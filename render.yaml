@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: garimpador-backend
+    env: docker
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: DEBUG
+        value: "False"
+      - key: LEADS_DB_PATH
+        value: /data/leads.db
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_CLAIMS_SUB
+        value: mailto:admin@magicleads.com
+      - key: DEMO_EMAIL
+        value: demo@magicleads.app
+      - key: DEMO_PASSWORD
+        value: Demo2026#Magic
+      - key: STRIPE_API_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PRICE_ID_PRO
+        sync: false
+      - key: FRONTEND_URL
+        value: https://garimpador-leads.vercel.app
+      - key: ALLOWED_ORIGINS
+        value: https://garimpador-leads.vercel.app
+      - key: CRON_SECRET
+        sync: false
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1
+    healthCheckPath: /health
+    autoDeploy: true

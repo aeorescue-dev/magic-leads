@@ -1,0 +1,136 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import { CheckCircle2, CreditCard, Loader2, ShieldCheck, X } from "lucide-react";
+import { confirmMockWeek, startCheckout, SUBSCRIPTION_PLAN } from "@/lib/billing";
+
+interface CheckoutModalProps {
+  open: boolean;
+  onClose: () => void;
+  onActivated?: () => void;
+  isDark?: boolean;
+}
+
+export default function CheckoutModal({ open, onClose, onActivated, isDark = false }: CheckoutModalProps) {
+  const [busy, setBusy] = useState(false);
+  const [state, setState] = useState<"idle" | "success">("idle");
+  const [error, setError] = useState("");
+
+  const c = useMemo(
+    () => ({
+      card: isDark ? "bg-[#14161d] border-white/10" : "bg-white border-slate-200",
+      box: isDark ? "bg-white/5 border-white/10" : "bg-slate-50 border-slate-200",
+      text: isDark ? "text-slate-300" : "text-slate-600",
+      textSoft: isDark ? "text-slate-400" : "text-slate-500",
+      strong: isDark ? "text-white" : "text-slate-900",
+      btn: "bg-emerald-500 hover:bg-emerald-400 text-slate-900",
+    }),
+    [isDark]
+  );
+
+  if (!open) return null;
+
+  const handleSubscribe = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const res = await startCheckout();
+      if (res.checkout_url) {
+        window.open(res.checkout_url, "_blank");
+        onClose();
+      } else {
+        await confirmMockWeek();
+        setState("success");
+      }
+    } catch (e: any) {
+      setError(e?.message || "Falha ao iniciar o pagamento");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDone = () => {
+    setState("idle");
+    onClose();
+    onActivated?.();
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60" onClick={busy ? undefined : onClose} />
+      <div className={`relative w-full max-w-md border rounded-2xl p-6 space-y-5 shadow-2xl animate-scale-in ${c.card}`}>
+        <button
+          onClick={onClose}
+          disabled={busy}
+          className="absolute right-4 top-4 p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-40"
+        >
+          <X className="w-5 h-5" />
+        </button>
+
+        {state === "success" ? (
+          <div className="flex flex-col items-center gap-3 py-6 text-center">
+            <CheckCircle2 className="w-12 h-12 text-emerald-500" />
+            <h3 className={`text-xl font-semibold ${c.strong}`}>Semana liberada!</h3>
+            <p className={`text-sm ${c.text}`}>
+              Seu acesso continua por +7 dias. Sem renovação automática — quando quiser, pague de novo por mais uma semana.
+            </p>
+            <button onClick={handleDone} className={`mt-2 px-5 py-2.5 rounded-xl font-semibold text-sm ${c.btn}`}>
+              Continuar no dashboard
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-2">
+              <CreditCard className="w-5 h-5 text-emerald-500" />
+              <h3 className={`text-lg font-semibold ${c.strong}`}>Assinar Magic Leads</h3>
+            </div>
+
+            <div className={`rounded-xl border p-4 flex items-center justify-between ${c.box}`}>
+              <div>
+                <p className={`text-sm font-semibold ${c.strong}`}>Plano {SUBSCRIPTION_PLAN.name}</p>
+                <p className={`text-xs ${c.textSoft}`}>Pagamento único por semana</p>
+              </div>
+              <div className="text-right">
+                <p className={`text-2xl font-bold text-emerald-500`}>
+                  ${SUBSCRIPTION_PLAN.amount}
+                  <span className={`text-sm font-medium ${c.textSoft}`}>/semana</span>
+                </p>
+                <p className={`text-xs ${c.textSoft}`}>~${SUBSCRIPTION_PLAN.annual}/ano</p>
+              </div>
+            </div>
+
+            <ul className={`space-y-2 text-sm ${c.text}`}>
+              <li className="flex items-start gap-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
+                Sem renovação automática — você decide quando renovar.
+              </li>
+              <li className="flex items-start gap-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
+                Reservas exclusivas, alertas, favoritos e dashboard completo por 7 dias.
+              </li>
+              <li className="flex items-start gap-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
+                Preço fixo: $79/semana, sem porcentagem de comissão sobre jobs.
+              </li>
+            </ul>
+
+            {error && <p className="text-sm text-red-500">{error}</p>}
+
+            <button
+              onClick={handleSubscribe}
+              disabled={busy}
+              className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl font-semibold text-sm ${c.btn} disabled:opacity-50`}
+            >
+              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
+              {busy ? "Processando…" : `Pagar $${SUBSCRIPTION_PLAN.amount}/semana`}
+            </button>
+
+            <p className={`text-[11px] text-center ${c.textSoft}`}>
+              Ambiente de demonstração sem cobrança real. O gateway (ex: Stripe) está pronto no fluxo, com o plano fixed de $79/semana.
+            </p>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}

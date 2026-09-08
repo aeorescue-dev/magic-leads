@@ -1,0 +1,44 @@
+# Node
+node_modules/
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# Env
+.env
+.env.local
+.env*.local
+backend/.env
+
+# Database
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+data/leads.backup.db
+
+# Build
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+frontend/next-start.log*
+data/scraper_cron.log
+
+# Temp files
+frontend/temp.b64
