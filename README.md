@@ -70,5 +70,3 @@ $0 e sem cartão.
 1. **Validar com contractors** — leads do 311 já funcionando
 2. **Adicionar** Building Permits + Tax Delinquency + skip tracing
 3. **Monetizar** com Stripe (Stripe só tem custo quando você cobra)
-git commit --allow-empty -m "chore: trigger vercel deploy"
-git push origin master
