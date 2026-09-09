@@ -21,7 +21,6 @@ jobs:
         run: |
           curl --fail -sS -m 2400 \
             -X POST \
-            -H "X-Cron-Secret: ${{ secrets.CRON_SECRET }}" \
             "https://magic-leads-production.up.railway.app/api/scraper/run?max_cities=8" \
             -o /tmp/scraper.json -w "HTTP:%{http_code}\n"
           cat /tmp/scraper.json
