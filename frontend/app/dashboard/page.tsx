@@ -15,7 +15,7 @@ import {
   AlertCircle, Tag, Loader2, BarChart3, History,
   Flame, Zap, Forklift, Droplets, Bug, Droplet, AlertTriangle,
   DoorOpen, AppWindow, Package, Wind,
-  TrendingUp, Navigation, Smartphone,
+  TrendingUp, Navigation, Smartphone, FolderOpen,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
@@ -171,6 +171,7 @@ function DashboardPageInner() {
   // Filter states
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [selectedUrgency, setSelectedUrgency] = useState<string>("all");
+  const [selectedType, setSelectedType] = useState<string>("all");
   const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
   const [scraperState, setScraperState] = useState<ScraperRunState | null>(null);
   const [shown, setShown] = useState<Set<string>>(new Set());
@@ -178,6 +179,12 @@ function DashboardPageInner() {
   const CITIES = ["all", "NYC", "Chicago", "Dallas", "Boston"];
   const CATEGORIES_FILTER = ["all", ...CATEGORIES.map(c => c.key)];
 const URGENCIES = ["all", "high", "medium", "low"];
+const LEAD_TYPES = [
+  { value: "all", labelKey: "dashboard.filter.all_types" },
+  { value: "dob_violation", labelKey: "dashboard.lead_type.obligation" },
+  { value: "permit", labelKey: "dashboard.lead_type.permit" },
+  { value: "311", labelKey: "dashboard.lead_type.open" },
+];
 
 // Handlers para ações do lead (Maps, SMS, WhatsApp)
   const openMaps = (address: string) => {
@@ -356,7 +363,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
         const [statsData, citiesData, leadsData, summaryData, scraperData] = await Promise.all([
           fetchStats().catch(() => null),
           fetchCitiesWithCounts().catch(() => []),
-          fetchTodayLeads(50, selectedCity === "all" ? undefined : selectedCity, false, 1).catch(() => ({ leads: [], total: 0, page: 1, per_page: 50 })),
+          fetchTodayLeads(50, selectedCity === "all" ? undefined : selectedCity, false, 1, selectedType === "all" ? undefined : selectedType).catch(() => ({ leads: [], total: 0, page: 1, per_page: 50 })),
           fetchDashboardSummary().catch(() => null),
           fetchScraperStatus().catch(() => null),
         ]);
@@ -379,12 +386,12 @@ const URGENCIES = ["all", "high", "medium", "low"];
     return () => {
       active = false;
     };
-  }, [selectedCity]);
+  }, [selectedCity, selectedType]);
 
   // Real-time polling: refresh leads + KPIs every 30 seconds
   useEffect(() => {
     const interval = setInterval(() => {
-      fetchTodayLeads(50, selectedCity === "all" ? undefined : selectedCity, false, 1)
+      fetchTodayLeads(50, selectedCity === "all" ? undefined : selectedCity, false, 1, selectedType === "all" ? undefined : selectedType)
         .then((data) => {
           setLeads(data.leads || []);
           setCurrentPage(1);
@@ -566,7 +573,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
     setLoadingMore(true);
     try {
       const nextPage = currentPage + 1;
-      const data = await fetchTodayLeads(50, selectedCity === "all" ? undefined : selectedCity, false, nextPage);
+      const data = await fetchTodayLeads(50, selectedCity === "all" ? undefined : selectedCity, false, nextPage, selectedType === "all" ? undefined : selectedType);
       if (data.leads && data.leads.length > 0) {
         setLeads((prev) => [...prev, ...data.leads]);
         setCurrentPage(nextPage);
@@ -579,7 +586,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
     } finally {
       setLoadingMore(false);
     }
-  }, [currentPage, hasMoreLeads, loadingMore, selectedCity]);
+  }, [currentPage, hasMoreLeads, loadingMore, selectedCity, selectedType]);
 
   // Open Lead Detail
   const openLeadDetail = async (lead: LeadResponse) => {
@@ -781,6 +788,13 @@ const URGENCIES = ["all", "high", "medium", "low"];
         }
       }
 
+      // Type filter
+      if (selectedType !== "all") {
+        if (lead.source_type !== selectedType) {
+          return false;
+        }
+      }
+
       // Interest category filter (when in overview or opportunities)
       if (activeTab === "overview") {
         const cat = catOfLead(lead);
@@ -801,7 +815,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
 
       return true;
     });
-  }, [leads, activeTab, selectedCity, selectedCategory, selectedUrgency, interests, searchQuery]);
+  }, [leads, activeTab, selectedCity, selectedCategory, selectedUrgency, selectedType, interests, searchQuery]);
 
   // New alerts (not yet viewed)
   const newAlerts = useMemo(
@@ -1158,6 +1172,16 @@ const URGENCIES = ["all", "high", "medium", "low"];
                 {URGENCIES.map((u) => <option key={u} value={u}>{u === "all" ? t("dashboard.filter.all_urgency") || "Todas" : t(`dashboard.feed.urgency.${u}`) || u.charAt(0).toUpperCase() + u.slice(1)}</option>)}
               </select>
             </div>
+            <div className="flex items-center gap-2">
+              <span className={`text-xs font-medium ${T.text2}`}>{t("dashboard.filter.type") || "Tipo:"}</span>
+              <select
+                value={selectedType}
+                onChange={(e) => setSelectedType(e.target.value)}
+                className={`px-3 py-1.5 rounded-lg text-sm border ${theme === "dark" ? "bg-[#0b0d1a] border-white/10 text-white" : "bg-white border-slate-200"}`}
+              >
+                {LEAD_TYPES.map((lt) => <option key={lt.value} value={lt.value}>{t(lt.labelKey)}</option>)}
+              </select>
+            </div>
             <div className="flex-1" />
             <div className="flex items-center gap-2 text-xs" style={{ color: theme === "dark" ? "#94a3b8" : "#64748b" }}>
               <span>{filteredLeads.length} {t("dashboard.filter.showing") || "oportunidades"}</span>
@@ -1503,6 +1527,14 @@ const URGENCIES = ["all", "high", "medium", "low"];
                           <span className="text-[10px] font-semibold uppercase tracking-wider flex items-center gap-1.5 px-2.5 py-1 rounded-full" style={{ backgroundColor: `${cat.color}1a`, color: cat.color }}>
                             <CatIcon className="h-3 w-3" /> {t(cat.labelKey)}
                           </span>
+
+                          {(lead.source_type && (() => {
+                            const st = lead.source_type;
+                            if (st === "dob_violation") return <span className="text-[10px] font-semibold uppercase tracking-wider bg-amber-500/15 text-amber-400 px-2.5 py-1 rounded-full flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> {t("dashboard.lead_type.obligation")}</span>;
+                            if (st === "permit") return <span className="text-[10px] font-semibold uppercase tracking-wider bg-sky-500/15 text-sky-400 px-2.5 py-1 rounded-full flex items-center gap-1"><HardHat className="h-3 w-3" /> {t("dashboard.lead_type.permit")}</span>;
+                            return <span className="text-[10px] font-semibold uppercase tracking-wider bg-slate-500/15 text-slate-400 px-2.5 py-1 rounded-full flex items-center gap-1"><FolderOpen className="h-3 w-3" /> {t("dashboard.lead_type.open")}</span>;
+                          })())}
+
                           <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full flex items-center gap-1 ${badge.cls}`}>
                             {badge.icon} {badge.label}
                           </span>
@@ -1688,6 +1720,13 @@ const URGENCIES = ["all", "high", "medium", "low"];
                             >
                               <CatIcon className="h-3 w-3" /> {t(cat.labelKey)}
                             </span>
+
+                            {(lead.source_type && (() => {
+                              const st = lead.source_type;
+                              if (st === "dob_violation") return <span className="text-[10px] font-semibold uppercase tracking-wider bg-amber-500/15 text-amber-400 px-2.5 py-1 rounded-full flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> {t("dashboard.lead_type.obligation")}</span>;
+                              if (st === "permit") return <span className="text-[10px] font-semibold uppercase tracking-wider bg-sky-500/15 text-sky-400 px-2.5 py-1 rounded-full flex items-center gap-1"><HardHat className="h-3 w-3" /> {t("dashboard.lead_type.permit")}</span>;
+                              return <span className="text-[10px] font-semibold uppercase tracking-wider bg-slate-500/15 text-slate-400 px-2.5 py-1 rounded-full flex items-center gap-1"><FolderOpen className="h-3 w-3" /> {t("dashboard.lead_type.open")}</span>;
+                            })())}
 
                             {lead.owner_name && (
                               <span className="text-[10px] font-semibold uppercase bg-emerald-500/15 text-emerald-400 px-2.5 py-1 rounded-full flex items-center gap-1">

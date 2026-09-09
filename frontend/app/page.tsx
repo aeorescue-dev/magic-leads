@@ -1,6 +1,7 @@
 'use client';
 
 import { HeroSection } from "@/components/HeroSection";
+import { ServicesSection } from "@/components/ServicesSection";
 import { ComparisonTable } from "@/components/ComparisonTable";
 import { HowItWorks } from "@/components/HowItWorks";
 import { LiveLeadsSection } from "@/components/LiveLeadsSection";
@@ -17,6 +18,9 @@ export default function Home() {
     <div className="bg-background">
       {/* HERO */}
       <HeroSection />
+
+      {/* SERVIÇOS */}
+      <ServicesSection />
 
       {/* COMPARAÇÃO REAL */}
       <ComparisonTable />

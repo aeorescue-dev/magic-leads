@@ -30,9 +30,10 @@ class Socrata311Scraper:
         url = f"https://{domain}/resource/{dataset}.json"
         params = {
             "$select": select,
-            "$where": where,
             "$limit": limit,
         }
+        if where:
+            params["$where"] = where
         if order:
             params["$order"] = order
 
@@ -200,12 +201,12 @@ class Socrata311Scraper:
         date_col = find(
             "created_date", "creation_date", "createdtime", "requested_datetime",
             "requested_date", "created", "date_entered", "open_date", "service_request_date",
-            "inspectiondate", "approveddate", "novissueddate",
+            "inspection_date", "inspectiondate", "approved_date", "approveddate", "novissueddate",
         )
         desc_col = find(
             "complaint_type", "type_of_service_request", "service_request_type",
             "request_type", "issue_type", "category", "title", "type", "sr_type",
-            "novdescription", "nov_description", "description",
+            "violation_type", "service_type", "novdescription", "nov_description", "description",
         )
         lat_col = find("latitude", "lat", "lat_address", "lat_location")
         lng_col = find("longitude", "lon", "lng", "long", "long_address")
@@ -304,14 +305,10 @@ class Socrata311Scraper:
         if not select_fields:
             select_fields = ["*"]
 
-        since = (datetime.now() - timedelta(hours=hours)).isoformat()
+        since = (datetime.now() - timedelta(hours=hours)).strftime("%Y-%m-%d")
 
-        if keyword_filter:
-            # filtra por keywords nas colunas de descrição
-            keywords_or = " OR ".join([f"lower({cols['desc']}) like '%{kw.lower()}%'" for kw in self.keywords])
-            where = f"{cols['date']} > '{since}' AND ({keywords_or})"
-        else:
-            where = f"{cols['date']} > '{since}'"
+        # keyword filtering done in Python (post-fetch) to avoid SQL lower() issues
+        where = f"{cols['date']} > '{since}'"
 
         rows = await self._fetch_soql(
             domain=domain,

@@ -7,6 +7,7 @@ from enum import Enum
 class SourceType(str, Enum):
     SERVICE_311 = "311"
     BUILDING_PERMIT = "permit"
+    DOB_VIOLATION = "dob_violation"
     TAX_DELINQUENCY = "tax_delinquency"
 
 
@@ -35,18 +36,19 @@ class UrgencyLevel(str, Enum):
     HIGH = "high"
 
 
-# Raw lead from 311 API
+# Raw lead from public records (311, violations, permits)
 class RawLead311(BaseModel):
     external_id: str
     address: str
     city: str
     state: str
-    zip_code: Optional[str]
+    zip_code: Optional[str] = None
     issue_description: str
     created_at: datetime
-    lat: Optional[float]
-    lng: Optional[float]
+    lat: Optional[float] = None
+    lng: Optional[float] = None
     issue_category: IssueCategory = IssueCategory.GRASS
+    source_type: Optional[str] = None  # "311" | "permit" | "dob_violation" (None => 311)
 
     # Historical details from 311 systems (populated generically)
     case_title: Optional[str] = None
@@ -132,6 +134,7 @@ class EnrichedLead(BaseModel):
 class LeadResponse(BaseModel):
     id: str
     external_id: str
+    source_type: Optional[str] = None
     address: str
     city: str
     issue_category: str

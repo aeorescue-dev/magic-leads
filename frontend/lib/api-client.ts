@@ -46,6 +46,7 @@ function authHeaders(): HeadersInit {
 export interface LeadResponse {
   id: string;
   external_id: string;
+  source_type?: string;
   address: string;
   city: string;
   issue_category: string;
@@ -153,22 +154,25 @@ async function handle<T>(res: Response): Promise<T> {
 export async function fetchLeads(params: {
   city: string;
   category?: string;
+  type?: string;
   page?: number;
   per_page?: number;
 }): Promise<LeadsListResponse> {
   const q = new URLSearchParams();
   q.append("city", params.city);
   if (params.category) q.append("category", params.category);
+  if (params.type) q.append("type", params.type);
   q.append("page", String(params.page || 1));
   q.append("per_page", String(params.per_page || 20));
 
   return handle<LeadsListResponse>(await fetch(`${API_URL}/api/leads?${q}`, { headers: { ...authHeaders() } }));
 }
 
-export async function fetchTodayLeads(limit: number = 60, city?: string, includeIncomplete: boolean = false, page: number = 1): Promise<LeadsListResponse> {
+export async function fetchTodayLeads(limit: number = 60, city?: string, includeIncomplete: boolean = false, page: number = 1, type?: string): Promise<LeadsListResponse> {
   const q = new URLSearchParams({ limit: String(limit), page: String(page) });
   if (city && city !== "Todas") q.set("city", city);
   if (includeIncomplete) q.set("include_incomplete", "true");
+  if (type) q.set("type", type);
   return handle<LeadsListResponse>(await fetch(`${API_URL}/api/leads/today?${q.toString()}`, { headers: { ...authHeaders() } }));
 }
 

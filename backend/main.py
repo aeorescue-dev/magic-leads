@@ -79,6 +79,7 @@ def _to_lead_response(lead: dict) -> LeadResponse:
     return LeadResponse(
         id=str(lead["id"]),
         external_id=lead["external_id"],
+        source_type=lead.get("source_type"),
         address=lead["address"],
         city=lead["city"],
         issue_category=lead["issue_category"],
@@ -284,6 +285,7 @@ async def health_check():
 async def get_leads(
     city: str = "NYC",
     category: str = None,
+    type: str = None,
     page: int = 1,
     per_page: int = 20,
     user: Optional[dict] = Depends(_get_optional_user)
@@ -295,6 +297,10 @@ async def get_leads(
         # Filter by category se especificado
         if category:
             leads = [l for l in leads if l.get("issue_category") == category]
+
+        # Filter by source type se especificado
+        if type:
+            leads = [l for l in leads if l.get("source_type") == type]
 
         _annotate_visibility(leads, user)
 
@@ -367,7 +373,7 @@ async def recent_leads(limit: int = 12, user: Optional[dict] = Depends(_get_opti
 
 # Demandas do dia (lote mais recente de todas as cidades) — feed "ver tudo"
 @app.get("/api/leads/today", response_model=LeadsListResponse)
-async def leads_today(limit: int = 60, page: int = 1, city: str = None, include_incomplete: bool = False, user: Optional[dict] = Depends(_get_optional_user)):
+async def leads_today(limit: int = 60, page: int = 1, city: str = None, type: str = None, include_incomplete: bool = False, user: Optional[dict] = Depends(_get_optional_user)):
     """Retorna demandas dos últimos 7 dias.
 
     REGRA FIXA por defecto: apenas leads com dados ESSENCIAIS (department,
@@ -388,6 +394,9 @@ async def leads_today(limit: int = 60, page: int = 1, city: str = None, include_
             if city:
                 sql += " AND city = ?"
                 params.append(city)
+            if type:
+                sql += " AND source_type = ?"
+                params.append(type)
             if not include_incomplete:
                 sql += """
                   AND department IS NOT NULL AND TRIM(department) != ''
@@ -850,29 +859,14 @@ async def _scrape_worker(run_id: str, max_cities: int = 8):
         # Cidades-base garantidas (datasets conhecidos, estáveis e com endereço de rua)
         base = [
             {"domain": "data.cityofnewyork.us", "dataset": "erm2-nwe9", "city": "NYC", "state": "NY", "hours": 96, "fields": ["unique_key", "created_date", "complaint_type", "incident_address", "incident_zip", "latitude", "longitude"]},
-            {"domain": "data.cityofnewyork.us", "dataset": "wvxf-dwi5", "city": "NYC", "state": "NY", "hours": 120, "fields": None},  # HPD Violations
-            {"domain": "data.cityofchicago.org", "dataset": "v6vf-nfxy", "city": "Chicago", "state": "IL", "hours": 48, "fields": None},
-            {"domain": "www.dallasopendata.com", "dataset": "d7e7-envw", "city": "Dallas", "state": "TX", "hours": 48, "fields": None},
+            {"domain": "data.cityofnewyork.us", "dataset": "wvxf-dwi5", "city": "NYC", "state": "NY", "hours": 120, "fields": ["violation_id", "inspection_date", "building_id", "address", "city", "state", "zip", "latitude", "longitude", "violation_type", "violation_status", "disposition_date"]},  # HPD Violations
+            {"domain": "data.cityofchicago.org", "dataset": "v6vf-nfxy", "city": "Chicago", "state": "IL", "hours": 48, "fields": ["service_request_number", "created_date", "sr_type", "street_address", "zip_code", "latitude", "longitude"]},
+            {"domain": "www.dallasopendata.com", "dataset": "d7e7-envw", "city": "Dallas", "state": "TX", "hours": 48, "fields": ["service_request_id", "created_date", "service_type", "address", "zip_code", "latitude", "longitude"]},
         ]
 
-        # Descobre colunas automaticamente para os datasets sem fields explícitos
         tasks_311 = []
         for entry in base:
             fields = entry["fields"]
-            if fields is None:
-                async with httpx.AsyncClient(timeout=30) as client:
-                    meta_headers = {}
-                    if settings.SOCRATA_APP_TOKEN:
-                        meta_headers["X-App-Token"] = settings.SOCRATA_APP_TOKEN
-                    resp = await client.get(
-                        f"https://{entry['domain']}/resource/{entry['dataset']}.json",
-                        params={"$limit": 5},
-                        headers=meta_headers,
-                    )
-                    if resp.status_code != 200 or not resp.json():
-                        logger.warning(f"{entry['city']}: falha ao obter metadados — pulando")
-                        continue
-                    fields = list(resp.json()[0].keys())
             tasks_311.append(
                 socrata_scraper.fetch_from_dataset(
                     entry["domain"], entry["dataset"], entry["city"], entry["state"],
@@ -948,13 +942,194 @@ async def _scrape_worker(run_id: str, max_cities: int = 8):
             except Exception:
                 return []
 
+        # NYC DOB Violations — obrigações legais EM ABERTO (multa corre)
+        async def _fetch_dob_violations():
+            from backend.scrapers.socrata_311 import socrata_scraper as _s
+            import backend.models.schemas as _sch
+            domain = "data.cityofnewyork.us"
+            dataset = "3h2n-5cm9"
+            boro_map = {"1": "MANHATTAN", "2": "BRONX", "3": "BROOKLYN", "4": "QUEENS", "5": "STATEN ISLAND"}
+            keywords_or = " OR ".join([f"lower(description) like '%{kw.lower()}%'" for kw in settings.SCRAPER_KEYWORDS])
+            where = f"(disposition_date IS NULL OR disposition_date = '') AND ({keywords_or})"
+            logger.info(f"DOB Violations: fetching from {domain}/{dataset}")
+            rows = await _s._fetch_soql(
+                domain=domain, dataset=dataset,
+                select="violation_number, issue_date, house_number, street, boro, description, violation_type, violation_category, ecb_number, disposition_date, disposition_comments",
+                where=where, limit=5000, order="issue_date DESC",
+            )
+            logger.info(f"DOB Violations: got {len(rows)} raw rows from Socrata")
+            out = []
+            rejected_date = 0
+            rejected_addr = 0
+            rejected_other = 0
+            for row in rows:
+                try:
+                    number = str(row.get("violation_number") or "").strip() or str(row.get("ecb_number") or "").strip()
+                    if not number:
+                        continue
+                    desc = str(row.get("description") or "").strip()
+                    if not desc:
+                        continue
+                    house = str(row.get("house_number") or "").strip()
+                    street = str(row.get("street") or "").strip()
+                    boro = boro_map.get(str(row.get("boro") or "").strip(), str(row.get("boro") or "").strip())
+                    addr = f"{house} {street}".strip()
+                    issue = row.get("issue_date")
+                    created = None
+                    try:
+                        created = datetime.strptime(str(issue).strip(), "%Y%m%d")
+                    except Exception:
+                        try:
+                            created = datetime.fromisoformat(str(issue).replace("Z", "+00:00").replace("+00:00:00", "+00:00"))
+                        except Exception:
+                            pass
+                    if created is None:
+                        rejected_date += 1
+                        continue  # linhas-lixo com data inválida
+                    if not addr:
+                        rejected_addr += 1
+                        continue
+                    out.append(_sch.RawLead311(
+                        external_id=number,
+                        address=f"{addr}, {boro}, NY" if addr and boro else ("NYC, NY" if not addr else f"{addr}, NYC, NY"),
+                        city="NYC", state="NY",
+                        issue_description=desc,
+                        created_at=created,
+                        issue_category=_s._infer_category(desc),
+                        source_type="dob_violation",
+                        case_title=desc,
+                        descriptor=row.get("violation_type") or None,
+                        department="DOB",
+                        case_status="Open",
+                        source=f"{domain}/{dataset}",
+                        neighborhood=boro or None,
+                        resolution_description=row.get("disposition_comments") or None,
+                    ))
+                except Exception as e:
+                    rejected_other += 1
+                    if rejected_other <= 3:
+                        logger.warning(f"DOB Violations row error: {e} | row keys: {list(row.keys())}")
+                    continue
+            logger.info(f"DOB Violations: {len(out)} válidos, rejected_date={rejected_date}, rejected_addr={rejected_addr}, rejected_other={rejected_other}")
+            return out
+
+        # NYC DOB Approved Permits — obra autorizada; apenas solicitante = dono (não contratado)
+        async def _fetch_dob_permits():
+            from backend.scrapers.socrata_311 import socrata_scraper as _s
+            import backend.models.schemas as _sch
+            domain = "data.cityofnewyork.us"
+            dataset = "rbx6-tga4"
+            # Query sem where - filtra tudo em Python (evita 400 no Socrata)
+            logger.info(f"DOB Permits: fetching from {domain}/{dataset}")
+            try:
+                rows = await _s._fetch_soql(
+                    domain=domain, dataset=dataset,
+                    select="job_filing_number, work_permit, house_no, street_name, borough, zip_code, latitude, longitude, approved_date, issued_date, job_description, work_type, job_type, permit_status, applicant_first_name, applicant_last_name, applicant_business_name, owner_name, owner_business_name, nta, council_district",
+                    where=None, limit=5000, order="approved_date DESC",
+                )
+                logger.info(f"DOB Permits: got {len(rows)} raw rows from Socrata")
+            except Exception as e:
+                logger.error(f"DOB Permits: fetch failed: {e}")
+                return []
+
+            def _norm(s):
+                return "".join((s or "").lower().split())
+
+            core_kws = ["roof", "roofing", "plumbing", "water", "paint", "facade", "boiler", "heating", "sprinkler", "sewer", "electrical", "leak", "mold", "chimney", "siding", "foundation"]
+
+            out = []
+            rejected_status = 0
+            rejected_kw = 0
+            rejected_owner = 0
+            rejected_addr = 0
+            rejected_other = 0
+            for row in rows:
+                try:
+                    # Filtro de status
+                    if str(row.get("permit_status") or "") != "Permit Issued":
+                        rejected_status += 1
+                        continue
+                    # Filtro de data (60 dias)
+                    app_date = row.get("approved_date") or row.get("issued_date")
+                    if app_date:
+                        try:
+                            ad = datetime.fromisoformat(str(app_date).replace("Z", "+00:00").replace("+00:00:00", "+00:00"))
+                            if ad < datetime.now() - timedelta(days=60):
+                                continue
+                        except Exception:
+                            pass
+                    # Filtro de keywords
+                    desc = str(row.get("job_description") or "").strip().lower()
+                    if not any(kw in desc for kw in core_kws):
+                        rejected_kw += 1
+                        continue
+                    a_f, a_l = _norm(row.get("applicant_first_name")), _norm(row.get("applicant_last_name"))
+                    owner = _norm(row.get("owner_name"))
+                    a_b = _norm(row.get("applicant_business_name"))
+                    o_b = row.get("owner_business_name")
+                    if a_b and a_b not in ("-", "none", "n/a"):
+                        continue
+                    if not owner or not a_l:
+                        rejected_owner += 1
+                        continue
+                    if not (a_l in owner or (a_f and a_f in owner)):
+                        rejected_owner += 1
+                        continue
+                    job_no = str(row.get("job_filing_number") or "").strip()
+                    if not job_no:
+                        continue
+                    if "not yet issued" in str(row.get("work_permit") or "").lower():
+                        continue
+                    house = " ".join(str(row.get("house_no") or "").split())
+                    street = " ".join(str(row.get("street_name") or "").split())
+                    if not (house and street):
+                        rejected_addr += 1
+                        continue
+                    boro = str(row.get("borough") or "").strip()
+                    zipc = str(row.get("zip_code") or "").strip() or None
+                    wp = str(row.get("work_permit") or "").strip()
+                    try:
+                        created = datetime.fromisoformat(str(app_date).replace("Z", "+00:00").replace("+00:00:00", "+00:00"))
+                    except Exception:
+                        created = datetime.now()
+                    out.append(_sch.RawLead311(
+                        external_id=f"{job_no}~{wp}" if wp else job_no,
+                        address=f"{house} {street}, {boro}, NY {zipc}" if zipc else f"{house} {street}, {boro}, NY",
+                        city="NYC", state="NY",
+                        zip_code=zipc,
+                        issue_description=desc,
+                        created_at=created,
+                        lat=float(row["latitude"]) if row.get("latitude") is not None else None,
+                        lng=float(row["longitude"]) if row.get("longitude") is not None else None,
+                        issue_category=_s._infer_category(desc),
+                        source_type="permit",
+                        case_title=desc,
+                        type=row.get("work_type") or None,
+                        department="DOB",
+                        case_status="Approved",
+                        source=f"{domain}/{dataset}",
+                        neighborhood=row.get("nta") or None,
+                        ward=str(row.get("council_district")) if row.get("council_district") is not None else None,
+                        closed_dt=row.get("issued_date") or None,
+                    ))
+                except Exception as e:
+                    rejected_other += 1
+                    if rejected_other <= 3:
+                        logger.warning(f"DOB Permits row error: {e}")
+                    continue
+            logger.info(f"DOB Permits: {len(out)} válidos, rejected_status={rejected_status}, rejected_kw={rejected_kw}, rejected_owner={rejected_owner}, rejected_addr={rejected_addr}, rejected_other={rejected_other}")
+            return out
+
         tasks_311.append(_fetch_boston())
+        tasks_311.append(_fetch_dob_violations())
+        tasks_311.append(_fetch_dob_permits())
 
         all_raw = []
-        for bundled in await asyncio.gather(*tasks_311, return_exceptions=True):
+        for i, bundled in enumerate(await asyncio.gather(*tasks_311, return_exceptions=True)):
             if isinstance(bundled, Exception):
-                logger.warning(f"Erro numa cidade 311: {bundled}")
+                logger.warning(f"Erro na task {i}: {bundled}")
             else:
+                logger.info(f"Task {i} returned {len(bundled)} leads")
                 all_raw.extend(bundled)
 
         logger.info(f"Total bruto 311 (todas cidades): {len(all_raw)}")
@@ -971,7 +1146,7 @@ async def _scrape_worker(run_id: str, max_cities: int = 8):
 
             enriched = EnrichedLead(
                 external_id=raw_lead.external_id,
-                source_type=SourceType.SERVICE_311,
+                source_type=SourceType(raw_lead.source_type) if raw_lead.source_type else SourceType.SERVICE_311,
                 address=raw_lead.address,
                 city=raw_lead.city,
                 state=raw_lead.state,
@@ -979,7 +1154,7 @@ async def _scrape_worker(run_id: str, max_cities: int = 8):
                 lat=raw_lead.lat,
                 lng=raw_lead.lng,
                 county=None,
-                issue_category=_map_category(raw_lead.issue_description),
+                issue_category=raw_lead.issue_category,
                 issue_description=raw_lead.issue_description,
                 urgency_level=socrata_scraper._infer_urgency(raw_lead.issue_description),
                 owner_name=owner_name_val,
