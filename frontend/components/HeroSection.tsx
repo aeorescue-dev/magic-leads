@@ -1,13 +1,45 @@
 'use client';
 
+import { useEffect, useState } from "react";
 import { ArrowRight, CheckCircle2, Shield, Zap, Users, TrendingUp, Sparkles, Target, Radio, Smartphone, Globe, CheckCircle, Radio as RadioIcon } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { DemoLoginButton } from "@/components/DemoLoginButton";
 import { useStats } from "@/lib/hooks/useStats";
+import { fetchDashboardSummary, fetchScraperStatus } from "@/lib/api-client";
+
+function formatUpdatedSince(dateStr: string, t: (k: string) => string): string {
+  const iso = dateStr.replace(" ", "T");
+  const withZ = /[Zz]|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : iso + "Z";
+  const d = new Date(withZ);
+  if (isNaN(d.getTime())) return "";
+  const diffMin = Math.max(0, Math.floor((Date.now() - d.getTime()) / 60000));
+  return diffMin < 1 ? t("hero.live.just_now") : `${diffMin} ${t("hero.live.min")}`;
+}
 
 export function HeroSection() {
   const { t } = useI18n();
   const { stats } = useStats();
+  const [new24h, setNew24h] = useState<number | null>(null);
+  const [lastUpdate, setLastUpdate] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const refresh = async () => {
+      try {
+        const [s, st] = await Promise.all([
+          fetchDashboardSummary().catch(() => null),
+          fetchScraperStatus().catch(() => null),
+        ]);
+        if (!active) return;
+        if (s && typeof s.new_24h === "number") setNew24h(s.new_24h);
+        if (st?.last_run?.finished_at) setLastUpdate(st.last_run.finished_at);
+      } catch { /* ignore */ }
+    };
+    refresh();
+    const id = setInterval(refresh, 5 * 60 * 1000);
+    return () => { active = false; clearInterval(id); };
+  }, []);
+
   const fmt = (n?: number) => (n !== undefined ? `${n.toLocaleString("en-US")}+` : "…");
   const fmtCities = (n?: number) => (n !== undefined ? `${n}+` : "…");
 
@@ -37,12 +69,26 @@ export function HeroSection() {
           {/* LEFT COLUMN - Copy & CTA */}
           <div className="lg:order-2 relative z-10 animate-fade-in-up delay-100">
             {/* Live Status Badge */}
-            <div className="inline-flex items-center gap-2.5 px-4 py-2 rounded-full bg-emerald-500/10 border border-emerald-500/20 backdrop-blur-sm mb-6 animate-fade-in">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-              </span>
-              <span className="text-xs font-semibold text-emerald-400">{t("hero.badge_live")}</span>
+            <div className="inline-flex flex-col items-start gap-2 mb-6 animate-fade-in">
+              <div className="inline-flex items-center gap-2.5 px-4 py-2 rounded-full bg-emerald-500/10 border border-emerald-500/20 backdrop-blur-sm">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                </span>
+                {new24h !== null ? (
+                  <span className="text-xs font-semibold text-emerald-400">
+                    <span className="text-sm font-extrabold">{new24h.toLocaleString("en-US")}</span>{" "}
+                    {t("hero.live.new_24h")}
+                  </span>
+                ) : (
+                  <span className="text-xs font-semibold text-emerald-400">{t("hero.badge_live")}</span>
+                )}
+              </div>
+              {lastUpdate ? (
+                <span className="text-[11px] text-slate-500 pl-1">
+                  {t("hero.live.updated")} {formatUpdatedSince(lastUpdate, t)}
+                </span>
+              ) : null}
             </div>
 
             {/* Main headline */}
@@ -106,6 +152,11 @@ export function HeroSection() {
               <div className="text-center">
                 <div className="text-3xl md:text-4xl font-extrabold text-emerald-400">{fmtCities(stats?.cities?.length)}</div>
                 <div className="text-xs text-slate-500 mt-1">{t("hero.stats.cities")}</div>
+              </div>
+              <div className="w-px h-8 bg-slate-700/50 mx-4 hidden sm:block" />
+              <div className="text-center">
+                <div className="text-3xl md:text-4xl font-extrabold text-emerald-400">{new24h !== null ? `${new24h.toLocaleString("en-US")}+` : "…"}</div>
+                <div className="text-xs text-slate-500 mt-1">{t("hero.stats.new_24h")}</div>
               </div>
             </div>
           </div>
