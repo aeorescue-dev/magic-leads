@@ -2075,11 +2075,12 @@ class DatabaseService:
                 f"SELECT COUNT(*) AS c FROM leads {base_where}", params
             ).fetchone()["c"]
             
-            # Novas nas últimas 24h
-            params_24h = params + [datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
+            # Novas nas últimas 24h (baseados em created_at = momento real de ingestão no sistema)
+            # Antes usava date_reported (data da prefeitura, muitas vezes histórica = baixo número).
+            # Agora usa created_at = momento em o lead foi realmente inserido no nosso banco.
             new_24h = conn.execute(
-                f"SELECT COUNT(*) AS c FROM leads {base_where} AND datetime(date_reported) >= datetime(?, '-24 hours')",
-                params_24h
+                f"SELECT COUNT(*) AS c FROM leads {base_where} AND created_at >= datetime('now', '-24 hours')",
+                params
             ).fetchone()["c"]
             
             # Com contato (owner_name preenchido)
