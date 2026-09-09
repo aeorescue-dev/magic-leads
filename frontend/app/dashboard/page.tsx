@@ -107,7 +107,9 @@ const LIGHT = {
 function formatRelativeTime(dateStr: string, t: (k: string) => string): string {
   if (!dateStr) return "";
   const now = new Date();
-  const date = new Date(dateStr.replace(" ", "T"));
+  let iso = dateStr.replace(" ", "T");
+  if (!/[Zz]|[+-]\d{2}:?\d{2}$/.test(iso)) iso += "Z";
+  const date = new Date(iso);
   if (isNaN(date.getTime())) return dateStr;
   const diffSec = Math.max(0, Math.floor((now.getTime() - date.getTime()) / 1000));
   if (diffSec < 60) return t("dashboard.time.just_now") || "agora mesmo";
