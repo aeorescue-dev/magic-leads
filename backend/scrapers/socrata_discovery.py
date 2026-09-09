@@ -7,6 +7,7 @@ Isso permite cobrir o país inteiro sem cadastrar cada município manualmente.
 """
 import httpx
 from typing import List, Dict, Optional
+from ..config import settings
 from ..utils.logger import logger
 
 SOCRATA_CATALOG = "https://api.us.socrata.com/api/catalog/v1"
@@ -41,7 +42,10 @@ class SocrataDiscovery:
         }
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             try:
-                resp = await client.get(SOCRATA_CATALOG, params=params)
+                headers = {}
+                if settings.SOCRATA_APP_TOKEN:
+                    headers["X-App-Token"] = settings.SOCRATA_APP_TOKEN
+                resp = await client.get(SOCRATA_CATALOG, params=params, headers=headers)
                 resp.raise_for_status()
                 payload = resp.json()
             except httpx.HTTPError as e:

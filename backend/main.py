@@ -7,6 +7,7 @@ from slowapi.errors import RateLimitExceeded
 import asyncio
 import httpx
 import os
+import uuid
 from datetime import datetime, timedelta
 from typing import List, Optional
 
@@ -800,12 +801,51 @@ async def test_push_notification(user_id: int):
 
 
 # Webhook para rodar scraper manualmente
+# Estado dos runs do scraper (background — o Railway corta conexões longas)
+_scrape_runs: dict = {}
+
+
 @app.post("/api/scraper/run")
 @limiter.limit("10/hour")
 async def run_scraper(request: Request, max_cities: int = 8):
-    """Executa o scraper em escala nacional (311 multi-cidade via Socrata Discovery)."""
+    """Dispara o scraper nacional em background e responde na hora (o run leva 15min+)."""
+    for run in _scrape_runs.values():
+        if run.get("running"):
+            return JSONResponse(status_code=409, content={
+                "status": "already_running",
+                "run_id": run.get("run_id"),
+                "note": "Scraper já em execução; inserts são incrementais/reentrantes (dedupe).",
+            })
+    run_id = uuid.uuid4().hex[:12]
+    _scrape_runs[run_id] = {
+        "run_id": run_id, "running": True,
+        "started_at": datetime.utcnow().isoformat(),
+        "inserted": 0, "total_raw": 0, "status": "running", "error": None,
+    }
+    asyncio.create_task(_scrape_worker(run_id, max_cities))
+    return JSONResponse(status_code=202, content={
+        "status": "started", "run_id": run_id,
+        "note": "Run em background; acompanhe em GET /api/scraper/status",
+    })
+
+
+@app.get("/api/scraper/status")
+async def scraper_status():
+    """Progresso/último resultado do scraper em background."""
+    active = {rid: r for rid, r in _scrape_runs.items() if r.get("running")}
+    last = None
+    for r in reversed(list(_scrape_runs.values())):
+        if not r.get("running"):
+            last = r
+            break
+    return {"active": bool(active), "running": active, "last_run": last}
+
+
+async def _scrape_worker(run_id: str, max_cities: int = 8):
+    """Executa o scrape nacional (worker em background)."""
+    state = _scrape_runs[run_id]
     try:
-        logger.info("Iniciando scraper nacional 311...")
+        logger.info(f"Iniciando scraper nacional 311... [run {run_id}]")
 
         # Cidades-base garantidas (datasets conhecidos, estáveis e com endereço de rua)
         base = [
@@ -821,9 +861,13 @@ async def run_scraper(request: Request, max_cities: int = 8):
             fields = entry["fields"]
             if fields is None:
                 async with httpx.AsyncClient(timeout=30) as client:
+                    meta_headers = {}
+                    if settings.SOCRATA_APP_TOKEN:
+                        meta_headers["X-App-Token"] = settings.SOCRATA_APP_TOKEN
                     resp = await client.get(
                         f"https://{entry['domain']}/resource/{entry['dataset']}.json",
                         params={"$limit": 5},
+                        headers=meta_headers,
                     )
                     if resp.status_code != 200 or not resp.json():
                         logger.warning(f"{entry['city']}: falha ao obter metadados — pulando")
@@ -972,7 +1016,6 @@ async def run_scraper(request: Request, max_cities: int = 8):
                 inserted += 1
                 newly_added.append(new_lead)
 
-        logger.info(f"Scraper nacional completo: {inserted} leads inseridos")
         if inserted > 0:
             # Fan-out por interesse: notifica usuários com a categoria marcada
             added_by_cat: dict = {}
@@ -987,17 +1030,17 @@ async def run_scraper(request: Request, max_cities: int = 8):
                         await push_service.send_new_lead_alert(lead, cat)
                     except Exception as e:
                         logger.error(f"Erro ao enviar push para lead {lead.get('id')}: {e}")
-        return {
-            "status": "success",
-            "inserted": inserted,
-            "total_raw": len(all_raw),
-            "cities_covered": len(tasks_311),
-            "note": "311 multi-cidade via Socrata Discovery (nacional)",
-        }
+        logger.info(f"Scraper completo [run {run_id}]: {inserted} leads inseridos")
+        state.update(
+            status="success", inserted=inserted,
+            total_raw=len(all_raw), cities_covered=len(tasks_311),
+            note="311 multi-cidade via Socrata Discovery (nacional)",
+            running=False, finished_at=datetime.utcnow().isoformat(),
+        )
 
     except Exception as e:
-        logger.error(f"Erro no scraper: {e}")
-        raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
+        logger.error(f"Erro no scraper [run {run_id}]: {e}", exc_info=True)
+        state.update(status="error", error=str(e), running=False, finished_at=datetime.utcnow().isoformat())
 
 
 # Lista o que o framework nacional descobriu (estados/mercados cobertos)

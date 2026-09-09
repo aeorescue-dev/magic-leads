@@ -19,8 +19,23 @@ jobs:
     steps:
       - name: Disparar scraper na producao (Railway)
         run: |
-          curl --fail -sS -m 2400 \
-            -X POST \
-            "https://magic-leads-production.up.railway.app/api/scraper/run?max_cities=8" \
-            -o /tmp/scraper.json -w "HTTP:%{http_code}\n"
-          cat /tmp/scraper.json
+          start=$(curl -sS -m 30 -X POST "https://magic-leads-production.up.railway.app/api/scraper/run?max_cities=8")
+          echo "start: $start"
+          run_id=$(echo "$start" | jq -r '.run_id // empty')
+          if [ -z "$run_id" ]; then
+            st=$(curl -sS -m 30 "https://magic-leads-production.up.railway.app/api/scraper/status")
+            echo "status: $st"
+            run_id=$(echo "$st" | jq -r '.running | keys[0] // empty')
+          fi
+          echo "run_id: ${run_id:-<nenhum>}"
+          for i in $(seq 1 55); do
+            sleep 60
+            st=$(curl -sS -m 30 "https://magic-leads-production.up.railway.app/api/scraper/status")
+            if [ "$(echo "$st" | jq -r '.active')" = "false" ]; then
+              echo "Scraper concluido:"
+              echo "$st"
+              exit 0
+            fi
+          done
+          echo "Ainda ativo apos 55min — run continua em background (job sai sem erro)"
+          exit 0

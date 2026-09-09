@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""  # Optional para visão
 
     # Scraper Config
+    SOCRATA_APP_TOKEN: str = ""  # App Token Socrata (pool dedicado, cota maior)
     SOCRATA_DOMAINS: List[str] = [
         "data.cityofnewyork.us",
         "data.cityofchicago.org",

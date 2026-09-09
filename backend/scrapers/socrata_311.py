@@ -38,7 +38,10 @@ class Socrata311Scraper:
 
         async with httpx.AsyncClient(timeout=t) as client:
             try:
-                response = await client.get(url, params=params)
+                headers = {}
+                if settings.SOCRATA_APP_TOKEN:
+                    headers["X-App-Token"] = settings.SOCRATA_APP_TOKEN
+                response = await client.get(url, params=params, headers=headers)
                 response.raise_for_status()
                 data = response.json()
                 if isinstance(data, dict):  # erro retornado como dict
