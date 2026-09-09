@@ -202,6 +202,34 @@ export async function fetchCitiesWithCounts(filtered = true): Promise<CityCount[
   return handle<CityCount[]>(await fetch(`${API_URL}/api/leads/cities-with-counts?filtered=${filtered}`));
 }
 
+export interface ScraperRunState {
+  active: boolean;
+  running: Record<string, {
+    run_id: string;
+    running: boolean;
+    started_at: string;
+    inserted: number;
+    total_raw: number;
+    status: string;
+    error: string | null;
+  }>;
+  last_run: {
+    run_id: string;
+    running: boolean;
+    started_at: string;
+    finished_at?: string;
+    inserted: number;
+    total_raw: number;
+    status: string;
+    error: string | null;
+    note?: string;
+    cities_covered?: number;
+  } | null;
+}
+export async function fetchScraperStatus(): Promise<ScraperRunState> {
+  return handle<ScraperRunState>(await fetch(`${API_URL}/api/scraper/status`));
+}
+
 export interface InterestCountResponse {
   count: number;
   categories: string[];

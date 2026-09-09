@@ -33,7 +33,8 @@ import {
   fetchUserDailyStats, fetchUserSubscriptionStatus, fetchContractorMetrics,
   fetchMyLeadsHistory, MyLeadHistoryItem, MyLeadsHistoryKpis,
   LeadOccurrence, fetchLeadOccurrences,
-  fetchDashboardSummary, DashboardSummary
+  fetchDashboardSummary, DashboardSummary,
+  fetchScraperStatus, ScraperRunState
 } from "@/lib/api-client";
 
 type Theme = "dark" | "light";
@@ -169,6 +170,7 @@ function DashboardPageInner() {
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [selectedUrgency, setSelectedUrgency] = useState<string>("all");
   const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
+  const [scraperState, setScraperState] = useState<ScraperRunState | null>(null);
   const [shown, setShown] = useState<Set<string>>(new Set());
 
   const CITIES = ["all", "NYC", "Chicago", "Dallas", "Boston"];
@@ -349,11 +351,12 @@ const URGENCIES = ["all", "high", "medium", "low"];
     (async () => {
       setLoadingLeads(true);
       try {
-        const [statsData, citiesData, leadsData, summaryData] = await Promise.all([
+        const [statsData, citiesData, leadsData, summaryData, scraperData] = await Promise.all([
           fetchStats().catch(() => null),
           fetchCitiesWithCounts().catch(() => []),
           fetchTodayLeads(50, selectedCity === "all" ? undefined : selectedCity, false, 1).catch(() => ({ leads: [], total: 0, page: 1, per_page: 50 })),
           fetchDashboardSummary().catch(() => null),
+          fetchScraperStatus().catch(() => null),
         ]);
         if (!active) return;
         if (statsData) setStats(statsData);
@@ -361,6 +364,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
           setCitiesWithCounts(citiesData);
         }
         if (summaryData) setDashboardSummary(summaryData);
+        if (scraperData) setScraperState(scraperData);
         setLeads(leadsData.leads || []);
         setCurrentPage(1);
         setHasMoreLeads((leadsData.leads?.length || 0) >= 50);
@@ -388,6 +392,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
       fetchDashboardSummary().then(setDashboardSummary).catch(() => {});
       fetchStats().then(setStats).catch(() => {});
       fetchCitiesWithCounts().then(setCitiesWithCounts).catch(() => {});
+      fetchScraperStatus().then(setScraperState).catch(() => {});
     }, 30000);
     return () => clearInterval(interval);
   }, [selectedCity]);
@@ -1156,6 +1161,28 @@ const URGENCIES = ["all", "high", "medium", "low"];
               <span>{filteredLeads.length} {t("dashboard.filter.showing") || "oportunidades"}</span>
               <span>·</span>
               <span>{newAlerts.length} {t("dashboard.filter.new") || "novas"}</span>
+            </div>
+          </div>
+
+          {/* DATA FRESHNESS BADGE */}
+          <div className="flex items-center justify-end mb-3">
+            <div className={`flex items-center gap-2 rounded-full px-3 py-1.5 text-xs border ${theme === "dark" ? "bg-[#10121a] border-white/5" : "bg-white border-slate-200 shadow-sm"} ${T.text2}`}>
+              {scraperState?.active ? (
+                <>
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                  <span>{t("dashboard.freshness.updating") || "Atualizando dados…"}</span>
+                </>
+              ) : scraperState?.last_run?.finished_at ? (
+                <>
+                  <span className="inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  <span>{`${t("dashboard.freshness.updated") || "Dados atualizados"}: ${formatRelativeTime(scraperState.last_run.finished_at, t)}`}</span>
+                </>
+              ) : (
+                <span>{t("dashboard.freshness.warmup") || "Coletando dados…"}</span>
+              )}
             </div>
           </div>
 
