@@ -1,0 +1,17 @@
+.git
+.gitignore
+venv
+.venv
+backend/venv
+node_modules
+frontend
+data
+*.db
+*.sqlite
+__pycache__
+*.pyc
+.env
+.env.*
+backend/.env
+.next
+nul

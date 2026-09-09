@@ -809,10 +809,10 @@ async def run_scraper(request: Request, max_cities: int = 8):
 
         # Cidades-base garantidas (datasets conhecidos, estáveis e com endereço de rua)
         base = [
-            {"domain": "data.cityofnewyork.us", "dataset": "erm2-nwe9", "city": "NYC", "state": "NY", "hours": 24, "fields": ["unique_key", "created_date", "complaint_type", "incident_address", "incident_zip", "latitude", "longitude"]},
-            {"domain": "data.cityofnewyork.us", "dataset": "wvxf-dwi5", "city": "NYC", "state": "NY", "hours": 48, "fields": None},  # HPD Violations
-            {"domain": "data.cityofchicago.org", "dataset": "v6vf-nfxy", "city": "Chicago", "state": "IL", "hours": 24, "fields": ["service_request_number", "creation_date", "sr_type", "street_address", "zip_code", "latitude", "longitude"]},
-            {"domain": "www.dallasopendata.com", "dataset": "d7e7-envw", "city": "Dallas", "state": "TX", "hours": 24, "fields": None},
+            {"domain": "data.cityofnewyork.us", "dataset": "erm2-nwe9", "city": "NYC", "state": "NY", "hours": 96, "fields": ["unique_key", "created_date", "complaint_type", "incident_address", "incident_zip", "latitude", "longitude"]},
+            {"domain": "data.cityofnewyork.us", "dataset": "wvxf-dwi5", "city": "NYC", "state": "NY", "hours": 120, "fields": None},  # HPD Violations
+            {"domain": "data.cityofchicago.org", "dataset": "v6vf-nfxy", "city": "Chicago", "state": "IL", "hours": 48, "fields": None},
+            {"domain": "www.dallasopendata.com", "dataset": "d7e7-envw", "city": "Dallas", "state": "TX", "hours": 48, "fields": None},
         ]
 
         # Descobre colunas automaticamente para os datasets sem fields explícitos
@@ -853,7 +853,7 @@ async def run_scraper(request: Request, max_cities: int = 8):
                     data = resp.json()
                     if not data.get("success"):
                         return []
-                    since = datetime.now() - timedelta(hours=24)
+                    since = datetime.now() - timedelta(hours=72)
                     records = data["result"]["records"]
                     out = []
                     for rec in records:

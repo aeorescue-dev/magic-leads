@@ -375,7 +375,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
     };
   }, [selectedCity]);
 
-  // Real-time polling: refresh leads every 30 seconds
+  // Real-time polling: refresh leads + KPIs every 30 seconds
   useEffect(() => {
     const interval = setInterval(() => {
       fetchTodayLeads(50, selectedCity === "all" ? undefined : selectedCity, false, 1)
@@ -385,6 +385,9 @@ const URGENCIES = ["all", "high", "medium", "low"];
           setHasMoreLeads((data.leads?.length || 0) >= 50);
         })
         .catch(() => {});
+      fetchDashboardSummary().then(setDashboardSummary).catch(() => {});
+      fetchStats().then(setStats).catch(() => {});
+      fetchCitiesWithCounts().then(setCitiesWithCounts).catch(() => {});
     }, 30000);
     return () => clearInterval(interval);
   }, [selectedCity]);

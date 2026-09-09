@@ -1,0 +1,27 @@
+name: Scraper Nacional 311
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scraper-nacional
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Disparar scraper na producao (Railway)
+        run: |
+          curl --fail -sS -m 2400 \
+            -X POST \
+            -H "X-Cron-Secret: ${{ secrets.CRON_SECRET }}" \
+            "https://magic-leads-production.up.railway.app/api/scraper/run?max_cities=8" \
+            -o /tmp/scraper.json -w "HTTP:%{http_code}\n"
+          cat /tmp/scraper.json

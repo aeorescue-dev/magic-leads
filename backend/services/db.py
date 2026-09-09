@@ -117,7 +117,8 @@ CREATE TABLE IF NOT EXISTS leads (
   converted_at TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(external_id, source_type)
+  UNIQUE(external_id, source_type),
+  UNIQUE(address, city)
 );
 
 CREATE TABLE IF NOT EXISTS lead_notes (
@@ -271,19 +272,97 @@ def get_connection() -> sqlite3.Connection:
     return conn
 
 
+def _seed_from_bundle(conn: sqlite3.Connection, force: bool = False) -> bool:
+    """Se o banco está vazio/inexistente e existe seed versionado, restaura-o.
+    Com force=1 (env LEADS_RESET_ON_BOOT) sobrescreve sempre, uma vez.
+    Retorna True se restaurou (o chamador deve reabrir a conexão)."""
+    if not force:
+        try:
+            count = conn.execute("SELECT COUNT(*) FROM leads").fetchone()[0]
+        except sqlite3.OperationalError:
+            count = 0
+        if count > 0:
+            return False
+    seed = os.environ.get("LEADS_SEED_FILE", "")
+    if not seed or not os.path.exists(seed):
+        return False
+    logger.info(f"Banco vazio — restaurando seed de {seed}")
+    conn.close()
+    data = open(seed, "rb").read()
+    if seed.endswith(".gz"):
+        import gzip
+        data = gzip.decompress(data)
+    with open(DB_PATH, "wb") as f:
+        f.write(data)
+    for suffix in ("-wal", "-shm"):
+        try:
+            os.remove(DB_PATH + suffix)
+        except OSError:
+            pass
+    if force:
+        os.environ.pop("LEADS_RESET_ON_BOOT", None)
+    return True
+
+
+def _ensure_demo_user() -> None:
+    """Garante que o usuário demo existe e tem a senha do ambiente (DEMO_PASSWORD).
+    Idempotente; só atualiza o hash quando ele não confere."""
+    import os
+    demo_email = os.environ.get("DEMO_EMAIL", "demo@magicleads.app").lower()
+    demo_password = os.environ.get("DEMO_PASSWORD", "")
+    if not demo_password:
+        return
+    try:
+        from .security import hash_password, verify_password
+    except Exception:
+        return
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT id, password_hash FROM users WHERE email = ?", (demo_email,)
+        ).fetchone()
+        if row:
+            if row["password_hash"] and verify_password(demo_password, row["password_hash"]):
+                return
+            pwd_hash = hash_password(demo_password)
+            conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (pwd_hash, row["id"]))
+            logger.info(f"Senha do usuário demo {demo_email} atualizada")
+        else:
+            pwd_hash = hash_password(demo_password)
+            conn.execute(
+                "INSERT INTO users (email, password_hash, company_name, plan, subscription_status, plan_until) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (demo_email, pwd_hash, "Contratante Demo", "free", "trial",
+                 (datetime.now() + timedelta(days=14)).strftime("%Y-%m-%d %H:%M:%S")),
+            )
+            logger.info(f"Usuário demo {demo_email} criado")
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"Erro ao garantir usuário demo: {e}")
+    finally:
+        conn.close()
+
+
 def init_db() -> None:
     """Cria o schema se não existir (tolerante a fs read-only em produção)."""
-    try:
-        conn = get_connection()
+    force_reset = os.environ.get("LEADS_RESET_ON_BOOT") == "1"
+    for _ in range(2):
         try:
-            conn.executescript(DEFAULT_SCHEMA)
-            _migrate_schema(conn)
-            conn.commit()
-        finally:
-            conn.close()
-        logger.info(f"Banco SQLite pronto em {DB_PATH}")
-    except sqlite3.OperationalError:
-        logger.warning("Filesystem read-only — usando banco versionado (leitura apenas).")
+            conn = get_connection()
+            try:
+                if _seed_from_bundle(conn, force=force_reset and _ == 0):
+                    conn = get_connection()
+                conn.executescript(DEFAULT_SCHEMA)
+                _migrate_schema(conn)
+                conn.commit()
+            finally:
+                conn.close()
+            _ensure_demo_user()
+            logger.info(f"Banco SQLite pronto em {DB_PATH}")
+            return
+        except sqlite3.OperationalError:
+            logger.warning("Filesystem read-only — usando banco versionado (leitura apenas).")
+            return
 
 
 def _migrate_schema(conn: sqlite3.Connection) -> None:
@@ -338,6 +417,24 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     for name, ctype in extra_cols.items():
         if name not in cols:
             conn.execute(f"ALTER TABLE leads ADD COLUMN {name} {ctype}")
+
+    deduped_keys = {
+        "idx_leads_address_city": "(address, city)",
+        "idx_leads_ext_src": "(external_id, source_type)",
+    }
+    for idx_name, idx_cols in deduped_keys.items():
+        exists = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name=?", (idx_name,)
+        ).fetchone()
+        if not exists:
+            group_cols = idx_cols.strip("()")
+            conn.execute(
+                f"DELETE FROM leads WHERE id NOT IN (SELECT MIN(id) FROM leads GROUP BY {group_cols})"
+            )
+            try:
+                conn.execute(f"CREATE UNIQUE INDEX {idx_name} ON leads {idx_cols}")
+            except sqlite3.OperationalError:
+                pass
 
     user_cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
     if user_cols and "score" not in user_cols:
