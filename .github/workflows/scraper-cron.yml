@@ -22,7 +22,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
 
-      - name: Run scraper (insere no SQLite)
+- name: Run scraper (insere no SQLite)
         run: |
           python -c "
 from fastapi.testclient import TestClient
