@@ -8,6 +8,11 @@ frontend
 data
 *.db
 *.sqlite
+*.log
+*.sql
+*.dump
+*.gz
+*.tar
 __pycache__
 *.pyc
 .env
