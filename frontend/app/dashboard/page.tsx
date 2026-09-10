@@ -827,8 +827,7 @@ const LEAD_TYPES = [
   const realTotalLeads = dashboardSummary?.total_interested ?? (stats?.total ?? stats?.total_leads ?? 1249);
   const lastScrapeText = String(dashboardSummary?.last_scrape ?? "");
 const scrapeCount = Number(lastScrapeText.match(/\d+/)?.[0] || 0);
-const fallbackCount = dashboardSummary?.by_city?.NYC || dashboardSummary?.total_interested || 0;
-const lastScrapeCount = scrapeCount >= 500 ? scrapeCount : (dashboardSummary?.by_city?.NYC || dashboardSummary?.total_interested || 0);
+const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
   const urgentCount = dashboardSummary?.urgent ?? 0;
 
   const T = theme === "dark" ? DARK : LIGHT;
@@ -1219,7 +1218,7 @@ const lastScrapeCount = scrapeCount >= 500 ? scrapeCount : (dashboardSummary?.by
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
             {[
               { label: t("dashboard.kpi.interested") || "No seu interesse", value: dashboardSummary?.total_interested ?? 0, delta: t("dashboard.kpi.opportunities") || "oportunidades reais", icon: Building2, color: "#6366f1" },
-              { label: t("dashboard.kpi.last_scrape") || "Última varredura", value: lastScrapeCount, delta: t("dashboard.kpi.today") || "entraram hoje", icon: TrendingUp, color: "#22c55e" },
+              { label: "Última Varredura", value: String(dashboardSummary?.last_scrape ?? "").match(/\d+/)?.[0] || "0", delta: "atualizado agora", icon: TrendingUp, color: "#22c55e" },
               { label: t("dashboard.kpi.with_contact") || "Com contato", value: dashboardSummary?.with_contact ?? 0, delta: t("dashboard.kpi.ready_call") || "prontas p/ ligar", icon: Phone, color: "#f59e0b" },
               { label: t("dashboard.kpi.urgent") || "Urgentes", value: dashboardSummary?.urgent ?? 0, delta: t("dashboard.kpi.need_action") || "precisam ação", icon: AlertCircle, color: "#ef4444" },
             ].map((k) => (

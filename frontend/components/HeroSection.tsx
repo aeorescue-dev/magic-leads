@@ -157,19 +157,12 @@ export function HeroSection() {
               <div className="text-center">
                 {(() => {
                   const scrapeText = String(lastScrape ?? "");
-                  const scrapeCount = Number(scrapeText.match(/\d+/)?.[0] || 0);
-                  const fallbackCount = stats?.by_city?.NYC || stats?.total_interested || 0;
-                  const displayCount = scrapeCount >= 500 ? scrapeCount : (fallbackCount || 0);
-                  const citiesStr = "NYC, Boston, Dallas";
-                  const hoursAgo = (() => {
-                    const match = String(lastScrape ?? "").match(/Atualizado há (\d+) horas?/);
-                    return match ? match[1] : "1";
-                  })();
+                  const displayText = scrapeText || "Aguardando dados...";
                   return (
                     <>
                       <div className="text-sm md:text-lg font-semibold text-emerald-400">
                         <span className="text-emerald-300">⚡ </span>
-                        Última Varredura do Robô: <span className="font-extrabold">{displayCount.toLocaleString()}</span> novas oportunidades (NYC, Boston, Dallas) · Atualizado há {hoursAgo} hora{Number(hoursAgo) > 1 ? "s" : ""} · 100% com registro público
+                        Última Varredura do Robô: <span className="font-extrabold">{displayText}</span>
                       </div>
                     </>
                   );
