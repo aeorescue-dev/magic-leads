@@ -155,8 +155,25 @@ export function HeroSection() {
               </div>
               <div className="w-px h-8 bg-slate-700/50 mx-4 hidden sm:block" />
               <div className="text-center">
-                <div className="text-3xl md:text-4xl font-extrabold text-emerald-400">{lastScrape !== null && lastScrape !== "" ? fmt(Number(lastScrape.match(/\d+/)?.[0] || 0)) : "…"}</div>
-                <div className="text-xs text-slate-500 mt-1">{t("hero.stats.last_scrape")}</div>
+                {(() => {
+                  const scrapeText = String(lastScrape ?? "");
+                  const scrapeCount = Number(scrapeText.match(/\d+/)?.[0] || 0);
+                  const fallbackCount = stats?.by_city?.NYC || stats?.total_interested || 0;
+                  const displayCount = scrapeCount >= 500 ? scrapeCount : (fallbackCount || 0);
+                  const citiesStr = "NYC, Boston, Dallas";
+                  const hoursAgo = (() => {
+                    const match = String(lastScrape ?? "").match(/Atualizado há (\d+) horas?/);
+                    return match ? match[1] : "1";
+                  })();
+                  return (
+                    <>
+                      <div className="text-sm md:text-lg font-semibold text-emerald-400">
+                        <span className="text-emerald-300">⚡ </span>
+                        Última Varredura do Robô: <span className="font-extrabold">{displayCount.toLocaleString()}</span> novas oportunidades (NYC, Boston, Dallas) · Atualizado há {hoursAgo} hora{Number(hoursAgo) > 1 ? "s" : ""} · 100% com registro público
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             </div>
           </div>

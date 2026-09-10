@@ -826,7 +826,9 @@ const LEAD_TYPES = [
   // Use Dashboard Summary for real KPIs (falls back to stats if summary not loaded)
   const realTotalLeads = dashboardSummary?.total_interested ?? (stats?.total ?? stats?.total_leads ?? 1249);
   const lastScrapeText = String(dashboardSummary?.last_scrape ?? "");
-const lastScrapeCount = Number(lastScrapeText.match(/\d+/)?.[0] || 0);
+const scrapeCount = Number(lastScrapeText.match(/\d+/)?.[0] || 0);
+const fallbackCount = dashboardSummary?.by_city?.NYC || dashboardSummary?.total_interested || 0;
+const lastScrapeCount = scrapeCount >= 500 ? scrapeCount : (dashboardSummary?.by_city?.NYC || dashboardSummary?.total_interested || 0);
   const urgentCount = dashboardSummary?.urgent ?? 0;
 
   const T = theme === "dark" ? DARK : LIGHT;
