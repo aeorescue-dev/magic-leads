@@ -429,7 +429,6 @@ const PT: Dict = {
   "dashboard.kpi.urgent": "Urgentes",
   "dashboard.kpi.last_scrape": "Última varredura",
   "dashboard.kpi.today": "entraram hoje",
-  "dashboard.kpi.last_scrape": "Última varredura",
   "dashboard.kpi.opportunities": "oportunidades reais",
   "dashboard.kpi.ready_call": "prontas p/ ligar",
   "dashboard.kpi.need_action": "precisam ação",
