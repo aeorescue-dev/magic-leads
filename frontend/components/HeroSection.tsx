@@ -19,7 +19,7 @@ function formatUpdatedSince(dateStr: string, t: (k: string) => string): string {
 export function HeroSection() {
   const { t } = useI18n();
   const { stats } = useStats();
-  const [new24h, setNew24h] = useState<number | null>(null);
+  const [lastScrape, setLastScrape] = useState<string | null>(null);
   const [lastUpdate, setLastUpdate] = useState<string | null>(null);
 
   useEffect(() => {
@@ -31,7 +31,7 @@ export function HeroSection() {
           fetchScraperStatus().catch(() => null),
         ]);
         if (!active) return;
-        if (s && typeof s.new_24h === "number") setNew24h(s.new_24h);
+        if (s && typeof s.last_scrape === "string") setLastScrape(s.last_scrape);
         if (st?.last_run?.finished_at) setLastUpdate(st.last_run.finished_at);
       } catch { /* ignore */ }
     };
@@ -75,10 +75,10 @@ export function HeroSection() {
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
                 </span>
-                {new24h !== null ? (
+                {lastScrape !== null && lastScrape !== "" ? (
                   <span className="text-xs font-semibold text-emerald-400">
-                    <span className="text-sm font-extrabold">{new24h.toLocaleString("en-US")}</span>{" "}
-                    {t("hero.live.new_24h")}
+                    <span></span>
+                    {lastScrape}
                   </span>
                 ) : (
                   <span className="text-xs font-semibold text-emerald-400">{t("hero.badge_live")}</span>
@@ -155,8 +155,8 @@ export function HeroSection() {
               </div>
               <div className="w-px h-8 bg-slate-700/50 mx-4 hidden sm:block" />
               <div className="text-center">
-                <div className="text-3xl md:text-4xl font-extrabold text-emerald-400">{new24h !== null ? `${new24h.toLocaleString("en-US")}+` : "…"}</div>
-                <div className="text-xs text-slate-500 mt-1">{t("hero.stats.new_24h")}</div>
+                <div className="text-3xl md:text-4xl font-extrabold text-emerald-400">{lastScrape !== null && lastScrape !== "" ? fmt(lastScrape.length) : "…"}</div>
+                <div className="text-xs text-slate-500 mt-1">{t("hero.stats.last_scrape")}</div>
               </div>
             </div>
           </div>

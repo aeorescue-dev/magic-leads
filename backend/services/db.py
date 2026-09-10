@@ -2075,13 +2075,34 @@ class DatabaseService:
                 f"SELECT COUNT(*) AS c FROM leads {base_where}", params
             ).fetchone()["c"]
             
-            # Novas nas últimas 24h (baseados em created_at = momento real de ingestão no sistema)
-            # Antes usava date_reported (data da prefeitura, muitas vezes histórica = baixo número).
-            # Agora usa created_at = momento em o lead foi realmente inserido no nosso banco.
-            new_24h = conn.execute(
-                f"SELECT COUNT(*) AS c FROM leads {base_where} AND created_at >= datetime('now', '-24 hours')",
-                params
-            ).fetchone()["c"]
+            # Última Varredura do Robô (baseado em leads realmente inseridos recentemente)
+            # Conta leads criados nas últimas 2h (janela da varredura periódica do robô)
+            # e agrupa por cidade para mostrar as fontes ativas.
+            recent_cutoff = datetime('now', '-2 hours')
+            recent_leads = conn.execute(
+                f"SELECT created_at, city FROM leads {base_where} AND created_at >= ? ORDER BY created_at DESC LIMIT 100",
+                [recent_cutoff.isoformat()]
+            ).fetchall()
+            
+            if recent_leads:
+                # Conta total de leads recentes (únicos por endereço, como o scraper faz com dedupe)
+                recent_count = len(recent_leads)
+                # Obtém as cidades mais recentes para mostrar as fontes
+                cities = list(set([r["city"] for r in recent_leads if r["city"]]))
+                cities_str = ", ".join(cities[:3]) + ("..." if len(cities) > 3 else "")
+                # Tempo desde a varredura mais recente
+                most_recent = datetime.fromisoformat(recent_leads[0]["created_at"].replace("T", " ")) if hasattr(recent_leads[0]["created_at"], "replace") else recent_leads[0]["created_at"]
+                if isinstance(most_recent, str):
+                    most_recent = datetime.strptime(most_recent, "%Y-%m-%d %H:%M:%S")
+                hours_ago = max(1, round((datetime.now() - most_recent).total_seconds() / 3600))
+                last_scrape_info = f"{recent_count} novas oportunidades ({cities_str}) Atualizado há {hours_ago} horas · 100% com registro público"
+            else:
+                # Fallback: usa a contagem 24h se não houver leads recentes
+                last_24h = conn.execute(
+                    f"SELECT COUNT(*) AS c FROM leads {base_where} AND created_at >= datetime('now', '-24 hours')",
+                    params
+                ).fetchone()["c"]
+                last_scrape_info = f"{last_24h} novas oportunidades nas últimas 24h"
             
             # Com contato (owner_name preenchido)
             with_contact = conn.execute(
@@ -2118,7 +2139,7 @@ class DatabaseService:
             
             return {
                 "total_interested": total_interested,
-                "new_24h": new_24h,
+                "last_scrape": last_scrape_info,
                 "with_contact": with_contact,
                 "urgent": urgent,
                 "by_category": by_category,

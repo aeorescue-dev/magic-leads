@@ -159,7 +159,7 @@ export default function ProDashboard() {
 
   // Use real stats from backend summary
   const totalInterested = summary?.total_interested ?? 0;
-  const new24h = summary?.new_24h ?? 0;
+  const lastScrape = summary?.last_scrape ?? "—";
   const withContact = summary?.with_contact ?? 0;
   const urgent = summary?.urgent ?? 0;
 
@@ -407,7 +407,7 @@ export default function ProDashboard() {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
             {[
               { label: "No seu interesse", value: totalInterested, delta: "oportunidades reais", icon: Building2, color: "#6366f1" },
-              { label: "Novas 24h", value: new24h, delta: "entraram hoje", icon: TrendingUp, color: "#22c55e" },
+              { label: "Última varredura", value: newScrape, delta: "entraram hoje", icon: TrendingUp, color: "#22c55e" },
               { label: "Com contato", value: withContact, delta: "prontas p/ ligar", icon: Phone, color: "#f59e0b" },
               { label: "Urgentes", value: urgent, delta: "precisam ação", icon: AlertCircle, color: "#ef4444" },
             ].map((k) => (

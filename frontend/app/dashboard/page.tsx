@@ -825,7 +825,7 @@ const LEAD_TYPES = [
 
   // Use Dashboard Summary for real KPIs (falls back to stats if summary not loaded)
   const realTotalLeads = dashboardSummary?.total_interested ?? (stats?.total ?? stats?.total_leads ?? 1249);
-  const new24h = dashboardSummary?.new_24h ?? 0;
+  const lastScrape = dashboardSummary?.last_scrape ?? "";
   const urgentCount = dashboardSummary?.urgent ?? 0;
 
   const T = theme === "dark" ? DARK : LIGHT;
@@ -1216,7 +1216,7 @@ const LEAD_TYPES = [
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
             {[
               { label: t("dashboard.kpi.interested") || "No seu interesse", value: dashboardSummary?.total_interested ?? 0, delta: t("dashboard.kpi.opportunities") || "oportunidades reais", icon: Building2, color: "#6366f1" },
-              { label: t("dashboard.kpi.new_24h") || "Novas 24h", value: dashboardSummary?.new_24h ?? 0, delta: t("dashboard.kpi.today") || "entraram hoje", icon: TrendingUp, color: "#22c55e" },
+              { label: t("dashboard.kpi.last_scrape") || "Última varredura", value: dashboardSummary?.last_scrape ?? "—", delta: t("dashboard.kpi.today") || "entraram hoje", icon: TrendingUp, color: "#22c55e" },
               { label: t("dashboard.kpi.with_contact") || "Com contato", value: dashboardSummary?.with_contact ?? 0, delta: t("dashboard.kpi.ready_call") || "prontas p/ ligar", icon: Phone, color: "#f59e0b" },
               { label: t("dashboard.kpi.urgent") || "Urgentes", value: dashboardSummary?.urgent ?? 0, delta: t("dashboard.kpi.need_action") || "precisam ação", icon: AlertCircle, color: "#ef4444" },
             ].map((k) => (

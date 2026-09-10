@@ -178,7 +178,7 @@ export async function fetchTodayLeads(limit: number = 60, city?: string, include
 
 export interface DashboardSummary {
   total_interested: number;
-  new_24h: number;
+  last_scrape: string;
   with_contact: number;
   urgent: number;
   by_category: Record<string, number>;
