@@ -159,8 +159,8 @@ export default function ProDashboard() {
 
   // Use real stats from backend summary
   const totalInterested = summary?.total_interested ?? 0;
-  const lastScrapeText = summary?.last_scrape ?? "—";
-  const lastScrapeCount = Number(lastScrapeText.match(/^\d+/)?.[0] || 0);
+const lastScrapeText = String(summary?.last_scrape ?? "");
+const lastScrapeCount = Number(lastScrapeText.match(/\d+/)?.[0] || 0);
   const withContact = summary?.with_contact ?? 0;
   const urgent = summary?.urgent ?? 0;
 
