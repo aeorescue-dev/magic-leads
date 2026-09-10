@@ -155,7 +155,7 @@ export function HeroSection() {
               </div>
               <div className="w-px h-8 bg-slate-700/50 mx-4 hidden sm:block" />
               <div className="text-center">
-                <div className="text-3xl md:text-4xl font-extrabold text-emerald-400">{lastScrape !== null && lastScrape !== "" ? fmt(lastScrape.length) : "…"}</div>
+                <div className="text-3xl md:text-4xl font-extrabold text-emerald-400">{lastScrape !== null && lastScrape !== "" ? fmt(Number(lastScrape.match(/^\d+/)?.[0] || 0)) : "…"}</div>
                 <div className="text-xs text-slate-500 mt-1">{t("hero.stats.last_scrape")}</div>
               </div>
             </div>
