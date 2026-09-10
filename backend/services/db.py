@@ -2045,10 +2045,11 @@ class DatabaseService:
         """
         conn = get_connection()
         try:
-            # Base query com filtro de 7 dias e department+status preenchidos
+            # Base query com filtro de 7 dias em created_at (tempo real do sistema)
+            # date_reported mantido apenas como validação secundária
             base_where = """
-                WHERE date_reported IS NOT NULL
-                  AND date(date_reported) >= date('now', '-7 days')
+                WHERE created_at IS NOT NULL
+                  AND datetime(created_at) >= datetime('now', '-7 days')
                   AND department IS NOT NULL AND TRIM(department) != ''
                   AND case_status IS NOT NULL AND TRIM(case_status) != ''
             """
@@ -2078,7 +2079,7 @@ class DatabaseService:
             # Última Varredura do Robô (baseado em leads realmente inseridos recentemente)
             # Conta leads criados nas últimas 2h (janela da varredura periódica do robô)
             # e agrupa por cidade para mostrar as fontes ativas.
-            recent_cutoff = datetime('now', '-2 hours')
+            recent_cutoff = datetime.now() - timedelta(hours=2)
             recent_leads = conn.execute(
                 f"SELECT created_at, city FROM leads {base_where} AND created_at >= ? ORDER BY created_at DESC LIMIT 100",
                 [recent_cutoff.isoformat()]
