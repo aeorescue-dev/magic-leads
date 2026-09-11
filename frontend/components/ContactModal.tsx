@@ -3,7 +3,9 @@
 import { useState } from "react";
 import { X, Copy, PhoneCall, MessageSquare, Mail, Phone } from "lucide-react";
 import { LeadResponse, recordContact } from "@/lib/api-client";
-import { useI18n, Lang } from "@/lib/i18n";
+import { useAuth } from "@/lib/auth";
+import { useI18n } from "@/lib/i18n";
+import { buildOutreachMessage, OutreachMessage } from "@/lib/outreach";
 
 interface ContactModalProps {
   lead: LeadResponse;
@@ -11,33 +13,37 @@ interface ContactModalProps {
   onContacted?: (lead: LeadResponse) => void;
 }
 
-const MSG_TEMPLATES: Record<Lang, (owner: string, address: string) => string> = {
-  pt: (owner, address) =>
-    `Oi ${owner}! Tudo bem? Vi que você reportou um problema no imóvel em ${address}. Sou profissional em reformas e posso ajudar. Qual o melhor horário para falarmos?`,
-  en: (owner, address) =>
-    `Hi ${owner}! Hope you're well. I saw the issue you reported at ${address}. I'm a licensed contractor and can help. What's the best time to talk?`,
-  es: (owner, address) =>
-    `¡Hola ${owner}! ¿Cómo estás? Vi que reportaste un problema en la propiedad en ${address}. Soy contratista y puedo ayudarte. ¿Cuál es el mejor horario para hablar?`,
-};
-
 const CHANNEL_ICONS = { whatsapp: MessageSquare, sms: MessageSquare, call: Phone, email: Mail } as const;
 
 export function ContactModal({ lead, onClose, onContacted }: ContactModalProps) {
-  const { t, lang } = useI18n();
+  const { t } = useI18n();
+  const { user } = useAuth();
   const [channel, setChannel] = useState<"whatsapp" | "sms" | "call" | "email">("whatsapp");
   const [sent, setSent] = useState(false);
 
-  const owner = lead.owner_name || "proprietário";
-  const message = MSG_TEMPLATES[lang](owner, lead.address);
+  const msgs = buildOutreachMessage({
+    owner: lead.owner_name || "—",
+    company: user?.company_name || "—",
+    city: lead.city || "",
+    category: lead.issue_category || "Other",
+  });
+
+  const textFor = (c: typeof channel, m: OutreachMessage): string => {
+    if (c === "sms") return m.sms;
+    if (c === "email") return `${m.emailSubject}\n\n${m.emailBody}`;
+    return m.whatsapp;
+  };
+
+  const message = textFor(channel, msgs);
 
   const linkFor = (c: typeof channel): string => {
     const phone = (lead.owner_phone || "").replace(/\D/g, "");
-    const url = encodeURIComponent(message);
     switch (c) {
-      case "whatsapp": return `https://wa.me/${phone}?text=${url}`;
-      case "sms": return `sms:${phone}?body=${url}`;
+      case "whatsapp": return `https://wa.me/${phone}?text=${encodeURIComponent(msgs.whatsapp)}`;
+      case "sms": return `sms:${phone}?body=${encodeURIComponent(msgs.sms)}`;
       case "call": return `tel:${phone}`;
-      case "email": return `mailto:?subject=${encodeURIComponent("Orçamento de reforma")}&body=${url}`;
+      case "email":
+        return `mailto:${lead.owner_email || ""}?subject=${encodeURIComponent(msgs.emailSubject)}&body=${encodeURIComponent(msgs.emailBody)}`;
     }
   };
 

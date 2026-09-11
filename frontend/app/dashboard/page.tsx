@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
+import { buildOutreachMessage } from "@/lib/outreach";
 import CheckoutModal from "@/components/CheckoutModal";
 import ReleaseModal from "@/components/ReleaseModal";
 import { PushNotificationButton } from "@/components/PushNotificationButton";
@@ -195,6 +196,20 @@ const LEAD_TYPES = [
       : `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
     window.open(url, "_blank", "noopener,noreferrer");
   };
+
+  const buildMsgs = (lead: LeadResponse) =>
+    buildOutreachMessage({
+      owner: lead.owner_name || "—",
+      company: user?.company_name || "—",
+      city: lead.city || "",
+      category: lead.issue_category || "Other",
+    });
+
+  const waHref = (phone: string, m: ReturnType<typeof buildOutreachMessage>) =>
+    `https://wa.me/${phone.replace(/\D/g, "")}?text=${encodeURIComponent(m.whatsapp)}`;
+
+  const smsHref = (phone: string, m: ReturnType<typeof buildOutreachMessage>) =>
+    `sms:${phone.replace(/\D/g, "")}?body=${encodeURIComponent(m.sms)}`;
 
   const openSMS = (phone: string) => {
     const clean = phone.replace(/\D/g, "");
@@ -1821,7 +1836,7 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                                   </button>
                                   {lead.owner_phone && (
                                     <a
-                                      href={`https://wa.me/${lead.owner_phone.replace(/\D/g, "")}`}
+                                      href={waHref(lead.owner_phone, buildMsgs(lead))}
                                       target="_blank"
                                       rel="noopener noreferrer"
                                       onClick={(e) => e.stopPropagation()}
@@ -1832,11 +1847,7 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                                   )}
                                   {lead.owner_phone && (
                                     <a
-                                      href={`sms:${lead.owner_phone.replace(/\D/g, "")}?body=${encodeURIComponent(
-                                        (t("dashboard.detail.sms_body") || "Oi {owner}! Vi seu imóvel em {address}. Posso ajudar com a reforma?")
-                                          .replace("{owner}", lead.owner_name || "proprietário")
-                                          .replace("{address}", lead.address)
-                                      )}`}
+                                      href={smsHref(lead.owner_phone, buildMsgs(lead))}
                                       onClick={(e) => e.stopPropagation()}
                                       className="flex items-center gap-1.5 text-[11px] font-semibold bg-green-500/15 text-green-400 px-3 py-1.5 rounded-lg hover:bg-green-500/25 transition"
                                     >
@@ -1969,7 +1980,7 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
               {selectedLead.owner_phone && (
                 <div className="flex flex-wrap gap-2 pt-2">
                   <a
-                    href={`https://wa.me/${selectedLead.owner_phone.replace(/\D/g, "")}`}
+                    href={waHref(selectedLead.owner_phone, buildMsgs(selectedLead))}
                     target="_blank"
                     rel="noreferrer"
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 text-xs font-bold hover:bg-emerald-400 transition"
@@ -1983,11 +1994,7 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                     <Phone className="h-3.5 w-3.5" /> Ligar
                   </a>
                   <a
-                    href={`sms:${selectedLead.owner_phone.replace(/\D/g, "")}?body=${encodeURIComponent(
-                      (t("dashboard.detail.sms_body") || "Oi {owner}! Vi seu imóvel em {address}. Posso ajudar com a reforma?")
-                        .replace("{owner}", selectedLead.owner_name || "proprietário")
-                        .replace("{address}", selectedLead.address)
-                    )}`}
+                    href={smsHref(selectedLead.owner_phone, buildMsgs(selectedLead))}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600 text-white text-xs font-bold hover:bg-green-500 transition"
                   >
                     <MessageSquare className="h-3.5 w-3.5" /> SMS
@@ -1995,13 +2002,8 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                   {selectedLead.owner_email && (
                     <a
                       href={`mailto:${selectedLead.owner_email}?subject=${encodeURIComponent(
-                        t("dashboard.detail.email_subject") || "Orçamento de Reforma"
-                      )}&body=${encodeURIComponent(
-                        (t("dashboard.detail.email_body") || "Olá {owner},\n\nVi o seu imóvel em {address} e gostaria de oferecer meus serviços de reforma.\n\nAtenciosamente,\n{company}")
-                          .replace("{owner}", selectedLead.owner_name || "proprietário")
-                          .replace("{address}", selectedLead.address)
-                          .replace("{company}", user?.company_name || "Sua Empresa")
-                      )}`}
+                        buildMsgs(selectedLead).emailSubject
+                      )}&body=${encodeURIComponent(buildMsgs(selectedLead).emailBody)}`}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-bold hover:bg-blue-500 transition"
                     >
                       <Mail className="h-3.5 w-3.5" /> E-mail
