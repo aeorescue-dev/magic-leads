@@ -8,6 +8,7 @@ import { LiveLeadsSection } from "@/components/LiveLeadsSection";
 import { TestimonialsSection } from "@/components/TestimonialsSection";
 import { PricingSection } from "@/components/PricingSection";
 import { DemoLoginButton } from "@/components/DemoLoginButton";
+import { AuthForm } from "@/components/AuthForm";
 import { useI18n } from "@/lib/i18n";
 import { ArrowRight } from "lucide-react";
 
@@ -57,18 +58,21 @@ export default function Home() {
             <p className="text-slate-400 text-lg mb-8 max-w-2xl mx-auto leading-relaxed">
               {t("cta.sub")}
             </p>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center mb-8">
-              <DemoLoginButton className="btn-primary w-full sm:w-auto text-lg px-10 py-4">
-                {t("cta.btn")}
+            <div className="max-w-md mx-auto">
+              <AuthForm />
+              <div className="relative my-6">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-white/10" />
+                </div>
+                <div className="relative flex justify-center text-sm">
+                  <span className="bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 px-4 text-slate-500">{t('auth.or_demo') || 'ou'}</span>
+                </div>
+              </div>
+              <DemoLoginButton className="btn-secondary w-full sm:w-auto text-lg px-10 py-4">
+                {t("cta.demo_btn") || 'Entrar como Demo'}
               </DemoLoginButton>
-              <a
-                href="#preco"
-                className="btn-secondary w-full sm:w-auto text-lg px-10 py-4"
-              >
-                {t("cta.btn_secondary")} <ArrowRight className="h-5 w-5 group-hover:translate-x-1 transition-transform" />
-              </a>
             </div>
-            <p className="text-slate-500 text-sm">{t("cta.note")}</p>
+            <p className="text-slate-500 text-sm mt-4">{t("cta.note")}</p>
           </div>
         </div>
       </section>
