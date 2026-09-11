@@ -1830,6 +1830,19 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                                       WhatsApp
                                     </a>
                                   )}
+                                  {lead.owner_phone && (
+                                    <a
+                                      href={`sms:${lead.owner_phone.replace(/\D/g, "")}?body=${encodeURIComponent(
+                                        (t("dashboard.detail.sms_body") || "Oi {owner}! Vi seu imóvel em {address}. Posso ajudar com a reforma?")
+                                          .replace("{owner}", lead.owner_name || "proprietário")
+                                          .replace("{address}", lead.address)
+                                      )}`}
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="flex items-center gap-1.5 text-[11px] font-semibold bg-green-500/15 text-green-400 px-3 py-1.5 rounded-lg hover:bg-green-500/25 transition"
+                                    >
+                                      <MessageSquare className="h-3 w-3" /> SMS
+                                    </a>
+                                  )}
                                   <button
                                     onClick={(e) => { e.stopPropagation(); openReleaseModal(lead); }}
                                     disabled={busyAction}
@@ -1971,7 +1984,7 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                   </a>
                   <a
                     href={`sms:${selectedLead.owner_phone.replace(/\D/g, "")}?body=${encodeURIComponent(
-                      (t("dashboard.detail.sms") || "Oi {owner}! Vi seu imóvel em {address}. Posso ajudar com a reforma?")
+                      (t("dashboard.detail.sms_body") || "Oi {owner}! Vi seu imóvel em {address}. Posso ajudar com a reforma?")
                         .replace("{owner}", selectedLead.owner_name || "proprietário")
                         .replace("{address}", selectedLead.address)
                     )}`}
