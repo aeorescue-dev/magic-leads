@@ -92,6 +92,8 @@ export interface LeadResponse {
   visibility_status?: "available" | "reserved_by_me" | "reserved_by_other";
   reserved_by_me?: { created_at?: string; expires_at?: string; hours_remaining?: number };
   reserved_by_other?: { contractor_id?: number; contractor_name?: string; expires_at?: string };
+  // Reveal por consentimento: true = dados do proprietário liberados para o usuário
+  revealed?: boolean;
 }
 
 export interface LeadsListResponse {
@@ -643,6 +645,20 @@ export interface HoldResult {
   status: string;
   expires_at?: string;
   message?: string;
+  revealed?: boolean;
+  counted_again?: boolean;
+  used?: number;
+  limit?: number;
+  remaining?: number;
+  reset_at?: string;
+  owner?: {
+    name?: string | null;
+    phone?: string | null;
+    email?: string | null;
+    mailing_address?: string | null;
+    address?: string | null;
+    city?: string | null;
+  };
 }
 
 export interface HistoryEvent {
@@ -660,12 +676,16 @@ export async function fetchLeadStatus(leadId: string | number): Promise<LeadStat
   );
 }
 
-export async function reserveLead(leadId: string | number, minutes = 15): Promise<HoldResult> {
+export async function reserveLead(
+  leadId: string | number,
+  minutes = 60,
+  opts: { consent?: boolean; idempotency?: string } = {}
+): Promise<HoldResult> {
   return handle<HoldResult>(
     await fetch(`${API_URL}/api/leads/${leadId}/reserve`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({ minutes }),
+      body: JSON.stringify({ minutes, consent: opts.consent ?? false, idempotency: opts.idempotency }),
     })
   );
 }

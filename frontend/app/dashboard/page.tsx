@@ -235,6 +235,7 @@ const LEAD_TYPES = [
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [releaseTarget, setReleaseTarget] = useState<LeadResponse | null>(null);
+  const [revealTarget, setRevealTarget] = useState<LeadResponse | null>(null);
   const [contractorMetrics, setContractorMetrics] = useState<ContractorMetrics | null>(null);
   
   // Toast notifications (fila empilhável + auto-dismiss 4s)
@@ -474,27 +475,11 @@ const LEAD_TYPES = [
   const handleHistoryReserve = async (lead: MyLeadHistoryItem) => {
     if (busyAction || (subscription && !subscription.can_access)) return;
     if (dailyStats && dailyStats.remaining === 0) {
-      showToast(`Limite de 10 leads/dia atingido. Reset em ${dailyStats.reset_at ? formatRelativeTime(dailyStats.reset_at, t) : "breve"}`, "warning");
+      showToast(`Limite de 10 leads/dia atingido. Volte amanhã e abra seus 10+ potenciais clientes.`, "warning");
       return;
     }
-    setBusyAction(true);
-    try {
-      const res = await reserveLead(lead.id);
-      showToast(res?.message || "Lead reservado com exclusividade", "success");
-      if (dailyStats) {
-        try {
-          setDailyStats(await fetchUserDailyStats(userId!));
-        } catch (e) {
-          console.error(e);
-        }
-      }
-      refreshHistory();
-      if (userId) refreshNotifications();
-    } catch (e: any) {
-      showToast(e?.message || "Erro ao reservar lead", "error");
-    } finally {
-      setBusyAction(false);
-    }
+    // Consentimento antes de re-revelar os dados do proprietário (conta novamente)
+    setRevealTarget(lead);
   };
 
   const handleHistoryConvert = async (lead: MyLeadHistoryItem) => {
@@ -687,13 +672,31 @@ const LEAD_TYPES = [
   const handleQuickReserve = async (lead: LeadResponse) => {
     if (busyAction || (subscription && !subscription.can_access)) return;
     if (dailyStats && dailyStats.remaining === 0) {
-      showToast(`Limite de 10 leads/dia atingido. Reset em ${dailyStats.reset_at ? formatRelativeTime(dailyStats.reset_at, t) : "breve"}`, "warning");
+      showToast(`Limite de 10 leads/dia atingido. Volte amanhã e abra seus 10+ potenciais clientes.`, "warning");
+      return;
+    }
+    // Abre o modal de consentimento antes de revelar os dados do proprietário
+    setRevealTarget(lead);
+  };
+  const closeRevealModal = () => {
+    if (busyAction) return;
+    setRevealTarget(null);
+  };
+  const confirmReveal = async () => {
+    if (!revealTarget || busyAction) return;
+    if (subscription && !subscription.can_access) {
+      showToast(subscription.message || "Acesso negado", "error");
+      return;
+    }
+    if (dailyStats && dailyStats.remaining === 0) {
+      showToast(`Limite de 10 leads/dia atingido. Volte amanhã e abra seus 10+ potenciais clientes.`, "warning");
       return;
     }
     setBusyAction(true);
     try {
-      const res = await reserveLead(lead.id);
-      showToast(res?.message || "Lead reservado com exclusividade", "success");
+      const idKey = `u${userId}:l${revealTarget.id}:${new Date().toISOString().slice(0, 10)}`;
+      const res = await reserveLead(revealTarget.id, 60, { consent: true, idempotency: idKey });
+      showToast(res?.message || "Dados revelados — reserva de 1 hora ativa", "success");
       if (dailyStats) {
         try {
           const stats = await fetchUserDailyStats(userId!);
@@ -702,18 +705,29 @@ const LEAD_TYPES = [
           console.error(e);
         }
       }
+      const revealedFields: Partial<LeadResponse> = {
+        owner_name: res?.owner?.name ?? revealTarget.owner_name,
+        owner_phone: res?.owner?.phone ?? revealTarget.owner_phone,
+        owner_email: res?.owner?.email ?? revealTarget.owner_email,
+        mailing_address: res?.owner?.mailing_address ?? revealTarget.mailing_address,
+        revealed: true,
+        status: "reserved",
+        visibility_status: "reserved_by_me",
+        reserved_by_me: { expires_at: res?.expires_at },
+      };
       setLeads((prev) =>
-        prev.map((l) =>
-          l.id === lead.id
-            ? { ...l, status: "reserved", reserved_by_me: { expires_at: res?.expires_at } }
-            : l
-        )
+        prev.map((l) => (l.id === revealTarget.id ? { ...l, ...revealedFields } : l))
+      );
+      setSelectedLead((prev) =>
+        prev && prev.id === revealTarget.id ? { ...prev, ...revealedFields } : prev
       );
       if (userId) refreshNotifications();
+      refreshHistory();
     } catch (e: any) {
-      showToast(e?.message || "Erro ao reservar lead", "error");
+      showToast(e?.message || "Erro ao revelar lead", "error");
     } finally {
       setBusyAction(false);
+      setRevealTarget(null);
     }
   };
   const confirmRelease = async (reason: string, note?: string) => {
@@ -1137,7 +1151,7 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
             </div>
             {dailyStats && dailyStats.remaining === 0 && (
               <div className="text-xs text-red-400 font-medium">
-                Limite atingido. Reset em {dailyStats.reset_at ? formatRelativeTime(dailyStats.reset_at, t) : "breve"}
+                Volte amanhã e abra seus 10+ potenciais clientes. · Reset em {dailyStats.reset_at ? formatRelativeTime(dailyStats.reset_at, t) : "breve"}
               </div>
             )}
           </div>
@@ -1787,46 +1801,23 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                                       (subscription && !subscription.can_access) || (dailyStats && dailyStats.remaining === 0) ? "opacity-30 cursor-not-allowed" : ""
                                     }`}
                                   >
-                                    <Lock className="h-3 w-3" /> Reservar 15min
+                                    <Lock className="h-3 w-3" /> Reservar 1 Hora
                                   </button>
-                                  <button
-                                    onClick={() => openMaps(lead.address)}
-                                    className="flex items-center gap-1.5 text-[11px] font-semibold bg-slate-500/15 text-slate-300 px-3 py-1.5 rounded-lg hover:bg-slate-500/25 transition"
-                                  >
-                                    <Navigation className="h-3 w-3" /> Mapa
-                                  </button>
-                                  <button
-                                    onClick={() => lead.owner_phone ? openSMS(lead.owner_phone!) : alert("Telefone não disponível")}
-                                    disabled={!lead.owner_phone}
-                                    className={`flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-lg transition ${
-                                      lead.owner_phone
-                                        ? "bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25"
-                                        : "bg-slate-500/10 text-slate-500 cursor-not-allowed opacity-50"
-                                    }`}
-                                  >
-                                    <Smartphone className="h-3 w-3" /> SMS
-                                  </button>
-                                  <button
-                                    onClick={() => lead.owner_phone ? openWhatsApp(lead.owner_phone!) : alert("Telefone não disponível")}
-                                    disabled={!lead.owner_phone}
-                                    className={`flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-lg transition ${
-                                      lead.owner_phone
-                                        ? "bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25"
-                                        : "bg-slate-500/10 text-slate-500 cursor-not-allowed opacity-50"
-                                    }`}
-                                  >
-                                    <MessageSquare className="h-3 w-3" /> WhatsApp
-                                  </button>
+                                  <span className="text-[10px] text-slate-500 flex items-center gap-1">
+                                    <ShieldCheck className="h-3 w-3" /> Dados do dono protegidos
+                                  </span>
                                 </div>
                               )}
                               {isMine && (
-                                <div className="flex items-center gap-2 mt-3">
+                                <div className="flex items-center gap-2 mt-3 flex-wrap">
+                                  <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-400 px-2.5 py-1 rounded-full">
+                                    <BadgeCheck className="h-3 w-3" /> Revelado
+                                  </span>
                                   <button
-                                    onClick={(e) => { e.stopPropagation(); openReleaseModal(lead); }}
-                                    disabled={busyAction}
-                                    className="flex items-center gap-1.5 text-[11px] font-semibold bg-white/10 hover:bg-rose-500/20 text-slate-300 hover:text-rose-400 px-3 py-1.5 rounded-lg transition disabled:opacity-50"
+                                    onClick={(e) => { e.stopPropagation(); openMaps(lead.address); }}
+                                    className="flex items-center gap-1.5 text-[11px] font-semibold bg-slate-500/15 text-slate-300 px-3 py-1.5 rounded-lg hover:bg-slate-500/25 transition"
                                   >
-                                    <RefreshCcw className="h-3 w-3" /> Largar
+                                    <Navigation className="h-3 w-3" /> Mapa
                                   </button>
                                   {lead.owner_phone && (
                                     <a
@@ -1839,6 +1830,13 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                                       WhatsApp
                                     </a>
                                   )}
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); openReleaseModal(lead); }}
+                                    disabled={busyAction}
+                                    className="flex items-center gap-1.5 text-[11px] font-semibold bg-white/10 hover:bg-rose-500/20 text-slate-300 hover:text-rose-400 px-3 py-1.5 rounded-lg transition disabled:opacity-50"
+                                  >
+                                    <RefreshCcw className="h-3 w-3" /> Largar
+                                  </button>
                                 </div>
                               )}
                             </div>
@@ -2163,7 +2161,7 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
               </h4>
               <div className="flex flex-wrap gap-2">
                 <button
-                  onClick={async () => {
+                  onClick={() => {
                     // Check subscription first
                     if (subscription && !subscription.can_access) {
                       showToast(subscription.message || "Acesso negado", "error");
@@ -2171,26 +2169,18 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                     }
                     // Check daily limit
                     if (dailyStats && dailyStats.remaining === 0) {
-                      showToast(`Limite de 10 leads/dia atingido. Reset em ${dailyStats.reset_at ? formatRelativeTime(dailyStats.reset_at, t) : "breve"}`, "warning");
+                      showToast(`Limite de 10 leads/dia atingido. Volte amanhã e abra seus 10+ potenciais clientes.`, "warning");
                       return;
                     }
-                    await handleLeadAction(() => reserveLead(selectedLead.id), t("dashboard.action.reserve_ok"));
-                    if (dailyStats) {
-                      // Refresh daily stats after successful reserve
-                      try {
-                        const stats = await fetchUserDailyStats(userId!);
-                        setDailyStats(stats);
-                      } catch (e) {
-                        console.error(e);
-                      }
-                    }
+                    // Consentimento antes de revelar os dados do proprietário
+                    setRevealTarget(selectedLead);
                   }}
                   disabled={busyAction || (subscription && !subscription.can_access) || (dailyStats?.remaining === 0)}
                   className={`flex items-center gap-1.5 text-xs font-bold bg-indigo-500 hover:bg-indigo-400 text-white px-3.5 py-2 rounded-xl transition shadow-sm disabled:opacity-50 ${
                     (subscription && !subscription.can_access) || (dailyStats && dailyStats.remaining === 0) ? "opacity-30 cursor-not-allowed" : ""
                   }`}
                 >
-                  <Lock className="h-3.5 w-3.5" /> {t("dashboard.action.reserve")} (15min)
+                  <Lock className="h-3.5 w-3.5" /> {t("dashboard.action.reserve")} (1 hora)
                 </button>
                 <button
                   onClick={() => handleLeadAction(() => contactLead(selectedLead.id, "sms"), t("dashboard.action.contact_ok"))}
@@ -2285,6 +2275,80 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
         onClose={closeReleaseModal}
         onRelease={confirmRelease}
       />
+
+      {/* REVEAL CONSENT MODAL (dados do proprietário protegidos) */}
+      {revealTarget && (
+        <div className="fixed inset-0 z-[85] flex items-center justify-center p-4" style={{ backgroundColor: isDark ? "rgba(11,13,18,0.85)" : "rgba(248,250,252,0.9)" }} onClick={closeRevealModal}>
+          <div
+            className={`w-full max-w-md rounded-2xl border p-6 shadow-2xl ${isDark ? "bg-[#10121a] border-white/10" : "bg-white border-slate-200"}`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3">
+              <div className="h-11 w-11 rounded-xl bg-indigo-500/20 flex items-center justify-center shrink-0">
+                <ShieldCheck className="h-6 w-6 text-indigo-400" />
+              </div>
+              <div className="flex-1">
+                <h2 className="text-lg font-bold" style={{ color: isDark ? "#fff" : "#0f172a" }}>
+                  Revelar dados do proprietário
+                </h2>
+                <p className={`text-sm mt-1 ${T.text2}`}>
+                  Ao reservar por <span className="font-semibold">1 hora</span>, você autoriza verificar
+                  nome, endereço completo, telefone, SMS/e-mail e mapa de direção deste lead.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <p className={`text-xs font-semibold ${T.text2}`}>
+                {revealTarget.address}, {revealTarget.city}
+              </p>
+              <p className={`text-xs mt-0.5 ${T.text2}`}>
+                {revealTarget.issue_category || revealTarget.issue_description}
+              </p>
+              <div className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3">
+                <label className={`flex items-start gap-2.5 text-sm cursor-pointer ${isDark ? "text-slate-200" : "text-slate-700"}`}>
+                  <input
+                    type="checkbox"
+                    defaultChecked
+                    className="mt-0.5 h-4 w-4 accent-indigo-500"
+                  />
+                  <span>
+                    <span className="font-semibold">Concordo em verificar dados deste lead (1/10 hoje).</span>
+                    <span className={`block text-xs mt-1 ${T.text2}`}>
+                      Se eu não agir em 1 hora, o lead volta a{" "}
+                      {t("dashboard.opportunities.title") || "Oportunidades para você"} e pode ser revelado
+                      por outro empreiteiro.
+                    </span>
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            <div className="mt-5 flex gap-2">
+              <button
+                onClick={confirmReveal}
+                disabled={busyAction || (subscription && !subscription.can_access) || (dailyStats?.remaining === 0)}
+                className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-white text-sm font-bold transition disabled:opacity-50"
+              >
+                {busyAction ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lock className="h-4 w-4" />}
+                Reservar 1 Hora · Revelar
+              </button>
+              <button
+                onClick={closeRevealModal}
+                disabled={busyAction}
+                className={`px-4 py-2.5 rounded-xl text-sm font-semibold transition disabled:opacity-50 ${isDark ? "bg-white/10 text-slate-300 hover:bg-white/20" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}
+              >
+                Cancelar
+              </button>
+            </div>
+            {dailyStats && dailyStats.remaining > 0 && dailyStats.remaining <= 2 && (
+              <p className="text-[11px] text-amber-400 mt-2 text-center">
+                Você ainda tem {dailyStats.remaining} de {dailyStats.limit} revelações hoje.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* CHECKOUT / PLANS MODAL */}
       <CheckoutModal
