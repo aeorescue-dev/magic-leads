@@ -1107,6 +1107,21 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
 
         {/* MAIN BODY CONTAINER */}
         <main className="flex-1 p-4 md:p-6 space-y-6 max-w-7xl mx-auto w-full">
+          {/* GREETING */}
+          <div className="flex items-center justify-between flex-wrap gap-4">
+            <div>
+              <p className={`text-xs font-medium tracking-wide uppercase ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
+                {t("dashboard.greeting.kicker")}
+              </p>
+              <h1 className={`text-2xl md:text-3xl font-extrabold tracking-tight ${isDark ? "text-white" : "text-slate-950"}`}>
+                {t(greetingKey)}
+              </h1>
+              <p className={`mt-1 text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                {t("dashboard.greeting.sub")}
+              </p>
+            </div>
+          </div>
+
           {/* SUBSCRIPTION BANNER + DAILY LIMIT BAR */}
           <div className="rounded-2xl border border-emerald-500/30 bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-transparent p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center gap-3">
