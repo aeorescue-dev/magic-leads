@@ -5,7 +5,19 @@ import { useAuth } from '@/lib/auth';
 import { useI18n } from '@/lib/i18n';
 import { Bell, BellOff, Loader2 } from 'lucide-react';
 
-const AUTH_TOKEN_KEY = 'garimpador.token';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
+
+function apiFetch(path: string, options: RequestInit = {}) {
+  const token = localStorage.getItem('garimpador.token');
+  return fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${localStorage.getItem('garimpador.token')}`,
+      ...options.headers,
+    },
+  });
+}
 
 export function PushNotificationButton() {
   const { user, loading: authLoading } = useAuth();
@@ -30,10 +42,7 @@ export function PushNotificationButton() {
   const checkSubscription = async () => {
     if (!user) return;
     try {
-      const token = localStorage.getItem(AUTH_TOKEN_KEY);
-      const res = await fetch('/api/push/subscriptions', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const res = await apiFetch('/api/push/subscriptions');
       if (res.ok) {
         const data = await res.json();
         setSubscribed(data.subscriptions && data.subscriptions.length > 0);
@@ -67,9 +76,7 @@ export function PushNotificationButton() {
       const registration = await navigator.serviceWorker.register('/sw.js');
       await navigator.serviceWorker.ready;
 
-      const keyRes = await fetch('/api/push/vapid-public-key', {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem(AUTH_TOKEN_KEY)}` }
-      });
+      const keyRes = await apiFetch('/api/push/vapid-public-key');
       if (!keyRes.ok) throw new Error('VAPID key not available');
       const { public_key } = await keyRes.json();
 
@@ -100,14 +107,9 @@ export function PushNotificationButton() {
         auth: btoa(String.fromCharCode(...Array.from(new Uint8Array(subscription.getKey('auth')!))))
       };
 
-      const token = localStorage.getItem(AUTH_TOKEN_KEY);
-      const subRes = await fetch('/api/push/subscribe', {
+      const subRes = await apiFetch('/api/push/subscribe', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(subData)
+        body: JSON.stringify(subData),
       });
 
       if (!subRes.ok) throw new Error('Falha ao inscrever');
@@ -132,13 +134,8 @@ export function PushNotificationButton() {
       if (subscription) {
         await subscription.unsubscribe();
         
-        const token = localStorage.getItem(AUTH_TOKEN_KEY);
-        await fetch('/api/push/unsubscribe', {
+        await apiFetch('/api/push/unsubscribe', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
           body: JSON.stringify({
             endpoint: subscription.endpoint
           })
