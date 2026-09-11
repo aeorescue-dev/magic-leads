@@ -4,7 +4,7 @@ import Link from "next/link";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { LayoutDashboard, LogOut, Menu, Sparkles, X, UserPlus } from "lucide-react";
+import { LayoutDashboard, LogOut, Menu, Sparkles, X, Plus } from "lucide-react";
 import { getToken, logoutUser, demoLogin } from "@/lib/api-client";
 import { useI18n, LANGS } from "@/lib/i18n";
 
@@ -101,7 +101,7 @@ export function Navbar() {
                 href="/auth"
                 className="inline-flex items-center gap-2 rounded-lg bg-secondary px-4 py-2 text-sm font-medium text-secondary-foreground hover:bg-secondary/80 transition-colors"
               >
-                <UserPlus className="h-4 w-4" />
+                <Plus className="h-4 w-4" />
                 {t("nav.register") || 'Cadastrar'}
               </Link>
               <button
@@ -147,7 +147,7 @@ export function Navbar() {
                   onClick={() => setMobileOpen(false)}
                   className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-secondary px-4 py-2 text-sm"
                 >
-                  <UserPlus className="h-4 w-4" /> {t("nav.register") || 'Cadastrar'}
+                  <Plus className="h-4 w-4" /> {t("nav.register") || 'Cadastrar'}
                 </Link>
                 <button onClick={handleDemoLogin} className="w-full rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">
                   {t("nav.demo") || 'Demo'}
