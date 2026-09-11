@@ -1497,7 +1497,7 @@ class DatabaseService:
         finally:
             conn.close()
 
-def reserve_lead(self, lead_id: int, user_id: int, minutes: int = 60) -> Optional[dict]:
+    def reserve_lead(self, lead_id: int, user_id: int, minutes: int = 60) -> Optional[dict]:
         conn = get_connection()
         try:
             self._expire_lead_holds(conn)
