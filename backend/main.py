@@ -75,6 +75,11 @@ def _to_lead_response(lead: dict) -> LeadResponse:
                 "contractor_name": reserved_by_name,
                 "expires_at": reserved_until
             }
+
+    # Proteção de dados do proprietário: só usuários com reveal ativo
+    # (consentimento) veem owner_name/owner_phone/owner_email/mailing_address.
+    # Sem reveal, os campos vêm mascarados (None) na response.
+    show_owner = bool(lead.get("_revealed", False))
     
     return LeadResponse(
         id=str(lead["id"]),
@@ -84,9 +89,9 @@ def _to_lead_response(lead: dict) -> LeadResponse:
         city=lead["city"],
         issue_category=lead["issue_category"],
         issue_description=lead["issue_description"] or "",
-        owner_name=lead.get("owner_name"),
-        owner_phone=lead.get("owner_phone"),
-        owner_email=lead.get("owner_email"),
+        owner_name=lead.get("owner_name") if show_owner else None,
+        owner_phone=lead.get("owner_phone") if show_owner else None,
+        owner_email=lead.get("owner_email") if show_owner else None,
         date_reported=lead["date_reported"],
         urgency_level=lead["urgency_level"],
         image_url=lead.get("image_url"),
@@ -120,12 +125,13 @@ def _to_lead_response(lead: dict) -> LeadResponse:
         descriptor=lead.get("descriptor"),
         resolution_description=lead.get("resolution_description"),
         resolution_action_updated_date=lead.get("resolution_action_updated_date"),
-        # Owner mailing address
-        mailing_address=lead.get("mailing_address"),
+        # Owner mailing address (protegido até o reveal)
+        mailing_address=lead.get("mailing_address") if show_owner else None,
         # Visibility fields
         visibility_status=visibility_status,
         reserved_by_me=reserved_by_me,
         reserved_by_other=reserved_by_other,
+        revealed=show_owner,
     )
 
 
@@ -238,7 +244,7 @@ def _get_optional_user(
 
 
 def _annotate_visibility(leads: list, user: Optional[dict]) -> None:
-    """Marca is_mine/hours_remaining/favorited nos leads para o _to_lead_response."""
+    """Marca is_mine/hours_remaining/favorited/_revealed nos leads para o _to_lead_response."""
     user_id = user["id"] if user else None
     
     # Pre-fetch user favorites for batch lookup
@@ -248,11 +254,22 @@ def _annotate_visibility(leads: list, user: Optional[dict]) -> None:
             user_fav_ids = set(db_service._service.get_user_favorites(user_id))
         except Exception:
             pass
+
+    # Pre-fetch reveal ativo do usuário (decide se dados do dono vêm mascarados)
+    revealed_ids: set = set()
+    if user_id and leads:
+        try:
+            revealed_ids = db_service._service.get_revealed_ids(user_id, [l.get("id") for l in leads])
+        except Exception:
+            pass
     
     for lead in leads:
         lead["is_mine"] = bool(user_id) and lead.get("reserved_by") == user_id
         # Per-user favorite status
         lead["favorited"] = 1 if lead.get("id") in user_fav_ids else 0
+        # Dados do proprietário só para quem revelou o lead (consentimento)
+        revealed_ids = revealed_ids or set()
+        lead["_revealed"] = bool(user_id) and lead.get("id") in revealed_ids
         if lead.get("reserved_until") and lead.get("lead_status") == "reserved":
             try:
                 expires = datetime.fromisoformat(lead["reserved_until"].replace("Z", "+00:00"))
@@ -495,6 +512,11 @@ async def user_daily_stats(user_id: int, user: dict = Depends(_get_current_user)
     if user["id"] != user_id:
         raise HTTPException(status_code=403, detail="Sem permissão")
     try:
+        # Sweep watchdog de reveals (notificação 30/45min, retorno ao pool 60min)
+        try:
+            await db_service.check_reveal_watchdogs()
+        except Exception as e:
+            logger.error(f"Erro no watchdog de reveals: {e}")
         return await db_service.get_daily_leads_used(user_id)
     except Exception as e:
         logger.error(f"Erro ao buscar stats diários: {e}")
@@ -612,10 +634,11 @@ async def leads_dashboard_summary(user: Optional[dict] = Depends(_get_optional_u
 
 # Detalhe de um lead
 @app.get("/api/leads/{lead_id}", response_model=LeadResponse)
-async def get_lead(lead_id: int):
+async def get_lead(lead_id: int, user: Optional[dict] = Depends(_get_optional_user)):
     lead = await db_service.get_lead_by_id(lead_id)
     if not lead:
         raise HTTPException(status_code=404, detail="Lead não encontrado")
+    _annotate_visibility([lead], user)
     return _to_lead_response(lead)
 
 
@@ -1858,8 +1881,59 @@ async def reserve_lead(
                 "action": "REDIRECT_TO_CHECKOUT"
             }
         )
-    
-    # 2. VALIDA DAILY LIMIT (10 leads/dia)
+
+    # 1.1 Sinaliza contato nos reveals em aberto (watchdog para de notificar)
+    await db_service.flag_reveal_contact(user_id, lead_id)
+
+    minutes = payload.minutes or 60
+
+    # 2. COM CONSENTIMENTO => REVEAL (reserva 60min + conta 1/10 com idempotência)
+    if payload.consent:
+        key = payload.idempotency or f"{user_id}:{lead_id}"
+        result = await db_service.reveal_lead(user_id, lead_id, key, minutes=minutes)
+        if not result:
+            raise HTTPException(status_code=404, detail="Lead não encontrado")
+        if result.get("error") == "not_found":
+            raise HTTPException(status_code=404, detail="Lead não encontrado")
+        if result.get("error") == "already_reserved":
+            raise HTTPException(status_code=409, detail="Lead já reservado por outro usuário")
+        if result.get("error") == "limit_reached":
+            raise HTTPException(
+                status_code=429,
+                detail="Limite de 10 leads/dia atingido. Volte amanhã e abra seus 10+ potenciais clientes."
+            )
+
+        lead = result.get("lead") or {}
+
+        # Registra interação
+        await db_service.record_event(lead_id, "revealed")
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                "reserved": True,
+                "revealed": True,
+                "status": lead.get("lead_status", "reserved"),
+                "expires_at": lead.get("reserved_until"),
+                "message": "Dados revelados — reserva de 1 hora ativa",
+                "counted_again": result.get("counted_again", True),
+                "used": result.get("used"),
+                "limit": result.get("limit"),
+                "remaining": result.get("remaining"),
+                "reset_at": result.get("reset_at"),
+                "owner": {
+                    "name": lead.get("owner_name"),
+                    "phone": lead.get("owner_phone"),
+                    "email": lead.get("owner_email"),
+                    "mailing_address": lead.get("mailing_address"),
+                    "address": lead.get("address"),
+                    "city": lead.get("city"),
+                },
+            },
+        )
+
+    # 3. SEM CONSENTIMENTO: fluxo antigo (reserva simples, contando no limite)
+    # 3.1 VALIDA DAILY LIMIT (10 leads/dia)
     if not await db_service.increment_daily_leads(user_id):
         daily_stats = await db_service.get_daily_leads_used(user_id)
         reset_at = daily_stats.get("reset_at")
@@ -1873,11 +1947,11 @@ async def reserve_lead(
                 pass
         raise HTTPException(
             status_code=429,
-            detail=f"Limite de 10 leads/dia atingido.{reset_str}"
+            detail=f"Limite de 10 leads/dia atingido. Volte amanhã e abra seus 10+ potenciais clientes.{reset_str}"
         )
     
-    # 3. RESERVA LEAD
-    result = await db_service.reserve_lead(lead_id, user["id"], minutes=payload.minutes)
+    # 3.2 RESERVA LEAD
+    result = await db_service.reserve_lead(lead_id, user["id"], minutes=minutes)
     if not result:
         raise HTTPException(status_code=404, detail="Lead não encontrado")
     if result.get("error") == "already_reserved":
@@ -1900,7 +1974,7 @@ async def reserve_lead(
         reserved=True,
         status=result.get("lead_status", "reserved"),
         expires_at=result.get("reserved_until"),
-        message="Lead reservado com exclusividade",
+        message="Lead reservado com exclusividade por 1 hora",
     )
 
 
@@ -1942,17 +2016,28 @@ async def contact_lead(
         raise HTTPException(status_code=404, detail="Lead não encontrado")
     if result.get("error") == "already_reserved":
         raise HTTPException(status_code=409, detail="Lead reservado por outro usuário")
+    # Sinalizou contato => watchdog de reveals para de notificar o empreiteiro
+    try:
+        await db_service.flag_reveal_contact(user["id"], lead_id)
+    except Exception:
+        pass
     return {"status": "ok", "channel": payload.channel, "contact_count": result.get("contact_count", 0)}
 
 
-# Cron: expira holds vencidos (chamado por GitHub Actions a cada hora)
+# Cron: expira holds vencidos + watchdog de reveals (chamado por GitHub Actions a cada hora)
 @app.get("/api/cron/expire-holds")
 async def cron_expire_holds(x_cron_secret: Optional[str] = Header(None)):
     if settings.CRON_SECRET and x_cron_secret != settings.CRON_SECRET:
         raise HTTPException(status_code=401, detail="Não autorizado")
     try:
         expired = await db_service.expire_holds()
-        return {"status": "ok", "expired_holds": expired, "at": datetime.utcnow().isoformat()}
+        reveals = await db_service.check_reveal_watchdogs()
+        return {
+            "status": "ok",
+            "expired_holds": expired,
+            "reveals_processed": reveals,
+            "at": datetime.utcnow().isoformat(),
+        }
     except Exception as e:
         logger.error(f"Erro no cron expire-holds: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Erro ao expirar holds")

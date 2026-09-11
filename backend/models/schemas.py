@@ -186,6 +186,9 @@ class LeadResponse(BaseModel):
     reserved_by_me: Optional[dict] = None  # {created_at, expires_at, hours_remaining}
     reserved_by_other: Optional[dict] = None  # {contractor_id, contractor_name, expires_at}
 
+    # Reveal (consentimento): true = dados do proprietário visíveis para o usuário
+    revealed: bool = False
+
     model_config = ConfigDict(exclude_none=False)
 
 
@@ -271,7 +274,9 @@ class InterestsUpdate(BaseModel):
 
 
 class ReserverLeadRequest(BaseModel):
-    minutes: int = 15
+    minutes: int = 60
+    consent: bool = False
+    idempotency: Optional[str] = None
 
 
 ALLOWED_RELEASE_REASONS = ["no_answer", "declined", "out_of_area", "personal_emergency", "changed_mind", "lazy", "other"]

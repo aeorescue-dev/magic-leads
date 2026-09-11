@@ -217,6 +217,20 @@ CREATE TABLE IF NOT EXISTS user_daily_stats (
   PRIMARY KEY (user_id, date)
 );
 
+CREATE TABLE IF NOT EXISTS lead_reveals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  revealed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  revealed_date TEXT NOT NULL,
+  idempotency_key TEXT UNIQUE,
+  contact_flagged INTEGER DEFAULT 0,
+  notified_30 INTEGER DEFAULT 0,
+  notified_45 INTEGER DEFAULT 0,
+  returned_to_pool INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS contractor_metrics (
   contractor_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   releases_this_month INTEGER DEFAULT 0,
@@ -1483,7 +1497,7 @@ class DatabaseService:
         finally:
             conn.close()
 
-    def reserve_lead(self, lead_id: int, user_id: int, minutes: int = 15) -> Optional[dict]:
+def reserve_lead(self, lead_id: int, user_id: int, minutes: int = 60) -> Optional[dict]:
         conn = get_connection()
         try:
             self._expire_lead_holds(conn)
@@ -2369,6 +2383,290 @@ class DatabaseService:
         finally:
             conn.close()
 
+    # ------------------------------------------------------------------
+    # REVEAL DE DADOS DO PROPRIETÁRIO (consentimento + limite 10/dia)
+    # Regras:
+    #  - Revelar = reservar por 60min + contar 1 uso do limite diário.
+    #  - Idempotente: clicar 2x no mesmo lead hoje (ainda com reveal ativo)
+    #    conta 1x (segunda chamada só renova a reserva).
+    #  - Sem contato sinalizado: notificação em 30min e em 45min;
+    #    aos 60min o lead volta ao pool (returned_to_pool=1) e future
+    #    re-reveals contam novamente (2/10, 3/10...).
+    # ------------------------------------------------------------------
+    REVEAL_HOLD_MINUTES = 60
+    REVEAL_NOTIFY_1_MIN = 30
+    REVEAL_NOTIFY_2_MIN = 45
+    REVEAL_RETURN_MIN = 60
+
+    def get_revealed_ids(self, user_id: int, lead_ids: List[int]) -> set:
+        """Retorna ids com reveal ativo do usuário (para mascarar dados do dono)."""
+        if not lead_ids:
+            return set()
+        conn = get_connection()
+        try:
+            marks = []
+            for chunk_start in range(0, len(lead_ids), 500):
+                chunk = lead_ids[chunk_start:chunk_start + 500]
+                placeholders = ",".join("?" * len(chunk))
+                rows = conn.execute(
+                    f"""SELECT DISTINCT lead_id FROM lead_reveals
+                        WHERE user_id = ? AND lead_id IN ({placeholders})
+                          AND revealed_date = ? AND returned_to_pool = 0""",
+                    (user_id, *chunk, datetime.utcnow().date().isoformat()),
+                ).fetchall()
+                marks.extend(r["lead_id"] for r in rows)
+            return set(marks)
+        finally:
+            conn.close()
+
+    def reveal_lead(
+        self,
+        user_id: int,
+        lead_id: int,
+        idempotency_key: Optional[str] = None,
+        minutes: int = REVEAL_HOLD_MINUTES,
+    ) -> Optional[dict]:
+        """Revela dados do proprietário: reserva + contabiliza (idempotente).
+
+        Retorna dict com 'lead' completo + 'used'/'limit'/'remaining'/'reset_at',
+        ou dict de erro ('error': 'limit_reached' | 'already_reserved' | 'not_found').
+        """
+        conn = get_connection()
+        try:
+            self._expire_lead_holds(conn)
+            today = datetime.utcnow().date().isoformat()
+
+            # 1. Lead existe?
+            lead = conn.execute("SELECT * FROM leads WHERE id = ?", (lead_id,)).fetchone()
+            if not lead:
+                return {"error": "not_found"}
+
+            # 2. Reservado por outro? (já expirado via _expire_lead_holds acima)
+            if lead["lead_status"] == "reserved" and lead["reserved_by"] != user_id:
+                return {"error": "already_reserved", "lead": dict(lead)}
+
+            # 3. Idempotência: reveal ativo hoje para este (user, lead)?
+            active = conn.execute(
+                """SELECT * FROM lead_reveals
+                   WHERE user_id = ? AND lead_id = ?
+                     AND revealed_date = ? AND returned_to_pool = 0
+                   ORDER BY id DESC LIMIT 1""",
+                (user_id, lead_id, today),
+            ).fetchone()
+
+            if active:
+                # Re-clique no mesmo lead com reveal ativo: renova reserva, NÃO conta 2x.
+                conn.execute(
+                    """UPDATE leads SET lead_status = 'reserved', reserved_by = ?,
+                       reserved_until = datetime('now', ?), updated_at = CURRENT_TIMESTAMP
+                       WHERE id = ?""",
+                    (user_id, f"+{int(minutes)} minutes", lead_id),
+                )
+                conn.execute(
+                    """INSERT INTO lead_holds (lead_id, user_id, expires_at, status)
+                       VALUES (?, ?, datetime('now', ?), 'active')""",
+                    (lead_id, user_id, f"+{int(minutes)} minutes"),
+                )
+                conn.commit()
+                result = dict(conn.execute("SELECT * FROM leads WHERE id = ?", (lead_id,)).fetchone())
+                return {
+                    "lead": result,
+                    "revealed": True,
+                    "counted_again": False,
+                    "idempotent": True,
+                }
+
+            # 4. Checa limite diário ANTES de criar novo reveal.
+            stat = conn.execute(
+                "SELECT leads_used, leads_limit FROM user_daily_stats WHERE user_id = ? AND date = ?",
+                (user_id, today),
+            ).fetchone()
+            used = stat["leads_used"] if stat else 0
+            limit = (stat["leads_limit"] if stat and stat["leads_limit"] else 10) or 10
+            if used >= limit:
+                return {"error": "limit_reached"}
+
+            # 5. Cria o reveal (idempotency_key único protege contra submit duplo).
+            key = idempotency_key or f"{user_id}:{lead_id}:{today}"
+            try:
+                conn.execute(
+                    """INSERT INTO lead_reveals
+                       (lead_id, user_id, revealed_at, revealed_date, idempotency_key)
+                       VALUES (?, ?, CURRENT_TIMESTAMP, ?, ?)""",
+                    (lead_id, user_id, today, key),
+                )
+            except sqlite3.IntegrityError:
+                # Submit duplo concorrente: outro insert já criou o reveal.
+                conn.rollback()
+                existing = conn.execute(
+                    """SELECT * FROM lead_reveals WHERE idempotency_key = ?""", (key,)
+                ).fetchone()
+                if existing:
+                    conn.execute(
+                        """UPDATE leads SET lead_status = 'reserved', reserved_by = ?,
+                           reserved_until = datetime('now', ?), updated_at = CURRENT_TIMESTAMP
+                           WHERE id = ?""",
+                        (user_id, f"+{int(minutes)} minutes", lead_id),
+                    )
+                    conn.commit()
+                    result = dict(conn.execute("SELECT * FROM leads WHERE id = ?", (lead_id,)).fetchone())
+                    return {"lead": result, "revealed": True, "counted_again": False, "idempotent": True}
+                raise
+
+            # 6. Incrementa daily stats do dia (reserva de consumo do usário).
+            reset_at = self._utc_tomorrow_midnight().isoformat()
+            if stat:
+                conn.execute(
+                    "UPDATE user_daily_stats SET leads_used = leads_used + 1 WHERE user_id = ? AND date = ?",
+                    (user_id, today),
+                )
+            else:
+                conn.execute(
+                    """INSERT INTO user_daily_stats (user_id, date, leads_used, leads_limit, reset_at)
+                       VALUES (?, ?, 1, 10, ?)""",
+                    (user_id, today, reset_at),
+                )
+
+            # 7. Reserva o lead por 60 minutos.
+            conn.execute(
+                """UPDATE leads SET lead_status = 'reserved', reserved_by = ?,
+                   reserved_until = datetime('now', ?), updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ?""",
+                (user_id, f"+{int(minutes)} minutes", lead_id),
+            )
+            conn.execute(
+                """INSERT INTO lead_holds (lead_id, user_id, expires_at, status)
+                   VALUES (?, ?, datetime('now', ?), 'active')""",
+                (lead_id, user_id, f"+{int(minutes)} minutes"),
+            )
+            self._event(conn, lead_id, user_id, "revealed", f"Dados revelados (consentimento) — reserva {minutes}min")
+            conn.commit()
+
+            result = dict(conn.execute("SELECT * FROM leads WHERE id = ?", (lead_id,)).fetchone())
+            new_used = used + 1
+            return {
+                "lead": result,
+                "revealed": True,
+                "counted_again": True,
+                "idempotent": False,
+                "used": new_used,
+                "limit": limit,
+                "remaining": max(0, limit - new_used),
+                "reset_at": reset_at,
+            }
+        finally:
+            conn.close()
+
+    def flag_reveal_contact(self, user_id: int, lead_id: int) -> bool:
+        """Marca contact_flagged=1 no reveal ativo (emitir contato = parar watchdog)."""
+        conn = get_connection()
+        try:
+            today = datetime.utcnow().date().isoformat()
+            cur = conn.execute(
+                """UPDATE lead_reveals SET contact_flagged = 1
+                   WHERE user_id = ? AND lead_id = ? AND revealed_date = ?
+                     AND returned_to_pool = 0""",
+                (user_id, lead_id, today),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def check_reveal_watchdogs(self) -> int:
+        """Sweep: notifica (30min/45min) e devolve lead ao pool (60min) sem contato.
+
+        Retorna qtd de reveals processados (para metrics/cron).
+        """
+        conn = get_connection()
+        try:
+            now = datetime.utcnow()
+            rows = conn.execute(
+                """SELECT r.*, l.address, l.issue_category, l.owner_name
+                   FROM lead_reveals r
+                   LEFT JOIN leads l ON l.id = r.lead_id
+                   WHERE r.returned_to_pool = 0 AND r.contact_flagged = 0
+                     AND (r.notified_30 = 0 OR r.notified_45 = 0 OR r.revealed_at IS NOT NULL)"""
+            ).fetchall()
+
+            processed = 0
+            for r in rows:
+                try:
+                    revealed_dt = self._parse_dt(r["revealed_at"]) or now
+                except Exception:
+                    continue
+                elapsed = (now - revealed_dt).total_seconds() / 60.0
+                address = r["address"] or f"lead #{r['lead_id']}"
+                owner = r["owner_name"] or ""
+                category = r["issue_category"] or ""
+                subject = f"{owner} · {address}" if owner else address
+
+                if elapsed >= self.REVEAL_RETURN_MIN and r["notified_45"] and r["notified_30"]:
+                    # 60min sem contato: lead volta ao pool.
+                    conn.execute(
+                        """UPDATE lead_reveals SET returned_to_pool = 1, idempotency_key = NULL
+                           WHERE id = ?""",
+                        (r["id"],),
+                    )
+                    conn.execute(
+                        """UPDATE leads SET lead_status = 'available', reserved_by = NULL,
+                           reserved_until = NULL WHERE id = ? AND reserved_by = ?""",
+                        (r["lead_id"], r["user_id"]),
+                    )
+                    conn.execute(
+                        """UPDATE lead_holds SET status = 'expired', release_reason = 'reveal_timeout',
+                           released_at = CURRENT_TIMESTAMP
+                           WHERE lead_id = ? AND user_id = ? AND status = 'active'""",
+                        (r["lead_id"], r["user_id"]),
+                    )
+                    conn.execute(
+                        """INSERT INTO notifications (user_id, type, title, message, lead_id)
+                           VALUES (?, 'reveal_timeout', ?, ?, ?)""",
+                        (
+                            r["user_id"],
+                            "🕒 Lead voltou ao pool",
+                            f"{subject} voltou a ficar disponível para outros empreiteiros. Nenhum contato foi sinalizado em 1 hora.",
+                            r["lead_id"],
+                        ),
+                    )
+                    self._event(conn, r["lead_id"], r["user_id"], "reveal_timeout", f"Lead voltou ao pool após {int(elapsed)}min sem contato")
+                    processed += 1
+                elif elapsed >= self.REVEAL_NOTIFY_2_MIN and not r["notified_45"]:
+                    conn.execute(
+                        "UPDATE lead_reveals SET notified_45 = 1 WHERE id = ?", (r["id"],)
+                    )
+                    conn.execute(
+                        """INSERT INTO notifications (user_id, type, title, message, lead_id)
+                           VALUES (?, 'reveal_urgent', ?, ?, ?)""",
+                        (
+                            r["user_id"],
+                            "🚨 Últimos 15 minutos!",
+                            f"Você revelou {subject} ({category}) e ainda não sinalizou contato. Em 15 min o lead volta ao pool.",
+                            r["lead_id"],
+                        ),
+                    )
+                    processed += 1
+                elif elapsed >= self.REVEAL_NOTIFY_1_MIN and not r["notified_30"]:
+                    conn.execute(
+                        "UPDATE lead_reveals SET notified_30 = 1 WHERE id = ?", (r["id"],)
+                    )
+                    conn.execute(
+                        """INSERT INTO notifications (user_id, type, title, message, lead_id)
+                           VALUES (?, 'reveal_followup', ?, ?, ?)""",
+                        (
+                            r["user_id"],
+                            "⏰ Lead revelado, aguardando você",
+                            f"Faltam 30 min para {subject} ({category}) voltar ao pool. Registre o contato ou ligue agora.",
+                            r["lead_id"],
+                        ),
+                    )
+                    processed += 1
+
+            conn.commit()
+            return processed
+        finally:
+            conn.close()
+
 
 class AsyncDatabaseService:
     """Wrappers async sobre o DatabaseService (para endpoints FastAPI async)."""
@@ -2550,7 +2848,7 @@ class AsyncDatabaseService:
     async def list_leads_with_status(self, limit: int = 100, status: Optional[str] = None) -> List[dict]:
         return self._service.list_leads_with_status(limit, status)
 
-    async def reserve_lead(self, lead_id: int, user_id: int, minutes: int = 15) -> Optional[dict]:
+    async def reserve_lead(self, lead_id: int, user_id: int, minutes: int = 60) -> Optional[dict]:
         return self._service.reserve_lead(lead_id, user_id, minutes)
 
     async def release_lead(self, lead_id: int, user_id: int, reason: Optional[str] = None, note: Optional[str] = None) -> Optional[dict]:
@@ -2619,6 +2917,18 @@ class AsyncDatabaseService:
 
     async def increment_daily_leads(self, user_id: int) -> bool:
         return self._service.increment_daily_leads(user_id)
+
+    async def reveal_lead(self, user_id: int, lead_id: int, idempotency_key: Optional[str] = None, minutes: int = DatabaseService.REVEAL_HOLD_MINUTES) -> Optional[dict]:
+        return self._service.reveal_lead(user_id, lead_id, idempotency_key, minutes)
+
+    async def get_revealed_ids(self, user_id: int, lead_ids: List[int]) -> set:
+        return self._service.get_revealed_ids(user_id, lead_ids)
+
+    async def flag_reveal_contact(self, user_id: int, lead_id: int) -> bool:
+        return self._service.flag_reveal_contact(user_id, lead_id)
+
+    async def check_reveal_watchdogs(self) -> int:
+        return self._service.check_reveal_watchdogs()
 
 
 # Instância global (interface async, compatível com o antigo supabase_service)
