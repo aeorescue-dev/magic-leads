@@ -23,7 +23,7 @@ from .models.schemas import (
     LeadsListResponse, LeadResponse, LeadStatsResponse, LeadUpdate, NoteResponse, NoteCreate,
     NotificationResponse,
     EnrichedLead, SourceType, IssueCategory, UrgencyLevel,
-    UserCreate, UserLogin, UserResponse, AuthResponse, InterestsUpdate,
+    UserCreate, UserLogin, UserResponse, UserUpdate, AuthResponse, InterestsUpdate,
     ReserverLeadRequest, ReleaseLeadRequest, ContactLeadRequest,
     RejectLeadRequest, LeadHoldResponse, LeadStatusResponse, HistoryEvent,
 )
