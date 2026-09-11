@@ -514,6 +514,16 @@ export async function fetchMe(): Promise<AuthUser> {
   );
 }
 
+export async function updateCompanyName(userId: number, company_name: string): Promise<AuthUser> {
+  return handle<AuthUser>(
+    await fetch(`${API_URL}/api/users/${userId}/company`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ company_name }),
+    })
+  );
+}
+
 // ------------------------------------------------------------------
 // Interesses por usuário (categorias de alerta)
 // ------------------------------------------------------------------

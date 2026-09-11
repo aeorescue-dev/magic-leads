@@ -1155,6 +1155,17 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def update_user_company(self, user_id: int, company_name: str) -> Optional[dict]:
+        """Atualiza o nome da empresa (remetente nas mensagens aos clientes)."""
+        conn = get_connection()
+        try:
+            conn.execute("UPDATE users SET company_name = ? WHERE id = ?", (company_name, user_id))
+            conn.commit()
+            row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
     def update_user_plan(self, user_id: int, plan: str, subscription_status: str = "active") -> bool:
         conn = get_connection()
         try:
@@ -2785,6 +2796,9 @@ class AsyncDatabaseService:
 
     async def get_user_by_id(self, user_id: int) -> Optional[dict]:
         return self._service.get_user_by_id(user_id)
+
+    async def update_user_company(self, user_id: int, company_name: str) -> Optional[dict]:
+        return self._service.update_user_company(user_id, company_name)
 
     async def update_user_plan(self, user_id: int, plan: str, subscription_status: str = "active") -> bool:
         return self._service.update_user_plan(user_id, plan, subscription_status)

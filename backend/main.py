@@ -1574,6 +1574,38 @@ async def me(user: dict = Depends(_get_current_user)):
     )
 
 
+@app.patch("/api/users/{user_id}/company", response_model=UserResponse)
+async def update_user_company(user_id: int, payload: UserUpdate, user: dict = Depends(_get_current_user)):
+    try:
+        if int(user["id"]) != int(user_id):
+            raise HTTPException(status_code=403, detail="Sem permissão para editar este usuário")
+        name = (payload.company_name or "").strip()
+        if not name:
+            raise HTTPException(status_code=422, detail="Nome da empresa é obrigatório")
+        if len(name) > 120:
+            raise HTTPException(status_code=422, detail="Nome muito longo (máx. 120 caracteres)")
+        full = await db_service.update_user_company(int(user_id), name)
+        if not full:
+            raise HTTPException(status_code=404, detail="Usuário não encontrado")
+        return UserResponse(
+            id=full["id"],
+            email=full["email"],
+            company_name=full.get("company_name"),
+            plan=full.get("plan"),
+            subscription_status=full.get("subscription_status"),
+            plan_until=full.get("plan_until"),
+            score=full.get("score") or 0,
+            leads_taken=full.get("leads_taken") or 0,
+            conversions=full.get("conversions") or 0,
+            created_at=full.get("created_at"),
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao atualizar empresa do usuário {user_id}: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao atualizar empresa")
+
+
 @app.post("/api/auth/logout")
 async def logout_user(authorization: Optional[str] = Header(None), response: Response = None):
     if authorization and authorization.startswith("Bearer "):

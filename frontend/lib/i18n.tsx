@@ -598,6 +598,12 @@ const PT: Dict = {
   "dashboard.settings.subscription_body": "Acesso liberado toda semana após pagamento. Ao expirar, o sistema pausa em 402 até você renovar.",
   "dashboard.settings.renew": "Renovar / assinar",
   "dashboard.settings.logout": "Sair",
+  "dashboard.settings.edit": "Editar",
+  "dashboard.settings.save": "Salvar",
+  "dashboard.settings.cancel": "Cancelar",
+  "dashboard.settings.company_hint": "Nome usado como remetente nas mensagens aos clientes (WhatsApp, SMS e e-mail).",
+  "dashboard.settings.company_required": "O nome da empresa não pode ficar vazio.",
+  "dashboard.settings.company_error": "Não foi possível salvar o nome da empresa.",
 };
 
 const EN: Dict = {
@@ -1160,6 +1166,12 @@ const EN: Dict = {
   "dashboard.settings.subscription_body": "Access is unlocked every week after payment. When it expires, the system pauses with a 402 until you renew.",
   "dashboard.settings.renew": "Renew / subscribe",
   "dashboard.settings.logout": "Sign out",
+  "dashboard.settings.edit": "Edit",
+  "dashboard.settings.save": "Save",
+  "dashboard.settings.cancel": "Cancel",
+  "dashboard.settings.company_hint": "Name used as the sender in messages to clients (WhatsApp, SMS and email).",
+  "dashboard.settings.company_required": "Company name cannot be empty.",
+  "dashboard.settings.company_error": "Could not save company name.",
 };
 
 const ES: Dict = {
@@ -1722,6 +1734,12 @@ const ES: Dict = {
   "dashboard.settings.subscription_body": "Acceso liberado cada semana tras el pago. Al expirar, el sistema se pausa con un 402 hasta que renueves.",
   "dashboard.settings.renew": "Renovar / suscribirse",
   "dashboard.settings.logout": "Salir",
+  "dashboard.settings.edit": "Editar",
+  "dashboard.settings.save": "Guardar",
+  "dashboard.settings.cancel": "Cancelar",
+  "dashboard.settings.company_hint": "Nombre usado como remitente en los mensajes a los clientes (WhatsApp, SMS y correo).",
+  "dashboard.settings.company_required": "El nombre de la empresa no puede quedar vacío.",
+  "dashboard.settings.company_error": "No se pudo guardar el nombre de la empresa.",
 };
 
 const DICTS: Record<Lang, Dict> = { pt: PT, en: EN, es: ES };

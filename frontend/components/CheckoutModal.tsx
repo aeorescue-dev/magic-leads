@@ -1,8 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { CheckCircle2, CreditCard, Loader2, ShieldCheck, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Building2, CheckCircle2, CreditCard, Loader2, ShieldCheck, X } from "lucide-react";
 import { confirmMockWeek, startCheckout, SUBSCRIPTION_PLAN } from "@/lib/billing";
+import { updateCompanyName } from "@/lib/api-client";
+import { useAuth } from "@/lib/auth";
 
 interface CheckoutModalProps {
   open: boolean;
@@ -12,9 +14,15 @@ interface CheckoutModalProps {
 }
 
 export default function CheckoutModal({ open, onClose, onActivated, isDark = false }: CheckoutModalProps) {
+  const { user, updateUser } = useAuth();
   const [busy, setBusy] = useState(false);
   const [state, setState] = useState<"idle" | "success">("idle");
   const [error, setError] = useState("");
+  const [companyName, setCompanyName] = useState("");
+
+  useEffect(() => {
+    if (user?.company_name && !companyName) setCompanyName(user.company_name);
+  }, [user, companyName]);
 
   const c = useMemo(
     () => ({
@@ -24,6 +32,9 @@ export default function CheckoutModal({ open, onClose, onActivated, isDark = fal
       textSoft: isDark ? "text-slate-400" : "text-slate-500",
       strong: isDark ? "text-white" : "text-slate-900",
       btn: "bg-emerald-500 hover:bg-emerald-400 text-slate-900",
+      input: isDark
+        ? "bg-white/10 border-white/15 text-white placeholder-slate-500 focus:border-emerald-500"
+        : "bg-white border-slate-300 text-slate-900 placeholder-slate-400 focus:border-emerald-500",
     }),
     [isDark]
   );
@@ -31,9 +42,20 @@ export default function CheckoutModal({ open, onClose, onActivated, isDark = fal
   if (!open) return null;
 
   const handleSubscribe = async () => {
+    const name = companyName.trim();
+    if (!name) {
+      setError("Informe o nome da sua empresa para continuar.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
+      if (user) {
+        if (name !== (user.company_name || "")) {
+          const updated = await updateCompanyName(user.id, name);
+          updateUser(updated);
+        }
+      }
       const res = await startCheckout();
       if (res.checkout_url) {
         window.open(res.checkout_url, "_blank");
@@ -113,6 +135,26 @@ export default function CheckoutModal({ open, onClose, onActivated, isDark = fal
                 Preço fixo: $79/semana, sem porcentagem de comissão sobre jobs.
               </li>
             </ul>
+
+            <div className={`rounded-xl border p-4 space-y-2 ${c.box}`}>
+              <label className={`flex items-center gap-2 text-sm font-semibold ${c.strong}`}>
+                <Building2 className="w-4 h-4 text-emerald-500" />
+                Nome real da sua empresa
+              </label>
+              <input
+                type="text"
+                value={companyName}
+                onChange={(e) => setCompanyName(e.target.value)}
+                placeholder="Ex.: Rocha Reparos"
+                disabled={busy}
+                maxLength={120}
+                className={`w-full px-3 py-2.5 rounded-lg border text-sm outline-none transition-colors focus:ring-2 focus:ring-emerald-500/30 disabled:opacity-50 ${c.input}`}
+              />
+              <p className={`text-[11px] leading-relaxed ${c.textSoft}`}>
+                É o nome que aparece como remetente nas mensagens aos clientes (WhatsApp, SMS e e-mail).
+                Você pode alterar depois em Configurações.
+              </p>
+            </div>
 
             {error && <p className="text-sm text-red-500">{error}</p>}
 

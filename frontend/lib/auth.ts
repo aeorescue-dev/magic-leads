@@ -117,7 +117,12 @@ export function useAuth() {
     setSubscription(null);
   }, []);
 
-  return { user, subscription, loading, signIn, signOut };
+  const updateUser = useCallback((u: AuthUser) => {
+    setUser(u);
+    storeUser(u);
+  }, []);
+
+  return { user, subscription, loading, signIn, signOut, updateUser };
 }
 
 export default useAuth;

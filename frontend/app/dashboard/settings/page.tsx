@@ -3,9 +3,10 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, CreditCard, Loader2, LogOut } from "lucide-react";
+import { ArrowLeft, Check, CreditCard, Loader2, LogOut, Pencil, X } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
+import { updateCompanyName } from "@/lib/api-client";
 import CheckoutModal from "@/components/CheckoutModal";
 
 const PLAN_LABELS: Record<string, string> = {
@@ -15,16 +16,51 @@ const PLAN_LABELS: Record<string, string> = {
 };
 
 export default function DashboardSettingsPage() {
-  const { user, loading, signOut } = useAuth();
+  const { user, loading, signOut, updateUser } = useAuth();
   const { t } = useI18n();
   const router = useRouter();
   const [showCheckout, setShowCheckout] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [editingCompany, setEditingCompany] = useState(false);
+  const [companyDraft, setCompanyDraft] = useState("");
+  const [companyError, setCompanyError] = useState("");
+  const [savingCompany, setSavingCompany] = useState(false);
 
   const handleLogout = async () => {
     setLoggingOut(true);
     await signOut();
     router.push("/");
+  };
+
+  const startEditCompany = () => {
+    setCompanyDraft(user?.company_name || "");
+    setCompanyError("");
+    setEditingCompany(true);
+  };
+
+  const cancelEditCompany = () => {
+    setEditingCompany(false);
+    setCompanyError("");
+  };
+
+  const saveCompany = async () => {
+    if (!user) return;
+    const name = companyDraft.trim();
+    if (!name) {
+      setCompanyError(t("dashboard.settings.company_required"));
+      return;
+    }
+    setSavingCompany(true);
+    setCompanyError("");
+    try {
+      const updated = await updateCompanyName(user.id, name);
+      updateUser(updated);
+      setEditingCompany(false);
+    } catch (e: any) {
+      setCompanyError(e?.message || t("dashboard.settings.company_error"));
+    } finally {
+      setSavingCompany(false);
+    }
   };
 
   return (
@@ -51,7 +87,48 @@ export default function DashboardSettingsPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                 <div className="rounded-xl bg-white/5 border border-white/10 p-3">
                   <p className="text-xs text-slate-400">{t("dashboard.auth.company")}</p>
-                  <p className="font-medium">{user.company_name || "—"}</p>
+                  {editingCompany ? (
+                    <div className="mt-1 space-y-2">
+                      <input
+                        type="text"
+                        value={companyDraft}
+                        onChange={(e) => setCompanyDraft(e.target.value)}
+                        disabled={savingCompany}
+                        maxLength={120}
+                        autoFocus
+                        className="w-full px-3 py-1.5 rounded-lg bg-white/10 border border-white/15 text-sm text-white placeholder-slate-500 outline-none focus:border-emerald-500"
+                      />
+                      <p className="text-[11px] text-slate-400 leading-relaxed">{t("dashboard.settings.company_hint")}</p>
+                      {companyError && <p className="text-xs text-red-400">{companyError}</p>}
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={saveCompany}
+                          disabled={savingCompany}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-900 text-xs font-semibold disabled:opacity-50"
+                        >
+                          {savingCompany ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                          {t("dashboard.settings.save")}
+                        </button>
+                        <button
+                          onClick={cancelEditCompany}
+                          disabled={savingCompany}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 text-xs font-medium disabled:opacity-50"
+                        >
+                          <X className="w-3.5 h-3.5" /> {t("dashboard.settings.cancel")}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-medium break-all">{user.company_name || "—"}</p>
+                      <button
+                        onClick={startEditCompany}
+                        className="flex items-center gap-1 px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 text-xs"
+                      >
+                        <Pencil className="w-3 h-3" /> {t("dashboard.settings.edit")}
+                      </button>
+                    </div>
+                  )}
                 </div>
                 <div className="rounded-xl bg-white/5 border border-white/10 p-3">
                   <p className="text-xs text-slate-400">{t("dashboard.field.email")}</p>
