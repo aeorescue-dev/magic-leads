@@ -52,11 +52,11 @@ class Settings(BaseSettings):
 
     # Frontend
     FRONTEND_URL: str = "http://localhost:3000"
-    ALLOWED_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:3005"]
+    ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:3005"
 
-    @field_validator("ALLOWED_ORIGINS", mode="before")
-    @classmethod
-    def parse_allowed_origins(cls, v):
+    @property
+    def allowed_origins_list(self) -> List[str]:
+        v = self.ALLOWED_ORIGINS
         if isinstance(v, str):
             try:
                 parsed = json.loads(v)
