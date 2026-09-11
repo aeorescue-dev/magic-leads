@@ -1449,6 +1449,99 @@ class DatabaseService:
             conn.close()
 
     # ---------------------------------------------------------------
+    # Daily alert cap (10/day, dedup, digest)
+    # ---------------------------------------------------------------
+    def get_new_lead_alert_counts_today(self) -> List[dict]:
+        """Retorna [{user_id, n}] com contagem de alertas new_lead hoje, agrupado por usuário."""
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT user_id, COUNT(*) AS n FROM notifications "
+                "WHERE user_id IS NOT NULL AND type = 'new_lead' "
+                "AND DATE(created_at) = DATE('now') GROUP BY user_id"
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def has_alerted_user_for_lead(self, user_id: int, lead_id: int) -> bool:
+        """True se já existe notificação new_lead para (user_id, lead_id) — dedup."""
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM notifications "
+                "WHERE user_id = ? AND lead_id = ? AND type = 'new_lead' LIMIT 1",
+                (user_id, lead_id),
+            ).fetchone()
+            return row is not None
+        finally:
+            conn.close()
+
+    def get_alerted_pairs_for_leads(self, lead_ids: List[int]) -> List[dict]:
+        """Retorna [{user_id, lead_id}] de alertas new_lead já criados para os leads informados."""
+        if not lead_ids:
+            return []
+        conn = get_connection()
+        try:
+            ph = ",".join("?" * len(lead_ids))
+            rows = conn.execute(
+                f"SELECT DISTINCT user_id, lead_id FROM notifications "
+                f"WHERE type = 'new_lead' AND user_id IS NOT NULL AND lead_id IN ({ph})",
+                lead_ids,
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def upsert_daily_digest(self, user_id: int, extra_count: int) -> Optional[dict]:
+        """Insere ou atualiza a notificação de resumo diário para um usuário.
+        O digest NÃO conta no teto de 10 (tipo 'digest', não 'new_lead')."""
+        import re
+        conn = get_connection()
+        try:
+            existing = conn.execute(
+                "SELECT id, message FROM notifications "
+                "WHERE user_id = ? AND type = 'digest' AND DATE(created_at) = DATE('now')",
+                (user_id,),
+            ).fetchone()
+            if existing:
+                prev = 0
+                m = re.search(r"Mais (\d+)", existing["message"] or "")
+                if m:
+                    prev = int(m.group(1))
+                total = prev + extra_count
+                new_msg = (
+                    f"Mais {total} ofertas chegaram hoje "
+                    f"— o limite de 10 renova amanhã."
+                )
+                conn.execute(
+                    "UPDATE notifications SET message = ? WHERE id = ?",
+                    (new_msg, existing["id"]),
+                )
+                conn.commit()
+                row = conn.execute(
+                    "SELECT * FROM notifications WHERE id = ?", (existing["id"],)
+                ).fetchone()
+                return dict(row) if row else None
+            else:
+                new_msg = (
+                    f"Mais {extra_count} ofertas chegaram hoje "
+                    f"— o limite de 10 renova amanhã."
+                )
+                conn.execute(
+                    "INSERT INTO notifications (user_id, type, title, message, lead_id) "
+                    "VALUES (?, 'digest', 'Resumo diário de alertas', ?, NULL)",
+                    (user_id, new_msg),
+                )
+                conn.commit()
+                row = conn.execute(
+                    "SELECT * FROM notifications WHERE id = last_insert_rowid()"
+                ).fetchone()
+                return dict(row) if row else None
+        finally:
+            conn.close()
+
+    # ---------------------------------------------------------------
     # Hold / Reserva / Release / Score / Histórico estruturado
     # ---------------------------------------------------------------
     def _expire_lead_holds(self, conn: sqlite3.Connection) -> None:
@@ -2943,6 +3036,20 @@ class AsyncDatabaseService:
 
     async def check_reveal_watchdogs(self) -> int:
         return self._service.check_reveal_watchdogs()
+
+    # ===== DAILY ALERT CAP (10/day, dedup, digest) =====
+
+    async def get_new_lead_alert_counts_today(self) -> List[dict]:
+        return self._service.get_new_lead_alert_counts_today()
+
+    async def has_alerted_user_for_lead(self, user_id: int, lead_id: int) -> bool:
+        return self._service.has_alerted_user_for_lead(user_id, lead_id)
+
+    async def get_alerted_pairs_for_leads(self, lead_ids: List[int]) -> List[dict]:
+        return self._service.get_alerted_pairs_for_leads(lead_ids)
+
+    async def upsert_daily_digest(self, user_id: int, extra_count: int) -> Optional[dict]:
+        return self._service.upsert_daily_digest(user_id, extra_count)
 
 
 # Instância global (interface async, compatível com o antigo supabase_service)

@@ -1216,18 +1216,13 @@ async def _scrape_worker(run_id: str, max_cities: int = 8):
 
         if inserted > 0:
             # Fan-out por interesse: notifica usuários com a categoria marcada
+            # (teto 10/dia, dedup e push incluídos em fanout_new_lead_batch)
             added_by_cat: dict = {}
             for nl in newly_added:
                 cat = (nl.get("issue_category") or "Structure").strip()
                 added_by_cat.setdefault(cat, []).append(nl)
             for cat, items in added_by_cat.items():
                 await notifier.fanout_new_lead_batch(cat, items)
-                # Envia push notifications para usuários interessados
-                for lead in items:
-                    try:
-                        await push_service.send_new_lead_alert(lead, cat)
-                    except Exception as e:
-                        logger.error(f"Erro ao enviar push para lead {lead.get('id')}: {e}")
         logger.info(f"Scraper completo [run {run_id}]: {inserted} leads inseridos")
         state.update(
             status="success", inserted=inserted,
