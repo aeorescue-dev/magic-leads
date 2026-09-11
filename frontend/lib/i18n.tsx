@@ -26,6 +26,8 @@ const PT: Dict = {
   // Navbar / geral
   "nav.pricing": "Planos",
   "nav.dashboard": "Dashboard",
+  "nav.register": "Cadastrar",
+  "nav.demo": "Demo",
   "nav.enter": "Entrar (demo)",
   "nav.logout": "Sair",
   "nav.currency": "BRL",
@@ -680,6 +682,8 @@ const PT: Dict = {
 const EN: Dict = {
   "nav.pricing": "Pricing",
   "nav.dashboard": "Dashboard",
+  "nav.register": "Sign up",
+  "nav.demo": "Demo",
   "nav.enter": "Enter (demo)",
   "nav.logout": "Log out",
   "nav.currency": "USD",
@@ -1319,6 +1323,8 @@ const EN: Dict = {
 const ES: Dict = {
   "nav.pricing": "Precios",
   "nav.dashboard": "Panel",
+  "nav.register": "Registrarse",
+  "nav.demo": "Demo",
   "nav.enter": "Entrar (demo)",
   "nav.logout": "Salir",
   "nav.currency": "USD",
