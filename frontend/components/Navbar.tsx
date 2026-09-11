@@ -1,7 +1,6 @@
 'use client';
 
 import Link from "next/link";
-import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { LayoutDashboard, LogOut, Menu, Sparkles, X, Plus } from "lucide-react";
@@ -20,6 +19,11 @@ export function Navbar() {
   useEffect(() => {
     setIsLogged(Boolean(getToken()));
   }, []);
+
+  // Fecha menu mobile ao navegar
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
 
   const handleDemoLogin = async () => {
     await demoLogin();
@@ -127,11 +131,11 @@ export function Navbar() {
       {/* Mobile menu */}
       {mobileOpen && (
         <div className="md:hidden border-t bg-background px-4 py-4 space-y-3 animate-slide-down">
-          <Link href="/pricing" onClick={() => setMobileOpen(false)} className="block text-sm text-muted-foreground hover:text-foreground">
+          <Link href="/pricing" className="block text-sm text-muted-foreground hover:text-foreground">
             {t("nav.pricing")}
           </Link>
           {isLogged && (
-            <Link href="/dashboard" onClick={() => setMobileOpen(false)} className="block text-sm text-muted-foreground hover:text-foreground">
+            <Link href="/dashboard" className="block text-sm text-muted-foreground hover:text-foreground">
               {t("nav.dashboard")}
             </Link>
           )}
@@ -144,7 +148,6 @@ export function Navbar() {
               <div className="space-y-2">
                 <Link
                   href="/auth"
-                  onClick={() => setMobileOpen(false)}
                   className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-secondary px-4 py-2 text-sm"
                 >
                   <Plus className="h-4 w-4" /> {t("nav.register") || 'Cadastrar'}
