@@ -1,10 +1,12 @@
 import sqlite3
 import os
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from ..models.schemas import EnrichedLead
 from ..utils.logger import logger
+from .phone_lookup import phone_lookup_service, PhoneResult
 
 
 def _not_junk_where(alias: str = "") -> str:
@@ -1601,7 +1603,7 @@ class DatabaseService:
         finally:
             conn.close()
 
-    def reserve_lead(self, lead_id: int, user_id: int, minutes: int = 60) -> Optional[dict]:
+    def reserve_lead(self, lead_id: int, user_id: int, minutes: int = 60, skip_daily_increment: bool = False) -> Optional[dict]:
         conn = get_connection()
         try:
             self._expire_lead_holds(conn)
@@ -1639,10 +1641,19 @@ class DatabaseService:
                 "INSERT INTO lead_holds (lead_id, user_id, expires_at, status) VALUES (?, ?, datetime('now', ?), 'active')",
                 (lead_id, user_id, f"+{int(minutes)} minutes"),
             )
-            conn.execute("UPDATE users SET leads_taken = leads_taken + 1 WHERE id = ?", (user_id,))
+            if not skip_daily_increment:
+                conn.execute("UPDATE users SET leads_taken = leads_taken + 1 WHERE id = ?", (user_id,))
             self._event(conn, lead_id, user_id, "reserved", f"Reservado por {minutes}min")
             conn.commit()
-            return dict(conn.execute("SELECT * FROM leads WHERE id = ?", (lead_id,)).fetchone())
+            lead_dict = dict(conn.execute("SELECT * FROM leads WHERE id = ?", (lead_id,)).fetchone())
+            # Retorna campos necessários para phone lookup
+            return {
+                **lead_dict,
+                "address": lead_dict.get("address"),
+                "city": lead_dict.get("city"),
+                "state": lead_dict.get("state"),
+                "_skip_daily_increment": skip_daily_increment
+            }
         finally:
             conn.close()
 
@@ -2956,7 +2967,58 @@ class AsyncDatabaseService:
         return self._service.list_leads_with_status(limit, status)
 
     async def reserve_lead(self, lead_id: int, user_id: int, minutes: int = 60) -> Optional[dict]:
-        return self._service.reserve_lead(lead_id, user_id, minutes)
+        # 1. Reserva o lead sem incrementar contador diário (skip_daily_increment=True)
+        reserved = self._service.reserve_lead(lead_id, user_id, minutes, skip_daily_increment=True)
+        if not reserved or reserved.get("error"):
+            return reserved
+        
+        # Extrai dados para phone lookup
+        address = reserved.get("address")
+        city = reserved.get("city")
+        state = reserved.get("state")
+        lead_id_reserved = reserved.get("id")
+        
+        if not address or not city or not state:
+            # Sem dados de endereço para busca - libera a reserva e retorna erro
+            await self.release_lead(lead_id_reserved, user_id, reason="no_address_for_phone_lookup")
+            return {"error": "no_address", "message": "Lead sem endereço completo para busca de telefone"}
+        
+        # 2. Busca telefone do dono
+        phone_result: PhoneResult = await phone_lookup_service.lookup(address, city, state)
+        
+        if not phone_result.success:
+            # Falha na busca - libera a reserva, não incrementa contador
+            await self.release_lead(lead_id, user_id, reason="phone_lookup_failed")
+            error_msg = phone_result.error or "busca_falhou"
+            return {
+                "error": "phone_lookup_failed",
+                "message": f"Não foi possível obter telefone do proprietário: {phone_result.error or 'indisponível'}",
+                "phone_error": phone_result.error,
+                "credit_preserved": True
+            }
+        
+        # 3. Sucesso - atualiza lead com telefone, incrementa contador diário
+        phone_updated = self._service.update_owner_phone(lead_id, phone_result.phone)
+        if not phone_updated:
+            await self.release_lead(lead_id, user_id, reason="phone_update_failed")
+            return {"error": "phone_update_failed", "message": "Falha ao salvar telefone no lead"}
+        
+        # Incrementa contador diário (respeita limite de 10/dia)
+        incremented = await self.increment_daily_leads(user_id)
+        if not incremented:
+            # Limite diário atingido - não deveria acontecer pois checamos antes, mas por segurança
+            await self.release_lead(lead_id, user_id, reason="daily_limit_exceeded")
+            return {"error": "daily_limit_exceeded", "message": "Limite diário de 10 leads atingido"}
+        
+        # Busca lead atualizado para retornar
+        lead_data = await self.get_lead_by_id(lead_id)
+        if lead_data:
+            lead_data["owner_phone"] = phone_result.phone
+            lead_data["_phone_lookup"] = {
+                "provider": phone_result.provider,
+                "success": True
+            }
+        return lead_data
 
     async def release_lead(self, lead_id: int, user_id: int, reason: Optional[str] = None, note: Optional[str] = None) -> Optional[dict]:
         return self._service.release_lead(lead_id, user_id, reason, note)
