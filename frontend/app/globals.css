@@ -414,31 +414,6 @@
     100% { background-position: 200% 0; }
   }
 
-  @keyframes spin-slow {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-  }
-
-  @keyframes fadeInUp {
-    from { opacity: 0; transform: translateY(20px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  @keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-  }
-
-  @keyframes scaleIn {
-    from { opacity: 0; transform: scale(0.95); }
-    to { opacity: 1; transform: scale(1); }
-  }
-
-  @keyframes slideUp {
-    from { opacity: 0; transform: translateY(30px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
   .animate-pulse-slow {
     animation: pulse-slow 3s ease-in-out infinite;
   }
@@ -495,7 +470,7 @@
    LANDING PAGE - LIGHT THEME UTILITIES (from reference src/index.css)
    ============================================ */
 
-@theme {
+:root {
   --font-display: "Archivo", "Inter", system-ui, sans-serif;
 }
 
@@ -741,12 +716,6 @@
 .landing-light .pop-in { animation: pop-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) both; }
 
 .landing-light details summary::-webkit-details-marker { display: none; }
-
-/* Light theme scrollbar for landing */
-.landing-light ::-webkit-scrollbar { width: 10px; }
-.landing-light ::-webkit-scrollbar-track { background: #eef2f7; }
-.landing-light ::-webkit-scrollbar-thumb { background: #c7d0dd; border-radius: 6px; }
-.landing-light ::-webkit-scrollbar-thumb:hover { background: #9aa7ba; }
 
 /* Focus visible for landing */
 .landing-light *:focus-visible {
