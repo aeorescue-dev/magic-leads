@@ -333,41 +333,47 @@ class Socrata311Scraper:
         logger.info(f"{city} 311: {len(leads)} leads válidos")
         return leads
 
-    def _infer_category(self, description: str) -> "IssueCategory":
-        """Infere a categoria a partir das palavras-chave da descrição."""
+    def _infer_category(self, description: str, source_type: str = None) -> "IssueCategory":
+        """Infere a categoria a partir das palavras-chave da descrição.
+
+        Mapeia exclusivamente para as 16 categorias/ofícios da plataforma.
+        Fallback: Obras & Permissões (Permit_Rejected) para fontes de obrigação
+        legal (permit/violação/fiscalização); Structure para os demais."""
         desc = (description or "").lower()
         # Categorias específicas (devem vir ANTES das genéricas para não serem capturadas por palavras-chave amplas)
-        if any(k in desc for k in ["heat", "hot water", "heating", "boiler", "no heat", "radiator"]):
+        if any(k in desc for k in ["heat", "hot water", "heating", "boiler", "no heat", "radiator", "no hot water"]):
             return IssueCategory.HEATING
-        if any(k in desc for k in ["gas", "gas leak", "cooking gas"]):
+        if any(k in desc for k in ["gas", "gas leak", "cooking gas", "gas odor", "gas smell"]):
             return IssueCategory.GAS
-        if any(k in desc for k in ["electric", "electrical", "wiring", "outlet", "circuit", "panel"]):
+        if any(k in desc for k in ["electric", "electrical", "wiring", "outlet", "circuit", "panel", "short circuit"]):
             return IssueCategory.ELECTRICAL
         if any(k in desc for k in ["elevator", "lift"]):
             return IssueCategory.ELEVATOR
-        if any(k in desc for k in ["rodent", "rat", "mouse", "vermin", "roach", "pest", "cockroach", "bed bug"]):
+        if any(k in desc for k in ["rodent", "rat", "mice", "mouse", "vermin", "roach", "pest", "cockroach", "bed bug", "infestation", "pigeon"]):
             return IssueCategory.RODENT
-        if any(k in desc for k in ["mold", "mildew", "fungus"]):
+        if any(k in desc for k in ["mold", "mildew", "fungus", "water damage"]):
             return IssueCategory.MOLD
         if any(k in desc for k in ["lead", "lead paint", "lead hazard"]):
             return IssueCategory.LEAD
-        if any(k in desc for k in ["unsanitary", "sanitary", "filth", "sewage backup"]):
+        if any(k in desc for k in ["unsanitary", "sanitary", "filth", "sewage backup", "unsatisfactory living conditions", "hoarding", "sewage", "septic", "raw sewage", "bad odor", "foul odor", "squalid"]):
             return IssueCategory.UNSANITARY
-        if any(k in desc for k in ["door", "window", "frame", "sash", "jamb"]):
+        if any(k in desc for k in ["door", "window", "frame", "sash", "jamb", "broken window", "stuck window"]):
             return IssueCategory.DOOR_WINDOW
-        if any(k in desc for k in ["debris", "garbage", "trash", "rubbish", "litter", "dumping"]):
+        if any(k in desc for k in ["debris", "garbage", "trash", "rubbish", "litter", "dumping", "junk", "dumpster", "bulk removal", "overflowing garbage"]):
             return IssueCategory.DEBRIS
         # Categorias genéricas (vêm depois)
-        if any(k in desc for k in ["roof", "gutter", "shingle"]):
+        if any(k in desc for k in ["roof", "gutter", "shingle", "roof leak", "shed"]):
             return IssueCategory.ROOF
-        if any(k in desc for k in ["plumb", "water", "leak", "pipe", "sewer", "drain"]):
+        if any(k in desc for k in ["plumb", "water", "leak", "pipe", "sewer", "drain", "backflow"]):
             return IssueCategory.PLUMBING
-        if any(k in desc for k in ["paint", "plaster", "graffiti", "facade", "façade"]):
+        if any(k in desc for k in ["paint", "plaster", "graffiti", "facade", "façade", "peeling"]):
             return IssueCategory.PAINT
-        if any(k in desc for k in ["structur", "foundation", "wall", "collapse", "crack", "unsafe building"]):
+        if any(k in desc for k in ["structur", "foundation", "wall", "collapse", "crack", "unsafe building", "sagging", "deterioration", "buckling", "leaning"]):
             return IssueCategory.STRUCTURE
-        if any(k in desc for k in ["grass", "weed", "vegetation", "overgrown", "blight", "high weeds"]):
+        if any(k in desc for k in ["grass", "weed", "vegetation", "overgrown", "blight", "high weeds", "vacant lot", "tall grass", "brush", "excessive vegetation"]):
             return IssueCategory.GRASS
+        if source_type in ("permit", "dob_violation", "tax_delinquency"):
+            return IssueCategory.PERMIT_REJECTED  # Obras & Permissões
         return IssueCategory.STRUCTURE  # fallback conservador
 
     def _infer_urgency(self, description: str) -> UrgencyLevel:
