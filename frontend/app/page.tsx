@@ -313,7 +313,7 @@ export default function LandingPage() {
             {L.categories.map((cat) => (
               <div key={cat} className="card flex items-center gap-3 px-4 py-3.5">
                 <span className="h-2 w-2 shrink-0 rounded-full bg-[#10b981]" />
-                <span className="text-sm font-bold text-slate-900">{cat}</span>
+                <span className="text-sm font-bold !text-slate-900">{cat}</span>
               </div>
             ))}
           </div>
@@ -411,19 +411,19 @@ export default function LandingPage() {
               <article key={c.channel} className={`flex flex-col rounded-3xl p-7 ${c.winner ? "bg-[#0b1220] text-white shadow-2xl md:-translate-y-3" : "card card-hover"}`}>
                 <div className="flex items-center justify-between">
                   <div>
-                    <h3 className={`font-display text-xl font-black ${c.winner ? "text-[#34e0a1]" : "text-slate-900"}`}>{c.channel}</h3>
+                    <h3 className={`font-display text-xl font-black ${c.winner ? "text-[#34e0a1]" : "!text-slate-900"}`}>{c.channel}</h3>
                     <p className="text-xs text-[#94a3b8]">{c.sub}</p>
                   </div>
                   {c.winner && <span className="rounded-full bg-[#10b981] px-2.5 py-1 text-[10px] font-black text-white">{t("landing.best")}</span>}
                 </div>
                 <div className="mt-6">
-                  <p className={`font-display text-3xl font-black ${c.winner ? "text-white" : "text-slate-900"}`}>{c.cost}</p>
+                  <p className={`font-display text-3xl font-black ${c.winner ? "text-white" : "!text-slate-900"}`}>{c.cost}</p>
                   <p className="text-xs text-[#94a3b8]">{c.costLabel}</p>
                 </div>
 <div className={`mt-6 space-y-3 border-t pt-5 text-sm ${c.winner ? "border-white/10" : "border-[#eef1f6]"}`}>
-  <div className="flex justify-between gap-3"><span className={c.winner ? "text-[#94a3b8]" : "text-slate-500"}>{t("landing.excl")}</span><span className={`text-right font-bold ${c.winner ? "text-[#34e0a1]" : "text-slate-900"}`}>{c.exclusivity}</span></div>
-  <div className="flex justify-between gap-3"><span className={c.winner ? "text-[#94a3b8]" : "text-slate-500"}>{t("landing.intentL")}</span><span className={`text-right font-bold ${c.winner ? "text-[#34e0a1]" : "text-slate-900"}`}>{c.intent}</span></div>
-  <div className="flex justify-between gap-3"><span className={c.winner ? "text-[#94a3b8]" : "text-slate-500"}>{t("landing.phoneL")}</span><span className={`text-right font-bold ${c.winner ? "text-[#34e0a1]" : "text-slate-900"}`}>{c.phone}</span></div>
+  <div className="flex justify-between gap-3"><span className={c.winner ? "text-[#94a3b8]" : "!text-slate-500"}>{t("landing.excl")}</span><span className={`text-right font-bold ${c.winner ? "text-[#34e0a1]" : "!text-slate-900"}`}>{c.exclusivity}</span></div>
+  <div className="flex justify-between gap-3"><span className={c.winner ? "text-[#94a3b8]" : "!text-slate-500"}>{t("landing.intentL")}</span><span className={`text-right font-bold ${c.winner ? "text-[#34e0a1]" : "!text-slate-900"}`}>{c.intent}</span></div>
+  <div className="flex justify-between gap-3"><span className={c.winner ? "text-[#94a3b8]" : "!text-slate-500"}>{t("landing.phoneL")}</span><span className={`text-right font-bold ${c.winner ? "text-[#34e0a1]" : "!text-slate-900"}`}>{c.phone}</span></div>
 </div>
               </article>
             ))}
@@ -448,7 +448,7 @@ export default function LandingPage() {
             ).map((s) => (
               <article key={s.n} className={`card card-hover p-8 ${s.featured ? "ring-2 ring-[#7c5cff]/25" : ""}`}>
                 <span className="flex h-14 w-14 items-center justify-center rounded-2xl font-display text-xl font-black" style={{ background: s.bg, color: s.tint }}>{s.n}</span>
-                <h3 className="font-display mt-6 text-xl font-bold text-slate-900">{s.title}</h3>
+                <h3 className="font-display mt-6 text-xl font-bold !text-slate-900">{s.title}</h3>
                 <p className="mt-3 text-[15px] leading-relaxed text-[#54617a]">{s.body}</p>
               </article>
             ))}
@@ -482,7 +482,7 @@ export default function LandingPage() {
                   <button onClick={() => copyTpl(L.templates[tplTrade][tplChannel])} className="btn-dark px-3.5 py-1.5 text-xs">{copied ? t("landing.copied") : t("landing.copy")}</button>
                 </div>
                 <div className="p-6">
-                  <div className="rounded-2xl bg-[#e8f9ef] p-5"><pre className="whitespace-pre-wrap font-sans text-[15px] leading-relaxed text-slate-900">{L.templates[tplTrade][tplChannel]}</pre></div>
+                  <div className="rounded-2xl bg-[#e8f9ef] p-5"><pre className="whitespace-pre-wrap font-sans text-[15px] leading-relaxed !text-slate-900">{L.templates[tplTrade][tplChannel]}</pre></div>
                   <p className="mt-4 text-xs text-[#94a3b8]">{t("landing.tplFields")}</p>
                 </div>
               </div>
@@ -622,7 +622,7 @@ export default function LandingPage() {
               return (
                 <div key={f.q} className={`card overflow-hidden ${open ? "shadow-lg" : ""}`}>
                   <button onClick={() => setOpenFaq(open ? null : i)} className="flex w-full items-center justify-between gap-4 p-5 text-left">
-                    <span className="font-display text-[17px] font-bold text-slate-900">{f.q}</span>
+                    <span className="font-display text-[17px] font-bold !text-slate-900">{f.q}</span>
                     <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${open ? "bg-[#0b1220] text-[#34e0a1]" : "bg-[#f1f4f9]"}`}>
                       <svg className={`h-4 w-4 ${open ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" /></svg>
                     </span>
