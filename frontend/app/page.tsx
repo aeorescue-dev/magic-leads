@@ -6,7 +6,7 @@ import { useI18n } from "@/lib/i18n";
 import { AuthForm } from "@/components/AuthForm";
 import { DemoLoginButton } from "@/components/DemoLoginButton";
 import { fetchStats, fetchScraperStatus } from "@/lib/api-client";
-import type { LeadStats } from "@/lib/api-client";
+import type { LeadStats, ScraperRunState } from "@/lib/api-client";
 
 // ------------------------------------------------------------------
 // Tipos e dados ilustrativos do "painel amostra"
@@ -106,6 +106,7 @@ export default function LandingPage() {
 
   // dados reais (públicos)
   const [stats, setStats] = useState<LeadStats | null>(null);
+  const [scraper, setScraper] = useState<ScraperRunState | null>(null);
   const [scrapeAt, setScrapeAt] = useState<number | null>(null);
   const [nowTick, setNowTick] = useState(() => Date.now());
 
@@ -124,6 +125,7 @@ export default function LandingPage() {
       }
       try {
         const sc = await fetchScraperStatus();
+        if (mounted) setScraper(sc ?? null);
         const ts = sc?.last_run?.started_at ? Date.parse(sc.last_run.started_at) : NaN;
         if (mounted && !Number.isNaN(ts)) setScrapeAt(ts);
       } catch {
@@ -192,8 +194,8 @@ export default function LandingPage() {
 
   // ------------------------------------------------ derivados
   const leadsBank = stats?.total_leads ?? stats?.total ?? 0;
-  const withOwner = stats?.leads_with_owner ?? stats?.contacted ?? 0;
-  const citiesCount = stats?.cities?.length || CITIES.length;
+  const withOwner = stats?.leads_with_owner ?? stats?.with_owner ?? stats?.contacted ?? 0;
+  const citiesCount = stats?.cities?.length || scraper?.last_run?.cities_covered || CITIES.length;
 
   const fmtTimer = (s: number) =>
     `${Math.floor(s / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;
@@ -219,8 +221,7 @@ export default function LandingPage() {
         <div className="relative mx-auto max-w-6xl px-4 pb-16 pt-16 text-center sm:px-6 md:pb-24 md:pt-24">
           <div className="fade-up inline-flex items-center gap-2 text-[12px] font-bold tracking-wider text-[#0a8f65]">
             <span className="blink-dot" /><span className="blink-dot blink-dot-delay" /><span className="blink-dot blink-dot-delay-2" />
-            {stats ? <strong>{leadsBank.toLocaleString("en-US")} </strong> : null}
-            {t("landing.heroKicker")}
+            {leadsBank.toLocaleString("en-US")} {t("landing.heroKicker")}
           </div>
           <h1 className="fade-up font-display mx-auto mt-8 max-w-5xl text-[3.1rem] font-black leading-[0.9] sm:text-7xl lg:text-[6.2rem] lg:leading-[0.88]">
             {t("landing.heroTitle1")}<br /><span className="hl">{t("landing.heroTitle2")}</span>
@@ -257,12 +258,10 @@ export default function LandingPage() {
                 <p className="mt-2 text-[11px] font-bold uppercase tracking-wider text-[#94a3b8]">{t("landing.statCities")}</p>
               </div>
             </div>
-            {scrapeAt && (
-              <p className="mt-8 flex items-center justify-center gap-2 text-sm font-medium text-[#0a8f65]">
-                <span className="blink-dot" /><span className="blink-dot blink-dot-delay" /><span className="blink-dot blink-dot-delay-2" />
-                {t("landing.updated")} {L.timeAgoLabel()}
-              </p>
-            )}
+            <p className="mt-8 flex items-center justify-center gap-2 text-sm font-medium text-[#0a8f65]">
+              <span className="blink-dot" /><span className="blink-dot blink-dot-delay" /><span className="blink-dot blink-dot-delay-2" />
+              {t("landing.updated")} {L.timeAgoLabel()}
+            </p>
           </div>
         </div>
         <div className="overflow-hidden border-t border-[#eef1f6] bg-white py-4">
@@ -521,7 +520,7 @@ export default function LandingPage() {
               </div>
               <div className="my-6 space-y-3 border-y border-white/20 py-5 text-sm font-semibold">
                 <div className="flex justify-between"><span className="text-white/80">{t("landing.invest")}</span><span>$340{t("landing.perMo")}</span></div>
-                <div className="flex justify-between"><span className="text-white/80">{t("landing.costDelivered")}</span><span>~$1,62</span></div>
+                <div className="flex justify-between"><span className="text-white/80">{t("landing.costDelivered")}</span><span>~$1.62</span></div>
                 <div className="flex justify-between text-base"><span>{t("landing.onePays")}</span><span className="rounded-lg bg-[#04231a] px-2.5 py-0.5 text-[#34e0a1]">{monthsPaid} {t("landing.months")}</span></div>
               </div>
               <button onClick={openModal} className="w-full rounded-xl bg-white py-4 text-sm font-black uppercase tracking-wider text-[#0a8f65]">{t("landing.calcCta")}</button>
