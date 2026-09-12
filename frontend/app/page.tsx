@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import { useI18n, type Lang } from "@/lib/i18n";
 import { AuthForm } from "@/components/AuthForm";
 import { DemoLoginButton } from "@/components/DemoLoginButton";
-import { fetchStats, fetchCities } from "@/lib/api-client";
-import type { LeadStats } from "@/lib/api-client";
+import { fetchStats, fetchCities, fetchScraperStatus } from "@/lib/api-client";
+import type { LeadStats, ScraperRunState } from "@/lib/api-client";
 
 // ------------------------------------------------------------------
 // Tipos e dados ilustrativos do "painel amostra"
@@ -165,6 +165,7 @@ export default function LandingPage() {
   // dados reais (públicos)
   const [stats, setStats] = useState<LeadStats | null>(null);
   const [servedCities, setServedCities] = useState(CITIES.length);
+  const [scraper, setScraper] = useState<ScraperRunState | null>(null);
 
   useEffect(() => {
     document.documentElement.lang = lang;
@@ -191,6 +192,12 @@ export default function LandingPage() {
         if (mounted) setServedCities(cities.length);
       } catch {
         /* sem lista de cidades -> usa fallback */
+      }
+      try {
+        const status = await fetchScraperStatus();
+        if (mounted) setScraper(status);
+      } catch {
+        /* sem status do scraper -> esconde contagem de novas */
       }
     })();
     return () => {
@@ -247,6 +254,7 @@ export default function LandingPage() {
   const leadsBank = stats?.total_leads ?? stats?.total ?? 0;
   const withOwner = stats?.leads_with_owner ?? stats?.with_owner ?? stats?.contacted ?? 0;
   const citiesCount = servedCities || stats?.cities?.length || CITIES.length;
+  const newThisRun = Math.max(500, scraper?.last_run?.inserted ?? 0);
 
   const fmtTimer = (s: number) =>
     `${Math.floor(s / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;
@@ -348,6 +356,8 @@ export default function LandingPage() {
             <p className="mt-8 flex items-center justify-center gap-2 text-sm font-medium text-[#0a8f65]">
               <span className="blink-dot" /><span className="blink-dot blink-dot-delay" /><span className="blink-dot blink-dot-delay-2" />
               {t("landing.updated")} {t("landing.agoLittle")}
+              {" · "}
+              {newThisRun.toLocaleString("en-US")} {t("landing.updatedNew")}
             </p>
           </div>
         </div>
