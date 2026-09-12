@@ -169,7 +169,7 @@ export function AuthForm() {
               type="text"
               value={companyName}
               onChange={(e) => { setCompanyName(e.target.value); if (errors.company_name) setErrors({...errors, company_name: undefined}); }}
-              placeholder={t('dashboard.auth.company_placeholder') || 'Minha Empresa'}
+              placeholder={t('dashboard.auth.placeholder_company') || 'Nome da sua empresa'}
               className={`w-full pl-10 pr-4 py-2.5 rounded-lg border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 ${
                 errors.company_name ? 'border-red-400' : 'border-border'
               }`}

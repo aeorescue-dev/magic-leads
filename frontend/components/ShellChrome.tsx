@@ -7,10 +7,11 @@ import { Footer } from "@/components/Footer";
 export function ShellChrome() {
   const pathname = usePathname();
   const isLanding = pathname === "/";
+  const isDashboard = pathname.startsWith("/dashboard");
   return (
     <>
       {!isLanding && <Navbar />}
-      {!isLanding && <Footer />}
+      {!isLanding && !isDashboard && <Footer />}
     </>
   );
 }
