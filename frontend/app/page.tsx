@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import { useI18n, type Lang } from "@/lib/i18n";
 import { AuthForm } from "@/components/AuthForm";
 import { DemoLoginButton } from "@/components/DemoLoginButton";
-import { fetchStats, fetchScraperStatus } from "@/lib/api-client";
-import type { LeadStats, ScraperRunState } from "@/lib/api-client";
+import { fetchStats, fetchCities } from "@/lib/api-client";
+import type { LeadStats } from "@/lib/api-client";
 
 // ------------------------------------------------------------------
 // Tipos e dados ilustrativos do "painel amostra"
@@ -164,9 +164,7 @@ export default function LandingPage() {
 
   // dados reais (públicos)
   const [stats, setStats] = useState<LeadStats | null>(null);
-  const [scraper, setScraper] = useState<ScraperRunState | null>(null);
-  const [scrapeAt, setScrapeAt] = useState<number | null>(null);
-  const [nowTick, setNowTick] = useState(() => Date.now());
+  const [servedCities, setServedCities] = useState(CITIES.length);
 
   useEffect(() => {
     document.documentElement.lang = lang;
@@ -189,22 +187,15 @@ export default function LandingPage() {
         /* sem dados públicos -> valores iniciais zero */
       }
       try {
-        const sc = await fetchScraperStatus();
-        if (mounted) setScraper(sc ?? null);
-        const ts = sc?.last_run?.started_at ? Date.parse(sc.last_run.started_at) : NaN;
-        if (mounted && !Number.isNaN(ts)) setScrapeAt(ts);
+        const cities = await fetchCities();
+        if (mounted) setServedCities(cities.length);
       } catch {
-        /* sem status do scraper */
+        /* sem lista de cidades -> usa fallback */
       }
     })();
     return () => {
       mounted = false;
     };
-  }, []);
-
-  useEffect(() => {
-    const i = setInterval(() => setNowTick(Date.now()), 30000);
-    return () => clearInterval(i);
   }, []);
 
   useEffect(() => {
@@ -248,23 +239,14 @@ export default function LandingPage() {
       t("landing.waMsg").replace("{name}", name).replace("{cat}", cat).replace("{addr}", addr);
     const aboutJobs = (n: number, ticket: string) =>
       t("landing.aboutJobs").replace("{n}", String(n)).replace("{ticket}", ticket);
-    const timeAgoLabel = () => {
-      if (!scrapeAt) return t("landing.agoLittle");
-      const minutes = Math.max(1, Math.floor((nowTick - scrapeAt) / 60000));
-      if (minutes < 60) return t("landing.agoMin").replace("{n}", String(minutes));
-      const hours = Math.floor(minutes / 60);
-      if (hours === 1) return t("landing.agoHour");
-      if (hours < 24) return t("landing.agoHours").replace("{n}", String(hours));
-      return t("landing.agoLittle");
-    };
 
-    return { categories, tradesLabel, signals, problems, comparisons, quotes, planFeatures, neverItems, faqs, templates, trust, nav: navPairs, waMsg, aboutJobs, timeAgoLabel };
-  }, [lang, t, nowTick, scrapeAt]);
+    return { categories, tradesLabel, signals, problems, comparisons, quotes, planFeatures, neverItems, faqs, templates, trust, nav: navPairs, waMsg, aboutJobs };
+  }, [lang, t]);
 
   // ------------------------------------------------ derivados
   const leadsBank = stats?.total_leads ?? stats?.total ?? 0;
   const withOwner = stats?.leads_with_owner ?? stats?.with_owner ?? stats?.contacted ?? 0;
-  const citiesCount = stats?.cities?.length || scraper?.last_run?.cities_covered || CITIES.length;
+  const citiesCount = servedCities || stats?.cities?.length || CITIES.length;
 
   const fmtTimer = (s: number) =>
     `${Math.floor(s / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;
@@ -365,7 +347,7 @@ export default function LandingPage() {
             </div>
             <p className="mt-8 flex items-center justify-center gap-2 text-sm font-medium text-[#0a8f65]">
               <span className="blink-dot" /><span className="blink-dot blink-dot-delay" /><span className="blink-dot blink-dot-delay-2" />
-              {t("landing.updated")} {L.timeAgoLabel()}
+              {t("landing.updated")} {t("landing.agoLittle")}
             </p>
           </div>
         </div>
