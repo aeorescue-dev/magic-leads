@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
-import { Navbar } from "@/components/Navbar";
-import { Footer } from "@/components/Footer";
+import { ShellChrome } from "@/components/ShellChrome";
 import { LanguageProvider } from "@/lib/i18n";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
@@ -35,11 +34,10 @@ export default function RootLayout({
       <body className="min-h-screen bg-background text-foreground antialiased">
         <LanguageProvider>
           <ServiceWorkerRegistration />
-          <Navbar />
+          <ShellChrome />
           <main className="min-h-screen">
             <ErrorBoundary>{children}</ErrorBoundary>
           </main>
-          <Footer />
         </LanguageProvider>
       </body>
     </html>

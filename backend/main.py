@@ -136,21 +136,18 @@ def _to_lead_response(lead: dict) -> LeadResponse:
 
 
 # ------------------------------------------------------------------
-# Filtro de lixo urbano (saneamento, lixo, pragas, parking, sinais,
-# tráfego, TPW). Usado pelas rotas de feed ao vivo para manter apenas
-# oportunidades REAIS de reforma (Telhado, Encanamento, Pintura,
-# Estrutura, Mato Alto).
+# Ruído urbano NÃO-serviço (não corresponde aos 16 ofícios da plataforma):
+# estacionamento, tráfego/sinalização, veículos abandonados, TPW, testes.
+# Não lista mais os ofícios (telhado, encanamento, pintura, pragas, lixo,
+# esgoto etc.) — esses agora são oportunidades qualificadas.
 # ------------------------------------------------------------------
 _JUNK_TERMS = [
-    "unsanitary", "dirty condition", "sanitation", "garbage", "trash",
-    "litter", "clean sweep", "street spillage", "debris",
-    "parking enforcement", "needle", "rodent", "pest ", "pests",
-    "bed bug", "mice", "pigeon", "sign repair", "missing sign",
-    "traffic signal", "general traffic", "abandoned vehicle",
-    "abandoned bicycle", "abandoned bike", "debug test", "test issue",
-    "contractors complaint", "fair housing", "squalid", "illegal auto",
-    "bike rack", "boston bikes", "work w/out permit",
-    "working beyond hours", "recycling", "debris at curb",
+    "parking enforcement", "traffic signal", "general traffic", "signal",
+    "sign repair", "missing sign", "bike rack", "boston bikes",
+    "abandoned vehicle", "abandoned bicycle", "abandoned bike", "illegal auto",
+    "dead animal", "hydrant", "towing", "tpw", "transportation",
+    "debug test", "test issue", "contractors complaint", "fair housing",
+    "needle", "work w/out permit", "working beyond hours",
 ]
 
 _RICH_COLS = ["issue_description", "descriptor", "case_title",
@@ -168,6 +165,52 @@ def _junk_where(alias: str = "") -> str:
 
 def _not_junk_where(alias: str = "") -> str:
     return f"NOT {_junk_where(alias)}"
+
+
+# As 16 categorias de ofícios da plataforma.
+_TRADE_CATEGORIES = (
+    "Roof", "Structure", "Plumbing", "Grass", "Paint", "Permit_Rejected",
+    "Heating", "Electrical", "Elevator", "Gas", "Rodent", "Mold", "Lead",
+    "Unsanitary", "Door_Window", "Debris",
+)
+
+# Status "chamado aberto / em andamento" (gatilho preditivo).
+_OPEN_STATUSES = (
+    "open", "new", "in progress", "in_progress", "assigned", "active",
+    "approved", "issued", "pending", "acknowledged", "referred", "scheduled",
+    "investigation", "awaiting", "awaiting assignment",
+)
+
+
+def _address_where(alias: str = "") -> str:
+    prefix = f"{alias}." if alias else ""
+    return f"TRIM({prefix}address) IS NOT NULL AND LENGTH(TRIM({prefix}address)) > 8"
+
+
+def _category_where(alias: str = "") -> str:
+    prefix = f"{alias}." if alias else ""
+    values = ", ".join(f"'{c}'" for c in _TRADE_CATEGORIES)
+    return f"{prefix}issue_category IN ({values})"
+
+
+def _trigger_where(alias: str = "") -> str:
+    """Obrigação legal (violação/multa/permisção) OU chamado 311 aberto/em andamento."""
+    prefix = f"{alias}." if alias else ""
+    statuses = ", ".join(f"'{s}'" for s in _OPEN_STATUSES)
+    return (
+        f"(LOWER({prefix}case_status) IN ({statuses}) "
+        f"OR {prefix}source_type IN ('permit', 'dob_violation', 'tax_delinquency'))"
+    )
+
+
+def _qualified_where(alias: str = "") -> str:
+    parts = [
+        _address_where(alias),
+        _category_where(alias),
+        _trigger_where(alias),
+        _not_junk_where(alias),
+    ]
+    return " AND ".join(parts)
 
 
 app = FastAPI(
@@ -356,8 +399,8 @@ async def search_leads(q: str = "", per_page: int = 50, user: Optional[dict] = D
 # Leads recentes de todas as cidades (para prévia ao vivo na home)
 @app.get("/api/leads/recent", response_model=LeadsListResponse)
 async def recent_leads(limit: int = 12, user: Optional[dict] = Depends(_get_optional_user)):
-    """Retorna os leads RECENTES e VÁLIDOS (sem lixo urbano), de todas as
-    cidades/estados. Filtro feito em SQL para nunca zerar a lista."""
+    """Retorna os leads RECENTES e QUALIFICADOS (endereço + 16 ofícios + gatilho
+    preditivo), de todas as cidades/estados. Filtro feito em SQL para nunca zerar a lista."""
     try:
         from backend.services import db as dbmod
         conn = dbmod.get_connection()
@@ -365,7 +408,7 @@ async def recent_leads(limit: int = 12, user: Optional[dict] = Depends(_get_opti
             rows = conn.execute(
                 f"""
                 SELECT * FROM leads
-                WHERE {_not_junk_where()}
+                WHERE {_qualified_where()}
                 ORDER BY date_reported DESC, id DESC
                 LIMIT ?
                 """,
@@ -393,10 +436,11 @@ async def recent_leads(limit: int = 12, user: Optional[dict] = Depends(_get_opti
 async def leads_today(limit: int = 60, page: int = 1, city: str = None, type: str = None, include_incomplete: bool = False, user: Optional[dict] = Depends(_get_optional_user)):
     """Retorna demandas dos últimos 7 dias.
 
-    REGRA FIXA por defecto: apenas leads com dados ESSENCIAIS (department,
-    case_status, descriptor e neighborhood) e sem lixo urbano.
-    O campo resolution_description NÃO é exigido (não existe no dataset NYC).
-    include_incomplete=true libera leads sem os dados essenciais.
+    REGRA FIXA por default: apenas leads QUALIFICADOS (endereço + 16 ofícios +
+    gatilho preditivo: obrigação legal OU chamado aberto/em andamento).
+    Não exige mais department/descriptor/neighborhood (campos que descartavam
+    chamados válidos dos 16 ofícios).
+    include_incomplete=true libera os leads fora desse critério.
     """
     try:
         from backend.services import db as dbmod
@@ -415,10 +459,7 @@ async def leads_today(limit: int = 60, page: int = 1, city: str = None, type: st
                 sql += " AND source_type = ?"
                 params.append(type)
             if not include_incomplete:
-                sql += """
-                  AND department IS NOT NULL AND TRIM(department) != ''
-                  AND case_status IS NOT NULL AND TRIM(case_status) != ''
-                """
+                sql += f" AND {_qualified_where()}"
             
             # Conta total para paginação
             count_sql = sql.replace("SELECT *", "SELECT COUNT(*) as total")
@@ -559,9 +600,9 @@ async def feed_stats(city: str = None):
 async def lead_services(limit: int = 50):
     """Agrupa os serviços (descriptors) por categoria de interesse.
 
-    REGRA FIXA: apenas leads com dados COMPLETOS (department, case_status,
-    descriptor, resolution_description, neighborhood preenchidos) e status
-    ABERTO (não encerrado/concluído). Nunca mostrar leads incompletos.
+    REGRA FIXA: apenas leads QUALIFICADOS (endereço + 16 ofícios + gatilho
+    preditivo) e status ABERTO (não encerrado/concluído). Nunca mostrar leads
+    não-qualificados.
     """
     try:
         from backend.services import db as dbmod
@@ -575,7 +616,7 @@ async def lead_services(limit: int = 50):
                 FROM leads
                 WHERE COALESCE(NULLIF(TRIM(descriptor), ''), NULLIF(TRIM(case_title), ''), NULLIF(TRIM(issue_description), '')) != ''
                   AND LOWER(COALESCE(case_status, '')) NOT IN ('closed', 'resolved', 'solved', 'archived', 'duplicated')
-                  AND {_not_junk_where()}
+                  AND {_qualified_where()}
                 GROUP BY issue_category, service
                 HAVING service IS NOT NULL AND service != ''
                 ORDER BY issue_category ASC, cnt DESC

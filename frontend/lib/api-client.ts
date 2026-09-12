@@ -3,7 +3,7 @@
 const API_URL = (
   (typeof window !== "undefined" && (window as any).__NEXT_PUBLIC_API_URL) ||
   process.env.NEXT_PUBLIC_API_URL ||
-  ""
+  "https://magic-leads-production.up.railway.app"
 ).replace(/\/$/, "");
 
 // ------------------------------------------------------------------
@@ -111,6 +111,7 @@ export interface LeadStats {
   by_category: Record<string, number>;
   total_leads?: number;
   leads_with_owner?: number;
+  with_owner?: number;
   cities?: { city: string; count: number }[];
 }
 

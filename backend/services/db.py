@@ -10,24 +10,74 @@ from .phone_lookup import phone_lookup_service, PhoneResult
 
 
 def _not_junk_where(alias: str = "") -> str:
-    """Filtro para excluir lixo urbano (saneamento, lixo, pragas, parking, tráfego, TPW).
-    Mantém apenas oportunidades REAIS de reforma (Telhado, Encanamento, Pintura, Estrutura, Mato Alto)."""
+    """Filtro de não-serviço: mantém apenas ruído urbano que NÃO corresponde aos 16 ofícios
+    da plataforma (estacionamento, tráfego/sinalização, veículos abandonados, TPW)."""
     prefix = f"{alias}." if alias else ""
     junk_terms = [
-        "sanitation", "garbage", "trash", "refuse", "litter", "debris", "dumping",
-        "rodent", "rat", "mouse", "pest", "vermin", "roach", "insect",
-        "parking", "traffic", "signal", "sign", "street light", "pothole",
-        "sidewalk", "curb", "graffiti", "noise", "animal", "dog", "cat",
-        "dead animal", "abandoned vehicle", "towing", "tpw", "transportation",
-        "water leak", "hydrant", "sewer backup", "catch basin", "storm drain",
-        "illegal dumping", "bulk item", "recycling", "organics", "yard waste"
+        "parking enforcement", "traffic signal", "general traffic", "signal",
+        "sign repair", "missing sign", "bike rack", "boston bikes",
+        "abandoned vehicle", "abandoned bicycle", "abandoned bike", "illegal auto",
+        "dead animal", "hydrant", "towing", "tpw", "transportation",
+        "debug test", "test issue", "contractors complaint", "fair housing",
+        "needle", "work w/out permit", "working beyond hours",
     ]
     conditions = []
     for term in junk_terms:
-        conditions.append(f"LOWER({prefix}issue_category) NOT LIKE '%{term}%'")
-        conditions.append(f"LOWER({prefix}issue_description) NOT LIKE '%{term}%'")
-        conditions.append(f"LOWER({prefix}descriptor) NOT LIKE '%{term}%'")
+        conditions.append(f"LOWER(COALESCE({prefix}issue_category, '')) NOT LIKE '%{term}%'")
+        conditions.append(f"LOWER(COALESCE({prefix}issue_description, '')) NOT LIKE '%{term}%'")
+        conditions.append(f"LOWER(COALESCE({prefix}descriptor, '')) NOT LIKE '%{term}%'")
     return " AND ".join(conditions)
+
+
+# As 16 categorias de ofícios da plataforma (modelo de negócio).
+_TRADE_CATEGORIES = (
+    "Roof", "Structure", "Plumbing", "Grass", "Paint", "Permit_Rejected",
+    "Heating", "Electrical", "Elevator", "Gas", "Rodent", "Mold", "Lead",
+    "Unsanitary", "Door_Window", "Debris",
+)
+
+# Status considerados "chamado aberto / em andamento" (gatilho preditivo).
+_OPEN_STATUSES = (
+    "open", "new", "in progress", "in_progress", "assigned", "active",
+    "approved", "issued", "pending", "acknowledged", "referred", "scheduled",
+    "investigation", "awaiting", "awaiting assignment",
+)
+
+
+def _address_where(alias: str = "") -> str:
+    """Endereço real presente (exclui só coordenadas/curtos)."""
+    prefix = f"{alias}." if alias else ""
+    return f"TRIM({prefix}address) IS NOT NULL AND LENGTH(TRIM({prefix}address)) > 8"
+
+
+def _category_where(alias: str = "") -> str:
+    """Lead mapeado para um dos 16 ofícios."""
+    prefix = f"{alias}." if alias else ""
+    values = ", ".join(f"'{c}'" for c in _TRADE_CATEGORIES)
+    return f"{prefix}issue_category IN ({values})"
+
+
+def _trigger_where(alias: str = "") -> str:
+    """Gatilho preditivo: obrigação legal (violação/multa/permisção) OU chamado 311
+    aberto/em andamento (intenção direta de resolução)."""
+    prefix = f"{alias}." if alias else ""
+    statuses = ", ".join(f"'{s}'" for s in _OPEN_STATUSES)
+    return (
+        f"(LOWER({prefix}case_status) IN ({statuses}) "
+        f"OR {prefix}source_type IN ('permit', 'dob_violation', 'tax_delinquency'))"
+    )
+
+
+def _qualified_where(alias: str = "") -> str:
+    """Lead qualificado: [Endereço + Categoria dos 16 Ofícios + Gatilho Preditivo],
+    sem exigir department/descriptor/neighborhood."""
+    parts = [
+        _address_where(alias),
+        _category_where(alias),
+        _trigger_where(alias),
+        _not_junk_where(alias),
+    ]
+    return " AND ".join(parts)
 
 # Banco de dados SQLite: arquivo versionado no repo (leitura pela API / escrita pelo scraper).
 # Para MVP single-tenant sem custo. Em produção multi-tenant, migrar para Postgres/Supabase.
@@ -912,17 +962,14 @@ class DatabaseService:
             conn.close()
 
     def get_cities_with_counts_filtered(self) -> List[dict]:
-        """Retorna cidades com contagem de leads válidos (sem lixo, com dados essenciais)."""
+        """Retorna cidades com contagem de leads QUALIFICADOS
+        (endereço + 16 ofícios + gatilho preditivo)."""
         conn = get_connection()
         try:
             rows = conn.execute(
                 f"""
                 SELECT city, COUNT(*) AS count FROM leads
-                WHERE {_not_junk_where()}
-                  AND department IS NOT NULL AND TRIM(department) != ''
-                  AND case_status IS NOT NULL AND TRIM(case_status) != ''
-                  AND descriptor IS NOT NULL AND TRIM(descriptor) != ''
-                  AND neighborhood IS NOT NULL AND TRIM(neighborhood) != ''
+                WHERE {_qualified_where()}
                 GROUP BY city ORDER BY count DESC
                 """
             ).fetchall()
@@ -941,7 +988,7 @@ class DatabaseService:
                 f"""
                 SELECT COUNT(*) AS c FROM leads
                 WHERE issue_category IN ({placeholders})
-                  AND {_not_junk_where()}
+                  AND {_qualified_where()}
                 """,
                 categories,
             ).fetchone()
@@ -961,18 +1008,15 @@ class DatabaseService:
             conn.close()
 
     def count_leads_last_7d_filtered(self, city: Optional[str] = None) -> int:
-        """Conta leads dos últimos 7 dias com filtros de qualidade."""
+        """Conta leads qualificados (endereço + 16 ofícios + gatilho) dos últimos 7 dias
+        reportados."""
         conn = get_connection()
         try:
             sql = f"""
                 SELECT COUNT(*) AS c FROM leads
                 WHERE date_reported IS NOT NULL
                   AND date(date_reported) >= date('now', '-7 days')
-                  AND {_not_junk_where()}
-                  AND department IS NOT NULL AND TRIM(department) != ''
-                  AND case_status IS NOT NULL AND TRIM(case_status) != ''
-                  AND descriptor IS NOT NULL AND TRIM(descriptor) != ''
-                  AND neighborhood IS NOT NULL AND TRIM(neighborhood) != ''
+                  AND {_qualified_where()}
             """
             params: list = []
             if city:
@@ -2176,11 +2220,10 @@ class DatabaseService:
         try:
             # Base query com filtro de 7 dias em created_at (tempo real do sistema)
             # date_reported mantido apenas como validação secundária
-            base_where = """
+            base_where = f"""
                 WHERE created_at IS NOT NULL
                   AND datetime(created_at) >= datetime('now', '-7 days')
-                  AND department IS NOT NULL AND TRIM(department) != ''
-                  AND case_status IS NOT NULL AND TRIM(case_status) != ''
+                  AND {_qualified_where()}
             """
             params = []
             
@@ -2188,7 +2231,7 @@ class DatabaseService:
             if interest_categories:
                 # Mapear chaves do frontend para valores do banco
                 cat_map = {
-                    "telhado": "Roof", "encanamento": "Plumbing", "mato": "Grass",
+                    "telhado": "Roof", "estrutura": "Structure", "encanamento": "Plumbing", "mato": "Grass",
                     "pintura": "Paint", "obras": "Permit_Rejected", "heating": "Heating",
                     "electrical": "Electrical", "elevator": "Elevator", "gas": "Gas",
                     "rodent": "Rodent", "mold": "Mold", "lead": "Lead",
