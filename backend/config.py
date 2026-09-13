@@ -47,7 +47,8 @@ class Settings(BaseSettings):
         "Roof", "Grass", "Overgrown", "Weed", "Vegetation", "Blight",
         "Plumbing", "Paint", "Structure", "Heat", "Hot Water", "Unsanitary",
         "Leak", "Door", "Window", "Electric", "Elevator", "Gas", "Rodent",
-        "Pest", "Garbage", "Debris", "Mold", "Lead"
+        "Pest", "Garbage", "Debris", "Mold", "Lead",
+        "Code", "Permit", "Animal", "Graffiti"
     ]
 
     # Enriquecimento

@@ -1,5 +1,6 @@
 import httpx
 import asyncio
+import re
 from datetime import datetime, timedelta
 from typing import List
 from ..models.schemas import RawLead311, IssueCategory, UrgencyLevel
@@ -449,6 +450,16 @@ class Socrata311Scraper:
             if not addr and lat and lng:
                 addr = f"{lat},{lng}"
 
+            full_addr = ""
+            if addr:
+                addr_up = addr.upper()
+                if re.search(r"\b[A-Z]{2}\b[, ]*\d{5}", addr_up) or re.search(r",\s*[A-Z]{2}\s*$", addr_up):
+                    full_addr = addr
+                else:
+                    full_addr = f"{addr}, {city}, {state}"
+            else:
+                full_addr = f"{city}, {state}"
+
             hist = cols.get("hist") or {}
 
             def _val(key, fallback_key=None):
@@ -466,7 +477,7 @@ class Socrata311Scraper:
 
             return RawLead311(
                 external_id=ext,
-                address=f"{addr}, {city}, {state}" if addr else f"{city}, {state}",
+                address=full_addr,
                 city=city,
                 state=state,
                 zip_code=str(zipc) if zipc else None,

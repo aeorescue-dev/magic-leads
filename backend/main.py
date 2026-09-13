@@ -931,7 +931,7 @@ async def _scrape_worker(run_id: str, max_cities: int = 8):
             {"domain": "data.cityofnewyork.us", "dataset": "erm2-nwe9", "city": "NYC", "state": "NY", "hours": 96, "fields": ["unique_key", "created_date", "complaint_type", "incident_address", "incident_zip", "latitude", "longitude"]},
             {"domain": "data.cityofnewyork.us", "dataset": "wvxf-dwi5", "city": "NYC", "state": "NY", "hours": 120, "fields": ["violation_id", "inspection_date", "building_id", "address", "city", "state", "zip", "latitude", "longitude", "violation_type", "violation_status", "disposition_date"]},  # HPD Violations
             {"domain": "data.cityofchicago.org", "dataset": "v6vf-nfxy", "city": "Chicago", "state": "IL", "hours": 48, "fields": ["service_request_number", "created_date", "sr_type", "street_address", "zip_code", "latitude", "longitude"]},
-            {"domain": "www.dallasopendata.com", "dataset": "d7e7-envw", "city": "Dallas", "state": "TX", "hours": 48, "fields": ["service_request_id", "created_date", "service_type", "address", "zip_code", "latitude", "longitude"]},
+            {"domain": "www.dallasopendata.com", "dataset": "d7e7-envw", "city": "Dallas", "state": "TX", "hours": 48, "fields": ["service_request_number", "created_date", "service_request_type", "address", "lat_location"]},
         ]
 
         tasks_311 = []
