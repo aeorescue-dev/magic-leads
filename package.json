@@ -1,0 +1,9 @@
+{
+  "name": "garimpador-leads",
+  "private": true,
+  "scripts": {
+    "build": "cd frontend && npm run build",
+    "dev": "cd frontend && npm run dev",
+    "install": "cd frontend && npm install"
+  }
+}
