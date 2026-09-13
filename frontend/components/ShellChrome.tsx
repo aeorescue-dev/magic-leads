@@ -10,7 +10,7 @@ export function ShellChrome() {
   const isDashboard = pathname.startsWith("/dashboard");
   return (
     <>
-      {!isLanding && <Navbar />}
+      {!isLanding && !isDashboard && <Navbar />}
       {!isLanding && !isDashboard && <Footer />}
     </>
   );
