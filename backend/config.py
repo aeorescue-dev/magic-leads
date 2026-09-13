@@ -50,6 +50,13 @@ class Settings(BaseSettings):
         "Pest", "Garbage", "Debris", "Mold", "Lead"
     ]
 
+    # Enriquecimento
+    ENRICHMENT_DAILY_BUDGET: int = 300  # Máximo de lookups de owner por dia
+
+    # Scheduler interno (independente do GH Actions — redundância no Railway)
+    SCRAPER_SELF_SCHEDULED: bool = True   # True = scheduler interno roda a cada N horas
+    SCRAPER_INTERVAL_HOURS: int = 6       # Intervalo em horas entre varreduras agendadas
+
     # Frontend
     FRONTEND_URL: str = "http://localhost:3000"
     ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:3005,https://magicleads-oficial.vercel.app,https://magic-leads-frontend-final.vercel.app"

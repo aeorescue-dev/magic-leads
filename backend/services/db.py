@@ -324,6 +324,21 @@ CREATE INDEX IF NOT EXISTS idx_events_lead ON lead_events (lead_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications (created_at);
 CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications (read);
 CREATE INDEX IF NOT EXISTS idx_interest_user ON user_interests (user_id);
+
+CREATE TABLE IF NOT EXISTS scraper_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id TEXT NOT NULL,
+  trigger TEXT DEFAULT 'manual',
+  started_at TEXT,
+  finished_at TEXT,
+  status TEXT DEFAULT 'running',
+  inserted INTEGER DEFAULT 0,
+  total_raw INTEGER DEFAULT 0,
+  cities_covered INTEGER DEFAULT 0,
+  error TEXT,
+  note TEXT,
+  UNIQUE(run_id)
+);
 """
 
 
@@ -567,11 +582,11 @@ class DatabaseService:
                   issue_category=excluded.issue_category,
                   issue_description=excluded.issue_description,
                   urgency_level=excluded.urgency_level,
-                  owner_name=excluded.owner_name,
-                  owner_phone=excluded.owner_phone,
-                  owner_email=excluded.owner_email,
-                  owner_status=excluded.owner_status,
-                  mailing_address=excluded.mailing_address,
+                  owner_name=CASE WHEN excluded.owner_name IS NOT NULL AND excluded.owner_name != '' THEN excluded.owner_name ELSE leads.owner_name END,
+                  owner_phone=CASE WHEN excluded.owner_phone IS NOT NULL AND excluded.owner_phone != '' THEN excluded.owner_phone ELSE leads.owner_phone END,
+                  owner_email=CASE WHEN excluded.owner_email IS NOT NULL AND excluded.owner_email != '' THEN excluded.owner_email ELSE leads.owner_email END,
+                  owner_status=CASE WHEN excluded.owner_status IS NOT NULL AND excluded.owner_status != '' THEN excluded.owner_status ELSE leads.owner_status END,
+                  mailing_address=CASE WHEN excluded.mailing_address IS NOT NULL AND excluded.mailing_address != '' THEN excluded.mailing_address ELSE leads.mailing_address END,
                   date_reported=excluded.date_reported,
                   image_url=excluded.image_url,
                   source_url=excluded.source_url,
@@ -2218,11 +2233,11 @@ class DatabaseService:
         """
         conn = get_connection()
         try:
-            # Base query com filtro de 7 dias em created_at (tempo real do sistema)
+            # Base query com filtro de 7 dias em updated_at (cada varredura toca os leads)
             # date_reported mantido apenas como validação secundária
             base_where = f"""
-                WHERE created_at IS NOT NULL
-                  AND datetime(created_at) >= datetime('now', '-7 days')
+                WHERE updated_at IS NOT NULL
+                  AND datetime(updated_at) >= datetime('now', '-7 days')
                   AND {_qualified_where()}
             """
             params = []
@@ -2251,10 +2266,11 @@ class DatabaseService:
             # Última Varredura do Robô (baseado em leads realmente inseridos recentemente)
             # Conta leads criados nas últimas 2h (janela da varredura periódica do robô)
             # e agrupa por cidade para mostrar as fontes ativas.
-            recent_cutoff = datetime.now() - timedelta(hours=2)
+            recent_cutoff = datetime.utcnow() - timedelta(hours=2)
+            recent_cutoff_str = recent_cutoff.strftime("%Y-%m-%d %H:%M:%S")
             recent_leads = conn.execute(
-                f"SELECT created_at, city FROM leads {base_where} AND created_at >= ? ORDER BY created_at DESC LIMIT 100",
-                [recent_cutoff.isoformat()]
+                f"SELECT updated_at, city FROM leads {base_where} AND updated_at >= ? ORDER BY updated_at DESC LIMIT 100",
+                [recent_cutoff_str]
             ).fetchall()
             
             if recent_leads:
@@ -2264,7 +2280,7 @@ class DatabaseService:
                 cities = list(set([r["city"] for r in recent_leads if r["city"]]))
                 cities_str = ", ".join(cities[:3]) + ("..." if len(cities) > 3 else "")
                 # Tempo desde a varredura mais recente
-                most_recent = datetime.fromisoformat(recent_leads[0]["created_at"].replace("T", " ")) if hasattr(recent_leads[0]["created_at"], "replace") else recent_leads[0]["created_at"]
+                most_recent = datetime.fromisoformat(recent_leads[0]["updated_at"].replace("T", " ")) if hasattr(recent_leads[0]["updated_at"], "replace") else recent_leads[0]["updated_at"]
                 if isinstance(most_recent, str):
                     most_recent = datetime.strptime(most_recent, "%Y-%m-%d %H:%M:%S")
                 hours_ago = max(1, round((datetime.now() - most_recent).total_seconds() / 3600))
@@ -2272,7 +2288,7 @@ class DatabaseService:
             else:
                 # Fallback: usa a contagem 24h se não houver leads recentes
                 last_24h = conn.execute(
-                    f"SELECT COUNT(*) AS c FROM leads {base_where} AND created_at >= datetime('now', '-24 hours')",
+                    f"SELECT COUNT(*) AS c FROM leads {base_where} AND updated_at >= datetime('now', '-24 hours')",
                     params
                 ).fetchone()["c"]
                 last_scrape_info = f"{last_24h} novas oportunidades nas últimas 24h"
@@ -2323,8 +2339,61 @@ class DatabaseService:
             conn.close()
 
 
+    # ===== SCRAPER RUNS (persistidos p/ status sobreviver a redeploy) =====
+
+    def record_scrape_run(self, run: dict) -> None:
+        """Insere ou atualiza a linha do run na tabela scraper_runs."""
+        conn = get_connection()
+        try:
+            conn.execute(
+                """
+                INSERT INTO scraper_runs (run_id, trigger, started_at, finished_at, status, inserted, total_raw, cities_covered, error, note)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(run_id) DO UPDATE SET
+                  finished_at=excluded.finished_at,
+                  status=excluded.status,
+                  inserted=excluded.inserted,
+                  total_raw=excluded.total_raw,
+                  cities_covered=excluded.cities_covered,
+                  error=excluded.error,
+                  note=excluded.note
+                """,
+                (
+                    run.get("run_id", ""),
+                    run.get("trigger", "manual"),
+                    run.get("started_at"),
+                    run.get("finished_at"),
+                    run.get("status", "running"),
+                    run.get("inserted", 0),
+                    run.get("total_raw", 0),
+                    run.get("cities_covered", 0),
+                    run.get("error"),
+                    run.get("note"),
+                ),
+            )
+            conn.commit()
+        except Exception as e:
+            logger.error(f"Erro ao registrar run do scraper: {e}")
+        finally:
+            conn.close()
+
+    def get_last_scrape_run(self) -> Optional[dict]:
+        """Retorna o último run (concluído) persistido no banco."""
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT * FROM scraper_runs ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Erro ao ler último run do scraper: {e}")
+            return None
+        finally:
+            conn.close()
+
+
     # ===== SUBSCRIPTION / TRIAL HELPERS =====
-    
+
     def _parse_dt(self, value) -> Optional[datetime]:
         """Converte string de timestamp (com ou sem timezone) para datetime não-aware UTC."""
         if not value:
@@ -2870,6 +2939,12 @@ class AsyncDatabaseService:
 
     async def update_owner(self, lead_id: int, owner_name: Optional[str]) -> bool:
         return self._service.update_owner(lead_id, owner_name)
+
+    async def record_scrape_run(self, run: dict) -> None:
+        return self._service.record_scrape_run(run)
+
+    async def get_last_scrape_run(self) -> Optional[dict]:
+        return self._service.get_last_scrape_run()
 
     async def update_owner_phone(self, lead_id: int, owner_phone: Optional[str]) -> bool:
         return self._service.update_owner_phone(lead_id, owner_phone)

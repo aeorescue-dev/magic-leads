@@ -11,7 +11,9 @@ Por cidade, usa o dataset Socrata/CKAN que contém owner + endereço no mesmo re
 """
 import re
 import httpx
+from datetime import date
 from typing import Optional, Dict, Any, List
+from ..config import settings
 from ..utils.logger import logger
 
 CITY_DATASETS: Dict[str, Dict] = {
@@ -130,6 +132,29 @@ class OwnerEnrichment:
 
     def __init__(self):
         self._cache: Dict[str, Optional[Dict[str, Any]]] = {}
+        self._budget_date: Optional[date] = None
+        self._budget_used: int = 0
+
+    def _budget_available(self) -> bool:
+        """Reseta o contador diário quando vira o dia e checa a cota."""
+        today = date.today()
+        if self._budget_date != today:
+            self._budget_date = today
+            self._budget_used = 0
+        return self._budget_used < settings.ENRICHMENT_DAILY_BUDGET
+
+    def _consume_budget(self) -> None:
+        self._budget_used += 1
+
+    def budget_remaining(self) -> int:
+        self._budget_available()
+        return max(0, settings.ENRICHMENT_DAILY_BUDGET - self._budget_used)
+
+    def _headers(self) -> Dict[str, str]:
+        headers = {}
+        if settings.SOCRATA_APP_TOKEN:
+            headers["X-App-Token"] = settings.SOCRATA_APP_TOKEN
+        return headers
 
     def _config_for(self, city: str) -> Optional[Dict]:
         key = None
@@ -147,6 +172,11 @@ class OwnerEnrichment:
         cache_key = f"{city}:{address}"
         if cache_key in self._cache:
             return self._cache[cache_key]
+        if not self._budget_available():
+            logger.info(f"Enriquecimento: cota diária esgotada ({settings.ENRICHMENT_DAILY_BUDGET}/dia) — pulando {address}")
+            self._cache[cache_key] = None
+            return None
+        self._consume_budget()
         result = await self._lookup(address, cfg)
         self._cache[cache_key] = result
         return result
@@ -255,7 +285,7 @@ class OwnerEnrichment:
                         if cfg.get("order_dir"):
                             order = f"{order} {cfg['order_dir']}"
                         params["$order"] = order
-                    resp = await client.get(base, params=params)
+                    resp = await client.get(base, params=params, headers=self._headers())
                     if resp.status_code != 200:
                         continue
                     data = resp.json()
@@ -325,7 +355,7 @@ class OwnerEnrichment:
                     "limit": "10",
                     "fields": ",".join(fields),
                     "q": street_search,  # Full-text search
-                })
+                }, headers=self._headers())
                 if resp.status_code != 200:
                     return None
                 result = resp.json()

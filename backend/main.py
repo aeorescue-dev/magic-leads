@@ -5,6 +5,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 import asyncio
+import contextlib
 import httpx
 import os
 import uuid
@@ -912,6 +913,10 @@ async def scraper_status():
         if not r.get("running"):
             last = r
             break
+    if last is None:
+        persisted = await db_service.get_last_scrape_run()
+        if persisted:
+            last = persisted
     return {"active": bool(active), "running": active, "last_run": last}
 
 
@@ -1202,13 +1207,6 @@ async def _scrape_worker(run_id: str, max_cities: int = 8):
         inserted = 0
         newly_added: List[dict] = []
         for raw_lead in all_raw:
-            # Enriquecimento automático: busca o dono na ingestão (regra fixa)
-            try:
-                enrich_result = await owner_enrichment.enrich(raw_lead.address, raw_lead.city)
-                owner_name_val = (enrich_result or {}).get("owner_name")
-            except Exception:
-                owner_name_val = None
-
             enriched = EnrichedLead(
                 external_id=raw_lead.external_id,
                 source_type=SourceType(raw_lead.source_type) if raw_lead.source_type else SourceType.SERVICE_311,
@@ -1222,7 +1220,7 @@ async def _scrape_worker(run_id: str, max_cities: int = 8):
                 issue_category=raw_lead.issue_category,
                 issue_description=raw_lead.issue_description,
                 urgency_level=socrata_scraper._infer_urgency(raw_lead.issue_description),
-                owner_name=owner_name_val,
+                owner_name=None,
                 owner_phone=None,
                 owner_email=None,
                 owner_status=None,
@@ -1255,6 +1253,15 @@ async def _scrape_worker(run_id: str, max_cities: int = 8):
             if new_lead:
                 inserted += 1
                 newly_added.append(new_lead)
+                # Enriquecimento automático APENAS em leads estritamente novos
+                # (cota diária guarda na classe OwnerEnrichment)
+                try:
+                    enrich_result = await owner_enrichment.enrich(raw_lead.address, raw_lead.city)
+                    owner_name_val = (enrich_result or {}).get("owner_name")
+                    if owner_name_val:
+                        await db_service.update_owner(new_lead["id"], owner_name_val)
+                except Exception:
+                    pass
 
         if inserted > 0:
             # Fan-out por interesse: notifica usuários com a categoria marcada
@@ -1272,10 +1279,58 @@ async def _scrape_worker(run_id: str, max_cities: int = 8):
             note="311 multi-cidade via Socrata Discovery (nacional)",
             running=False, finished_at=datetime.utcnow().isoformat(),
         )
+        await db_service.record_scrape_run(state)
 
     except Exception as e:
         logger.error(f"Erro no scraper [run {run_id}]: {e}", exc_info=True)
         state.update(status="error", error=str(e), running=False, finished_at=datetime.utcnow().isoformat())
+        await db_service.record_scrape_run(state)
+
+
+# ------------------------------------------------------------------
+# Scheduler interno — robustez no Railway (independe do GH Actions).
+# Roda a varredura a cada SCRAPER_INTERVAL_HOURS horas, reutilizando
+# a mesma fila de runs (_scrape_runs) do endpoint manual.
+# ------------------------------------------------------------------
+def _scheduled_scrape(max_cities: int = 8):
+    for run in _scrape_runs.values():
+        if run.get("running"):
+            logger.info("Scheduler: run do scraper já ativo, pulando")
+            return
+    run_id = uuid.uuid4().hex[:12]
+    _scrape_runs[run_id] = {
+        "run_id": run_id, "running": True,
+        "started_at": datetime.utcnow().isoformat(),
+        "inserted": 0, "total_raw": 0, "status": "running", "error": None,
+        "trigger": "scheduler",
+    }
+    asyncio.create_task(_scrape_worker(run_id, max_cities))
+    logger.info(f"Scheduler: varredura disparada [run {run_id}]")
+
+
+@contextlib.asynccontextmanager
+async def _lifespan(app):
+    _scheduler_task = None
+    if settings.SCRAPER_SELF_SCHEDULED:
+        _scheduler_task = asyncio.create_task(_scheduler_loop())
+        logger.info(f"Scheduler interno ativo (a cada {settings.SCRAPER_INTERVAL_HOURS}h)")
+    yield
+    if _scheduler_task:
+        _scheduler_task.cancel()
+
+
+async def _scheduler_loop():
+    """Loop do scheduler interno: espera o intervalo e dispara a varredura."""
+    interval_seconds = max(300, settings.SCRAPER_INTERVAL_HOURS * 3600)
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            _scheduled_scrape(max_cities=8)
+        except Exception as e:
+            logger.error(f"Erro no scheduler interno: {e}", exc_info=True)
+
+
+app.router.lifespan_context = _lifespan
 
 
 # Lista o que o framework nacional descobriu (estados/mercados cobertos)
