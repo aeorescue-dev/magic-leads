@@ -1,0 +1,15 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npm run build",
+  "devCommand": "npm run dev",
+  "installCommand": "npm install",
+  "framework": "nextjs",
+  "regions": [
+    "iad1"
+  ],
+  "env": {
+    "NEXT_PUBLIC_API_URL": "https://magic-leads-production.up.railway.app",
+    "NEXT_PUBLIC_VAPID_PUBLIC_KEY": "BCSKl7kvE2xi1h24S5ydBBTnox1RiCQs5RWQU8wDSR-2EsOn41XP1VJhPjawKoCszAxA7gtV2Ve8QXdbJatovvg",
+    "NEXT_PUBLIC_APP_URL": "https://magicleads-oficial.vercel.app"
+  }
+}
