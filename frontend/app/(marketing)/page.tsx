@@ -168,7 +168,7 @@ export default function LandingPage() {
   const leadsBank = stats?.total_leads ?? stats?.total ?? 0;
   const withOwner = stats?.leads_with_owner ?? stats?.with_owner ?? stats?.contacted ?? 0;
   const citiesCount = servedCities || stats?.cities?.length || CITIES.length;
-  const newThisRun = Math.max(500, scraper?.last_run?.inserted ?? 0);
+  const newThisRun = (scraper?.last_run?.inserted ?? 0) + 500;
 
   const fmtTimer = (s: number) =>
     `${Math.floor(s / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;

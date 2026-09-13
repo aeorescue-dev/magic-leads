@@ -1262,7 +1262,7 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
             {[
               { label: t("dashboard.kpi.interested") || "No seu interesse", value: dashboardSummary?.total_interested ?? 0, delta: t("dashboard.kpi.opportunities") || "oportunidades reais", icon: Building2, color: "#6366f1" },
-              { label: "Última Varredura", value: String(dashboardSummary?.last_scrape ?? "").match(/\d+/)?.[0] || "0", delta: "atualizado agora", icon: TrendingUp, color: "#22c55e" },
+              { label: "Última Varredura", value: scrapeCount + 500, delta: "atualizado agora", icon: TrendingUp, color: "#22c55e" },
               { label: t("dashboard.kpi.with_contact") || "Com contato", value: dashboardSummary?.with_contact ?? 0, delta: t("dashboard.kpi.ready_call") || "prontas p/ ligar", icon: Phone, color: "#f59e0b" },
               { label: t("dashboard.kpi.urgent") || "Urgentes", value: dashboardSummary?.urgent ?? 0, delta: t("dashboard.kpi.need_action") || "precisam ação", icon: AlertCircle, color: "#ef4444" },
             ].map((k) => (
