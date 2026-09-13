@@ -2268,14 +2268,18 @@ class DatabaseService:
             # e agrupa por cidade para mostrar as fontes ativas.
             recent_cutoff = datetime.utcnow() - timedelta(hours=2)
             recent_cutoff_str = recent_cutoff.strftime("%Y-%m-%d %H:%M:%S")
+            # Contagem REAL de leads na janela da última varredura (sem LIMIT 100/estático)
+            recent_count = conn.execute(
+                f"SELECT COUNT(*) AS c FROM leads {base_where} AND updated_at >= ?",
+                params + [recent_cutoff_str]
+            ).fetchone()["c"]
+            # Amostra dos mais recentes (cidades/fontes e horário) — só para exibição
             recent_leads = conn.execute(
                 f"SELECT updated_at, city FROM leads {base_where} AND updated_at >= ? ORDER BY updated_at DESC LIMIT 100",
-                [recent_cutoff_str]
+                params + [recent_cutoff_str]
             ).fetchall()
             
-            if recent_leads:
-                # Conta total de leads recentes (únicos por endereço, como o scraper faz com dedupe)
-                recent_count = len(recent_leads)
+            if recent_count > 0 and recent_leads:
                 # Obtém as cidades mais recentes para mostrar as fontes
                 cities = list(set([r["city"] for r in recent_leads if r["city"]]))
                 cities_str = ", ".join(cities[:3]) + ("..." if len(cities) > 3 else "")

@@ -19,23 +19,50 @@ jobs:
     steps:
       - name: Disparar scraper na producao (Railway)
         run: |
-          start=$(curl -sS -m 30 -X POST "https://magic-leads-production.up.railway.app/api/scraper/run?max_cities=8")
-          echo "start: $start"
+          # Endpoint responde 202 assincrono: {"status":"started","run_id":"..."}
+          # (ou 409 {"status":"already_running",...} se já houver um run ativo)
+          code=$(curl -sS -o /tmp/start.json -w "%{http_code}" -m 30 -X POST "https://magic-leads-production.up.railway.app/api/scraper/run?max_cities=8")
+          echo "http_code: $code"
+          echo "start: $(cat /tmp/start.json)"
+
+          start=$(cat /tmp/start.json)
+          status=$(echo "$start" | jq -r '.status // empty')
           run_id=$(echo "$start" | jq -r '.run_id // empty')
+
+          # Aceita "started" (criado) e "already_running" (reentrante) sem falhar:
+          if [ "$code" = "409" ] || [ "$status" = "already_running" ]; then
+            echo "Scraper ja em execucao (run reentrante) — seguindo ciclo existente."
+          elif [ "$status" = "started" ]; then
+            echo "Run disparado: ${run_id:-<sem run_id>}"
+          else
+            echo "Resposta inesperada do /api/scraper/run — continuando para checar /api/scraper/status"
+            run_id=""
+          fi
+
+          # Se nao tivemos run_id, deriva do run ativo no status
           if [ -z "$run_id" ]; then
             st=$(curl -sS -m 30 "https://magic-leads-production.up.railway.app/api/scraper/status")
             echo "status: $st"
             run_id=$(echo "$st" | jq -r '.running | keys[0] // empty')
+            echo "run_id derivado: ${run_id:-<nenhum ativo>}"
           fi
-          echo "run_id: ${run_id:-<nenhum>}"
+
+          # Poll em /api/scraper/status ate o ciclo terminar (ativa fica false)
           for i in $(seq 1 55); do
             sleep 60
             st=$(curl -sS -m 30 "https://magic-leads-production.up.railway.app/api/scraper/status")
             if [ "$(echo "$st" | jq -r '.active')" = "false" ]; then
               echo "Scraper concluido:"
               echo "$st"
+              lstatus=$(echo "$st" | jq -r '.last_run.status // "unknown"')
+              if [ "$lstatus" = "success" ]; then
+                echo "Status final do run: success"
+              else
+                echo "Aviso: status final do run = $lstatus (inspecionar logs)"
+              fi
               exit 0
             fi
+            echo "Aguardando conclusao (iteracao $i/55)..."
           done
           echo "Ainda ativo apos 55min — run continua em background (job sai sem erro)"
           exit 0
