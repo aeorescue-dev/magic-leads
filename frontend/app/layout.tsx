@@ -1,13 +1,8 @@
 import type { Metadata } from "next";
-import { usePathname } from "next/navigation";
-import { Navbar } from "@/components/Navbar";
-import { Footer } from "@/components/Footer";
 import { LanguageProvider } from "@/lib/i18n";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
 import "./globals.css";
-
-export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   title: "Magic Leads - Obras reais com dono identificado",
@@ -26,9 +21,6 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const pathname = usePathname();
-  const isDashboardRoute = pathname?.startsWith('/dashboard');
-
   return (
     <html lang="pt-BR">
       <head>
@@ -39,11 +31,7 @@ export default function RootLayout({
       <body className="min-h-screen bg-background text-foreground antialiased">
         <LanguageProvider>
           <ServiceWorkerRegistration />
-          {!isDashboardRoute && <Navbar />}
-          <main className="min-h-screen">
-            <ErrorBoundary>{children}</ErrorBoundary>
-          </main>
-          {!isDashboardRoute && <Footer />}
+          <ErrorBoundary>{children}</ErrorBoundary>
         </LanguageProvider>
       </body>
     </html>
