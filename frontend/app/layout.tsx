@@ -1,11 +1,8 @@
 import type { Metadata } from "next";
-import { ShellChrome } from "@/components/ShellChrome";
 import { LanguageProvider } from "@/lib/i18n";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
 import "./globals.css";
-
-export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   title: "Magic Leads - Obras reais com dono identificado",
@@ -34,10 +31,7 @@ export default function RootLayout({
       <body className="min-h-screen bg-background text-foreground antialiased">
         <LanguageProvider>
           <ServiceWorkerRegistration />
-          <ShellChrome />
-          <main className="min-h-screen">
-            <ErrorBoundary>{children}</ErrorBoundary>
-          </main>
+          <ErrorBoundary>{children}</ErrorBoundary>
         </LanguageProvider>
       </body>
     </html>

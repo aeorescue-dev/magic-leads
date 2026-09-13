@@ -8,6 +8,7 @@ import asyncio
 import httpx
 import os
 import uuid
+import sqlite3
 from datetime import datetime, timedelta
 from typing import List, Optional
 
@@ -1470,6 +1471,111 @@ async def enrich_all_leads(request: Request, limit_per_city: int = 200):
         }
     except Exception as e:
         logger.error(f"Erro no enriquecimento completo: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
+
+
+# Reclassificação dos leads existentes para o novo modelo (16 ofícios + gatilhos preditivos)
+@app.post("/api/admin/requalify")
+async def admin_requalify_leads(request: Request):
+    """
+    Reclassifica todos os leads existentes no banco para o novo modelo:
+    - _infer_category aprimorado (16 ofícios, fallback Permit_Rejected para fontes legais)
+    - Retorna estatísticas antes/depois do filtro qualificado
+    """
+    try:
+        from backend.services import db as dbmod
+        from backend.scrapers.socrata_311 import socrata_scraper
+        
+        conn = dbmod.get_connection()
+        conn.row_factory = sqlite3.Row
+        
+        # 1. Estatísticas ANTES (filtro legado: essenciais + junk antigo)
+        old_junk_terms = [
+            "sanitation", "garbage", "trash", "refuse", "litter", "debris", "dumping",
+            "rodent", "rat", "mouse", "pest", "vermin", "roach", "insect",
+            "parking", "traffic", "signal", "sign", "street light", "pothole",
+            "sidewalk", "curb", "graffiti", "noise", "animal", "dog", "cat",
+            "dead animal", "abandoned vehicle", "towing", "tpw", "transportation",
+            "water leak", "hydrant", "sewer backup", "catch basin", "storm drain",
+            "illegal dumping", "bulk item", "recycling", "organics", "yard waste",
+        ]
+        
+        def old_qualified_where(prefix=""):
+            conds = [
+                f"{prefix}department IS NOT NULL AND TRIM({prefix}department) != ''",
+                f"{prefix}case_status IS NOT NULL AND TRIM({prefix}case_status) != ''",
+                f"{prefix}descriptor IS NOT NULL AND TRIM({prefix}descriptor) != ''",
+                f"{prefix}neighborhood IS NOT NULL AND TRIM({prefix}neighborhood) != ''",
+            ]
+            for t in old_junk_terms:
+                for col in (f"{prefix}issue_category", f"{prefix}issue_description", f"{prefix}descriptor"):
+                    conds.append(f"LOWER(COALESCE({col}, '')) NOT LIKE '%{t}%'")
+            return " AND ".join(conds)
+        
+        old_total = conn.execute(f"SELECT COUNT(*) FROM leads WHERE {old_qualified_where()}").fetchone()[0]
+        old_7d = conn.execute(f"SELECT COUNT(*) FROM leads WHERE date_reported IS NOT NULL AND date(date_reported)>=date('now','-7 days') AND {old_qualified_where()}").fetchone()[0]
+        old_24h = conn.execute(f"SELECT COUNT(*) FROM leads WHERE created_at>=datetime('now','-1 day') AND {old_qualified_where()}").fetchone()[0]
+        
+        # 2. Reclassificação
+        rows = conn.execute("SELECT id, issue_category, source_type, case_title, issue_description, descriptor FROM leads").fetchall()
+        changes = {}
+        kept = 0
+        
+        for r in rows:
+            text = (r["case_title"] or r["issue_description"] or r["descriptor"] or "") or ""
+            new_cat = socrata_scraper._infer_category(text, r["source_type"])
+            new_cat = new_cat.value if hasattr(new_cat, "value") else str(new_cat)
+            old = r["issue_category"]
+            if new_cat != old:
+                changes[f"{old}->{new_cat}"] = changes.get(f"{old}->{new_cat}", 0) + 1
+                conn.execute("UPDATE leads SET issue_category=? WHERE id=?", (new_cat, r["id"]))
+            else:
+                kept += 1
+        
+        conn.commit()
+        
+        # 3. Estatísticas DEPOIS (filtro qualificado novo)
+        from backend.services.db import _qualified_where
+        
+        new_total = conn.execute(f"SELECT COUNT(*) FROM leads WHERE {_qualified_where()}").fetchone()[0]
+        new_7d = conn.execute(f"SELECT COUNT(*) FROM leads WHERE date_reported IS NOT NULL AND date(date_reported)>=date('now','-7 days') AND {_qualified_where()}").fetchone()[0]
+        new_24h = conn.execute(f"SELECT COUNT(*) FROM leads WHERE created_at>=datetime('now','-1 day') AND {_qualified_where()}").fetchone()[0]
+        
+        # Por cidade (novo)
+        city_rows = conn.execute(f"SELECT city, COUNT(*) c FROM leads WHERE {_qualified_where()} GROUP BY city ORDER BY c DESC").fetchall()
+        by_city = {r["city"]: r["c"] for r in city_rows}
+        
+        # Por ofício (novo)
+        cat_rows = conn.execute(f"SELECT issue_category, COUNT(*) c FROM leads WHERE {_qualified_where()} GROUP BY issue_category ORDER BY c DESC").fetchall()
+        by_category = {r["issue_category"]: r["c"] for r in cat_rows}
+        
+        conn.close()
+        
+        return {
+            "status": "success",
+            "reclassified": sum(changes.values()),
+            "kept": kept,
+            "changes": changes,
+            "before": {
+                "total": old_total,
+                "last_7d": old_7d,
+                "last_24h": old_24h,
+            },
+            "after": {
+                "total": new_total,
+                "last_7d": new_7d,
+                "last_24h": new_24h,
+                "by_city": by_city,
+                "by_category": by_category,
+            },
+            "delta": {
+                "total": new_total - old_total,
+                "last_7d": new_7d - old_7d,
+                "last_24h": new_24h - old_24h,
+            },
+        }
+    except Exception as e:
+        logger.error(f"Erro na reclassificação: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
 
 

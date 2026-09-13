@@ -1,0 +1,49 @@
+## Objective
+- Deploy & verify user-approved Request #5 (landing: real served-cities counter + evergreen "Atualizado há pouco"). DONE — live on preview `jkvx8cuj2`. Also fixed deploy-blocking `vercel.json` `@vapid_public_key` secret ref.
+- Standing rule: deploy updates via `commit + push` so preview == pushed commit (followed: `9b912c9`, `2dad54e`).
+
+## Important Details
+- Branch `landing-migration` (github.com/aeorescue-dev/magic-leads.git); commits pushed: `0df327a`, `88501fd`, `5b4e5ff`, `da02219`, `387d3a6`, `9b912c9`, `2dad54e`.
+- **Authoritative preview now:** `https://magic-leads-frontend-final-jkvx8cuj2-fabio-dev2.vercel.app` (SSO ON). Old references to preview `jlus9f18l` are stale.
+- **Root cause of preview zeros (RESOLVED):** `frontend/next.config.js` had inlined `http://localhost:8000` fallback/rewrite; both now `https://magic-leads-production.up.railway.app`; do NOT revert. `.env.local` excluded via `.vercelignore` (`.env*`).
+- **Vercel deploy SEO (RESOLVED):** root `vercel.json` `env` used `@vapid_public_key` (named Secret) → deleted secret → ALL deploys 400 `env_secret_missing`. Now inlined literal VAPID public key + pinned API_URL. Any deploy uses `vercel deploy --force --cwd frontend --yes`.
+- Vercel build-cache gotcha: stale `localhost:8000` persists in cached chunks → always `vercel deploy --force`.
+- Vercel project `magic-leads-frontend-final` (projectId `prj_Bhw3jj8Kx0B9O1IPsgsKIaOV4lLH`, orgId `team_8D5D7YnmL6OA1ECw4KPYIUz6`). CLI: `& "C:\Users\Fabio\AppData\Local\Temp\opencode\node-portable\node.exe" "C:\Users\Fabio\AppData\Local\Temp\opencode\node-portable\node_modules\vercel\dist\index.js" <cmd>`. `vercel curl`/`env` from `frontend` workdir. Vercel REST token: `C:\Users\Fabio\AppData\Roaming\xdg.data\com.vercel.cli\auth.json`.
+- Build on this machine requires portable node + explicit env (`.env.local` has localhost): `$env:NEXT_PUBLIC_API_URL="https://magic-leads-production.up.railway.app"; & "path\node.exe" "node_modules\next\dist\bin\next" build` (workdir `frontend`).
+- **Shell chrome gating:** `frontend/components/ShellChrome.tsx` (`'use client'`) renders `<Navbar/>+<Footer/>` only when `pathname !== "/"`; `/` uses prototype navbar + landing footer. Old Navbar is `<nav>` (not `<header>`), old Footer has "PT · EN · ES".
+- Prototype navbar is inline in `app/page.tsx` above `{/* HERO */}`: sticky, `max-w-[1400px]`, logo gradient `#7c5cff→#10b981` ("Magic<span>Leads"), `LangSwitch` dark pill (`bg-[#141820]`, buttons `h-10 w-11 rounded-[12px]`, active `bg-[#0f2a24] ring-2 ring-[#2feaa8]`), green `btn-mint` CTA (mobile menu on small), hamburger `lg:hidden`, bottom row `nav` = `L.nav` 8 anchors (`text-[13px] font-semibold text-[#54617a]`), `scrollTo` closes menu. `Flag`/`LangSwitch`/`LANGS` inline in page.tsx; `type Lang` from `@/lib/i18n`.
+- Backend: `https://magic-leads-production.up.railway.app`; live stats `{total:11550, with_owner:8793, reported_today:0, contacted:2, by_category:{Structure:3978,Plumbing:1871,Rodent:1111,Door_Window:1092,Paint:793,Roof:560,Grass:558,Unsanitary:364,Debris:333,Electrical:258,Heating:212,Lead:211,Elevator:116,Gas:61,Mold:30,Permit_Rejected:2}}`; `/api/leads/cities` → [NYC, Boston, Chicago, Dallas, Norfolk] (5). CORS echoes preview origin.
+- `.env.local` has localhost:8000 + VAPID public key; git-ignored; never commit.
+- Standing rules: never cite 311/Socrata/tecnicos publicly; no fixed daily volume promises; no "grátis" (use "7 dias de acesso → depois $79/semana"); do not modify `/dashboard`, auth, checkout, FastAPI integrations, Web Push, `.env` without authorization; do not reintroduce secret refs in vercel.json.
+
+## Work State
+### Completed
+- Request #5 (this session, per user confirmation): landing cities counter uses REAL served cities from `/api/leads/cities` (5: NYC, Boston, Chicago, Dallas, Norfolk) instead of scraper `last_run.cities_covered` (7 = count of data-source TASKS per `backend/main.py:1229 len(tasks_311)`, NYC double-counted — wrong metric); and the "Atualizado" line is now EVERGREEN static "Atualizado · há pouco" (user: "fica mais aberto e nunca satura").
+- page.tsx changes: removed `scraper`/`scrapeAt`/`nowTick` states + fetchScraperStatus + 30s nowTick interval + `timeAgoLabel()`; added `servedCities` state (`useState(CITIES.length)`) set via `fetchCities()` (line 190, `/api/leads/cities`); `citiesCount = servedCities || stats?.cities?.length || CITIES.length` (line 249); render line `{t("landing.updated")} {t("landing.agoLittle")}` (line 350). Memo deps now `[lang, t]`.
+- INFRA FIX (blocked ALL deploys): root `vercel.json` had `"env": { "NEXT_PUBLIC_VAPID_PUBLIC_KEY": "@vapid_public_key" }` referencing the NAMED SECRET `vapid_public_key`, which was DELETED → every deploy failed with `env_secret_missing` ("references Secret vapid_public_key, which does not exist") at `POST /v13/deployments`. Fix: inlined the actual VAPID public key value (from `frontend/.env.local`, 87 chars, public by design) + pinned `NEXT_PUBLIC_API_URL: https://magic-leads-production.up.railway.app`. The project env records (VAPID/API_URL production) were HEALTHY config records all along (verified via REST API `GET /v9/projects/prj_Bhw3jj8Kx0B9O1IPsgsKIaOV4lLH/env`); they got re-created as plain config (`vercel env add --force --no-sensitive`) which is fine.
+- Commits pushed to `landing-migration`: `9b912c9` (cities + evergreen updated), `2dad54e` (vercel.json secret-inline fix), `8657ba9` (Atualizado line shows new opportunities from last scrape, floored at min 500), `5be432d` (Final CTA copy).
+- Request #7 (Final CTA copy): i18n keys `landing.finalTitle/finalHl/finalSub/finalCta` updated in pt/en/es. PT: título "Oportunidade" + hl "na sua mão." (existing `<br/><span class=hl>` split kept), sub "Abra. Conecte-se. Feche sua próxima obra. Ainda hoje.", button "Começar por $79/sem" (was "Acessar o painel · $79/sem"). EN: "Opportunity / in your hands." / "Open. Connect. Close your next job. Today." / "Start for $79/wk". ES: "Oportunidad / en tus manos." / "Abre. Conecta. Cierra tu próxima obra. Hoy." / "Empezar por $79/sem". Kicker pill kept (VAGAS LIMITADAS...).
+- Request #6 (user: "3 bolinhas piscando, nenhum número"): the "Atualizado" line now ALSO shows the new-opportunities count from the last scrape run: `Atualizado · há pouco · N novas oportunidades` (pt/en/es, new key `landing.updatedNew`). `newThisRun = Math.max(500, scraper?.last_run?.inserted ?? 0)` — user REQUIRED the number to never go below **500** (current real value 294 → displays 500). Re-added `fetchScraperStatus`/`ScraperRunState` import; `scraper` state + fetch in mount effect (page.tsx ~lines 168-205); render at line ~353-360. i18n keys at i18n.tsx ~704 (pt), ~1501 (en), ~2298 (es).
+- NEW AUTHORITATIVE PREVIEW: `https://magic-leads-frontend-final-1cscuvn5f-fabio-dev2.vercel.app` — Final CTA verified via SSR (kicker pill + "Oportunidade na sua mão." + sub + "Começar por $79/sem"); previous preview `6unqrcvtu` had Request #6 verified SSR ("Atualizado há pouco · 500 novas oportunidades" + chunk `Math.max(500, ...inserted)` + 3-effect mount mP/gT/Py).
+- Vercel auth token location on this machine: `C:\Users\Fabio\AppData\Roaming\xdg.data\com.vercel.cli\auth.json` (needed for REST API calls; token field).
+
+### Active
+- Request #5 fully DONE and LIVE. Diagnostic episode (Request #5 phase A) complete: user clarified the "Atualizado há 1 min" line; code was always rendering it (timeAgoLabel never blank) — user then approved the evergreen change face-up. No outstanding diagnostic debt.
+
+### Blocked
+- Carried unresolved: Searchbug no credentials (MockPhoneProvider); Stripe prod keys/prices not configured; GitHub Actions "Scraper Cron Job" failing; push end-to-end with real user unconfirmed; `TRIAL_DAYS=7` vs `start_trial` 3d mismatch. Deploy/vercel.json issue RESOLVED (see Completed).
+
+## Next Move
+- Reply to the user (pt-BR) summarizing: (a) cities counter now shows the real 5 served cities (help "Atualizado há pouco" is now evergreen/static; (a + b are LIVE on preview `jkvx8cuj2`); (c) the deployment had been blocked by a deleted Vercel secret reference in root `vercel.json` — fixed and re-deployed. Provide preview URL. No further code changes pending.
+
+## Relevant Files
+- `C:\Users\Fabio\Documents\Default Project\garimpador-leads\vercel.json` — ROOT config; FIXED (was `@vapid_public_key` secret ref → deploy-blocking `env_secret_missing`); now inlines real VAPID public key + `NEXT_PUBLIC_API_URL: https://magic-leads-production.up.railway.app`. Do NOT reintroduce `@` secret refs here.
+- `frontend/app/page.tsx` — landing; prototype navbar (top), new footer (bottom), `L.nav`, Flag/LangSwitch, `scrollTo`, `openModal`, `{lang,setLang,t}`. Request #5: `servedCities` state (line 167), `fetchCities` in mount effect (line 190), `citiesCount` derive (line 249, renders `{citiesCount}+` at 344), evergreen `{t("landing.updated")} {t("landing.agoLittle")}` (line 350). Static props 13.
+- `frontend/lib/api-client.ts` — `fetchStats` (:196 `/api/leads/stats`), `fetchCities` (:200 `/api/leads/cities`); plain GETs.
+- `backend/main.py` (~line 1229) — `cities_covered=len(tasks_311)` is the WRONG metric for cidades (counts tasks, NYC ×2); landing no longer consumes it.
+- `frontend/app/layout.tsx` — mounts `<ShellChrome />`; governs global Navbar/Footer for non-landing routes.
+- `frontend/components/ShellChrome.tsx` — pathname gate for old Navbar/Footer.
+- `frontend/app/globals.css` — `.landing-light .card` forced light `!important`.
+- `frontend/.vercelignore` — excludes `.env*`.
+- `frontend/.env.local` — local-only (localhost:8000 + VAPID public key); never commit.
+- Old-shell components still used off "/": `frontend/components/Navbar.tsx` (`<nav>`), `frontend/components/Footer.tsx`.
