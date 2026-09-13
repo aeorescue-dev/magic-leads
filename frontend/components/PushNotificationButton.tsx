@@ -79,6 +79,7 @@ export function PushNotificationButton() {
       const keyRes = await apiFetch('/api/push/vapid-public-key');
       if (!keyRes.ok) throw new Error('VAPID key not available');
       const { public_key } = await keyRes.json();
+      if (!public_key) throw new Error('VAPID key not available');
 
       const urlBase64ToUint8Array = (base64String: string) => {
         const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -91,9 +92,7 @@ export function PushNotificationButton() {
         return outputArray;
       };
 
-      const applicationServerKey = urlBase64ToUint8Array(
-        process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || ''
-      );
+      const applicationServerKey = urlBase64ToUint8Array(public_key);
 
       const swRegistration = await navigator.serviceWorker.ready;
       const subscription = await swRegistration.pushManager.subscribe({
