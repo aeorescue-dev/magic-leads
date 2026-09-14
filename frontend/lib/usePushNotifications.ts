@@ -10,12 +10,23 @@ export type PushPermissionState = "default" | "granted" | "denied";
 
 function isPushSupported(): boolean {
   if (typeof window === "undefined") return false;
-  return (
-    "serviceWorker" in navigator &&
-    "PushManager" in window &&
-    typeof Notification !== "undefined" &&
-    "requestPermission" in Notification
-  );
+  const hasSW = "serviceWorker" in navigator;
+  const hasPushManager = "PushManager" in window;
+  const hasNotification = typeof Notification !== "undefined";
+  const hasRequestPermission = "requestPermission" in Notification;
+
+  // iOS Safari: PushManager existe só no 16.4+ e exige PWA instalado
+  // Não bloqueamos a UI — deixamos o botão aparecer com aviso
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+  const isStandalone = window.matchMedia("(display-mode: standalone)").matches;
+
+  if (isIOS && !isStandalone && !hasPushManager) {
+    // iOS antigo ou não-PWA: suporta notificação mas não push nativo
+    // Retornamos true para mostrar o botão com aviso
+    return hasSW && hasNotification && hasRequestPermission;
+  }
+
+  return hasSW && hasPushManager && hasNotification && hasRequestPermission;
 }
 
 function apiFetch(path: string, options: RequestInit = {}) {

@@ -2,7 +2,7 @@
 
 import { useI18n } from "@/lib/i18n";
 import { usePushNotifications } from "@/lib/usePushNotifications";
-import { Bell, BellOff, Loader2, ShieldAlert } from "lucide-react";
+import { Bell, BellOff, Loader2, ShieldAlert, Smartphone } from "lucide-react";
 
 export function PushNotificationButton() {
   const { t } = useI18n();
@@ -16,6 +16,11 @@ export function PushNotificationButton() {
     subscribe,
     unsubscribe,
   } = usePushNotifications();
+
+  const isIOS = typeof navigator !== "undefined" && /iPad|iPhone|iPod/.test(navigator.userAgent);
+  const isStandalone = typeof window !== "undefined" && window.matchMedia("(display-mode: standalone)").matches;
+  const isIOSPWA = isIOS && isStandalone;
+  const isIOSNeedsInstall = isIOS && !isStandalone;
 
   if (!hasUser || !supported) {
     return null;
@@ -48,15 +53,27 @@ export function PushNotificationButton() {
           <span className="hidden sm:inline">{t("push.disable") || "Desativar alertas"}</span>
         </button>
       ) : (
-        <button
-          onClick={subscribe}
-          disabled={loading}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/30 transition disabled:opacity-50"
-        >
-          <Loader2 className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-          <Bell className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">{t("push.enable") || "Ativar alertas no celular/desktop"}</span>
-        </button>
+        <>
+          {isIOSNeedsInstall && (
+            <span className="flex items-center gap-1.5 px-2 py-1.5 text-xs text-amber-400 bg-amber-500/10 rounded-lg border border-amber-500/20">
+              <Smartphone className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">iOS: adicione à Tela Inicial para alertas</span>
+            </span>
+          )}
+          <button
+            onClick={subscribe}
+            disabled={loading}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/30 transition disabled:opacity-50"
+          >
+            <Loader2 className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+            <Bell className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">
+              {isIOSNeedsInstall
+                ? (t("push.enable_ios") || "Ativar (requer Tela Inicial)")
+                : (t("push.enable") || "Ativar alertas no celular/desktop")}
+            </span>
+          </button>
+        </>
       )}
       {error && (
         <span className="text-xs text-red-400 ml-2">{error}</span>
