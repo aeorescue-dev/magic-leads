@@ -313,6 +313,7 @@ class SendTestPushRequest(BaseModel):
     body: str = "Esta e uma notificacao de teste. Push notifications funcionando!"
     tag: str = "test_notification"
     url: str = "/dashboard"
+    debug: bool = False
 
 
 class ContactLeadRequest(BaseModel):

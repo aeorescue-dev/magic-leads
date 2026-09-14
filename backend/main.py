@@ -910,8 +910,12 @@ async def send_test_push(payload: SendTestPushRequest):
 
     if payload.user_id is not None:
         sent = await push_service.send_to_user(payload.user_id, push_payload)
-    else:
-        sent = await push_service.send_to_all(push_payload)
+        return {"status": "ok", "sent": sent, "configured": True}
+
+    if payload.debug:
+        return await push_service.send_to_all_debug(push_payload)
+
+    sent = await push_service.send_to_all(push_payload)
 
     return {"status": "ok", "sent": sent, "configured": True}
 

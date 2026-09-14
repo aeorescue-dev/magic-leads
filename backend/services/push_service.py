@@ -116,16 +116,16 @@ class PushService:
         """Envia push para todas as subscriptions ativas (broadcast)."""
         if not self.is_configured():
             return 0
-            
+
         subscriptions = await db_service.get_all_push_subscriptions()
         if not subscriptions:
             return 0
-            
+
         # Group by user_id
         by_user = {}
         for sub in subscriptions:
             by_user.setdefault(sub["user_id"], []).append(sub)
-        
+
         total_sent = 0
         for user_id, subs in by_user.items():
             sent = 0
@@ -136,13 +136,71 @@ class PushService:
                     sent += 1
                 elif result == "expired":
                     expired_endpoints.append(sub["endpoint"])
-            
+
             for endpoint in expired_endpoints:
                 await db_service.remove_push_subscription(user_id, endpoint)
-                
+
             total_sent += sent
-            
+
         return total_sent
+
+    def _send_single_debug(self, subscription: Dict, payload: Dict) -> Dict:
+        """Como _send_single, mas retorna {ok, error} com detalhes para debug."""
+        if not self.is_configured():
+            return {"ok": False, "error": "Push not configured"}
+
+        try:
+            webpush(
+                subscription_info={
+                    "endpoint": subscription["endpoint"],
+                    "keys": {
+                        "p256dh": subscription["p256dh"],
+                        "auth": subscription["auth"]
+                    }
+                },
+                data=json.dumps(payload),
+                vapid_private_key=self._vapid_private_key,
+                vapid_claims=self._vapid_claims
+            )
+            return {"ok": True}
+        except WebPushException as e:
+            status = e.response.status_code if e.response is not None else None
+            detail = str(e)
+            if status in (404, 410):
+                return {"ok": False, "error": f"expired (HTTP {status})", "expired": True, "detail": detail}
+            return {"ok": False, "error": f"WebPushException (HTTP {status}): {detail}"}
+        except Exception as e:
+            return {"ok": False, "error": f"Unexpected: {type(e).__name__}: {e}"}
+
+    async def send_to_all_debug(self, payload: Dict) -> Dict:
+        """Broadcast retornando erros detalhados por subscription (para teste)."""
+        results = {
+            "configured": self.is_configured(),
+            "subscriptions_found": 0,
+            "sent": 0,
+            "errors": []
+        }
+        if not self.is_configured():
+            results["errors"].append("VAPID keys not configured")
+            return results
+
+        subscriptions = await db_service.get_all_push_subscriptions()
+        results["subscriptions_found"] = len(subscriptions)
+        for sub in subscriptions:
+            res = self._send_single_debug(sub, payload)
+            if res.get("ok"):
+                results["sent"] += 1
+            else:
+                if res.get("expired"):
+                    await db_service.remove_push_subscription(sub["user_id"], sub["endpoint"])
+                results["errors"].append({
+                    "user_id": sub["user_id"],
+                    "endpoint_prefix": (sub["endpoint"] or "<vazia>")[:60],
+                    "p256dh_empty": not bool(sub.get("p256dh")),
+                    "auth_empty": not bool(sub.get("auth")),
+                    "error": res.get("error")
+                })
+        return results
 
     async def send_new_lead_alert(self, lead: dict, category: str) -> int:
         """Envia alerta de novo lead para usuários interessados na categoria."""
