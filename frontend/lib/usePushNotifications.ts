@@ -17,8 +17,14 @@ function isPushSupported(): boolean {
 
   // iOS Safari: PushManager existe só no 16.4+ e exige PWA instalado
   // Não bloqueamos a UI — deixamos o botão aparecer com aviso
-  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-  const isStandalone = window.matchMedia("(display-mode: standalone)").matches;
+  let isIOS = false;
+  let isStandalone = false;
+  try {
+    isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent || "");
+    isStandalone = window.matchMedia?.("(display-mode: standalone)")?.matches ?? false;
+  } catch {
+    // Silenciosamente ignora se APIs não estiverem disponíveis
+  }
 
   if (isIOS && !isStandalone && !hasPushManager) {
     // iOS antigo ou não-PWA: suporta notificação mas não push nativo
