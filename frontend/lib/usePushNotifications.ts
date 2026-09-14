@@ -51,6 +51,10 @@ function arrayBufferToBase64(buffer: ArrayBuffer | null): string {
   return btoa(binary);
 }
 
+function toUrlBase64(base64: string): string {
+  return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
 export function usePushNotifications() {
   const { user } = useAuth();
   const [supported, setSupported] = useState(false);
@@ -138,7 +142,7 @@ export function usePushNotifications() {
       if (existingSubscription) {
         // Re-subscribe if the application server key changed.
         const existingKey = existingSubscription.options.applicationServerKey;
-        if (existingKey && arrayBufferToBase64(existingKey) === publicKey) {
+        if (existingKey && toUrlBase64(arrayBufferToBase64(existingKey)) === publicKey) {
           subscription = existingSubscription;
         } else {
           await existingSubscription.unsubscribe();
