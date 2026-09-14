@@ -203,6 +203,8 @@ export interface PublicMetrics {
     started_at?: string | null;
     finished_at?: string | null;
     status?: string | null;
+    captured_24h: number;
+    floor: number;
     novas_oportunidades: number;
   };
 }
@@ -217,6 +219,8 @@ export const EMPTY_PUBLIC_METRICS: PublicMetrics = {
     started_at: null,
     finished_at: null,
     status: null,
+    captured_24h: 0,
+    floor: 0,
     novas_oportunidades: 0,
   },
 };
@@ -235,6 +239,8 @@ function toPublicMetrics(value: any): PublicMetrics {
       started_at: typeof lastScrape.started_at === "string" ? lastScrape.started_at : null,
       finished_at: typeof lastScrape.finished_at === "string" ? lastScrape.finished_at : null,
       status: typeof lastScrape.status === "string" ? lastScrape.status : null,
+      captured_24h: Number.isFinite(lastScrape.captured_24h) ? lastScrape.captured_24h : 0,
+      floor: Number.isFinite(lastScrape.floor) ? lastScrape.floor : 0,
       novas_oportunidades: Number.isFinite(lastScrape.novas_oportunidades) ? lastScrape.novas_oportunidades : 0,
     },
   };

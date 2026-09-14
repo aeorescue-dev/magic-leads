@@ -25,26 +25,48 @@ jobs:
       - name: Run scraper (insere no SQLite)
         run: |
           python -c "
+          import time, sys
           from fastapi.testclient import TestClient
           from backend.main import app
           from backend.services.db import db_service
-          import time
 
           client = TestClient(app)
-          resp = client.post('/api/scraper/run')
+
+          # POST com retry: 3 tentativas, 15s de intervalo
+          resp = None
+          for attempt in range(1, 4):
+              try:
+                  resp = client.post('/api/scraper/run')
+                  break
+              except Exception as e:
+                  print('Tentativa %d/3 falhou: %s' % (attempt, e))
+                  if attempt < 3:
+                      time.sleep(15)
+                  else:
+                      print('Todas as tentativas de POST falharam')
+                      sys.exit(1)
+
           start = resp.json()
           print('HTTP:', resp.status_code, '| Resposta:', start)
 
-          # Rota assincrona: aceita 202 started ou 409 already_running (reentrante)
           assert resp.status_code in (200, 202, 409), 'HTTP %s: %s' % (resp.status_code, resp.text)
           assert start.get('status') in ('started', 'already_running'), start
 
           if start.get('status') == 'already_running':
               print('Run ja em execucao em outro processo — seguindo ciclo existente.')
           else:
-              # Acompanha ate o ciclo terminar (roda em background no TestClient)
+              # Poll com retry: se GET falhar, retenta antes de desistir
               for i in range(60):
-                  st = client.get('/api/scraper/status').json()
+                  for poll_attempt in range(3):
+                      try:
+                          st = client.get('/api/scraper/status').json()
+                          break
+                      except Exception as e:
+                          print('Poll tentativa %d/3 falhou: %s' % (poll_attempt + 1, e))
+                          if poll_attempt < 2:
+                              time.sleep(5)
+                          else:
+                              st = {}
                   if not (st.get('active') and st.get('running')):
                       print('Run concluido:', st)
                       break

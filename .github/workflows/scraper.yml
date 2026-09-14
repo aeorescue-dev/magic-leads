@@ -19,13 +19,14 @@ jobs:
     steps:
       - name: Disparar scraper na producao (Railway)
         run: |
-          # Endpoint responde 202 assincrono: {"status":"started","run_id":"..."}
-          # (ou 409 {"status":"already_running",...} se já houver um run ativo)
-          code=$(curl -sS -o /tmp/start.json -w "%{http_code}" -m 30 -X POST "https://magic-leads-production.up.railway.app/api/scraper/run?max_cities=8")
+          # Retry policy: 3 tentativas com 15s de intervalo em caso de falha HTTP/conexao
+          code=$(curl --retry 3 --retry-delay 15 --retry-all-errors \
+            -sS -o /tmp/start.json -w "%{http_code}" -m 30 \
+            -X POST "https://magic-leads-production.up.railway.app/api/scraper/run?max_cities=8") || true
           echo "http_code: $code"
-          echo "start: $(cat /tmp/start.json)"
+          echo "start: $(cat /tmp/start.json 2>/dev/null || echo '{"status":"error"}')"
 
-          start=$(cat /tmp/start.json)
+          start=$(cat /tmp/start.json 2>/dev/null || echo '{}')
           status=$(echo "$start" | jq -r '.status // empty')
           run_id=$(echo "$start" | jq -r '.run_id // empty')
 
@@ -41,7 +42,8 @@ jobs:
 
           # Se nao tivemos run_id, deriva do run ativo no status
           if [ -z "$run_id" ]; then
-            st=$(curl -sS -m 30 "https://magic-leads-production.up.railway.app/api/scraper/status")
+            st=$(curl --retry 3 --retry-delay 10 --retry-all-errors \
+              -sS -m 30 "https://magic-leads-production.up.railway.app/api/scraper/status") || true
             echo "status: $st"
             run_id=$(echo "$st" | jq -r '.running | keys[0] // empty')
             echo "run_id derivado: ${run_id:-<nenhum ativo>}"
@@ -50,7 +52,8 @@ jobs:
           # Poll em /api/scraper/status ate o ciclo terminar (ativa fica false)
           for i in $(seq 1 55); do
             sleep 60
-            st=$(curl -sS -m 30 "https://magic-leads-production.up.railway.app/api/scraper/status")
+            st=$(curl --retry 3 --retry-delay 10 --retry-all-errors \
+              -sS -m 30 "https://magic-leads-production.up.railway.app/api/scraper/status") || true
             if [ "$(echo "$st" | jq -r '.active')" = "false" ]; then
               echo "Scraper concluido:"
               echo "$st"

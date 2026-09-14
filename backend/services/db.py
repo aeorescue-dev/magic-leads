@@ -2225,7 +2225,10 @@ class DatabaseService:
     def get_public_metrics(self) -> dict:
         """Fonte Única da Verdade dos contadores públicos (landing + dashboard).
 
-        Chave canônica: last_scrape.novas_oportunidades (inserted + baseline).
+        Chave canônica: last_scrape.novas_oportunidades.
+        Cálculo: max(leads capturados nas últimas 24h, piso dinâmico).
+        O piso é a média de inserted das últimas 10 execuções (mínimo 500),
+        evitando que oscilações pontuais zerem a exibição.
         """
         conn = get_connection()
         try:
@@ -2239,23 +2242,37 @@ class DatabaseService:
                     "SELECT DISTINCT city FROM leads WHERE city IS NOT NULL AND city != '' ORDER BY city"
                 ).fetchall()
             ]
+            # Leads efetivamente inseridos nas últimas 24h
+            captured_24h = conn.execute(
+                "SELECT COUNT(*) AS c FROM leads WHERE created_at >= datetime('now', '-24 hours')"
+            ).fetchone()["c"]
+            # Piso dinâmico: média de inserted das últimas 10 execuções, mínimo 500
+            recent = conn.execute(
+                "SELECT inserted FROM scraper_runs ORDER BY id DESC LIMIT 10"
+            ).fetchall()
+            recent_vals = [r["inserted"] for r in recent if r["inserted"] is not None]
+            avg_recent = round(sum(recent_vals) / len(recent_vals)) if recent_vals else 0
+            floor = max(500, avg_recent)
         finally:
             conn.close()
 
         last_run = self.get_last_scrape_run() or {}
-        inserted = last_run.get("inserted") or 0
-        baseline = 500
+        last_inserted = last_run.get("inserted") or 0
+        novas_oportunidades = max(captured_24h, floor)
+
         return {
             "total_leads": total,
             "leads_with_owner": with_owner,
             "cities": cities,
             "cities_count": len(cities),
             "last_scrape": {
-                "inserted": inserted,
+                "inserted": last_inserted,
                 "started_at": last_run.get("started_at"),
                 "finished_at": last_run.get("finished_at"),
                 "status": last_run.get("status"),
-                "novas_oportunidades": inserted + baseline,
+                "captured_24h": captured_24h,
+                "floor": floor,
+                "novas_oportunidades": novas_oportunidades,
             },
         }
 
