@@ -38,23 +38,15 @@ self.addEventListener('push', (event) => {
         {
           body: typeof data.body === 'string' && data.body ? data.body : 'Nova oportunidade disponível.',
           icon: '/icon-192.png',
-          badge: '/icon-192.png',
-          vibrate: [200, 100, 200],
-          tag: typeof data.tag === 'string' && data.tag ? data.tag : 'magic-leads-notification',
-          renotify: true,
-          requireInteraction: true,
-          actions: [
-            { action: 'open', title: 'Ver oportunidade' },
-            { action: 'dismiss', title: 'Dispensar' }
-          ],
-          data: {
-            leadId: data.leadId != null ? String(data.leadId) : undefined,
-            url: typeof data.url === 'string' ? data.url : '/dashboard'
-          }
+          tag: typeof data.tag === 'string' && data.tag ? data.tag : 'magic-leads-alert'
         }
       );
     } catch (err) {
-      console.error('Erro ao exibir notificação:', err);
+      console.error('Erro ao exibir notificação:', {
+        name: err && err.name ? err.name : String(err),
+        message: err && err.message ? err.message : String(err),
+        stack: err && err.stack ? err.stack : '(sem stack)'
+      }, err);
     }
   })();
   event.waitUntil(promiseChain);

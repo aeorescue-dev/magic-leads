@@ -28,7 +28,7 @@ from .models.schemas import (
     UserCreate, UserLogin, UserResponse, UserUpdate, AuthResponse, InterestsUpdate,
     ReserverLeadRequest, ReleaseLeadRequest, ContactLeadRequest,
     RejectLeadRequest, LeadHoldResponse, LeadStatusResponse, HistoryEvent,
-    PushSubscribeRequest, PushUnsubscribeRequest,
+    PushSubscribeRequest, PushUnsubscribeRequest, SendTestPushRequest,
 )
 from .utils.logger import logger
 
@@ -890,6 +890,30 @@ async def test_push_notification(user_id: int):
         "url": "/dashboard"
     })
     return {"status": "ok", "sent": sent}
+
+
+@app.post("/api/push/send-test")
+async def send_test_push(payload: SendTestPushRequest):
+    """Dispara um push real via Web Push (pywebpush) para teste.
+
+    Sem user_id, faz broadcast para todas as subscriptions ativas.
+    """
+    if not push_service.is_configured():
+        raise HTTPException(status_code=503, detail="Push notifications not configured")
+
+    push_payload = {
+        "title": payload.title,
+        "body": payload.body,
+        "tag": payload.tag,
+        "url": payload.url
+    }
+
+    if payload.user_id is not None:
+        sent = await push_service.send_to_user(payload.user_id, push_payload)
+    else:
+        sent = await push_service.send_to_all(push_payload)
+
+    return {"status": "ok", "sent": sent, "configured": True}
 
 
 # Webhook para rodar scraper manualmente

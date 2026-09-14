@@ -307,6 +307,14 @@ class PushUnsubscribeRequest(BaseModel):
     endpoint: str
 
 
+class SendTestPushRequest(BaseModel):
+    user_id: Optional[int] = None
+    title: str = "Magic Leads - Teste"
+    body: str = "Esta e uma notificacao de teste. Push notifications funcionando!"
+    tag: str = "test_notification"
+    url: str = "/dashboard"
+
+
 class ContactLeadRequest(BaseModel):
     channel: str = "sms"
 
