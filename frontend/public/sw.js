@@ -10,19 +10,18 @@ self.addEventListener('fetch', (event) => {
 });
 
 // Push event - show notification
-// Nunca lanca: payload ausente/malformado/null cai nos defaults, e qualquer
-// rejeicao do showNotification e capturada (sem Uncaught (in promise)).
+// try/catch global: qualquer exception e capturada e o worker NAO e encerrado.
 self.addEventListener('push', (event) => {
-  event.waitUntil(
-    (async () => {
-      let data = { title: 'Nova Oportunidade!', body: 'Você recebeu um novo lead.' };
+  const promiseChain = (async () => {
+    try {
+      let data = { title: 'Nova Oportunidade!', body: 'Novo lead disponível.' };
       if (event.data) {
         try {
           const parsed = event.data.json();
           if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
             data = { ...data, ...parsed };
           }
-        } catch (jsonErr) {
+        } catch (e) {
           try {
             const text = event.data.text();
             if (text && typeof text === 'string') {
@@ -34,32 +33,31 @@ self.addEventListener('push', (event) => {
         }
       }
 
-      const title = typeof data.title === 'string' && data.title ? data.title : 'Magic Leads';
-      const options = {
-        body: typeof data.body === 'string' && data.body ? data.body : 'Nova oportunidade disponível',
-        icon: '/icon-192.png',
-        badge: '/icon-192.png',
-        vibrate: [200, 100, 200],
-        tag: typeof data.tag === 'string' && data.tag ? data.tag : 'magic-leads-notification',
-        renotify: true,
-        requireInteraction: true,
-        actions: [
-          { action: 'open', title: 'Ver oportunidade' },
-          { action: 'dismiss', title: 'Dispensar' }
-        ],
-        data: {
-          leadId: data.leadId != null ? String(data.leadId) : undefined,
-          url: typeof data.url === 'string' ? data.url : '/dashboard'
+      await self.registration.showNotification(
+        typeof data.title === 'string' && data.title ? data.title : 'Magic Leads',
+        {
+          body: typeof data.body === 'string' && data.body ? data.body : 'Nova oportunidade disponível.',
+          icon: '/icon-192.png',
+          badge: '/icon-192.png',
+          vibrate: [200, 100, 200],
+          tag: typeof data.tag === 'string' && data.tag ? data.tag : 'magic-leads-notification',
+          renotify: true,
+          requireInteraction: true,
+          actions: [
+            { action: 'open', title: 'Ver oportunidade' },
+            { action: 'dismiss', title: 'Dispensar' }
+          ],
+          data: {
+            leadId: data.leadId != null ? String(data.leadId) : undefined,
+            url: typeof data.url === 'string' ? data.url : '/dashboard'
+          }
         }
-      };
-
-      try {
-        await self.registration.showNotification(title, options);
-      } catch (notifErr) {
-        console.error('Push: showNotification falhou', notifErr);
-      }
-    })()
-  );
+      );
+    } catch (err) {
+      console.error('Erro ao exibir notificação:', err);
+    }
+  })();
+  event.waitUntil(promiseChain);
 });
 
 // Notification click event

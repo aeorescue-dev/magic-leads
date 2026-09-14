@@ -122,6 +122,7 @@ export function usePushNotifications() {
       // Register service worker (idempotent if already registered).
       const registration = await navigator.serviceWorker.register("/sw.js");
       await navigator.serviceWorker.ready;
+      console.log("[push] SW registered:", registration.scope);
 
       // Fetch VAPID public key (endpoint works with or without auth).
       const keyRes = await apiFetch("/api/push/vapid-public-key");
@@ -134,28 +135,43 @@ export function usePushNotifications() {
         setError("Push service unavailable");
         return;
       }
+      console.log("[push] VAPID public key obtida:", publicKey.length, "chars");
 
       const existingSubscription = await registration.pushManager.getSubscription();
       const applicationServerKey = urlBase64ToUint8Array(publicKey);
 
       let subscription: PushSubscription;
-      if (existingSubscription) {
-        // Re-subscribe if the application server key changed.
-        const existingKey = existingSubscription.options.applicationServerKey;
-        if (existingKey && toUrlBase64(arrayBufferToBase64(existingKey)) === publicKey) {
-          subscription = existingSubscription;
+      try {
+        if (existingSubscription) {
+          // Re-subscribe if the application server key changed.
+          const existingKey = existingSubscription.options.applicationServerKey;
+          if (existingKey && toUrlBase64(arrayBufferToBase64(existingKey)) === publicKey) {
+            console.log("[push] Reusando subscription existente");
+            subscription = existingSubscription;
+          } else {
+            console.log("[push] Chave VAPID mudou — resubscribe");
+            await existingSubscription.unsubscribe();
+            subscription = await registration.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey: applicationServerKey as any,
+            });
+          }
         } else {
-          await existingSubscription.unsubscribe();
+          console.log("[push] Criando nova PushSubscription...");
           subscription = await registration.pushManager.subscribe({
             userVisibleOnly: true,
             applicationServerKey: applicationServerKey as any,
           });
         }
-      } else {
-        subscription = await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: applicationServerKey as any,
-        });
+        console.log("[push] PushSubscription criada:", subscription.endpoint);
+      } catch (subscribeErr) {
+        console.error("[push] FALHA em pushManager.subscribe():", subscribeErr);
+        setError(
+          subscribeErr instanceof Error
+            ? `Push browser error: ${subscribeErr.name}: ${subscribeErr.message}`
+            : "Push browser error"
+        );
+        return;
       }
 
       const subData = {
@@ -169,21 +185,32 @@ export function usePushNotifications() {
         return;
       }
 
-      const subRes = await apiFetch("/api/push/subscribe", {
-        method: "POST",
-        body: JSON.stringify(subData),
-      });
+      // Envio assintrono ao backend com tratamento de erro isolado.
+      try {
+        const subRes = await apiFetch("/api/push/subscribe", {
+          method: "POST",
+          body: JSON.stringify(subData),
+        });
 
-      if (!subRes.ok) {
-        const detail = await subRes.json().catch(() => null);
-        setError(detail?.detail || "Push registration failed");
+        if (!subRes.ok) {
+          const detail = await subRes.json().catch(() => null);
+          console.error("[push] Backend rejeitou subscription:", subRes.status, detail);
+          setError(detail?.detail || "Push registration failed");
+          return;
+        }
+
+        console.log("[push] Subscription registrada no backend");
+      } catch (backendErr) {
+        console.error("[push] Erro ao salvar subscription no backend:", backendErr);
+        setError(backendErr instanceof Error ? backendErr.message : "Push registration failed");
         return;
       }
 
+      // So ativa a UI apos sucesso confirmado no backend.
       setSubscribed(true);
       setError(null);
     } catch (err) {
-      console.error("Subscribe error:", err);
+      console.error("[push] Subscribe error:", err);
       setError(err instanceof Error ? err.message : "Push error");
     } finally {
       setLoading(false);
