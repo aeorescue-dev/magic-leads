@@ -11,11 +11,13 @@ self.addEventListener('fetch', (event) => {
 
 // Push event - show notification
 self.addEventListener('push', (event) => {
-  let data = {};
-  try {
-    data = event.data ? event.data.json() : {};
-  } catch (e) {
-    console.error('Push: invalid JSON payload', e);
+  let data = { title: 'Nova Oportunidade!', body: 'Você recebeu um novo lead.' };
+  if (event.data) {
+    try {
+      data = event.data.json();
+    } catch (e) {
+      data.body = event.data.text();
+    }
   }
 
   const options = {
