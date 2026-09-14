@@ -24,6 +24,7 @@ import CheckoutModal from "@/components/CheckoutModal";
 import ReleaseModal from "@/components/ReleaseModal";
 import { PushNotificationButton } from "@/components/PushNotificationButton";
 import NotificationPromptBanner from "@/components/NotificationPromptBanner";
+import { LeadLocationMap } from "@/components/LeadLocationMap";
 import {
   LeadResponse, LeadStats, CityCount, Notification, Note, HistoryEvent,
   ContractorMetrics,
@@ -1848,6 +1849,7 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                                 </div>
                               )}
                               {isMine && (
+                                <>
                                 <div className="flex items-center gap-2 mt-3 flex-wrap">
                                   <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-400 px-2.5 py-1 rounded-full">
                                     <BadgeCheck className="h-3 w-3" /> Revelado
@@ -1886,6 +1888,21 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                                     <RefreshCcw className="h-3 w-3" /> Largar
                                   </button>
                                 </div>
+                                {/* Embedded map + navigation buttons */}
+                                {lead.address && (
+                                  <div className="mt-3">
+                                    <LeadLocationMap
+                                      address={lead.address}
+                                      city={lead.city}
+                                      compact
+                                      isDark={isDark}
+                                      mapLabel={t("dashboard.action.map") || "Mapa"}
+                                      googleLabel={t("dashboard.map.google") || "Google Maps"}
+                                      appleLabel={t("dashboard.map.apple") || "Apple Maps"}
+                                    />
+                                  </div>
+                                )}
+                                </>
                               )}
                             </div>
 
@@ -2048,6 +2065,20 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                     {copiedField === "phone" ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
                     Copiar telefone
                   </button>
+                </div>
+              )}
+
+              {/* Embedded map + navigation buttons */}
+              {selectedLead.address && (
+                <div className="pt-1">
+                  <LeadLocationMap
+                    address={selectedLead.address}
+                    city={selectedLead.city}
+                    isDark={isDark}
+                    mapLabel={t("dashboard.action.map") || "Mapa"}
+                    googleLabel={t("dashboard.map.google") || "Google Maps"}
+                    appleLabel={t("dashboard.map.apple") || "Apple Maps"}
+                  />
                 </div>
               )}
             </div>
