@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/lib/i18n";
-import { fetchStats, fetchCities, fetchScraperStatus } from "@/lib/api-client";
-import type { LeadStats, ScraperRunState } from "@/lib/api-client";
+import { fetchPublicMetrics } from "@/lib/api-client";
+import type { PublicMetrics } from "@/lib/api-client";
 import { FoldWave, useLandingShell } from "@/components/landing/LandingShell";
 
 // ------------------------------------------------------------------
@@ -91,31 +91,17 @@ export default function LandingPage() {
   const [conversionRate, setConversionRate] = useState(3);
   const [openFaq, setOpenFaq] = useState<number | null>(0);
 
-  // dados reais (públicos)
-  const [stats, setStats] = useState<LeadStats | null>(null);
-  const [servedCities, setServedCities] = useState(CITIES.length);
-  const [scraper, setScraper] = useState<ScraperRunState | null>(null);
+  // dados reais (métricas públicas — fonte única da verdade)
+  const [metrics, setMetrics] = useState<PublicMetrics | null>(null);
 
   useEffect(() => {
     let mounted = true;
     (async () => {
       try {
-        const s = await fetchStats();
-        if (mounted) setStats(s);
+        const m = await fetchPublicMetrics();
+        if (mounted) setMetrics(m);
       } catch {
-        /* sem dados públicos -> valores iniciais zero */
-      }
-      try {
-        const cities = await fetchCities();
-        if (mounted) setServedCities(cities.length);
-      } catch {
-        /* sem lista de cidades -> usa fallback */
-      }
-      try {
-        const status = await fetchScraperStatus();
-        if (mounted) setScraper(status);
-      } catch {
-        /* sem status do scraper -> esconde contagem de novas */
+        /* sem métricas públicas -> valores iniciais zero */
       }
     })();
     return () => {
@@ -164,11 +150,11 @@ export default function LandingPage() {
     return { categories, tradesLabel, signals, problems, comparisons, quotes, planFeatures, neverItems, faqs, templates, trust, waMsg, aboutJobs };
   }, [t]);
 
-  // ------------------------------------------------ derivados
-  const leadsBank = stats?.total_leads ?? stats?.total ?? 0;
-  const withOwner = stats?.leads_with_owner ?? stats?.with_owner ?? stats?.contacted ?? 0;
-  const citiesCount = servedCities || stats?.cities?.length || CITIES.length;
-  const newThisRun = (scraper?.last_run?.inserted ?? 0) + 500;
+  // ------------------------------------------------ derivados (métricas públicas)
+  const leadsBank = metrics?.total_leads ?? 0;
+  const withOwner = metrics?.leads_with_owner ?? 0;
+  const citiesCount = metrics?.cities_count ?? CITIES.length;
+  const newThisRun = metrics?.last_scrape?.novas_oportunidades ?? 0;
 
   const fmtTimer = (s: number) =>
     `${Math.floor(s / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;

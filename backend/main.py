@@ -675,6 +675,21 @@ async def leads_dashboard_summary(user: Optional[dict] = Depends(_get_optional_u
         raise HTTPException(status_code=500, detail="Erro ao buscar resumo do dashboard")
 
 
+# Métricas públicas - Fonte Única da Verdade para contadores da Landing Page e Dashboard
+@app.get("/api/metrics/public")
+async def public_metrics():
+    """Retorna contadores públicos unificados (total/owner/cidades + última varredura).
+
+    Chave canônica: last_scrape.novas_oportunidades — usada tanto na Landing
+    quanto no card 'Última Varredura' do Dashboard para evitar divergência.
+    """
+    try:
+        return await db_service.get_public_metrics()
+    except Exception as e:
+        logger.error(f"Erro ao buscar métricas públicas: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao buscar métricas públicas")
+
+
 # Detalhe de um lead
 @app.get("/api/leads/{lead_id}", response_model=LeadResponse)
 async def get_lead(lead_id: int, user: Optional[dict] = Depends(_get_optional_user)):

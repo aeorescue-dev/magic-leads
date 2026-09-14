@@ -193,6 +193,24 @@ export async function fetchDashboardSummary(): Promise<DashboardSummary> {
   return handle<DashboardSummary>(await fetch(`${API_URL}/api/leads/dashboard-summary`, { headers: { ...authHeaders() } }));
 }
 
+export interface PublicMetrics {
+  total_leads: number;
+  leads_with_owner: number;
+  cities: string[];
+  cities_count: number;
+  last_scrape: {
+    inserted: number;
+    started_at?: string | null;
+    finished_at?: string | null;
+    status?: string | null;
+    novas_oportunidades: number;
+  };
+}
+
+export async function fetchPublicMetrics(): Promise<PublicMetrics> {
+  return handle<PublicMetrics>(await fetch(`${API_URL}/api/metrics/public`));
+}
+
 export async function fetchStats(): Promise<LeadStats> {
   return handle<LeadStats>(await fetch(`${API_URL}/api/leads/stats`));
 }

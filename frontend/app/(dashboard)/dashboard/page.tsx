@@ -35,7 +35,8 @@ import {
   fetchMyLeadsHistory, MyLeadHistoryItem, MyLeadsHistoryKpis,
   LeadOccurrence, fetchLeadOccurrences,
   fetchDashboardSummary, DashboardSummary,
-  fetchScraperStatus, ScraperRunState
+  fetchScraperStatus, ScraperRunState,
+  fetchPublicMetrics, PublicMetrics
 } from "@/lib/api-client";
 
 type Theme = "dark" | "light";
@@ -174,6 +175,7 @@ function DashboardPageInner() {
   const [selectedUrgency, setSelectedUrgency] = useState<string>("all");
   const [selectedType, setSelectedType] = useState<string>("all");
   const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
+  const [publicMetrics, setPublicMetrics] = useState<PublicMetrics | null>(null);
   const [scraperState, setScraperState] = useState<ScraperRunState | null>(null);
   const [shown, setShown] = useState<Set<string>>(new Set());
 
@@ -376,12 +378,13 @@ const LEAD_TYPES = [
     (async () => {
       setLoadingLeads(true);
       try {
-        const [statsData, citiesData, leadsData, summaryData, scraperData] = await Promise.all([
+        const [statsData, citiesData, leadsData, summaryData, scraperData, publicMetricsData] = await Promise.all([
           fetchStats().catch(() => null),
           fetchCitiesWithCounts().catch(() => []),
           fetchTodayLeads(50, selectedCity === "all" ? undefined : selectedCity, false, 1, selectedType === "all" ? undefined : selectedType).catch(() => ({ leads: [], total: 0, page: 1, per_page: 50 })),
           fetchDashboardSummary().catch(() => null),
           fetchScraperStatus().catch(() => null),
+          fetchPublicMetrics().catch(() => null),
         ]);
         if (!active) return;
         if (statsData) setStats(statsData);
@@ -390,6 +393,7 @@ const LEAD_TYPES = [
         }
         if (summaryData) setDashboardSummary(summaryData);
         if (scraperData) setScraperState(scraperData);
+        if (publicMetricsData) setPublicMetrics(publicMetricsData);
         setLeads(leadsData.leads || []);
         setCurrentPage(1);
         setHasMoreLeads((leadsData.leads?.length || 0) >= 50);
@@ -418,6 +422,7 @@ const LEAD_TYPES = [
       fetchStats().then(setStats).catch(() => {});
       fetchCitiesWithCounts().then(setCitiesWithCounts).catch(() => {});
       fetchScraperStatus().then(setScraperState).catch(() => {});
+      fetchPublicMetrics().then(setPublicMetrics).catch(() => {});
     }, 30000);
     return () => clearInterval(interval);
   }, [selectedCity]);
@@ -1262,7 +1267,7 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
             {[
               { label: t("dashboard.kpi.interested") || "No seu interesse", value: dashboardSummary?.total_interested ?? 0, delta: t("dashboard.kpi.opportunities") || "oportunidades reais", icon: Building2, color: "#6366f1" },
-              { label: "Última Varredura", value: scrapeCount + 500, delta: "atualizado agora", icon: TrendingUp, color: "#22c55e" },
+              { label: "Última Varredura", value: publicMetrics?.last_scrape?.novas_oportunidades ?? scrapeCount + 500, delta: "atualizado agora", icon: TrendingUp, color: "#22c55e" },
               { label: t("dashboard.kpi.with_contact") || "Com contato", value: dashboardSummary?.with_contact ?? 0, delta: t("dashboard.kpi.ready_call") || "prontas p/ ligar", icon: Phone, color: "#f59e0b" },
               { label: t("dashboard.kpi.urgent") || "Urgentes", value: dashboardSummary?.urgent ?? 0, delta: t("dashboard.kpi.need_action") || "precisam ação", icon: AlertCircle, color: "#ef4444" },
             ].map((k) => (

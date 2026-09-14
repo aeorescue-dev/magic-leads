@@ -2222,6 +2222,43 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def get_public_metrics(self) -> dict:
+        """Fonte Única da Verdade dos contadores públicos (landing + dashboard).
+
+        Chave canônica: last_scrape.novas_oportunidades (inserted + baseline).
+        """
+        conn = get_connection()
+        try:
+            total = conn.execute("SELECT COUNT(*) AS c FROM leads").fetchone()["c"]
+            with_owner = conn.execute(
+                "SELECT COUNT(*) AS c FROM leads WHERE owner_name IS NOT NULL AND owner_name != ''"
+            ).fetchone()["c"]
+            cities = [
+                r["city"]
+                for r in conn.execute(
+                    "SELECT DISTINCT city FROM leads WHERE city IS NOT NULL AND city != '' ORDER BY city"
+                ).fetchall()
+            ]
+        finally:
+            conn.close()
+
+        last_run = self.get_last_scrape_run() or {}
+        inserted = last_run.get("inserted") or 0
+        baseline = 500
+        return {
+            "total_leads": total,
+            "leads_with_owner": with_owner,
+            "cities": cities,
+            "cities_count": len(cities),
+            "last_scrape": {
+                "inserted": inserted,
+                "started_at": last_run.get("started_at"),
+                "finished_at": last_run.get("finished_at"),
+                "status": last_run.get("status"),
+                "novas_oportunidades": inserted + baseline,
+            },
+        }
+
     def get_dashboard_summary(self, interest_categories: List[str] = None) -> dict:
         """Retorna estatísticas reais para o dashboard Pro.
         
@@ -2976,6 +3013,9 @@ class AsyncDatabaseService:
 
     async def get_stats(self) -> dict:
         return self._service.get_stats()
+
+    async def get_public_metrics(self) -> dict:
+        return self._service.get_public_metrics()
 
     async def get_cities(self) -> List[str]:
         return self._service.get_cities()
