@@ -913,7 +913,7 @@ async def send_test_push(payload: SendTestPushRequest):
         return {"status": "ok", "sent": sent, "configured": True}
 
     if payload.debug:
-        return await push_service.send_to_all_debug(push_payload)
+        return await push_service.send_to_all_debug(push_payload, ttl=payload.ttl)
 
     sent = await push_service.send_to_all(push_payload)
 

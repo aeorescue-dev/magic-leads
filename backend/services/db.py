@@ -1409,7 +1409,7 @@ class DatabaseService:
         conn = get_connection()
         try:
             rows = conn.execute(
-                "SELECT user_id, endpoint, p256dh, auth FROM push_subscriptions"
+                "SELECT user_id, endpoint, p256dh, auth, created_at FROM push_subscriptions"
             ).fetchall()
             return [dict(r) for r in rows]
         finally:

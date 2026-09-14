@@ -74,10 +74,17 @@ export function usePushNotifications() {
   const checkSubscription = useCallback(async () => {
     if (!user?.id || !getToken()) return;
     try {
-      const res = await apiFetch("/api/push/subscriptions");
+      const [res, swSub] = await Promise.all([
+        apiFetch("/api/push/subscriptions"),
+        navigator.serviceWorker.ready.then((reg) => reg.pushManager.getSubscription()),
+      ]);
       if (res.ok) {
         const data = await res.json();
-        setSubscribed(data.subscriptions && data.subscriptions.length > 0);
+        const subs = data.subscriptions || [];
+        // Só considera "ativado" se o endpoint do browser ATUAL está no backend.
+        // Subs de outros browsers/dispositivos não devem esconder o botão de ativar.
+        const currentEndpoint = swSub?.endpoint || "";
+        setSubscribed(!!currentEndpoint && subs.some((s: { endpoint: string }) => s.endpoint === currentEndpoint));
       }
     } catch (e) {
       console.error("Error checking subscription:", e);

@@ -144,7 +144,7 @@ class PushService:
 
         return total_sent
 
-    def _send_single_debug(self, subscription: Dict, payload: Dict) -> Dict:
+    def _send_single_debug(self, subscription: Dict, payload: Dict, ttl: int = 3600) -> Dict:
         """Como _send_single, mas retorna {ok, error} com detalhes para debug."""
         if not self.is_configured():
             return {"ok": False, "error": "Push not configured"}
@@ -160,7 +160,8 @@ class PushService:
                 },
                 data=json.dumps(payload),
                 vapid_private_key=self._vapid_private_key,
-                vapid_claims=dict(self._vapid_claims)
+                vapid_claims=dict(self._vapid_claims),
+                ttl=ttl
             )
             return {"ok": True}
         except WebPushException as e:
@@ -172,7 +173,7 @@ class PushService:
         except Exception as e:
             return {"ok": False, "error": f"Unexpected: {type(e).__name__}: {e}"}
 
-    async def send_to_all_debug(self, payload: Dict) -> Dict:
+    async def send_to_all_debug(self, payload: Dict, ttl: int = 3600) -> Dict:
         """Broadcast retornando erros detalhados por subscription (para teste)."""
         results = {
             "configured": self.is_configured(),
@@ -187,9 +188,17 @@ class PushService:
         subscriptions = await db_service.get_all_push_subscriptions()
         results["subscriptions_found"] = len(subscriptions)
         for sub in subscriptions:
-            res = self._send_single_debug(sub, payload)
+            res = self._send_single_debug(sub, payload, ttl)
             if res.get("ok"):
                 results["sent"] += 1
+                results["errors"].append({
+                    "user_id": sub["user_id"],
+                    "endpoint_prefix": (sub["endpoint"] or "<vazia>")[:60],
+                    "p256dh_empty": not bool(sub.get("p256dh")),
+                    "auth_empty": not bool(sub.get("auth")),
+                    "created_at": sub.get("created_at"),
+                    "status": "sent"
+                })
             else:
                 if res.get("expired"):
                     await db_service.remove_push_subscription(sub["user_id"], sub["endpoint"])
@@ -198,6 +207,7 @@ class PushService:
                     "endpoint_prefix": (sub["endpoint"] or "<vazia>")[:60],
                     "p256dh_empty": not bool(sub.get("p256dh")),
                     "auth_empty": not bool(sub.get("auth")),
+                    "created_at": sub.get("created_at"),
                     "error": res.get("error")
                 })
         return results

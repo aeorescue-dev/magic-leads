@@ -314,6 +314,7 @@ class SendTestPushRequest(BaseModel):
     tag: str = "test_notification"
     url: str = "/dashboard"
     debug: bool = False
+    ttl: int = 3600
 
 
 class ContactLeadRequest(BaseModel):
