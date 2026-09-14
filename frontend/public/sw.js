@@ -32,14 +32,28 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch event - serve from cache, fallback to network
+// Fetch event - only intercept same-origin GET navigation/static requests.
+// API and cross-origin requests pass straight to the network so a failing
+// backend never breaks the page with net::ERR_FAILED.
 self.addEventListener('fetch', (event) => {
-  // Skip non-GET requests
+  const requestUrl = new URL(event.request.url);
+
   if (event.request.method !== 'GET') return;
-  
-  // Skip chrome-extension and other non-http requests
-  if (!event.request.url.startsWith('http')) return;
-  
+
+  // Never intercept cross-origin requests (backend API, external CDNs, etc.)
+  if (requestUrl.origin !== self.location.origin) return;
+
+  // Never intercept API requests
+  if (requestUrl.pathname.startsWith('/api/')) return;
+
+  // Only handle same-origin navigations and static assets
+  if (event.request.mode !== 'navigate' &&
+      requestUrl.pathname.startsWith('/_next/') === false &&
+      requestUrl.pathname.startsWith('/manifest.json') === false &&
+      requestUrl.pathname.startsWith('/icon-') === false) {
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request)
       .then((cachedResponse) => {
@@ -48,21 +62,19 @@ self.addEventListener('fetch', (event) => {
         }
         return fetch(event.request)
           .then((response) => {
-            // Don't cache non-success responses
             if (!response || response.status !== 200 || response.type !== 'basic') {
               return response;
             }
-            // Clone and cache
             const responseToCache = response.clone();
             caches.open(CACHE_NAME)
               .then((cache) => cache.put(event.request, responseToCache));
             return response;
           })
           .catch(() => {
-            // Offline fallback for navigation requests
-            if (event.request.mode === 'navigate') {
-              return caches.match('/');
-            }
+            // Offline fallback - ALWAYS return a valid Response to avoid
+            // net::ERR_FAILED. Fall back to the cached homepage if available.
+            return caches.match('/')
+              .then((home) => home || new Response('Offline', { status: 503, headers: { 'Content-Type': 'text/plain' } }));
           });
       })
   );
@@ -70,9 +82,13 @@ self.addEventListener('fetch', (event) => {
 
 // Push event - show notification
 self.addEventListener('push', (event) => {
-  if (!event.data) return;
-  
-  const data = event.data.json();
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch (e) {
+    console.error('Push: invalid JSON payload', e);
+  }
+
   const options = {
     body: data.body || 'Nova oportunidade disponível',
     icon: '/icon-192.png',
@@ -90,7 +106,7 @@ self.addEventListener('push', (event) => {
       url: data.url || '/dashboard'
     }
   };
-  
+
   event.waitUntil(
     self.registration.showNotification(data.title || 'Magic Leads', options)
   );
@@ -99,14 +115,14 @@ self.addEventListener('push', (event) => {
 // Notification click event
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  
+
   if (event.action === 'dismiss') {
     return;
   }
-  
+
   const leadId = event.notification.data?.leadId;
   const url = event.notification.data?.url || '/dashboard';
-  
+
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true })
       .then((clientList) => {

@@ -297,6 +297,16 @@ class ReleaseLeadRequest(BaseModel):
         return v
 
 
+class PushSubscribeRequest(BaseModel):
+    endpoint: str
+    p256dh: str
+    auth: str
+
+
+class PushUnsubscribeRequest(BaseModel):
+    endpoint: str
+
+
 class ContactLeadRequest(BaseModel):
     channel: str = "sms"
 

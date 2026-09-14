@@ -23,6 +23,7 @@ import { buildOutreachMessage } from "@/lib/outreach";
 import CheckoutModal from "@/components/CheckoutModal";
 import ReleaseModal from "@/components/ReleaseModal";
 import { PushNotificationButton } from "@/components/PushNotificationButton";
+import NotificationPromptBanner from "@/components/NotificationPromptBanner";
 import {
   LeadResponse, LeadStats, CityCount, Notification, Note, HistoryEvent,
   ContractorMetrics,
@@ -1112,6 +1113,9 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
 
         {/* MAIN BODY CONTAINER */}
         <main className="flex-1 p-4 md:p-6 space-y-6 max-w-7xl mx-auto w-full">
+          {/* PUSH NOTIFICATION PROMPT */}
+          <NotificationPromptBanner />
+
           {/* GREETING */}
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>

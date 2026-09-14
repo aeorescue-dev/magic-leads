@@ -1,157 +1,39 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { useAuth } from '@/lib/auth';
-import { useI18n } from '@/lib/i18n';
-import { Bell, BellOff, Loader2 } from 'lucide-react';
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
-
-function apiFetch(path: string, options: RequestInit = {}) {
-  const token = localStorage.getItem('garimpador.token');
-  return fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${localStorage.getItem('garimpador.token')}`,
-      ...options.headers,
-    },
-  });
-}
+import { useI18n } from "@/lib/i18n";
+import { usePushNotifications } from "@/lib/usePushNotifications";
+import { Bell, BellOff, Loader2, ShieldAlert } from "lucide-react";
 
 export function PushNotificationButton() {
-  const { user, loading: authLoading } = useAuth();
   const { t } = useI18n();
-  const [subscribed, setSubscribed] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [supported, setSupported] = useState(false);
-  const [permission, setPermission] = useState<'default' | 'granted' | 'denied'>('default');
-  const [error, setError] = useState<string | null>(null);
+  const {
+    supported,
+    permission,
+    subscribed,
+    loading,
+    error,
+    hasUser,
+    subscribe,
+    unsubscribe,
+  } = usePushNotifications();
 
-  useEffect(() => {
-    const isSupported = 'serviceWorker' in navigator && 'PushManager' in window;
-    setSupported(isSupported);
-    
-    if (isSupported && Notification.permission) {
-      setPermission(Notification.permission);
-    }
-
-    checkSubscription();
-  }, []);
-
-  const checkSubscription = async () => {
-    if (!user) return;
-    try {
-      const res = await apiFetch('/api/push/subscriptions');
-      if (res.ok) {
-        const data = await res.json();
-        setSubscribed(data.subscriptions && data.subscriptions.length > 0);
-      }
-    } catch (e) {
-      console.error('Error checking subscription:', e);
-    }
-  };
-
-  const subscribe = async () => {
-    if (!user || !supported) return;
-    setLoading(true);
-    setError(null);
-
-    try {
-      // Check current permission first
-      if (Notification.permission === 'denied') {
-        setError(t('push.permission_denied') || 'Permissão negada. Habilite nas configurações do navegador (ícone de cadeado/escudo na barra de endereço > Notificações > Permitir)');
-        setLoading(false);
-        return;
-      }
-
-      const permission = await Notification.requestPermission();
-      setPermission(permission);
-      
-      if (permission !== 'granted') {
-        setError(t('push.permission_denied') || 'Permissão negada. Habilite nas configurações do navegador (ícone de cadeado/escudo na barra de endereço > Notificações > Permitir)');
-        return;
-      }
-
-      const registration = await navigator.serviceWorker.register('/sw.js');
-      await navigator.serviceWorker.ready;
-
-      const keyRes = await apiFetch('/api/push/vapid-public-key');
-      if (!keyRes.ok) throw new Error('VAPID key not available');
-      const { public_key } = await keyRes.json();
-      if (!public_key) throw new Error('VAPID key not available');
-
-      const urlBase64ToUint8Array = (base64String: string) => {
-        const padding = '='.repeat((4 - base64String.length % 4) % 4);
-        const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-        const rawData = window.atob(base64);
-        const outputArray = new Uint8Array(rawData.length);
-        for (let i = 0; i < rawData.length; ++i) {
-          outputArray[i] = rawData.charCodeAt(i);
-        }
-        return outputArray;
-      };
-
-      const applicationServerKey = urlBase64ToUint8Array(public_key);
-
-      const swRegistration = await navigator.serviceWorker.ready;
-      const subscription = await swRegistration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey
-      });
-
-      const subData = {
-        endpoint: subscription.endpoint,
-        p256dh: btoa(String.fromCharCode(...Array.from(new Uint8Array(subscription.getKey('p256dh')!)))),
-        auth: btoa(String.fromCharCode(...Array.from(new Uint8Array(subscription.getKey('auth')!))))
-      };
-
-      const subRes = await apiFetch('/api/push/subscribe', {
-        method: 'POST',
-        body: JSON.stringify(subData),
-      });
-
-      if (!subRes.ok) throw new Error('Falha ao inscrever');
-
-      setSubscribed(true);
-      setError(null);
-    } catch (err: any) {
-      console.error('Subscribe error:', err);
-      setError(err.message || t('push.error') || 'Erro ao ativar notificações');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const unsubscribe = async () => {
-    if (!user) return;
-    setLoading(true);
-    try {
-      const registration = await navigator.serviceWorker.ready;
-      const subscription = await registration.pushManager.getSubscription();
-      
-      if (subscription) {
-        await subscription.unsubscribe();
-        
-        await apiFetch('/api/push/unsubscribe', {
-          method: 'POST',
-          body: JSON.stringify({
-            endpoint: subscription.endpoint
-          })
-        });
-        
-        setSubscribed(false);
-      }
-    } catch (err: any) {
-      console.error('Unsubscribe error:', err);
-      setError(err.message || t('push.error') || 'Erro ao desativar');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  if (authLoading || !user || !supported) {
+  if (!hasUser || !supported) {
     return null;
+  }
+
+  if (permission === "denied") {
+    return (
+      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
+        <span className="flex items-center gap-1.5 text-xs text-amber-400">
+          <ShieldAlert className="h-3.5 w-3.5" />
+          {t("push.permission_denied") || "Notificações bloqueadas no navegador"}
+        </span>
+        <span className="text-[11px] text-slate-400">
+          {t("push.permission_instructions") ||
+            "Habilite no cadeado/escudo da barra de endereço > Notificações > Permitir e recarregue a página."}
+        </span>
+      </div>
+    );
   }
 
   return (
@@ -163,17 +45,17 @@ export function PushNotificationButton() {
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-500/10 text-slate-400 hover:bg-slate-500/20 hover:text-slate-300 transition disabled:opacity-50"
         >
           <BellOff className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">{t('push.disable') || 'Desativar alertas'}</span>
+          <span className="hidden sm:inline">{t("push.disable") || "Desativar alertas"}</span>
         </button>
       ) : (
         <button
           onClick={subscribe}
-          disabled={loading || permission === 'denied'}
+          disabled={loading}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/30 transition disabled:opacity-50"
         >
-          <Loader2 className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+          <Loader2 className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
           <Bell className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">{t('push.enable') || 'Ativar alertas no celular/desktop'}</span>
+          <span className="hidden sm:inline">{t("push.enable") || "Ativar alertas no celular/desktop"}</span>
         </button>
       )}
       {error && (
@@ -182,3 +64,5 @@ export function PushNotificationButton() {
     </div>
   );
 }
+
+export default PushNotificationButton;

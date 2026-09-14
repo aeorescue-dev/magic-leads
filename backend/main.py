@@ -28,6 +28,7 @@ from .models.schemas import (
     UserCreate, UserLogin, UserResponse, UserUpdate, AuthResponse, InterestsUpdate,
     ReserverLeadRequest, ReleaseLeadRequest, ContactLeadRequest,
     RejectLeadRequest, LeadHoldResponse, LeadStatusResponse, HistoryEvent,
+    PushSubscribeRequest, PushUnsubscribeRequest,
 )
 from .utils.logger import logger
 
@@ -841,14 +842,12 @@ async def test_endpoint():
 
 @app.post("/api/push/subscribe")
 async def subscribe_push(
+    payload: PushSubscribeRequest,
     user: dict = Depends(_get_current_user),
-    endpoint: str = "",
-    p256dh: str = "",
-    auth: str = ""
 ):
     """Registra uma push subscription para o usuário."""
     try:
-        ok = await db_service.add_push_subscription(user["id"], endpoint, p256dh, auth)
+        ok = await db_service.add_push_subscription(user["id"], payload.endpoint, payload.p256dh, payload.auth)
         return {"status": "ok", "subscribed": ok}
     except Exception as e:
         logger.error(f"Erro ao inscrever push: {e}")
@@ -856,9 +855,12 @@ async def subscribe_push(
 
 
 @app.post("/api/push/unsubscribe")
-async def unsubscribe_push(user: dict = Depends(_get_current_user), endpoint: str = ""):
+async def unsubscribe_push(
+    payload: PushUnsubscribeRequest,
+    user: dict = Depends(_get_current_user),
+):
     """Remove uma push subscription do usuário."""
-    ok = await db_service.remove_push_subscription(user["id"], endpoint)
+    ok = await db_service.remove_push_subscription(user["id"], payload.endpoint)
     return {"status": "ok", "unsubscribed": ok}
 
 
