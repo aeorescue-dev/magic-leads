@@ -28,12 +28,32 @@ jobs:
           from fastapi.testclient import TestClient
           from backend.main import app
           from backend.services.db import db_service
+          import time
 
           client = TestClient(app)
           resp = client.post('/api/scraper/run')
-          print('Resultado:', resp.json())
+          start = resp.json()
+          print('HTTP:', resp.status_code, '| Resposta:', start)
+
+          # Rota assincrona: aceita 202 started ou 409 already_running (reentrante)
+          assert resp.status_code in (200, 202, 409), 'HTTP %s: %s' % (resp.status_code, resp.text)
+          assert start.get('status') in ('started', 'already_running'), start
+
+          if start.get('status') == 'already_running':
+              print('Run ja em execucao em outro processo — seguindo ciclo existente.')
+          else:
+              # Acompanha ate o ciclo terminar (roda em background no TestClient)
+              for i in range(60):
+                  st = client.get('/api/scraper/status').json()
+                  if not (st.get('active') and st.get('running')):
+                      print('Run concluido:', st)
+                      break
+                  print('Aguardando conclusao (iteracao %d/60)...' % (i + 1))
+                  time.sleep(10)
+              else:
+                  print('Aviso: run ainda ativo apos ~10min — seguindo com o que ja foi inserido.')
+
           print('Total no banco:', db_service._service.count_leads())
-          assert resp.status_code == 200, resp.text
           "
 
       - name: Commit updated database
