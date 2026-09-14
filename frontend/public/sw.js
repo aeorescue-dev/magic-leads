@@ -10,45 +10,37 @@ self.addEventListener('fetch', (event) => {
 });
 
 // Push event - show notification
-// try/catch global: qualquer exception e capturada e o worker NAO e encerrado.
 self.addEventListener('push', (event) => {
   const promiseChain = (async () => {
-    try {
-      let data = { title: 'Nova Oportunidade!', body: 'Novo lead disponível.' };
-      if (event.data) {
-        try {
-          const parsed = event.data.json();
-          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-            data = { ...data, ...parsed };
-          }
-        } catch (e) {
-          try {
-            const text = event.data.text();
-            if (text && typeof text === 'string') {
-              data = { ...data, body: text };
-            }
-          } catch (textErr) {
-            // Payload ilegivel — mantem os defaults.
-          }
-        }
-      }
+    let title = 'Magic Leads';
+    let options = {
+      body: 'Nova oportunidade disponível.',
+      icon: '/icon-192.png',
+      tag: 'magic-leads-alert'
+    };
 
-      await self.registration.showNotification(
-        typeof data.title === 'string' && data.title ? data.title : 'Magic Leads',
-        {
-          body: typeof data.body === 'string' && data.body ? data.body : 'Nova oportunidade disponível.',
-          icon: '/icon-192.png',
-          tag: typeof data.tag === 'string' && data.tag ? data.tag : 'magic-leads-alert'
+    if (event.data) {
+      try {
+        const payload = event.data.json();
+        if (payload && typeof payload === 'object') {
+          title = payload.title || title;
+          options.body = payload.body || options.body;
+          if (payload.icon) options.icon = payload.icon;
+          if (payload.tag) options.tag = payload.tag;
         }
-      );
+      } catch (e) {
+        // Se falhar o parse do JSON (ex: texto puro do DevTools), usa o texto puro como body
+        options.body = event.data.text() || options.body;
+      }
+    }
+
+    try {
+      await self.registration.showNotification(title, options);
     } catch (err) {
-      console.error('Erro ao exibir notificação:', {
-        name: err && err.name ? err.name : String(err),
-        message: err && err.message ? err.message : String(err),
-        stack: err && err.stack ? err.stack : '(sem stack)'
-      }, err);
+      console.error('Erro no showNotification:', err);
     }
   })();
+
   event.waitUntil(promiseChain);
 });
 
