@@ -207,8 +207,50 @@ export interface PublicMetrics {
   };
 }
 
+export const EMPTY_PUBLIC_METRICS: PublicMetrics = {
+  total_leads: 0,
+  leads_with_owner: 0,
+  cities: [],
+  cities_count: 0,
+  last_scrape: {
+    inserted: 0,
+    started_at: null,
+    finished_at: null,
+    status: null,
+    novas_oportunidades: 0,
+  },
+};
+
+function toPublicMetrics(value: any): PublicMetrics {
+  const safe = value && typeof value === "object" ? value : {};
+  const lastScrape = safe.last_scrape && typeof safe.last_scrape === "object" ? safe.last_scrape : {};
+  const cities = Array.isArray(safe.cities) ? safe.cities.filter((c: any) => typeof c === "string") : [];
+  return {
+    total_leads: Number.isFinite(safe.total_leads) ? safe.total_leads : 0,
+    leads_with_owner: Number.isFinite(safe.leads_with_owner) ? safe.leads_with_owner : 0,
+    cities,
+    cities_count: Number.isFinite(safe.cities_count) ? safe.cities_count : cities.length,
+    last_scrape: {
+      inserted: Number.isFinite(lastScrape.inserted) ? lastScrape.inserted : 0,
+      started_at: typeof lastScrape.started_at === "string" ? lastScrape.started_at : null,
+      finished_at: typeof lastScrape.finished_at === "string" ? lastScrape.finished_at : null,
+      status: typeof lastScrape.status === "string" ? lastScrape.status : null,
+      novas_oportunidades: Number.isFinite(lastScrape.novas_oportunidades) ? lastScrape.novas_oportunidades : 0,
+    },
+  };
+}
+
 export async function fetchPublicMetrics(): Promise<PublicMetrics> {
-  return handle<PublicMetrics>(await fetch(`${API_URL}/api/metrics/public`));
+  try {
+    const res = await fetch(`${API_URL}/api/metrics/public`);
+    if (!res.ok) {
+      return EMPTY_PUBLIC_METRICS;
+    }
+    const json = await res.json();
+    return toPublicMetrics(json);
+  } catch {
+    return EMPTY_PUBLIC_METRICS;
+  }
 }
 
 export async function fetchStats(): Promise<LeadStats> {

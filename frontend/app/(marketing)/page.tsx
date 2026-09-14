@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/lib/i18n";
-import { fetchPublicMetrics } from "@/lib/api-client";
+import { fetchPublicMetrics, EMPTY_PUBLIC_METRICS } from "@/lib/api-client";
 import type { PublicMetrics } from "@/lib/api-client";
 import { FoldWave, useLandingShell } from "@/components/landing/LandingShell";
 
@@ -92,17 +92,13 @@ export default function LandingPage() {
   const [openFaq, setOpenFaq] = useState<number | null>(0);
 
   // dados reais (métricas públicas — fonte única da verdade)
-  const [metrics, setMetrics] = useState<PublicMetrics | null>(null);
+  const [metrics, setMetrics] = useState<PublicMetrics>(EMPTY_PUBLIC_METRICS);
 
   useEffect(() => {
     let mounted = true;
     (async () => {
-      try {
-        const m = await fetchPublicMetrics();
-        if (mounted) setMetrics(m);
-      } catch {
-        /* sem métricas públicas -> valores iniciais zero */
-      }
+      const m = await fetchPublicMetrics();
+      if (mounted) setMetrics(m);
     })();
     return () => {
       mounted = false;

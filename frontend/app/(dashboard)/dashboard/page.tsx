@@ -36,7 +36,7 @@ import {
   LeadOccurrence, fetchLeadOccurrences,
   fetchDashboardSummary, DashboardSummary,
   fetchScraperStatus, ScraperRunState,
-  fetchPublicMetrics, PublicMetrics
+  fetchPublicMetrics, PublicMetrics, EMPTY_PUBLIC_METRICS
 } from "@/lib/api-client";
 
 type Theme = "dark" | "light";
@@ -175,7 +175,7 @@ function DashboardPageInner() {
   const [selectedUrgency, setSelectedUrgency] = useState<string>("all");
   const [selectedType, setSelectedType] = useState<string>("all");
   const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
-  const [publicMetrics, setPublicMetrics] = useState<PublicMetrics | null>(null);
+  const [publicMetrics, setPublicMetrics] = useState<PublicMetrics>(EMPTY_PUBLIC_METRICS);
   const [scraperState, setScraperState] = useState<ScraperRunState | null>(null);
   const [shown, setShown] = useState<Set<string>>(new Set());
 
