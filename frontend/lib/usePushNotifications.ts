@@ -91,6 +91,11 @@ export function usePushNotifications() {
   const checkSubscription = useCallback(async () => {
     if (!user?.id || !getToken()) return;
     try {
+      // iOS Safari sem PWA: PushManager não existe
+      if (!("PushManager" in window)) {
+        setSubscribed(false);
+        return;
+      }
       const [res, swSub] = await Promise.all([
         apiFetch("/api/push/subscriptions"),
         navigator.serviceWorker.ready.then((reg) => reg.pushManager.getSubscription()),
@@ -120,6 +125,12 @@ export function usePushNotifications() {
     setError(null);
 
     try {
+      // iOS Safari sem PWA: PushManager não existe
+      if (!("PushManager" in window)) {
+        setError("iOS: adicione à Tela Inicial para ativar notificações nativas");
+        return;
+      }
+
       // Permission already denied by the browser: instruct how to re-enable.
       if (Notification.permission === "denied") {
         setPermission("denied");
