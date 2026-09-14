@@ -57,7 +57,7 @@ class PushService:
                 },
                 data=json.dumps(payload),
                 vapid_private_key=self._vapid_private_key,
-                vapid_claims=self._vapid_claims
+                vapid_claims=dict(self._vapid_claims)
             )
             return True
         except WebPushException as e:
@@ -160,7 +160,7 @@ class PushService:
                 },
                 data=json.dumps(payload),
                 vapid_private_key=self._vapid_private_key,
-                vapid_claims=self._vapid_claims
+                vapid_claims=dict(self._vapid_claims)
             )
             return {"ok": True}
         except WebPushException as e:
