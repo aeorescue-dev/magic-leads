@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
-import { Loader2, Eye, EyeOff, Mail, Lock, Building2, ArrowRight, CheckCircle, LogOut } from 'lucide-react';
+import { Loader2, Eye, EyeOff, Mail, Lock, Building2, ArrowRight, CheckCircle, AlertTriangle } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { useI18n } from '@/lib/i18n';
 
@@ -144,9 +144,9 @@ function AuthFormInner() {
       )}
 
       {sessionReason && (
-        <div className="text-sm text-amber-400 text-center bg-amber-400/10 px-3 py-2 rounded-lg border border-amber-400/30 flex items-start gap-2">
-          <LogOut className="h-4 w-4 mt-0.5 shrink-0" />
-          <span>{sessionMessage}</span>
+        <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-black/40 border border-white/10 backdrop-blur-sm animate-in fade-in slide-in-from-top-2 duration-300">
+          <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0" aria-hidden="true" />
+          <p className="text-sm text-gray-200 leading-relaxed">{sessionMessage}</p>
         </div>
       )}
 
