@@ -178,8 +178,8 @@ async def fanout_new_lead_batch(category: str, leads: list) -> int:
                 await push_service.send_to_user(uid, {
                     "title": "Nova oportunidade",
                     "body": f"{category}: {addr} — {city}",
-                    "icon": "https://magicleads-oficial.vercel.app/icons/push-icon-192.png",
-                    "badge": "https://magicleads-oficial.vercel.app/icons/push-badge-72.png",
+                    "icon": "https://magicleads-oficial.vercel.app/icons/magicleads-brand.svg",
+                    "badge": "https://magicleads-oficial.vercel.app/icons/magicleads-brand.svg",
                     "tag": f"new_lead_{lid}",
                     "leadId": lid,
                     "url": f"/dashboard?lead={lid}",
@@ -201,8 +201,8 @@ async def fanout_new_lead_batch(category: str, leads: list) -> int:
                         f"Mais {cnt} ofertas chegaram hoje "
                         f"— o limite de 10 renova amanhã."
                     ),
-                    "icon": "https://magicleads-oficial.vercel.app/icons/push-icon-192.png",
-                    "badge": "https://magicleads-oficial.vercel.app/icons/push-badge-72.png",
+                    "icon": "https://magicleads-oficial.vercel.app/icons/magicleads-brand.svg",
+                    "badge": "https://magicleads-oficial.vercel.app/icons/magicleads-brand.svg",
                     "tag": f"digest_{today_tag}",
                     "url": "/dashboard",
                 })

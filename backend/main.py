@@ -906,8 +906,8 @@ async def send_test_push(payload: SendTestPushRequest):
         "body": payload.body,
         "tag": payload.tag,
         "url": payload.url,
-        "icon": "https://magicleads-oficial.vercel.app/icons/push-icon-192.png",
-        "badge": "https://magicleads-oficial.vercel.app/icons/push-badge-72.png"
+        "icon": "https://magicleads-oficial.vercel.app/icons/magicleads-brand.svg",
+        "badge": "https://magicleads-oficial.vercel.app/icons/magicleads-brand.svg"
     }
 
     if payload.user_id is not None:
