@@ -1,5 +1,7 @@
 'use client';
 
+// Rota canônica /auth do grupo (auth) — layout limpo (sem rodapé antigo).
+// Gatilho de redeploy Vercel: adicionado comentário sem impacto funcional.
 import { AuthForm } from '@/components/AuthForm';
 import { useI18n } from '@/lib/i18n';
 
