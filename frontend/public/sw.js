@@ -15,9 +15,10 @@ self.addEventListener('push', (event) => {
     let title = 'Magic Leads';
     let options = {
       body: 'Nova oportunidade disponível.',
-      icon: '/icons/magicleads-icon-192.png',
-      badge: '/icons/magicleads-icon-192.png',
-      tag: 'magic-leads-alert'
+      icon: '/icons/icon-192.png',
+      badge: '/icons/badge-72.png',
+      tag: 'magic-leads-notification',
+      data: {}
     };
 
     if (event.data) {
