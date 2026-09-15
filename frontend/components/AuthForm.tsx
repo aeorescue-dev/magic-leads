@@ -35,22 +35,12 @@ function AuthFormInner() {
   const { t } = useI18n();
   const { signIn, loading: authLoading } = useAuth();
 
-  // Resolve a mensagem da sessão, garantindo que a chave crua (ex.:
-  // "dashboard.auth.session_expired") nunca vaze para a UI quando a
-  // tradução não estiver disponível.
-  const sessionMessage = (() => {
-    if (!sessionReason) return null;
-    const key =
-      sessionReason === "fifo_evicted"
-        ? "dashboard.auth.session_fifo_evicted"
-        : "dashboard.auth.session_expired";
-    const fallback =
-      sessionReason === "fifo_evicted"
-        ? "Sua sessão foi encerrada porque você entrou em outro dispositivo."
-        : "Sua sessão expirou. Faça login novamente.";
-    const translated = t(key);
-    return translated && !translated.startsWith("dashboard.auth.") ? translated : fallback;
-  })();
+  // Mensagem direta sem depender de t() — evita chave crua mesmo se i18n falhar.
+  const sessionMessage = sessionReason === 'fifo_evicted'
+    ? 'Sua sessão foi encerrada porque você entrou em outro dispositivo.'
+    : sessionReason === 'session_expired'
+      ? 'Sua sessão expirou. Faça login novamente.'
+      : null;
 
   const [isRegister, setIsRegister] = useState(false);
   const [email, setEmail] = useState('');
