@@ -28,7 +28,10 @@ export function setToken(token: string | null) {
 export function setAuthCookie(value = "1", days = 30) {
   if (typeof document === "undefined") return;
   const exp = new Date(Date.now() + days * 86400000).toUTCString();
-  document.cookie = `garimpador_auth=${value}; path=/; expires=${exp}; samesite=lax`;
+  // Secure só em HTTPS (produção). Em dev local (HTTP) o cookie com Secure
+  // seria descartado — o que quebraria o login local.
+  const secure = window.location.protocol === "https:" ? "; secure" : "";
+  document.cookie = `garimpador_auth=${value}; path=/; expires=${exp}; samesite=lax${secure}`;
 }
 
 export function clearAuthCookie() {

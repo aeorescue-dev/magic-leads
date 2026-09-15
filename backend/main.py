@@ -1766,9 +1766,9 @@ async def register_user(request: Request, payload: UserCreate, response: Respons
                 key="garimpador_token",
                 value=token,
                 httponly=True,
-                secure=True,
+                secure=settings.DEBUG == False,  # False em dev (HTTP), True em prod (HTTPS)
                 samesite="lax",
-                max_age=7 * 24 * 60 * 60,  # 7 dias
+                max_age=30 * 24 * 60 * 60,  # 30 dias
                 path="/",
             )
         
@@ -1820,7 +1820,7 @@ async def login_user(request: Request, payload: UserLogin, response: Response = 
                 httponly=True,
                 secure=settings.DEBUG == False,  # False em dev (HTTP), True em prod (HTTPS)
                 samesite="lax",
-                max_age=7 * 24 * 60 * 60,  # 7 dias
+                max_age=30 * 24 * 60 * 60,  # 30 dias
                 path="/",
             )
         
@@ -1954,7 +1954,7 @@ async def demo_login(response: Response = None):
     # Mantém compatibilidade com fallback em memória
     _SESSIONS[token] = user["id"]
     
-    # Define httpOnly cookie com o token
+# Define httpOnly cookie com o token
     if response:
         response.set_cookie(
             key="garimpador_token",
@@ -1962,7 +1962,7 @@ async def demo_login(response: Response = None):
             httponly=True,
             secure=settings.DEBUG == False,
             samesite="lax",
-            max_age=7 * 24 * 60 * 60,
+            max_age=30 * 24 * 60 * 60,
             path="/",
         )
     
