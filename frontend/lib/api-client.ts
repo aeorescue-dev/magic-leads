@@ -164,14 +164,14 @@ async function handle<T>(res: Response): Promise<T> {
 
 // Limita a 2 sessões simultâneas por usuário (backend 401 session_expired_concurrent_login).
 // Registrada globalmente para acessar de qualquer módulo.
-export function handleSessionExpired() {
+export function handleSessionExpired(reason: "fifo_evicted" | "session_expired" = "fifo_evicted") {
   setToken(null);
   clearAuthCookie();
   if (typeof document !== "undefined") {
     document.cookie = "garimpador_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
   }
   if (typeof window !== "undefined" && !window.location.pathname.startsWith("/auth")) {
-    window.location.href = "/auth?session_expired=1";
+    window.location.href = `/auth?reason=${reason}`;
   }
 }
 

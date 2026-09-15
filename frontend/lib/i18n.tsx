@@ -18,7 +18,22 @@ export const LANGS: { code: Lang; label: string; native: string }[] = [
 
 export const LANGS_VALID: Lang[] = ["pt", "en", "es"];
 
-const STORAGE_KEY = "magicleads.lang";
+const STORAGE_KEY = "NEXT_LOCALE";
+const COOKIE_KEY = "NEXT_LOCALE";
+const COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // 1 ano
+
+function setLocaleCookie(l: Lang) {
+  if (typeof document === "undefined") return;
+  // Secure só em HTTPS (produção). Em dev local (HTTP) o cookie seria descartado.
+  const secure = window.location.protocol === "https:" ? "; secure" : "";
+  document.cookie = `${COOKIE_KEY}=${encodeURIComponent(l)}; path=/; max-age=${COOKIE_MAX_AGE}; samesite=lax${secure}`;
+}
+
+function getLocaleCookie(): string | null {
+  if (typeof document === "undefined") return null;
+  const m = document.cookie.match(/(?:^|; )NEXT_LOCALE=([^;]*)/);
+  return m ? decodeURIComponent(m[1]) : null;
+}
 
 type Dict = Record<string, string>;
 
@@ -623,6 +638,8 @@ const PT: Dict = {
   "dashboard.auth.email_exists": "Email já cadastrado. Tente entrar.",
   "dashboard.auth.invalid_credentials": "Email ou senha inválidos",
   "dashboard.auth.error_generic": "Erro ao autenticar. Tente novamente.",
+  "dashboard.auth.session_fifo_evicted": "Sua sessão foi encerrada porque você entrou em outro dispositivo.",
+  "dashboard.auth.session_expired": "Sua sessão expirou. Faça login novamente.",
   "dashboard.auth.password_placeholder": "••••••••",
   "dashboard.auth.register_success": "Conta criada!",
   "dashboard.auth.login_success": "Entrada realizada!",
@@ -1448,6 +1465,8 @@ const EN: Dict = {
   "dashboard.auth.email_exists": "Email already registered. Try signing in.",
   "dashboard.auth.invalid_credentials": "Invalid email or password",
   "dashboard.auth.error_generic": "Authentication error. Please try again.",
+  "dashboard.auth.session_fifo_evicted": "Your session was closed because you logged in on another device.",
+  "dashboard.auth.session_expired": "Your session expired. Please log in again.",
   "dashboard.auth.password_placeholder": "••••••••",
   "dashboard.auth.register_success": "Account created!",
   "dashboard.auth.login_success": "Signed in!",
@@ -2273,6 +2292,8 @@ const ES: Dict = {
   "dashboard.auth.email_exists": "Correo ya registrado. Intenta entrar.",
   "dashboard.auth.invalid_credentials": "Correo o contraseña inválidos",
   "dashboard.auth.error_generic": "Error al autenticar. Inténtalo de nuevo.",
+  "dashboard.auth.session_fifo_evicted": "Se cerró tu sesión porque iniciaste sesión en otro dispositivo.",
+  "dashboard.auth.session_expired": "Tu sesión expiró. Por favor inicia sesión de nuevo.",
   "dashboard.auth.password_placeholder": "••••••••",
   "dashboard.auth.register_success": "¡Cuenta creada!",
   "dashboard.auth.login_success": "¡Entrada realizada!",
@@ -2529,8 +2550,10 @@ const Ctx = createContext<I18nCtx>({
 
 function getInitialLang(): Lang {
   if (typeof window === "undefined") return "pt";
-  const stored = window.localStorage.getItem(STORAGE_KEY) as Lang | null;
-  if (stored && LANGS_VALID.includes(stored)) return stored;
+  const stored = window.localStorage.getItem(STORAGE_KEY);
+  if (stored && LANGS_VALID.includes(stored as Lang)) return stored as Lang;
+  const cookieLang = getLocaleCookie();
+  if (cookieLang && LANGS_VALID.includes(cookieLang as Lang)) return cookieLang as Lang;
   try {
     const nav = (navigator.language || "pt").toLowerCase().slice(0, 2);
     if (LANGS_VALID.includes(nav as Lang)) return nav as Lang;
@@ -2540,18 +2563,28 @@ function getInitialLang(): Lang {
   return "pt";
 }
 
+function persistLocale(l: Lang) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(STORAGE_KEY, l);
+  } catch {
+    /* storage indisponível (ex.: modo privado) */
+  }
+  setLocaleCookie(l);
+}
+
 export function LanguageProvider({ children }: { children: ReactNode }) {
   const [lang, setLangState] = useState<Lang>("pt");
 
   useEffect(() => {
-    setLangState(getInitialLang());
+    const initial = getInitialLang();
+    setLangState(initial);
+    persistLocale(initial);
   }, []);
 
   const setLang = (l: Lang) => {
     setLangState(l);
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(STORAGE_KEY, l);
-    }
+    persistLocale(l);
   };
 
   const t = (key: string) => DICTS[lang][key] ?? key;
