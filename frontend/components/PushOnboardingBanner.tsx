@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useI18n } from "@/lib/i18n";
 import { usePushNotifications } from "@/lib/usePushNotifications";
 import { useAuth } from "@/lib/auth";
+import { iOSInstallModal as IOSInstallModal } from "@/components/iOSInstallModal";
 import { Bell, BellRing, ShieldAlert, Smartphone, X, ArrowUpRight } from "lucide-react";
 
 const DISMISSED_KEY = "garimpador.push.ios_tutorial.dismissed";
@@ -32,6 +33,7 @@ export function PushOnboardingBanner() {
   } = usePushNotifications();
 
   const [visible, setVisible] = useState(false);
+  const [showInstallHelp, setShowInstallHelp] = useState(false);
 
   // Se é iOS fora do PWA, sempre mostra o tutorial de instalação
   // (a permissão Web Push nunca funciona numa aba de navegador no iOS).
@@ -73,6 +75,7 @@ export function PushOnboardingBanner() {
     const browser = detectBrowser();
 
     return (
+      <>
       <div className="fixed inset-x-0 bottom-0 z-[200] sm:absolute sm:left-4 sm:right-4 sm:bottom-4 rounded-t-3xl sm:rounded-2xl border border-emerald-500/30 bg-[#0d1420]/95 backdrop-blur-xl shadow-2xl shadow-emerald-500/10 overflow-hidden">
         {/* Seta animada indicando a ação */}
         <div className="relative">
@@ -133,18 +136,18 @@ export function PushOnboardingBanner() {
               >
                 {t("push.banner.dismiss") || "Agora não"}
               </button>
-              <a
-                href="https://support.apple.com/en-us/105082"
-                target="_blank"
-                rel="noopener noreferrer"
+              <button
+                onClick={() => setShowInstallHelp(true)}
                 className="px-3 py-2 rounded-lg text-xs font-semibold text-emerald-400 hover:text-emerald-300 transition"
               >
                 {t("push.ios.howto") || "Como instalar"} ↗
-              </a>
+              </button>
             </div>
           </div>
         </div>
       </div>
+      {showInstallHelp && <IOSInstallModal onClose={() => setShowInstallHelp(false)} />}
+      </>
     );
   }
 
