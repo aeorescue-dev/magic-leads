@@ -226,6 +226,17 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   UNIQUE(user_id, endpoint)
 );
 
+CREATE TABLE IF NOT EXISTS user_sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL,
+  device_info TEXT,
+  ip_address TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  last_active_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(token_hash)
+);
+
 CREATE TABLE IF NOT EXISTS lead_holds (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
@@ -1410,6 +1421,117 @@ class DatabaseService:
         try:
             rows = conn.execute(
                 "SELECT user_id, endpoint, p256dh, auth, created_at FROM push_subscriptions"
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    # ---------------------------------------------------------------
+    # User Sessions (Concurrent login control - max 2 per user)
+    # ---------------------------------------------------------------
+    def create_user_session(
+        self, user_id: int, token_hash: str, device_info: Optional[str], ip_address: Optional[str]
+    ) -> bool:
+        """
+        Cria uma nova sessão para o usuário.
+        Se já existirem 2 sessões ativas, remove a mais antiga (FIFO).
+        """
+        conn = get_connection()
+        try:
+            # Conta sessões atuais
+            count = conn.execute(
+                "SELECT COUNT(*) as cnt FROM user_sessions WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()["cnt"]
+
+            if count >= 2:
+                # Remove a sessão mais antiga (FIFO)
+                conn.execute(
+                    """
+                    DELETE FROM user_sessions 
+                    WHERE id = (
+                        SELECT id FROM user_sessions 
+                        WHERE user_id = ? 
+                        ORDER BY last_active_at ASC 
+                        LIMIT 1
+                    )
+                    """,
+                    (user_id,),
+                )
+
+            # Insere a nova sessão
+            conn.execute(
+                """
+                INSERT INTO user_sessions (user_id, token_hash, device_info, ip_address)
+                VALUES (?, ?, ?, ?)
+                """,
+                (user_id, token_hash, device_info, ip_address),
+            )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+    def validate_user_session(self, token_hash: str) -> Optional[int]:
+        """
+        Verifica se o token_hash corresponde a uma sessão válida.
+        Retorna o user_id se válido, None caso contrário.
+        Atualiza last_active_at em caso de sucesso.
+        """
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT user_id FROM user_sessions WHERE token_hash = ?",
+                (token_hash,),
+            ).fetchone()
+            if row:
+                conn.execute(
+                    "UPDATE user_sessions SET last_active_at = CURRENT_TIMESTAMP WHERE token_hash = ?",
+                    (token_hash,),
+                )
+                conn.commit()
+                return row["user_id"]
+            return None
+        finally:
+            conn.close()
+
+    def remove_user_session(self, token_hash: str) -> bool:
+        """Remove uma sessão específica pelo token_hash."""
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "DELETE FROM user_sessions WHERE token_hash = ?",
+                (token_hash,),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def remove_user_sessions(self, user_id: int) -> int:
+        """Remove todas as sessões de um usuário."""
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "DELETE FROM user_sessions WHERE user_id = ?",
+                (user_id,),
+            )
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
+
+    def get_user_active_sessions(self, user_id: int) -> List[dict]:
+        """Retorna todas as sessões ativas de um usuário."""
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                """
+                SELECT id, token_hash, device_info, ip_address, created_at, last_active_at
+                FROM user_sessions WHERE user_id = ?
+                ORDER BY last_active_at DESC
+                """,
+                (user_id,),
             ).fetchall()
             return [dict(r) for r in rows]
         finally:
@@ -3117,6 +3239,24 @@ class AsyncDatabaseService:
 
     async def get_all_push_subscriptions(self) -> List[dict]:
         return self._service.get_all_push_subscriptions()
+
+    # User Sessions
+    async def create_user_session(
+        self, user_id: int, token_hash: str, device_info: Optional[str], ip_address: Optional[str]
+    ) -> bool:
+        return self._service.create_user_session(user_id, token_hash, device_info, ip_address)
+
+    async def validate_user_session(self, token_hash: str) -> Optional[int]:
+        return self._service.validate_user_session(token_hash)
+
+    async def remove_user_session(self, token_hash: str) -> bool:
+        return self._service.remove_user_session(token_hash)
+
+    async def remove_user_sessions(self, user_id: int) -> int:
+        return self._service.remove_user_sessions(user_id)
+
+    async def get_user_active_sessions(self, user_id: int) -> List[dict]:
+        return self._service.get_user_active_sessions(user_id)
 
     async def get_users_interested_in(self, category: str, city: Optional[str] = None) -> List[dict]:
         return self._service.get_users_interested_in(category, city)

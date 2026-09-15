@@ -149,9 +149,27 @@ async function handle<T>(res: Response): Promise<T> {
     } catch {
       detail = await res.text();
     }
+    // Sessão expirada por login concorrente (limite de 2 sessões por usuário)
+    if (detail && typeof detail === "object" && detail?.error === "session_expired_concurrent_login") {
+      handleSessionExpired();
+      throw new Error(toErrorMessage(detail));
+    }
     throw new Error(toErrorMessage(detail));
   }
   return res.json() as Promise<T>;
+}
+
+// Limita a 2 sessões simultâneas por usuário (backend 401 session_expired_concurrent_login).
+// Registrada globalmente para acessar de qualquer módulo.
+export function handleSessionExpired() {
+  setToken(null);
+  clearAuthCookie();
+  if (typeof document !== "undefined") {
+    document.cookie = "garimpador_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+  }
+  if (typeof window !== "undefined" && !window.location.pathname.startsWith("/auth")) {
+    window.location.href = "/auth?session_expired=1";
+  }
 }
 
 export async function fetchLeads(params: {

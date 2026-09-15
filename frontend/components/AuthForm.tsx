@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { Loader2, Eye, EyeOff, Mail, Lock, Building2, ArrowRight, CheckCircle } from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense } from 'react';
+import { Loader2, Eye, EyeOff, Mail, Lock, Building2, ArrowRight, CheckCircle, LogOut } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { useI18n } from '@/lib/i18n';
 
@@ -14,7 +15,17 @@ interface FormErrors {
 }
 
 export function AuthForm() {
+  return (
+    <Suspense fallback={null}>
+      <AuthFormInner />
+    </Suspense>
+  );
+}
+
+function AuthFormInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const sessionExpired = searchParams.get('session_expired') === '1';
   const { t } = useI18n();
   const { signIn, loading: authLoading } = useAuth();
 
@@ -116,6 +127,15 @@ export function AuthForm() {
       {errors.general && (
         <div className="text-sm text-red-400 text-center bg-red-400/10 px-3 py-2 rounded-lg">
           {errors.general}
+        </div>
+      )}
+
+      {sessionExpired && (
+        <div className="text-sm text-amber-400 text-center bg-amber-400/10 px-3 py-2 rounded-lg border border-amber-400/30 flex items-start gap-2">
+          <LogOut className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>
+            {t('dashboard.auth.session_expired') || 'Sua sessão anterior foi encerrada porque esta conta foi acessada em outro dispositivo. Limite de 2 sessões simultâneas. Entre novamente para continuar.'}
+          </span>
         </div>
       )}
 

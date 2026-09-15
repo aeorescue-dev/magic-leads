@@ -6,6 +6,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 import asyncio
 import contextlib
+import hashlib
 import httpx
 import os
 import uuid
@@ -240,13 +241,23 @@ app.add_middleware(
 
 
 # ------------------------------------------------------------------
-# Sessões simples (token -> user_id) para o MVP self-hosted.
-# Em produção, trocar por sessões em banco/JWT com expiração.
+# Sessões via banco de dados (controle de concorrência: máx. 2 por usuário)
 # ------------------------------------------------------------------
-_SESSIONS: dict[str, int] = {}
+_SESSIONS: dict[str, int] = {}  # Fallback para compatibilidade (legacy)
 
 
-def _get_current_user(
+def _hash_token(token: str) -> str:
+    """Gera hash SHA-256 do token para armazenamento seguro no banco."""
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+async def _get_user_id_from_token(token: str) -> Optional[int]:
+    """Valida o token no banco de dados e retorna o user_id se válido."""
+    token_hash = _hash_token(token)
+    return await db_service.validate_user_session(token_hash)
+
+
+async def _get_current_user(
     authorization: Optional[str] = Header(None),
     garimpador_token: Optional[str] = Cookie(None),
 ) -> dict:
@@ -262,13 +273,22 @@ def _get_current_user(
             status_code=401, detail="Autenticação necessária"
         )
     
-    user_id = _SESSIONS.get(token)
+    # Valida no banco de dados (fonte da verdade — a evicção FIFO de
+    # sessões concorrentes só tem efeito se a checagem for feita aqui)
+    user_id = await _get_user_id_from_token(token)
+    
     if not user_id:
-        raise HTTPException(status_code=401, detail="Sessão inválida ou expirada")
+        raise HTTPException(
+            status_code=401, 
+            detail={
+                "error": "session_expired_concurrent_login",
+                "message": "Você foi deslogado pois sua conta foi acessada em outro dispositivo."
+            }
+        )
     return {"id": user_id}
 
 
-def _get_optional_user(
+async def _get_optional_user(
     authorization: Optional[str] = Header(None),
     garimpador_token: Optional[str] = Cookie(None),
 ) -> Optional[dict]:
@@ -283,7 +303,8 @@ def _get_optional_user(
     if not token:
         return None
     
-    user_id = _SESSIONS.get(token)
+    user_id = await _get_user_id_from_token(token)
+    
     if not user_id:
         return None
     return {"id": user_id}
@@ -1719,6 +1740,8 @@ async def register_user(request: Request, payload: UserCreate, response: Respons
         await db_service.start_trial(user["id"])
         user = await db_service.get_user_by_id(user["id"])
         token = security.new_session_token()
+        # Registra a sessão no banco (aplica limite de 2 sessões por usuário - FIFO)
+        await db_service.create_user_session(user["id"], _hash_token(token), "Signup", None)
         _SESSIONS[token] = user["id"]
         
         # Define httpOnly cookie com o token
@@ -1763,6 +1786,13 @@ async def login_user(request: Request, payload: UserLogin, response: Response = 
         if not user or not security.verify_password(payload.password, user["password_hash"]):
             raise HTTPException(status_code=401, detail="Email ou senha inválidos")
         token = security.new_session_token()
+        
+        # Registra a sessão no banco (aplica limite de 2 sessões por usuário - FIFO)
+        device_info = request.headers.get("user-agent", "")
+        ip_address = request.client.host if request.client else None
+        await db_service.create_user_session(user["id"], _hash_token(token), device_info, ip_address)
+        
+        # Mantém compatibilidade com fallback em memória
         _SESSIONS[token] = user["id"]
         
         # Define httpOnly cookie com o token
@@ -1854,6 +1884,9 @@ async def update_user_company(user_id: int, payload: UserUpdate, user: dict = De
 async def logout_user(authorization: Optional[str] = Header(None), response: Response = None):
     if authorization and authorization.startswith("Bearer "):
         token = authorization[len("Bearer "):].strip()
+        # Remove do banco
+        await db_service.remove_user_session(_hash_token(token))
+        # Remove do fallback em memória
         _SESSIONS.pop(token, None)
     
     # Limpa o cookie
@@ -1885,19 +1918,24 @@ async def demo_login(response: Response = None):
             await db_service.start_trial(user["id"])
             user = await db_service.get_user_by_id(user["id"])
             token = security.new_session_token()
-            _SESSIONS[token] = user["id"]
         else:
             if not security.verify_password(demo_password, user["password_hash"]):
                 raise HTTPException(status_code=500, detail="Demo account configuration error")
             token = security.new_session_token()
-            _SESSIONS[token] = user["id"]
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Erro no demo login: {e}")
         raise HTTPException(status_code=500, detail="Erro no demo login")
     
-# Define httpOnly cookie com o token
+    # Registra a sessão no banco
+    token_hash = _hash_token(token)
+    await db_service.create_user_session(user["id"], token_hash, "Demo Login", None)
+    
+    # Mantém compatibilidade com fallback em memória
+    _SESSIONS[token] = user["id"]
+    
+    # Define httpOnly cookie com o token
     if response:
         response.set_cookie(
             key="garimpador_token",
