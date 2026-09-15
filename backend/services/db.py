@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS users (
   leads_taken INTEGER DEFAULT 0,
   conversions INTEGER DEFAULT 0,
   cities_filter TEXT DEFAULT NULL,
+  push_enabled INTEGER DEFAULT 0,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -535,6 +536,8 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN conversions INTEGER DEFAULT 0")
     if user_cols and "cities_filter" not in user_cols:
         conn.execute("ALTER TABLE users ADD COLUMN cities_filter TEXT DEFAULT NULL")
+    if user_cols and "push_enabled" not in user_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN push_enabled INTEGER DEFAULT 0")
 
     event_cols = {r["name"] for r in conn.execute("PRAGMA table_info(lead_events)").fetchall()}
     if event_cols:
@@ -1423,6 +1426,31 @@ class DatabaseService:
                 "SELECT user_id, endpoint, p256dh, auth, created_at FROM push_subscriptions"
             ).fetchall()
             return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def set_user_push_enabled(self, user_id: int, enabled: bool) -> bool:
+        """Atualiza o flag push_enabled do usuário."""
+        conn = get_connection()
+        try:
+            conn.execute(
+                "UPDATE users SET push_enabled = ? WHERE id = ?",
+                (1 if enabled else 0, user_id),
+            )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+    def is_push_enabled(self, user_id: int) -> bool:
+        """Verifica se push_enabled está ativo para o usuário."""
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT push_enabled FROM users WHERE id = ?",
+                (user_id,),
+            ).fetchone()
+            return bool(row["push_enabled"]) if row else False
         finally:
             conn.close()
 
@@ -3239,6 +3267,12 @@ class AsyncDatabaseService:
 
     async def get_all_push_subscriptions(self) -> List[dict]:
         return self._service.get_all_push_subscriptions()
+
+    async def set_user_push_enabled(self, user_id: int, enabled: bool) -> bool:
+        return self._service.set_user_push_enabled(user_id, enabled)
+
+    async def is_push_enabled(self, user_id: int) -> bool:
+        return self._service.is_push_enabled(user_id)
 
     # User Sessions
     async def create_user_session(

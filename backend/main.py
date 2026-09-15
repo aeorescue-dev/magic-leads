@@ -29,7 +29,7 @@ from .models.schemas import (
     UserCreate, UserLogin, UserResponse, UserUpdate, AuthResponse, InterestsUpdate,
     ReserverLeadRequest, ReleaseLeadRequest, ContactLeadRequest,
     RejectLeadRequest, LeadHoldResponse, LeadStatusResponse, HistoryEvent,
-    PushSubscribeRequest, PushUnsubscribeRequest, SendTestPushRequest,
+    PushSubscribeRequest, PushUnsubscribeRequest, PushEnabledUpdate, SendTestPushRequest,
 )
 from .utils.logger import logger
 
@@ -869,6 +869,8 @@ async def subscribe_push(
     """Registra uma push subscription para o usuário."""
     try:
         ok = await db_service.add_push_subscription(user["id"], payload.endpoint, payload.p256dh, payload.auth)
+        if ok:
+            await db_service.set_user_push_enabled(user["id"], True)
         return {"status": "ok", "subscribed": ok}
     except Exception as e:
         logger.error(f"Erro ao inscrever push: {e}")
@@ -882,7 +884,21 @@ async def unsubscribe_push(
 ):
     """Remove uma push subscription do usuário."""
     ok = await db_service.remove_push_subscription(user["id"], payload.endpoint)
+    # Se não restarem subscriptions, marca push_enabled = false
+    remaining = await db_service.get_user_push_subscriptions(user["id"])
+    if not remaining:
+        await db_service.set_user_push_enabled(user["id"], False)
     return {"status": "ok", "unsubscribed": ok}
+
+
+@app.patch("/api/push/enabled")
+async def update_push_enabled(
+    payload: PushEnabledUpdate,
+    user: dict = Depends(_get_current_user),
+):
+    """Define manualmente o flag push_enabled do usuário."""
+    ok = await db_service.set_user_push_enabled(user["id"], payload.enabled)
+    return {"status": "ok", "push_enabled": payload.enabled, "updated": ok}
 
 
 @app.get("/api/push/subscriptions")
@@ -1768,6 +1784,7 @@ async def register_user(request: Request, payload: UserCreate, response: Respons
                 score=user.get("score") or 0,
                 leads_taken=user.get("leads_taken") or 0,
                 conversions=user.get("conversions") or 0,
+                push_enabled=bool(user.get("push_enabled")),
                 created_at=user.get("created_at"),
             ),
         )
@@ -1819,6 +1836,7 @@ async def login_user(request: Request, payload: UserLogin, response: Response = 
                 score=user.get("score") or 0,
                 leads_taken=user.get("leads_taken") or 0,
                 conversions=user.get("conversions") or 0,
+                push_enabled=bool(user.get("push_enabled")),
                 created_at=user.get("created_at"),
             ),
         )
@@ -1844,6 +1862,7 @@ async def me(user: dict = Depends(_get_current_user)):
         score=full.get("score") or 0,
         leads_taken=full.get("leads_taken") or 0,
         conversions=full.get("conversions") or 0,
+        push_enabled=bool(full.get("push_enabled")),
         created_at=full.get("created_at"),
     )
 

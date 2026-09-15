@@ -13,14 +13,10 @@ export function PushNotificationButton() {
     loading,
     error,
     hasUser,
+    isIOSNeedsInstall,
     subscribe,
     unsubscribe,
   } = usePushNotifications();
-
-  const isIOS = typeof navigator !== "undefined" && /iPad|iPhone|iPod/.test(navigator.userAgent);
-  const isStandalone = typeof window !== "undefined" && window.matchMedia("(display-mode: standalone)").matches;
-  const isIOSPWA = isIOS && isStandalone;
-  const isIOSNeedsInstall = isIOS && !isStandalone;
 
   if (!hasUser || !supported) {
     return null;

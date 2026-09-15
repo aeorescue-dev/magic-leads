@@ -2,11 +2,38 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
-import { getToken } from "@/lib/api-client";
+import { getToken, setPushEnabled, fetchPushEnabled } from "@/lib/api-client";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 export type PushPermissionState = "default" | "granted" | "denied";
+
+export function isIOSDevice(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  return (
+    /iPad|iPhone|iPod/.test(ua) ||
+    ((navigator.platform === "MacIntel" || /Mac/.test(ua)) &&
+      typeof navigator.maxTouchPoints === "number" &&
+      navigator.maxTouchPoints > 1)
+  );
+}
+
+export function isStandaloneMode(): boolean {
+  if (typeof window === "undefined") return false;
+  const iosStandalone =
+    (window.navigator as unknown as { standalone?: boolean }).standalone === true;
+  const displayMode = window.matchMedia?.("(display-mode: standalone)")?.matches ?? false;
+  return iosStandalone || displayMode;
+}
+
+export function isIOSPWA(): boolean {
+  return isIOSDevice() && isStandaloneMode();
+}
+
+export function isIOSNeedsInstall(): boolean {
+  return isIOSDevice() && !isStandaloneMode();
+}
 
 function isPushSupported(): boolean {
   if (typeof window === "undefined") return false;
@@ -15,20 +42,9 @@ function isPushSupported(): boolean {
   const hasNotification = typeof Notification !== "undefined";
   const hasRequestPermission = "requestPermission" in Notification;
 
-  // iOS Safari: PushManager existe só no 16.4+ e exige PWA instalado
-  // Não bloqueamos a UI — deixamos o botão aparecer com aviso
-  let isIOS = false;
-  let isStandalone = false;
-  try {
-    isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent || "");
-    isStandalone = window.matchMedia?.("(display-mode: standalone)")?.matches ?? false;
-  } catch {
-    // Silenciosamente ignora se APIs não estiverem disponíveis
-  }
-
-  if (isIOS && !isStandalone && !hasPushManager) {
-    // iOS antigo ou não-PWA: suporta notificação mas não push nativo
-    // Retornamos true para mostrar o botão com aviso
+  // iOS (qualquer navegador) fora do modo PWA: PushManager nunca existe.
+  // Returnamos true para que a UI decida exibir o tutorial de instalação.
+  if (isIOSNeedsInstall()) {
     return hasSW && hasNotification && hasRequestPermission;
   }
 
@@ -77,6 +93,7 @@ export function usePushNotifications() {
   const [supported, setSupported] = useState(false);
   const [permission, setPermission] = useState<PushPermissionState>("default");
   const [subscribed, setSubscribed] = useState(false);
+  const [pushEnabling, setPushEnabling] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -86,12 +103,18 @@ export function usePushNotifications() {
     if (supported) {
       setPermission(Notification.permission);
     }
-  }, []);
+    // Sincroniza o flag push_enabled do backend com o estado local.
+    if (user?.id) {
+      fetchPushEnabled()
+        .then((enabled) => setPushEnabling(enabled))
+        .catch(() => setPushEnabling(!!user.push_enabled));
+    }
+  }, [user?.id]);
 
   const checkSubscription = useCallback(async () => {
     if (!user?.id || !getToken()) return;
     try {
-      // iOS Safari sem PWA: PushManager não existe
+      // iOS fora do PWA: PushManager não existe — nada a verificar.
       if (!("PushManager" in window)) {
         setSubscribed(false);
         return;
@@ -119,23 +142,52 @@ export function usePushNotifications() {
     }
   }, [user?.id, checkSubscription]);
 
-  const subscribe = useCallback(async () => {
-    if (!user?.id || !supported || loading) return;
+  // Auto-reconexão silenciosa: se o usuário já tinha push_enabled=true e a
+  // permissão do browser está 'granted', reativa o Service Worker em segundo
+  // plano (sem modais) na volta do usuário.
+  useEffect(() => {
+    const hasPushFlag =
+      (typeof user?.push_enabled === "boolean" && user.push_enabled) ||
+      pushEnabling;
+    if (!user?.id || !hasPushFlag || !isStandaloneMode()) return;
+    if (typeof Notification !== "undefined" && Notification.permission !== "granted") return;
+    if (!("serviceWorker" in navigator)) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const registration = await navigator.serviceWorker.register("/sw.js");
+        await navigator.serviceWorker.ready;
+        if (cancelled) return;
+        const sub = await registration.pushManager.getSubscription();
+        setSubscribed(!!sub);
+        console.log("[push] Reconnect silencioso concluído:", registration.scope);
+      } catch (e) {
+        console.warn("[push] Reconnect silencioso ignorado:", e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, pushEnabling, user?.push_enabled]);
+
+  const subscribe = useCallback(async (): Promise<boolean> => {
+    if (!user?.id || !supported || loading) return false;
     setLoading(true);
     setError(null);
 
     try {
-      // iOS Safari sem PWA: PushManager não existe
+      // iOS fora do PWA: PushManager não existe — exige instalação.
       if (!("PushManager" in window)) {
         setError("iOS: adicione à Tela Inicial para ativar notificações nativas");
-        return;
+        return false;
       }
 
       // Permission already denied by the browser: instruct how to re-enable.
       if (Notification.permission === "denied") {
         setPermission("denied");
         setError("Notification permission is blocked");
-        return;
+        return false;
       }
 
       let granted: boolean;
@@ -151,7 +203,7 @@ export function usePushNotifications() {
 
       if (!granted) {
         setError("Notification permission is blocked");
-        return;
+        return false;
       }
 
       // Register service worker (idempotent if already registered).
@@ -168,7 +220,7 @@ export function usePushNotifications() {
       }
       if (!publicKey) {
         setError("Push service unavailable");
-        return;
+        return false;
       }
       console.log("[push] VAPID public key obtida:", publicKey.length, "chars");
 
@@ -206,7 +258,7 @@ export function usePushNotifications() {
             ? `Push browser error: ${subscribeErr.name}: ${subscribeErr.message}`
             : "Push browser error"
         );
-        return;
+        return false;
       }
 
       const subData = {
@@ -217,7 +269,7 @@ export function usePushNotifications() {
 
       if (!subData.p256dh || !subData.auth) {
         setError("Browser keys unavailable");
-        return;
+        return false;
       }
 
       // Envio assintrono ao backend com tratamento de erro isolado.
@@ -231,22 +283,31 @@ export function usePushNotifications() {
           const detail = await subRes.json().catch(() => null);
           console.error("[push] Backend rejeitou subscription:", subRes.status, detail);
           setError(detail?.detail || "Push registration failed");
-          return;
+          return false;
         }
 
         console.log("[push] Subscription registrada no backend");
       } catch (backendErr) {
         console.error("[push] Erro ao salvar subscription no backend:", backendErr);
         setError(backendErr instanceof Error ? backendErr.message : "Push registration failed");
-        return;
+        return false;
       }
 
       // So ativa a UI apos sucesso confirmado no backend.
       setSubscribed(true);
+      setPushEnabling(true);
       setError(null);
+      // Persiste push_enabled=true no backend (propriedade da tabela users).
+      try {
+        await setPushEnabled(true);
+      } catch (e) {
+        console.warn("[push] Não foi possível persistir push_enabled:", e);
+      }
+      return true;
     } catch (err) {
       console.error("[push] Subscribe error:", err);
       setError(err instanceof Error ? err.message : "Push error");
+      return false;
     } finally {
       setLoading(false);
     }
@@ -269,6 +330,13 @@ export function usePushNotifications() {
       }
 
       setSubscribed(false);
+      setPushEnabling(false);
+      // Persiste push_enabled=false no backend.
+      try {
+        await setPushEnabled(false);
+      } catch (e) {
+        console.warn("[push] Não foi possível limpar push_enabled:", e);
+      }
     } catch (err) {
       console.error("Unsubscribe error:", err);
       setError(err instanceof Error ? err.message : "Push error");
@@ -281,9 +349,14 @@ export function usePushNotifications() {
     supported,
     permission,
     subscribed,
+    pushEnabling,
     loading,
     error,
     hasUser: !!user?.id,
+    isIOS: isIOSDevice(),
+    isStandalone: isStandaloneMode(),
+    isIOSPWA: isIOSPWA(),
+    isIOSNeedsInstall: isIOSNeedsInstall(),
     subscribe,
     unsubscribe,
     clearError: () => setError(null),

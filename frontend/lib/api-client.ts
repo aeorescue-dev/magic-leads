@@ -490,6 +490,7 @@ export interface AuthUser {
   score: number;
   leads_taken: number;
   conversions: number;
+  push_enabled?: boolean;
   created_at?: string;
 }
 
@@ -607,6 +608,27 @@ export async function updateCompanyName(userId: number, company_name: string): P
       body: JSON.stringify({ company_name }),
     })
   );
+}
+
+export async function setPushEnabled(enabled: boolean): Promise<{ status: string; push_enabled: boolean }> {
+  return handle<{ status: string; push_enabled: boolean }>(
+    await fetch(`${API_URL}/api/push/enabled`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ enabled }),
+    })
+  );
+}
+
+export async function fetchPushEnabled(): Promise<boolean> {
+  try {
+    const r = await handle<{ subscriptions: { endpoint: string }[] }>(
+      await fetch(`${API_URL}/api/push/subscriptions`, { headers: { ...authHeaders() } })
+    );
+    return (r.subscriptions?.length ?? 0) > 0;
+  } catch {
+    return false;
+  }
 }
 
 // ------------------------------------------------------------------

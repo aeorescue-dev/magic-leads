@@ -261,6 +261,7 @@ class UserResponse(BaseModel):
     score: int = 0
     leads_taken: int = 0
     conversions: int = 0
+    push_enabled: bool = False
     created_at: Optional[str] = None
 
 
@@ -301,6 +302,10 @@ class PushSubscribeRequest(BaseModel):
     endpoint: str
     p256dh: str
     auth: str
+
+
+class PushEnabledUpdate(BaseModel):
+    enabled: bool
 
 
 class PushUnsubscribeRequest(BaseModel):
