@@ -21,10 +21,14 @@ export function isIOSDevice(): boolean {
 
 export function isStandaloneMode(): boolean {
   if (typeof window === "undefined") return false;
-  const iosStandalone =
-    (window.navigator as unknown as { standalone?: boolean }).standalone === true;
-  const displayMode = window.matchMedia?.("(display-mode: standalone)")?.matches ?? false;
-  return iosStandalone || displayMode;
+  try {
+    const iosStandalone =
+      (window.navigator as unknown as { standalone?: boolean }).standalone === true;
+    const displayMode = window.matchMedia?.("(display-mode: standalone)")?.matches ?? false;
+    return iosStandalone || displayMode;
+  } catch {
+    return false;
+  }
 }
 
 export function isIOSPWA(): boolean {
@@ -90,12 +94,27 @@ function toUrlBase64(base64: string): string {
 
 export function usePushNotifications() {
   const { user } = useAuth();
+  // SSR/hydration safety: browser props (navigator, window, Notification)
+  // are ONLY read inside useEffect, never during render.
+  const [mounted, setMounted] = useState(false);
   const [supported, setSupported] = useState(false);
   const [permission, setPermission] = useState<PushPermissionState>("default");
   const [subscribed, setSubscribed] = useState(false);
   const [pushEnabling, setPushEnabling] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isIOS, setIsIOS] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
+  const [isIOSNeedsInstall, setIsIOSNeedsInstall] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    const ios = isIOSDevice();
+    const standalone = isStandaloneMode();
+    setIsIOS(ios);
+    setIsStandalone(standalone);
+    setIsIOSNeedsInstall(ios && !standalone);
+  }, []);
 
   useEffect(() => {
     const supported = isPushSupported();
@@ -346,6 +365,7 @@ export function usePushNotifications() {
   }, [user?.id]);
 
   return {
+    mounted,
     supported,
     permission,
     subscribed,
@@ -353,10 +373,10 @@ export function usePushNotifications() {
     loading,
     error,
     hasUser: !!user?.id,
-    isIOS: isIOSDevice(),
-    isStandalone: isStandaloneMode(),
-    isIOSPWA: isIOSPWA(),
-    isIOSNeedsInstall: isIOSNeedsInstall(),
+    isIOS,
+    isStandalone,
+    isIOSPWA: isIOS && isStandalone,
+    isIOSNeedsInstall,
     subscribe,
     unsubscribe,
     clearError: () => setError(null),

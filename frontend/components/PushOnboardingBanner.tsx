@@ -19,6 +19,7 @@ export function PushOnboardingBanner() {
   const { t } = useI18n();
   const { user, updateUser } = useAuth();
   const {
+    mounted,
     supported,
     permission,
     loading,
@@ -58,6 +59,10 @@ export function PushOnboardingBanner() {
     }
     setVisible(false);
   };
+
+  // SSR/hydration safety: só renderiza após o mount no cliente,
+  // quando isIOSNeedsInstall foi calculado dentro de useEffect no hook.
+  if (!mounted) return null;
 
   if (!visible) return null;
 
