@@ -92,6 +92,17 @@ function toUrlBase64(base64: string): string {
   return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+// Acesso seguro ao container de Service Worker: em iframes/WebKit restritos
+// no iOS, o próprio getter navigator.serviceWorker pode lançar SecurityError.
+function getSWContainer(): { register(path: string): Promise<ServiceWorkerRegistration>; ready: Promise<ServiceWorkerRegistration> } | null {
+  try {
+    if (typeof window === "undefined" || !("serviceWorker" in navigator)) return null;
+    return navigator.serviceWorker;
+  } catch {
+    return null;
+  }
+}
+
 export function usePushNotifications() {
   const { user } = useAuth();
   // SSR/hydration safety: browser props (navigator, window, Notification)
@@ -117,10 +128,15 @@ export function usePushNotifications() {
   }, []);
 
   useEffect(() => {
-    const supported = isPushSupported();
-    setSupported(supported);
-    if (supported) {
-      setPermission(Notification.permission);
+    let supported = false;
+    try {
+      supported = isPushSupported();
+      setSupported(supported);
+      if (supported && typeof Notification !== "undefined") {
+        setPermission(Notification.permission);
+      }
+    } catch (e) {
+      console.warn("[push] Detecção de suporte ignorada:", e);
     }
     // Sincroniza o flag push_enabled do backend com o estado local.
     if (user?.id) {
@@ -140,7 +156,9 @@ export function usePushNotifications() {
       }
       const [res, swSub] = await Promise.all([
         apiFetch("/api/push/subscriptions"),
-        navigator.serviceWorker.ready.then((reg) => reg.pushManager.getSubscription()),
+        getSWContainer()
+          ? getSWContainer()!.ready.then((reg) => reg.pushManager.getSubscription())
+          : Promise.resolve(null),
       ]);
       if (res.ok) {
         const data = await res.json();
@@ -169,14 +187,21 @@ export function usePushNotifications() {
       (typeof user?.push_enabled === "boolean" && user.push_enabled) ||
       pushEnabling;
     if (!user?.id || !hasPushFlag || !isStandaloneMode()) return;
-    if (typeof Notification !== "undefined" && Notification.permission !== "granted") return;
-    if (!("serviceWorker" in navigator)) return;
+    let permissionGranted = false;
+    try {
+      permissionGranted = typeof Notification !== "undefined" && Notification.permission === "granted";
+    } catch (e) {
+      console.warn("[push] Leitura de Notification ignorada:", e);
+    }
+    if (!permissionGranted) return;
+    const sw = getSWContainer();
+    if (!sw) return;
 
     let cancelled = false;
     (async () => {
       try {
-        const registration = await navigator.serviceWorker.register("/sw.js");
-        await navigator.serviceWorker.ready;
+        const registration = await sw.register("/sw.js");
+        await sw.ready;
         if (cancelled) return;
         const sub = await registration.pushManager.getSubscription();
         setSubscribed(!!sub);
@@ -226,8 +251,13 @@ export function usePushNotifications() {
       }
 
       // Register service worker (idempotent if already registered).
-      const registration = await navigator.serviceWorker.register("/sw.js");
-      await navigator.serviceWorker.ready;
+      const sw = getSWContainer();
+      if (!sw) {
+        setError("Push service unavailable");
+        return false;
+      }
+      const registration = await sw.register("/sw.js");
+      await sw.ready;
       console.log("[push] SW registered:", registration.scope);
 
       // Fetch VAPID public key (endpoint works with or without auth).
@@ -337,8 +367,11 @@ export function usePushNotifications() {
     setLoading(true);
     setError(null);
     try {
-      const registration = await navigator.serviceWorker.ready;
-      const subscription = await registration.pushManager.getSubscription();
+      const sw = getSWContainer();
+      const registration = sw ? await sw.ready : null;
+      const subscription = registration
+        ? await registration.pushManager.getSubscription()
+        : null;
 
       if (subscription) {
         await subscription.unsubscribe();
