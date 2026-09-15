@@ -35,6 +35,23 @@ function AuthFormInner() {
   const { t } = useI18n();
   const { signIn, loading: authLoading } = useAuth();
 
+  // Resolve a mensagem da sessão, garantindo que a chave crua (ex.:
+  // "dashboard.auth.session_expired") nunca vaze para a UI quando a
+  // tradução não estiver disponível.
+  const sessionMessage = (() => {
+    if (!sessionReason) return null;
+    const key =
+      sessionReason === "fifo_evicted"
+        ? "dashboard.auth.session_fifo_evicted"
+        : "dashboard.auth.session_expired";
+    const fallback =
+      sessionReason === "fifo_evicted"
+        ? "Sua sessão foi encerrada porque você entrou em outro dispositivo."
+        : "Sua sessão expirou. Faça login novamente.";
+    const translated = t(key);
+    return translated && !translated.startsWith("dashboard.auth.") ? translated : fallback;
+  })();
+
   const [isRegister, setIsRegister] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -139,11 +156,7 @@ function AuthFormInner() {
       {sessionReason && (
         <div className="text-sm text-amber-400 text-center bg-amber-400/10 px-3 py-2 rounded-lg border border-amber-400/30 flex items-start gap-2">
           <LogOut className="h-4 w-4 mt-0.5 shrink-0" />
-          <span>
-            {sessionReason === 'fifo_evicted'
-              ? (t('dashboard.auth.session_fifo_evicted') || 'Sua sessão foi encerrada porque você entrou em outro dispositivo.')
-              : (t('dashboard.auth.session_expired') || 'Sua sessão expirou. Faça login novamente.')}
-          </span>
+          <span>{sessionMessage}</span>
         </div>
       )}
 
