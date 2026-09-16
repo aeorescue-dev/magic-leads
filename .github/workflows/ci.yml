@@ -31,6 +31,8 @@ jobs:
           pip install pytest pytest-asyncio httpx fastapi uvicorn
 
       - name: Run import & syntax checks
+        env:
+          PYTHONPATH: .
         run: |
           pytest tests/test_imports.py -v --tb=short
 
