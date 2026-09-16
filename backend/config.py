@@ -83,6 +83,10 @@ class Settings(BaseSettings):
     # Cron (GitHub Actions chama com este header)
     CRON_SECRET: str = ""
 
+    # Admin (rotas administrativas: requalify, enrich em lote, push de teste).
+    # Se vazio, TODAS as rotas admin ficam bloqueadas (fail-closed).
+    ADMIN_SECRET: str = ""
+
     # Webhook para alertas do scraper (Telegram/Slack/Email via n8n/Resend/etc)
     SCRAPER_WEBHOOK_URL: str = ""
 

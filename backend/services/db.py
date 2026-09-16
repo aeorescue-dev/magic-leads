@@ -4,6 +4,8 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
+import anyio
+
 from ..models.schemas import EnrichedLead
 from ..utils.logger import logger
 from .phone_lookup import phone_lookup_service, PhoneResult
@@ -79,12 +81,22 @@ def _qualified_where(alias: str = "") -> str:
     ]
     return " AND ".join(parts)
 
-# Banco de dados SQLite: arquivo versionado no repo (leitura pela API / escrita pelo scraper).
-# Para MVP single-tenant sem custo. Em produção multi-tenant, migrar para Postgres/Supabase.
-DB_PATH = os.environ.get("LEADS_DB_PATH", os.path.join(
+# Banco de dados SQLite: em produção DEVE apontar para volume persistente (Railway).
+# Prioridade: LEADS_DB_PATH > DATA_DIR/leads.db > data/leads.db (repo, dev local).
+# O Dockerfile define DATA_DIR=/data (volume persistente); sem volume montado os dados
+# são perdidos a cada redeploy. Em produção multi-tenant, migrar para Postgres/Supabase.
+_REPO_DB_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     "data", "leads.db"
-))
+)
+_DATA_DIR = os.environ.get("DATA_DIR")
+if os.environ.get("LEADS_DB_PATH"):
+    DB_PATH = os.environ["LEADS_DB_PATH"]
+elif _DATA_DIR:
+    DB_PATH = os.path.join(_DATA_DIR, "leads.db")
+else:
+    DB_PATH = _REPO_DB_PATH
+logger.info(f"SQLite DB_PATH resolvido para: {DB_PATH}")
 
 DEFAULT_SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -328,9 +340,12 @@ CREATE TABLE IF NOT EXISTS lead_case_history (
 CREATE INDEX IF NOT EXISTS idx_case_history_lead ON lead_case_history (lead_id);
 
 CREATE INDEX IF NOT EXISTS idx_leads_city_reported ON leads (city, date_reported);
+CREATE INDEX IF NOT EXISTS idx_leads_date_reported ON leads (date_reported);
+CREATE INDEX IF NOT EXISTS idx_leads_lead_status ON leads (lead_status);
 CREATE INDEX IF NOT EXISTS idx_leads_source ON leads (source_type);
 CREATE INDEX IF NOT EXISTS idx_leads_category ON leads (issue_category);
 CREATE INDEX IF NOT EXISTS idx_leads_phone ON leads (owner_phone);
+CREATE INDEX IF NOT EXISTS idx_users_plan_until ON users (plan_until);
 CREATE INDEX IF NOT EXISTS idx_notes_lead ON lead_notes (lead_id);
 CREATE INDEX IF NOT EXISTS idx_events_lead ON lead_events (lead_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications (created_at);
@@ -361,15 +376,26 @@ CREATE TABLE IF NOT EXISTS city_health (
   last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS stripe_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id TEXT NOT NULL UNIQUE,
+  event_type TEXT,
+  user_id INTEGER,
+  processed_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
 def get_connection() -> sqlite3.Connection:
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
+    conn = sqlite3.connect(DB_PATH, timeout=10.0)
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("PRAGMA journal_mode=WAL;")
+        # Evita "database is locked" sob concorrência (scraper + API + webhook).
+        conn.execute("PRAGMA busy_timeout=10000;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
     except sqlite3.OperationalError:
         pass  # fs read-only (serverless) — segue com leitura
     return conn
@@ -1291,6 +1317,60 @@ class DatabaseService:
             if cur.rowcount == 0:
                 return None
             return self.get_user_by_id(user_id)
+        finally:
+            conn.close()
+
+    def extend_access(self, user_id: int, days: int = 7) -> Optional[dict]:
+        """Estende o acesso pago em +days dias.
+
+        A base é max(agora, plan_until atual): pagar com acesso ativo soma à
+        expiração existente (não reinicia); pagar expirado conta a partir de agora.
+        Usado pelo webhook Stripe (checkout.session.completed / pagamento avulso).
+        """
+        conn = get_connection()
+        try:
+            user = conn.execute("SELECT plan_until FROM users WHERE id = ?", (user_id,)).fetchone()
+            if not user:
+                return None
+            now = datetime.utcnow()
+            current = self._parse_dt(user["plan_until"])
+            base = max(now, current) if current else now
+            new_until = base + timedelta(days=days)
+            conn.execute(
+                "UPDATE users SET plan = 'pro', subscription_status = 'active', "
+                "plan_until = ? WHERE id = ?",
+                (new_until.isoformat(), user_id),
+            )
+            conn.commit()
+            return self.get_user_by_id(user_id)
+        finally:
+            conn.close()
+
+    # ---------------------------------------------------------------
+    # Pagamentos avulsos (Stripe) — idempotência por event_id
+    # ---------------------------------------------------------------
+    def record_stripe_event(self, event_id: str, event_type: str,
+                            user_id: Optional[int] = None) -> bool:
+        """Registra um evento Stripe. Retorna True se é novo, False se já processado."""
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO stripe_events (event_id, event_type, user_id) "
+                "VALUES (?, ?, ?)",
+                (event_id, event_type, user_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def has_stripe_event(self, event_id: str) -> bool:
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM stripe_events WHERE event_id = ?", (event_id,)
+            ).fetchone()
+            return row is not None
         finally:
             conn.close()
 
@@ -3361,242 +3441,258 @@ class AsyncDatabaseService:
         self._service = DatabaseService()
 
     async def insert_lead(self, lead: EnrichedLead) -> bool:
-        return self._service.insert_lead(lead)
+        return await anyio.to_thread.run_sync(self._service.insert_lead, lead)
 
     async def insert_lead_new(self, lead: EnrichedLead) -> Optional[dict]:
-        return self._service.insert_lead_new(lead)
+        return await anyio.to_thread.run_sync(self._service.insert_lead_new, lead)
 
     async def update_lead_historical(self, external_id: str, city: str, lead: EnrichedLead) -> bool:
-        return self._service.update_lead_historical(external_id, city, lead)
+        return await anyio.to_thread.run_sync(self._service.update_lead_historical, external_id, city, lead)
 
     async def get_leads_by_city(self, city: str, limit: int = 100) -> List[dict]:
-        return self._service.get_leads_by_city(city, limit)
+        return await anyio.to_thread.run_sync(self._service.get_leads_by_city, city, limit)
 
     async def get_all_leads(self, limit: int = 100) -> List[dict]:
-        return self._service.get_all_leads(limit)
+        return await anyio.to_thread.run_sync(self._service.get_all_leads, limit)
 
     async def count_leads(self) -> int:
-        return self._service.count_leads()
+        return await anyio.to_thread.run_sync(self._service.count_leads)
 
     async def get_lead_by_id(self, lead_id: int) -> Optional[dict]:
-        return self._service.get_lead_by_id(lead_id)
+        return await anyio.to_thread.run_sync(self._service.get_lead_by_id, lead_id)
 
     async def update_lead_status(self, lead_id: int, status: str) -> bool:
-        return self._service.update_lead_status(lead_id, status)
+        return await anyio.to_thread.run_sync(self._service.update_lead_status, lead_id, status)
 
     async def toggle_favorite(self, lead_id: int) -> Optional[int]:
-        return self._service.toggle_favorite(lead_id)
+        return await anyio.to_thread.run_sync(self._service.toggle_favorite, lead_id)
 
     async def toggle_favorite_for_user(self, user_id: int, lead_id: int) -> Optional[bool]:
-        return self._service.toggle_favorite_for_user(user_id, lead_id)
+        return await anyio.to_thread.run_sync(self._service.toggle_favorite_for_user, user_id, lead_id)
 
     async def is_favorite_for_user(self, user_id: int, lead_id: int) -> bool:
-        return self._service.is_favorite_for_user(user_id, lead_id)
+        return await anyio.to_thread.run_sync(self._service.is_favorite_for_user, user_id, lead_id)
 
     async def get_user_favorites(self, user_id: int) -> List[int]:
-        return self._service.get_user_favorites(user_id)
+        return await anyio.to_thread.run_sync(self._service.get_user_favorites, user_id)
 
     async def update_owner(self, lead_id: int, owner_name: Optional[str]) -> bool:
-        return self._service.update_owner(lead_id, owner_name)
+        return await anyio.to_thread.run_sync(self._service.update_owner, lead_id, owner_name)
 
     async def record_scrape_run(self, run: dict) -> None:
-        return self._service.record_scrape_run(run)
+        return await anyio.to_thread.run_sync(self._service.record_scrape_run, run)
 
     async def get_last_scrape_run(self) -> Optional[dict]:
-        return self._service.get_last_scrape_run()
+        return await anyio.to_thread.run_sync(self._service.get_last_scrape_run)
 
     async def get_city_health(self, city: str) -> dict:
-        return self._service.get_city_health(city)
+        return await anyio.to_thread.run_sync(self._service.get_city_health, city)
 
     async def get_all_city_health(self) -> dict:
-        return self._service.get_all_city_health()
+        return await anyio.to_thread.run_sync(self._service.get_all_city_health)
 
     async def record_city_success(self, city: str) -> None:
-        return self._service.record_city_success(city)
+        return await anyio.to_thread.run_sync(self._service.record_city_success, city)
 
     async def record_city_failure(self, city: str, error: str = None) -> dict:
-        return self._service.record_city_failure(city, error)
+        return await anyio.to_thread.run_sync(self._service.record_city_failure, city, error)
 
     async def increment_anomaly_counter(self, city: str) -> int:
-        return self._service.increment_anomaly_counter(city)
+        return await anyio.to_thread.run_sync(self._service.increment_anomaly_counter, city)
 
     async def reset_anomaly_counter(self, city: str) -> None:
-        return self._service.reset_anomaly_counter(city)
+        return await anyio.to_thread.run_sync(self._service.reset_anomaly_counter, city)
 
     async def get_city_health_for_scraper_status(self) -> dict:
-        return self._service.get_city_health_for_scraper_status()
+        return await anyio.to_thread.run_sync(self._service.get_city_health_for_scraper_status)
 
     async def reprocess_notification_dlq(self) -> int:
-        return self._service.reprocess_notification_dlq()
+        return await anyio.to_thread.run_sync(self._service.reprocess_notification_dlq)
 
     async def update_owner_phone(self, lead_id: int, owner_phone: Optional[str]) -> bool:
-        return self._service.update_owner_phone(lead_id, owner_phone)
+        return await anyio.to_thread.run_sync(self._service.update_owner_phone, lead_id, owner_phone)
 
     async def update_owner_email(self, lead_id: int, owner_email: Optional[str]) -> bool:
-        return self._service.update_owner_email(lead_id, owner_email)
+        return await anyio.to_thread.run_sync(self._service.update_owner_email, lead_id, owner_email)
 
     async def update_mailing_address(self, lead_id: int, mailing_address: Optional[str]) -> bool:
-        return self._service.update_mailing_address(lead_id, mailing_address)
+        return await anyio.to_thread.run_sync(self._service.update_mailing_address, lead_id, mailing_address)
 
     async def add_note(self, lead_id: int, note: str, user_id: Optional[int] = None) -> Optional[dict]:
-        return self._service.add_note(lead_id, note, user_id)
+        return await anyio.to_thread.run_sync(self._service.add_note, lead_id, note, user_id)
 
     async def get_notes(self, lead_id: int) -> List[dict]:
-        return self._service.get_notes(lead_id)
+        return await anyio.to_thread.run_sync(self._service.get_notes, lead_id)
 
     async def delete_note(self, note_id: int) -> bool:
-        return self._service.delete_note(note_id)
+        return await anyio.to_thread.run_sync(self._service.delete_note, note_id)
 
     async def record_event(self, lead_id: int, event_type: str) -> bool:
-        return self._service.record_event(lead_id, event_type)
+        return await anyio.to_thread.run_sync(self._service.record_event, lead_id, event_type)
 
     async def search_leads(self, query: str, limit: int = 50) -> List[dict]:
-        return self._service.search_leads(query, limit)
+        return await anyio.to_thread.run_sync(self._service.search_leads, query, limit)
 
     async def get_stats(self) -> dict:
-        return self._service.get_stats()
+        return await anyio.to_thread.run_sync(self._service.get_stats)
 
     async def get_public_metrics(self) -> dict:
-        return self._service.get_public_metrics()
+        return await anyio.to_thread.run_sync(self._service.get_public_metrics)
 
     async def get_cities(self) -> List[str]:
-        return self._service.get_cities()
+        return await anyio.to_thread.run_sync(self._service.get_cities)
 
     async def get_cities_with_counts(self) -> List[dict]:
-        return self._service.get_cities_with_counts()
+        return await anyio.to_thread.run_sync(self._service.get_cities_with_counts)
 
     async def get_cities_with_counts_filtered(self) -> List[dict]:
-        return self._service.get_cities_with_counts_filtered()
+        return await anyio.to_thread.run_sync(self._service.get_cities_with_counts_filtered)
 
     async def count_leads_by_interests(self, categories: List[str]) -> int:
-        return self._service.count_leads_by_interests(categories)
+        return await anyio.to_thread.run_sync(self._service.count_leads_by_interests, categories)
 
     async def count_leads_last_24h(self) -> int:
-        return self._service.count_leads_last_24h()
+        return await anyio.to_thread.run_sync(self._service.count_leads_last_24h)
 
     async def count_leads_last_7d_filtered(self, city: Optional[str] = None) -> int:
-        return self._service.count_leads_last_7d_filtered(city)
+        return await anyio.to_thread.run_sync(self._service.count_leads_last_7d_filtered, city)
 
     async def get_locations_hierarchy(self) -> dict:
-        return self._service.get_locations_hierarchy()
+        return await anyio.to_thread.run_sync(self._service.get_locations_hierarchy)
 
     async def add_notification(self, type: str, title: str, message: str, lead_id: Optional[int] = None) -> Optional[dict]:
-        return self._service.add_notification(type, title, message, lead_id)
+        return await anyio.to_thread.run_sync(self._service.add_notification, type, title, message, lead_id)
 
     async def get_notifications(self, filter: str = "recent", limit: int = 50) -> List[dict]:
-        return self._service.get_notifications(filter, limit)
+        return await anyio.to_thread.run_sync(self._service.get_notifications, filter, limit)
 
     async def mark_notification_read(self, notification_id: int) -> bool:
-        return self._service.mark_notification_read(notification_id)
+        return await anyio.to_thread.run_sync(self._service.mark_notification_read, notification_id)
 
     async def mark_all_notifications_read(self) -> int:
-        return self._service.mark_all_notifications_read()
+        return await anyio.to_thread.run_sync(self._service.mark_all_notifications_read)
 
     async def count_unread_notifications(self) -> int:
-        return self._service.count_unread_notifications()
+        return await anyio.to_thread.run_sync(self._service.count_unread_notifications)
 
     async def create_user(self, email: str, password_hash: str, company_name: str, plan: str = "free",
                            subscription_status: Optional[str] = None, plan_until: Optional[str] = None) -> Optional[dict]:
-        return self._service.create_user(email, password_hash, company_name, plan, subscription_status, plan_until)
+        return await anyio.to_thread.run_sync(self._service.create_user, email, password_hash, company_name, plan, subscription_status, plan_until)
 
     async def get_user_by_email(self, email: str) -> Optional[dict]:
-        return self._service.get_user_by_email(email)
+        return await anyio.to_thread.run_sync(self._service.get_user_by_email, email)
 
     async def get_user_by_id(self, user_id: int) -> Optional[dict]:
-        return self._service.get_user_by_id(user_id)
+        return await anyio.to_thread.run_sync(self._service.get_user_by_id, user_id)
 
     async def update_user_company(self, user_id: int, company_name: str) -> Optional[dict]:
-        return self._service.update_user_company(user_id, company_name)
+        return await anyio.to_thread.run_sync(self._service.update_user_company, user_id, company_name)
 
     async def update_user_plan(self, user_id: int, plan: str, subscription_status: str = "active") -> bool:
-        return self._service.update_user_plan(user_id, plan, subscription_status)
+        return await anyio.to_thread.run_sync(self._service.update_user_plan, user_id, plan, subscription_status)
 
     async def set_user_stripe(self, user_id: int, customer_id: Optional[str], subscription_id: Optional[str]) -> bool:
-        return self._service.set_user_stripe(user_id, customer_id, subscription_id)
+        return await anyio.to_thread.run_sync(self._service.set_user_stripe, user_id, customer_id, subscription_id)
 
     async def activate_week(self, user_id: int, plan: str = "pro", subscription_status: str = "active",
                             days: int = 7) -> Optional[dict]:
-        return self._service.activate_week(user_id, plan, subscription_status, days)
+        return await anyio.to_thread.run_sync(self._service.activate_week, user_id, plan, subscription_status, days)
+
+    async def extend_access(self, user_id: int, days: int = 7) -> Optional[dict]:
+        return await anyio.to_thread.run_sync(self._service.extend_access, user_id, days)
+
+    async def record_stripe_event(self, event_id: str, event_type: str,
+                                  user_id: Optional[int] = None) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.record_stripe_event, event_id, event_type, user_id
+        )
+
+    async def has_stripe_event(self, event_id: str) -> bool:
+        return await anyio.to_thread.run_sync(self._service.has_stripe_event, event_id)
 
     async def set_user_interests(self, user_id: int, categories: List[str]) -> bool:
-        return self._service.set_user_interests(user_id, categories)
+        return await anyio.to_thread.run_sync(self._service.set_user_interests, user_id, categories)
 
     async def get_user_interests(self, user_id: int) -> List[str]:
-        return self._service.get_user_interests(user_id)
+        return await anyio.to_thread.run_sync(self._service.get_user_interests, user_id)
 
     async def set_user_cities_filter(self, user_id: int, cities: Optional[List[str]]) -> bool:
-        return self._service.set_user_cities_filter(user_id, cities)
+        return await anyio.to_thread.run_sync(self._service.set_user_cities_filter, user_id, cities)
 
     async def get_user_cities_filter(self, user_id: int) -> Optional[List[str]]:
-        return self._service.get_user_cities_filter(user_id)
+        return await anyio.to_thread.run_sync(self._service.get_user_cities_filter, user_id)
 
     # Push Subscriptions
     async def add_push_subscription(self, user_id: int, endpoint: str, p256dh: str, auth: str) -> bool:
-        return self._service.add_push_subscription(user_id, endpoint, p256dh, auth)
+        return await anyio.to_thread.run_sync(self._service.add_push_subscription, user_id, endpoint, p256dh, auth)
 
     async def remove_push_subscription(self, user_id: int, endpoint: str) -> bool:
-        return self._service.remove_push_subscription(user_id, endpoint)
+        return await anyio.to_thread.run_sync(self._service.remove_push_subscription, user_id, endpoint)
 
     async def get_user_push_subscriptions(self, user_id: int) -> List[dict]:
-        return self._service.get_user_push_subscriptions(user_id)
+        return await anyio.to_thread.run_sync(self._service.get_user_push_subscriptions, user_id)
 
     async def get_all_push_subscriptions(self) -> List[dict]:
-        return self._service.get_all_push_subscriptions()
+        return await anyio.to_thread.run_sync(self._service.get_all_push_subscriptions)
 
     async def set_user_push_enabled(self, user_id: int, enabled: bool) -> bool:
-        return self._service.set_user_push_enabled(user_id, enabled)
+        return await anyio.to_thread.run_sync(self._service.set_user_push_enabled, user_id, enabled)
 
     async def is_push_enabled(self, user_id: int) -> bool:
-        return self._service.is_push_enabled(user_id)
+        return await anyio.to_thread.run_sync(self._service.is_push_enabled, user_id)
 
     # User Sessions
     async def create_user_session(
         self, user_id: int, token_hash: str, device_info: Optional[str], ip_address: Optional[str]
     ) -> bool:
-        return self._service.create_user_session(user_id, token_hash, device_info, ip_address)
+        return await anyio.to_thread.run_sync(self._service.create_user_session, user_id, token_hash, device_info, ip_address)
 
     async def validate_user_session(self, token_hash: str) -> Optional[int]:
-        return self._service.validate_user_session(token_hash)
+        return await anyio.to_thread.run_sync(self._service.validate_user_session, token_hash)
 
     async def remove_user_session(self, token_hash: str) -> bool:
-        return self._service.remove_user_session(token_hash)
+        return await anyio.to_thread.run_sync(self._service.remove_user_session, token_hash)
 
     async def remove_user_sessions(self, user_id: int) -> int:
-        return self._service.remove_user_sessions(user_id)
+        return await anyio.to_thread.run_sync(self._service.remove_user_sessions, user_id)
 
     async def get_user_active_sessions(self, user_id: int) -> List[dict]:
-        return self._service.get_user_active_sessions(user_id)
+        return await anyio.to_thread.run_sync(self._service.get_user_active_sessions, user_id)
 
     async def get_users_interested_in(self, category: str, city: Optional[str] = None) -> List[dict]:
-        return self._service.get_users_interested_in(category, city)
+        return await anyio.to_thread.run_sync(self._service.get_users_interested_in, category, city)
 
     async def get_all_users(self) -> List[dict]:
-        return self._service.get_all_users()
+        return await anyio.to_thread.run_sync(self._service.get_all_users)
 
     async def add_notification_for_user(self, user_id: int, type: str, title: str, message: str, lead_id: Optional[int] = None) -> Optional[dict]:
-        return self._service.add_notification_for_user(user_id, type, title, message, lead_id)
+        return await anyio.to_thread.run_sync(self._service.add_notification_for_user, user_id, type, title, message, lead_id)
 
     async def get_notifications_for_user(self, user_id: int, filter: str = "recent", limit: int = 50) -> List[dict]:
-        return self._service.get_notifications_for_user(user_id, filter, limit)
+        return await anyio.to_thread.run_sync(self._service.get_notifications_for_user, user_id, filter, limit)
 
     async def mark_notification_read_for_user(self, notification_id: int, user_id: int) -> bool:
-        return self._service.mark_notification_read_for_user(notification_id, user_id)
+        return await anyio.to_thread.run_sync(self._service.mark_notification_read_for_user, notification_id, user_id)
 
     async def mark_all_notifications_read_for_user(self, user_id: int) -> int:
-        return self._service.mark_all_notifications_read_for_user(user_id)
+        return await anyio.to_thread.run_sync(self._service.mark_all_notifications_read_for_user, user_id)
 
     async def count_unread_notifications_for_user(self, user_id: int) -> int:
-        return self._service.count_unread_notifications_for_user(user_id)
+        return await anyio.to_thread.run_sync(self._service.count_unread_notifications_for_user, user_id)
 
     async def get_lead_with_status(self, lead_id: int) -> Optional[dict]:
-        return self._service.get_lead_with_status(lead_id)
+        return await anyio.to_thread.run_sync(self._service.get_lead_with_status, lead_id)
 
     async def list_leads_with_status(self, limit: int = 100, status: Optional[str] = None) -> List[dict]:
-        return self._service.list_leads_with_status(limit, status)
+        return await anyio.to_thread.run_sync(self._service.list_leads_with_status, limit, status)
 
     async def reserve_lead(self, lead_id: int, user_id: int, minutes: int = 60) -> Optional[dict]:
         # 1. Reserva o lead sem incrementar contador diário (skip_daily_increment=True)
-        reserved = self._service.reserve_lead(lead_id, user_id, minutes, skip_daily_increment=True)
+        reserved = await anyio.to_thread.run_sync(
+            lambda: self._service.reserve_lead(
+                lead_id, user_id, minutes, skip_daily_increment=True
+            )
+        )
         if not reserved or reserved.get("error"):
             return reserved
         
@@ -3626,7 +3722,9 @@ class AsyncDatabaseService:
             }
         
         # 3. Sucesso - atualiza lead com telefone, incrementa contador diário
-        phone_updated = self._service.update_owner_phone(lead_id, phone_result.phone)
+        phone_updated = await anyio.to_thread.run_sync(
+            self._service.update_owner_phone, lead_id, phone_result.phone
+        )
         if not phone_updated:
             await self.release_lead(lead_id, user_id, reason="phone_update_failed")
             return {"error": "phone_update_failed", "message": "Falha ao salvar telefone no lead"}
@@ -3649,97 +3747,101 @@ class AsyncDatabaseService:
         return lead_data
 
     async def release_lead(self, lead_id: int, user_id: int, reason: Optional[str] = None, note: Optional[str] = None) -> Optional[dict]:
-        return self._service.release_lead(lead_id, user_id, reason, note)
+        return await anyio.to_thread.run_sync(self._service.release_lead, lead_id, user_id, reason, note)
 
     async def record_contact(self, lead_id: int, user_id: int, channel: str) -> Optional[dict]:
-        return self._service.record_contact(lead_id, user_id, channel)
+        return await anyio.to_thread.run_sync(self._service.record_contact, lead_id, user_id, channel)
 
     async def mark_negotiation(self, lead_id: int, user_id: int) -> Optional[dict]:
-        return self._service.mark_negotiation(lead_id, user_id)
+        return await anyio.to_thread.run_sync(self._service.mark_negotiation, lead_id, user_id)
 
     async def convert_lead(self, lead_id: int, user_id: int) -> Optional[dict]:
-        return self._service.convert_lead(lead_id, user_id)
+        return await anyio.to_thread.run_sync(self._service.convert_lead, lead_id, user_id)
 
     async def reject_lead(self, lead_id: int, user_id: int, reason: Optional[str] = None) -> Optional[dict]:
-        return self._service.reject_lead(lead_id, user_id, reason)
+        return await anyio.to_thread.run_sync(self._service.reject_lead, lead_id, user_id, reason)
 
     async def add_user_penalty(self, contractor_id: int, penalty_type: str, reason: str, penalty_level: str = "warning", expires_hours: int = 24) -> bool:
-        return self._service.add_user_penalty(contractor_id, penalty_type, reason, penalty_level, expires_hours)
+        return await anyio.to_thread.run_sync(self._service.add_user_penalty, contractor_id, penalty_type, reason, penalty_level, expires_hours)
 
     async def check_user_penalties(self, contractor_id: int) -> List[dict]:
-        return self._service.check_user_penalties(contractor_id)
+        return await anyio.to_thread.run_sync(self._service.check_user_penalties, contractor_id)
 
     async def get_user_score(self, contractor_id: int) -> Optional[dict]:
-        return self._service.get_user_score(contractor_id)
+        return await anyio.to_thread.run_sync(self._service.get_user_score, contractor_id)
 
     async def get_lead_history(self, lead_id: int) -> List[dict]:
-        return self._service.get_lead_history(lead_id)
+        return await anyio.to_thread.run_sync(self._service.get_lead_history, lead_id)
 
     async def get_contractor_metrics(self, contractor_id: int) -> Optional[dict]:
-        return self._service.get_contractor_metrics(contractor_id)
+        return await anyio.to_thread.run_sync(self._service.get_contractor_metrics, contractor_id)
 
     async def get_user_leads_history(self, user_id: int, **kwargs):
-        return self._service.get_user_leads_history(user_id, **kwargs)
+        return await anyio.to_thread.run_sync(
+            lambda: self._service.get_user_leads_history(user_id, **kwargs)
+        )
 
     async def save_lead_case_history(self, lead_id: int, occurrences: list) -> int:
-        return self._service.save_lead_case_history(lead_id, occurrences)
+        return await anyio.to_thread.run_sync(self._service.save_lead_case_history, lead_id, occurrences)
 
     async def get_lead_case_history(self, lead_id: int) -> list:
-        return self._service.get_lead_case_history(lead_id)
+        return await anyio.to_thread.run_sync(self._service.get_lead_case_history, lead_id)
 
     async def list_leads_for_case_history(self, **kwargs) -> list:
-        return self._service.list_leads_for_case_history(**kwargs)
+        return await anyio.to_thread.run_sync(
+            lambda: self._service.list_leads_for_case_history(**kwargs)
+        )
 
     async def get_dashboard_summary(self, interest_categories: List[str] = None) -> dict:
-        return self._service.get_dashboard_summary(interest_categories)
+        return await anyio.to_thread.run_sync(self._service.get_dashboard_summary, interest_categories)
 
     async def expire_holds(self) -> int:
-        return self._service.expire_holds()
+        return await anyio.to_thread.run_sync(self._service.expire_holds)
 
     # ===== SUBSCRIPTION / TRIAL ASYNC WRAPPERS =====
     
     async def get_user_subscription_status(self, user_id: int) -> dict:
-        return self._service.get_user_subscription_status(user_id)
+        return await anyio.to_thread.run_sync(self._service.get_user_subscription_status, user_id)
 
     async def start_trial(self, user_id: int) -> bool:
-        return self._service.start_trial(user_id)
+        return await anyio.to_thread.run_sync(self._service.start_trial, user_id)
 
     async def activate_subscription(self, user_id: int, stripe_customer_id: str, stripe_subscription_id: str) -> bool:
-        return self._service.activate_subscription(user_id, stripe_customer_id, stripe_subscription_id)
+        return await anyio.to_thread.run_sync(self._service.activate_subscription, user_id, stripe_customer_id, stripe_subscription_id)
 
     # ===== DAILY STATS ASYNC WRAPPERS =====
     
     async def get_daily_leads_used(self, user_id: int) -> dict:
-        return self._service.get_daily_leads_used(user_id)
+        return await anyio.to_thread.run_sync(self._service.get_daily_leads_used, user_id)
 
     async def increment_daily_leads(self, user_id: int) -> bool:
-        return self._service.increment_daily_leads(user_id)
+        return await anyio.to_thread.run_sync(self._service.increment_daily_leads, user_id)
 
     async def reveal_lead(self, user_id: int, lead_id: int, idempotency_key: Optional[str] = None, minutes: int = DatabaseService.REVEAL_HOLD_MINUTES) -> Optional[dict]:
-        return self._service.reveal_lead(user_id, lead_id, idempotency_key, minutes)
+        return await anyio.to_thread.run_sync(self._service.reveal_lead, user_id, lead_id, idempotency_key, minutes)
 
     async def get_revealed_ids(self, user_id: int, lead_ids: List[int]) -> set:
-        return self._service.get_revealed_ids(user_id, lead_ids)
+        return await anyio.to_thread.run_sync(self._service.get_revealed_ids, user_id, lead_ids)
 
     async def flag_reveal_contact(self, user_id: int, lead_id: int) -> bool:
-        return self._service.flag_reveal_contact(user_id, lead_id)
+        return await anyio.to_thread.run_sync(self._service.flag_reveal_contact, user_id, lead_id)
 
     async def check_reveal_watchdogs(self) -> int:
-        return self._service.check_reveal_watchdogs()
+        return await anyio.to_thread.run_sync(self._service.check_reveal_watchdogs)
 
     # ===== DAILY ALERT CAP (10/day, dedup, digest) =====
 
     async def get_new_lead_alert_counts_today(self) -> List[dict]:
-        return self._service.get_new_lead_alert_counts_today()
+        return await anyio.to_thread.run_sync(self._service.get_new_lead_alert_counts_today)
 
     async def has_alerted_user_for_lead(self, user_id: int, lead_id: int) -> bool:
-        return self._service.has_alerted_user_for_lead(user_id, lead_id)
+        return await anyio.to_thread.run_sync(self._service.has_alerted_user_for_lead, user_id, lead_id)
 
     async def get_alerted_pairs_for_leads(self, lead_ids: List[int]) -> List[dict]:
-        return self._service.get_alerted_pairs_for_leads(lead_ids)
+        return await anyio.to_thread.run_sync(self._service.get_alerted_pairs_for_leads, lead_ids)
 
     async def upsert_daily_digest(self, user_id: int, extra_count: int) -> Optional[dict]:
-        return self._service.upsert_daily_digest(user_id, extra_count)
+        return await anyio.to_thread.run_sync(self._service.upsert_daily_digest, user_id, extra_count)
 
 
 # Instância global (interface async, compatível com o antigo supabase_service)

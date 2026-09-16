@@ -7,6 +7,7 @@ from slowapi.errors import RateLimitExceeded
 import asyncio
 import contextlib
 import hashlib
+import secrets
 import httpx
 import os
 import uuid
@@ -311,15 +312,36 @@ async def _get_optional_user(
     return {"id": user_id}
 
 
-def _annotate_visibility(leads: list, user: Optional[dict]) -> None:
+def _require_admin(x_admin_secret: Optional[str] = Header(None)) -> bool:
+    """Exige o header X-Admin-Secret nas rotas administrativas.
+
+    Fail-closed: se ADMIN_SECRET não estiver configurado, TODAS as rotas admin
+    são negadas (nunca ficam abertas em produção).
+    """
+    expected = settings.ADMIN_SECRET
+    if not expected:
+        raise HTTPException(status_code=503, detail="ADMIN_SECRET não configurado no servidor")
+    if not x_admin_secret or not secrets.compare_digest(x_admin_secret, expected):
+        raise HTTPException(status_code=401, detail="Não autorizado: admin secret inválido")
+    return True
+
+
+def _check_cron_secret(x_cron_secret: Optional[str]) -> None:
+    """Valida o header X-Cron-Secret. Fail-closed (antes aceitava requisições sem secret)."""
+    expected = settings.CRON_SECRET
+    if not expected or not x_cron_secret or not secrets.compare_digest(x_cron_secret, expected):
+        raise HTTPException(status_code=401, detail="Não autorizado: CRON_SECRET inválido")
+
+
+async def _annotate_visibility(leads: list, user: Optional[dict]) -> None:
     """Marca is_mine/hours_remaining/favorited/_revealed nos leads para o _to_lead_response."""
     user_id = user["id"] if user else None
     
-    # Pre-fetch user favorites for batch lookup
+    # Pre-fetch user favorites for batch lookup (via thread pool — evita travar o event loop)
     user_fav_ids = set()
     if user_id:
         try:
-            user_fav_ids = set(db_service._service.get_user_favorites(user_id))
+            user_fav_ids = set(await db_service.get_user_favorites(user_id))
         except Exception:
             pass
 
@@ -327,7 +349,7 @@ def _annotate_visibility(leads: list, user: Optional[dict]) -> None:
     revealed_ids: set = set()
     if user_id and leads:
         try:
-            revealed_ids = db_service._service.get_revealed_ids(user_id, [l.get("id") for l in leads])
+            revealed_ids = await db_service.get_revealed_ids(user_id, [l.get("id") for l in leads])
         except Exception:
             pass
     
@@ -387,7 +409,7 @@ async def get_leads(
         if type:
             leads = [l for l in leads if l.get("source_type") == type]
 
-        _annotate_visibility(leads, user)
+        await _annotate_visibility(leads, user)
 
         return LeadsListResponse(
             total=len(leads),
@@ -408,7 +430,7 @@ async def search_leads(q: str = "", per_page: int = 50, user: Optional[dict] = D
     try:
         results = await db_service.search_leads(q, limit=per_page)
 
-        _annotate_visibility(results, user)
+        await _annotate_visibility(results, user)
 
         return LeadsListResponse(
             total=len(results),
@@ -443,7 +465,7 @@ async def recent_leads(limit: int = 12, user: Optional[dict] = Depends(_get_opti
             conn.close()
         results = [dict(r) for r in rows]
 
-        _annotate_visibility(results, user)
+        await _annotate_visibility(results, user)
 
         return LeadsListResponse(
             total=len(results),
@@ -499,7 +521,7 @@ async def leads_today(limit: int = 60, page: int = 1, city: str = None, type: st
             conn.close()
         results = [dict(r) for r in results]
 
-        _annotate_visibility(results, user)
+        await _annotate_visibility(results, user)
 
         return LeadsListResponse(
             total=total,
@@ -719,7 +741,7 @@ async def get_lead(lead_id: int, user: Optional[dict] = Depends(_get_optional_us
     lead = await db_service.get_lead_by_id(lead_id)
     if not lead:
         raise HTTPException(status_code=404, detail="Lead não encontrado")
-    _annotate_visibility([lead], user)
+    await _annotate_visibility([lead], user)
     return _to_lead_response(lead)
 
 
@@ -910,8 +932,8 @@ async def list_push_subscriptions(user: dict = Depends(_get_current_user)):
 
 
 @app.post("/api/push/test")
-async def test_push_notification(user_id: int):
-    """Envia uma notificação de teste para o usuário."""
+async def test_push_notification(user_id: int, _admin: bool = Depends(_require_admin)):
+    """Envia uma notificação de teste para o usuário (rota administrativa)."""
     if not push_service.is_configured():
         raise HTTPException(status_code=503, detail="Push notifications not configured")
     
@@ -931,8 +953,8 @@ async def test_push_notification(user_id: int):
 
 
 @app.post("/api/push/send-test")
-async def send_test_push(payload: SendTestPushRequest):
-    """Dispara um push real via Web Push (pywebpush) para teste.
+async def send_test_push(payload: SendTestPushRequest, _admin: bool = Depends(_require_admin)):
+    """Dispara um push real via Web Push (pywebpush) para teste (rota administrativa).
 
     Sem user_id, faz broadcast para todas as subscriptions ativas.
     """
@@ -978,9 +1000,8 @@ async def run_scraper(
     Requer header X-Cron-Secret para execução via cron externo (GitHub Actions, Railway Cron).
     Parâmetro 'hours' opcional: janela de horas para buscar dados (ex: 120 para catch-up noturno).
     """
-    # Autenticação por CRON_SECRET (obrigatório para cron externo)
-    if settings.CRON_SECRET and x_cron_secret != settings.CRON_SECRET:
-        raise HTTPException(status_code=401, detail="Não autorizado: CRON_SECRET inválido")
+    # Autenticação por CRON_SECRET (obrigatório — fail-closed)
+    _check_cron_secret(x_cron_secret)
     
     for run in _scrape_runs.values():
         if run.get("running"):
@@ -1722,8 +1743,8 @@ async def discover_available():
 
 # Enriquecimento em lote: preenche owner_name = nome do proprietário (registro público)
 @app.post("/api/scraper/enrich")
-async def enrich_leads(city: str = "NYC", limit: int = 500):
-    """Busca o nome do proprietário para os leads que ainda não têm owner_name."""
+async def enrich_leads(city: str = "NYC", limit: int = 500, user: dict = Depends(_get_current_user)):
+    """Busca o nome do proprietário para os leads que ainda não têm owner_name (requer login)."""
     try:
         from backend.services import db as dbmod
 
@@ -1767,7 +1788,7 @@ async def enrich_leads(city: str = "NYC", limit: int = 500):
 # Enriquecimento completo em lote: owner_name + mailing_address + skip_trace (phone/email)
 @app.post("/api/scraper/enrich-all")
 @limiter.limit("5/hour")
-async def enrich_all_leads(request: Request, limit_per_city: int = 200):
+async def enrich_all_leads(request: Request, limit_per_city: int = 200, _admin: bool = Depends(_require_admin)):
     """
     Roda enriquecimento completo em TODAS as cidades:
     1. Owner name + mailing_address (via assessor/property records)
@@ -1899,7 +1920,7 @@ async def enrich_all_leads(request: Request, limit_per_city: int = 200):
 
 # Reclassificação dos leads existentes para o novo modelo (16 ofícios + gatilhos preditivos)
 @app.post("/api/admin/requalify")
-async def admin_requalify_leads(request: Request):
+async def admin_requalify_leads(request: Request, _admin: bool = Depends(_require_admin)):
     """
     Reclassifica todos os leads existentes no banco para o novo modelo:
     - _infer_category aprimorado (16 ofícios, fallback Permit_Rejected para fontes legais)
@@ -2004,8 +2025,8 @@ async def admin_requalify_leads(request: Request):
 
 # Enriquecimento/consulta do dono de um único lead
 @app.post("/api/leads/{lead_id}/enrich")
-async def enrich_single_lead(lead_id: int):
-    """Consulta o nome do proprietário de um lead específico."""
+async def enrich_single_lead(lead_id: int, user: dict = Depends(_get_current_user)):
+    """Consulta o nome do proprietário de um lead específico (requer login)."""
     try:
         lead = await db_service.get_lead_by_id(lead_id)
         if not lead:
@@ -2271,9 +2292,56 @@ async def demo_login(response: Response = None):
 # ------------------------------------------------------------------
 # Billing: checkout Stripe (ou mock local) + ativação de semana
 # ------------------------------------------------------------------
+def _plan_payload() -> dict:
+    return {
+        "name": settings.PLAN_NAME,
+        "interval": settings.PLAN_INTERVAL,
+        "amount_cents": settings.PLAN_AMOUNT_CENTS,
+        "amount_usd": settings.PLAN_AMOUNT_USD,
+        "annual_usd": settings.PLAN_ANNUAL_USD,
+        "price_id": settings.STRIPE_PRICE_ID_PRO,
+    }
+
+
+def _stripe_configured() -> bool:
+    return bool(
+        settings.STRIPE_API_KEY
+        and settings.STRIPE_PRICE_ID_PRO
+        and settings.STRIPE_PRICE_ID_PRO != "price_..."
+    )
+
+
+def _create_stripe_checkout_session(user_id: int) -> tuple:
+    """Cria sessão Stripe de PAGAMENTO AVULSO (sem recorrência) de 7 dias.
+
+    Retorna (mock: bool, checkout_url: Optional[str]). Pagamento único em USD;
+    o acesso é liberado pelo webhook (checkout.session.completed) por 7 dias.
+    """
+    has_stripe = _stripe_configured()
+    if not has_stripe:
+        return True, None
+
+    import stripe
+    stripe.api_key = settings.STRIPE_API_KEY
+    session = stripe.checkout.Session.create(
+        mode="payment",
+        currency="usd",
+        line_items=[{"price": settings.STRIPE_PRICE_ID_PRO, "quantity": 1}],
+        success_url=f"{settings.FRONTEND_URL}/dashboard?paid=1",
+        cancel_url=f"{settings.FRONTEND_URL}/pricing",
+        client_reference_id=str(user_id),
+        metadata={
+            "user_id": str(user_id),
+            "access": "7_days",
+            "plan": settings.PLAN_NAME.lower(),
+        },
+    )
+    return False, session.url
+
+
 @app.post("/api/billing/checkout")
 async def create_checkout(user: dict = Depends(_get_current_user)):
-    """Cria sessão de checkout do plano semanal fixed ($79/week).
+    """Cria sessão de checkout do acesso de 7 dias ($79, pagamento avulso).
 
     Se STRIPE_API_KEY + STRIPE_PRICE_ID_PRO estiverem configurados, cria uma
     sessão real no Stripe (hosted). Caso contrário retorna mock para o fluxo
@@ -2283,43 +2351,39 @@ async def create_checkout(user: dict = Depends(_get_current_user)):
     if not full:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
 
-    plan_payload = {
-        "name": settings.PLAN_NAME,
-        "interval": settings.PLAN_INTERVAL,
-        "amount_cents": settings.PLAN_AMOUNT_CENTS,
-        "amount_usd": settings.PLAN_AMOUNT_USD,
-        "annual_usd": settings.PLAN_ANNUAL_USD,
-        "price_id": settings.STRIPE_PRICE_ID_PRO,
-    }
-
-    has_stripe = (
-        settings.STRIPE_API_KEY
-        and settings.STRIPE_PRICE_ID_PRO
-        and settings.STRIPE_PRICE_ID_PRO != "price_..."
-    )
-    if not has_stripe:
-        return {"mock": True, "checkout_url": None, "plan": plan_payload}
-
     try:
-        import stripe
-        stripe.api_key = settings.STRIPE_API_KEY
-        session = stripe.checkout.Session.create(
-            mode="payment",
-            line_items=[{"price": settings.STRIPE_PRICE_ID_PRO, "quantity": 1}],
-            success_url=f"{settings.FRONTEND_URL}/dashboard?paid=1",
-            cancel_url=f"{settings.FRONTEND_URL}/pricing",
-            client_reference_id=str(user["id"]),
-            metadata={"user_id": str(user["id"])},
-        )
-        return {"mock": False, "checkout_url": session.url, "plan": plan_payload}
+        mock, checkout_url = _create_stripe_checkout_session(user["id"])
     except Exception as e:
         logger.error(f"Erro ao criar checkout Stripe: {e}")
         raise HTTPException(status_code=502, detail="Falha ao iniciar checkout")
 
+    return {"mock": mock, "checkout_url": checkout_url, "plan": _plan_payload()}
+
+
+@app.post("/api/stripe/create-checkout")
+async def stripe_create_checkout(user: dict = Depends(_get_current_user)):
+    """Alias autenticado para o checkout de pagamento avulso (7 dias)."""
+    full = await db_service.get_user_by_id(user["id"])
+    if not full:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado")
+    try:
+        mock, checkout_url = _create_stripe_checkout_session(user["id"])
+    except Exception as e:
+        logger.error(f"Erro ao criar checkout Stripe: {e}")
+        raise HTTPException(status_code=502, detail="Falha ao iniciar checkout")
+    return {
+        "mock": mock,
+        "checkout_url": checkout_url,
+        "plan": _plan_payload(),
+        "mode": "payment",
+        "currency": "usd",
+        "access_days": 7,
+    }
+
 
 @app.post("/api/billing/mock-activate")
 async def mock_activate(user: dict = Depends(_get_current_user)):
-    """Mock de confirmação de pagamento: libera +1 semana ($79/week)."""
+    """Mock de confirmação de pagamento: libera +1 semana ($79)."""
     renewed = await db_service.activate_week(
         user["id"], plan=settings.PLAN_NAME.lower(),
         subscription_status="active", days=7,
@@ -2336,12 +2400,81 @@ async def mock_activate(user: dict = Depends(_get_current_user)):
 
 
 @app.post("/api/stripe/webhook")
-async def stripe_webhook(request: dict = None):
-    """Webhook do Stripe (assinar body + verificar Stripe-Signature em produção).
+async def stripe_webhook(request: Request, stripe_signature: Optional[str] = Header(None)):
+    """Webhook do Stripe: valida assinatura e libera 7 dias de acesso (idempotente).
 
-    Aqui é o ponto em que o backend confirmaria o invoice.paid e chamaria
-    db_service.activate_week. Por enquanto retorna 200 (evento ignorado).
+    Fluxo (pagamento avulso, SEM recorrência):
+      1. Valida Stripe-Signature com STRIPE_WEBHOOK_SECRET (fail-closed).
+      2. Em checkout.session.completed: registra event_id (idempotência) e
+         estende o acesso do user_id (metadata) em +7 dias.
     """
+    if not settings.STRIPE_WEBHOOK_SECRET:
+        logger.error("STRIPE_WEBHOOK_SECRET não configurado — webhook recusado")
+        return JSONResponse(status_code=503, content={"status": "not_configured"})
+    if not stripe_signature:
+        raise HTTPException(status_code=400, detail="Header Stripe-Signature ausente")
+
+    payload = await request.body()
+    try:
+        import stripe
+        stripe.api_key = settings.STRIPE_API_KEY or "sk_test_placeholder"
+        event = stripe.Webhook.construct_event(
+            payload, stripe_signature, settings.STRIPE_WEBHOOK_SECRET
+        )
+    except Exception as e:
+        logger.warning(f"Stripe webhook: assinatura inválida ({e})")
+        raise HTTPException(status_code=400, detail="Assinatura inválida")
+
+    event_id = event.get("id")
+    event_type = event.get("type")
+    if not event_id:
+        raise HTTPException(status_code=400, detail="Evento sem id")
+
+    # Idempotência: nunca processa o mesmo evento duas vezes.
+    if await db_service.has_stripe_event(event_id):
+        return {"status": "received", "handled": True, "idempotent": True}
+
+    if event_type == "checkout.session.completed":
+        session_obj = (event.get("data") or {}).get("object") or {}
+        meta = session_obj.get("metadata") or {}
+        user_id_raw = meta.get("user_id") or session_obj.get("client_reference_id")
+        if not user_id_raw:
+            await db_service.record_stripe_event(event_id, event_type, None)
+            logger.warning(f"Stripe {event_id}: checkout sem user_id — ignorado")
+            return {"status": "received", "handled": False, "reason": "missing_user_id"}
+        try:
+            user_id = int(user_id_raw)
+        except (TypeError, ValueError):
+            await db_service.record_stripe_event(event_id, event_type, None)
+            return {"status": "received", "handled": False, "reason": "invalid_user_id"}
+
+        recorded = await db_service.record_stripe_event(event_id, event_type, user_id)
+        if not recorded:
+            return {"status": "received", "handled": True, "idempotent": True}
+
+        updated = await db_service.extend_access(user_id, days=7)
+        if updated is None:
+            logger.error(f"Stripe {event_id}: user {user_id} não encontrado")
+            return {"status": "received", "handled": False, "reason": "user_not_found"}
+
+        customer_id = session_obj.get("customer")
+        if customer_id:
+            try:
+                await db_service.set_user_stripe(user_id, customer_id, None)
+            except Exception as e:
+                logger.warning(f"Stripe: falha ao salvar customer {customer_id}: {e}")
+
+        logger.info(f"Stripe: acesso +7 dias liberado para user {user_id} (event {event_id})")
+        return {
+            "status": "received",
+            "handled": True,
+            "idempotent": False,
+            "user_id": user_id,
+            "plan_until": updated.get("plan_until"),
+        }
+
+    # Demais eventos: registra para idempotência e ignora.
+    await db_service.record_stripe_event(event_id, event_type, None)
     return {"status": "received", "handled": False}
 
 
@@ -2644,8 +2777,7 @@ async def contact_lead(
 # Cron: expira holds vencidos + watchdog de reveals (chamado por GitHub Actions a cada hora)
 @app.get("/api/cron/expire-holds")
 async def cron_expire_holds(x_cron_secret: Optional[str] = Header(None)):
-    if settings.CRON_SECRET and x_cron_secret != settings.CRON_SECRET:
-        raise HTTPException(status_code=401, detail="Não autorizado")
+    _check_cron_secret(x_cron_secret)
     try:
         expired = await db_service.expire_holds()
         reveals = await db_service.check_reveal_watchdogs()

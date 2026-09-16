@@ -7,6 +7,9 @@ import json
 import asyncio
 import random
 from typing import List, Dict, Optional
+
+import anyio
+
 from pywebpush import webpush, WebPushException
 from .db import db_service
 from ..config import settings
@@ -90,18 +93,21 @@ class PushService:
         last_error = None
         for attempt in range(MAX_RETRIES):
             try:
-                webpush(
-                    subscription_info={
-                        "endpoint": subscription["endpoint"],
-                        "keys": {
-                            "p256dh": subscription["p256dh"],
-                            "auth": subscription["auth"]
-                        }
-                    },
-                    data=json.dumps(payload),
-                    vapid_private_key=self._vapid_private_key,
-                    vapid_claims=dict(self._vapid_claims),
-                    urgency="high"
+                # webpush() é I/O de rede BLOQUEANTE — roda em thread para não travar o event loop.
+                await anyio.to_thread.run_sync(
+                    lambda: webpush(
+                        subscription_info={
+                            "endpoint": subscription["endpoint"],
+                            "keys": {
+                                "p256dh": subscription["p256dh"],
+                                "auth": subscription["auth"]
+                            }
+                        },
+                        data=json.dumps(payload),
+                        vapid_private_key=self._vapid_private_key,
+                        vapid_claims=dict(self._vapid_claims),
+                        urgency="high"
+                    )
                 )
                 return True
             except WebPushException as e:
@@ -257,7 +263,7 @@ class PushService:
         subscriptions = await db_service.get_all_push_subscriptions()
         results["subscriptions_found"] = len(subscriptions)
         for sub in subscriptions:
-            res = self._send_single_debug(sub, payload, ttl)
+            res = await anyio.to_thread.run_sync(self._send_single_debug, sub, payload, ttl)
             if res.get("ok"):
                 results["sent"] += 1
                 results["errors"].append({
