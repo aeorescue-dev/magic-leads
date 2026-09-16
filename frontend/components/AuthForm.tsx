@@ -81,23 +81,28 @@ function AuthFormInner() {
     try {
       const user = await signIn(email.trim(), password, isRegister ? companyName.trim() : undefined);
       if (isRegister) {
-        // Cadastro concluído: libera o acesso só após o pagamento.
+        // Cadastro concluído: o acesso só é liberado após o pagamento.
         // Cria a sessão do Stripe Checkout e redireciona imediatamente.
-        setSuccess(true);
+        // NUNCA cai em fallback para /dashboard: sem URL real é erro.
+        let checkoutUrl: string | null = null;
         try {
-          const { checkout_url } = await startCheckout();
-          setTimeout(() => {
-            if (checkout_url) {
-              window.location.href = checkout_url;
-            } else {
-              router.push('/dashboard');
-              router.refresh();
-            }
-          }, 800);
-        } catch {
-          router.push('/dashboard');
-          router.refresh();
+          const res = await startCheckout();
+          checkoutUrl = res.checkout_url;
+        } catch (err: any) {
+          const msg = err?.response?.data?.detail || err?.message || t('dashboard.auth.error_generic') || 'Erro ao iniciar pagamento';
+          setErrors({ general: msg });
+          setSubmitting(false);
+          return;
         }
+        if (!checkoutUrl) {
+          setErrors({ general: 'Pagamento indisponível no momento. Tente novamente em instantes ou fale com o suporte para liberar seu acesso.' });
+          setSubmitting(false);
+          return;
+        }
+        setSuccess(true);
+        setTimeout(() => {
+          window.location.href = checkoutUrl;
+        }, 600);
       } else {
         setSuccess(true);
         setTimeout(() => {
