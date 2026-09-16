@@ -104,7 +104,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   company_name TEXT NOT NULL,
   plan TEXT DEFAULT 'free',
-  subscription_status TEXT DEFAULT 'trial',
+  subscription_status TEXT DEFAULT 'expired',
   trial_started_at TEXT,
   trial_ends_at TEXT,
   is_trial_active INTEGER DEFAULT 1,
@@ -460,8 +460,7 @@ def _ensure_demo_user() -> None:
             conn.execute(
                 "INSERT INTO users (email, password_hash, company_name, plan, subscription_status, plan_until) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
-                (demo_email, pwd_hash, "Contratante Demo", "free", "trial",
-                 (datetime.now() + timedelta(days=14)).strftime("%Y-%m-%d %H:%M:%S")),
+                (demo_email, pwd_hash, "Contratante Demo", "free", "expired", None),
             )
             logger.info(f"Usuário demo {demo_email} criado")
         conn.commit()

@@ -631,19 +631,6 @@ async def user_daily_stats(user_id: int, user: dict = Depends(_get_current_user)
         raise HTTPException(status_code=500, detail="Erro ao buscar stats diários")
 
 
-# Start Trial (3 dias)
-@app.post("/api/users/{user_id}/start-trial")
-async def start_trial(user_id: int, user: dict = Depends(_get_current_user)):
-    if user["id"] != user_id:
-        raise HTTPException(status_code=403, detail="Sem permissão")
-    try:
-        await db_service.start_trial(user_id)
-        return {"status": "ok", "message": "Trial de 3 dias iniciado"}
-    except Exception as e:
-        logger.error(f"Erro ao iniciar trial: {e}")
-        raise HTTPException(status_code=500, detail="Erro ao iniciar trial")
-
-
 # Stats do feed (contagens por cidade, últimas 24h, últimas 7d)
 @app.get("/api/leads/stats/feed")
 async def feed_stats(city: str = None):
@@ -2064,16 +2051,12 @@ async def enrich_single_lead(lead_id: int, user: dict = Depends(_get_current_use
 async def register_user(request: Request, payload: UserCreate, response: Response = None):
     try:
         pwd_hash = security.hash_password(payload.password)
-        trial_end = (datetime.utcnow() + timedelta(days=settings.TRIAL_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
         user = await db_service.create_user(
             payload.email.lower(), pwd_hash, payload.company_name, plan="free",
-            subscription_status="trial", plan_until=trial_end,
+            subscription_status="expired", plan_until=None,
         )
         if not user:
             raise HTTPException(status_code=409, detail="Email já cadastrado")
-        # Garante trial de 3 dias preenchido (trial_ends_at / status 'trial')
-        await db_service.start_trial(user["id"])
-        user = await db_service.get_user_by_id(user["id"])
         token = security.new_session_token()
         # Registra a sessão no banco (aplica limite de 2 sessões por usuário - FIFO)
         await db_service.create_user_session(user["id"], _hash_token(token), "Signup", None)
@@ -2246,15 +2229,12 @@ async def demo_login(response: Response = None):
         user = await db_service.get_user_by_email(demo_email.lower())
         if not user:
             pwd_hash = security.hash_password(demo_password)
-            trial_end = (datetime.utcnow() + timedelta(days=settings.TRIAL_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
             user = await db_service.create_user(
                 demo_email.lower(), pwd_hash, "Contratante Demo", plan="free",
-                subscription_status="trial", plan_until=trial_end,
+                subscription_status="expired", plan_until=None,
             )
             if not user:
                 raise HTTPException(status_code=500, detail="Erro ao criar conta demo")
-            await db_service.start_trial(user["id"])
-            user = await db_service.get_user_by_id(user["id"])
             token = security.new_session_token()
         else:
             if not security.verify_password(demo_password, user["password_hash"]):
