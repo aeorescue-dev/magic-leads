@@ -9,12 +9,10 @@ Dedup: mesmo lead nunca gera 2 alertas para o mesmo usuário.
 Digest: resumo diário para quem bateu no teto (não conta no teto).
 """
 
-import asyncio
 from collections import defaultdict
-from typing import List, Optional
 
-from .db import db_service
 from ..utils.logger import logger
+from .db import db_service
 
 DAILY_ALERT_LIMIT = 10
 
@@ -106,7 +104,7 @@ async def fanout_new_lead_batch(category: str, leads: list) -> int:
     if not category:
         return 0
 
-    lead_ids = [l.get("id") for l in leads if l.get("id")]
+    lead_ids = [ld.get("id") for ld in leads if ld.get("id")]
     if not lead_ids:
         return 0
 

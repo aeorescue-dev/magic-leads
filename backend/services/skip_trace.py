@@ -11,8 +11,10 @@ NOTA: Telefone/email de pessoas físicas NÃO estão disponíveis em registros p
 Estes dados são privados e só obtidos via skip tracing comercial (TruthFinder, Spokeo, etc.)
 """
 import re
-import httpx
 from typing import Optional
+
+import httpx
+
 from ..utils.logger import logger
 
 
@@ -28,7 +30,7 @@ class SkipTraceService:
     async def find_owner_phone(self, address: str, owner_name: Optional[str] = None, city: str = "") -> Optional[str]:
         """
         Busca telefone do proprietário usando múltiplas fontes gratuitas.
-        
+
         Fontes tentadas em ordem:
         1. NYC DOB Building Permits - se owner fez obra, pode ter phone no application
         2. SEC EDGAR - se owner é LLC/Corp, registered agent pode ter phone
@@ -56,14 +58,14 @@ class SkipTraceService:
 
         # Fonte 3: Nenhuma fonte gratuita confiável para phone de pessoa física
         # Registros públicos (assessor, deeds, voter reg) NÃO incluem telefone
-        
+
         self._cache[cache_key] = None
         return None
 
     async def find_owner_email(self, address: str, owner_name: Optional[str] = None, city: str = "") -> Optional[str]:
         """
         Busca email do proprietário.
-        
+
         Realidade: Email de pessoa física NÃO existe em registros públicos gratuitos.
         Fontes tentadas:
         1. SEC EDGAR - para LLC/Corp, registered agent email
@@ -105,7 +107,7 @@ class SkipTraceService:
         try:
             # Normalize address for search
             addr_part = address.split(",")[0].strip().upper()
-            
+
             async with httpx.AsyncClient(timeout=30) as client:
                 # Search by address in DOB permits
                 resp = await client.get(
@@ -119,19 +121,19 @@ class SkipTraceService:
                 if resp.status_code != 200:
                     return None
                 data = resp.json()
-                
+
                 if isinstance(data, list):
                     for permit in data:
                         # Match by owner name if provided
                         permit_owner = str(permit.get("owner_name") or "").strip()
                         applicant_name = str(permit.get("applicant_name") or "").strip()
-                        
+
                         if owner_name and (owner_name.upper() in permit_owner.upper() or owner_name.upper() in applicant_name.upper()):
                             # Return applicant or owner phone
                             phone = permit.get("owner_phone") or permit.get("applicant_phone")
                             if phone:
                                 return self._normalize_phone(phone)
-                        
+
                         # Also try address match
                         permit_addr = f"{permit.get('house_number','')} {permit.get('street_name','')}".strip().upper()
                         if addr_part in permit_addr or permit_addr in addr_part:
@@ -155,7 +157,7 @@ class SkipTraceService:
                 resp = await client.get("https://www.sec.gov/files/company_tickers.json")
                 if resp.status_code != 200:
                     return None
-                
+
                 companies = resp.json()
                 # Find matching company (simplified - in production use proper search)
                 cik = None
@@ -165,19 +167,19 @@ class SkipTraceService:
                         if owner_name.upper() in title or title in owner_name.upper():
                             cik = str(company.get("cik_str", "")).zfill(10)
                             break
-                
+
                 if not cik:
                     return None
-                
+
                 # Get submissions for this CIK
                 resp2 = await client.get(f"https://data.sec.gov/submissions/CIK{cik}.json")
                 if resp2.status_code != 200:
                     return None
-                
-                submissions = resp2.json()
+
+                _submissions = resp2.json()
                 # Look for registered agent info in recent filings
                 # This is simplified - real implementation would parse specific forms
-                
+
         except Exception as e:
             logger.debug(f"SEC EDGAR search error: {e}")
         return None
@@ -189,7 +191,7 @@ class SkipTraceService:
                 resp = await client.get("https://www.sec.gov/files/company_tickers.json")
                 if resp.status_code != 200:
                     return None
-                
+
                 companies = resp.json()
                 cik = None
                 for key, company in companies.items():
@@ -198,13 +200,13 @@ class SkipTraceService:
                         if owner_name.upper() in title or title in owner_name.upper():
                             cik = str(company.get("cik_str", "")).zfill(10)
                             break
-                
+
                 if not cik:
                     return None
-                
+
                 # Could parse specific forms (DEF 14A, etc.) for emails
                 # Simplified for now
-                
+
         except Exception as e:
             logger.debug(f"SEC EDGAR email search error: {e}")
         return None

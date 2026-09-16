@@ -1,38 +1,58 @@
-from fastapi import FastAPI, Depends, HTTPException, status, Header, Request, Response, Cookie
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
 import asyncio
 import contextlib
 import hashlib
-import secrets
-import httpx
-import os
-import uuid
-import sqlite3
 import json
+import os
+import secrets
+import sqlite3
+import uuid
 from datetime import datetime, timedelta
 from typing import List, Optional
 
+import httpx
+from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+
 from .config import settings
+from .models.schemas import (
+    AuthResponse,
+    ContactLeadRequest,
+    EnrichedLead,
+    HistoryEvent,
+    InterestsUpdate,
+    IssueCategory,
+    LeadHoldResponse,
+    LeadResponse,
+    LeadsListResponse,
+    LeadStatsResponse,
+    LeadStatusResponse,
+    LeadUpdate,
+    NoteCreate,
+    NoteResponse,
+    NotificationResponse,
+    PushEnabledUpdate,
+    PushSubscribeRequest,
+    PushUnsubscribeRequest,
+    RejectLeadRequest,
+    ReleaseLeadRequest,
+    ReserverLeadRequest,
+    SendTestPushRequest,
+    SourceType,
+    UserCreate,
+    UserLogin,
+    UserResponse,
+    UserUpdate,
+)
 from .scrapers.socrata_311 import socrata_scraper
 from .scrapers.socrata_discovery import socrata_discovery
+from .services import notifier, security
 from .services.db import db_service
 from .services.enrichment import owner_enrichment
-from .services import security
-from .services import notifier
 from .services.push_service import push_service
-from .models.schemas import (
-    LeadsListResponse, LeadResponse, LeadStatsResponse, LeadUpdate, NoteResponse, NoteCreate,
-    NotificationResponse,
-    EnrichedLead, SourceType, IssueCategory, UrgencyLevel,
-    UserCreate, UserLogin, UserResponse, UserUpdate, AuthResponse, InterestsUpdate,
-    ReserverLeadRequest, ReleaseLeadRequest, ContactLeadRequest,
-    RejectLeadRequest, LeadHoldResponse, LeadStatusResponse, HistoryEvent,
-    PushSubscribeRequest, PushUnsubscribeRequest, PushEnabledUpdate, SendTestPushRequest,
-)
 from .utils.logger import logger
 
 
@@ -61,11 +81,11 @@ def _to_lead_response(lead: dict) -> LeadResponse:
     reserved_by = lead.get("reserved_by")
     reserved_until = lead.get("reserved_until")
     reserved_by_name = lead.get("reserved_by_name")
-    
+
     visibility_status = "available"
     reserved_by_me = None
     reserved_by_other = None
-    
+
     if lead_status == "reserved" and reserved_by:
         if lead.get("is_mine"):  # This will be set by the caller based on user_id
             visibility_status = "reserved_by_me"
@@ -86,7 +106,7 @@ def _to_lead_response(lead: dict) -> LeadResponse:
     # (consentimento) veem owner_name/owner_phone/owner_email/mailing_address.
     # Sem reveal, os campos vêm mascarados (None) na response.
     show_owner = bool(lead.get("_revealed", False))
-    
+
     return LeadResponse(
         id=str(lead["id"]),
         external_id=lead["external_id"],
@@ -269,19 +289,19 @@ async def _get_current_user(
         token = authorization[len("Bearer "):].strip()
     elif garimpador_token:
         token = garimpador_token
-    
+
     if not token:
         raise HTTPException(
             status_code=401, detail="Autenticação necessária"
         )
-    
+
     # Valida no banco de dados (fonte da verdade — a evicção FIFO de
     # sessões concorrentes só tem efeito se a checagem for feita aqui)
     user_id = await _get_user_id_from_token(token)
-    
+
     if not user_id:
         raise HTTPException(
-            status_code=401, 
+            status_code=401,
             detail={
                 "error": "session_expired_concurrent_login",
                 "message": "Você foi deslogado pois sua conta foi acessada em outro dispositivo."
@@ -301,12 +321,12 @@ async def _get_optional_user(
         token = authorization[len("Bearer "):].strip()
     elif garimpador_token:
         token = garimpador_token
-    
+
     if not token:
         return None
-    
+
     user_id = await _get_user_id_from_token(token)
-    
+
     if not user_id:
         return None
     return {"id": user_id}
@@ -336,7 +356,7 @@ def _check_cron_secret(x_cron_secret: Optional[str]) -> None:
 async def _annotate_visibility(leads: list, user: Optional[dict]) -> None:
     """Marca is_mine/hours_remaining/favorited/_revealed nos leads para o _to_lead_response."""
     user_id = user["id"] if user else None
-    
+
     # Pre-fetch user favorites for batch lookup (via thread pool — evita travar o event loop)
     user_fav_ids = set()
     if user_id:
@@ -349,10 +369,10 @@ async def _annotate_visibility(leads: list, user: Optional[dict]) -> None:
     revealed_ids: set = set()
     if user_id and leads:
         try:
-            revealed_ids = await db_service.get_revealed_ids(user_id, [l.get("id") for l in leads])
+            revealed_ids = await db_service.get_revealed_ids(user_id, [ld.get("id") for ld in leads])
         except Exception:
             pass
-    
+
     for lead in leads:
         lead["is_mine"] = bool(user_id) and lead.get("reserved_by") == user_id
         # Per-user favorite status
@@ -403,11 +423,11 @@ async def get_leads(
 
         # Filter by category se especificado
         if category:
-            leads = [l for l in leads if l.get("issue_category") == category]
+            leads = [ld for ld in leads if ld.get("issue_category") == category]
 
         # Filter by source type se especificado
         if type:
-            leads = [l for l in leads if l.get("source_type") == type]
+            leads = [ld for ld in leads if ld.get("source_type") == type]
 
         await _annotate_visibility(leads, user)
 
@@ -493,7 +513,7 @@ async def leads_today(limit: int = 60, page: int = 1, city: str = None, type: st
         from backend.services import db as dbmod
         conn = dbmod.get_connection()
         try:
-            sql = f"""
+            sql = """
                 SELECT * FROM leads
                 WHERE date_reported IS NOT NULL
                   AND date(date_reported) >= date('now', '-7 days')
@@ -507,11 +527,11 @@ async def leads_today(limit: int = 60, page: int = 1, city: str = None, type: st
                 params.append(type)
             if not include_incomplete:
                 sql += f" AND {_qualified_where()}"
-            
+
             # Conta total para paginação
             count_sql = sql.replace("SELECT *", "SELECT COUNT(*) as total")
             total = conn.execute(count_sql, params).fetchone()["total"]
-            
+
             # Aplica paginação
             offset = (page - 1) * limit
             sql += " ORDER BY date_reported DESC, id DESC LIMIT ? OFFSET ?"
@@ -712,7 +732,7 @@ async def leads_dashboard_summary(user: Optional[dict] = Depends(_get_optional_u
             categories = await db_service.get_user_interests(user["id"])
             if categories:
                 interest_categories = categories
-        
+
         summary = await db_service.get_dashboard_summary(interest_categories)
         return summary
     except Exception as e:
@@ -936,13 +956,7 @@ async def test_push_notification(user_id: int, _admin: bool = Depends(_require_a
     """Envia uma notificação de teste para o usuário (rota administrativa)."""
     if not push_service.is_configured():
         raise HTTPException(status_code=503, detail="Push notifications not configured")
-    
-    payload = {
-        "title": "Magic Leads - Teste",
-        "body": "Esta é uma notificação de teste. Push notifications funcionando!",
-        "tag": "test_notification",
-        "url": "/dashboard"
-    }
+
     sent = await push_service.send_to_user(user_id, {
         "title": "Magic Leads - Teste",
         "body": "Esta é uma notificação de teste. Push notifications funcionando!",
@@ -996,13 +1010,13 @@ async def run_scraper(
     x_cron_secret: Optional[str] = Header(None),
 ):
     """Dispara o scraper nacional em background e responde na hora (o run leva 15min+).
-    
+
     Requer header X-Cron-Secret para execução via cron externo (GitHub Actions, Railway Cron).
     Parâmetro 'hours' opcional: janela de horas para buscar dados (ex: 120 para catch-up noturno).
     """
     # Autenticação por CRON_SECRET (obrigatório — fail-closed)
     _check_cron_secret(x_cron_secret)
-    
+
     for run in _scrape_runs.values():
         if run.get("running"):
             return JSONResponse(status_code=409, content={
@@ -1152,7 +1166,7 @@ async def _dlq_reprocess(run_id: str) -> int:
 # ============================================================
 async def _send_scraper_webhook(run_id: str, city_results: dict, dlq_reprocessed: int, inserted: int, total_raw: int, hours_override: int = None) -> bool:
     """Envia relatório consolidado do scraper para webhook configurado (Telegram/Slack/Email).
-    
+
     Retorna True se enviado com sucesso, False caso contrário.
     """
     webhook_url = settings.SCRAPER_WEBHOOK_URL
@@ -1164,7 +1178,7 @@ async def _send_scraper_webhook(run_id: str, city_results: dict, dlq_reprocessed
     city_lines = []
     anomalies = []
     circuit_breakers = []
-    
+
     for city, result in city_results.items():
         if result.get("skipped"):
             city_lines.append(f"  {city}: ⏭️ PULADO (circuit breaker aberto até {result.get('error', 'N/A')})")
@@ -1199,7 +1213,7 @@ async def _send_scraper_webhook(run_id: str, city_results: dict, dlq_reprocessed
     # Monta mensagem
     hours_info = f" (janela: {hours_override}h)" if hours_override else ""
     trigger = "scheduler" if "scheduler" in run_id else "manual"
-    
+
     lines = [
         f"📊 **Scraper Run `{run_id}`** {hours_info}",
         f"🕐 {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC | Trigger: {trigger}",
@@ -1209,10 +1223,10 @@ async def _send_scraper_webhook(run_id: str, city_results: dict, dlq_reprocessed
         "🏙️ **Por Cidade**:",
         *city_lines,
     ]
-    
+
     if anomaly_lines:
         lines.extend(["", "🚨 **Anomalias Detectadas**:", *anomaly_lines])
-    
+
     if cb_lines:
         lines.extend(["", *cb_lines])
 
@@ -1287,7 +1301,7 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
         for entry in all_entries:
             city = entry["city"]
             health = city_health.get(city, {})
-            failure_count = health.get("failure_count", 0)
+            _failure_count = health.get("failure_count", 0)
             circuit_open_until = health.get("circuit_open_until")
 
             # Circuit Breaker: pula cidade se circuit breaker aberto
@@ -1301,8 +1315,8 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
 
                 if entry.get("type") == "dob_violations":
                     # NYC DOB Violations
-                    from backend.scrapers.socrata_311 import socrata_scraper as _s
                     import backend.models.schemas as _sch
+                    from backend.scrapers.socrata_311 import socrata_scraper as _s
                     domain = "data.cityofnewyork.us"
                     dataset = "3h2n-5cm9"
                     boro_map = {"1": "MANHATTAN", "2": "BRONX", "3": "BROOKLYN", "4": "QUEENS", "5": "STATEN ISLAND"}
@@ -1362,8 +1376,8 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
 
                 elif entry.get("type") == "dob_permits":
                     # NYC DOB Permits
-                    from backend.scrapers.socrata_311 import socrata_scraper as _s
                     import backend.models.schemas as _sch
+                    from backend.scrapers.socrata_311 import socrata_scraper as _s
                     domain = "data.cityofnewyork.us"
                     dataset = "rbx6-tga4"
                     logger.info(f"DOB Permits: fetching from {domain}/{dataset}")
@@ -1402,7 +1416,7 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                             a_f, a_l = _norm(row.get("applicant_first_name")), _norm(row.get("applicant_last_name"))
                             owner = _norm(row.get("owner_name"))
                             a_b = _norm(row.get("applicant_business_name"))
-                            o_b = row.get("owner_business_name")
+                            _o_b = row.get("owner_business_name")
                             if a_b and a_b not in ("-", "none", "n/a"):
                                 continue
                             if not owner or not a_l:
@@ -1539,7 +1553,7 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
             except Exception as e:
                 # Falha isolada: registra failure, não derruba outras cidades
                 logger.error(f"Erro ao buscar {city}: {e}", exc_info=True)
-                failure_info = await db_service.record_city_failure(city, str(e))
+                _failure_info = await db_service.record_city_failure(city, str(e))
                 city_results[city] = {"leads": [], "error": str(e), "skipped": False}
 
         logger.info(f"Total bruto 311 (todas cidades): {len(all_raw)}")
@@ -1662,7 +1676,7 @@ def _scheduled_scrape(max_cities: int = 8, hours_override: int = None):
 
 async def _scheduler_loop():
     """Loop do scheduler interno: espera o intervalo e dispara a varredura.
-    
+
     Executa varredura normal a cada SCRAPER_INTERVAL_HOURS horas.
     Executa varredura estendida (hours=120) às 02:00 UTC para catch-up noturno.
     """
@@ -1684,7 +1698,7 @@ async def _scheduler_loop():
 @contextlib.asynccontextmanager
 async def _lifespan(app):
     _scheduler_task = None
-    
+
     # Validação de VAPID keys no startup
     if not settings.VAPID_PUBLIC_KEY or not settings.VAPID_PRIVATE_KEY:
         logger.critical("❌ VAPID keys NÃO CONFIGURADAS — Push notifications DESABILITADAS!")
@@ -1699,7 +1713,7 @@ async def _lifespan(app):
                 logger.error(f"Falha ao enviar alerta de VAPID keys ausentes: {e}")
     else:
         logger.info("✅ VAPID keys configuradas — Push notifications ATIVAS")
-    
+
     if settings.SCRAPER_SELF_SCHEDULED:
         _scheduler_task = asyncio.create_task(_scheduler_loop())
         logger.info(f"Scheduler interno ativo (a cada {settings.SCRAPER_INTERVAL_HOURS}h)")
@@ -1797,7 +1811,7 @@ async def enrich_all_leads(request: Request, limit_per_city: int = 200, _admin: 
     try:
         from backend.services import db as dbmod
         from backend.services.skip_trace import skip_trace_service
-        
+
         cities = await db_service.get_cities()
         total_processed = 0
         total_owners_found = 0
@@ -1805,10 +1819,10 @@ async def enrich_all_leads(request: Request, limit_per_city: int = 200, _admin: 
         total_phones_found = 0
         total_emails_found = 0
         results_by_city = {}
-        
+
         for city in cities:
             logger.info(f"Enriquecendo {city}...")
-            
+
             # Pega leads sem owner_name OU sem mailing_address OU sem phone/email
             conn = dbmod.get_connection()
             rows = conn.execute(
@@ -1822,27 +1836,27 @@ async def enrich_all_leads(request: Request, limit_per_city: int = 200, _admin: 
                 (city, limit_per_city),
             ).fetchall()
             conn.close()
-            
+
             if not rows:
                 results_by_city[city] = {"processed": 0, "message": "No leads to enrich"}
                 continue
-            
+
             city_processed = 0
             city_owners = 0
             city_mailing = 0
             city_phones = 0
             city_emails = 0
-            
+
             # Prepare address-city pairs for batch enrichment
             address_city_pairs = [(row["address"], row["city"]) for row in rows]
-            
+
             # Batch owner enrichment
             enrichment_results = await owner_enrichment.enrich_batch(address_city_pairs)
-            
+
             for row in rows:
                 key = f"{row['city']}:{row['address']}"
                 enrich_result = enrichment_results.get(key)
-                
+
                 updates = {}
                 if enrich_result and enrich_result.get("owner_name"):
                     updates["owner_name"] = enrich_result["owner_name"]
@@ -1850,7 +1864,7 @@ async def enrich_all_leads(request: Request, limit_per_city: int = 200, _admin: 
                 if enrich_result and enrich_result.get("mailing_address"):
                     updates["mailing_address"] = enrich_result["mailing_address"]
                     city_mailing += 1
-                
+
                 # Skip trace for phone/email (only if we have owner_name)
                 if enrich_result and enrich_result.get("owner_name"):
                     phone = await skip_trace_service.find_owner_phone(
@@ -1865,7 +1879,7 @@ async def enrich_all_leads(request: Request, limit_per_city: int = 200, _admin: 
                     if email:
                         updates["owner_email"] = email
                         city_emails += 1
-                
+
                 if updates:
                     # Apply all updates
                     for field, value in updates.items():
@@ -1878,12 +1892,12 @@ async def enrich_all_leads(request: Request, limit_per_city: int = 200, _admin: 
                         elif field == "owner_email":
                             await db_service.update_owner_email(row["id"], value)
                     city_processed += 1
-                
+
                 total_processed += 1
-            
+
             # Also add owner_email update to db
             # (We'll need to add this method)
-            
+
             results_by_city[city] = {
                 "processed": city_processed,
                 "owners_found": city_owners,
@@ -1891,19 +1905,19 @@ async def enrich_all_leads(request: Request, limit_per_city: int = 200, _admin: 
                 "phones_found": city_phones,
                 "emails_found": city_emails,
             }
-            
+
             total_owners_found += city_owners
             total_mailing_found += city_mailing
             total_phones_found += city_phones
             total_emails_found += city_emails
-        
+
         if total_owners_found > 0 or total_mailing_found > 0 or total_phones_found > 0 or total_emails_found > 0:
             await db_service.add_notification(
                 "enrichment_complete",
                 "Enriquecimento de dados concluído",
                 f"Identificados: {total_owners_found} proprietários, {total_mailing_found} endereços de correspondência, {total_phones_found} telefones, {total_emails_found} e-mails",
             )
-        
+
         return {
             "status": "success",
             "total_processed": total_processed,
@@ -1927,12 +1941,12 @@ async def admin_requalify_leads(request: Request, _admin: bool = Depends(_requir
     - Retorna estatísticas antes/depois do filtro qualificado
     """
     try:
-        from backend.services import db as dbmod
         from backend.scrapers.socrata_311 import socrata_scraper
-        
+        from backend.services import db as dbmod
+
         conn = dbmod.get_connection()
         conn.row_factory = sqlite3.Row
-        
+
         # 1. Estatísticas ANTES (filtro legado: essenciais + junk antigo)
         old_junk_terms = [
             "sanitation", "garbage", "trash", "refuse", "litter", "debris", "dumping",
@@ -1943,7 +1957,7 @@ async def admin_requalify_leads(request: Request, _admin: bool = Depends(_requir
             "water leak", "hydrant", "sewer backup", "catch basin", "storm drain",
             "illegal dumping", "bulk item", "recycling", "organics", "yard waste",
         ]
-        
+
         def old_qualified_where(prefix=""):
             conds = [
                 f"{prefix}department IS NOT NULL AND TRIM({prefix}department) != ''",
@@ -1955,16 +1969,16 @@ async def admin_requalify_leads(request: Request, _admin: bool = Depends(_requir
                 for col in (f"{prefix}issue_category", f"{prefix}issue_description", f"{prefix}descriptor"):
                     conds.append(f"LOWER(COALESCE({col}, '')) NOT LIKE '%{t}%'")
             return " AND ".join(conds)
-        
+
         old_total = conn.execute(f"SELECT COUNT(*) FROM leads WHERE {old_qualified_where()}").fetchone()[0]
         old_7d = conn.execute(f"SELECT COUNT(*) FROM leads WHERE date_reported IS NOT NULL AND date(date_reported)>=date('now','-7 days') AND {old_qualified_where()}").fetchone()[0]
         old_24h = conn.execute(f"SELECT COUNT(*) FROM leads WHERE created_at>=datetime('now','-1 day') AND {old_qualified_where()}").fetchone()[0]
-        
+
         # 2. Reclassificação
         rows = conn.execute("SELECT id, issue_category, source_type, case_title, issue_description, descriptor FROM leads").fetchall()
         changes = {}
         kept = 0
-        
+
         for r in rows:
             text = (r["case_title"] or r["issue_description"] or r["descriptor"] or "") or ""
             new_cat = socrata_scraper._infer_category(text, r["source_type"])
@@ -1975,26 +1989,26 @@ async def admin_requalify_leads(request: Request, _admin: bool = Depends(_requir
                 conn.execute("UPDATE leads SET issue_category=? WHERE id=?", (new_cat, r["id"]))
             else:
                 kept += 1
-        
+
         conn.commit()
-        
+
         # 3. Estatísticas DEPOIS (filtro qualificado novo)
         from backend.services.db import _qualified_where
-        
+
         new_total = conn.execute(f"SELECT COUNT(*) FROM leads WHERE {_qualified_where()}").fetchone()[0]
         new_7d = conn.execute(f"SELECT COUNT(*) FROM leads WHERE date_reported IS NOT NULL AND date(date_reported)>=date('now','-7 days') AND {_qualified_where()}").fetchone()[0]
         new_24h = conn.execute(f"SELECT COUNT(*) FROM leads WHERE created_at>=datetime('now','-1 day') AND {_qualified_where()}").fetchone()[0]
-        
+
         # Por cidade (novo)
         city_rows = conn.execute(f"SELECT city, COUNT(*) c FROM leads WHERE {_qualified_where()} GROUP BY city ORDER BY c DESC").fetchall()
         by_city = {r["city"]: r["c"] for r in city_rows}
-        
+
         # Por ofício (novo)
         cat_rows = conn.execute(f"SELECT issue_category, COUNT(*) c FROM leads WHERE {_qualified_where()} GROUP BY issue_category ORDER BY c DESC").fetchall()
         by_category = {r["issue_category"]: r["c"] for r in cat_rows}
-        
+
         conn.close()
-        
+
         return {
             "status": "success",
             "reclassified": sum(changes.values()),
@@ -2064,19 +2078,19 @@ async def register_user(request: Request, payload: UserCreate, response: Respons
         # Registra a sessão no banco (aplica limite de 2 sessões por usuário - FIFO)
         await db_service.create_user_session(user["id"], _hash_token(token), "Signup", None)
         _SESSIONS[token] = user["id"]
-        
+
         # Define httpOnly cookie com o token
         if response:
             response.set_cookie(
                 key="garimpador_token",
                 value=token,
                 httponly=True,
-                secure=settings.DEBUG == False,  # False em dev (HTTP), True em prod (HTTPS)
+                secure=not settings.DEBUG,  # False em dev (HTTP), True em prod (HTTPS)
                 samesite="lax",
                 max_age=30 * 24 * 60 * 60,  # 30 dias
                 path="/",
             )
-        
+
         return AuthResponse(
             token=token,
             user=UserResponse(
@@ -2108,27 +2122,27 @@ async def login_user(request: Request, payload: UserLogin, response: Response = 
         if not user or not security.verify_password(payload.password, user["password_hash"]):
             raise HTTPException(status_code=401, detail="Email ou senha inválidos")
         token = security.new_session_token()
-        
+
         # Registra a sessão no banco (aplica limite de 2 sessões por usuário - FIFO)
         device_info = request.headers.get("user-agent", "")
         ip_address = request.client.host if request.client else None
         await db_service.create_user_session(user["id"], _hash_token(token), device_info, ip_address)
-        
+
         # Mantém compatibilidade com fallback em memória
         _SESSIONS[token] = user["id"]
-        
+
         # Define httpOnly cookie com o token
         if response:
             response.set_cookie(
                 key="garimpador_token",
                 value=token,
                 httponly=True,
-                secure=settings.DEBUG == False,  # False em dev (HTTP), True em prod (HTTPS)
+                secure=not settings.DEBUG,  # False em dev (HTTP), True em prod (HTTPS)
                 samesite="lax",
                 max_age=30 * 24 * 60 * 60,  # 30 dias
                 path="/",
             )
-        
+
         return AuthResponse(
             token=token,
             user=UserResponse(
@@ -2212,14 +2226,14 @@ async def logout_user(authorization: Optional[str] = Header(None), response: Res
         await db_service.remove_user_session(_hash_token(token))
         # Remove do fallback em memória
         _SESSIONS.pop(token, None)
-    
+
     # Limpa o cookie
     if response:
         response.delete_cookie(
             key="garimpador_token",
             path="/",
         )
-    
+
     return {"status": "ok"}
 
 
@@ -2251,26 +2265,26 @@ async def demo_login(response: Response = None):
     except Exception as e:
         logger.error(f"Erro no demo login: {e}")
         raise HTTPException(status_code=500, detail="Erro no demo login")
-    
+
     # Registra a sessão no banco
     token_hash = _hash_token(token)
     await db_service.create_user_session(user["id"], token_hash, "Demo Login", None)
-    
+
     # Mantém compatibilidade com fallback em memória
     _SESSIONS[token] = user["id"]
-    
+
 # Define httpOnly cookie com o token
     if response:
         response.set_cookie(
             key="garimpador_token",
             value=token,
             httponly=True,
-            secure=settings.DEBUG == False,
+secure=not settings.DEBUG,
             samesite="lax",
             max_age=30 * 24 * 60 * 60,
             path="/",
         )
-    
+
     logger.info(f"Demo login successful for user {user['id']}")
     return AuthResponse(
         token=token,
@@ -2619,7 +2633,7 @@ async def reserve_lead(
     user: dict = Depends(_get_current_user),
 ):
     user_id = user["id"]
-    
+
     # 1. VALIDA SUBSCRIPTION STATUS (PRIMEIRO!)
     sub_status = await db_service.get_user_subscription_status(user_id)
     if not sub_status.get("can_access", False):
@@ -2693,13 +2707,13 @@ async def reserve_lead(
                 reset_dt = datetime.fromisoformat(reset_at.replace("Z", "+00:00"))
                 hours_left = int((reset_dt - datetime.utcnow()).total_seconds() / 3600)
                 reset_str = f" Reset em {hours_left}h."
-            except:
+            except Exception:
                 pass
         raise HTTPException(
             status_code=429,
             detail=f"Limite de 10 leads/dia atingido. Volte amanhã e abra seus 10+ potenciais clientes.{reset_str}"
         )
-    
+
     # 3.2 RESERVA LEAD
     result = await db_service.reserve_lead(lead_id, user["id"], minutes=minutes)
     if not result:
@@ -2716,10 +2730,10 @@ async def reserve_lead(
             status_code=429,
             detail=result.get("message", "Prioridade reduzida: aguarde 5min entre reservas"),
         )
-    
+
     # Registra interação
     await db_service.record_event(lead_id, "reserve")
-    
+
     return LeadHoldResponse(
         reserved=True,
         status=result.get("lead_status", "reserved"),

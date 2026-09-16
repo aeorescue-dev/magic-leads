@@ -1,7 +1,8 @@
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from datetime import datetime
-from typing import Optional, List
 from enum import Enum
+from typing import List, Optional
+
+from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
 
 
 class SourceType(str, Enum):
@@ -97,7 +98,7 @@ class EnrichedLead(BaseModel):
     issue_category: IssueCategory
     issue_description: str
     urgency_level: UrgencyLevel
-    
+
     # Historical details from 311 systems
     case_title: Optional[str] = None
     subject: Optional[str] = None

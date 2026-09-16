@@ -21,7 +21,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: "pip"
-          cache-key: "pip-${{ runner.os }}-${{ hashFiles('backend/requirements.txt') }}"
+          cache-dependency-path: backend/requirements.txt
 
       - name: Install dependencies
         working-directory: ./backend
@@ -60,6 +60,10 @@ jobs:
       - name: Install dependencies
         working-directory: ./frontend
         run: npm ci
+
+      - name: Build (generate types + validate)
+        working-directory: ./frontend
+        run: npx next build
 
       - name: TypeScript type check
         working-directory: ./frontend

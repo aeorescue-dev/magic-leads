@@ -1,10 +1,11 @@
-import httpx
-import asyncio
 import re
 from datetime import datetime, timedelta
 from typing import List, Optional
-from ..models.schemas import RawLead311, IssueCategory, UrgencyLevel
+
+import httpx
+
 from ..config import settings
+from ..models.schemas import IssueCategory, RawLead311, UrgencyLevel
 from ..utils.logger import logger
 
 
@@ -157,7 +158,7 @@ class Socrata311Scraper:
         try:
             created = row.get("created_date")
             created_at = datetime.fromisoformat(str(created).replace("Z", "+00:00")) if created else datetime.now()
-            
+
             return RawLead311(
                 external_id=str(row.get("sr_number")),
                 address=f"{row.get('street_address') or ''}, Chicago, IL",
@@ -183,7 +184,7 @@ class Socrata311Scraper:
     def _guess_columns(self, field_names: List[str]) -> dict:
         """Detecta heuristicamente as colunas relevantes em um dataset 311 de qualquer cidade."""
         fns = [f.lower() for f in (field_names or [])]
-        lower = " ".join(fns)
+        _lower = " ".join(fns)
 
         def find(*cands):
             for f, fname in zip(fns, field_names or []):
@@ -533,25 +534,25 @@ address_zip=addr_components.get("address_zip"),
             "address_state": None,
             "address_zip": None,
         }
-        
+
         if not full_address:
             return result
-            
+
         # First, try to extract ZIP code if not provided
         zip_pattern = r'\b(\d{5}(?:-\d{4})?)\b'
         zip_match = re.search(zip_pattern, full_address)
         found_zip = zip_match.group(1) if zip_match else (zip_code or None)
         result["address_zip"] = found_zip
-        
+
         # Remove ZIP from address for parsing
         addr_no_zip = re.sub(zip_pattern, '', full_address).strip()
         addr_upper = addr_no_zip.upper()
-        
+
         # Try to find state abbreviation (2 letters) near the end
         state_pattern = r'\b([A-Z]{2})\b'
         state_matches = list(re.finditer(state_pattern, addr_upper))
         found_state = state.upper() if state else None
-        
+
         if state_matches:
             # Take the last state-like match that's not the city abbreviation
             for match in reversed(state_matches):
@@ -560,9 +561,9 @@ address_zip=addr_components.get("address_zip"),
                 if match.start() > 5:
                     found_state = potential_state
                     break
-        
+
         result["address_state"] = found_state
-        
+
         # Try to parse street address
         # Remove state and zip from address for street parsing
         street_part = addr_no_zip
@@ -570,27 +571,27 @@ address_zip=addr_components.get("address_zip"),
             # Remove state abbreviation
             state_pattern_escaped = re.escape(found_state)
             street_part = re.sub(rf'\b{state_pattern_escaped}\b', '', street_part).strip()
-        
+
         # Remove city from the end if present
         city_upper = city.upper() if city else None
         if city_upper and city_upper in street_part.upper():
             idx = street_part.upper().rfind(city_upper)
             street_part = street_part[:idx].strip()
-        
+
         # Clean up trailing commas, spaces
         street_part = re.sub(r'[,\s]+$', '', street_part).strip()
-        
+
         if street_part:
             result["address_street"] = street_part
-        
+
         # Determine city - use provided city or try to extract
         if city:
             result["address_city"] = city
         elif street_part:
             # Try to extract city from remaining parts
             pass
-            
+
         return result
 
-# Instância global
+# InstÃ¢ncia global
 socrata_scraper = Socrata311Scraper()

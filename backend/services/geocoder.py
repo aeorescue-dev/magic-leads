@@ -1,5 +1,5 @@
-import httpx
 from typing import Optional, Tuple
+
 from ..utils.logger import logger
 
 

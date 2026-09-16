@@ -10,9 +10,11 @@ Estratégia multicaminho para máxima consistência:
 Por cidade, usa o dataset Socrata/CKAN que contém owner + endereço no mesmo registro.
 """
 import re
-import httpx
 from datetime import date
-from typing import Optional, Dict, Any, List
+from typing import Any, Dict, List, Optional
+
+import httpx
+
 from ..config import settings
 from ..utils.logger import logger
 
@@ -188,7 +190,7 @@ class OwnerEnrichment:
         num, street = parsed
         # Keep original street for query (dataset uses full names like ROAD, AVENUE)
         # Also create normalized version for client-side comparison if needed
-        
+
         if cfg["type"] == "socrata":
             return await self._lookup_socrata(address, num, street, cfg)
         elif cfg["type"] == "ckan":
@@ -198,7 +200,7 @@ class OwnerEnrichment:
     async def _lookup_socrata(self, original_address: str, num: str, street_norm: str, cfg: Dict) -> Optional[Dict[str, Any]]:
         domain = cfg["domain"]
         dset = cfg["dataset"]
-        
+
         # Build select columns
         select_cols = [cfg["owner_col"]]
         if cfg.get("mailing_addr_col"):
@@ -219,7 +221,7 @@ class OwnerEnrichment:
             select_cols.append(cfg["year_col"])
         if cfg.get("zip_col"):
             select_cols.append(cfg["zip_col"])
-        
+
         sel = ",".join(select_cols)
         base = f"https://{domain}/resource/{dset}.json"
         num_col = cfg.get("num_col")
@@ -227,17 +229,17 @@ class OwnerEnrichment:
         address_col = cfg.get("address_col")
         city_filter_col = cfg.get("city_filter_col")
         city_filter_value = cfg.get("city_filter_value")
-        
+
         # Use original street name for query (dataset has full names like ROAD, AVENUE)
         # Also create normalized version for client-side comparison
         street_for_query = street_norm  # Keep original (not abbreviated)
         # Collaps multi-spaces (ex.: "323 EAST   12 STREET" -> "323 EAST 12 STREET")
         street_for_query = re.sub(r"\s+", " ", street_for_query).strip()
         # Don't abbreviate suffixes in query - dataset uses full names
-        
+
         # Build queries in order of preference
         queries = []
-        
+
         if address_col:
             # Full-address dataset (e.g. Cook County): "153 W NORTH AVE" em um campo só
             full_address = f"{num} {street_for_query}"
@@ -249,7 +251,7 @@ class OwnerEnrichment:
                 city_part = f" AND {city_filter_col} = '{city_esc}'"
             # Prefix-exact (endereço começa com número+rua): usa índice, mais rápido que %...%
             queries.append(f"{address_col} like '{full_address_esc}%'{city_part}")
-        
+
         if num_col and street_col:
             # Prefix-exact primeiro (usa índice, ~1s) e broad como fallback
             if cfg.get("number_as_string", True):
@@ -259,7 +261,7 @@ class OwnerEnrichment:
             else:
                 queries.append(f"{street_col} like '{street_for_query}%' AND {num_col} = {num}")
                 queries.append(f"{street_col} like '%{street_for_query}%' AND {num_col} = {num}")
-        
+
         # Prefix fallback
         if num_col and street_col and len(num) > 1:
             prefix = num[:max(1, len(num) - 1)]
@@ -267,11 +269,11 @@ class OwnerEnrichment:
                 queries.append(f"{street_col} like '%{street_for_query}%' AND {num_col} like '{prefix}%'")
             else:
                 queries.append(f"{street_col} like '%{street_for_query}%' AND {num_col} like {prefix}%")
-        
+
         # Street only (broad match, filter client-side)
         if street_col:
             queries.append(f"{street_col} like '%{street_for_query}%'")
-        
+
         async with httpx.AsyncClient(timeout=90) as client:
             for where in queries:
                 try:
@@ -292,7 +294,7 @@ class OwnerEnrichment:
                 except httpx.HTTPError as e:
                     logger.debug(f"Erro enrichment {domain}: {e}")
                     continue
-                
+
                 if isinstance(data, list) and data:
                     if num_col:
                         # Filter client-side for exact number match if we have num_col
@@ -328,7 +330,7 @@ class OwnerEnrichment:
         domain = cfg["domain"]
         dset = cfg["dataset"]
         base = f"https://{domain}/api/3/action/datastore_search"
-        
+
         # CKAN uses different query format - we'll search by full_address
         # Build field list
         fields = [cfg["owner_col"]]
@@ -342,12 +344,12 @@ class OwnerEnrichment:
             fields.append(cfg["street_col"])
         if cfg.get("zip_col"):
             fields.append(cfg["zip_col"])
-        
+
         # Search by street name in full_address
         street_search = street_norm.split()[0] if street_norm else ""
         if not street_search:
             return None
-        
+
         try:
             async with httpx.AsyncClient(timeout=90) as client:
                 resp = await client.get(base, params={
@@ -362,14 +364,14 @@ class OwnerEnrichment:
         except httpx.HTTPError as e:
             logger.debug(f"Erro enrichment CKAN {domain}: {e}")
             return None
-        
+
         if not result.get("success"):
             return None
-        
+
         records = result["result"].get("records", [])
         if not records:
             return None
-        
+
         # Filter client-side for best match
         for row in records:
             full_addr = str(row.get(cfg["street_col"]) or "").upper()
@@ -382,7 +384,7 @@ class OwnerEnrichment:
                         return self._build_result(row, cfg, original_address)
                 # Return first street match
                 return self._build_result(row, cfg, original_address)
-        
+
         # Fallback: return first record
         return self._build_result(records[0], cfg, original_address)
 
@@ -390,13 +392,13 @@ class OwnerEnrichment:
         owner = str(row.get(cfg["owner_col"]) or "").strip()
         if not owner or owner.upper().startswith("N/A"):
             return None
-        
+
         result = {
             "owner_name": owner,
             "source_dataset": f"{cfg['domain']}/{cfg['dataset']}",
             "matched_address": original_address,
         }
-        
+
         # Add mailing address if available
         mailing_parts = []
         if cfg.get("mailing_addr_col"):
@@ -411,10 +413,10 @@ class OwnerEnrichment:
             zipc = str(row.get(cfg["mailing_zip_col"]) or "").strip()
             if zipc:
                 mailing_parts.append(zipc)
-        
+
         if mailing_parts:
             result["mailing_address"] = ", ".join(mailing_parts)
-        
+
         return result
 
     async def enrich_batch(self, address_city_pairs: List[tuple]) -> Dict[str, Optional[Dict[str, Any]]]:

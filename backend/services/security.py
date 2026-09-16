@@ -1,7 +1,6 @@
 import hashlib
 import hmac
 import secrets
-import base64
 
 
 def hash_password(password: str) -> str:

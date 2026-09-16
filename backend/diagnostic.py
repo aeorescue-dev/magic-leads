@@ -1,5 +1,5 @@
-import sqlite3
 import os
+import sqlite3
 from datetime import datetime
 
 # Database path
@@ -14,33 +14,33 @@ conn.row_factory = sqlite3.Row
 try:
     # 1. Total de leads
     total_leads = conn.execute("SELECT COUNT(*) AS c FROM leads").fetchone()["c"]
-    
+
     # 2. Leads criados/atualizados hoje
     today = datetime.now().strftime("%Y-%m-%d")
     leads_today = conn.execute(
         "SELECT COUNT(*) AS c FROM leads WHERE date(created_at) = ? OR date(updated_at) = ?",
         (today, today)
     ).fetchone()["c"]
-    
+
     # 3. Leads com owner_name
     with_owner = conn.execute(
         "SELECT COUNT(*) AS c FROM leads WHERE owner_name IS NOT NULL AND owner_name != ''"
     ).fetchone()["c"]
-    
+
     # 4. Total de usuários
     total_users = conn.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"]
-    
+
     # 5. Notificações não lidas (globais)
     unread_global = conn.execute(
         "SELECT COUNT(*) AS c FROM notifications WHERE read = 0"
     ).fetchone()["c"]
-    
+
     # 6. Notificações totais (globais)
     total_notif_global = conn.execute("SELECT COUNT(*) AS c FROM notifications").fetchone()["c"]
-    
+
     # 7. Notificações por usuário
     users = conn.execute("SELECT id, email, company_name FROM users").fetchall()
-    
+
     print(f"[DIAGNOSTICO] Total de Leads no BD: {total_leads}")
     print(f"[DIAGNOSTICO] Leads criados/atualizados hoje: {leads_today}")
     print(f"[DIAGNOSTICO] Leads com owner_name: {with_owner}")
@@ -48,7 +48,7 @@ try:
     print(f"[DIAGNOSTICO] Notificações globais não lidas: {unread_global}")
     print(f"[DIAGNOSTICO] Notificações globais total: {total_notif_global}")
     print()
-    
+
     for user in users:
         uid = user["id"]
         unread_user = conn.execute(
@@ -64,7 +64,7 @@ try:
         print(f"  - Notificações não lidas: {unread_user}")
         print(f"  - Notificações total: {total_user_notif}")
         print(f"  - Leads reservados/convertidos: {leads_user}")
-    
+
     # 8. Últimos leads inseridos
     print()
     recent = conn.execute(
@@ -73,7 +73,7 @@ try:
     print("[DIAGNOSTICO] Últimos 5 leads inseridos:")
     for r in recent:
         print(f"  - ID {r['id']}: {r['address']}, {r['city']} | reported: {r['date_reported']} | created: {r['created_at']} | owner: {r['owner_name'] or 'N/A'}")
-    
+
     # 9. Últimas notificações
     print()
     recent_notif = conn.execute(

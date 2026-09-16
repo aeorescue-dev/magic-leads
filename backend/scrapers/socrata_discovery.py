@@ -5,8 +5,10 @@ A API de catálogo do Socrata (https://api.us.socrata.com/api/catalog/v1) lista
 datasets públicos de MILHARES de cidades/condados/estados dos EUA — tudo gratuito.
 Isso permite cobrir o país inteiro sem cadastrar cada município manualmente.
 """
+from typing import Dict, List
+
 import httpx
-from typing import List, Dict, Optional
+
 from ..config import settings
 from ..utils.logger import logger
 

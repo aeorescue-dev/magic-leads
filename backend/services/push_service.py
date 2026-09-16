@@ -2,19 +2,17 @@
 
 Envia notificações push via Web Push Protocol (VAPID) para subscriptions salvas.
 """
-import os
-import json
 import asyncio
+import json
 import random
-from typing import List, Dict, Optional
+from typing import Dict
 
 import anyio
+from pywebpush import WebPushException, webpush
 
-from pywebpush import webpush, WebPushException
-from .db import db_service
 from ..config import settings
 from ..utils.logger import logger
-
+from .db import db_service
 
 MAX_RETRIES = 3
 BASE_BACKOFF = 1.0  # seconds
@@ -63,21 +61,21 @@ class PushService:
         self._vapid_private_key = None
         self._vapid_claims = None
         self._load_config()
-        
+
     def _load_config(self):
         self._vapid_public_key = settings.VAPID_PUBLIC_KEY
         self._vapid_private_key = settings.VAPID_PRIVATE_KEY
         self._vapid_claims = {
             "sub": settings.VAPID_CLAIMS_SUB
         }
-        
+
         if not self._vapid_public_key or not self._vapid_private_key:
             logger.warning("VAPID keys not configured - push notifications disabled")
             self._configured = False
         else:
             self._configured = True
             logger.info("VAPID keys loaded - push notifications enabled")
-    
+
     def reload_config(self):
         """Recarrega a configuração (útil após mudanças no .env)."""
         self._load_config()
@@ -89,7 +87,7 @@ class PushService:
         """Envia push para uma única subscription com retry exponencial."""
         if not self.is_configured():
             return False
-            
+
         last_error = None
         for attempt in range(MAX_RETRIES):
             try:
@@ -140,7 +138,7 @@ class PushService:
                     continue
                 logger.error(f"Unexpected push error após {MAX_RETRIES} tentativas: {e}")
                 return False
-        
+
         # Se chegou aqui, todas as tentativas falharam
         logger.error(f"Push falhou após {MAX_RETRIES} tentativas: {last_error}")
         return False
@@ -149,41 +147,41 @@ class PushService:
         """Envia push para todas as subscriptions de um usuário."""
         if not self.is_configured():
             return 0
-            
+
         subscriptions = await db_service.get_user_push_subscriptions(user_id)
         if not subscriptions:
             return 0
-            
+
         sent = 0
         expired_endpoints = []
-        
+
         for sub in subscriptions:
             result = await self._send_single(sub, payload)
             if result is True:
                 sent += 1
             elif result == "expired":
                 expired_endpoints.append(sub["endpoint"])
-        
+
         # Remove expired subscriptions
         for endpoint in expired_endpoints:
             await db_service.remove_push_subscription(user_id, endpoint)
-            
+
         return sent
 
     async def send_to_category(self, category: str, payload: Dict) -> int:
         """Envia push para todos usuários interessados na categoria."""
         if not self.is_configured():
             return 0
-            
+
         users = await db_service.get_users_interested_in(category)
         if not users:
             return 0
-            
+
         total_sent = 0
         for user in users:
             sent = await self.send_to_user(user["id"], payload)
             total_sent += sent
-            
+
         return total_sent
 
     async def send_to_all(self, payload: Dict) -> int:

@@ -1,6 +1,5 @@
-import sqlite3
 import os
-import asyncio
+import sqlite3
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
@@ -8,7 +7,7 @@ import anyio
 
 from ..models.schemas import EnrichedLead
 from ..utils.logger import logger
-from .phone_lookup import phone_lookup_service, PhoneResult
+from .phone_lookup import PhoneResult, phone_lookup_service
 
 
 def _not_junk_where(alias: str = "") -> str:
@@ -839,13 +838,13 @@ class DatabaseService:
             lead = conn.execute("SELECT id FROM leads WHERE id = ?", (lead_id,)).fetchone()
             if not lead:
                 return None
-            
+
             # Verifica se já é favorito
             existing = conn.execute(
                 "SELECT id FROM user_favorites WHERE user_id = ? AND lead_id = ?",
                 (user_id, lead_id)
             ).fetchone()
-            
+
             if existing:
                 # Remove dos favoritos
                 conn.execute(
@@ -1380,7 +1379,7 @@ class DatabaseService:
     def set_user_interests(self, user_id: int, categories: List[str]) -> bool:
         conn = get_connection()
         try:
-            cur = conn.execute("DELETE FROM user_interests WHERE user_id = ?", (user_id,))
+            _cur = conn.execute("DELETE FROM user_interests WHERE user_id = ?", (user_id,))
             for cat in categories:
                 if cat:
                     conn.execute(
@@ -1568,11 +1567,11 @@ class DatabaseService:
                 # Remove a sessão mais antiga (FIFO)
                 conn.execute(
                     """
-                    DELETE FROM user_sessions 
+                    DELETE FROM user_sessions
                     WHERE id = (
-                        SELECT id FROM user_sessions 
-                        WHERE user_id = ? 
-                        ORDER BY last_active_at ASC 
+                        SELECT id FROM user_sessions
+                        WHERE user_id = ?
+                        ORDER BY last_active_at ASC
                         LIMIT 1
                     )
                     """,
@@ -1691,7 +1690,8 @@ class DatabaseService:
     def _save_notification_dlq(self, user_id: int, type: str, title: str, message: str, lead_id: Optional[int], error: str) -> None:
         """Salva notificação falha no DLQ para reprocessamento posterior."""
         try:
-            import os, json
+            import json
+            import os
             from datetime import datetime
             dlq_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "dlq", "notifications")
             os.makedirs(dlq_dir, exist_ok=True)
@@ -1714,8 +1714,8 @@ class DatabaseService:
 
     def reprocess_notification_dlq(self) -> int:
         """Reprocessa notificações pendentes no DLQ. Retorna qtd reinseridas."""
-        import os, json
-        from datetime import datetime
+        import json
+        import os
         dlq_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "dlq", "notifications")
         if not os.path.exists(dlq_dir):
             return 0
@@ -2089,7 +2089,7 @@ class DatabaseService:
         suspicious_releases = (row["suspicious_releases"] or 0) + (1 if suspicious else 0) if row else (1 if suspicious else 0)
 
         now = datetime.utcnow()
-        now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+        _now_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
         penalty_level = (row["penalty_level"] or 0) if row else 0
         penalty_until = row["penalty_until"] if row else None
@@ -2397,7 +2397,7 @@ class DatabaseService:
     def mark_negotiation(self, lead_id: int, user_id: int) -> Optional[dict]:
         conn = get_connection()
         try:
-            leads = conn.execute("UPDATE leads SET lead_status = 'in_negotiation', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND (reserved_by = ? OR reserved_by IS NULL)", (lead_id, user_id))
+            _leads = conn.execute("UPDATE leads SET lead_status = 'in_negotiation', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND (reserved_by = ? OR reserved_by IS NULL)", (lead_id, user_id))
             conn.execute(
                 "UPDATE leads SET reserved_by = COALESCE(reserved_by, ?) WHERE id = ?",
                 (user_id, lead_id),
@@ -2589,10 +2589,10 @@ class DatabaseService:
 
     def get_dashboard_summary(self, interest_categories: List[str] = None) -> dict:
         """Retorna estatísticas reais para o dashboard Pro.
-        
+
         Args:
             interest_categories: Lista de chaves de categoria do usuário (ex: ['telhado', 'encanamento'])
-        
+
         Returns:
             Dict com totais reais filtrados por interesse do usuário.
         """
@@ -2606,7 +2606,7 @@ class DatabaseService:
                   AND {_qualified_where()}
             """
             params = []
-            
+
             # Se tem interesses, filtrar por categoria mapeada
             if interest_categories:
                 # Mapear chaves do frontend para valores do banco
@@ -2622,12 +2622,12 @@ class DatabaseService:
                     placeholders = ",".join("?" * len(db_cats))
                     base_where += f" AND issue_category IN ({placeholders})"
                     params.extend(db_cats)
-            
+
             # Total no interesse
             total_interested = conn.execute(
                 f"SELECT COUNT(*) AS c FROM leads {base_where}", params
             ).fetchone()["c"]
-            
+
             # Última Varredura do Robô (baseado em leads realmente inseridos recentemente)
             # Conta leads criados nas últimas 2h (janela da varredura periódica do robô)
             # e agrupa por cidade para mostrar as fontes ativas.
@@ -2643,7 +2643,7 @@ class DatabaseService:
                 f"SELECT updated_at, city FROM leads {base_where} AND updated_at >= ? ORDER BY updated_at DESC LIMIT 100",
                 params + [recent_cutoff_str]
             ).fetchall()
-            
+
             if recent_count > 0 and recent_leads:
                 # Obtém as cidades mais recentes para mostrar as fontes
                 cities = list(set([r["city"] for r in recent_leads if r["city"]]))
@@ -2661,40 +2661,40 @@ class DatabaseService:
                     params
                 ).fetchone()["c"]
                 last_scrape_info = f"{last_24h} novas oportunidades nas últimas 24h"
-            
+
             # Com contato (owner_name preenchido)
             with_contact = conn.execute(
                 f"SELECT COUNT(*) AS c FROM leads {base_where} AND owner_name IS NOT NULL AND owner_name != ''",
                 params
             ).fetchone()["c"]
-            
+
             # Urgentes (high)
             urgent = conn.execute(
                 f"SELECT COUNT(*) AS c FROM leads {base_where} AND urgency_level = 'high'",
                 params
             ).fetchone()["c"]
-            
+
             # Por categoria (para os cards de interesse)
             by_cat_rows = conn.execute(
                 f"SELECT issue_category, COUNT(*) AS c FROM leads {base_where} GROUP BY issue_category ORDER BY c DESC",
                 params
             ).fetchall()
             by_category = {r["issue_category"]: r["c"] for r in by_cat_rows}
-            
+
             # Por cidade
             by_city_rows = conn.execute(
                 f"SELECT city, COUNT(*) AS c FROM leads {base_where} GROUP BY city ORDER BY c DESC",
                 params
             ).fetchall()
             by_city = {r["city"]: r["c"] for r in by_city_rows}
-            
+
             # Urgência breakdown
             urgency_rows = conn.execute(
                 f"SELECT urgency_level, COUNT(*) AS c FROM leads {base_where} GROUP BY urgency_level",
                 params
             ).fetchall()
             by_urgency = {r["urgency_level"]: r["c"] for r in urgency_rows}
-            
+
             return {
                 "total_interested": total_interested,
                 "last_scrape": last_scrape_info,
@@ -3059,11 +3059,11 @@ class DatabaseService:
             now = datetime.utcnow()
             subscription_ends = now + timedelta(weeks=1)
             conn.execute(
-                """UPDATE users SET 
-                   plan_until = ?, 
-                   subscription_status = 'active', 
-                   stripe_customer_id = ?, 
-                   stripe_subscription_id = ? 
+                """UPDATE users SET
+                   plan_until = ?,
+                   subscription_status = 'active',
+                   stripe_customer_id = ?,
+                   stripe_subscription_id = ?
                    WHERE id = ?""",
                 (subscription_ends.isoformat(), stripe_customer_id, stripe_subscription_id, user_id)
             )
@@ -3073,7 +3073,7 @@ class DatabaseService:
             conn.close()
 
     # ===== DAILY STATS HELPERS (LIMIT 10) =====
-    
+
     def _utc_tomorrow_midnight(self) -> datetime:
         """Meia-noite próxima em UTC (reset do limite diário)."""
         now = datetime.utcnow()
@@ -3089,7 +3089,7 @@ class DatabaseService:
                 "SELECT leads_used, leads_limit, reset_at FROM user_daily_stats WHERE user_id = ? AND date = ?",
                 (user_id, today)
             ).fetchone()
-            
+
             limit = 10
             reset_at = self._utc_tomorrow_midnight()
             if record and record["reset_at"]:
@@ -3695,32 +3695,32 @@ class AsyncDatabaseService:
         )
         if not reserved or reserved.get("error"):
             return reserved
-        
+
         # Extrai dados para phone lookup
         address = reserved.get("address")
         city = reserved.get("city")
         state = reserved.get("state")
         lead_id_reserved = reserved.get("id")
-        
+
         if not address or not city or not state:
             # Sem dados de endereço para busca - libera a reserva e retorna erro
             await self.release_lead(lead_id_reserved, user_id, reason="no_address_for_phone_lookup")
             return {"error": "no_address", "message": "Lead sem endereço completo para busca de telefone"}
-        
+
         # 2. Busca telefone do dono
         phone_result: PhoneResult = await phone_lookup_service.lookup(address, city, state)
-        
+
         if not phone_result.success:
             # Falha na busca - libera a reserva, não incrementa contador
             await self.release_lead(lead_id, user_id, reason="phone_lookup_failed")
-            error_msg = phone_result.error or "busca_falhou"
+            _error_msg = phone_result.error or "busca_falhou"
             return {
                 "error": "phone_lookup_failed",
                 "message": f"Não foi possível obter telefone do proprietário: {phone_result.error or 'indisponível'}",
                 "phone_error": phone_result.error,
                 "credit_preserved": True
             }
-        
+
         # 3. Sucesso - atualiza lead com telefone, incrementa contador diário
         phone_updated = await anyio.to_thread.run_sync(
             self._service.update_owner_phone, lead_id, phone_result.phone
@@ -3728,14 +3728,14 @@ class AsyncDatabaseService:
         if not phone_updated:
             await self.release_lead(lead_id, user_id, reason="phone_update_failed")
             return {"error": "phone_update_failed", "message": "Falha ao salvar telefone no lead"}
-        
+
         # Incrementa contador diário (respeita limite de 10/dia)
         incremented = await self.increment_daily_leads(user_id)
         if not incremented:
             # Limite diário atingido - não deveria acontecer pois checamos antes, mas por segurança
             await self.release_lead(lead_id, user_id, reason="daily_limit_exceeded")
             return {"error": "daily_limit_exceeded", "message": "Limite diário de 10 leads atingido"}
-        
+
         # Busca lead atualizado para retornar
         lead_data = await self.get_lead_by_id(lead_id)
         if lead_data:
@@ -3799,7 +3799,7 @@ class AsyncDatabaseService:
         return await anyio.to_thread.run_sync(self._service.expire_holds)
 
     # ===== SUBSCRIPTION / TRIAL ASYNC WRAPPERS =====
-    
+
     async def get_user_subscription_status(self, user_id: int) -> dict:
         return await anyio.to_thread.run_sync(self._service.get_user_subscription_status, user_id)
 
@@ -3810,7 +3810,7 @@ class AsyncDatabaseService:
         return await anyio.to_thread.run_sync(self._service.activate_subscription, user_id, stripe_customer_id, stripe_subscription_id)
 
     # ===== DAILY STATS ASYNC WRAPPERS =====
-    
+
     async def get_daily_leads_used(self, user_id: int) -> dict:
         return await anyio.to_thread.run_sync(self._service.get_daily_leads_used, user_id)
 
