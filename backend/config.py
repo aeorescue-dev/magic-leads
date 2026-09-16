@@ -1,6 +1,7 @@
 import json
 from typing import List
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -60,6 +61,17 @@ class Settings(BaseSettings):
     # Frontend
     FRONTEND_URL: str = "http://localhost:3000"
     ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:3005,https://magicleads-oficial.vercel.app,https://magic-leads-frontend-final.vercel.app"
+
+    @field_validator(
+        "STRIPE_API_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_ID_PRO",
+        mode="before",
+    )
+    @classmethod
+    def _strip_stripe_values(cls, v: object) -> object:
+        # Railway max às vezes injeta \n ou espaços no fim — evita "No such price".
+        if isinstance(v, str):
+            return v.strip()
+        return v
 
     @property
     def allowed_origins_list(self) -> List[str]:
