@@ -6,6 +6,7 @@ import { Suspense } from 'react';
 import { Loader2, Eye, EyeOff, Mail, Lock, Building2, ArrowRight, CheckCircle, AlertTriangle } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { useI18n } from '@/lib/i18n';
+import { startCheckout } from '@/lib/billing';
 
 interface FormErrors {
   email?: string;
@@ -79,11 +80,31 @@ function AuthFormInner() {
 
     try {
       const user = await signIn(email.trim(), password, isRegister ? companyName.trim() : undefined);
-      setSuccess(true);
-      setTimeout(() => {
-        router.push('/dashboard');
-        router.refresh();
-      }, 800);
+      if (isRegister) {
+        // Cadastro concluído: libera o acesso só após o pagamento.
+        // Cria a sessão do Stripe Checkout e redireciona imediatamente.
+        setSuccess(true);
+        try {
+          const { checkout_url } = await startCheckout();
+          setTimeout(() => {
+            if (checkout_url) {
+              window.location.href = checkout_url;
+            } else {
+              router.push('/dashboard');
+              router.refresh();
+            }
+          }, 800);
+        } catch {
+          router.push('/dashboard');
+          router.refresh();
+        }
+      } else {
+        setSuccess(true);
+        setTimeout(() => {
+          router.push('/dashboard');
+          router.refresh();
+        }, 800);
+      }
     } catch (err: any) {
       const msg = err?.response?.data?.detail || err?.message || t('dashboard.auth.error_generic') || 'Erro ao autenticar';
       if (msg.includes('Email já cadastrado') || msg.includes('already registered')) {

@@ -3024,6 +3024,18 @@ class DatabaseService:
                     "action": "REDIRECT_TO_CHECKOUT",
                 }
 
+            # ===== SEM ASSINATURA (cadastro sem pagamento) =====
+            elif sub_status in ("expired", "pending_payment"):
+                return {
+                    "status": "expired",
+                    "is_active": False,
+                    "can_access": False,
+                    "days_remaining": 0,
+                    "expires_at": (plan_until.isoformat() if plan_until else None),
+                    "message": "Assinatura necessária. Pague $79/semana para liberar o acesso",
+                    "action": "REDIRECT_TO_CHECKOUT",
+                }
+
             # ===== Fallback =====
             return {
                 "status": sub_status,

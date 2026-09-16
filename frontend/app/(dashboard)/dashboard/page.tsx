@@ -2436,7 +2436,11 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
               <Lock className="h-7 w-7 text-rose-500" />
             </div>
             <h2 className="text-xl font-bold mt-5" style={{ color: isDark ? "#fff" : "#0f172a" }}>
-              {subscription.status === "trial_expired" ? "Seu teste grátis terminou" : "Seu plano expirou"}
+              {subscription.status === "trial_expired"
+                ? "Seu teste grátis terminou"
+                : subscription.status === "expired" || subscription.status === "pending_payment"
+                  ? "Assinatura necessária"
+                  : "Seu plano expirou"}
             </h2>
             <p className={`text-sm mt-2 ${T.text2}`}>
               {subscription.message || "Assine $79/semana para continuar acessando os leads com exclusividade."}
