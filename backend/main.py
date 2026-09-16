@@ -1663,6 +1663,22 @@ async def _scheduler_loop():
 @contextlib.asynccontextmanager
 async def _lifespan(app):
     _scheduler_task = None
+    
+    # Validação de VAPID keys no startup
+    if not settings.VAPID_PUBLIC_KEY or not settings.VAPID_PRIVATE_KEY:
+        logger.critical("❌ VAPID keys NÃO CONFIGURADAS — Push notifications DESABILITADAS!")
+        if settings.SCRAPER_WEBHOOK_URL:
+            try:
+                async with httpx.AsyncClient(timeout=10) as client:
+                    await client.post(settings.SCRAPER_WEBHOOK_URL, json={
+                        "text": "🚨 **ALERTA CRÍTICO**: VAPID keys não configuradas no Railway/Vercel!\nPush notifications **DESABILITADAS** para todos usuários.\nConfigure `VAPID_PUBLIC_KEY` e `VAPID_PRIVATE_KEY` nas env vars.",
+                        "parse_mode": "Markdown"
+                    })
+            except Exception as e:
+                logger.error(f"Falha ao enviar alerta de VAPID keys ausentes: {e}")
+    else:
+        logger.info("✅ VAPID keys configuradas — Push notifications ATIVAS")
+    
     if settings.SCRAPER_SELF_SCHEDULED:
         _scheduler_task = asyncio.create_task(_scheduler_loop())
         logger.info(f"Scheduler interno ativo (a cada {settings.SCRAPER_INTERVAL_HOURS}h)")

@@ -1598,8 +1598,77 @@ class DatabaseService:
                 "SELECT * FROM notifications WHERE id = last_insert_rowid()"
             ).fetchone()
             return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Erro ao inserir notificação para user {user_id}: {e}")
+            # Salva no DLQ para reprocessamento posterior
+            self._save_notification_dlq(user_id, type, title, message, lead_id, str(e))
+            return None
         finally:
             conn.close()
+
+    def _save_notification_dlq(self, user_id: int, type: str, title: str, message: str, lead_id: Optional[int], error: str) -> None:
+        """Salva notificação falha no DLQ para reprocessamento posterior."""
+        try:
+            import os, json
+            from datetime import datetime
+            dlq_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "dlq", "notifications")
+            os.makedirs(dlq_dir, exist_ok=True)
+            filename = f"notif_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{user_id}.json"
+            path = os.path.join(dlq_dir, filename)
+            payload = {
+                "user_id": user_id,
+                "type": type,
+                "title": title,
+                "message": message,
+                "lead_id": lead_id,
+                "error": error,
+                "saved_at": datetime.utcnow().isoformat(),
+            }
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+            logger.warning(f"DLQ Notification: user {user_id} salvo em {filename}")
+        except Exception as e:
+            logger.error(f"Erro ao salvar notificação no DLQ: {e}")
+
+    def reprocess_notification_dlq(self) -> int:
+        """Reprocessa notificações pendentes no DLQ. Retorna qtd reinseridas."""
+        import os, json
+        from datetime import datetime
+        dlq_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "dlq", "notifications")
+        if not os.path.exists(dlq_dir):
+            return 0
+        reprocessed = 0
+        for filename in os.listdir(dlq_dir):
+            if not filename.endswith(".json"):
+                continue
+            path = os.path.join(dlq_dir, filename)
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+                user_id = payload.get("user_id")
+                ntype = payload.get("type")
+                title = payload.get("title")
+                message = payload.get("message")
+                lead_id = payload.get("lead_id")
+                if not all([user_id, ntype, title, message]):
+                    logger.warning(f"DLQ Notification {filename}: payload incompleto, removendo")
+                    os.remove(path)
+                    continue
+                conn = get_connection()
+                try:
+                    conn.execute(
+                        "INSERT INTO notifications (user_id, type, title, message, lead_id) VALUES (?, ?, ?, ?, ?)",
+                        (user_id, ntype, title, message, lead_id),
+                    )
+                    conn.commit()
+                    reprocessed += 1
+                    logger.info(f"DLQ Notification reprocessado: {filename}")
+                    os.remove(path)
+                finally:
+                    conn.close()
+            except Exception as e:
+                logger.error(f"Erro ao reprocessar DLQ notification {filename}: {e}")
+        return reprocessed
 
     def get_notifications_for_user(self, user_id: int, filter: str = "recent", limit: int = 50) -> List[dict]:
         conn = get_connection()
@@ -3354,6 +3423,9 @@ class AsyncDatabaseService:
 
     async def get_city_health_for_scraper_status(self) -> dict:
         return self._service.get_city_health_for_scraper_status()
+
+    async def reprocess_notification_dlq(self) -> int:
+        return self._service.reprocess_notification_dlq()
 
     async def update_owner_phone(self, lead_id: int, owner_phone: Optional[str]) -> bool:
         return self._service.update_owner_phone(lead_id, owner_phone)

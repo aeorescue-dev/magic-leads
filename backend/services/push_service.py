@@ -5,11 +5,17 @@ Envia notificações push via Web Push Protocol (VAPID) para subscriptions salva
 import os
 import json
 import asyncio
+import random
 from typing import List, Dict, Optional
 from pywebpush import webpush, WebPushException
 from .db import db_service
 from ..config import settings
 from ..utils.logger import logger
+
+
+MAX_RETRIES = 3
+BASE_BACKOFF = 1.0  # seconds
+MAX_BACKOFF = 30.0  # seconds
 
 
 class PushService:
@@ -41,35 +47,61 @@ class PushService:
     def is_configured(self) -> bool:
         return self._configured
 
-    def _send_single(self, subscription: Dict, payload: Dict) -> bool:
-        """Envia push para uma única subscription."""
+    async def _send_single(self, subscription: Dict, payload: Dict):
+        """Envia push para uma única subscription com retry exponencial."""
         if not self.is_configured():
             return False
             
-        try:
-            webpush(
-                subscription_info={
-                    "endpoint": subscription["endpoint"],
-                    "keys": {
-                        "p256dh": subscription["p256dh"],
-                        "auth": subscription["auth"]
-                    }
-                },
-                data=json.dumps(payload),
-                vapid_private_key=self._vapid_private_key,
-                vapid_claims=dict(self._vapid_claims)
-            )
-            return True
-        except WebPushException as e:
-            # Subscription expirada ou inválida - marcar para remoção
-            if e.response and e.response.status_code in (404, 410):
-                logger.info(f"Push subscription expired/invalid: {subscription['endpoint'][:50]}...")
-                return "expired"
-            logger.warning(f"WebPush error: {e}")
-            return False
-        except Exception as e:
-            logger.error(f"Unexpected push error: {e}")
-            return False
+        last_error = None
+        for attempt in range(MAX_RETRIES):
+            try:
+                webpush(
+                    subscription_info={
+                        "endpoint": subscription["endpoint"],
+                        "keys": {
+                            "p256dh": subscription["p256dh"],
+                            "auth": subscription["auth"]
+                        }
+                    },
+                    data=json.dumps(payload),
+                    vapid_private_key=self._vapid_private_key,
+                    vapid_claims=dict(self._vapid_claims)
+                )
+                return True
+            except WebPushException as e:
+                last_error = e
+                # Subscription expirada ou inválida - não retry, marca para remoção
+                if e.response and e.response.status_code in (404, 410):
+                    logger.info(f"Push subscription expired/invalid: {subscription['endpoint'][:50]}...")
+                    return "expired"
+                # Rate limiting - retry com backoff
+                if e.response and e.response.status_code == 429:
+                    retry_after = e.response.headers.get("Retry-After")
+                    wait_time = int(retry_after) if retry_after and retry_after.isdigit() else min(BASE_BACKOFF * (2 ** attempt) + random.uniform(0, 1), MAX_BACKOFF)
+                    logger.warning(f"Rate limited (429), aguardando {wait_time:.1f}s antes de retry {attempt + 1}/{MAX_RETRIES}")
+                    await asyncio.sleep(wait_time)
+                    continue
+                # Outros erros HTTP - retry
+                if attempt < MAX_RETRIES - 1:
+                    wait_time = min(BASE_BACKOFF * (2 ** attempt) + random.uniform(0, 1), MAX_BACKOFF)
+                    logger.warning(f"WebPush error (tentativa {attempt + 1}/{MAX_RETRIES}): {e}. Retry em {wait_time:.1f}s")
+                    await asyncio.sleep(wait_time)
+                    continue
+                logger.warning(f"WebPush error após {MAX_RETRIES} tentativas: {e}")
+                return False
+            except Exception as e:
+                last_error = e
+                if attempt < MAX_RETRIES - 1:
+                    wait_time = min(BASE_BACKOFF * (2 ** attempt) + random.uniform(0, 1), MAX_BACKOFF)
+                    logger.warning(f"Unexpected push error (tentativa {attempt + 1}/{MAX_RETRIES}): {e}. Retry em {wait_time:.1f}s")
+                    await asyncio.sleep(wait_time)
+                    continue
+                logger.error(f"Unexpected push error após {MAX_RETRIES} tentativas: {e}")
+                return False
+        
+        # Se chegou aqui, todas as tentativas falharam
+        logger.error(f"Push falhou após {MAX_RETRIES} tentativas: {last_error}")
+        return False
 
     async def send_to_user(self, user_id: int, payload: Dict) -> int:
         """Envia push para todas as subscriptions de um usuário."""
@@ -84,7 +116,7 @@ class PushService:
         expired_endpoints = []
         
         for sub in subscriptions:
-            result = self._send_single(sub, payload)
+            result = await self._send_single(sub, payload)
             if result is True:
                 sent += 1
             elif result == "expired":
@@ -131,7 +163,7 @@ class PushService:
             sent = 0
             expired_endpoints = []
             for sub in subs:
-                result = self._send_single(sub, payload)
+                result = await self._send_single(sub, payload)
                 if result is True:
                     sent += 1
                 elif result == "expired":
