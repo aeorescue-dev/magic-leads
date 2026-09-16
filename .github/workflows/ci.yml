@@ -1,0 +1,74 @@
+name: CI - Import & Syntax Check
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  import-and-syntax-check:
+    name: Import & Syntax Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-key: "pip-${{ runner.os }}-${{ hashFiles('backend/requirements.txt') }}"
+
+      - name: Install dependencies
+        working-directory: ./backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio httpx fastapi uvicorn
+
+      - name: Run import & syntax checks
+        working-directory: ./backend
+        run: |
+          pytest ../tests/test_imports.py -v --tb=short
+
+      - name: Syntax check (ruff)
+        working-directory: ./backend
+        run: |
+          pip install ruff
+          ruff check . --select=E,F,W,I --ignore=E501 --output-format=github
+
+  frontend-type-check:
+    name: Frontend Type Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: TypeScript type check
+        working-directory: ./frontend
+        run: npx tsc --noEmit
+
+      - name: Lint
+        working-directory: ./frontend
+        run: npm run lint --if-present
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
