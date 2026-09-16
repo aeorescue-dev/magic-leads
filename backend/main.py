@@ -2349,7 +2349,7 @@ async def create_checkout(user: dict = Depends(_get_current_user)):
         mock, checkout_url = _create_stripe_checkout_session(user["id"])
     except Exception as e:
         logger.error(f"Erro ao criar checkout Stripe: {e}")
-        raise HTTPException(status_code=502, detail="Falha ao iniciar checkout")
+        raise HTTPException(status_code=502, detail=f"Falha ao iniciar checkout: {e}")
 
     return {"mock": mock, "checkout_url": checkout_url, "plan": _plan_payload()}
 
