@@ -1,5 +1,7 @@
 "use client";
 
+// Checkout avulso de 7 dias ($79): chama /api/billing/checkout e redireciona
+// o navegador (mesma aba) para a sessão hospedada do Stripe.
 import { useEffect, useMemo, useState } from "react";
 import { Building2, CreditCard, Loader2, ShieldCheck, X } from "lucide-react";
 import { startCheckout, SUBSCRIPTION_PLAN } from "@/lib/billing";
