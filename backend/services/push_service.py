@@ -17,6 +17,41 @@ MAX_RETRIES = 3
 BASE_BACKOFF = 1.0  # seconds
 MAX_BACKOFF = 30.0  # seconds
 
+# Prefixos padronizados para títulos
+PREFIXES = {
+    "new_lead": "⚡ [NOVO LEAD]",
+    "status_change": "🔄 [STATUS]",
+    "digest": "📋 [RESUMO]",
+    "system_alert": "🚨 [ALERTA SISTEMA]",
+    "anomaly": "⚠️ [ANOMALIA]",
+    "circuit_breaker": "🔴 [CIRCUIT BREAKER]",
+    "test": "🧪 [TESTE]",
+}
+
+ICON_URL = "https://magicleads-oficial.vercel.app/icons/magicleads-brand.svg"
+BADGE_URL = "https://magicleads-oficial.vercel.app/icons/magicleads-brand.svg"
+
+
+def _build_payload(title: str, body: str, tag: str, lead_id: int = None, url: str = None, category: str = None, extra: dict = None) -> dict:
+    """Constrói payload padronizado com urgency, sound, icon, badge, prefixos."""
+    payload = {
+        "title": title,
+        "body": body,
+        "sound": "default",
+        "icon": ICON_URL,
+        "badge": BADGE_URL,
+        "tag": tag,
+    }
+    if lead_id is not None:
+        payload["leadId"] = lead_id
+    if url is not None:
+        payload["url"] = url
+    if category is not None:
+        payload["category"] = category
+    if extra:
+        payload.update(extra)
+    return payload
+
 
 class PushService:
     def __init__(self):
@@ -65,7 +100,8 @@ class PushService:
                     },
                     data=json.dumps(payload),
                     vapid_private_key=self._vapid_private_key,
-                    vapid_claims=dict(self._vapid_claims)
+                    vapid_claims=dict(self._vapid_claims),
+                    urgency="high"
                 )
                 return True
             except WebPushException as e:
@@ -193,6 +229,7 @@ class PushService:
                 data=json.dumps(payload),
                 vapid_private_key=self._vapid_private_key,
                 vapid_claims=dict(self._vapid_claims),
+                urgency="high",
                 ttl=ttl
             )
             return {"ok": True}
@@ -246,28 +283,28 @@ class PushService:
 
     async def send_new_lead_alert(self, lead: dict, category: str) -> int:
         """Envia alerta de novo lead para usuários interessados na categoria."""
-        payload = {
-            "title": "Nova oportunidade",
-            "body": f"{category}: {lead.get('address', 'Endereço não informado')} — {lead.get('city', '')}",
-            "tag": f"new_lead_{lead.get('id')}",
-            "leadId": lead.get("id"),
-            "url": f"/dashboard?lead={lead.get('id')}",
-            "category": category,
-            "timestamp": lead.get("date_reported")
-        }
+        payload = _build_payload(
+            title=f"{PREFIXES['new_lead']} Nova oportunidade",
+            body=f"{category}: {lead.get('address', 'Endereço não informado')} — {lead.get('city', '')}",
+            tag=f"new_lead_{lead.get('id')}",
+            lead_id=lead.get("id"),
+            url=f"/dashboard?lead={lead.get('id')}",
+            category=category,
+            extra={"timestamp": lead.get("date_reported")}
+        )
         return await self.send_to_category(category, payload)
 
     async def send_status_change_alert(self, lead: dict, new_status: str, category: str) -> int:
         """Envia alerta de mudança de status."""
-        payload = {
-            "title": "Status atualizado",
-            "body": f"O lead {lead.get('address', '')} — {lead.get('city', '')} agora está '{new_status}' ({category})",
-            "tag": f"status_{lead.get('id')}_{new_status}",
-            "leadId": lead.get("id"),
-            "url": f"/dashboard?lead={lead.get('id')}",
-            "category": category,
-            "status": new_status
-        }
+        payload = _build_payload(
+            title=f"{PREFIXES['status_change']} Status atualizado",
+            body=f"O lead {lead.get('address', '')} — {lead.get('city', '')} agora está '{new_status}' ({category})",
+            tag=f"status_{lead.get('id')}_{new_status}",
+            lead_id=lead.get("id"),
+            url=f"/dashboard?lead={lead.get('id')}",
+            category=category,
+            extra={"status": new_status}
+        )
         return await self.send_to_category(category, payload)
 
 
