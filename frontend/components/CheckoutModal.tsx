@@ -58,15 +58,16 @@ export default function CheckoutModal({ open, onClose, onActivated, isDark = fal
       }
       const res = await startCheckout();
       if (res.checkout_url) {
-        window.open(res.checkout_url, "_blank");
-        onClose();
-      } else {
-        await confirmMockWeek();
-        setState("success");
+        // Popups após await são bloqueados pelo navegador; redirecionamos na
+        // mesma aba para a página hospedada do Stripe Checkout.
+        window.location.href = res.checkout_url;
+        return;
       }
+      await confirmMockWeek();
+      setState("success");
+      setBusy(false);
     } catch (e: any) {
       setError(e?.message || "Falha ao iniciar o pagamento");
-    } finally {
       setBusy(false);
     }
   };
@@ -78,7 +79,7 @@ export default function CheckoutModal({ open, onClose, onActivated, isDark = fal
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60" onClick={busy ? undefined : onClose} />
       <div className={`relative w-full max-w-md border rounded-2xl p-6 space-y-5 shadow-2xl animate-scale-in ${c.card}`}>
         <button
