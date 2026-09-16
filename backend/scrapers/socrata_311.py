@@ -591,3 +591,6 @@ address_zip=addr_components.get("address_zip"),
             pass
             
         return result
+
+# Instância global
+socrata_scraper = Socrata311Scraper()
