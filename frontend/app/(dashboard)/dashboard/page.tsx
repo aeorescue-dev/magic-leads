@@ -1,5 +1,7 @@
 "use client";
 
+// Assinatura: o CTA da tela de bloqueio chama a sessão real do Stripe
+// (handleStartSubscription) e redireciona na mesma aba para o checkout.
 export const dynamic = 'force-dynamic';
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
