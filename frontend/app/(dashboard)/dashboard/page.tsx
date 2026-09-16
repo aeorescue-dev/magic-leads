@@ -20,6 +20,7 @@ import {
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 import { buildOutreachMessage } from "@/lib/outreach";
+import { startCheckout } from "@/lib/billing";
 import CheckoutModal from "@/components/CheckoutModal";
 import ReleaseModal from "@/components/ReleaseModal";
 import { PushNotificationButton } from "@/components/PushNotificationButton";
@@ -242,6 +243,7 @@ const LEAD_TYPES = [
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showCheckout, setShowCheckout] = useState(false);
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [selectedLead, setSelectedLead] = useState<LeadResponse | null>(null);
 
   // Lead details sub-states
@@ -267,6 +269,24 @@ const LEAD_TYPES = [
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 4000);
   }, []);
+
+  // Assinatura: chama a sessão real do Stripe e redireciona na hora.
+  const handleStartSubscription = useCallback(async () => {
+    if (checkoutLoading) return;
+    setCheckoutLoading(true);
+    try {
+      const res = await startCheckout();
+      if (res.checkout_url) {
+        window.location.href = res.checkout_url;
+        return;
+      }
+      setShowCheckout(true);
+    } catch (e: any) {
+      showToast(e?.message || "Falha ao iniciar o pagamento. Tente novamente.", "error");
+    } finally {
+      setCheckoutLoading(false);
+    }
+  }, [checkoutLoading, showToast]);
 
   // Dynamic Greeting based on client local time
   const [greetingKey, setGreetingKey] = useState<string>("dashboard.greeting.morning");
@@ -2446,11 +2466,16 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
               {subscription.message || "Assine $79/semana para continuar acessando os leads com exclusividade."}
             </p>
             <button
-              onClick={() => setShowCheckout(true)}
-              className="mt-6 inline-flex items-center justify-center gap-2 w-full px-5 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-bold transition"
+              onClick={handleStartSubscription}
+              disabled={checkoutLoading}
+              className="mt-6 inline-flex items-center justify-center gap-2 w-full px-5 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-bold transition disabled:opacity-50"
             >
-              <CreditCard className="h-4 w-4" />
-              Assinar $79/semana
+              {checkoutLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <CreditCard className="h-4 w-4" />
+              )}
+              {checkoutLoading ? "Abrindo pagamento…" : "Assinar $79/semana"}
             </button>
             <button
               onClick={() => signOut()}

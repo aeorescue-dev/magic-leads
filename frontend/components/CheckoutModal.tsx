@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Building2, CheckCircle2, CreditCard, Loader2, ShieldCheck, X } from "lucide-react";
-import { confirmMockWeek, startCheckout, SUBSCRIPTION_PLAN } from "@/lib/billing";
+import { Building2, CreditCard, Loader2, ShieldCheck, X } from "lucide-react";
+import { startCheckout, SUBSCRIPTION_PLAN } from "@/lib/billing";
 import { updateCompanyName } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth";
 
@@ -13,10 +13,9 @@ interface CheckoutModalProps {
   isDark?: boolean;
 }
 
-export default function CheckoutModal({ open, onClose, onActivated, isDark = false }: CheckoutModalProps) {
+export default function CheckoutModal({ open, onClose, isDark = false }: CheckoutModalProps) {
   const { user, updateUser } = useAuth();
   const [busy, setBusy] = useState(false);
-  const [state, setState] = useState<"idle" | "success">("idle");
   const [error, setError] = useState("");
   const [companyName, setCompanyName] = useState("");
 
@@ -63,19 +62,12 @@ export default function CheckoutModal({ open, onClose, onActivated, isDark = fal
         window.location.href = res.checkout_url;
         return;
       }
-      await confirmMockWeek();
-      setState("success");
+      setError("Não foi possível gerar o link de pagamento. Tente novamente.");
       setBusy(false);
     } catch (e: any) {
       setError(e?.message || "Falha ao iniciar o pagamento");
       setBusy(false);
     }
-  };
-
-  const handleDone = () => {
-    setState("idle");
-    onClose();
-    onActivated?.();
   };
 
   return (
@@ -90,20 +82,8 @@ export default function CheckoutModal({ open, onClose, onActivated, isDark = fal
           <X className="w-5 h-5" />
         </button>
 
-        {state === "success" ? (
-          <div className="flex flex-col items-center gap-3 py-6 text-center">
-            <CheckCircle2 className="w-12 h-12 text-emerald-500" />
-            <h3 className={`text-xl font-semibold ${c.strong}`}>Semana liberada!</h3>
-            <p className={`text-sm ${c.text}`}>
-              Seu acesso continua por +7 dias. Sem renovação automática — quando quiser, pague de novo por mais uma semana.
-            </p>
-            <button onClick={handleDone} className={`mt-2 px-5 py-2.5 rounded-xl font-semibold text-sm ${c.btn}`}>
-              Continuar no dashboard
-            </button>
-          </div>
-        ) : (
-          <>
-            <div className="flex items-center gap-2">
+        <>
+          <div className="flex items-center gap-2">
               <CreditCard className="w-5 h-5 text-emerald-500" />
               <h3 className={`text-lg font-semibold ${c.strong}`}>Assinar Magic Leads</h3>
             </div>
@@ -169,10 +149,9 @@ export default function CheckoutModal({ open, onClose, onActivated, isDark = fal
             </button>
 
             <p className={`text-[11px] text-center ${c.textSoft}`}>
-              Ambiente de demonstração sem cobrança real. O gateway (ex: Stripe) está pronto no fluxo, com o plano fixed de $79/semana.
+              Pagamento seguro processado pelo Stripe. Pague uma vez e o acesso fica liberado por 7 dias, sem renovação automática.
             </p>
           </>
-        )}
       </div>
     </div>
   );
