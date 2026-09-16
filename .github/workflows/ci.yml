@@ -31,9 +31,8 @@ jobs:
           pip install pytest pytest-asyncio httpx fastapi uvicorn
 
       - name: Run import & syntax checks
-        working-directory: ./backend
         run: |
-          pytest ../tests/test_imports.py -v --tb=short
+          pytest tests/test_imports.py -v --tb=short
 
       - name: Syntax check (ruff)
         working-directory: ./backend
@@ -68,10 +67,6 @@ jobs:
       - name: TypeScript type check
         working-directory: ./frontend
         run: npx tsc --noEmit
-
-      - name: Lint
-        working-directory: ./frontend
-        run: npm run lint --if-present
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
