@@ -668,7 +668,7 @@ class DatabaseService:
             conn.close()
 
     def insert_lead_new(self, lead: EnrichedLead) -> Optional[dict]:
-        """Insere lead somente se ainda não existir (por address+city).
+        """Insere lead somente se ainda não existir (por external_id+source_type).
 
         Retorna um dict com {id, issue_category, address, city} se o lead era
         NOVO (para o fan-out de notificações por interesse), ou None se já
@@ -676,20 +676,22 @@ class DatabaseService:
         """
         conn = get_connection()
         try:
+            # Use external_id + source_type for deduplication (matches UNIQUE constraint)
             exist = conn.execute(
-                "SELECT id FROM leads WHERE address = ? AND city = ?",
-                (lead.address, lead.city),
+                "SELECT id FROM leads WHERE external_id = ? AND source_type = ?",
+                (lead.external_id, lead.source_type.value if hasattr(lead.source_type, 'value') else str(lead.source_type)),
             ).fetchone()
-            conn.close()
             if exist:
+                # Lead exists, update it with new data
                 self.insert_lead(lead)
+                conn.close()
                 return None
             self.insert_lead(lead)
             conn2 = get_connection()
             try:
                 row = conn2.execute(
-                    "SELECT id, issue_category, address, city FROM leads WHERE address = ? AND city = ?",
-                    (lead.address, lead.city),
+                    "SELECT id, issue_category, address, city FROM leads WHERE external_id = ? AND source_type = ?",
+                    (lead.external_id, lead.source_type.value if hasattr(lead.source_type, 'value') else str(lead.source_type)),
                 ).fetchone()
                 return dict(row) if row else None
             finally:
