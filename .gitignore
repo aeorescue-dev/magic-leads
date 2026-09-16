@@ -42,3 +42,7 @@ data/scraper_cron.log
 
 # Temp files
 frontend/temp.b64
+
+# Verificação de deploy
+scripts/.shots/
+watch-deploy.log*
