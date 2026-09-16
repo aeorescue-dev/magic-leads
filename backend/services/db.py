@@ -351,6 +351,16 @@ CREATE TABLE IF NOT EXISTS scraper_runs (
   note TEXT,
   UNIQUE(run_id)
 );
+
+CREATE TABLE IF NOT EXISTS city_health (
+  city TEXT PRIMARY KEY,
+  failure_count INTEGER DEFAULT 0,
+  circuit_open_until TEXT,
+  last_success_at TEXT,
+  anomaly_counter INTEGER DEFAULT 0,
+  last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -2599,6 +2609,176 @@ class DatabaseService:
         finally:
             conn.close()
 
+    # ===== CITY HEALTH (Circuit Breaker + Anomalia) =====
+
+    def get_city_health(self, city: str) -> dict:
+        """Retorna estado de saúde da cidade (circuit breaker + anomalia)."""
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT * FROM city_health WHERE city = ?", (city,)
+            ).fetchone()
+            if row:
+                return dict(row)
+            # Default state for new city
+            return {
+                "city": city,
+                "failure_count": 0,
+                "circuit_open_until": None,
+                "last_success_at": None,
+                "anomaly_counter": 0,
+                "last_seen_at": datetime.utcnow().isoformat(),
+                "updated_at": datetime.utcnow().isoformat(),
+            }
+        except Exception as e:
+            logger.error(f"Erro ao ler city_health para {city}: {e}")
+            return {
+                "city": city, "failure_count": 0, "circuit_open_until": None,
+                "last_success_at": None, "anomaly_counter": 0,
+                "last_seen_at": datetime.utcnow().isoformat(),
+                "updated_at": datetime.utcnow().isoformat(),
+            }
+        finally:
+            conn.close()
+
+    def get_all_city_health(self) -> dict:
+        """Retorna estado de saúde de todas as cidades."""
+        conn = get_connection()
+        try:
+            rows = conn.execute("SELECT * FROM city_health").fetchall()
+            return {r["city"]: dict(r) for r in rows}
+        except Exception as e:
+            logger.error(f"Erro ao ler all city_health: {e}")
+            return {}
+        finally:
+            conn.close()
+
+    def record_city_success(self, city: str) -> None:
+        """Registra sucesso da cidade: reseta failure_count, atualiza last_success_at,
+        e auto-recupera circuit breaker se estava aberto."""
+        conn = get_connection()
+        now = datetime.utcnow().isoformat()
+        try:
+            conn.execute(
+                """
+                INSERT INTO city_health (city, failure_count, circuit_open_until, last_success_at, last_seen_at, updated_at)
+                VALUES (?, 0, NULL, ?, ?, ?)
+                ON CONFLICT(city) DO UPDATE SET
+                  failure_count = 0,
+                  circuit_open_until = NULL,
+                  last_success_at = excluded.last_success_at,
+                  last_seen_at = excluded.last_seen_at,
+                  updated_at = excluded.updated_at
+                """,
+                (city, now, now, now),
+            )
+            conn.commit()
+        except Exception as e:
+            logger.error(f"Erro ao registrar sucesso de {city}: {e}")
+        finally:
+            conn.close()
+
+    def record_city_failure(self, city: str, error: str = None) -> dict:
+        """Registra falha da cidade. Retorna estado atualizado.
+        Se failure_count >= 3, abre circuit breaker por 1 hora."""
+        conn = get_connection()
+        now = datetime.utcnow().isoformat()
+        circuit_open_until = None
+        try:
+            # Get current state
+            row = conn.execute(
+                "SELECT failure_count FROM city_health WHERE city = ?", (city,)
+            ).fetchone()
+            current_failures = row["failure_count"] if row else 0
+            new_failures = current_failures + 1
+
+            # Open circuit breaker after 3 consecutive failures
+            if new_failures >= 3:
+                from datetime import timedelta
+                circuit_open_until = (datetime.utcnow() + timedelta(hours=1)).isoformat()
+
+            conn.execute(
+                """
+                INSERT INTO city_health (city, failure_count, circuit_open_until, last_seen_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(city) DO UPDATE SET
+                  failure_count = excluded.failure_count,
+                  circuit_open_until = excluded.circuit_open_until,
+                  last_seen_at = excluded.last_seen_at,
+                  updated_at = excluded.updated_at
+                """,
+                (city, new_failures, circuit_open_until, now, now),
+            )
+            conn.commit()
+            return {
+                "city": city,
+                "failure_count": new_failures,
+                "circuit_open_until": circuit_open_until,
+                "error": error,
+            }
+        except Exception as e:
+            logger.error(f"Erro ao registrar falha de {city}: {e}")
+            return {"city": city, "failure_count": 0, "circuit_open_until": None, "error": str(e)}
+        finally:
+            conn.close()
+
+    def increment_anomaly_counter(self, city: str) -> int:
+        """Incrementa contador de anomalia (cidade zerou).
+        Retorna novo valor do contador."""
+        conn = get_connection()
+        now = datetime.utcnow().isoformat()
+        try:
+            row = conn.execute(
+                "SELECT anomaly_counter FROM city_health WHERE city = ?", (city,)
+            ).fetchone()
+            current = row["anomaly_counter"] if row else 0
+            new_counter = current + 1
+
+            conn.execute(
+                """
+                INSERT INTO city_health (city, anomaly_counter, last_seen_at, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(city) DO UPDATE SET
+                  anomaly_counter = excluded.anomaly_counter,
+                  last_seen_at = excluded.last_seen_at,
+                  updated_at = excluded.updated_at
+                """,
+                (city, new_counter, now, now),
+            )
+            conn.commit()
+            return new_counter
+        except Exception as e:
+            logger.error(f"Erro ao incrementar anomaly_counter de {city}: {e}")
+            return 0
+        finally:
+            conn.close()
+
+    def reset_anomaly_counter(self, city: str) -> None:
+        """Reseta contador de anomalia após sucesso (cidade teve leads)."""
+        conn = get_connection()
+        now = datetime.utcnow().isoformat()
+        try:
+            conn.execute(
+                """
+                INSERT INTO city_health (city, anomaly_counter, last_seen_at, updated_at)
+                VALUES (?, 0, ?, ?)
+                ON CONFLICT(city) DO UPDATE SET
+                  anomaly_counter = 0,
+                  last_seen_at = excluded.last_seen_at,
+                  updated_at = excluded.updated_at
+                """,
+                (city, now, now),
+            )
+            conn.commit()
+        except Exception as e:
+            logger.error(f"Erro ao resetar anomaly_counter de {city}: {e}")
+        finally:
+            conn.close()
+
+    def get_city_health_for_scraper_status(self) -> dict:
+        """Retorna city_health formatado para /api/scraper/status."""
+        return self.get_all_city_health()
+
 
     # ===== SUBSCRIPTION / TRIAL HELPERS =====
 
@@ -3153,6 +3333,27 @@ class AsyncDatabaseService:
 
     async def get_last_scrape_run(self) -> Optional[dict]:
         return self._service.get_last_scrape_run()
+
+    async def get_city_health(self, city: str) -> dict:
+        return self._service.get_city_health(city)
+
+    async def get_all_city_health(self) -> dict:
+        return self._service.get_all_city_health()
+
+    async def record_city_success(self, city: str) -> None:
+        return self._service.record_city_success(city)
+
+    async def record_city_failure(self, city: str, error: str = None) -> dict:
+        return self._service.record_city_failure(city, error)
+
+    async def increment_anomaly_counter(self, city: str) -> int:
+        return self._service.increment_anomaly_counter(city)
+
+    async def reset_anomaly_counter(self, city: str) -> None:
+        return self._service.reset_anomaly_counter(city)
+
+    async def get_city_health_for_scraper_status(self) -> dict:
+        return self._service.get_city_health_for_scraper_status()
 
     async def update_owner_phone(self, lead_id: int, owner_phone: Optional[str]) -> bool:
         return self._service.update_owner_phone(lead_id, owner_phone)

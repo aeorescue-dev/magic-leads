@@ -11,6 +11,7 @@ import httpx
 import os
 import uuid
 import sqlite3
+import json
 from datetime import datetime, timedelta
 from typing import List, Optional
 
@@ -966,8 +967,21 @@ _scrape_runs: dict = {}
 
 @app.post("/api/scraper/run")
 @limiter.limit("10/hour")
-async def run_scraper(request: Request, max_cities: int = 8):
-    """Dispara o scraper nacional em background e responde na hora (o run leva 15min+)."""
+async def run_scraper(
+    request: Request,
+    max_cities: int = 8,
+    hours: int = None,
+    x_cron_secret: Optional[str] = Header(None),
+):
+    """Dispara o scraper nacional em background e responde na hora (o run leva 15min+).
+    
+    Requer header X-Cron-Secret para execução via cron externo (GitHub Actions, Railway Cron).
+    Parâmetro 'hours' opcional: janela de horas para buscar dados (ex: 120 para catch-up noturno).
+    """
+    # Autenticação por CRON_SECRET (obrigatório para cron externo)
+    if settings.CRON_SECRET and x_cron_secret != settings.CRON_SECRET:
+        raise HTTPException(status_code=401, detail="Não autorizado: CRON_SECRET inválido")
+    
     for run in _scrape_runs.values():
         if run.get("running"):
             return JSONResponse(status_code=409, content={
@@ -981,7 +995,7 @@ async def run_scraper(request: Request, max_cities: int = 8):
         "started_at": datetime.utcnow().isoformat(),
         "inserted": 0, "total_raw": 0, "status": "running", "error": None,
     }
-    asyncio.create_task(_scrape_worker(run_id, max_cities))
+    asyncio.create_task(_scrape_worker(run_id, max_cities, hours_override=hours))
     return JSONResponse(status_code=202, content={
         "status": "started", "run_id": run_id,
         "note": "Run em background; acompanhe em GET /api/scraper/status",
@@ -1001,295 +1015,423 @@ async def scraper_status():
         persisted = await db_service.get_last_scrape_run()
         if persisted:
             last = persisted
-    return {"active": bool(active), "running": active, "last_run": last}
+    # Inclui city_health no status
+    city_health = await db_service.get_city_health_for_scraper_status()
+    return {"active": bool(active), "running": active, "last_run": last, "city_health": city_health}
 
 
-async def _scrape_worker(run_id: str, max_cities: int = 8):
-    """Executa o scrape nacional (worker em background)."""
+# ============================================================
+# DLQ (Dead Letter Queue) Helpers
+# ============================================================
+DLQ_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "dlq")
+
+def _ensure_dlq_dir() -> None:
+    os.makedirs(DLQ_DIR, exist_ok=True)
+
+def _dlq_save(run_id: str, city: str, leads: list, error: str) -> str:
+    """Salva batch falho no DLQ para reprocessamento posterior."""
+    _ensure_dlq_dir()
+    filename = f"{run_id}_{city}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json"
+    path = os.path.join(DLQ_DIR, filename)
+    payload = {
+        "run_id": run_id,
+        "city": city,
+        "leads": leads,
+        "error": error,
+        "saved_at": datetime.utcnow().isoformat(),
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    logger.warning(f"DLQ: {city} salvo em {filename} ({len(leads)} leads)")
+    return path
+
+async def _dlq_reprocess(run_id: str) -> int:
+    """Reprocessa arquivos DLQ pendentes. Retorna qtd de leads reinseridos."""
+    _ensure_dlq_dir()
+    if not os.path.exists(DLQ_DIR):
+        return 0
+    reprocessed = 0
+    for filename in os.listdir(DLQ_DIR):
+        if not filename.endswith(".json"):
+            continue
+        path = os.path.join(DLQ_DIR, filename)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            leads = payload.get("leads", [])
+            if not leads:
+                os.remove(path)
+                continue
+            # Tenta reinserir
+            inserted = 0
+            for raw_lead in leads:
+                enriched = EnrichedLead(
+                    external_id=raw_lead.get("external_id"),
+                    source_type=SourceType(raw_lead.get("source_type")) if raw_lead.get("source_type") else SourceType.SERVICE_311,
+                    address=raw_lead.get("address"),
+                    city=raw_lead.get("city"),
+                    state=raw_lead.get("state"),
+                    zip_code=raw_lead.get("zip_code"),
+                    lat=raw_lead.get("lat"),
+                    lng=raw_lead.get("lng"),
+                    county=None,
+                    issue_category=raw_lead.get("issue_category"),
+                    issue_description=raw_lead.get("issue_description"),
+                    urgency_level=socrata_scraper._infer_urgency(raw_lead.get("issue_description", "")),
+                    owner_name=None,
+                    owner_phone=None,
+                    owner_email=None,
+                    owner_status=None,
+                    date_reported=raw_lead.get("created_at"),
+                    image_url=None,
+                    source_url=None,
+                    case_title=raw_lead.get("case_title"),
+                    subject=raw_lead.get("subject"),
+                    reason=raw_lead.get("reason"),
+                    type=raw_lead.get("type"),
+                    queue=raw_lead.get("queue"),
+                    department=raw_lead.get("department"),
+                    closure_reason=raw_lead.get("closure_reason"),
+                    case_status=raw_lead.get("case_status"),
+                    on_time=raw_lead.get("on_time"),
+                    sla_target_dt=raw_lead.get("sla_target_dt"),
+                    closed_dt=raw_lead.get("closed_dt"),
+                    submitted_photo=raw_lead.get("submitted_photo"),
+                    closed_photo=raw_lead.get("closed_photo"),
+                    source=raw_lead.get("source"),
+                    neighborhood=raw_lead.get("neighborhood"),
+                    ward=raw_lead.get("ward"),
+                    precinct=raw_lead.get("precinct"),
+                    descriptor=raw_lead.get("descriptor"),
+                    resolution_description=raw_lead.get("resolution_description"),
+                    resolution_action_updated_date=raw_lead.get("resolution_action_updated_date"),
+                )
+                new_lead = await db_service.insert_lead_new(enriched)
+                if new_lead:
+                    inserted += 1
+                    # Enriquecimento
+                    try:
+                        enrich_result = await owner_enrichment.enrich(raw_lead.get("address", ""), raw_lead.get("city", ""))
+                        owner_name_val = (enrich_result or {}).get("owner_name")
+                        if owner_name_val:
+                            await db_service.update_owner(new_lead["id"], owner_name_val)
+                    except Exception:
+                        pass
+            if inserted > 0:
+                logger.info(f"DLQ reprocessado: {filename} -> {inserted} leads reinseridos")
+                reprocessed += inserted
+            os.remove(path)
+        except Exception as e:
+            logger.error(f"Erro ao reprocessar DLQ {filename}: {e}")
+    return reprocessed
+
+
+async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int = None):
+    """Executa o scrape nacional (worker em background) com Circuit Breaker, DLQ e City Health."""
     state = _scrape_runs[run_id]
     try:
         logger.info(f"Iniciando scraper nacional 311... [run {run_id}]")
 
-        # Cidades-base garantidas (datasets conhecidos, estáveis e com endereço de rua)
-        base = [
+        # 1. Reprocessa DLQ pendente antes de buscar novos
+        dlq_reprocessed = await _dlq_reprocess(run_id)
+        if dlq_reprocessed:
+            logger.info(f"DLQ: {dlq_reprocessed} leads reprocessados no início do run")
+
+        # 2. Carrega city_health para circuit breaker
+        city_health = await db_service.get_all_city_health()
+
+        # 3. Define cidades-alvo (base + dinâmicas se max_cities permitir)
+        base_cities = [
             {"domain": "data.cityofnewyork.us", "dataset": "erm2-nwe9", "city": "NYC", "state": "NY", "hours": 96, "fields": ["unique_key", "created_date", "complaint_type", "incident_address", "incident_zip", "latitude", "longitude"]},
             {"domain": "data.cityofnewyork.us", "dataset": "wvxf-dwi5", "city": "NYC", "state": "NY", "hours": 120, "fields": ["violation_id", "inspection_date", "building_id", "address", "city", "state", "zip", "latitude", "longitude", "violation_type", "violation_status", "disposition_date"]},  # HPD Violations
             {"domain": "data.cityofchicago.org", "dataset": "v6vf-nfxy", "city": "Chicago", "state": "IL", "hours": 48, "fields": ["service_request_number", "created_date", "sr_type", "street_address", "zip_code", "latitude", "longitude"]},
             {"domain": "www.dallasopendata.com", "dataset": "d7e7-envw", "city": "Dallas", "state": "TX", "hours": 48, "fields": ["service_request_number", "created_date", "service_request_type", "address", "lat_location"]},
         ]
 
-        tasks_311 = []
-        for entry in base:
-            fields = entry["fields"]
-            tasks_311.append(
-                socrata_scraper.fetch_from_dataset(
-                    entry["domain"], entry["dataset"], entry["city"], entry["state"],
-                    field_names=fields, hours=entry["hours"], limit=2000,
-                )
-            )
+        # Aplica hours_override se fornecido (ex: cron noturno com hours=120)
+        for entry in base_cities:
+            if hours_override:
+                entry["hours"] = hours_override
 
-        # Boston usa CKAN
-        async def _fetch_boston():
-            from backend.scrapers.socrata_311 import socrata_scraper as _s
-            try:
-                import httpx as _h
-                async with _h.AsyncClient(timeout=60) as client:
-                    resp = await client.get(
-                        "https://data.boston.gov/api/3/action/datastore_search",
-                        params={
-                            "resource_id": "1a0b420d-99f1-4887-9851-990b2a5a6e17",
-                            "limit": 5000,
-                            "sort": "open_dt DESC",
-                        },
-                    )
-                    data = resp.json()
-                    if not data.get("success"):
-                        return []
-                    since = datetime.now() - timedelta(hours=72)
-                    records = data["result"]["records"]
-                    out = []
-                    for rec in records:
-                        od = rec.get("open_dt")
-                        if not od:
-                            continue
-                        try:
-                            odo = datetime.fromisoformat(str(od).replace("Z", "+00:00").replace("T", " "))
-                        except Exception:
-                            continue
-                        if odo < since:
-                            continue
-                        eid = str(rec.get("case_enquiry_id") or rec.get("_id") or "") 
-                        if not eid:
-                            continue
-                        address = rec.get("location") or rec.get("location_street_name") or "Boston, MA"
-                        desc = rec.get("case_title") or rec.get("reason") or rec.get("type") or ""
-                        import backend.models.schemas as _sch
-                        out.append(_sch.RawLead311(
-                            external_id=eid,
-                            address=f"{address}, Boston, MA" if address else "Boston, MA",
-                            city="Boston",
-                            state="MA",
-                            zip_code=str(rec.get("location_zipcode")) if rec.get("location_zipcode") else None,
-                            issue_description=desc,
-                            created_at=odo,
-                            lat=rec.get("latitude"),
-                            lng=rec.get("longitude"),
-                            issue_category=_s._infer_category(desc),
-                            case_title=rec.get("case_title") or None,
-                            subject=rec.get("subject") or None,
-                            reason=rec.get("reason") or None,
-                            type=rec.get("type") or None,
-                            queue=rec.get("queue") or None,
-                            department=rec.get("department") or None,
-                            closure_reason=rec.get("closure_reason") or None,
-                            case_status=rec.get("case_status") or None,
-                            on_time=rec.get("on_time") or None,
-                            sla_target_dt=rec.get("sla_target_dt") or None,
-                            closed_dt=rec.get("closed_dt") or None,
-                            source=rec.get("source") or None,
-                            neighborhood=rec.get("neighborhood") or None,
-                            ward=rec.get("ward") or None,
-                            precinct=rec.get("precinct") or None,
-                            resolution_description=rec.get("closure_reason") or None,
-                        ))
-                    return out
-            except Exception:
-                return []
+        # Boston (CKAN) - mantém hours=72 fixo
+        boston_entry = {"city": "Boston", "state": "MA", "hours": 72}
+        if hours_override:
+            boston_entry["hours"] = hours_override
 
-        # NYC DOB Violations — obrigações legais EM ABERTO (multa corre)
-        async def _fetch_dob_violations():
-            from backend.scrapers.socrata_311 import socrata_scraper as _s
-            import backend.models.schemas as _sch
-            domain = "data.cityofnewyork.us"
-            dataset = "3h2n-5cm9"
-            boro_map = {"1": "MANHATTAN", "2": "BRONX", "3": "BROOKLYN", "4": "QUEENS", "5": "STATEN ISLAND"}
-            keywords_or = " OR ".join([f"lower(description) like '%{kw.lower()}%'" for kw in settings.SCRAPER_KEYWORDS])
-            where = f"(disposition_date IS NULL OR disposition_date = '') AND ({keywords_or})"
-            logger.info(f"DOB Violations: fetching from {domain}/{dataset}")
-            rows = await _s._fetch_soql(
-                domain=domain, dataset=dataset,
-                select="violation_number, issue_date, house_number, street, boro, description, violation_type, violation_category, ecb_number, disposition_date, disposition_comments",
-                where=where, limit=5000, order="issue_date DESC",
-            )
-            logger.info(f"DOB Violations: got {len(rows)} raw rows from Socrata")
-            out = []
-            rejected_date = 0
-            rejected_addr = 0
-            rejected_other = 0
-            for row in rows:
-                try:
-                    number = str(row.get("violation_number") or "").strip() or str(row.get("ecb_number") or "").strip()
-                    if not number:
-                        continue
-                    desc = str(row.get("description") or "").strip()
-                    if not desc:
-                        continue
-                    house = str(row.get("house_number") or "").strip()
-                    street = str(row.get("street") or "").strip()
-                    boro = boro_map.get(str(row.get("boro") or "").strip(), str(row.get("boro") or "").strip())
-                    addr = f"{house} {street}".strip()
-                    issue = row.get("issue_date")
-                    created = None
-                    try:
-                        created = datetime.strptime(str(issue).strip(), "%Y%m%d")
-                    except Exception:
-                        try:
-                            created = datetime.fromisoformat(str(issue).replace("Z", "+00:00").replace("+00:00:00", "+00:00"))
-                        except Exception:
-                            pass
-                    if created is None:
-                        rejected_date += 1
-                        continue  # linhas-lixo com data inválida
-                    if not addr:
-                        rejected_addr += 1
-                        continue
-                    out.append(_sch.RawLead311(
-                        external_id=number,
-                        address=f"{addr}, {boro}, NY" if addr and boro else ("NYC, NY" if not addr else f"{addr}, NYC, NY"),
-                        city="NYC", state="NY",
-                        issue_description=desc,
-                        created_at=created,
-                        issue_category=_s._infer_category(desc),
-                        source_type="dob_violation",
-                        case_title=desc,
-                        descriptor=row.get("violation_type") or None,
-                        department="DOB",
-                        case_status="Open",
-                        source=f"{domain}/{dataset}",
-                        neighborhood=boro or None,
-                        resolution_description=row.get("disposition_comments") or None,
-                    ))
-                except Exception as e:
-                    rejected_other += 1
-                    if rejected_other <= 3:
-                        logger.warning(f"DOB Violations row error: {e} | row keys: {list(row.keys())}")
-                    continue
-            logger.info(f"DOB Violations: {len(out)} válidos, rejected_date={rejected_date}, rejected_addr={rejected_addr}, rejected_other={rejected_other}")
-            return out
+        # NYC DOB Violations + Permits
+        dob_violations_entry = {"city": "NYC", "state": "NY", "hours": hours_override or 48, "type": "dob_violations"}
+        dob_permits_entry = {"city": "NYC", "state": "NY", "hours": hours_override or 48, "type": "dob_permits"}
 
-        # NYC DOB Approved Permits — obra autorizada; apenas solicitante = dono (não contratado)
-        async def _fetch_dob_permits():
-            from backend.scrapers.socrata_311 import socrata_scraper as _s
-            import backend.models.schemas as _sch
-            domain = "data.cityofnewyork.us"
-            dataset = "rbx6-tga4"
-            # Query sem where - filtra tudo em Python (evita 400 no Socrata)
-            logger.info(f"DOB Permits: fetching from {domain}/{dataset}")
-            try:
-                rows = await _s._fetch_soql(
-                    domain=domain, dataset=dataset,
-                    select="job_filing_number, work_permit, house_no, street_name, borough, zip_code, latitude, longitude, approved_date, issued_date, job_description, work_type, job_type, permit_status, applicant_first_name, applicant_last_name, applicant_business_name, owner_name, owner_business_name, nta, council_district",
-                    where=None, limit=5000, order="approved_date DESC",
-                )
-                logger.info(f"DOB Permits: got {len(rows)} raw rows from Socrata")
-            except Exception as e:
-                logger.error(f"DOB Permits: fetch failed: {e}")
-                return []
+        all_entries = base_cities + [boston_entry, dob_violations_entry, dob_permits_entry]
 
-            def _norm(s):
-                return "".join((s or "").lower().split())
-
-            core_kws = ["roof", "roofing", "plumbing", "water", "paint", "facade", "boiler", "heating", "sprinkler", "sewer", "electrical", "leak", "mold", "chimney", "siding", "foundation"]
-
-            out = []
-            rejected_status = 0
-            rejected_kw = 0
-            rejected_owner = 0
-            rejected_addr = 0
-            rejected_other = 0
-            for row in rows:
-                try:
-                    # Filtro de status
-                    if str(row.get("permit_status") or "") != "Permit Issued":
-                        rejected_status += 1
-                        continue
-                    # Filtro de data (60 dias)
-                    app_date = row.get("approved_date") or row.get("issued_date")
-                    if app_date:
-                        try:
-                            ad = datetime.fromisoformat(str(app_date).replace("Z", "+00:00").replace("+00:00:00", "+00:00"))
-                            if ad < datetime.now() - timedelta(days=60):
-                                continue
-                        except Exception:
-                            pass
-                    # Filtro de keywords
-                    desc = str(row.get("job_description") or "").strip().lower()
-                    if not any(kw in desc for kw in core_kws):
-                        rejected_kw += 1
-                        continue
-                    a_f, a_l = _norm(row.get("applicant_first_name")), _norm(row.get("applicant_last_name"))
-                    owner = _norm(row.get("owner_name"))
-                    a_b = _norm(row.get("applicant_business_name"))
-                    o_b = row.get("owner_business_name")
-                    if a_b and a_b not in ("-", "none", "n/a"):
-                        continue
-                    if not owner or not a_l:
-                        rejected_owner += 1
-                        continue
-                    if not (a_l in owner or (a_f and a_f in owner)):
-                        rejected_owner += 1
-                        continue
-                    job_no = str(row.get("job_filing_number") or "").strip()
-                    if not job_no:
-                        continue
-                    if "not yet issued" in str(row.get("work_permit") or "").lower():
-                        continue
-                    house = " ".join(str(row.get("house_no") or "").split())
-                    street = " ".join(str(row.get("street_name") or "").split())
-                    if not (house and street):
-                        rejected_addr += 1
-                        continue
-                    boro = str(row.get("borough") or "").strip()
-                    zipc = str(row.get("zip_code") or "").strip() or None
-                    wp = str(row.get("work_permit") or "").strip()
-                    try:
-                        created = datetime.fromisoformat(str(app_date).replace("Z", "+00:00").replace("+00:00:00", "+00:00"))
-                    except Exception:
-                        created = datetime.now()
-                    out.append(_sch.RawLead311(
-                        external_id=f"{job_no}~{wp}" if wp else job_no,
-                        address=f"{house} {street}, {boro}, NY {zipc}" if zipc else f"{house} {street}, {boro}, NY",
-                        city="NYC", state="NY",
-                        zip_code=zipc,
-                        issue_description=desc,
-                        created_at=created,
-                        lat=float(row["latitude"]) if row.get("latitude") is not None else None,
-                        lng=float(row["longitude"]) if row.get("longitude") is not None else None,
-                        issue_category=_s._infer_category(desc),
-                        source_type="permit",
-                        case_title=desc,
-                        type=row.get("work_type") or None,
-                        department="DOB",
-                        case_status="Approved",
-                        source=f"{domain}/{dataset}",
-                        neighborhood=row.get("nta") or None,
-                        ward=str(row.get("council_district")) if row.get("council_district") is not None else None,
-                        closed_dt=row.get("issued_date") or None,
-                    ))
-                except Exception as e:
-                    rejected_other += 1
-                    if rejected_other <= 3:
-                        logger.warning(f"DOB Permits row error: {e}")
-                    continue
-            logger.info(f"DOB Permits: {len(out)} válidos, rejected_status={rejected_status}, rejected_kw={rejected_kw}, rejected_owner={rejected_owner}, rejected_addr={rejected_addr}, rejected_other={rejected_other}")
-            return out
-
-        tasks_311.append(_fetch_boston())
-        tasks_311.append(_fetch_dob_violations())
-        tasks_311.append(_fetch_dob_permits())
-
+        # 4. Executa fetch por cidade com Circuit Breaker isolado
         all_raw = []
-        for i, bundled in enumerate(await asyncio.gather(*tasks_311, return_exceptions=True)):
-            if isinstance(bundled, Exception):
-                logger.warning(f"Erro na task {i}: {bundled}")
-            else:
-                logger.info(f"Task {i} returned {len(bundled)} leads")
-                all_raw.extend(bundled)
+        city_results = {}  # {city: {"leads": [...], "error": None/str, "skipped": bool}}
+
+        for entry in all_entries:
+            city = entry["city"]
+            health = city_health.get(city, {})
+            failure_count = health.get("failure_count", 0)
+            circuit_open_until = health.get("circuit_open_until")
+
+            # Circuit Breaker: pula cidade se circuit breaker aberto
+            if circuit_open_until and datetime.utcnow().isoformat() < circuit_open_until:
+                logger.warning(f"Circuit Breaker ATIVO para {city} até {circuit_open_until} — pulando")
+                city_results[city] = {"leads": [], "error": "circuit_breaker_open", "skipped": True}
+                continue
+
+            try:
+                leads = []
+
+                if entry.get("type") == "dob_violations":
+                    # NYC DOB Violations
+                    from backend.scrapers.socrata_311 import socrata_scraper as _s
+                    import backend.models.schemas as _sch
+                    domain = "data.cityofnewyork.us"
+                    dataset = "3h2n-5cm9"
+                    boro_map = {"1": "MANHATTAN", "2": "BRONX", "3": "BROOKLYN", "4": "QUEENS", "5": "STATEN ISLAND"}
+                    keywords_or = " OR ".join([f"lower(description) like '%{kw.lower()}%'" for kw in settings.SCRAPER_KEYWORDS])
+                    where = f"(disposition_date IS NULL OR disposition_date = '') AND ({keywords_or})"
+                    logger.info(f"DOB Violations: fetching from {domain}/{dataset}")
+                    rows = await _s._fetch_soql(
+                        domain=domain, dataset=dataset,
+                        select="violation_number, issue_date, house_number, street, boro, description, violation_type, violation_category, ecb_number, disposition_date, disposition_comments",
+                        where=where, limit=5000, order="issue_date DESC",
+                    )
+                    logger.info(f"DOB Violations: got {len(rows)} raw rows from Socrata")
+                    out = []
+                    for row in rows:
+                        try:
+                            number = str(row.get("violation_number") or "").strip() or str(row.get("ecb_number") or "").strip()
+                            if not number:
+                                continue
+                            desc = str(row.get("description") or "").strip()
+                            if not desc:
+                                continue
+                            house = str(row.get("house_number") or "").strip()
+                            street = str(row.get("street") or "").strip()
+                            boro = boro_map.get(str(row.get("boro") or "").strip(), str(row.get("boro") or "").strip())
+                            addr = f"{house} {street}".strip()
+                            issue = row.get("issue_date")
+                            created = None
+                            try:
+                                created = datetime.strptime(str(issue).strip(), "%Y%m%d")
+                            except Exception:
+                                try:
+                                    created = datetime.fromisoformat(str(issue).replace("Z", "+00:00").replace("+00:00:00", "+00:00"))
+                                except Exception:
+                                    pass
+                            if created is None or not addr:
+                                continue
+                            out.append(_sch.RawLead311(
+                                external_id=number,
+                                address=f"{addr}, {boro}, NY" if addr and boro else ("NYC, NY" if not addr else f"{addr}, NYC, NY"),
+                                city="NYC", state="NY",
+                                issue_description=desc,
+                                created_at=created,
+                                issue_category=_s._infer_category(desc),
+                                source_type="dob_violation",
+                                case_title=desc,
+                                descriptor=row.get("violation_type") or None,
+                                department="DOB",
+                                case_status="Open",
+                                source=f"{domain}/{dataset}",
+                                neighborhood=boro or None,
+                                resolution_description=row.get("disposition_comments") or None,
+                            ))
+                        except Exception as e:
+                            logger.warning(f"DOB Violations row error: {e}")
+                            continue
+                    leads = out
+
+                elif entry.get("type") == "dob_permits":
+                    # NYC DOB Permits
+                    from backend.scrapers.socrata_311 import socrata_scraper as _s
+                    import backend.models.schemas as _sch
+                    domain = "data.cityofnewyork.us"
+                    dataset = "rbx6-tga4"
+                    logger.info(f"DOB Permits: fetching from {domain}/{dataset}")
+                    try:
+                        rows = await _s._fetch_soql(
+                            domain=domain, dataset=dataset,
+                            select="job_filing_number, work_permit, house_no, street_name, borough, zip_code, latitude, longitude, approved_date, issued_date, job_description, work_type, job_type, permit_status, applicant_first_name, applicant_last_name, applicant_business_name, owner_name, owner_business_name, nta, council_district",
+                            where=None, limit=5000, order="approved_date DESC",
+                        )
+                        logger.info(f"DOB Permits: got {len(rows)} raw rows from Socrata")
+                    except Exception as e:
+                        logger.error(f"DOB Permits: fetch failed: {e}")
+                        rows = []
+
+                    def _norm(s):
+                        return "".join((s or "").lower().split())
+
+                    core_kws = ["roof", "roofing", "plumbing", "water", "paint", "facade", "boiler", "heating", "sprinkler", "sewer", "electrical", "leak", "mold", "chimney", "siding", "foundation"]
+
+                    out = []
+                    for row in rows:
+                        try:
+                            if str(row.get("permit_status") or "") != "Permit Issued":
+                                continue
+                            app_date = row.get("approved_date") or row.get("issued_date")
+                            if app_date:
+                                try:
+                                    ad = datetime.fromisoformat(str(app_date).replace("Z", "+00:00").replace("+00:00:00", "+00:00"))
+                                    if ad < datetime.now() - timedelta(days=60):
+                                        continue
+                                except Exception:
+                                    pass
+                            desc = str(row.get("job_description") or "").strip().lower()
+                            if not any(kw in desc for kw in core_kws):
+                                continue
+                            a_f, a_l = _norm(row.get("applicant_first_name")), _norm(row.get("applicant_last_name"))
+                            owner = _norm(row.get("owner_name"))
+                            a_b = _norm(row.get("applicant_business_name"))
+                            o_b = row.get("owner_business_name")
+                            if a_b and a_b not in ("-", "none", "n/a"):
+                                continue
+                            if not owner or not a_l:
+                                continue
+                            if not (a_l in owner or (a_f and a_f in owner)):
+                                continue
+                            job_no = str(row.get("job_filing_number") or "").strip()
+                            if not job_no:
+                                continue
+                            if "not yet issued" in str(row.get("work_permit") or "").lower():
+                                continue
+                            house = " ".join(str(row.get("house_no") or "").split())
+                            street = " ".join(str(row.get("street_name") or "").split())
+                            if not (house and street):
+                                continue
+                            boro = str(row.get("borough") or "").strip()
+                            zipc = str(row.get("zip_code") or "").strip() or None
+                            wp = str(row.get("work_permit") or "").strip()
+                            try:
+                                created = datetime.fromisoformat(str(app_date).replace("Z", "+00:00").replace("+00:00:00", "+00:00"))
+                            except Exception:
+                                created = datetime.now()
+                            out.append(_sch.RawLead311(
+                                external_id=f"{job_no}~{wp}" if wp else job_no,
+                                address=f"{house} {street}, {boro}, NY {zipc}" if zipc else f"{house} {street}, {boro}, NY",
+                                city="NYC", state="NY",
+                                zip_code=zipc,
+                                issue_description=desc,
+                                created_at=created,
+                                lat=float(row["latitude"]) if row.get("latitude") is not None else None,
+                                lng=float(row["longitude"]) if row.get("longitude") is not None else None,
+                                issue_category=_s._infer_category(desc),
+                                source_type="permit",
+                                case_title=desc,
+                                type=row.get("work_type") or None,
+                                department="DOB",
+                                case_status="Approved",
+                                source=f"{domain}/{dataset}",
+                                neighborhood=row.get("nta") or None,
+                                ward=str(row.get("council_district")) if row.get("council_district") is not None else None,
+                                closed_dt=row.get("issued_date") or None,
+                            ))
+                        except Exception as e:
+                            logger.warning(f"DOB Permits row error: {e}")
+                            continue
+                    leads = out
+
+                else:
+                    # Socrata 311 genérico (NYC, Chicago, Dallas, etc.)
+                    fields = entry["fields"]
+                    city_hours = entry["hours"]
+                    leads = await socrata_scraper.fetch_from_dataset(
+                        entry["domain"], entry["dataset"], entry["city"], entry["state"],
+                        field_names=fields, hours=city_hours, limit=2000,
+                    )
+
+                # Boston (CKAN) - caso especial
+                if city == "Boston":
+                    from backend.scrapers.socrata_311 import socrata_scraper as _s
+                    try:
+                        import httpx as _h
+                        async with _h.AsyncClient(timeout=60) as client:
+                            resp = await client.get(
+                                "https://data.boston.gov/api/3/action/datastore_search",
+                                params={
+                                    "resource_id": "1a0b420d-99f1-4887-9851-990b2a5a6e17",
+                                    "limit": 5000,
+                                    "sort": "open_dt DESC",
+                                },
+                            )
+                            data = resp.json()
+                            if not data.get("success"):
+                                leads = []
+                            else:
+                                since = datetime.now() - timedelta(hours=entry["hours"])
+                                records = data["result"]["records"]
+                                out = []
+                                for rec in records:
+                                    od = rec.get("open_dt")
+                                    if not od:
+                                        continue
+                                    try:
+                                        odo = datetime.fromisoformat(str(od).replace("Z", "+00:00").replace("T", " "))
+                                    except Exception:
+                                        continue
+                                    if odo < since:
+                                        continue
+                                    eid = str(rec.get("case_enquiry_id") or rec.get("_id") or "")
+                                    if not eid:
+                                        continue
+                                    address = rec.get("location") or rec.get("location_street_name") or "Boston, MA"
+                                    desc = rec.get("case_title") or rec.get("reason") or rec.get("type") or ""
+                                    import backend.models.schemas as _sch
+                                    out.append(_sch.RawLead311(
+                                        external_id=eid,
+                                        address=f"{address}, Boston, MA" if address else "Boston, MA",
+                                        city="Boston",
+                                        state="MA",
+                                        zip_code=str(rec.get("location_zipcode")) if rec.get("location_zipcode") else None,
+                                        issue_description=desc,
+                                        created_at=odo,
+                                        lat=rec.get("latitude"),
+                                        lng=rec.get("longitude"),
+                                        issue_category=_s._infer_category(desc),
+                                        case_title=rec.get("case_title") or None,
+                                        subject=rec.get("subject") or None,
+                                        reason=rec.get("reason") or None,
+                                        type=rec.get("type") or None,
+                                        queue=rec.get("queue") or None,
+                                        department=rec.get("department") or None,
+                                        closure_reason=rec.get("closure_reason") or None,
+                                        case_status=rec.get("case_status") or None,
+                                        on_time=rec.get("on_time") or None,
+                                        sla_target_dt=rec.get("sla_target_dt") or None,
+                                        closed_dt=rec.get("closed_dt") or None,
+                                        source=rec.get("source") or None,
+                                        neighborhood=rec.get("neighborhood") or None,
+                                        ward=rec.get("ward") or None,
+                                        precinct=rec.get("precinct") or None,
+                                        resolution_description=rec.get("closure_reason") or None,
+                                    ))
+                                leads = out
+                    except Exception as e:
+                        logger.warning(f"Boston CKAN fetch error: {e}")
+                        leads = []
+
+                # Sucesso: registra city health
+                await db_service.record_city_success(city)
+                await db_service.reset_anomaly_counter(city)
+                city_results[city] = {"leads": leads, "error": None, "skipped": False}
+                all_raw.extend(leads)
+                logger.info(f"{city}: {len(leads)} leads obtidos")
+
+            except Exception as e:
+                # Falha isolada: registra failure, não derruba outras cidades
+                logger.error(f"Erro ao buscar {city}: {e}", exc_info=True)
+                failure_info = await db_service.record_city_failure(city, str(e))
+                city_results[city] = {"leads": [], "error": str(e), "skipped": False}
 
         logger.info(f"Total bruto 311 (todas cidades): {len(all_raw)}")
 
+        # 5. Inserção com DLQ fallback
         inserted = 0
         newly_added: List[dict] = []
+
         for raw_lead in all_raw:
             enriched = EnrichedLead(
                 external_id=raw_lead.external_id,
@@ -1311,7 +1453,6 @@ async def _scrape_worker(run_id: str, max_cities: int = 8):
                 date_reported=raw_lead.created_at,
                 image_url=None,
                 source_url=None,
-                # Campos ricos do chamado 311 (copiados para todas as cidades)
                 case_title=getattr(raw_lead, "case_title", None),
                 subject=getattr(raw_lead, "subject", None),
                 reason=getattr(raw_lead, "reason", None),
@@ -1338,7 +1479,6 @@ async def _scrape_worker(run_id: str, max_cities: int = 8):
                 inserted += 1
                 newly_added.append(new_lead)
                 # Enriquecimento automático APENAS em leads estritamente novos
-                # (cota diária guarda na classe OwnerEnrichment)
                 try:
                     enrich_result = await owner_enrichment.enrich(raw_lead.address, raw_lead.city)
                     owner_name_val = (enrich_result or {}).get("owner_name")
@@ -1347,20 +1487,29 @@ async def _scrape_worker(run_id: str, max_cities: int = 8):
                 except Exception:
                     pass
 
+        # 6. Fan-out + Anomalia detection por categoria
         if inserted > 0:
-            # Fan-out por interesse: notifica usuários com a categoria marcada
-            # (teto 10/dia, dedup e push incluídos em fanout_new_lead_batch)
             added_by_cat: dict = {}
             for nl in newly_added:
                 cat = (nl.get("issue_category") or "Structure").strip()
                 added_by_cat.setdefault(cat, []).append(nl)
             for cat, items in added_by_cat.items():
                 await notifier.fanout_new_lead_batch(cat, items)
+
+        # 7. Anomalia: cidades ativas que zeraram leads
+        for city, result in city_results.items():
+            if not result["skipped"] and len(result["leads"]) == 0:
+                anomaly_count = await db_service.increment_anomaly_counter(city)
+                if anomaly_count >= 2:
+                    logger.warning(f"ANOMALIA: {city} zerou {anomaly_count} execuções consecutivas")
+            elif not result["skipped"] and len(result["leads"]) > 0:
+                await db_service.reset_anomaly_counter(city)
+
         logger.info(f"Scraper completo [run {run_id}]: {inserted} leads inseridos")
         state.update(
             status="success", inserted=inserted,
-            total_raw=len(all_raw), cities_covered=len(tasks_311),
-            note="311 multi-cidade via Socrata Discovery (nacional)",
+            total_raw=len(all_raw), cities_covered=len([c for c in city_results if not city_results[c]["skipped"]]),
+            note="311 multi-cidade com Circuit Breaker + DLQ + City Health",
             running=False, finished_at=datetime.utcnow().isoformat(),
         )
         await db_service.record_scrape_run(state)
@@ -1376,7 +1525,7 @@ async def _scrape_worker(run_id: str, max_cities: int = 8):
 # Roda a varredura a cada SCRAPER_INTERVAL_HOURS horas, reutilizando
 # a mesma fila de runs (_scrape_runs) do endpoint manual.
 # ------------------------------------------------------------------
-def _scheduled_scrape(max_cities: int = 8):
+def _scheduled_scrape(max_cities: int = 8, hours_override: int = None):
     for run in _scrape_runs.values():
         if run.get("running"):
             logger.info("Scheduler: run do scraper já ativo, pulando")
@@ -1388,8 +1537,29 @@ def _scheduled_scrape(max_cities: int = 8):
         "inserted": 0, "total_raw": 0, "status": "running", "error": None,
         "trigger": "scheduler",
     }
-    asyncio.create_task(_scrape_worker(run_id, max_cities))
-    logger.info(f"Scheduler: varredura disparada [run {run_id}]")
+    asyncio.create_task(_scrape_worker(run_id, max_cities, hours_override=hours_override))
+    logger.info(f"Scheduler: varredura disparada [run {run_id}]" + (f" com hours={hours_override}" if hours_override else ""))
+
+
+async def _scheduler_loop():
+    """Loop do scheduler interno: espera o intervalo e dispara a varredura.
+    
+    Executa varredura normal a cada SCRAPER_INTERVAL_HOURS horas.
+    Executa varredura estendida (hours=120) às 02:00 UTC para catch-up noturno.
+    """
+    interval_seconds = max(300, settings.SCRAPER_INTERVAL_HOURS * 3600)
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            # Verifica se é hora da varredura noturna estendida (02:00 UTC)
+            now_utc = datetime.utcnow()
+            if now_utc.hour == 2 and now_utc.minute < (interval_seconds // 60):
+                logger.info("Scheduler: disparando varredura noturna estendida (hours=120)")
+                _scheduled_scrape(max_cities=12, hours_override=120)
+            else:
+                _scheduled_scrape(max_cities=8)
+        except Exception as e:
+            logger.error(f"Erro no scheduler interno: {e}", exc_info=True)
 
 
 @contextlib.asynccontextmanager
