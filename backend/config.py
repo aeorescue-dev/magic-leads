@@ -83,6 +83,9 @@ class Settings(BaseSettings):
     # Cron (GitHub Actions chama com este header)
     CRON_SECRET: str = ""
 
+    # Webhook para alertas do scraper (Telegram/Slack/Email via n8n/Resend/etc)
+    SCRAPER_WEBHOOK_URL: str = ""
+
     model_config = SettingsConfigDict(
         env_file = ".env",
         case_sensitive = True,

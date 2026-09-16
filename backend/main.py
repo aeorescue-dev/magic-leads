@@ -1126,6 +1126,101 @@ async def _dlq_reprocess(run_id: str) -> int:
     return reprocessed
 
 
+# ============================================================
+# Webhook Alert Helper
+# ============================================================
+async def _send_scraper_webhook(run_id: str, city_results: dict, dlq_reprocessed: int, inserted: int, total_raw: int, hours_override: int = None) -> bool:
+    """Envia relatório consolidado do scraper para webhook configurado (Telegram/Slack/Email).
+    
+    Retorna True se enviado com sucesso, False caso contrário.
+    """
+    webhook_url = settings.SCRAPER_WEBHOOK_URL
+    if not webhook_url:
+        logger.debug("SCRAPER_WEBHOOK_URL não configurado — pulando envio de webhook")
+        return False
+
+    # Monta resumo por cidade
+    city_lines = []
+    anomalies = []
+    circuit_breakers = []
+    
+    for city, result in city_results.items():
+        if result.get("skipped"):
+            city_lines.append(f"  {city}: ⏭️ PULADO (circuit breaker aberto até {result.get('error', 'N/A')})")
+            circuit_breakers.append(city)
+        elif result.get("error"):
+            city_lines.append(f"  {city}: ❌ ERRO — {result['error'][:100]}")
+        else:
+            count = len(result.get("leads", []))
+            city_lines.append(f"  {city}: {count} leads {'✅' if count > 0 else '🔴 ZERADO'}")
+            if count == 0:
+                anomalies.append(city)
+
+    # Verifica anomalias (cidade ativa zerou 2x+)
+    anomaly_lines = []
+    for city in anomalies:
+        health = await db_service.get_city_health(city)
+        anomaly_count = health.get("anomaly_counter", 0)
+        if anomaly_count >= 2:
+            anomaly_lines.append(f"⚠️ **ANOMALIA**: {city} zerou {anomaly_count} execuções consecutivas!")
+        elif anomaly_count == 1:
+            anomaly_lines.append(f"⚡ Atenção: {city} zerou 1 execução (monitorando)")
+
+    # Circuit breakers ativos
+    cb_lines = []
+    if circuit_breakers:
+        cb_lines.append("🔴 **Circuit Breakers Ativos**:")
+        for cb in circuit_breakers:
+            health = await db_service.get_city_health(cb)
+            open_until = health.get("circuit_open_until", "desconhecido")
+            cb_lines.append(f"  {cb}: aberto até {open_until}")
+
+    # Monta mensagem
+    hours_info = f" (janela: {hours_override}h)" if hours_override else ""
+    trigger = "scheduler" if "scheduler" in run_id else "manual"
+    
+    lines = [
+        f"📊 **Scraper Run `{run_id}`** {hours_info}",
+        f"🕐 {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC | Trigger: {trigger}",
+        "",
+        f"📥 **Total bruto**: {total_raw} | ✅ **Inseridos**: {inserted} | 🔄 **DLQ reprocessado**: {dlq_reprocessed}",
+        "",
+        "🏙️ **Por Cidade**:",
+        *city_lines,
+    ]
+    
+    if anomaly_lines:
+        lines.extend(["", "🚨 **Anomalias Detectadas**:", *anomaly_lines])
+    
+    if cb_lines:
+        lines.extend(["", *cb_lines])
+
+    message = "\n".join(lines)
+
+    # Envia webhook (formato genérico JSON - compatível com Telegram/Slack/Discord/n8n)
+    payload = {
+        "text": message,
+        "parse_mode": "Markdown",
+        "run_id": run_id,
+        "inserted": inserted,
+        "total_raw": total_raw,
+        "dlq_reprocessed": dlq_reprocessed,
+        "anomalies": anomaly_lines,
+        "circuit_breakers": circuit_breakers,
+        "city_results": city_results,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(webhook_url, json=payload)
+            resp.raise_for_status()
+        logger.info(f"Webhook enviado com sucesso para {webhook_url[:50]}...")
+        return True
+    except Exception as e:
+        logger.error(f"Falha ao enviar webhook: {e}")
+        return False
+
+
 async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int = None):
     """Executa o scrape nacional (worker em background) com Circuit Breaker, DLQ e City Health."""
     state = _scrape_runs[run_id]
@@ -1505,11 +1600,14 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
             elif not result["skipped"] and len(result["leads"]) > 0:
                 await db_service.reset_anomaly_counter(city)
 
+        # 8. Envia webhook de alerta consolidado
+        await _send_scraper_webhook(run_id, city_results, dlq_reprocessed, inserted, len(all_raw), hours_override)
+
         logger.info(f"Scraper completo [run {run_id}]: {inserted} leads inseridos")
         state.update(
             status="success", inserted=inserted,
             total_raw=len(all_raw), cities_covered=len([c for c in city_results if not city_results[c]["skipped"]]),
-            note="311 multi-cidade com Circuit Breaker + DLQ + City Health",
+            note="311 multi-cidade com Circuit Breaker + DLQ + City Health + Webhook",
             running=False, finished_at=datetime.utcnow().isoformat(),
         )
         await db_service.record_scrape_run(state)
