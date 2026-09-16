@@ -1,12 +1,19 @@
 import os
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 import anyio
 
 from ..models.schemas import EnrichedLead
 from ..utils.logger import logger
+from .access import (
+    STATUS_ACTIVE,
+    STATUS_TRIAL,
+    is_access_active,
+    normalize_status,
+    parse_dt,
+)
 from .phone_lookup import PhoneResult, phone_lookup_service
 
 
@@ -383,6 +390,20 @@ CREATE TABLE IF NOT EXISTS stripe_events (
   user_id INTEGER,
   processed_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Tabela de auditoria de anomalias de fluxo (Dead Man's Switch).
+CREATE TABLE IF NOT EXISTS system_alerts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  level TEXT DEFAULT 'warning',
+  code TEXT NOT NULL,
+  message TEXT NOT NULL,
+  context TEXT,
+  acknowledged INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_system_alerts_created ON system_alerts (created_at);
+CREATE INDEX IF NOT EXISTS idx_system_alerts_code ON system_alerts (code);
 """
 
 
@@ -1430,35 +1451,58 @@ class DatabaseService:
             conn.close()
 
     def get_users_interested_in(self, category: str, city: Optional[str] = None) -> List[dict]:
-        """Retorna todos os usuários que seguem determinada categoria (para notificação).
-        Se city for fornecido, filtra também por cidade de interesse do usuário.
-        Apenas retorna usuários com assinatura ativa (trial ou paga)."""
+        """Usuários elegíveis a receber alerta de uma categoria.
+
+        Elegibilidade (nesta ordem):
+          1. ACESSO VIGENTE — decidido por services.access.is_access_active()
+             (fonte única de verdade; nada de whitelist local de status aqui).
+          2. RECORTE DE CATEGORIA — usuários que marcaram a categoria OU que NÃO
+             têm nenhum interesse gravado (fallback inteligente: sem configuração
+             = todas as categorias, para nunca zerar o despacho por lacuna).
+          3. RECORTE DE CIDADE — se `city` informado e o usuário tiver
+             `cities_filter`, a cidade precisa estar na lista.
+        """
         conn = get_connection()
         try:
             rows = conn.execute(
                 """
                 SELECT u.* FROM users u
-                JOIN user_interests ui ON ui.user_id = u.id
-                WHERE ui.category = ?
-                AND u.subscription_status IN ('trial', 'active', 'subscribed')
+                WHERE EXISTS (
+                    SELECT 1 FROM user_interests ui
+                    WHERE ui.user_id = u.id AND ui.category = ?
+                )
+                OR NOT EXISTS (
+                    SELECT 1 FROM user_interests ui2 WHERE ui2.user_id = u.id
+                )
                 """,
                 (category,),
             ).fetchall()
-            users = [dict(r) for r in rows]
-            if city and users:
-                import json
-                filtered = []
-                for u in users:
-                    cities_filter = u.get("cities_filter")
-                    if cities_filter:
-                        allowed_cities = json.loads(cities_filter)
-                        if city not in allowed_cities:
-                            continue
-                    filtered.append(u)
-                return filtered
-            return users
+            candidates = [dict(r) for r in rows]
         finally:
             conn.close()
+
+        # (1) Acesso vigente — fonte única de verdade (fail-closed).
+        users = [
+            u for u in candidates
+            if is_access_active(u.get("subscription_status"), u.get("plan_until"))
+        ]
+
+        # (3) Recorte por cidade.
+        if city and users:
+            import json
+            filtered = []
+            for u in users:
+                cities_filter = u.get("cities_filter")
+                if cities_filter:
+                    try:
+                        allowed_cities = json.loads(cities_filter)
+                    except (ValueError, TypeError):
+                        allowed_cities = None
+                    if allowed_cities and city not in allowed_cities:
+                        continue
+                filtered.append(u)
+            return filtered
+        return users
 
     # ---------------------------------------------------------------
     # Push Subscriptions (Web Push)
@@ -2759,6 +2803,49 @@ class DatabaseService:
         finally:
             conn.close()
 
+    # ===== SYSTEM ALERTS (Dead Man's Switch / auditoria de fluxo) =====
+
+    def record_system_alert(
+        self,
+        level: str,
+        code: str,
+        message: str,
+        context: Optional[dict] = None,
+    ) -> Optional[dict]:
+        """Grava um alerta de auditoria de fluxo (anomalia/bloqueio silencioso)."""
+        import json
+        conn = get_connection()
+        try:
+            ctx = (
+                json.dumps(context, ensure_ascii=False, default=str)
+                if context is not None else None
+            )
+            cur = conn.execute(
+                "INSERT INTO system_alerts (level, code, message, context) VALUES (?, ?, ?, ?)",
+                (level, code, message, ctx),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT * FROM system_alerts WHERE id = ?", (cur.lastrowid,)
+            ).fetchone()
+            return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Erro ao gravar system_alert ({code}): {e}")
+            return None
+        finally:
+            conn.close()
+
+    def get_recent_system_alerts(self, limit: int = 20) -> List[dict]:
+        """Retorna os alertas de auditoria mais recentes (para /api/system/alerts)."""
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM system_alerts ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
     # ===== CITY HEALTH (Circuit Breaker + Anomalia) =====
 
     def get_city_health(self, city: str) -> dict:
@@ -2933,24 +3020,18 @@ class DatabaseService:
     # ===== SUBSCRIPTION / TRIAL HELPERS =====
 
     def _parse_dt(self, value) -> Optional[datetime]:
-        """Converte string de timestamp (com ou sem timezone) para datetime não-aware UTC."""
-        if not value:
-            return None
-        try:
-            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00").replace("T", " "))
-            if dt.tzinfo is not None:
-                dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-            return dt
-        except Exception:
-            return None
+        """Converte string de timestamp para datetime não-aware UTC.
+
+        Delega para a fonte única de verdade (services.access.parse_dt)."""
+        return parse_dt(value)
 
     def get_user_subscription_status(self, user_id: int) -> dict:
         """Retorna status EXATO da subscription do usuário.
 
-        Segue o padrao da FASE 4.1:
-          - Usa SEMPRE UTC (data do servidor, nunca client).
-          - Aceita 'trial' e 'trialing' (normalizacao de cadastro antigo).
-          - Retorna action para direcionar o frontend (checkout/renew).
+        FONTE ÚNICA DE VERDADE: `can_access` é decidido exclusivamente por
+        `services.access.is_access_active()` (status normalizado + plan_until > now).
+        Usa SEMPRE UTC (data do servidor, nunca client).
+        Retorna action para direcionar o frontend (checkout/renew).
         """
         conn = get_connection()
         try:
@@ -2966,17 +3047,13 @@ class DatabaseService:
                 }
 
             now = datetime.utcnow()
-            # Normaliza cadastros antigos ('trialing') e default do schema ('trial')
-            sub_status = (user["subscription_status"] or "trial").strip().lower()
-            if sub_status == "trialing":
-                sub_status = "trial"
+            sub_status = normalize_status(user["subscription_status"])
+            plan_until = parse_dt(user["plan_until"])
+            can_access = is_access_active(user["subscription_status"], user["plan_until"], now)
 
-            # Prazo (trial OU plano pago) fica na coluna plan_until do schema real
-            plan_until = self._parse_dt(user["plan_until"])
-
-            # ===== TRIAL ATIVO =====
-            if sub_status == "trial":
-                if plan_until and now < plan_until:
+            # ===== TRIAL =====
+            if sub_status == STATUS_TRIAL:
+                if can_access:
                     diff = plan_until - now
                     days_left = diff.days
                     hours_left = int(diff.seconds // 3600)
@@ -3002,8 +3079,8 @@ class DatabaseService:
                 }
 
             # ===== SUBSCRIPTION PAGA =====
-            elif sub_status == "active":
-                if plan_until and now < plan_until:
+            if sub_status == STATUS_ACTIVE:
+                if can_access:
                     days_left = (plan_until - now).days
                     return {
                         "status": "active",
@@ -3024,26 +3101,15 @@ class DatabaseService:
                     "action": "REDIRECT_TO_CHECKOUT",
                 }
 
-            # ===== SEM ASSINATURA (cadastro sem pagamento) =====
-            elif sub_status in ("expired", "pending_payment"):
-                return {
-                    "status": "expired",
-                    "is_active": False,
-                    "can_access": False,
-                    "days_remaining": 0,
-                    "expires_at": (plan_until.isoformat() if plan_until else None),
-                    "message": "Assinatura necessária. Pague $79/semana para liberar o acesso",
-                    "action": "REDIRECT_TO_CHECKOUT",
-                }
-
-            # ===== Fallback =====
+            # ===== SEM ASSINATURA (cadastro sem pagamento / status desconhecido) =====
             return {
-                "status": sub_status,
+                "status": "expired",
                 "is_active": False,
                 "can_access": False,
                 "days_remaining": 0,
-                "message": "Status desconhecido. Entre em contato com suporte",
-                "action": None,
+                "expires_at": (plan_until.isoformat() if plan_until else None),
+                "message": "Assinatura necessária. Pague $79/semana para liberar o acesso",
+                "action": "REDIRECT_TO_CHECKOUT",
             }
         finally:
             conn.close()
@@ -3675,6 +3741,18 @@ class AsyncDatabaseService:
 
     async def get_all_users(self) -> List[dict]:
         return await anyio.to_thread.run_sync(self._service.get_all_users)
+
+    async def record_system_alert(
+        self, level: str, code: str, message: str, context: Optional[dict] = None
+    ) -> Optional[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.record_system_alert, level, code, message, context
+        )
+
+    async def get_recent_system_alerts(self, limit: int = 20) -> List[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.get_recent_system_alerts, limit
+        )
 
     async def add_notification_for_user(self, user_id: int, type: str, title: str, message: str, lead_id: Optional[int] = None) -> Optional[dict]:
         return await anyio.to_thread.run_sync(self._service.add_notification_for_user, user_id, type, title, message, lead_id)

@@ -1042,6 +1042,14 @@ async def scraper_status():
     return {"active": bool(active), "running": active, "last_run": last, "city_health": city_health}
 
 
+@app.get("/api/system/alerts")
+async def system_alerts(limit: int = 20, _admin: bool = Depends(_require_admin)):
+    """Auditoria de anomalias de fluxo (Dead Man's Switch). Rota administrativa."""
+    limit = max(1, min(int(limit), 100))
+    alerts = await db_service.get_recent_system_alerts(limit)
+    return {"alerts": alerts, "count": len(alerts)}
+
+
 # ============================================================
 # DLQ (Dead Letter Queue) Helpers
 # ============================================================
@@ -1151,7 +1159,7 @@ async def _dlq_reprocess(run_id: str) -> int:
 # ============================================================
 # Webhook Alert Helper
 # ============================================================
-async def _send_scraper_webhook(run_id: str, city_results: dict, dlq_reprocessed: int, inserted: int, total_raw: int, hours_override: int = None) -> bool:
+async def _send_scraper_webhook(run_id: str, city_results: dict, dlq_reprocessed: int, inserted: int, total_raw: int, hours_override: int = None, notified: int = None) -> bool:
     """Envia relatório consolidado do scraper para webhook configurado (Telegram/Slack/Email).
 
     Retorna True se enviado com sucesso, False caso contrário.
@@ -1206,10 +1214,16 @@ async def _send_scraper_webhook(run_id: str, city_results: dict, dlq_reprocessed
         f"🕐 {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC | Trigger: {trigger}",
         "",
         f"📥 **Total bruto**: {total_raw} | ✅ **Inseridos**: {inserted} | 🔄 **DLQ reprocessado**: {dlq_reprocessed}",
+    ]
+    if notified is not None:
+        lines.append(f"🔔 **Notificações criadas**: {notified}")
+    if inserted > 0 and notified == 0:
+        lines.insert(0, "🚨🚨 **BLOQUEIO DE NOTIFICAÇÕES: leads inseridos, fan-out = 0** 🚨🚨")
+    lines.extend([
         "",
         "🏙️ **Por Cidade**:",
         *city_lines,
-    ]
+    ])
 
     if anomaly_lines:
         lines.extend(["", "🚨 **Anomalias Detectadas**:", *anomaly_lines])
@@ -1227,6 +1241,7 @@ async def _send_scraper_webhook(run_id: str, city_results: dict, dlq_reprocessed
         "inserted": inserted,
         "total_raw": total_raw,
         "dlq_reprocessed": dlq_reprocessed,
+        "notified": notified,
         "anomalies": anomaly_lines,
         "circuit_breakers": circuit_breakers,
         "city_results": city_results,
@@ -1605,13 +1620,31 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                     pass
 
         # 6. Fan-out + Anomalia detection por categoria
+        notified_total = 0
+        added_by_cat: dict = {}
         if inserted > 0:
-            added_by_cat: dict = {}
             for nl in newly_added:
                 cat = (nl.get("issue_category") or "Structure").strip()
                 added_by_cat.setdefault(cat, []).append(nl)
             for cat, items in added_by_cat.items():
-                await notifier.fanout_new_lead_batch(cat, items)
+                sent = await notifier.fanout_new_lead_batch(cat, items)
+                notified_total += int(sent or 0)
+
+            # Dead Man's Switch: leads inseridos mas fan-out zerado = bloqueio.
+            await notifier.guard_silent_fanout(
+                inserted=inserted,
+                notified=notified_total,
+                context={
+                    "run_id": run_id,
+                    "inserted": inserted,
+                    "notified": notified_total,
+                    "categories": {c: len(v) for c, v in added_by_cat.items()},
+                },
+            )
+            logger.info(
+                f"Fan-out [run {run_id}]: {notified_total} notificação(ões) criada(s) "
+                f"para {inserted} lead(s) em {len(added_by_cat)} categoria(s)"
+            )
 
         # 7. Anomalia: cidades ativas que zeraram leads
         for city, result in city_results.items():
@@ -1623,7 +1656,7 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                 await db_service.reset_anomaly_counter(city)
 
         # 8. Envia webhook de alerta consolidado
-        await _send_scraper_webhook(run_id, city_results, dlq_reprocessed, inserted, len(all_raw), hours_override)
+        await _send_scraper_webhook(run_id, city_results, dlq_reprocessed, inserted, len(all_raw), hours_override, notified=notified_total)
 
         logger.info(f"Scraper completo [run {run_id}]: {inserted} leads inseridos")
         state.update(

@@ -7,6 +7,13 @@ interesse naquela categoria (conceito central aprovado no protótipo /pro).
 Cap de 10 alertas new_lead/dia por usuário (in-app + push juntos).
 Dedup: mesmo lead nunca gera 2 alertas para o mesmo usuário.
 Digest: resumo diário para quem bateu no teto (não conta no teto).
+
+Elegibilidade (fonte única de verdade): services.access.is_access_active().
+Recorte de categoria: interesses marcados OU, sem nenhum interesse gravado,
+todas as categorias (fallback inteligente — ver db.get_users_interested_in).
+
+Dead Man's Switch: se leads foram inseridos mas nenhuma notificação saiu,
+isso é tratado como bloqueio de fluxo e escalado (log CRITICAL + auditoria).
 """
 
 from collections import defaultdict
@@ -15,6 +22,35 @@ from ..utils.logger import logger
 from .db import db_service
 
 DAILY_ALERT_LIMIT = 10
+
+
+async def guard_silent_fanout(inserted: int, notified: int, context: dict) -> bool:
+    """Dead Man's Switch do despacho de alertas.
+
+    Se o motor inseriu leads (`inserted > 0`) mas o fan-out não notificou
+    NINGUÉM (`notified == 0`), dispara log CRITICAL e grava um alerta de
+    auditoria (tabela system_alerts) para detecção imediata de bloqueio.
+
+    Retorna True se o fluxo está saudável, False se houve bloqueio silencioso.
+    """
+    if inserted > 0 and notified == 0:
+        msg = (
+            "BLOQUEIO DE FLUXO DE NOTIFICAÇÕES: "
+            f"{inserted} lead(s) inserido(s) mas 0 destinatário(s) notificado(s). "
+            "Possível divergência de status de acesso, interesses ou cities_filter."
+        )
+        logger.critical(msg)
+        try:
+            await db_service.record_system_alert(
+                level="critical",
+                code="NOTIFIER_SILENT_FAILURE",
+                message=msg,
+                context=context,
+            )
+        except Exception as e:  # nunca deixar o watchdog derrubar o run
+            logger.error(f"Falha ao registrar alerta crítico de fanout: {e}")
+        return False
+    return True
 
 
 async def notify_users_for_lead(
