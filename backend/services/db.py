@@ -3556,20 +3556,20 @@ class DatabaseService:
             user = conn.execute("SELECT id FROM users WHERE email = ?", (email.lower(),)).fetchone()
             if not user:
                 return None  # Não revela se email existe (segurança)
-            
+
             # Invalida tokens anteriores não usados
             conn.execute(
                 "UPDATE password_reset_tokens SET used = 1 WHERE user_id = ? AND used = 0",
                 (user["id"],)
             )
-            
+
             # Gera token seguro
             import secrets
             token = secrets.token_urlsafe(32)
             token_hash = secrets.token_urlsafe(32)  # hash para armazenar
-            
+
             expires_at = datetime.utcnow() + timedelta(hours=expires_hours)
-            
+
             conn.execute(
                 """INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
                    VALUES (?, ?, ?)""",
@@ -3592,20 +3592,20 @@ class DatabaseService:
             # Let's use a simpler approach: hash with sha256
             import hashlib
             token_hash = hashlib.sha256(token.encode()).hexdigest()
-            
+
             row = conn.execute(
                 """SELECT user_id, expires_at, used FROM password_reset_tokens 
                    WHERE token_hash = ?""",
                 (token_hash,)
             ).fetchone()
-            
+
             if not row:
                 return None
             if row["used"]:
                 return None
             if datetime.fromisoformat(row["expires_at"]) < datetime.utcnow():
                 return None
-            
+
             return row["user_id"]
         finally:
             conn.close()
@@ -3616,28 +3616,28 @@ class DatabaseService:
         try:
             import hashlib
             token_hash = hashlib.sha256(token.encode()).hexdigest()
-            
+
             row = conn.execute(
                 """SELECT user_id, expires_at, used FROM password_reset_tokens 
                    WHERE token_hash = ?""",
                 (token_hash,)
             ).fetchone()
-            
+
             if not row or row["used"] or datetime.fromisoformat(row["expires_at"]) < datetime.utcnow():
                 return False
-            
+
             # Atualiza senha
             conn.execute(
                 "UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (new_password_hash, row["user_id"])
             )
-            
+
             # Marca token como usado
             conn.execute(
                 "UPDATE password_reset_tokens SET used = 1 WHERE token_hash = ?",
                 (token_hash,)
             )
-            
+
             conn.commit()
             return True
         finally:
