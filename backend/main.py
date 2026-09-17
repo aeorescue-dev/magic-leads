@@ -422,15 +422,12 @@ async def get_leads(
 ):
     """Retorna leads da cidade especificada com filtros opcionais"""
     try:
-        leads = await db_service.get_leads_by_city(city, limit=per_page * page)
-
-        # Filter by category se especificado
-        if category:
-            leads = [ld for ld in leads if ld.get("issue_category") == category]
-
-        # Filter by source type se especificado
-        if type:
-            leads = [ld for ld in leads if ld.get("source_type") == type]
+        leads = await db_service.get_leads_by_city(
+            city, 
+            limit=per_page * page,
+            source_type=type,
+            category=category
+        )
 
         await _annotate_visibility(leads, user)
 

@@ -43,6 +43,12 @@ import {
   fetchPublicMetrics, PublicMetrics, EMPTY_PUBLIC_METRICS
 } from "@/lib/api-client";
 
+// Tipo enriquecido para o modal de revelação (com histórico e ocorrências)
+type EnrichedLead = LeadResponse & {
+  _history?: HistoryEvent[];
+  _occurrences?: LeadOccurrence[];
+};
+
 type Theme = "dark" | "light";
 
 type Category = {
@@ -257,7 +263,7 @@ const LEAD_TYPES = [
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [releaseTarget, setReleaseTarget] = useState<LeadResponse | null>(null);
-  const [revealTarget, setRevealTarget] = useState<LeadResponse | null>(null);
+  const [revealTarget, setRevealTarget] = useState<EnrichedLead | null>(null);
   const [contractorMetrics, setContractorMetrics] = useState<ContractorMetrics | null>(null);
   
   // Toast notifications (fila empilhável + auto-dismiss 4s)
@@ -709,8 +715,29 @@ const LEAD_TYPES = [
       showToast(`Limite de 10 leads/dia atingido. Volte amanhã e abra seus 10+ potenciais clientes.`, "warning");
       return;
     }
-    // Abre o modal de consentimento antes de revelar os dados do proprietário
-    setRevealTarget(lead);
+    // Buscar histórico e ocorrências antes de abrir o modal
+    setBusyAction(true);
+    try {
+      const [history, occurrences] = await Promise.all([
+        fetchLeadHistory(lead.id).catch(() => []),
+        fetchLeadOccurrences(lead.id).catch(() => []),
+      ]);
+      // Enriquecer o lead com dados extras para o modal
+      const enrichedLead = {
+        ...lead,
+        _history: history,
+        _occurrences: occurrences,
+      } as LeadResponse & {
+        _history: HistoryEvent[];
+        _occurrences: LeadOccurrence[];
+      };
+      setRevealTarget(enrichedLead);
+    } catch (e) {
+      console.error("Erro ao buscar detalhes do lead:", e);
+      setRevealTarget(lead); // fallback para o lead original
+    } finally {
+      setBusyAction(false);
+    }
   };
   const closeRevealModal = () => {
     if (busyAction) return;
@@ -2382,31 +2409,203 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
       {revealTarget && (
         <div className="fixed inset-0 z-[85] flex items-center justify-center p-4" style={{ backgroundColor: isDark ? "rgba(11,13,18,0.85)" : "rgba(248,250,252,0.9)" }} onClick={closeRevealModal}>
           <div
-            className={`w-full max-w-md rounded-2xl border p-6 shadow-2xl ${isDark ? "bg-[#10121a] border-white/10" : "bg-white border-slate-200"}`}
+            className={`w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-2xl border p-6 shadow-2xl ${isDark ? "bg-[#10121a] border-white/10" : "bg-white border-slate-200"}`}
             onClick={(e) => e.stopPropagation()}
           >
+            {/* HEADER */}
             <div className="flex items-start gap-3">
               <div className="h-11 w-11 rounded-xl bg-indigo-500/20 flex items-center justify-center shrink-0">
                 <ShieldCheck className="h-6 w-6 text-indigo-400" />
               </div>
-              <div className="flex-1">
-                <h2 className="text-lg font-bold" style={{ color: isDark ? "#fff" : "#0f172a" }}>
-                  Revelar dados do proprietário
-                </h2>
-                <p className={`text-sm mt-1 ${T.text2}`}>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap mb-1">
+                  <h2 className="text-lg font-bold" style={{ color: isDark ? "#fff" : "#0f172a" }}>
+                    Revelar dados do proprietário
+                  </h2>
+                  <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${revealTarget.source_type === "dob_violation" ? "bg-amber-500/15 text-amber-400" : revealTarget.source_type === "permit" ? "bg-sky-500/15 text-sky-400" : "bg-slate-500/15 text-slate-400"}`}>
+                    {revealTarget.source_type === "dob_violation" ? "Obrigação legal" : revealTarget.source_type === "permit" ? "Obra autorizada" : "Chamado aberto"}
+                  </span>
+                </div>
+                <p className={`text-sm ${T.text2}`}>
                   Ao reservar por <span className="font-semibold">1 hora</span>, você autoriza verificar
                   nome, endereço completo, telefone, SMS/e-mail e mapa de direção deste lead.
                 </p>
               </div>
             </div>
 
-            <div className="mt-4">
+            {/* ENDEREÇO + CATEGORIA */}
+            <div className="mt-4 p-3 rounded-xl border border-white/10 bg-white/5">
               <p className={`text-xs font-semibold ${T.text2}`}>
                 {revealTarget.address}, {revealTarget.city}
               </p>
               <p className={`text-xs mt-0.5 ${T.text2}`}>
                 {revealTarget.issue_category || revealTarget.issue_description}
               </p>
+            </div>
+
+            {/* SECTION 1: Detalhes da Ocorrência */}
+            {(revealTarget.department || revealTarget.case_status || revealTarget.descriptor || revealTarget.neighborhood || revealTarget.ward || revealTarget.precinct) && (
+              <div className="mt-4 space-y-1.5">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+                  <Building2 className="h-3.5 w-3.5" />
+                  Detalhes da Ocorrência
+                </h4>
+                <div className="rounded-lg border bg-muted/40 p-3 space-y-1.5 text-sm">
+                  {revealTarget.department && (
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-muted-foreground">Departamento</span>
+                      <span className="font-medium truncate">{revealTarget.department}</span>
+                    </div>
+                  )}
+                  {revealTarget.case_status && (
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-muted-foreground">Status do Caso</span>
+                      <span className="font-medium truncate">{revealTarget.case_status}</span>
+                    </div>
+                  )}
+                  {revealTarget.descriptor && (
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-muted-foreground">Descritor</span>
+                      <span className="font-medium truncate">{revealTarget.descriptor}</span>
+                    </div>
+                  )}
+                  {(revealTarget.neighborhood || revealTarget.ward || revealTarget.precinct) && (
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-muted-foreground">Localização</span>
+                      <span className="font-medium truncate">
+                        {[revealTarget.neighborhood, revealTarget.ward && revealTarget.ward.replace(/^\d+\s*/, ""), revealTarget.precinct && revealTarget.precinct.replace("Precinct ", "Pct ")]
+                          .filter(Boolean)
+                          .join(", ") || "—"
+                      }
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* SECTION 2: Detalhes do Chamado */}
+            {(revealTarget.case_title || revealTarget.subject || revealTarget.reason || revealTarget.type || revealTarget.queue || revealTarget.closure_reason || revealTarget.resolution_description || revealTarget.sla_target_dt || revealTarget.closed_dt) && (
+              <div className="mt-4 space-y-1.5">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+                  <Tag className="h-3.5 w-3.5" />
+                  Detalhes do Chamado
+                </h4>
+                <div className="rounded-lg border bg-muted/40 p-3 space-y-1.5 text-sm">
+                  {revealTarget.case_title && (
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-muted-foreground shrink-0">Título</span>
+                      <span className="font-medium truncate">{revealTarget.case_title}</span>
+                    </div>
+                  )}
+                  {revealTarget.subject && (
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-muted-foreground shrink-0">Assunto</span>
+                      <span className="font-medium truncate">{revealTarget.subject}</span>
+                    </div>
+                  )}
+                  {revealTarget.reason && (
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-muted-foreground shrink-0">Motivo</span>
+                      <span className="font-medium truncate">{revealTarget.reason}</span>
+                    </div>
+                  )}
+                  {revealTarget.type && (
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-muted-foreground">Tipo</span>
+                      <span className="font-medium truncate">{revealTarget.type}</span>
+                    </div>
+                  )}
+                  {revealTarget.queue && (
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-muted-foreground">Fila</span>
+                      <span className="font-medium truncate">{revealTarget.queue}</span>
+                    </div>
+                  )}
+                  {(revealTarget.resolution_description || revealTarget.closure_reason) && (
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-muted-foreground shrink-0">Resolução</span>
+                      <span className="font-medium truncate text-emerald-300/90">{revealTarget.resolution_description || revealTarget.closure_reason}</span>
+                    </div>
+                  )}
+                  {revealTarget.sla_target_dt && (
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-muted-foreground">SLA</span>
+                      <span className="font-medium truncate text-amber-300/90">{formatRelativeTime(revealTarget.sla_target_dt, t)}</span>
+                    </div>
+                  )}
+                  {revealTarget.closed_dt && (
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-muted-foreground">Fechado em</span>
+                      <span className="font-medium truncate">{formatRelativeTime(revealTarget.closed_dt, t)}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* SECTION 3: Histórico do Lead (eventos) */}
+            {revealTarget._history && revealTarget._history.length > 0 && (
+              <div className="mt-4 space-y-1.5">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+                  <Clock className="h-3.5 w-3.5" />
+                  Histórico do Lead
+                </h4>
+                <div className="rounded-lg border bg-muted/40 p-3 space-y-2 max-h-48 overflow-y-auto">
+                  {revealTarget._history.map((event) => (
+                    <div key={event.id} className="p-2 rounded border border-white/5 bg-white/5">
+                      <p className="text-sm text-slate-300">{event.detail || event.event_type}</p>
+                      <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-1">
+                        <span>{formatRelativeTime(event.created_at, t)}</span>
+                        {event.user_id && <span>· Por usuário #{event.user_id}</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* SECTION 4: Ocorrências do Imóvel (Parte B) */}
+            {revealTarget._occurrences && revealTarget._occurrences.length > 0 && (
+              <div className="mt-4 space-y-1.5">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+                  <Building2 className="h-3.5 w-3.5" />
+                  Histórico de Ocorrências do Imóvel
+                </h4>
+                <div className="rounded-lg border bg-muted/40 p-3 space-y-2 max-h-60 overflow-y-auto">
+                  {revealTarget._occurrences.map((oc) => (
+                    <div key={oc.id || oc.external_id || `${oc.case_title}-${oc.opened_at}`} className="p-2 rounded border border-white/5 bg-white/5">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-semibold text-slate-200">{oc.case_title || "Ocorrência"}</span>
+                        {oc.case_status && (
+                          <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
+                            oc.case_status.toLowerCase() === "closed" ? "bg-emerald-500/15 text-emerald-400"
+                            : oc.case_status.toLowerCase() === "open" ? "bg-rose-500/15 text-rose-400"
+                            : "bg-amber-500/15 text-amber-400"
+                          }`}>
+                            {oc.case_status}
+                          </span>
+                        )}
+                        {oc.opened_at && (
+                          <span className="ml-auto text-[10px] text-slate-500">{formatRelativeTime(oc.opened_at, t)}</span>
+                        )}
+                      </div>
+                      {oc.descriptor && <p className="text-sm text-slate-300 mt-1">{oc.descriptor}</p>}
+                      {oc.department && <div className="text-[11px] text-slate-500 mt-0.5">{oc.department}</div>}
+                      {(oc.resolution_description || oc.closure_reason) && (
+                        <div className="text-[11px] text-emerald-300/90 mt-1">Resolução: {oc.resolution_description || oc.closure_reason}</div>
+                      )}
+                      {oc.closed_at && (
+                        <div className="text-[11px] text-slate-500 mt-1">Fechado em {formatRelativeTime(oc.closed_at, t)}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* CONSENT CHECKBOX + BOTÕES */}
+            <div className="mt-4">
               <div className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3">
                 <label className={`flex items-start gap-2.5 text-sm cursor-pointer ${isDark ? "text-slate-200" : "text-slate-700"}`}>
                   <input

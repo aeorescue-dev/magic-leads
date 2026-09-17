@@ -874,6 +874,12 @@ export async function fetchLeadHistory(leadId: string | number): Promise<History
   );
 }
 
+export async function fetchLeadOccurrences(leadId: string | number): Promise<LeadOccurrence[]> {
+  return handle<LeadOccurrence[]>(
+    await fetch(`${API_URL}/api/leads/${leadId}/occurrences`, { headers: { ...authHeaders() } })
+  );
+}
+
 // ------------------------------------------------------------------
 // Histórico de ocorrências por imóvel (Parte B)
 // ------------------------------------------------------------------
@@ -893,12 +899,6 @@ export interface LeadOccurrence {
   closure_reason?: string;
   source?: string;
   source_url?: string;
-}
-
-export async function fetchLeadOccurrences(leadId: string | number): Promise<LeadOccurrence[]> {
-  return handle<LeadOccurrence[]>(
-    await fetch(`${API_URL}/api/leads/${leadId}/occurrences`, { headers: { ...authHeaders() } })
-  );
 }
 
 // ------------------------------------------------------------------

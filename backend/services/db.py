@@ -346,6 +346,7 @@ CREATE TABLE IF NOT EXISTS lead_case_history (
 CREATE INDEX IF NOT EXISTS idx_case_history_lead ON lead_case_history (lead_id);
 
 CREATE INDEX IF NOT EXISTS idx_leads_city_reported ON leads (city, date_reported);
+CREATE INDEX IF NOT EXISTS idx_leads_city_type_reported ON leads (city, source_type, date_reported DESC);
 CREATE INDEX IF NOT EXISTS idx_leads_date_reported ON leads (date_reported);
 CREATE INDEX IF NOT EXISTS idx_leads_lead_status ON leads (lead_status);
 CREATE INDEX IF NOT EXISTS idx_leads_source ON leads (source_type);
@@ -779,19 +780,24 @@ class DatabaseService:
         finally:
             conn.close()
 
-    def get_leads_by_city(self, city: str, limit: int = 100) -> List[dict]:
-        """Retorna leads mais recentes de uma cidade."""
+    def get_leads_by_city(self, city: str, limit: int = 100, source_type: Optional[str] = None, category: Optional[str] = None) -> List[dict]:
+        """Retorna leads mais recentes de uma cidade com filtros opcionais no SQL."""
         conn = get_connection()
         try:
-            rows = conn.execute(
-                """
-                SELECT * FROM leads
-                WHERE city = ?
-                ORDER BY date_reported DESC
-                LIMIT ?
-                """,
-                (city, limit),
-            ).fetchall()
+            sql = "SELECT * FROM leads WHERE city = ?"
+            params = [city]
+            
+            if source_type:
+                sql += " AND source_type = ?"
+                params.append(source_type)
+            if category:
+                sql += " AND issue_category = ?"
+                params.append(category)
+                
+            sql += " ORDER BY date_reported DESC LIMIT ?"
+            params.append(limit)
+            
+            rows = conn.execute(sql, params).fetchall()
             return [dict(r) for r in rows]
         finally:
             conn.close()
@@ -3544,8 +3550,8 @@ class AsyncDatabaseService:
     async def update_lead_historical(self, external_id: str, city: str, lead: EnrichedLead) -> bool:
         return await anyio.to_thread.run_sync(self._service.update_lead_historical, external_id, city, lead)
 
-    async def get_leads_by_city(self, city: str, limit: int = 100) -> List[dict]:
-        return await anyio.to_thread.run_sync(self._service.get_leads_by_city, city, limit)
+    async def get_leads_by_city(self, city: str, limit: int = 100, source_type: Optional[str] = None, category: Optional[str] = None) -> List[dict]:
+        return await anyio.to_thread.run_sync(self._service.get_leads_by_city, city, limit, source_type, category)
 
     async def get_all_leads(self, limit: int = 100) -> List[dict]:
         return await anyio.to_thread.run_sync(self._service.get_all_leads, limit)
