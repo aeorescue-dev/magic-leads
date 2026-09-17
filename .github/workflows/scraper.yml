@@ -22,6 +22,7 @@ jobs:
           # Retry policy: 3 tentativas com 15s de intervalo em caso de falha HTTP/conexao
           code=$(curl --retry 3 --retry-delay 15 --retry-all-errors \
             -sS -o /tmp/start.json -w "%{http_code}" -m 30 \
+            -H "X-Cron-Secret: ${{ secrets.CRON_SECRET }}" \
             -X POST "https://magic-leads-production.up.railway.app/api/scraper/run?max_cities=8") || true
           echo "http_code: $code"
           echo "start: $(cat /tmp/start.json 2>/dev/null || echo '{"status":"error"}')"
