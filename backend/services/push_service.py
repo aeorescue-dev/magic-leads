@@ -104,7 +104,7 @@ class PushService:
                         data=json.dumps(payload),
                         vapid_private_key=self._vapid_private_key,
                         vapid_claims=dict(self._vapid_claims),
-                        urgency="high"
+                        headers={"Urgency": "high"},
                     )
                 )
                 return True
@@ -233,8 +233,8 @@ class PushService:
                 data=json.dumps(payload),
                 vapid_private_key=self._vapid_private_key,
                 vapid_claims=dict(self._vapid_claims),
-                urgency="high",
-                ttl=ttl
+                ttl=ttl,
+                headers={"Urgency": "high"},
             )
             return {"ok": True}
         except WebPushException as e:
