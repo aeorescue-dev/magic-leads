@@ -36,7 +36,7 @@ const TIMEOUT_MS = 30 * 60 * 1000;
 const PORTABLE_NODE = process.execPath;
 const VERCEL_CLI =
   process.env.VERCEL_CLI ||
-  path.join(path.dirname(PORTABLE_NODE), "node_modules", "vercel", "dist", "index.js");
+  path.join(path.dirname(path.dirname(PORTABLE_NODE)), "vw", "node_modules", "vercel", "dist", "index.js");
 
 const AUTO_TASK = process.env.AUTO_TASK || "MagicLeads-AutoDeployFront";
 
