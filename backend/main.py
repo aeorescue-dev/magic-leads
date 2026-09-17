@@ -423,7 +423,7 @@ async def get_leads(
     """Retorna leads da cidade especificada com filtros opcionais"""
     try:
         leads = await db_service.get_leads_by_city(
-            city, 
+            city,
             limit=per_page * page,
             source_type=type,
             category=category

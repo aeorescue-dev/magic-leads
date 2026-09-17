@@ -782,21 +782,21 @@ class DatabaseService:
 
     def get_leads_by_city(self, city: str, limit: int = 100, source_type: Optional[str] = None, category: Optional[str] = None) -> List[dict]:
         """Retorna leads mais recentes de uma cidade com filtros opcionais no SQL."""
-        conn = get_connection()
+conn = get_connection()
         try:
             sql = "SELECT * FROM leads WHERE city = ?"
             params = [city]
-            
+
             if source_type:
                 sql += " AND source_type = ?"
                 params.append(source_type)
             if category:
                 sql += " AND issue_category = ?"
                 params.append(category)
-                
+
             sql += " ORDER BY date_reported DESC LIMIT ?"
             params.append(limit)
-            
+
             rows = conn.execute(sql, params).fetchall()
             return [dict(r) for r in rows]
         finally:
