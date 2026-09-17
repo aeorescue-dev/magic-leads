@@ -1475,7 +1475,7 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                             continue
                     leads = out
 
-                else:
+                elif city != "Boston":
                     # Socrata 311 genérico (NYC, Chicago, Dallas, etc.)
                     fields = entry["fields"]
                     city_hours = entry["hours"]
