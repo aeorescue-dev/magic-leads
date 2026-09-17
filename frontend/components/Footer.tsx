@@ -24,7 +24,7 @@ export function Footer() {
           <div>
             <h4 className="text-sm font-semibold mb-3">{t("nav.pricing")}</h4>
             <ul className="space-y-2 text-sm text-muted-foreground">
-              <li><a href="/pricing" className="hover:text-foreground transition-colors">{t("price.plan")}</a></li>
+              <li><a href="/#preco" className="hover:text-foreground transition-colors">{t("price.plan")}</a></li>
             </ul>
           </div>
           <div>

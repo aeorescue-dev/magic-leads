@@ -2369,8 +2369,8 @@ def _create_stripe_checkout_session(user_id: int) -> tuple:
         mode="payment",
         currency="usd",
         line_items=[{"price": settings.STRIPE_PRICE_ID_PRO, "quantity": 1}],
-        success_url=f"{settings.FRONTEND_URL}/dashboard?paid=1",
-        cancel_url=f"{settings.FRONTEND_URL}/pricing",
+        success_url=f"{settings.FRONTEND_URL.rstrip('/')}/dashboard?paid=1",
+        cancel_url=f"{settings.FRONTEND_URL.rstrip('/')}/",
         client_reference_id=str(user_id),
         metadata={
             "user_id": str(user_id),

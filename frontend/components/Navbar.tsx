@@ -57,7 +57,7 @@ export function Navbar() {
         </Link>
 
         <div className="hidden md:flex items-center gap-6">
-          {tryLink(t("nav.pricing"), pathname === "/pricing", "/pricing")}
+          {tryLink(t("nav.pricing"), false, "/#preco")}
           {isLogged && tryLink(t("nav.dashboard"), pathname === "/dashboard", "/dashboard")}
         </div>
 
@@ -131,7 +131,7 @@ export function Navbar() {
       {/* Mobile menu */}
       {mobileOpen && (
         <div className="md:hidden border-t bg-background px-4 py-4 space-y-3 animate-slide-down">
-          <Link href="/pricing" className="block text-sm text-muted-foreground hover:text-foreground">
+          <Link href="/#preco" className="block text-sm text-muted-foreground hover:text-foreground">
             {t("nav.pricing")}
           </Link>
           {isLogged && (
