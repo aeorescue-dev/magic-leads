@@ -782,7 +782,7 @@ class DatabaseService:
 
     def get_leads_by_city(self, city: str, limit: int = 100, source_type: Optional[str] = None, category: Optional[str] = None) -> List[dict]:
         """Retorna leads mais recentes de uma cidade com filtros opcionais no SQL."""
-conn = get_connection()
+        conn = get_connection()
         try:
             sql = "SELECT * FROM leads WHERE city = ?"
             params = [city]
