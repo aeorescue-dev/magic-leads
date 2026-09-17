@@ -3,9 +3,11 @@
  * Verificação de ponta a ponta do deploy do frontend + clique real no Stripe.
  *
  * Executa 3 níveis de validação:
- *   1. BUNDLE  – confirma que o build AO VIVO tem o novo fluxo (sem cache antigo);
- *   2. CLIQUE  – navegador headless (Edge/Chrome) logado: clica em "Assinar $79/semana"
- *                na tela de bloqueio e espera o redirect para checkout.stripe.com;
+ *   1. BUNDLE  – confirma que o build AO VIVO é o novo fluxo (modal de checkout
+ *                integrado para contas sem acesso; sem resquícios do CTA antigo);
+ *   2. CLIQUE  – navegador headless (Edge/Chrome) logado com conta nova: o modal
+ *                'Assinar Magic Leads' ABRE automaticamente na tela de bloqueio,
+ *                e o clique em "Pagar $79/semana" redireciona para checkout.stripe.com;
  *   3. API     – replica o contrato do botão via API.
  *
  * Uso:
@@ -30,8 +32,12 @@ const PW_DIR = (
   "C:/Users/Fabio/AppData/Local/Temp/opencode/pw/node_modules/playwright-core"
 ).replace(/\/$/, "");
 
-const FIXED_MARKERS = ["Abrindo pagamento", "Falha ao iniciar o pagamento. Tente novamente."];
-const REMOVED_MARKERS = ["Ambiente de demonstração sem cobrança real"];
+const REQUIRED_MARKERS = ["Assinar $79/semana", "Assinar Magic Leads"];
+const STALE_MARKERS = [
+  "Abrindo pagamento",
+  "Falha ao iniciar o pagamento. Tente novamente.",
+  "Ambiente de demonstração sem cobrança real",
+];
 
 const TIMEOUT = 60000;
 
@@ -110,13 +116,13 @@ async function checkBundle() {
     for (const s of scripts.slice(0, 30)) {
       const js = await (await fetch(FRONT_URL + s, { signal: AbortSignal.timeout(TIMEOUT) })).text();
       bundle += js;
-      if (js.includes(FIXED_MARKERS[0])) break;
+      if (js.includes(REQUIRED_MARKERS[0])) break;
     }
-    const missing = FIXED_MARKERS.filter((m) => !bundle.includes(m));
-    const stale = REMOVED_MARKERS.filter((m) => bundle.includes(m));
-    if (missing.length) { fail(`marcadores novos ausentes: ${missing.join(", ")}`); return false; }
-    if (stale.length) { fail(`resquício antigo presente: ${stale.join(", ")}`); return false; }
-    ok("build corrigido está AO VIVO (sem cache antigo)");
+    const missing = REQUIRED_MARKERS.filter((m) => !bundle.includes(m));
+    const stale = STALE_MARKERS.filter((m) => bundle.includes(m));
+    if (missing.length) { fail(`marcadores do fluxo novo ausentes: ${missing.join(", ")}`); return false; }
+    if (stale.length) { fail(`resquício do fluxo antigo presente: ${stale.join(", ")}`); return false; }
+    ok("build com o fluxo novo está AO VIVO (modal integrado, CTA antigo removido)");
     return true;
   } catch (e) {
     fail("leitura do frontend: " + e.message);
@@ -168,23 +174,27 @@ async function browserClickTest() {
 
     await page.goto(`${FRONT_URL}/dashboard`, { waitUntil: "domcontentloaded", timeout: TIMEOUT });
 
-    banner("NÍVEL 2a — tela de bloqueio");
-    const btn = page.getByRole("button", { name: "Assinar $79/semana" });
+    banner("NÍVEL 2a — modal 'Assinar Magic Leads' auto-aberto (conta nova/sem acesso)");
+    const modalHeading = page.getByRole("heading", { name: "Assinar Magic Leads" });
     try {
-      await btn.waitFor({ state: "visible", timeout: 45000 });
+      await modalHeading.waitFor({ state: "visible", timeout: 45000 });
     } catch {
-      fail("CTA 'Assinar $79/semana' não apareceu. URL atual: " + page.url());
-      await maybeShot(page, "scripts/.shots/1-blocked");
+      fail("modal de checkout NÃO abriu automaticamente. URL atual: " + page.url());
+      const lockCta = page.getByRole("button", { name: "Assinar $79/semana" });
+      const ctaVisible = await lockCta.isVisible().catch(() => false);
+      if (ctaVisible) console.log("  (tela de bloqueio visível, mas sem auto-abertura do modal — build antigo ainda no ar)");
+      await maybeShot(page, "scripts/.shots/1-no-auto-modal");
       return null;
     }
-    ok("tela de bloqueio renderizada com o CTA");
+    ok("modal 'Assinar Magic Leads' abriu automaticamente na tela de bloqueio");
 
-    banner("NÍVEL 2b — clique -> redirect para Stripe");
+    banner("NÍVEL 2b — clique em 'Pagar $79/semana' -> redirect para Stripe");
+    const payBtn = page.getByRole("button", { name: /Pagar \$79\/semana/ });
     let finalUrl = "";
     try {
       await Promise.all([
         page.waitForURL((u) => u.href.startsWith("https://checkout.stripe.com/"), { timeout: TIMEOUT }),
-        btn.click(),
+        payBtn.click(),
       ]);
       finalUrl = page.url();
     } catch {

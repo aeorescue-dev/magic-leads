@@ -25,7 +25,8 @@ const LOG = path.join(ROOT, "scripts", "watch-deploy.log");
 const MARKER_FILE = path.join(SHOTS, "VERIFIED-DEPLOY.txt");
 
 const FRONT_URL = (process.env.FRONT_URL || "https://magicleads-oficial.vercel.app").replace(/\/$/, "");
-const FIXED_MARKER = "Abrindo pagamento";
+const NEW_MARKER = "Assinar $79/semana";
+const OLD_MARKER = "Abrindo pagamento";
 const TIMEOUT = 60000;
 
 function log(msg) {
@@ -46,11 +47,14 @@ async function bundleHasNewBuild() {
     const res = await fetch(FRONT_URL + "/dashboard", { signal: AbortSignal.timeout(TIMEOUT) });
     if (!res.ok) return false;
     const scripts = [...(await res.text()).matchAll(/src="(\/_next\/static\/[^"]+\.js)"/g)].map((m) => m[1]);
+    let bundle = "";
     for (const s of scripts.slice(0, 30)) {
       const js = await (await fetch(FRONT_URL + s, { signal: AbortSignal.timeout(TIMEOUT) })).text();
-      if (js.includes(FIXED_MARKER)) return true;
+      bundle += js;
+      if (js.includes(NEW_MARKER)) break;
     }
-    return false;
+    // Build novo: CTA novo presente E resquício do CTA antigo ausente.
+    return bundle.includes(NEW_MARKER) && !bundle.includes(OLD_MARKER);
   } catch {
     return false;
   }
