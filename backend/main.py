@@ -2333,6 +2333,57 @@ secure=not settings.DEBUG,
     )
 
 
+# ===== PASSWORD RESET =====
+
+from pydantic import BaseModel, EmailStr
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+    confirm_password: str
+
+@app.post("/api/auth/forgot-password")
+async def forgot_password(payload: ForgotPasswordRequest):
+    """Solicita reset de senha - envia token por email (mock)."""
+    try:
+        token = await db_service.create_password_reset_token(payload.email, expires_hours=1)
+        if token:
+            await db_service.send_password_reset_email(payload.email, token)
+        # Sempre retorna sucesso para não revelar se email existe
+        return {"status": "ok", "message": "Se o email estiver cadastrado, você receberá instruções para redefinir a senha."}
+    except Exception as e:
+        logger.error(f"Erro no forgot-password: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao processar solicitação")
+
+@app.post("/api/auth/reset-password")
+async def reset_password(payload: ResetPasswordRequest):
+    """Valida token e define nova senha."""
+    try:
+        if payload.new_password != payload.confirm_password:
+            raise HTTPException(status_code=422, detail="As senhas não coincidem.")
+        if len(payload.new_password) < 6:
+            raise HTTPException(status_code=422, detail="A senha deve ter pelo menos 6 caracteres.")
+        
+        user_id = await db_service.validate_password_reset_token(payload.token)
+        if not user_id:
+            raise HTTPException(status_code=400, detail="Token inválido ou expirado.")
+        
+        pwd_hash = security.hash_password(payload.new_password)
+        success = await db_service.consume_password_reset_token(payload.token, pwd_hash)
+        if not success:
+            raise HTTPException(status_code=400, detail="Token inválido ou expirado.")
+        
+        return {"status": "ok", "message": "Senha redefinida com sucesso! Faça login com sua nova senha."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro no reset-password: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao redefinir senha")
+
+
 # ------------------------------------------------------------------
 # Billing: checkout Stripe (ou mock local) + ativação de semana
 # ------------------------------------------------------------------

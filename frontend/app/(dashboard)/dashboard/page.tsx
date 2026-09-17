@@ -1382,9 +1382,11 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                     {t("dashboard.nav.alerts") || "Alertas"}
                   </h2>
                   <p className={`text-xs mt-0.5 ${T.text2}`}>
-                    {unreadCount > 0
-                      ? `${unreadCount} notificaç${unreadCount > 1 ? "ões" : "ão"} não lida${unreadCount > 1 ? "s" : ""}`
-                      : "Todas as notificações estão em dia"}
+                    {unreadCount > 1
+                      ? t("dashboard.notifications.unread_plural").replace("{count}", String(unreadCount))
+                      : unreadCount === 1
+                        ? t("dashboard.notifications.unread_singular").replace("{count}", "1")
+                        : t("dashboard.notifications.all_read")}
                   </p>
                 </div>
                 {notifications.some((n) => !n.read) && (
@@ -1568,7 +1570,7 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                     <input
                       value={historySearch}
                       onChange={(e) => setHistorySearch(e.target.value)}
-                      placeholder="Buscar por endereço ou dono..."
+                      placeholder={t("dashboard.search.placeholder")}
                       className={`w-full pl-8 pr-3 py-1.5 rounded-lg text-xs border outline-none ${T.border} ${isDark ? "bg-white/5 text-slate-200" : "bg-slate-100 text-slate-800"}`}
                     />
                   </div>
@@ -1586,13 +1588,13 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                   <div className="text-4xl mb-3">📋</div>
                   <div className={`text-sm font-medium ${isDark ? "text-slate-300" : "text-slate-700"}`}>
                     {historyStatus || historyCategory || historyPeriod || historySearch || historyNeedsAction
-                      ? "Nenhum lead corresponde aos filtros"
-                      : "Nenhum lead aqui ainda"}
+                      ? t("dashboard.history.empty")
+                      : t("dashboard.history.empty")}
                   </div>
                   <p className={`text-xs mt-1 ${T.text2}`}>
                     {historyStatus || historyCategory || historyPeriod || historySearch || historyNeedsAction
-                      ? "Ajuste os filtros para ver mais resultados."
-                      : "Reserve seus primeiros leads para eles aparecerem aqui."}
+                      ? t("dashboard.history.adjust_filters")
+                      : t("dashboard.history.reserve_first")}
                   </p>
                 </div>
               ) : (
@@ -1604,7 +1606,7 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                       lead.my_status === "reserved"
                         ? { label: `Seu · ${lead.hold_expires_at ? countdownLabel(lead.hold_expires_at) : "24h"}`, cls: "bg-rose-500/15 text-rose-400", icon: <Lock className="h-3 w-3" /> }
                         : lead.my_status === "negotiating"
-                          ? { label: "Em negociação", cls: "bg-amber-500/15 text-amber-400", icon: <MessageSquare className="h-3 w-3" /> }
+                          ? { label: t("dashboard.status.negotiation"), cls: "bg-amber-500/15 text-amber-400", icon: <MessageSquare className="h-3 w-3" /> }
                           : lead.my_status === "hold_expired"
                             ? { label: "Hold expirou", cls: "bg-slate-500/15 text-slate-400", icon: <Clock className="h-3 w-3" /> }
                             : lead.my_status === "converted"
@@ -2668,10 +2670,10 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
             </div>
             <h2 className="text-xl font-bold mt-5" style={{ color: isDark ? "#fff" : "#0f172a" }}>
               {subscription.status === "trial_expired"
-                ? "Seu teste grátis terminou"
+                ? t("dashboard.trial.ended")
                 : subscription.status === "expired" || subscription.status === "pending_payment"
-                  ? "Assinatura necessária"
-                  : "Seu plano expirou"}
+                  ? t("dashboard.subscription.expired")
+                  : t("dashboard.subscription.expired")}
             </h2>
             <p className={`text-sm mt-2 ${T.text2}`}>
               {subscription.message || "Assine $79/semana para continuar acessando os leads com exclusividade."}

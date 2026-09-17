@@ -880,6 +880,45 @@ const PT: Dict = {
   "landing.faqs": "O lead é realmente exclusivo ou mais alguém recebe?|Sim. Cada oportunidade vai para um contratante. Quando você reserva, aquele endereço fica com você por uma hora. Sem concorrência e sem leilão.||E se o telefone do dono não for encontrado?|Você só gasta crédito quando o contato chega. Se não encontrarmos o telefone, a reserva cai e nada é debitado.||Existe um limite diário?|Sim. O fluxo é limitado de propósito para você conseguir ligar, agendar e visitar no mesmo dia. Não é uma lista infinita para spam.||Como funciona o pagamento de $79 por semana?|Você paga $79 e libera 7 dias na hora. No oitavo dia o plano pausa sozinho. Se estiver fechando serviço e quiser continuar, basta renovar. Sem fidelidade, sem multa e sem comissão sobre suas obras.||Preciso entender de anúncios ou marketing?|Não. Você recebe endereço, tipo de reparo, urgência e a mensagem pronta para o WhatsApp. Seu trabalho é atender.||Quais cidades já estão ativas?|Hoje operamos em New York, Boston, Dallas e Chicago. Estamos em expansão e novas cidades entram conforme a operação abre.",
   "landing.waMsg": "Oi {name}, tudo bem? Vi o chamado de {cat} na {addr}. Atendo aqui na região. Consigo passar hoje às 16h para avaliar sem compromisso?",
   "landing.templates": "Telhado|Oi {nome}, tudo bem? Aqui é o Carlos da CM Roofing. Vi que você precisa de reparo no telhado aí na {endereco}. Atendo aqui na região toda semana. Consigo passar hoje às 16h para avaliar sem compromisso e já te passar um orçamento. Fica bom pra você?|Oi {nome}, sou Carlos da CM Roofing. Notei a necessidade de reparo no telhado na {endereco}. Posso passar hoje às 16h para vistoria sem custo. Responda SIM se puder receber.|Assunto: Vistoria para reparo de telhado na {endereco}\n\nOlá {nome},\n\nMeu nome é Carlos, especialista em telhados na região. Identifiquei a necessidade de manutenção no seu imóvel e gostaria de agendar uma visita técnica gratuita hoje ou amanhã.\n\nQual o melhor horário para você?||Encanamento|Oi {nome}, aqui é o Marcos da Silva Plumbing. Identifiquei o chamado de reparo hidráulico na {endereco}. Tenho equipe na área agora. Posso passar aí em 30 minutos para estancar o problema e avaliar a tubulação?|Oi {nome}, Marcos da Silva Plumbing. Vi a solicitação de conserto hidráulico na {endereco}. Temos técnicos no bairro. Podemos passar hoje?|Assunto: Atendimento hidráulico na {endereco}\n\nOlá {nome},\n\nSou da Silva Plumbing na sua região. Identificamos sua solicitação de reparo e temos disponibilidade imediata para visita técnica e orçamento sem custo.||Estrutura|Olá {nome}, sou o engenheiro Felipe da Apex Estruturas. Vi a necessidade de avaliação estrutural na {endereco}. Trabalhamos com reforço de fundação e contenção de trincas. Posso agendar uma vistoria técnica amanhã pela manhã?|Olá {nome}, aqui é o Felipe da Apex Estruturas. Podemos realizar a vistoria da fundação na {endereco} amanhã às 10h?|Assunto: Vistoria técnica estrutural na {endereco}\n\nPrezado(a) {nome},\n\nIdentificamos a demanda de reparo estrutural em seu imóvel. Nossa equipe de engenharia pode realizar a análise preliminar sem ônus inicial nesta semana.||Pintura|Oi {nome}, tudo bem? Aqui é o Ricardo da RG Pinturas & Fachadas. Vi seu pedido de pintura e impermeabilização na {endereco}. Já estamos numa obra no seu bairro. Posso passar hoje às 17h para medir e montar o orçamento?|Oi {nome}, Ricardo da RG Pinturas. Podemos passar na {endereco} hoje para orçamento de pintura externa sem custo?|Assunto: Orçamento de pintura na {endereco}\n\nOlá {nome},\n\nNossa equipe atende projetos residenciais no seu bairro. Gostaria de agendar uma visita rápida para apresentar a proposta comercial.||Elétrica|Oi {nome}, sou o André da EletroPro. Vi a necessidade de atualização do painel elétrico na {endereco}. Como problemas elétricos exigem segurança rápida, posso passar hoje no fim da tarde para inspecionar seu quadro?|Oi {nome}, André da EletroPro. Vi sua solicitação para serviço elétrico na {endereco}. Posso passar para inspeção hoje?|Assunto: Inspeção elétrica na {endereco}\n\nOlá {nome},\n\nSou eletricista licenciado na sua área e estou à disposição para inspecionar o disjuntor e a fiação do seu imóvel com segurança e garantia formal.||Aquecimento|Oi {nome}, aqui é o Daniel da HeatCare. Vi que você está com problema na caldeira na {endereco}. Sei o quanto isso é urgente no frio. Posso enviar nosso técnico hoje mesmo para restabelecer o sistema?|Oi {nome}, Daniel da HeatCare. Vi o problema no aquecimento na {endereco}. Técnico disponível para visita hoje.|Assunto: Manutenção de aquecimento na {endereco}\n\nOlá {nome},\n\nRecebemos a notificação de reparo no sistema de aquecimento. Temos plantão de atendimento e podemos visitar seu imóvel hoje.",
+
+  // ============ MISSING I18N KEYS FOR HARDCODED STRINGS ============
+  // Dashboard - Notifications
+  "dashboard.notifications.unread_plural": "{count} notificações não lidas",
+  "dashboard.notifications.unread_singular": "{count} notificação não lida",
+  "dashboard.notifications.all_read": "Todas as notificações estão em dia",
+
+  // Dashboard - Feed/Search
+  "dashboard.search.placeholder": "Buscar por endereço ou dono...",
+  "dashboard.history.empty": "Nenhum lead aqui ainda",
+  "dashboard.history.adjust_filters": "Ajuste os filtros para ver mais resultados.",
+  "dashboard.history.reserve_first": "Reserve seus primeiros leads para eles aparecerem aqui.",
+
+  // Dashboard - Status labels
+  // Dashboard - Auth/Subscription
+  "dashboard.trial.ended": "Seu teste grátis terminou",
+  "dashboard.subscription.expired": "Seu plano expirou",
+
+  // Auth Form
+  "dashboard.auth.session_fifo": "Sua sessão foi encerrada porque você entrou em outro dispositivo.",
+
+  // Password Reset
+  "dashboard.auth.forgot_password": "Esqueci minha senha",
+  "dashboard.auth.reset_password": "Redefinir senha",
+  "dashboard.auth.new_password": "Nova senha",
+  "dashboard.auth.confirm_password": "Confirmar nova senha",
+  "dashboard.auth.reset_email_sent": "Enviamos um e-mail com instruções para redefinir sua senha.",
+  "dashboard.auth.reset_token_invalid": "Token inválido ou expirado. Solicite um novo e-mail.",
+  "dashboard.auth.reset_success": "Senha redefinida com sucesso! Faça login com sua nova senha.",
+  "dashboard.auth.password_mismatch": "As senhas não coincidem.",
+
+  "dashboard.auth.cancel": "Cancelar",
+  "dashboard.auth.back_to_login": "Voltar ao login",
+
+  // Push Notifications
+
+  // Layout/SEO (for metadata)
+  "layout.title": "Magic Leads - Obras reais com dono identificado",
+  "layout.description": "Capturamos oportunidades de reforma e correção (telhado, estrutura, encanamento, pintura) direto de registros públicos atualizados diariamente, com dono identificado e 24h de reserva exclusiva por $79/semana.",
 };
 
 const EN: Dict = {
@@ -1707,6 +1746,46 @@ const EN: Dict = {
   "landing.faqs": "Is the lead really exclusive?|Yes. Each opportunity goes to one contractor. When you reserve, that address stays with you for one hour. No race and no auction.||What if the owner's phone is not found?|You only spend credit when the contact arrives. If we do not find the phone, the hold drops and nothing is charged.||Is there a daily cap?|Yes. The flow is limited on purpose so you can call, book and visit the same day. It is not an endless spam list.||How does the $79 weekly payment work?|You pay $79 and unlock 7 days instantly. On day 8 the plan pauses by itself. If you are closing work and want to continue, just renew. No lock-in, no fee, no cut of your jobs.||Do I need ads or marketing skills?|No. You get address, repair type, urgency and a ready WhatsApp message. Your job is to show up.||Which cities are live?|Today we operate in New York, Boston, Dallas and Chicago. We are expanding, and new cities come online as the operation opens.",
   "landing.waMsg": "Hi {name}, I saw the {cat} request at {addr}. I work this area. I can stop by today at 4pm for a no-obligation look. Does that work?",
   "landing.templates": "Telhado|Hi {nome}, this is Carlos from CM Roofing. I saw you need a roof repair at {endereco}. I work this area every week. I can stop by today at 4pm for a no-obligation look. Does that work?|Hi {nome}, Carlos from CM Roofing. Roof repair at {endereco}. I can visit today at 4pm. Reply YES if that works.|Subject: Roof inspection at {endereco}\n\nHi {nome},\n\nI am Carlos, a roofer in your area. I would like to schedule a free inspection today or tomorrow.\n\nWhat time works?||Encanamento|Hi {nome}, Marcos from Silva Plumbing. I saw the plumbing call at {endereco}. My crew is nearby. I can be there in 30 minutes to stop the leak.|Hi {nome}, Marcos from Silva Plumbing. Plumbing request at {endereco}. Crew in the neighborhood. Can we come today?|Subject: Plumbing visit at {endereco}\n\nHi {nome},\n\nSilva Plumbing is in your area and can visit today for a no-cost look.||Estrutura|Hi {nome}, Felipe from Apex Structure. I saw the structural request at {endereco}. We handle foundation and crack repair. Can I book a visit tomorrow morning?|Hi {nome}, Felipe from Apex Structure. Foundation visit at {endereco} tomorrow at 10am?|Subject: Structural visit at {endereco}\n\nHi {nome},\n\nOur engineering team can do a first look this week at no initial cost.||Pintura|Hi {nome}, Ricardo from RG Painting. I saw the paint request at {endereco}. We are already on a job in your neighborhood. I can measure today at 5pm.|Hi {nome}, Ricardo from RG Painting. Exterior paint quote at {endereco} today?|Subject: Paint quote at {endereco}\n\nHi {nome},\n\nWe work homes in your neighborhood. Happy to stop by for a quote.||Elétrica|Hi {nome}, André from EletroPro. I saw the panel update at {endereco}. Electrical issues need a fast look. I can inspect this afternoon.|Hi {nome}, André from EletroPro. Electrical request at {endereco}. Inspection today?|Subject: Electrical inspection at {endereco}\n\nHi {nome},\n\nLicensed electrician in your area. I can inspect the panel and wiring with a written warranty.||Aquecimento|Hi {nome}, Daniel from HeatCare. I saw the boiler issue at {endereco}. I know how urgent that is in the cold. I can send a tech today.|Hi {nome}, Daniel from HeatCare. Heating issue at {endereco}. Tech available today.|Subject: Heating repair at {endereco}\n\nHi {nome},\n\nWe have on-call techs and can visit today.",
+
+  // ============ MISSING I18N KEYS FOR HARDCODED STRINGS ============
+  // Dashboard - Notifications
+  "dashboard.notifications.unread_plural": "{count} unread notifications",
+  "dashboard.notifications.unread_singular": "{count} unread notification",
+  "dashboard.notifications.all_read": "All notifications are up to date",
+
+  // Dashboard - Feed/Search
+  "dashboard.search.placeholder": "Search by address or owner...",
+  "dashboard.history.empty": "No leads here yet",
+  "dashboard.history.adjust_filters": "Adjust filters to see more results.",
+  "dashboard.history.reserve_first": "Reserve your first leads to make them appear here.",
+
+  // Dashboard - Status labels
+
+  // Dashboard - Auth/Subscription
+  "dashboard.trial.ended": "Your free trial has ended",
+  "dashboard.subscription.expired": "Your plan has expired",
+
+  // Auth Form
+  "dashboard.auth.session_fifo": "Your session was closed because you logged in on another device.",
+
+  // Password Reset
+  "dashboard.auth.forgot_password": "Forgot my password",
+  "dashboard.auth.reset_password": "Reset password",
+  "dashboard.auth.new_password": "New password",
+  "dashboard.auth.confirm_password": "Confirm new password",
+  "dashboard.auth.reset_email_sent": "We sent an email with instructions to reset your password.",
+  "dashboard.auth.reset_token_invalid": "Invalid or expired token. Request a new email.",
+  "dashboard.auth.reset_success": "Password reset successfully! Log in with your new password.",
+  "dashboard.auth.password_mismatch": "Passwords do not match.",
+
+  "dashboard.auth.cancel": "Cancel",
+  "dashboard.auth.back_to_login": "Back to login",
+
+  // Push Notifications
+
+  // Layout/SEO
+  "layout.title": "Magic Leads - Real works with owner identified",
+  "layout.description": "We capture remodeling and repair opportunities (roof, structure, plumbing, paint) straight from public records updated daily. We validate address and owner before you waste a minute. Traditional platforms sell the same lead to 3 to 8 competitors — you get the address, the owner and a 24h exclusive hold for $79/week.",
 };
 
 const ES: Dict = {
@@ -2534,6 +2613,46 @@ const ES: Dict = {
   "landing.faqs": "¿El lead es realmente exclusivo?|Sí. Cada oportunidad va a un contratista. Cuando reservas, esa dirección queda contigo por una hora. Sin carrera y sin subasta.||¿Y si no aparece el teléfono del dueño?|Solo gastas crédito cuando llega el contacto. Si no encontramos el teléfono, la reserva cae y no se cobra nada.||¿Hay un límite diario?|Sí. El flujo está limitado a propósito para que puedas llamar, agendar y visitar el mismo día. No es una lista infinita de spam.||¿Cómo funciona el pago de $79 por semana?|Pagas $79 y liberas 7 días al instante. El día 8 el plan se pausa solo. Si estás cerrando trabajo y quieres seguir, renuevas. Sin permanencia, sin multa y sin comisión sobre tus obras.||¿Necesito saber de anuncios o marketing?|No. Recibes dirección, tipo de arreglo, urgencia y el mensaje listo para WhatsApp. Tu trabajo es atender.||¿Qué ciudades ya están activas?|Hoy operamos en New York, Boston, Dallas y Chicago. Estamos en expansión y nuevas ciudades entran cuando la operación abre.",
   "landing.waMsg": "Hola {name}, vi el llamado de {cat} en {addr}. Atiendo esta zona. Puedo pasar hoy a las 16h para evaluar sin compromiso. ¿Te viene bien?",
   "landing.templates": "Telhado|Hola {nome}, ¿cómo estás? Soy Carlos de CM Roofing. Vi que necesitas un arreglo en el techo en {endereco}. Atiendo esta zona todas las semanas. Puedo pasar hoy a las 16h para evaluar sin compromiso. ¿Te viene bien?|Hola {nome}, soy Carlos de CM Roofing. Vi el arreglo en el techo en {endereco}. Puedo pasar hoy a las 16h sin costo. Responde SÍ si puedes recibirme.|Asunto: Visita técnica para techo en {endereco}\n\nHola {nome},\n\nSoy Carlos, especialista en techos en la zona. Me gustaría agendar una visita técnica gratuita hoy o mañana.\n\n¿A qué hora te viene bien?||Encanamento|Hola {nome}, soy Marcos de Silva Plumbing. Vi el llamado de plomería en {endereco}. Tengo equipo en la zona ahora. Puedo pasar en 30 minutos a resolver la fuga.|Hola {nome}, Marcos de Silva Plumbing. Solicitud de plomería en {endereco}. Equipo en el barrio. ¿Podemos pasar hoy?|Asunto: Atención de plomería en {endereco}\n\nHola {nome},\n\nSilva Plumbing está en tu zona y tenemos disponibilidad inmediata para visita y presupuesto sin costo.||Estrutura|Hola {nome}, soy el ingeniero Felipe de Apex Estructuras. Vi la necesidad de evaluación estructural en {endereco}. Hacemos refuerzo de cimientos y grietas. ¿Podemos agendar visita mañana por la mañana?|Hola {nome}, Felipe de Apex Estructuras. ¿Podemos revisar los cimientos en {endereco} mañana a las 10h?|Asunto: Visita técnica estructural en {endereco}\n\nEstimado(a) {nome},\n\nNuestro equipo puede hacer el análisis preliminar sin costo inicial esta semana.||Pintura|Hola {nome}, soy Ricardo de RG Pinturas. Vi tu solicitud de pintura e impermeabilización en {endereco}. Ya estamos en una obra en tu barrio. ¿Puedo pasar hoy a las 17h a medir?|Hola {nome}, Ricardo de RG Pinturas. ¿Podemos pasar hoy por {endereco} para presupuesto de pintura exterior sin costo?|Asunto: Presupuesto de pintura en {endereco}\n\nHola {nome},\n\nAtendemos obras residenciales en tu barrio. Me gustaría agendar una visita rápida para presentarte la propuesta.||Elétrica|Hola {nome}, soy André de EletroPro. Vi el pedido para el panel eléctrico en {endereco}. La electricidad exige seguridad rápida. Puedo pasar esta tarde a inspeccionar.|Hola {nome}, André de EletroPro. Solicitud eléctrica en {endereco}. ¿Inspección hoy?|Asunto: Inspección eléctrica en {endereco}\n\nHola {nome},\n\nSoy electricista con licencia en tu zona y puedo revisar el panel con garantía por escrito.||Aquecimento|Hola {nome}, soy Daniel de HeatCare. Vi el problema en la caldera en {endereco}. Sé lo urgente que es con el frío. Puedo enviar a nuestro técnico hoy mismo.|Hola {nome}, Daniel de HeatCare. Problema de calefacción en {endereco}. Técnico disponible hoy.|Asunto: Reparación de calefacción en {endereco}\n\nHola {nome},\n\nRecibimos el aviso de reparación y podemos visitar tu inmueble hoy.",
+
+  // ============ MISSING I18N KEYS FOR HARDCODED STRINGS ============
+  // Dashboard - Notifications
+  "dashboard.notifications.unread_plural": "{count} notificaciones no leídas",
+  "dashboard.notifications.unread_singular": "{count} notificación no leída",
+  "dashboard.notifications.all_read": "Todas las notificaciones están al día",
+
+  // Dashboard - Feed/Search
+  "dashboard.search.placeholder": "Buscar por dirección o propietario...",
+  "dashboard.history.empty": "Aún no hay leads aquí",
+  "dashboard.history.adjust_filters": "Ajusta los filtros para ver más resultados.",
+  "dashboard.history.reserve_first": "Reserva tus primeros leads para que aparezcan aquí.",
+
+  // Dashboard - Status labels
+
+  // Dashboard - Auth/Subscription
+  "dashboard.trial.ended": "Tu prueba gratis terminó",
+  "dashboard.subscription.expired": "Tu plan expiró",
+
+  // Auth Form
+  "dashboard.auth.session_fifo": "Tu sesión se cerró porque entraste en otro dispositivo.",
+
+  // Password Reset
+  "dashboard.auth.forgot_password": "Olvidé mi contraseña",
+  "dashboard.auth.reset_password": "Restablecer contraseña",
+  "dashboard.auth.new_password": "Nueva contraseña",
+  "dashboard.auth.confirm_password": "Confirmar nueva contraseña",
+  "dashboard.auth.reset_email_sent": "Enviamos un email con instrucciones para restablecer tu contraseña.",
+  "dashboard.auth.reset_token_invalid": "Token inválido o expirado. Solicita un nuevo email.",
+  "dashboard.auth.reset_success": "Contraseña restablecida con éxito! Inicia sesión con tu nueva contraseña.",
+  "dashboard.auth.password_mismatch": "Las contraseñas no coinciden.",
+
+  "dashboard.auth.cancel": "Cancelar",
+  "dashboard.auth.back_to_login": "Volver al login",
+
+  // Push Notifications
+
+  // Layout/SEO
+  "layout.title": "Magic Leads - Obras reales con dueño identificado",
+  "layout.description": "Capturamos oportunidades de reforma y corrección (techo, estructura, fontanería, pintura) directo de registros públicos actualizados diariamente, con dueño identificado y 24h de reserva exclusiva por $79/semana.",
 };
 
 export const DICTS: Record<Lang, Dict> = { pt: PT, en: EN, es: ES };

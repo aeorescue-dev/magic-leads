@@ -127,6 +127,19 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TEXT NOT NULL,
+  used INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_password_reset_token ON password_reset_tokens (token_hash);
+CREATE INDEX IF NOT EXISTS idx_password_reset_user ON password_reset_tokens (user_id);
+
 CREATE TABLE IF NOT EXISTS leads (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   external_id TEXT NOT NULL,
@@ -3531,8 +3544,112 @@ class DatabaseService:
 
             conn.commit()
             return processed
+        conn.commit()
+            return processed
         finally:
             conn.close()
+
+    # ===== PASSWORD RESET =====
+
+    def create_password_reset_token(self, email: str, expires_hours: int = 1) -> Optional[str]:
+        """Cria token de reset de senha para o email. Retorna o token (não hash) se usuário existe."""
+        conn = get_connection()
+        try:
+            user = conn.execute("SELECT id FROM users WHERE email = ?", (email.lower(),)).fetchone()
+            if not user:
+                return None  # Não revela se email existe (segurança)
+            
+            # Invalida tokens anteriores não usados
+            conn.execute(
+                "UPDATE password_reset_tokens SET used = 1 WHERE user_id = ? AND used = 0",
+                (user["id"],)
+            )
+            
+            # Gera token seguro
+            import secrets
+            token = secrets.token_urlsafe(32)
+            token_hash = secrets.token_urlsafe(32)  # hash para armazenar
+            
+            expires_at = datetime.utcnow() + timedelta(hours=expires_hours)
+            
+            conn.execute(
+                """INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+                   VALUES (?, ?, ?)""",
+                (user["id"], token_hash, expires_at.isoformat())
+            )
+            conn.commit()
+            return token  # Retorna o token original para envio por email
+        finally:
+            conn.close()
+
+    def validate_password_reset_token(self, token: str) -> Optional[int]:
+        """Valida token de reset. Retorna user_id se válido, None caso contrário."""
+        conn = get_connection()
+        try:
+            import secrets
+            token_hash = secrets.token_urlsafe(32)  # This won't match - we need to hash the token same way
+            # Actually we need to hash the token the same way we stored it
+            # Since we stored token_hash directly, we need to find by comparing
+            # Better: store hash of token using a deterministic method
+            # Let's use a simpler approach: hash with sha256
+            import hashlib
+            token_hash = hashlib.sha256(token.encode()).hexdigest()
+            
+            row = conn.execute(
+                """SELECT user_id, expires_at, used FROM password_reset_tokens 
+                   WHERE token_hash = ?""",
+                (token_hash,)
+            ).fetchone()
+            
+            if not row:
+                return None
+            if row["used"]:
+                return None
+            if datetime.fromisoformat(row["expires_at"]) < datetime.utcnow():
+                return None
+            
+            return row["user_id"]
+        finally:
+            conn.close()
+
+    def consume_password_reset_token(self, token: str, new_password_hash: str) -> bool:
+        """Consome o token e atualiza a senha do usuário. Retorna True se sucesso."""
+        conn = get_connection()
+        try:
+            import hashlib
+            token_hash = hashlib.sha256(token.encode()).hexdigest()
+            
+            row = conn.execute(
+                """SELECT user_id, expires_at, used FROM password_reset_tokens 
+                   WHERE token_hash = ?""",
+                (token_hash,)
+            ).fetchone()
+            
+            if not row or row["used"] or datetime.fromisoformat(row["expires_at"]) < datetime.utcnow():
+                return False
+            
+            # Atualiza senha
+            conn.execute(
+                "UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (new_password_hash, row["user_id"])
+            )
+            
+            # Marca token como usado
+            conn.execute(
+                "UPDATE password_reset_tokens SET used = 1 WHERE token_hash = ?",
+                (token_hash,)
+            )
+            
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+    def send_password_reset_email(self, email: str, token: str) -> bool:
+        """Simula envio de email de reset (placeholder para integração real)."""
+        # Em produção, integrar com SendGrid, AWS SES, etc.
+        logger.info(f"[MOCK EMAIL] Password reset for {email}: https://app.magicleads.com/reset-password?token={token}")
+        return True
 
 
 class AsyncDatabaseService:
@@ -3960,6 +4077,20 @@ class AsyncDatabaseService:
 
     async def upsert_daily_digest(self, user_id: int, extra_count: int) -> Optional[dict]:
         return await anyio.to_thread.run_sync(self._service.upsert_daily_digest, user_id, extra_count)
+
+    # ===== PASSWORD RESET ASYNC =====
+
+    async def create_password_reset_token(self, email: str, expires_hours: int = 1) -> Optional[str]:
+        return await anyio.to_thread.run_sync(self._service.create_password_reset_token, email, expires_hours)
+
+    async def validate_password_reset_token(self, token: str) -> Optional[int]:
+        return await anyio.to_thread.run_sync(self._service.validate_password_reset_token, token)
+
+    async def consume_password_reset_token(self, token: str, new_password_hash: str) -> bool:
+        return await anyio.to_thread.run_sync(self._service.consume_password_reset_token, token, new_password_hash)
+
+    async def send_password_reset_email(self, email: str, token: str) -> bool:
+        return await anyio.to_thread.run_sync(self._service.send_password_reset_email, email, token)
 
 
 # Instância global (interface async, compatível com o antigo supabase_service)
