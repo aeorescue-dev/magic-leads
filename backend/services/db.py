@@ -3544,8 +3544,6 @@ class DatabaseService:
 
             conn.commit()
             return processed
-        conn.commit()
-            return processed
         finally:
             conn.close()
 
