@@ -1283,10 +1283,10 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
 
         # 3. Define cidades-alvo (base + dinâmicas se max_cities permitir)
         base_cities = [
-            {"domain": "data.cityofnewyork.us", "dataset": "erm2-nwe9", "city": "NYC", "state": "NY", "hours": 96, "fields": ["unique_key", "created_date", "complaint_type", "incident_address", "incident_zip", "latitude", "longitude"]},
+            {"domain": "data.cityofnewyork.us", "dataset": "erm2-nwe9", "city": "NYC", "state": "NY", "hours": 96, "limit": 5000, "fields": ["unique_key", "created_date", "complaint_type", "incident_address", "incident_zip", "latitude", "longitude", "status"]},
             {"domain": "data.cityofnewyork.us", "dataset": "wvxf-dwi5", "city": "NYC", "state": "NY", "hours": 120, "fields": ["violation_id", "inspection_date", "building_id", "address", "city", "state", "zip", "latitude", "longitude", "violation_type", "violation_status", "disposition_date"]},  # HPD Violations
-            {"domain": "data.cityofchicago.org", "dataset": "v6vf-nfxy", "city": "Chicago", "state": "IL", "hours": 48, "fields": ["service_request_number", "created_date", "sr_type", "street_address", "zip_code", "latitude", "longitude"]},
-            {"domain": "www.dallasopendata.com", "dataset": "d7e7-envw", "city": "Dallas", "state": "TX", "hours": 48, "fields": ["service_request_number", "created_date", "service_request_type", "address", "lat_location"]},
+            {"domain": "data.cityofchicago.org", "dataset": "v6vf-nfxy", "city": "Chicago", "state": "IL", "hours": 48, "fields": ["service_request_number", "created_date", "sr_type", "street_address", "zip_code", "latitude", "longitude", "status"]},
+            {"domain": "www.dallasopendata.com", "dataset": "d7e7-envw", "city": "Dallas", "state": "TX", "hours": 48, "fields": ["service_request_number", "created_date", "service_request_type", "address", "lat_location", "status"]},
         ]
 
         # Aplica hours_override se fornecido (ex: cron noturno com hours=120)
@@ -1481,7 +1481,7 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                     city_hours = entry["hours"]
                     leads = await socrata_scraper.fetch_from_dataset(
                         entry["domain"], entry["dataset"], entry["city"], entry["state"],
-                        field_names=fields, hours=city_hours, limit=2000,
+                        field_names=fields, hours=city_hours, limit=entry.get("limit", 2000),
                     )
 
                 # Boston (CKAN) - caso especial
@@ -1498,8 +1498,10 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                                     "sort": "open_dt DESC",
                                 },
                             )
+                            logger.info(f"Boston CKAN: HTTP {resp.status_code}, bytes={len(resp.text)}")
                             data = resp.json()
                             if not data.get("success"):
+                                logger.warning(f"Boston CKAN: success=FALSE -> {str(data.get('error'))[:300]}")
                                 leads = []
                             else:
                                 since = datetime.now() - timedelta(hours=entry["hours"])
