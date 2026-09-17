@@ -15,7 +15,7 @@
  * Env: FRONT_URL, API_URL, PW_DIR, NTFY_TOPIC (opcional, ex: seu-token-pessoal)
  */
 import { spawn } from "node:child_process";
-import { writeFileSync, appendFileSync, mkdirSync, existsSync } from "node:fs";
+import { writeFileSync, appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -23,6 +23,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SHOTS = path.join(ROOT, "scripts", ".shots");
 const LOG = path.join(ROOT, "scripts", "watch-deploy.log");
 const MARKER_FILE = path.join(SHOTS, "VERIFIED-DEPLOY.txt");
+const FP_FILE = path.join(SHOTS, "live-fingerprint.json");
 
 const FRONT_URL = (process.env.FRONT_URL || "https://magicleads-oficial.vercel.app").replace(/\/$/, "");
 const NEW_MARKER = "Assinar $79/semana";
@@ -42,11 +43,20 @@ function args() {
   return { once, every };
 }
 
-async function bundleHasNewBuild() {
+async function fetchScriptList() {
   try {
     const res = await fetch(FRONT_URL + "/dashboard", { signal: AbortSignal.timeout(TIMEOUT) });
-    if (!res.ok) return false;
-    const scripts = [...(await res.text()).matchAll(/src="(\/_next\/static\/[^"]+\.js)"/g)].map((m) => m[1]);
+    if (!res.ok) return null;
+    return [...(await res.text()).matchAll(/src="(\/_next\/static\/[^"]+\.js)"/g)].map((m) => m[1]);
+  } catch {
+    return null;
+  }
+}
+
+async function bundleHasNewBuild() {
+  try {
+    const scripts = await fetchScriptList();
+    if (!scripts) return false;
     let bundle = "";
     for (const s of scripts.slice(0, 30)) {
       const js = await (await fetch(FRONT_URL + s, { signal: AbortSignal.timeout(TIMEOUT) })).text();
@@ -60,11 +70,20 @@ async function bundleHasNewBuild() {
   }
 }
 
-const TASK_NAME = "MagicLeads-VerifyDeploy";
+function readStoredFingerprint() {
+  try {
+    return JSON.parse(readFileSync(FP_FILE, "utf8")).fp;
+  } catch {
+    return null;
+  }
+}
 
-function removeScheduledTask() {
+const TASK_NAME = "MagicLeads-VerifyDeploy";
+const AUTO_TASK_NAME = "MagicLeads-AutoDeployFront";
+
+function removeScheduledTask(name) {
   return new Promise((resolve) => {
-    const child = spawn("schtasks", ["/Delete", "/TN", TASK_NAME, "/F"], { shell: true });
+    const child = spawn("schtasks", ["/Delete", "/TN", name, "/F"], { shell: true });
     child.on("close", () => resolve());
   });
 }
@@ -98,25 +117,39 @@ async function notify(title, body) {
 }
 
 async function checkOnce() {
-  log("Webcheck: aguardando build novo (" + FRONT_URL + ")...");
-  if (await bundleHasNewBuild()) {
-    const { code, out } = await runVerifier();
-    const result = {
-      at: new Date().toISOString(),
-      exitCode: code,
-      output: out,
-    };
-    log("Verificação final: exit=" + code);
-    if (code === 0) {
-      mkdirSync(SHOTS, { recursive: true });
-      writeFileSync(MARKER_FILE, JSON.stringify(result, null, 2));
-      log("TUDO VERDE -> marker salvo em " + MARKER_FILE);
-      await removeScheduledTask();
-      await notify("MagicLeads: deploy VERDE ✅", "O build corrigido está no ar e o clique vai para o Stripe. Pode fazer o teste final na aba anônima.");
-      return true;
-    }
-    log("Verificação rodou mas falhou (exit " + code + "). Re-checando no próximo ciclo.");
+  const scripts = await fetchScriptList();
+  if (!scripts) {
+    log("Front sem resposta de /dashboard — re-checando no próximo ciclo.");
+    return false;
   }
+  const fp = scripts.join("|");
+  if (readStoredFingerprint() === fp) {
+    log("Bundle inalterado desde a última checagem — sem re-verificação.");
+    return false;
+  }
+  writeFileSync(FP_FILE, JSON.stringify({ fp, at: new Date().toISOString() }), "utf8");
+  log("Bundle mudou (" + scripts.length + " chunks) — nova fingerprint gravada. Conferindo marcadores...");
+  if (!(await bundleHasNewBuild())) {
+    log("Bundle mudou mas NÃO é o build novo (marcadores não batem — provável deploy do dono).");
+    return false;
+  }
+  const { code, out } = await runVerifier();
+  const result = {
+    at: new Date().toISOString(),
+    exitCode: code,
+    output: out,
+  };
+  log("Verificação final: exit=" + code);
+  if (code === 0) {
+    mkdirSync(SHOTS, { recursive: true });
+    writeFileSync(MARKER_FILE, JSON.stringify(result, null, 2));
+    log("TUDO VERDE -> marker salvo em " + MARKER_FILE);
+    await removeScheduledTask(TASK_NAME);
+    await removeScheduledTask(AUTO_TASK_NAME);
+    await notify("MagicLeads: deploy VERDE ✅", "O build corrigido está no ar e o clique vai para o Stripe. Pode fazer o teste final na aba anônima.");
+    return true;
+  }
+  log("Verificação rodou mas falhou (exit " + code + "). Próximo ciclo só re-verifica se o bundle mudar de novo.");
   return false;
 }
 
