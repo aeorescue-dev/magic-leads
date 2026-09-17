@@ -1,0 +1,12 @@
+# Conteúdo não-frontend (o build usa frontend/ via Root Directory do projeto)
+backend/
+data/
+scripts/
+.github/
+.git/
+node_modules/
+frontend/node_modules/
+*.log
+*.md
+query_*.py
+backend/push-official-test.json

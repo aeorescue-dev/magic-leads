@@ -2,10 +2,11 @@
 /**
  * Auto-deploy do frontend na Vercel (quota guard p/ plano free).
  *
- * O projeto magic-leads-frontend-final tem Root Directory definido como raiz
- * (null/top-level): `vercel deploy --prod` roda direto da pasta `frontend/`.
- * Deploys via Git continuam usando o vercel.json da raiz do repo
- * (rootDirectory: "frontend"), que prevalece sobre as Project Settings.
+ * O projeto magic-leads-frontend-final tem Root Directory = "frontend" (Project
+ * Setting). Portanto `vercel deploy --prod` roda da RAIZ do repo (o Vercel usa o
+ * Root Directory para isolar frontend/ no build). Deploys via Git seguem o
+ * mesmo Root Directory — a chave `rootDirectory` NÃO é aceita no schema do
+ * vercel.json. O .vercelignore evita enviar backend/data/scripts.
  *
  * Enquanto a cota diária (api-deployments-free-per-day) está fechada, o Vercel
  * responde "Resource is limited - try again in 24 hours" e o script apenas
@@ -95,7 +96,7 @@ async function main() {
   }
 
   const { code, out } = await run(PORTABLE_NODE, [VERCEL_CLI, "deploy", "--prod", "--yes"], {
-    cwd: FRONT_DIR,
+    cwd: REPO,
     timeout: TIMEOUT_MS,
   });
 
