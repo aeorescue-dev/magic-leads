@@ -1841,7 +1841,13 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                                   </>
                                 )}
                                 <span>·</span>
-                                <span>{formatRelativeTime(lead.date_reported, t)}</span>
+                                <span>{t("dashboard.freshness.reported")}: {formatRelativeTime(lead.date_reported, t)}</span>
+                                {lead.last_synced && (
+                                  <>
+                                    <span>·</span>
+                                    <span>{t("dashboard.freshness.synced")}: {formatRelativeTime(lead.last_synced, t)}</span>
+                                  </>
+                                )}
                               </div>
 
                               {vis === "available" && (
@@ -2021,6 +2027,14 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                     {selectedLead.date_reported ? new Date(selectedLead.date_reported).toLocaleDateString("pt-BR") : "—"}
                   </span>
                 </div>
+                {selectedLead.last_synced && (
+                  <div>
+                    <span className="text-xs text-slate-400 block">{t("dashboard.freshness.synced")}</span>
+                    <span className="font-semibold" suppressHydrationWarning>
+                      {new Date(selectedLead.last_synced).toLocaleDateString("pt-BR")}
+                    </span>
+                  </div>
+                )}
                 {selectedLead.mailing_address && (
                   <div className="sm:col-span-2">
                     <span className="text-xs text-slate-400 block">{t("dashboard.field.mailing_address") || "Endereço de correspondência"}</span>
@@ -2142,7 +2156,13 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
               {selectedLead.date_reported && (
                 <div className="text-xs text-slate-400">
                   <Clock className="h-3.5 w-3.5 inline mr-1" />
-                  Aberto em {formatRelativeTime(selectedLead.date_reported, t)}
+                  {t("dashboard.freshness.reported")}: {formatRelativeTime(selectedLead.date_reported, t)}
+                </div>
+              )}
+              {selectedLead.last_synced && (
+                <div className="text-xs text-slate-400">
+                  <Clock className="h-3.5 w-3.5 inline mr-1" />
+                  {t("dashboard.freshness.synced")}: {formatRelativeTime(selectedLead.last_synced, t)}
                 </div>
               )}
               {selectedLead.sla_target_dt && (

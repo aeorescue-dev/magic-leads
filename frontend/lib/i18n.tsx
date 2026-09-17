@@ -423,6 +423,8 @@ const PT: Dict = {
   "dashboard.freshness.updated": "Dados atualizados",
   "dashboard.freshness.updating": "Atualizando dados…",
   "dashboard.freshness.warmup": "Coletando dados…",
+  "dashboard.freshness.reported": "Reportado",
+  "dashboard.freshness.synced": "Sincronizado",
   "dashboard.trial.expired": "✕ Seu teste grátis de 7 dias encerrou. Assine $79/semana para continuar reservando oportunidades.",
   "dashboard.trial.active_prefix": "Teste 7 dias grátis ativo até",
   "dashboard.trial.active_suffix": "Quando expirar, é só pagar $79/semana para continuar.",

@@ -61,6 +61,9 @@ export interface LeadResponse {
   urgency_level: string;
   status: string;
   favorited: boolean;
+  // Freshness fields (WS1 dual labels)
+  first_seen?: string;
+  last_synced?: string;
   // Address details
   address_unit?: string;
   address_type?: string;

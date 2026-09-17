@@ -177,7 +177,12 @@ export function LeadsTable({ leads, onLeadUpdated }: LeadsTableProps) {
                       <OwnerCell lead={lead} onPhoneSave={handlePhoneSave} />
                     </td>
                     <td className="px-4 py-3 text-sm text-muted-foreground" onClick={() => toggleRow(lead.id)} suppressHydrationWarning>
-                      {new Date(lead.date_reported).toLocaleDateString("pt-BR")}
+                      <div>{new Date(lead.date_reported).toLocaleDateString("pt-BR")}</div>
+                      {lead.last_synced && (
+                        <div className="text-[10px] mt-0.5 opacity-70">
+                          {t("dashboard.freshness.synced")}: {new Date(lead.last_synced).toLocaleDateString("pt-BR")}
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3" onClick={() => toggleRow(lead.id)}>
                       <StatusBadge status={lead.status} />

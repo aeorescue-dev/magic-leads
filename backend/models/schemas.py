@@ -190,6 +190,10 @@ class LeadResponse(BaseModel):
     # Reveal (consentimento): true = dados do proprietário visíveis para o usuário
     revealed: bool = False
 
+    # Freshness fields (WS1 dual labels)
+    first_seen: Optional[str] = None
+    last_synced: Optional[str] = None
+
     model_config = ConfigDict(exclude_none=False)
 
 

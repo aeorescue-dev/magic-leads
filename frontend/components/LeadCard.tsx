@@ -6,6 +6,10 @@ interface LeadCardProps {
   lead: LeadResponse;
 }
 
+function fmt(d?: string) {
+  return d ? new Date(d).toLocaleDateString("pt-BR") : "—";
+}
+
 export function LeadCard({ lead }: LeadCardProps) {
   return (
     <div className="bg-white border rounded-lg p-4 shadow-sm hover:shadow-md transition">
@@ -21,7 +25,9 @@ export function LeadCard({ lead }: LeadCardProps) {
       <div className="text-xs text-gray-500 space-y-1">
         {lead.owner_name && <p>Proprietário: {lead.owner_name}</p>}
         {lead.owner_phone && <p>Telefone: {lead.owner_phone}</p>}
-        <p suppressHydrationWarning>Data: {new Date(lead.date_reported).toLocaleDateString("pt-BR")}</p>
+        <p suppressHydrationWarning>Data: {fmt(lead.date_reported)}</p>
+        {lead.first_seen && <p>Descoberto: {fmt(lead.first_seen)}</p>}
+        {lead.last_synced && <p>Sincronizado: {fmt(lead.last_synced)}</p>}
       </div>
     </div>
   );

@@ -1,0 +1,89 @@
+[2026-09-17T02:52:26.237Z] auto-deploy iniciado (quota guard)
+[2026-09-17T02:52:26.388Z] staging pronto: C:\Users\Fabio\AppData\Local\Temp\opencode\deploystage (frontend/)
+[2026-09-17T02:52:27.863Z] vercel exit=1
+[2026-09-17T02:52:27.864Z] quota ainda fechada (rate limit). Sair sem custo. Próxima tentativa no próximo ciclo.
+[2026-09-17T03:07:02.643Z] auto-deploy iniciado (quota guard)
+[2026-09-17T03:07:03.311Z] staging pronto: C:\Users\Fabio\AppData\Local\Temp\opencode\deploystage (frontend/)
+[2026-09-17T03:07:57.214Z] vercel exit=0
+[2026-09-17T03:07:57.238Z] DEPLOY OK -> magic-leads-frontend-final-v1ov85j5m-fabio-dev2.vercel.app em 55s
+[2026-09-17T03:07:57.242Z] FINGERPRINT do deploy: magic-leads-frontend-final-v1ov85j5m-fabio-dev2.vercel.app
+[2026-09-17T03:07:57.250Z] task  removida (sucesso).
+[2026-09-17T03:11:35.334Z] auto-deploy iniciado (quota guard)
+[2026-09-17T03:11:37.995Z] vercel exit=1
+[2026-09-17T03:11:37.996Z] quota ainda fechada (rate limit). Sair sem custo. Próxima tentativa no próximo ciclo.
+[2026-09-17T13:27:01.953Z] auto-deploy iniciado (quota guard)
+[2026-09-17T13:28:07.275Z] vercel exit=0
+[2026-09-17T13:28:07.277Z] DEPLOY CRIADO -> magic-leads-frontend-final-33vg2r91f-fabio-dev2.vercel.app em 65s (build é assíncrono)
+[2026-09-17T13:28:07.409Z] task MagicLeads-AutoDeployFront removida (sucesso).
+[2026-09-17T13:29:20.964Z] auto-deploy iniciado (quota guard)
+[2026-09-17T13:29:22.057Z] vercel exit=1
+[2026-09-17T13:29:22.063Z] DEPLOY FALHOU (não foi rate-limit). Exit=1. Resposta: Vercel CLI 59.13.1 (Node.js 22.15.0) Error: Cannot find module 'C:\Users\Fabio\AppData\Local\Temp\opencode\node-portable\node_modules\vercel\dist\chunks\setup-and-link-R5N7WJ46.js' imported from C:\Users\Fabio\AppData\Local\Temp\opencode\node-portable\node_modules\vercel\dist\chunks\chunk-66LPM47Z.js 
+[2026-09-17T13:48:01.947Z] auto-deploy iniciado (quota guard)
+[2026-09-17T13:48:06.961Z] vercel exit=1
+[2026-09-17T13:48:06.963Z] DEPLOY FALHOU (não foi rate-limit). Exit=1. Resposta: Vercel CLI 59.13.1 (Node.js 22.15.0) Loading teams…    Directory       ~\Documents\Default Project\garimpador-leads  Searching for existing projects… Detected services: • frontend  [Next.js]   • backend   [FastAPI]   Error: The top-level property `framework` cannot be used with `services` because the owning service is ambiguous. Move it under the relevant service in `services`. 
+[2026-09-17T14:03:02.010Z] auto-deploy iniciado (quota guard)
+[2026-09-17T14:03:04.193Z] vercel exit=1
+[2026-09-17T14:03:04.194Z] DEPLOY FALHOU (não foi rate-limit). Exit=1. Resposta: Vercel CLI 59.13.1 (Node.js 22.15.0) Loading teams…    Directory       ~\Documents\Default Project\garimpador-leads  Searching for existing projects… Detected services: • frontend  [Next.js]   • backend   [FastAPI]   Error: The top-level property `framework` cannot be used with `services` because the owning service is ambiguous. Move it under the relevant service in `services`. 
+[2026-09-17T14:18:03.637Z] auto-deploy iniciado (quota guard)
+[2026-09-17T14:18:07.594Z] vercel exit=1
+[2026-09-17T14:18:07.597Z] DEPLOY FALHOU (não foi rate-limit). Exit=1. Resposta: Vercel CLI 59.13.1 (Node.js 22.15.0) Loading teams…    Directory       ~\Documents\Default Project\garimpador-leads  Searching for existing projects… Detected services: • frontend  [Next.js]   • backend   [FastAPI]   Error: The top-level property `framework` cannot be used with `services` because the owning service is ambiguous. Move it under the relevant service in `services`. 
+[2026-09-17T14:33:02.035Z] auto-deploy iniciado (quota guard)
+[2026-09-17T14:33:04.448Z] vercel exit=1
+[2026-09-17T14:33:04.449Z] DEPLOY FALHOU (não foi rate-limit). Exit=1. Resposta: Vercel CLI 59.13.1 (Node.js 22.15.0) Loading teams…    Directory       ~\Documents\Default Project\garimpador-leads  Searching for existing projects… Detected services: • frontend  [Next.js]   • backend   [FastAPI]   Error: The top-level property `framework` cannot be used with `services` because the owning service is ambiguous. Move it under the relevant service in `services`. 
+[2026-09-17T14:48:02.062Z] auto-deploy iniciado (quota guard)
+[2026-09-17T14:48:04.479Z] vercel exit=1
+[2026-09-17T14:48:04.481Z] DEPLOY FALHOU (não foi rate-limit). Exit=1. Resposta: Vercel CLI 59.13.1 (Node.js 22.15.0) Loading teams…    Directory       ~\Documents\Default Project\garimpador-leads  Searching for existing projects… Detected services: • frontend  [Next.js]   • backend   [FastAPI]   Error: The top-level property `framework` cannot be used with `services` because the owning service is ambiguous. Move it under the relevant service in `services`. 
+[2026-09-17T15:03:01.839Z] auto-deploy iniciado (quota guard)
+[2026-09-17T15:03:04.263Z] vercel exit=1
+[2026-09-17T15:03:04.265Z] DEPLOY FALHOU (não foi rate-limit). Exit=1. Resposta: Vercel CLI 59.13.1 (Node.js 22.15.0) Loading teams…    Directory       ~\Documents\Default Project\garimpador-leads  Searching for existing projects… Detected services: • frontend  [Next.js]   • backend   [FastAPI]   Error: The top-level property `framework` cannot be used with `services` because the owning service is ambiguous. Move it under the relevant service in `services`. 
+[2026-09-17T15:18:02.103Z] auto-deploy iniciado (quota guard)
+[2026-09-17T15:18:04.283Z] vercel exit=1
+[2026-09-17T15:18:04.285Z] DEPLOY FALHOU (não foi rate-limit). Exit=1. Resposta: Vercel CLI 59.13.1 (Node.js 22.15.0) Loading teams…    Directory       ~\Documents\Default Project\garimpador-leads  Searching for existing projects… Detected services: • frontend  [Next.js]   • backend   [FastAPI]   Error: The top-level property `framework` cannot be used with `services` because the owning service is ambiguous. Move it under the relevant service in `services`. 
+[2026-09-17T15:33:01.808Z] auto-deploy iniciado (quota guard)
+[2026-09-17T15:33:04.366Z] vercel exit=1
+[2026-09-17T15:33:04.367Z] DEPLOY FALHOU (não foi rate-limit). Exit=1. Resposta: Vercel CLI 59.13.1 (Node.js 22.15.0) Loading teams…    Directory       ~\Documents\Default Project\garimpador-leads  Searching for existing projects… Detected services: • frontend  [Next.js]   • backend   [FastAPI]   Error: The top-level property `framework` cannot be used with `services` because the owning service is ambiguous. Move it under the relevant service in `services`. 
+[2026-09-17T15:48:02.073Z] auto-deploy iniciado (quota guard)
+[2026-09-17T15:48:04.151Z] vercel exit=1
+[2026-09-17T15:48:04.152Z] DEPLOY FALHOU (não foi rate-limit). Exit=1. Resposta: Vercel CLI 59.13.1 (Node.js 22.15.0) Loading teams…    Directory       ~\Documents\Default Project\garimpador-leads  Searching for existing projects… Detected services: • frontend  [Next.js]   • backend   [FastAPI]   Error: The top-level property `framework` cannot be used with `services` because the owning service is ambiguous. Move it under the relevant service in `services`. 
+[2026-09-17T16:03:02.142Z] auto-deploy iniciado (quota guard)
+[2026-09-17T16:03:04.133Z] vercel exit=1
+[2026-09-17T16:03:04.135Z] DEPLOY FALHOU (não foi rate-limit). Exit=1. Resposta: Vercel CLI 59.13.1 (Node.js 22.15.0) Loading teams…    Directory       ~\Documents\Default Project\garimpador-leads  Searching for existing projects… Detected services: • frontend  [Next.js]   • backend   [FastAPI]   Error: The top-level property `framework` cannot be used with `services` because the owning service is ambiguous. Move it under the relevant service in `services`. 
+[2026-09-17T16:18:03.160Z] auto-deploy iniciado (quota guard)
+[2026-09-17T16:18:06.443Z] vercel exit=1
+[2026-09-17T16:18:06.444Z] DEPLOY FALHOU (não foi rate-limit). Exit=1. Resposta: Vercel CLI 59.13.1 (Node.js 22.15.0) Loading teams…    Directory       ~\Documents\Default Project\garimpador-leads  Searching for existing projects… Detected services: • frontend  [Next.js]   • backend   [FastAPI]   Error: The top-level property `framework` cannot be used with `services` because the owning service is ambiguous. Move it under the relevant service in `services`. 
+[2026-09-17T16:33:03.710Z] auto-deploy iniciado (quota guard)
+[2026-09-17T16:33:06.682Z] vercel exit=1
+[2026-09-17T16:33:06.683Z] DEPLOY FALHOU (não foi rate-limit). Exit=1. Resposta: Vercel CLI 59.13.1 (Node.js 22.15.0) Loading teams…    Directory       ~\Documents\Default Project\garimpador-leads  Searching for existing projects… Detected services: • frontend  [Next.js]   • backend   [FastAPI]   Error: The top-level property `framework` cannot be used with `services` because the owning service is ambiguous. Move it under the relevant service in `services`. 
+[2026-09-17T16:48:02.142Z] auto-deploy iniciado (quota guard)
+[2026-09-17T16:48:04.587Z] vercel exit=1
+[2026-09-17T16:48:04.588Z] DEPLOY FALHOU (não foi rate-limit). Exit=1. Resposta: Vercel CLI 59.13.1 (Node.js 22.15.0) Loading teams…    Directory       ~\Documents\Default Project\garimpador-leads  Searching for existing projects… Detected services: • frontend  [Next.js]   • backend   [FastAPI]   Error: The top-level property `framework` cannot be used with `services` because the owning service is ambiguous. Move it under the relevant service in `services`. 
+[2026-09-17T17:03:02.047Z] auto-deploy iniciado (quota guard)
+[2026-09-17T17:03:04.543Z] vercel exit=1
+[2026-09-17T17:03:04.544Z] DEPLOY FALHOU (não foi rate-limit). Exit=1. Resposta: Vercel CLI 59.13.1 (Node.js 22.15.0) Loading teams…    Directory       ~\Documents\Default Project\garimpador-leads  Searching for existing projects… Detected services: • frontend  [Next.js]   • backend   [FastAPI]   Error: The top-level property `framework` cannot be used with `services` because the owning service is ambiguous. Move it under the relevant service in `services`. 
+[2026-09-17T17:18:02.249Z] auto-deploy iniciado (quota guard)
+[2026-09-17T17:18:05.404Z] vercel exit=1
+[2026-09-17T17:18:05.406Z] DEPLOY FALHOU (não foi rate-limit). Exit=1. Resposta: Vercel CLI 59.13.1 (Node.js 22.15.0) Loading teams…    Directory       ~\Documents\Default Project\garimpador-leads  Searching for existing projects… Detected services: • frontend  [Next.js]   • backend   [FastAPI]   Error: The top-level property `framework` cannot be used with `services` because the owning service is ambiguous. Move it under the relevant service in `services`. 
+[2026-09-17T17:33:02.361Z] auto-deploy iniciado (quota guard)
+[2026-09-17T17:33:05.548Z] vercel exit=1
+[2026-09-17T17:33:05.549Z] DEPLOY FALHOU (não foi rate-limit). Exit=1. Resposta: Vercel CLI 59.13.1 (Node.js 22.15.0) Loading teams…    Directory       ~\Documents\Default Project\garimpador-leads  Searching for existing projects… Detected services: • frontend  [Next.js]   • backend   [FastAPI]   Error: The top-level property `framework` cannot be used with `services` because the owning service is ambiguous. Move it under the relevant service in `services`. 
+[2026-09-17T17:48:02.434Z] auto-deploy iniciado (quota guard)
+[2026-09-17T17:48:14.149Z] vercel exit=1
+[2026-09-17T17:48:14.150Z] DEPLOY FALHOU (não foi rate-limit). Exit=1. Resposta: Vercel CLI 59.13.1 (Node.js 22.15.0) Loading teams…    Directory       ~\Documents\Default Project\garimpador-leads  Searching for existing projects… Detected services: • frontend  [Next.js]   • backend   [FastAPI]   Error: The top-level property `framework` cannot be used with `services` because the owning service is ambiguous. Move it under the relevant service in `services`. 
+[2026-09-17T18:03:02.227Z] auto-deploy iniciado (quota guard)
+[2026-09-17T18:03:04.725Z] vercel exit=1
+[2026-09-17T18:03:04.731Z] DEPLOY FALHOU (não foi rate-limit). Exit=1. Resposta: Vercel CLI 59.13.1 (Node.js 22.15.0) Loading teams…    Directory       ~\Documents\Default Project\garimpador-leads  Searching for existing projects… Detected services: • frontend  [Next.js]   • backend   [FastAPI]   Error: The top-level property `framework` cannot be used with `services` because the owning service is ambiguous. Move it under the relevant service in `services`. 
+[2026-09-17T18:18:02.303Z] auto-deploy iniciado (quota guard)
+[2026-09-17T18:18:04.352Z] vercel exit=1
+[2026-09-17T18:18:04.353Z] DEPLOY FALHOU (não foi rate-limit). Exit=1. Resposta: Vercel CLI 59.13.1 (Node.js 22.15.0) Loading teams…    Directory       ~\Documents\Default Project\garimpador-leads  Searching for existing projects… Detected services: • frontend  [Next.js]   • backend   [FastAPI]   Error: The top-level property `framework` cannot be used with `services` because the owning service is ambiguous. Move it under the relevant service in `services`. 
+[2026-09-17T18:33:04.057Z] auto-deploy iniciado (quota guard)
+[2026-09-17T18:33:07.561Z] vercel exit=1
+[2026-09-17T18:33:07.563Z] DEPLOY FALHOU (não foi rate-limit). Exit=1. Resposta: Vercel CLI 59.13.1 (Node.js 22.15.0) Loading teams…    Directory       ~\Documents\Default Project\garimpador-leads  Searching for existing projects… Detected services: • frontend  [Next.js]   • backend   [FastAPI]   Error: The top-level property `framework` cannot be used with `services` because the owning service is ambiguous. Move it under the relevant service in `services`. 
+[2026-09-17T18:48:02.208Z] auto-deploy iniciado (quota guard)
+[2026-09-17T18:48:04.589Z] vercel exit=1
+[2026-09-17T18:48:04.591Z] DEPLOY FALHOU (não foi rate-limit). Exit=1. Resposta: Vercel CLI 59.13.1 (Node.js 22.15.0) Loading teams…    Directory       ~\Documents\Default Project\garimpador-leads  Searching for existing projects… Detected services: • frontend  [Next.js]   • backend   [FastAPI]   Error: The top-level property `framework` cannot be used with `services` because the owning service is ambiguous. Move it under the relevant service in `services`. 
+[2026-09-17T19:03:02.781Z] auto-deploy iniciado (quota guard)
+[2026-09-17T19:03:06.534Z] vercel exit=1
+[2026-09-17T19:03:06.537Z] DEPLOY FALHOU (não foi rate-limit). Exit=1. Resposta: Vercel CLI 59.13.1 (Node.js 22.15.0) Loading teams…    Directory       ~\Documents\Default Project\garimpador-leads  Searching for existing projects… Detected services: • frontend  [Next.js]   • backend   [FastAPI]   Error: The top-level property `framework` cannot be used with `services` because the owning service is ambiguous. Move it under the relevant service in `services`. 
+[2026-09-17T19:18:02.309Z] auto-deploy iniciado (quota guard)
+[2026-09-17T19:18:04.817Z] vercel exit=1
+[2026-09-17T19:18:04.818Z] DEPLOY FALHOU (não foi rate-limit). Exit=1. Resposta: Vercel CLI 59.13.1 (Node.js 22.15.0) Loading teams…    Directory       ~\Documents\Default Project\garimpador-leads  Searching for existing projects… Detected services: • frontend  [Next.js]   • backend   [FastAPI]   Error: The top-level property `framework` cannot be used with `services` because the owning service is ambiguous. Move it under the relevant service in `services`. 

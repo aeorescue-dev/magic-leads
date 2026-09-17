@@ -158,6 +158,9 @@ def _to_lead_response(lead: dict) -> LeadResponse:
         reserved_by_me=reserved_by_me,
         reserved_by_other=reserved_by_other,
         revealed=show_owner,
+        # Freshness fields (WS1 dual labels)
+        first_seen=lead.get("date_first_seen") or lead.get("created_at"),
+        last_synced=lead.get("updated_at") or lead.get("created_at"),
     )
 
 

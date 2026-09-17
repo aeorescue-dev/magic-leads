@@ -122,6 +122,18 @@ export function LeadCardView({ leads, onLeadUpdated }: Props) {
               <span className="text-muted-foreground text-xs">{t("db.col.date")}</span>
               <span className="text-xs" suppressHydrationWarning>{new Date(lead.date_reported).toLocaleDateString("pt-BR")}</span>
             </div>
+            {lead.first_seen && (
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground text-xs">{t("dashboard.freshness.reported")}</span>
+                <span className="text-xs" suppressHydrationWarning>{new Date(lead.first_seen).toLocaleDateString("pt-BR")}</span>
+              </div>
+            )}
+            {lead.last_synced && (
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground text-xs">{t("dashboard.freshness.synced")}</span>
+                <span className="text-xs" suppressHydrationWarning>{new Date(lead.last_synced).toLocaleDateString("pt-BR")}</span>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-1.5 pt-3 border-t opacity-70 group-hover:opacity-100 transition-opacity">
