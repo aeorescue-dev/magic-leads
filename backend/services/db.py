@@ -3594,7 +3594,7 @@ class DatabaseService:
             token_hash = hashlib.sha256(token.encode()).hexdigest()
 
             row = conn.execute(
-                """SELECT user_id, expires_at, used FROM password_reset_tokens 
+                """SELECT user_id, expires_at, used FROM password_reset_tokens
                    WHERE token_hash = ?""",
                 (token_hash,)
             ).fetchone()
@@ -3618,7 +3618,7 @@ class DatabaseService:
             token_hash = hashlib.sha256(token.encode()).hexdigest()
 
             row = conn.execute(
-                """SELECT user_id, expires_at, used FROM password_reset_tokens 
+                """SELECT user_id, expires_at, used FROM password_reset_tokens
                    WHERE token_hash = ?""",
                 (token_hash,)
             ).fetchone()

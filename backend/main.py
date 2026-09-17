@@ -8,8 +8,10 @@ import sqlite3
 import uuid
 from datetime import datetime, timedelta
 from typing import List, Optional
+from pydantic import BaseModel, EmailStr
 
 import httpx
+import stripe
 from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -2335,8 +2337,6 @@ secure=not settings.DEBUG,
 
 # ===== PASSWORD RESET =====
 
-from pydantic import BaseModel, EmailStr
-
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
 
@@ -2366,16 +2366,16 @@ async def reset_password(payload: ResetPasswordRequest):
             raise HTTPException(status_code=422, detail="As senhas não coincidem.")
         if len(payload.new_password) < 6:
             raise HTTPException(status_code=422, detail="A senha deve ter pelo menos 6 caracteres.")
-        
+
         user_id = await db_service.validate_password_reset_token(payload.token)
         if not user_id:
             raise HTTPException(status_code=400, detail="Token inválido ou expirado.")
-        
+
         pwd_hash = security.hash_password(payload.new_password)
         success = await db_service.consume_password_reset_token(payload.token, pwd_hash)
         if not success:
             raise HTTPException(status_code=400, detail="Token inválido ou expirado.")
-        
+
         return {"status": "ok", "message": "Senha redefinida com sucesso! Faça login com sua nova senha."}
     except HTTPException:
         raise
@@ -2416,7 +2416,6 @@ def _create_stripe_checkout_session(user_id: int) -> tuple:
     if not has_stripe:
         return True, None
 
-    import stripe
     stripe.api_key = settings.STRIPE_API_KEY
     session = stripe.checkout.Session.create(
         mode="payment",
@@ -2511,7 +2510,6 @@ async def stripe_webhook(request: Request, stripe_signature: Optional[str] = Hea
 
     payload = await request.body()
     try:
-        import stripe
         stripe.api_key = settings.STRIPE_API_KEY or "sk_test_placeholder"
         event = stripe.Webhook.construct_event(
             payload, stripe_signature, settings.STRIPE_WEBHOOK_SECRET
