@@ -7,7 +7,8 @@ vocabulário real do banco. Estes testes blindam:
 1. Fonte única de verdade de acesso (is_access_active / normalize_status).
 2. Elegibilidade do despacho (acesso vigente + interesse + cidade).
 3. Fallback inteligente: usuário sem interesses = todas as categorias.
-4. Dead Man's Switch: inserted > 0 e fanout == 0 gera alerta crítico auditável.
+4. Dead Man's Switch: inserted > 0 e audience == 0 gera alerta crítico
+   auditável; cap diário atingido (audience > 0) NÃO dispara.
 """
 
 import asyncio
@@ -218,8 +219,13 @@ def test_fanout_creates_notification_and_dedups():
         "date_reported": datetime.utcnow().isoformat(),
     }
 
-    assert _run(fanout_new_lead_batch("Roof", [lead])) == 1
-    assert _run(fanout_new_lead_batch("Roof", [lead])) == 0   # dedup
+    first = _run(fanout_new_lead_batch("Roof", [lead]))
+    assert first.created == 1
+    assert first.audience == 1
+
+    second = _run(fanout_new_lead_batch("Roof", [lead]))
+    assert second.created == 0          # dedup: já notificado
+    assert second.audience == 1         # elegível ainda é detectado
 
     conn = get_connection()
     try:
@@ -236,20 +242,51 @@ def test_fanout_creates_notification_and_dedups():
 def test_dead_mans_switch_records_critical_alert():
     _reset_tables()
 
-    # Fluxo saudável -> sem alerta
-    assert _run(guard_silent_fanout(inserted=5, notified=3, context={"run_id": "ok"})) is True
+    # Fluxo saudável (notificou) -> sem alerta
+    assert _run(guard_silent_fanout(
+        inserted=5, notified=3, audience=10, context={"run_id": "ok"},
+    )) is True
+    # Fluxo saudável (cap diário atingido: há elegíveis, mas notified == 0)
+    # -> NÃO é bloqueio. Regressão do falso positivo NOTIFIER_SILENT_FAILURE.
+    assert _run(guard_silent_fanout(
+        inserted=1471, notified=0, audience=8, context={"run_id": "capped"},
+    )) is True
     conn = get_connection()
     try:
         assert conn.execute("SELECT COUNT(*) AS c FROM system_alerts").fetchone()["c"] == 0
     finally:
         conn.close()
 
-    # Bloqueio silencioso -> alerta crítico auditável
+    # Bloqueio silencioso (nenhum destinatário elegível) -> alerta crítico
     assert _run(guard_silent_fanout(
-        inserted=5, notified=0, context={"run_id": "blocked"},
+        inserted=5, notified=0, audience=0, context={"run_id": "blocked"},
     )) is False
 
     alerts = _run(db_service.get_recent_system_alerts(5))
     assert any(a["code"] == "NOTIFIER_SILENT_FAILURE" for a in alerts)
     assert alerts[0]["level"] == "critical"
     assert "blocked" in (alerts[0]["context"] or "")
+
+
+def test_acknowledge_system_alert_marks_and_misses():
+    _reset_tables()
+
+    created = _run(db_service.record_system_alert(
+        level="critical",
+        code="NOTIFIER_SILENT_FAILURE",
+        message="alerta de teste",
+        context={"run_id": "ack"},
+    ))
+    assert created is not None
+    assert created["acknowledged"] == 0
+
+    acked = _run(db_service.acknowledge_system_alert(created["id"]))
+    assert acked is not None
+    assert acked["acknowledged"] == 1
+
+    # Persistiu no banco.
+    alerts = _run(db_service.get_recent_system_alerts(5))
+    assert alerts[0]["acknowledged"] == 1
+
+    # ID inexistente -> None (rota responde 404).
+    assert _run(db_service.acknowledge_system_alert(999999)) is None

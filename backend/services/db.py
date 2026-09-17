@@ -2846,6 +2846,24 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def acknowledge_system_alert(self, alert_id: int) -> Optional[dict]:
+        """Marca um alerta de auditoria como reconhecido. Retorna o alerta ou None."""
+        conn = get_connection()
+        try:
+            conn.execute(
+                "UPDATE system_alerts SET acknowledged = 1 WHERE id = ?", (alert_id,)
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT * FROM system_alerts WHERE id = ?", (alert_id,)
+            ).fetchone()
+            return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Erro ao reconhecer system_alert {alert_id}: {e}")
+            return None
+        finally:
+            conn.close()
+
     # ===== CITY HEALTH (Circuit Breaker + Anomalia) =====
 
     def get_city_health(self, city: str) -> dict:
@@ -3752,6 +3770,11 @@ class AsyncDatabaseService:
     async def get_recent_system_alerts(self, limit: int = 20) -> List[dict]:
         return await anyio.to_thread.run_sync(
             self._service.get_recent_system_alerts, limit
+        )
+
+    async def acknowledge_system_alert(self, alert_id: int) -> Optional[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.acknowledge_system_alert, alert_id
         )
 
     async def add_notification_for_user(self, user_id: int, type: str, title: str, message: str, lead_id: Optional[int] = None) -> Optional[dict]:

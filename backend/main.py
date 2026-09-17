@@ -1050,6 +1050,15 @@ async def system_alerts(limit: int = 20, _admin: bool = Depends(_require_admin))
     return {"alerts": alerts, "count": len(alerts)}
 
 
+@app.post("/api/system/alerts/{alert_id}/ack")
+async def acknowledge_system_alert(alert_id: int, _admin: bool = Depends(_require_admin)):
+    """Marca um alerta de auditoria como reconhecido. Rota administrativa."""
+    alert = await db_service.acknowledge_system_alert(alert_id)
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alerta não encontrado")
+    return {"ok": True, "alert": alert}
+
+
 # ============================================================
 # DLQ (Dead Letter Queue) Helpers
 # ============================================================
@@ -1621,29 +1630,35 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
 
         # 6. Fan-out + Anomalia detection por categoria
         notified_total = 0
+        audience_total = 0
         added_by_cat: dict = {}
         if inserted > 0:
             for nl in newly_added:
                 cat = (nl.get("issue_category") or "Structure").strip()
                 added_by_cat.setdefault(cat, []).append(nl)
             for cat, items in added_by_cat.items():
-                sent = await notifier.fanout_new_lead_batch(cat, items)
-                notified_total += int(sent or 0)
+                report = await notifier.fanout_new_lead_batch(cat, items)
+                notified_total += int(report.created or 0)
+                audience_total += int(report.audience or 0)
 
-            # Dead Man's Switch: leads inseridos mas fan-out zerado = bloqueio.
+            # Dead Man's Switch: alerta só quando NÃO houver nenhum elegível
+            # (cap diário atingido é saudável e não dispara).
             await notifier.guard_silent_fanout(
                 inserted=inserted,
                 notified=notified_total,
+                audience=audience_total,
                 context={
                     "run_id": run_id,
                     "inserted": inserted,
                     "notified": notified_total,
+                    "audience": audience_total,
                     "categories": {c: len(v) for c, v in added_by_cat.items()},
                 },
             )
             logger.info(
                 f"Fan-out [run {run_id}]: {notified_total} notificação(ões) criada(s) "
-                f"para {inserted} lead(s) em {len(added_by_cat)} categoria(s)"
+                f"para {inserted} lead(s) em {len(added_by_cat)} categoria(s) "
+                f"(audiência elegível: {audience_total})"
             )
 
         # 7. Anomalia: cidades ativas que zeraram leads

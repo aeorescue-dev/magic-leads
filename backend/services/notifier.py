@@ -12,11 +12,13 @@ Elegibilidade (fonte única de verdade): services.access.is_access_active().
 Recorte de categoria: interesses marcados OU, sem nenhum interesse gravado,
 todas as categorias (fallback inteligente — ver db.get_users_interested_in).
 
-Dead Man's Switch: se leads foram inseridos mas nenhuma notificação saiu,
-isso é tratado como bloqueio de fluxo e escalado (log CRITICAL + auditoria).
+Dead Man's Switch: se leads foram inseridos mas NENHUM destinatário elegível
+foi encontrado, isso é tratado como bloqueio de fluxo e escalado (log CRITICAL
++ auditoria). Cap diário atingido NÃO é bloqueio (há elegíveis).
 """
 
 from collections import defaultdict
+from dataclasses import dataclass
 
 from ..utils.logger import logger
 from .db import db_service
@@ -24,19 +26,36 @@ from .db import db_service
 DAILY_ALERT_LIMIT = 10
 
 
-async def guard_silent_fanout(inserted: int, notified: int, context: dict) -> bool:
+@dataclass
+class FanoutReport:
+    """Resultado de um fan-out.
+
+    - created: notificações in-app efetivamente criadas.
+    - audience: nº de usuários ELEGÍVEIS encontrados (independente de cap/dedup).
+    """
+
+    created: int = 0
+    audience: int = 0
+
+
+async def guard_silent_fanout(
+    inserted: int, notified: int, audience: int, context: dict
+) -> bool:
     """Dead Man's Switch do despacho de alertas.
 
-    Se o motor inseriu leads (`inserted > 0`) mas o fan-out não notificou
-    NINGUÉM (`notified == 0`), dispara log CRITICAL e grava um alerta de
-    auditoria (tabela system_alerts) para detecção imediata de bloqueio.
+    Dispara log CRITICAL + alerta de auditoria (tabela system_alerts) SOMENTE
+    quando leads foram inseridos (`inserted > 0`) mas o fan-out não encontrou
+    NENHUM destinatário elegível (`audience == 0`) — cenário do bug de whitelist
+    de status que silenciava o despacho.
 
-    Retorna True se o fluxo está saudável, False se houve bloqueio silencioso.
+    Um `notified == 0` com `audience > 0` é considerado SAUDÁVEL: significa que
+    os elegíveis já bateram no cap diário (ou os leads já haviam sido notificados).
     """
-    if inserted > 0 and notified == 0:
+    if inserted > 0 and audience == 0:
         msg = (
             "BLOQUEIO DE FLUXO DE NOTIFICAÇÕES: "
-            f"{inserted} lead(s) inserido(s) mas 0 destinatário(s) notificado(s). "
+            f"{inserted} lead(s) inserido(s) mas nenhum destinatário elegível "
+            f"encontrado ({notified} notificação(ões) criada(s)). "
             "Possível divergência de status de acesso, interesses ou cities_filter."
         )
         logger.critical(msg)
@@ -125,24 +144,27 @@ async def fanout_new_lead(lead: dict) -> int:
     )
 
 
-async def fanout_new_lead_batch(category: str, leads: list) -> int:
+async def fanout_new_lead_batch(category: str, leads: list) -> FanoutReport:
     """Fan-out por lead: cria UMA notificação por lead × usuário, com:
     - Dedup: (user_id, lead_id) já notificado → skip
     - Cap: user já atingiu DAILY_ALERT_LIMIT alertas new_lead hoje → skip
     - Digest: skippeados acumulam em upsert_daily_digest (não conta no teto)
     - Push: enviado apenas a quem recebeu in-app (corresponde city + cap)
+
+    Retorna FanoutReport(created=..., audience=...) para o Dead Man's Switch
+    distinguir "cap atingido" (saudável) de "nenhum elegível" (bloqueio).
     """
     from .push_service import push_service
 
     if not leads:
-        return 0
+        return FanoutReport()
     category = (category or "").strip()
     if not category:
-        return 0
+        return FanoutReport()
 
     lead_ids = [ld.get("id") for ld in leads if ld.get("id")]
     if not lead_ids:
-        return 0
+        return FanoutReport()
 
     # --- 1) Busca em lote: contagens de hoje e dedup existente ---
     counts_rows = await db_service.get_new_lead_alert_counts_today()
@@ -243,12 +265,16 @@ async def fanout_new_lead_batch(category: str, leads: list) -> int:
             except Exception as e:
                 logger.error(f"Push digest error user={uid}: {e}")
 
+    # Audiência elegível = usuários distintos encontrados (antes de cap/dedup).
+    audience = len({u["id"] for users in users_cache.values() for u in users})
+
     logger.info(
         f"Notifier: {sent} notificações criadas, "
         f"{len(skipped)} usuário(s) no teto, "
+        f"{audience} elegível(is), "
         f"{len(leads)} leads na categoria '{category}'"
     )
-    return sent
+    return FanoutReport(created=sent, audience=audience)
 
 
 async def fanout_status_change(lead: dict, new_status: str) -> int:
