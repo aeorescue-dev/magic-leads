@@ -228,6 +228,73 @@ class FakeResendResponse:
         return self._json
 
 
+def test_forgot_password_endpoint_resend_full_flow(monkeypatch, capsys):
+    """Integração local: register -> forgot-password com EMAIL_API_KEY ativo.
+
+    Simula o endpoint da Resend validando o payload que o backend monta
+    (from/to/subject/body com o link) e responde 200. O endpoint deve
+    responder 200 sem cair no fallback de logs e sem ERRO EMAIL DETALHADO.
+    """
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setattr("backend.services.db.settings", type("S", (), {
+        "EMAIL_API_KEY": "re_INTEGRATION",
+        "EMAIL_FROM": "Magic Leads <noreply@seudominio.com>",
+        "FRONTEND_URL": "",
+        "SMTP_HOST": "", "SMTP_PORT": 465,
+        "SMTP_USER": "", "SMTP_PASS": "", "SMTP_FROM": "",
+    })())
+
+    received = {}
+
+    def fake_resend_post(url, headers=None, json=None, timeout=None):
+        received["url"] = url
+        received["auth"] = headers.get("Authorization")
+        received["content_type"] = headers.get("Content-Type")
+        received["payload"] = json
+        # Simula a Resend: qualquer payload malformado aqui devolveria 422;
+        # como o payload do backend é válido, responde 200.
+        return FakeResendResponse(200, json_data={"id": "integration-id-1"})
+
+    monkeypatch.setattr("backend.services.db.httpx.post", fake_resend_post)
+
+    client = TestClient(app)
+    email = "resend-flow@magicleads.app"
+
+    # registra usuário real (mesmo fluxo do frontend)
+    r = client.post("/api/auth/register", json={
+        "email": email, "password": OLD_PASS, "company_name": "Intel Teste",
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()["user"]["email"] == email
+
+    out_before = capsys.readouterr().out
+    del out_before
+
+    # dispara recuperação de senha
+    r = client.post("/api/auth/forgot-password", json={"email": email})
+    assert r.status_code == 200, r.text
+    assert r.json().get("status") == "ok"
+
+    out = capsys.readouterr().out
+
+    # chamou a Resend corretamente
+    assert received["url"] == "https://api.resend.com/emails"
+    assert received["auth"] == "Bearer re_INTEGRATION"
+    assert received["content_type"] == "application/json"
+    body = received["payload"]
+    assert body["from"] == "Magic Leads <noreply@seudominio.com>"
+    assert body["to"] == [email]
+    assert "Recuperação de senha" in body["subject"]
+    assert body["text"]
+    assert "reset-password?token=" in body["text"]
+
+    # sucesso: sem ERRO e sem cair no fallback de logs
+    assert "via Resend" in out
+    assert "ERRO EMAIL DETALHADO" not in out
+    assert "link de teste" not in out
+
+
 def _resend_settings(**overrides):
     base = {
         "FRONTEND_URL": "https://app.magicleads.com",
