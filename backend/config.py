@@ -68,7 +68,7 @@ class Settings(BaseSettings):
     # (Gerar: Conta Google -> Segurança -> Senhas de app).
     # Sem SMTP_USER/SMTP_PASS a rota imprime o link nos logs (modo dev, zero custo).
     SMTP_HOST: str = "smtp.gmail.com"
-    SMTP_PORT: int = 587          # 587 = STARTTLS (Gmail); 465 = SSL
+    SMTP_PORT: int = 465          # 465 = SSL direto (SMTP_SSL) — Railway bloqueia egresso na 587
     SMTP_USER: str = ""           # helpmagicleads@gmail.com (Railway env)
     SMTP_PASS: str = ""           # App Password do Gmail (Railway env)
     SMTP_FROM: str = "helpmagicleads@gmail.com"

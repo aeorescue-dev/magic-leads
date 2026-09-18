@@ -1,4 +1,6 @@
 import os
+import smtplib
+import socket
 import sqlite3
 from datetime import datetime, timedelta
 from typing import List, Optional
@@ -630,6 +632,40 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     notes_cols = {r["name"] for r in conn.execute("PRAGMA table_info(lead_notes)").fetchall()}
     if notes_cols and "user_id" not in notes_cols:
         conn.execute("ALTER TABLE lead_notes ADD COLUMN user_id INTEGER")
+
+
+class _SmtpConnect(smtplib.SMTP):
+    """Conexão SMTP forçando IPv4 (containers Docker/Railway costumam não ter
+    egresso IPv6 e falham com 'Network is unreachable'/ENETUNREACH quando o
+    getaddrinfo devolve endereço IPv6 primeiro).
+
+    Se `context` for passado, o socket já nasce com TLS (equivale a SMTP_SSL,
+    porta 465). Sem context, é uma conexão plana para STARTTLS (porta 587).
+    """
+
+    def __init__(self, host="", port=0, local_hostname=None, timeout=None,
+                 context=None, source_address=None):
+        self._tls_context = context
+        super().__init__(
+            host=host, port=port, local_hostname=local_hostname,
+            timeout=timeout, source_address=source_address,
+        )
+
+    def _get_socket(self, host, port, timeout):
+        last_err = None
+        for _, socktype, proto, _, sockaddr in socket.getaddrinfo(
+            host, port, socket.AF_INET, socket.SOCK_STREAM
+        ):
+            try:
+                sock = socket.socket(socket.AF_INET, socktype, proto)
+                sock.settimeout(timeout)
+                sock.connect(sockaddr)
+                if self._tls_context is not None:
+                    sock = self._tls_context.wrap_socket(sock, server_hostname=self._host)
+                return sock
+            except OSError as err:
+                last_err = err
+        raise last_err
 
 
 class DatabaseService:
@@ -3644,7 +3680,8 @@ class DatabaseService:
 
         - SMTP REAL: exige SMTP_USER e SMTP_PASS configurados (defaults Gmail
           já preenchidos em SMTP_HOST/PORT/FROM). Envia via smtplib (stdlib).
-          587 = STARTTLS, 465 = SSL. Qualquer falha cai para o modo logs.
+          465 = SSL direto (recomendado — Railway bloqueia egresso na 587).
+          Qualquer falha cai para o modo logs.
         - MODO LOGS (sem credenciais): imprime o link de forma LEGÍVEL nos logs
           do Railway, permitindo validar o fluxo completo sem custo algum.
         """
@@ -3658,7 +3695,7 @@ class DatabaseService:
             import traceback
             from email.message import EmailMessage
 
-            port = int(settings.SMTP_PORT or 587)
+            port = int(settings.SMTP_PORT or 465)
             host = settings.SMTP_HOST
             user = settings.SMTP_USER
             smtp_from = settings.SMTP_FROM or f"Magic Leads <{user}>"
@@ -3689,9 +3726,9 @@ class DatabaseService:
 
                 ctx = ssl.create_default_context()
                 if port == 465:
-                    server = smtplib.SMTP_SSL(host, port, timeout=15, context=ctx)
+                    server = _SmtpConnect(host, port, timeout=15, context=ctx)
                 else:
-                    server = smtplib.SMTP(host, port, timeout=15)
+                    server = _SmtpConnect(host, port, timeout=15)
                     server.starttls(context=ctx)
                 with server:
                     server.login(user, settings.SMTP_PASS)
@@ -3737,7 +3774,8 @@ class DatabaseService:
                     f"  Host: {host}:{port}\n"
                     f"  Erro: {type(e).__name__}: {e}\n"
                     f"  Possíveis causas:\n"
-                    f"    - Porta {port} bloqueada pelo firewall do Railway\n"
+                    f"    - Railway bloqueando egresso na porta {port} (erro 'Network is unreachable').\n"
+                    f"      Defina SMTP_PORT=465 (SSL) se ainda estiver 587 — a 465 é liberada.\n"
                     f"    - Host {host} inacessível (DNS ou firewall)\n"
                     f"  Traceback:\n{traceback.format_exc()}"
                 )

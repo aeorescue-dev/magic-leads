@@ -166,12 +166,12 @@ def test_smtp_auth_failure_logs_detailed_error(monkeypatch, capsys):
     monkeypatch.setattr("backend.services.db.settings", type("S", (), {
         "FRONTEND_URL": "https://app.magicleads.com",
         "SMTP_HOST": "smtp.gmail.com",
-        "SMTP_PORT": 587,
+        "SMTP_PORT": 465,
         "SMTP_USER": "helpmagicleads@gmail.com",
         "SMTP_PASS": "senha-errada",
         "SMTP_FROM": "helpmagicleads@gmail.com",
     })())
-    monkeypatch.setattr(smtplib, "SMTP", _raise_auth)
+    monkeypatch.setattr("backend.services.db._SmtpConnect", _raise_auth)
 
     captured, handler = _capture_reset_log()
     try:
