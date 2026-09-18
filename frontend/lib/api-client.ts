@@ -549,6 +549,30 @@ export async function logoutUser(): Promise<void> {
   clearAuthCookie();
 }
 
+export async function requestPasswordReset(email: string): Promise<{ message?: string }> {
+  return handle<{ message?: string }>(
+    await fetch(`${API_URL}/api/auth/forgot-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    }),
+  );
+}
+
+export async function resetPassword(
+  token: string,
+  new_password: string,
+  confirm_password: string,
+): Promise<{ message?: string }> {
+  return handle<{ message?: string }>(
+    await fetch(`${API_URL}/api/auth/reset-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, new_password, confirm_password }),
+    }),
+  );
+}
+
 export async function demoLogin(): Promise<AuthUser> {
   const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
   const res = await fetch(`${API_BASE}/api/auth/demo`, { method: "POST" });

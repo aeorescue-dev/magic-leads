@@ -7,6 +7,7 @@ import { Loader2, Eye, EyeOff, Mail, Lock, Building2, ArrowRight, CheckCircle, A
 import { useAuth } from '@/lib/auth';
 import { useI18n } from '@/lib/i18n';
 import { startCheckout } from '@/lib/billing';
+import { requestPasswordReset } from '@/lib/api-client';
 
 interface FormErrors {
   email?: string;
@@ -26,20 +27,11 @@ function ForgotPasswordForm({ onClose }: { onClose: () => void }) {
     if (!email.trim()) return;
     setSubmitting(true);
     try {
-      const res = await fetch('/api/auth/forgot-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setSuccess(true);
-        setTimeout(onClose, 2000);
-      } else {
-        alert(data.message || 'Erro ao solicitar reset');
-      }
-    } catch {
-      alert('Erro ao solicitar reset');
+      await requestPasswordReset(email);
+      setSuccess(true);
+      setTimeout(onClose, 2000);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Erro ao solicitar reset');
     } finally {
       setSubmitting(false);
     }

@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Loader2, Lock, CheckCircle, AlertTriangle, Eye, EyeOff, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { useI18n } from '@/lib/i18n';
+import { resetPassword } from '@/lib/api-client';
 
 export default function ResetPasswordPage() {
   const router = useRouter();
@@ -55,20 +56,11 @@ export default function ResetPasswordPage() {
 
     setSubmitting(true);
     try {
-      const res = await fetch('/api/auth/reset-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token, new_password: password, confirm_password: confirmPassword }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setSuccess(true);
-        setTimeout(() => router.push('/auth?reset=success'), 2000);
-      } else {
-        setError(data.message || t('dashboard.auth.reset_token_invalid') || 'Token inválido ou expirado.');
-      }
-    } catch {
-      setError('Erro ao redefinir senha. Tente novamente.');
+      await resetPassword(token, password, confirmPassword);
+      setSuccess(true);
+      setTimeout(() => router.push('/auth?reset=success'), 2000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('dashboard.auth.reset_token_invalid') || 'Token inválido ou expirado.');
     } finally {
       setSubmitting(false);
     }

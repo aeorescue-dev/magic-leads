@@ -3623,7 +3623,7 @@ class DatabaseService:
 
             # Atualiza senha
             conn.execute(
-                "UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                "UPDATE users SET password_hash = ? WHERE id = ?",
                 (new_password_hash, row["user_id"])
             )
 
