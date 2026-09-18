@@ -9,15 +9,15 @@ import uuid
 from datetime import datetime, timedelta
 from typing import List, Optional
 
-import httpx
 from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+import httpx
+import stripe
 from pydantic import BaseModel, EmailStr
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
-import stripe
 
 from .config import settings
 from .models.schemas import (
