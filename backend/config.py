@@ -67,6 +67,14 @@ class Settings(BaseSettings):
     #   SMTP_USER=helpmagicleads@gmail.com e SMTP_PASS=<App Password do Gmail>
     # (Gerar: Conta Google -> Segurança -> Senhas de app).
     # Sem SMTP_USER/SMTP_PASS a rota imprime o link nos logs (modo dev, zero custo).
+    #
+    # IMPORTANTE: o Railway BLOQUEIA egresso nas portas SMTP (465/587).
+    # Por isso o envio via API HTTP (Resend, porta 443 liberada) tem PRIORIDADE:
+    #   EMAIL_API_KEY=<Resend API Key> e EMAIL_FROM="Magic Leads <noreply@seudominio.com>"
+    # (Resend: resend.com, plano grátis 3.000 e-mails/mês; exige domínio verificado).
+    # O SMTP continua como fallback caso a API não esteja configurada.
+    EMAIL_API_KEY: str = ""       # Resend API Key (HTTPS :443 — liberado no Railway)
+    EMAIL_FROM: str = ""          # "Nome <email@dominio-verificado.com>"
     SMTP_HOST: str = "smtp.gmail.com"
     SMTP_PORT: int = 465          # 465 = SSL direto (SMTP_SSL) — Railway bloqueia egresso na 587
     SMTP_USER: str = ""           # helpmagicleads@gmail.com (Railway env)
@@ -86,12 +94,14 @@ class Settings(BaseSettings):
 
     @field_validator(
         "SMTP_HOST", "SMTP_USER", "SMTP_PASS", "SMTP_FROM",
+        "EMAIL_API_KEY",
         mode="before",
     )
     @classmethod
     def _strip_smtp_values(cls, v: object) -> object:
         # App Password do Gmail fica inválida se o Railway injetar \n/espaço no
-        # fim (causa comum de 535 "Username and Password not accepted").
+        # fim (causa comum de 535 "Username and Password not accepted"). O mesmo
+        # vale para API Keys (Resend rejeita chave com caracteres extras).
         if isinstance(v, str):
             return v.strip()
         return v

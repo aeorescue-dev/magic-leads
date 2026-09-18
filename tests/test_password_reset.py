@@ -124,9 +124,11 @@ def test_reset_password_empty_payload_422():
 
 
 def test_logs_mode_prints_readable_link(monkeypatch):
-    """Sem SMTP configurado, o link de reset é impresso de forma legível nos logs."""
+    """Sem canal de e-mail configurado, o link de reset é impresso de forma legível nos logs."""
     monkeypatch.setattr("backend.services.db.settings", type("S", (), {
         "FRONTEND_URL": "https://app.magicleads.com",
+        "EMAIL_API_KEY": "",
+        "EMAIL_FROM": "",
         "SMTP_HOST": "smtp.gmail.com",
         "SMTP_PORT": 587,
         "SMTP_USER": "",
@@ -165,6 +167,8 @@ def test_smtp_auth_failure_logs_detailed_error(monkeypatch, capsys):
 
     monkeypatch.setattr("backend.services.db.settings", type("S", (), {
         "FRONTEND_URL": "https://app.magicleads.com",
+        "EMAIL_API_KEY": "",
+        "EMAIL_FROM": "",
         "SMTP_HOST": "smtp.gmail.com",
         "SMTP_PORT": 465,
         "SMTP_USER": "helpmagicleads@gmail.com",
@@ -187,9 +191,14 @@ def test_smtp_auth_failure_logs_detailed_error(monkeypatch, capsys):
     # ainda cai em modo logs
     assert "PASSWORD RESET" in joined
     assert "reset-password?token=authtok" in joined
+
+
+def test_smtp_failure_falls_back_to_logs(monkeypatch):
     """Se SMTP_HOST estiver configurado mas falhar, a função cai para modo logs e não levanta exceção."""
     monkeypatch.setattr("backend.services.db.settings", type("S", (), {
         "FRONTEND_URL": "https://app.magicleads.com",
+        "EMAIL_API_KEY": "",
+        "EMAIL_FROM": "",
         "SMTP_HOST": "smtp.nenhum.server.invalido",
         "SMTP_PORT": 587,
         "SMTP_USER": "user",
@@ -207,3 +216,79 @@ def test_smtp_auth_failure_logs_detailed_error(monkeypatch, capsys):
     assert "PASSWORD RESET" in joined
     assert "fallback@magicleads.app" in joined
     assert any("reset-password?token=fallbacktok" in line for line in captured)
+
+
+class FakeResendResponse:
+    def __init__(self, status_code, text="", json_data=None):
+        self.status_code = status_code
+        self.text = text
+        self._json = json_data or {}
+
+    def json(self):
+        return self._json
+
+
+def _resend_settings(**overrides):
+    base = {
+        "FRONTEND_URL": "https://app.magicleads.com",
+        "EMAIL_API_KEY": "re_test_123",
+        "EMAIL_FROM": "Magic Leads <noreply@magicleads.com>",
+        "SMTP_HOST": "smtp.gmail.com",
+        "SMTP_PORT": 465,
+        "SMTP_USER": "",
+        "SMTP_PASS": "",
+        "SMTP_FROM": "",
+    }
+    base.update(overrides)
+    return type("S", (), base)()
+
+
+def test_resend_api_success_sends_email(monkeypatch, capsys):
+    """Com EMAIL_API_KEY, o envio vai pela API HTTPS da Resend (porta 443) e não cai em logs."""
+    monkeypatch.setattr("backend.services.db.settings", _resend_settings())
+    called = {}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        called["url"] = url
+        called["auth"] = headers["Authorization"]
+        called["to"] = json["to"]
+        called["subject"] = json["subject"]
+        return FakeResendResponse(200, json_data={"id": "abc123"})
+
+    monkeypatch.setattr("backend.services.db.httpx.post", fake_post)
+
+    ok = DatabaseService().send_password_reset_email("user@example.com", "tokresend")
+    out = capsys.readouterr().out
+
+    assert ok is True
+    assert called["url"] == "https://api.resend.com/emails"
+    assert called["auth"] == "Bearer re_test_123"
+    assert called["to"] == ["user@example.com"]
+    assert "Recuperação de senha" in called["subject"]
+    assert "via Resend" in out
+    assert "link de teste" not in out
+
+
+def test_resend_api_rejection_falls_back_to_logs(monkeypatch, capsys):
+    """Se a Resend recusar (ex.: domínio não verificado), imprime o corpo do erro e cai em logs."""
+    monkeypatch.setattr("backend.services.db.settings", _resend_settings(EMAIL_API_KEY="re_bad"))
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        return FakeResendResponse(403, text='{"message":"domain not verified"}')
+
+    monkeypatch.setattr("backend.services.db.httpx.post", fake_post)
+
+    captured, handler = _capture_reset_log()
+    try:
+        ok = DatabaseService().send_password_reset_email("user@example.com", "tokrej")
+        assert ok is True
+    finally:
+        logging.getLogger("garimpador").removeHandler(handler)
+
+    out = "\n".join(captured) + "\n" + capsys.readouterr().out
+    assert "ERRO EMAIL DETALHADO" in out
+    assert "403" in out
+    assert "domain not verified" in out
+    # caiu em modo logs, mantendo o fluxo de reset utilizável
+    assert "link de teste" in out
+    assert "reset-password?token=tokrej" in out

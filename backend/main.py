@@ -1756,16 +1756,21 @@ async def _lifespan(app):
         _scheduler_task = asyncio.create_task(_scheduler_loop())
         logger.info(f"Scheduler interno ativo (a cada {settings.SCRAPER_INTERVAL_HOURS}h)")
 
-    # Diagnóstico SMTP no startup
-    if settings.SMTP_USER and settings.SMTP_PASS:
+    # Diagnóstico de e-mail no startup
+    if settings.EMAIL_API_KEY:
         logger.info(
-            f"[SMTP-STARTUP] Modo SMTP ATIVO — host={settings.SMTP_HOST}, "
-            f"port={settings.SMTP_PORT}, user={settings.SMTP_USER}, "
-            f"from={settings.SMTP_FROM}, pass={'*' * len(settings.SMTP_PASS)}"
+            f"[EMAIL-STARTUP] Canal ATIVO: Resend HTTP (HTTPS :443) — "
+            f"from={settings.EMAIL_FROM or '(não definido — usar domínio verificado)'}"
+        )
+    elif settings.SMTP_USER and settings.SMTP_PASS:
+        logger.info(
+            f"[EMAIL-STARTUP] Canal ATIVO: SMTP — host={settings.SMTP_HOST}, "
+            f"port={settings.SMTP_PORT}, user={settings.SMTP_USER}"
         )
     else:
         logger.info(
-            "[SMTP-STARTUP] Modo logs (sem credenciais SMTP) — links de reset impressos nos logs"
+            "[EMAIL-STARTUP] Modo logs (sem EMAIL_API_KEY nem SMTP_USER/PASS) — "
+            "links de reset impressos nos logs"
         )
     yield
     if _scheduler_task:

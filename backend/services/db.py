@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 
 import anyio
+import httpx
 
 from ..config import settings
 from ..models.schemas import EnrichedLead
@@ -3678,122 +3679,29 @@ class DatabaseService:
     def send_password_reset_email(self, email: str, token: str) -> bool:
         """Envia o link de recuperação de senha.
 
-        - SMTP REAL: exige SMTP_USER e SMTP_PASS configurados (defaults Gmail
-          já preenchidos em SMTP_HOST/PORT/FROM). Envia via smtplib (stdlib).
-          465 = SSL direto (recomendado — Railway bloqueia egresso na 587).
-          Qualquer falha cai para o modo logs.
-        - MODO LOGS (sem credenciais): imprime o link de forma LEGÍVEL nos logs
-          do Railway, permitindo validar o fluxo completo sem custo algum.
+        Canais em ordem de prioridade — o Railway BLOQUEIA egresso nas portas
+        SMTP (465/587), mas libera HTTPS :443 (usado pelo app para Socrata,
+        Stripe, etc.):
+          1. API HTTP (Resend) — exige EMAIL_API_KEY. Grátis (3.000 e-mails/mês).
+          2. SMTP — exige SMTP_USER+SMTP_PASS (465 SSL ou 587 STARTTLS).
+          3. MODO LOGS (default) — link legível nos logs do Railway.
+        Se o canal ativo falhar, imprime diagnóstico detalhado e cai no modo logs.
         """
         reset_url = f"{settings.FRONTEND_URL.rstrip('/')}/reset-password?token={token}"
 
-        smtp_ready = bool(settings.SMTP_USER and settings.SMTP_PASS)
-
-        if smtp_ready:
-            import smtplib
-            import ssl
-            import traceback
-            from email.message import EmailMessage
-
-            port = int(settings.SMTP_PORT or 465)
-            host = settings.SMTP_HOST
-            user = settings.SMTP_USER
-            smtp_from = settings.SMTP_FROM or f"Magic Leads <{user}>"
-
-            logger.info(
-                f"[PASSWORD-RESET-SMTP] Tentando envio — host={host}, port={port}, "
-                f"user={user}, from={smtp_from}, pass={'*' * len(settings.SMTP_PASS)}"
-            )
-            print(
-                f"[PASSWORD-RESET-SMTP] Tentando envio — host={host}, port={port}, "
-                f"user={user}, from={smtp_from}, pass={'*' * len(settings.SMTP_PASS)}",
-                flush=True,
-            )
-
-            try:
-                msg = EmailMessage()
-                msg["Subject"] = "Magic Leads — Recuperação de senha"
-                msg["From"] = smtp_from
-                msg["To"] = email
-                msg["Reply-To"] = settings.SMTP_FROM or user
-                msg.set_content(
-                    "Você solicitou a recuperação de senha na Magic Leads.\n\n"
-                    "Clique no link abaixo para redefinir sua senha:\n\n"
-                    f"{reset_url}\n\n"
-                    "O link é válido por 1 hora. Se não foi você, ignore este e-mail.\n\n"
-                    "— Equipe Magic Leads"
-                )
-
-                ctx = ssl.create_default_context()
-                if port == 465:
-                    server = _SmtpConnect(host, port, timeout=15, context=ctx)
-                else:
-                    server = _SmtpConnect(host, port, timeout=15)
-                    server.starttls(context=ctx)
-                with server:
-                    server.login(user, settings.SMTP_PASS)
-                    server.send_message(msg)
-
-                ok_msg = (
-                    f"[PASSWORD-RESET-SMTP] E-mail de recuperação enviado para {email} "
-                    f"via {host}:{port} (From: {smtp_from})"
-                )
-                logger.info(ok_msg)
-                print(ok_msg, flush=True)
+        if settings.EMAIL_API_KEY:
+            if self._send_via_email_api(email, reset_url):
                 return True
-
-            except Exception as e:
-                # Diagnóstico completo: qualquer erro aqui aparece INTEGRALMENTE
-                # nos logs do Railway (stdout), com o traceback exato do Python.
-                exc_type = type(e).__name__
-                if isinstance(e, smtplib.SMTPAuthenticationError):
-                    hints = [
-                        "FALHA DE AUTENTICAÇÃO SMTP (535)",
-                        "  - App Password inválida/expirada (Conta Google > Segurança > Senhas de app)",
-                        "  - Verificação em 2 etapas DESATIVADA na conta Gmail",
-                        "  - SMTP_USER não corresponde à conta Google autenticada",
-                        "  - Espaço/quebra de linha no fim da SMTP_PASS no Railway",
-                    ]
-                elif isinstance(e, (ConnectionRefusedError, OSError)):
-                    hints = [
-                        "FALHA DE CONEXÃO",
-                        "  - Railway bloqueando egresso nessa porta ('Network is unreachable')",
-                        "  - Confira SMTP_PORT=465 no Railway (ou remova a variável)",
-                    ]
-                elif isinstance(e, TimeoutError):
-                    hints = [
-                        "TIMEOUT (15s)",
-                        "  - Sem egresso de rede ou DNS lento dentro do Railway",
-                    ]
-                else:
-                    hints = [f"ERRO INESPERADO ({e!r})"]
-
-                err_msg = (
-                    "============================================================\n"
-                    " ERRO SMTP DETALHADO\n"
-                    f"  Tipo  : {exc_type}\n"
-                    f"  Erro  : {e!r}\n"
-                    f"  Host  : {host}:{port}\n"
-                    f"  User  : {user}\n"
-                    f"  From  : {smtp_from}\n"
-                    "  Hints :\n"
-                    + "\n".join(f"    {h}" for h in hints)
-                    + "\n"
-                    "  Traceback:\n"
-                    f"{traceback.format_exc()}"
-                )
-                print(f"ERRO SMTP DETALHADO: {exc_type}: {e!r}", flush=True)
-                print(err_msg, flush=True)
-                logger.error(err_msg)
+        elif settings.SMTP_USER and settings.SMTP_PASS:
+            if self._send_via_smtp(email, reset_url):
+                return True
         else:
             print(
-                "[PASSWORD-RESET-SMTP] Credenciais SMTP AUSENTES no ambiente "
-                "(SMTP_USER e/ou SMTP_PASS vazias no Railway) — usando modo logs.",
+                "[PASSWORD-RESET] Nenhum canal de e-mail configurado "
+                "(EMAIL_API_KEY ou SMTP_USER/PASS vazios no Railway) — modo logs.",
                 flush=True,
             )
-            logger.warning(
-                "[PASSWORD-RESET-SMTP] Credenciais SMTP ausentes — stream para logs"
-            )
+            logger.warning("[PASSWORD-RESET] Sem canal de e-mail configurado — modo logs")
 
         logger.info(
             "============================================================\n"
@@ -3804,6 +3712,182 @@ class DatabaseService:
         logger.info(f" Link   : {reset_url}")
         logger.info("============================================================")
         return True
+
+    def _send_via_email_api(self, email: str, reset_url: str) -> bool:
+        """Envia via Resend HTTPS (:443, liberado no Railway). Retorna False em falha."""
+        import traceback
+
+
+        email_from = settings.EMAIL_FROM or "Magic Leads <noreply@magic-leads-production.up.railway.app>"
+        body = (
+            "Você solicitou a recuperação de senha na Magic Leads.\n\n"
+            "Clique no link abaixo para redefinir sua senha:\n\n"
+            f"{reset_url}\n\n"
+            "O link é válido por 1 hora. Se não foi você, ignore este e-mail.\n\n"
+            "— Equipe Magic Leads"
+        )
+
+        print(
+            "[PASSWORD-RESET-API] Tentando envio via Resend (HTTPS :443) — "
+            f"from={email_from}, to={email}",
+            flush=True,
+        )
+        logger.info(f"[PASSWORD-RESET-API] Envio via Resend — from={email_from}, to={email}")
+
+        try:
+            resp = httpx.post(
+                "https://api.resend.com/emails",
+                headers={
+                    "Authorization": f"Bearer {settings.EMAIL_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "from": email_from,
+                    "to": [email],
+                    "subject": "Magic Leads — Recuperação de senha",
+                    "text": body,
+                },
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                ok_msg = (
+                    "[PASSWORD-RESET-API] E-mail de recuperação enviado via Resend "
+                    f"para {email} (id={resp.json().get('id')})"
+                )
+                print(ok_msg, flush=True)
+                logger.info(ok_msg)
+                return True
+
+            err_msg = (
+                "============================================================\n"
+                " ERRO EMAIL DETALHADO (Resend recusou o envio)\n"
+                f"  HTTP  : {resp.status_code}\n"
+                f"  Resposta da API: {resp.text[:1000]}\n"
+                "  Possíveis causas:\n"
+                "    - EMAIL_FROM não é um domínio verificado na Resend\n"
+                "      (resend.com -> Domains; para teste use 'onboarding@resend.dev')\n"
+                "    - EMAIL_API_KEY inválida/expirada (resend.com -> API Keys)\n"
+                "    - Limite diário gratuito atingido (100/dia)\n"
+            )
+            print(err_msg, flush=True)
+            logger.error(err_msg)
+            return False
+
+        except Exception as e:
+            exc_type = type(e).__name__
+            err_msg = (
+                "============================================================\n"
+                " ERRO EMAIL DETALHADO (falha de rede/HTTP na Resend)\n"
+                f"  Tipo  : {exc_type}\n"
+                f"  Erro  : {e!r}\n"
+                f"  From  : {email_from}\n"
+                f"  To    : {email}\n"
+                f"  Traceback:\n{traceback.format_exc()}"
+            )
+            print(f"ERRO EMAIL DETALHADO: {exc_type}: {e!r}", flush=True)
+            print(err_msg, flush=True)
+            logger.error(err_msg)
+            return False
+
+    def _send_via_smtp(self, email: str, reset_url: str) -> bool:
+        """Envia via SMTP (465 SSL / 587 STARTTLS). Retorna False em falha."""
+        import smtplib
+        import ssl
+        import traceback
+        from email.message import EmailMessage
+
+        port = int(settings.SMTP_PORT or 465)
+        host = settings.SMTP_HOST
+        user = settings.SMTP_USER
+        smtp_from = settings.SMTP_FROM or f"Magic Leads <{user}>"
+
+        logger.info(
+            f"[PASSWORD-RESET-SMTP] Tentando envio — host={host}, port={port}, "
+            f"user={user}, from={smtp_from}, pass={'*' * len(settings.SMTP_PASS)}"
+        )
+        print(
+            f"[PASSWORD-RESET-SMTP] Tentando envio — host={host}, port={port}, "
+            f"user={user}, from={smtp_from}, pass={'*' * len(settings.SMTP_PASS)}",
+            flush=True,
+        )
+
+        try:
+            msg = EmailMessage()
+            msg["Subject"] = "Magic Leads — Recuperação de senha"
+            msg["From"] = smtp_from
+            msg["To"] = email
+            msg["Reply-To"] = settings.SMTP_FROM or user
+            msg.set_content(
+                "Você solicitou a recuperação de senha na Magic Leads.\n\n"
+                "Clique no link abaixo para redefinir sua senha:\n\n"
+                f"{reset_url}\n\n"
+                "O link é válido por 1 hora. Se não foi você, ignore este e-mail.\n\n"
+                "— Equipe Magic Leads"
+            )
+
+            ctx = ssl.create_default_context()
+            if port == 465:
+                server = _SmtpConnect(host, port, timeout=15, context=ctx)
+            else:
+                server = _SmtpConnect(host, port, timeout=15)
+                server.starttls(context=ctx)
+            with server:
+                server.login(user, settings.SMTP_PASS)
+                server.send_message(msg)
+
+            ok_msg = (
+                f"[PASSWORD-RESET-SMTP] E-mail de recuperação enviado para {email} "
+                f"via {host}:{port} (From: {smtp_from})"
+            )
+            logger.info(ok_msg)
+            print(ok_msg, flush=True)
+            return True
+
+        except Exception as e:
+            # Diagnóstico completo: qualquer erro aparece INTEGRALMENTE nos logs
+            # do Railway (stdout), com o traceback exato do Python.
+            exc_type = type(e).__name__
+            if isinstance(e, smtplib.SMTPAuthenticationError):
+                hints = [
+                    "FALHA DE AUTENTICAÇÃO SMTP (535)",
+                    "  - App Password inválida/expirada (Conta Google > Segurança > Senhas de app)",
+                    "  - Verificação em 2 etapas DESATIVADA na conta Gmail",
+                    "  - SMTP_USER não corresponde à conta Google autenticada",
+                    "  - Espaço/quebra de linha no fim da SMTP_PASS no Railway",
+                ]
+            elif isinstance(e, (ConnectionRefusedError, OSError)):
+                hints = [
+                    "FALHA DE CONEXÃO",
+                    "  - Railway bloqueando egresso nas portas SMTP 465/587",
+                    "  - Use a API HTTP (EMAIL_API_KEY da Resend) que trafega pela 443",
+                ]
+            elif isinstance(e, TimeoutError):
+                hints = [
+                    "TIMEOUT (15s)",
+                    "  - Railway bloqueando egresso nas portas SMTP 465/587",
+                    "  - Solução recomendada: EMAIL_API_KEY da Resend (HTTPS :443)",
+                ]
+            else:
+                hints = [f"ERRO INESPERADO ({e!r})"]
+
+            err_msg = (
+                "============================================================\n"
+                " ERRO SMTP DETALHADO\n"
+                f"  Tipo  : {exc_type}\n"
+                f"  Erro  : {e!r}\n"
+                f"  Host  : {host}:{port}\n"
+                f"  User  : {user}\n"
+                f"  From  : {smtp_from}\n"
+                "  Hints :\n"
+                + "\n".join(f"    {h}" for h in hints)
+                + "\n"
+                "  Traceback:\n"
+                f"{traceback.format_exc()}"
+            )
+            print(f"ERRO SMTP DETALHADO: {exc_type}: {e!r}", flush=True)
+            print(err_msg, flush=True)
+            logger.error(err_msg)
+            return False
 
 
 class AsyncDatabaseService:
