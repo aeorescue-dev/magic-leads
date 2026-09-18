@@ -1755,6 +1755,18 @@ async def _lifespan(app):
     if settings.SCRAPER_SELF_SCHEDULED:
         _scheduler_task = asyncio.create_task(_scheduler_loop())
         logger.info(f"Scheduler interno ativo (a cada {settings.SCRAPER_INTERVAL_HOURS}h)")
+
+    # Diagnóstico SMTP no startup
+    if settings.SMTP_USER and settings.SMTP_PASS:
+        logger.info(
+            f"[SMTP-STARTUP] Modo SMTP ATIVO — host={settings.SMTP_HOST}, "
+            f"port={settings.SMTP_PORT}, user={settings.SMTP_USER}, "
+            f"from={settings.SMTP_FROM}, pass={'*' * len(settings.SMTP_PASS)}"
+        )
+    else:
+        logger.info(
+            "[SMTP-STARTUP] Modo logs (sem credenciais SMTP) — links de reset impressos nos logs"
+        )
     yield
     if _scheduler_task:
         _scheduler_task.cancel()

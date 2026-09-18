@@ -3653,16 +3653,32 @@ class DatabaseService:
         smtp_ready = bool(settings.SMTP_USER and settings.SMTP_PASS)
 
         if smtp_ready:
-            try:
-                import smtplib
-                import ssl
-                from email.message import EmailMessage
+            import smtplib
+            import ssl
+            import traceback
+            from email.message import EmailMessage
 
+            port = int(settings.SMTP_PORT or 587)
+            host = settings.SMTP_HOST
+            user = settings.SMTP_USER
+            smtp_from = settings.SMTP_FROM or f"Magic Leads <{user}>"
+
+            logger.info(
+                f"[PASSWORD-RESET-SMTP] Tentando envio — host={host}, port={port}, "
+                f"user={user}, from={smtp_from}"
+            )
+            print(
+                f"[PASSWORD-RESET-SMTP] Tentando envio — host={host}, port={port}, "
+                f"user={user}, from={smtp_from}",
+                flush=True,
+            )
+
+            try:
                 msg = EmailMessage()
                 msg["Subject"] = "Magic Leads — Recuperação de senha"
-                msg["From"] = settings.SMTP_FROM or f"Magic Leads <{settings.SMTP_USER}>"
+                msg["From"] = smtp_from
                 msg["To"] = email
-                msg["Reply-To"] = settings.SMTP_FROM or settings.SMTP_USER
+                msg["Reply-To"] = settings.SMTP_FROM or user
                 msg.set_content(
                     "Você solicitou a recuperação de senha na Magic Leads.\n\n"
                     "Clique no link abaixo para redefinir sua senha:\n\n"
@@ -3671,20 +3687,80 @@ class DatabaseService:
                     "— Equipe Magic Leads"
                 )
 
-                port = int(settings.SMTP_PORT or 587)
+                ctx = ssl.create_default_context()
                 if port == 465:
-                    server = smtplib.SMTP_SSL(settings.SMTP_HOST, port, timeout=15, context=ssl.create_default_context())
+                    server = smtplib.SMTP_SSL(host, port, timeout=15, context=ctx)
                 else:
-                    server = smtplib.SMTP(settings.SMTP_HOST, port, timeout=15)
-                    server.starttls(context=ssl.create_default_context())
+                    server = smtplib.SMTP(host, port, timeout=15)
+                    server.starttls(context=ctx)
                 with server:
-                    server.login(settings.SMTP_USER, settings.SMTP_PASS)
+                    server.login(user, settings.SMTP_PASS)
                     server.send_message(msg)
 
-                logger.info(f"[PASSWORD-RESET-SMTP] E-mail de recuperação enviado para {email} via {settings.SMTP_HOST}:{port} (From: {msg['From']})")
+                ok_msg = (
+                    f"[PASSWORD-RESET-SMTP] E-mail de recuperação enviado para {email} "
+                    f"via {host}:{port} (From: {smtp_from})"
+                )
+                logger.info(ok_msg)
+                print(ok_msg, flush=True)
                 return True
+
+            except smtplib.SMTPAuthenticationError as e:
+                err_msg = (
+                    f"[PASSWORD-RESET-SMTP] FALHA DE AUTENTICAÇÃO SMTP!\n"
+                    f"  Host: {host}:{port} | User: {user}\n"
+                    f"  Erro SMTP: {e}\n"
+                    f"  Possíveis causas:\n"
+                    f"    - App Password inválida ou expirada (gerar nova em: Conta Google > Segurança > Senhas de app)\n"
+                    f"    - Verificação em 2 etapas NÃO está ativa na conta {user}\n"
+                    f"    - SMTP_USER não corresponde ao e-mail da conta Google autenticada\n"
+                    f"  Traceback:\n{traceback.format_exc()}"
+                )
+                logger.error(err_msg)
+                print(err_msg, flush=True)
+
+            except smtplib.SMTPException as e:
+                err_msg = (
+                    f"[PASSWORD-RESET-SMTP] ERRO SMTP GERAL!\n"
+                    f"  Host: {host}:{port} | User: {user}\n"
+                    f"  Erro: {type(e).__name__}: {e}\n"
+                    f"  Traceback:\n{traceback.format_exc()}"
+                )
+                logger.error(err_msg)
+                print(err_msg, flush=True)
+
+            except (ConnectionRefusedError, OSError) as e:
+                err_msg = (
+                    f"[PASSWORD-RESET-SMTP] FALHA DE CONEXÃO SMTP!\n"
+                    f"  Host: {host}:{port}\n"
+                    f"  Erro: {type(e).__name__}: {e}\n"
+                    f"  Possíveis causas:\n"
+                    f"    - Porta {port} bloqueada pelo firewall do Railway\n"
+                    f"    - Host {host} inacessível (DNS ou firewall)\n"
+                    f"  Traceback:\n{traceback.format_exc()}"
+                )
+                logger.error(err_msg)
+                print(err_msg, flush=True)
+
+            except TimeoutError as e:
+                err_msg = (
+                    f"[PASSWORD-RESET-SMTP] TIMEOUT SMTP (15s)!\n"
+                    f"  Host: {host}:{port}\n"
+                    f"  Erro: {type(e).__name__}: {e}\n"
+                    f"  Traceback:\n{traceback.format_exc()}"
+                )
+                logger.error(err_msg)
+                print(err_msg, flush=True)
+
             except Exception as e:
-                logger.error(f"[PASSWORD-RESET-SMTP] Falha ao enviar via SMTP ({e}); caindo para modo logs")
+                err_msg = (
+                    f"[PASSWORD-RESET-SMTP] ERRO INESPERADO!\n"
+                    f"  Host: {host}:{port} | User: {user}\n"
+                    f"  Erro: {type(e).__name__}: {e}\n"
+                    f"  Traceback:\n{traceback.format_exc()}"
+                )
+                logger.error(err_msg)
+                print(err_msg, flush=True)
 
         logger.info(
             "============================================================\n"

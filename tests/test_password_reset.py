@@ -152,7 +152,41 @@ def test_logs_mode_prints_readable_link(monkeypatch):
     assert link_lines[0].endswith("reset-password?token=tok123"), "token deve ser o fim da linha"
 
 
-def test_smtp_failure_falls_back_to_logs(monkeypatch):
+def test_smtp_auth_failure_logs_detailed_error(monkeypatch, capsys):
+    """Falha de autenticação SMTP deve imprimir tipo + código exato (535) e cair para modo logs."""
+    import smtplib
+
+    class FakeAuthError(smtplib.SMTPAuthenticationError):
+        def __init__(self):
+            super().__init__(535, b"5.7.8 Username and Password not accepted")
+
+    def _raise_auth(*args, **kwargs):
+        raise FakeAuthError()
+
+    monkeypatch.setattr("backend.services.db.settings", type("S", (), {
+        "FRONTEND_URL": "https://app.magicleads.com",
+        "SMTP_HOST": "smtp.gmail.com",
+        "SMTP_PORT": 587,
+        "SMTP_USER": "helpmagicleads@gmail.com",
+        "SMTP_PASS": "senha-errada",
+        "SMTP_FROM": "helpmagicleads@gmail.com",
+    })())
+    monkeypatch.setattr(smtplib, "SMTP", _raise_auth)
+
+    captured, handler = _capture_reset_log()
+    try:
+        ok = DatabaseService().send_password_reset_email("authfail@magicleads.app", "authtok")
+        assert ok is True
+    finally:
+        logging.getLogger("garimpador").removeHandler(handler)
+
+    joined = "\n".join(captured) + "\n" + capsys.readouterr().out
+    assert "FALHA DE AUTENTICAÇÃO SMTP" in joined
+    assert "535" in joined
+    assert "App Password inválida" in joined
+    # ainda cai em modo logs
+    assert "PASSWORD RESET" in joined
+    assert "reset-password?token=authtok" in joined
     """Se SMTP_HOST estiver configurado mas falhar, a função cai para modo logs e não levanta exceção."""
     monkeypatch.setattr("backend.services.db.settings", type("S", (), {
         "FRONTEND_URL": "https://app.magicleads.com",
