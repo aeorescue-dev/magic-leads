@@ -84,6 +84,18 @@ class Settings(BaseSettings):
             return v.strip()
         return v
 
+    @field_validator(
+        "SMTP_HOST", "SMTP_USER", "SMTP_PASS", "SMTP_FROM",
+        mode="before",
+    )
+    @classmethod
+    def _strip_smtp_values(cls, v: object) -> object:
+        # App Password do Gmail fica inválida se o Railway injetar \n/espaço no
+        # fim (causa comum de 535 "Username and Password not accepted").
+        if isinstance(v, str):
+            return v.strip()
+        return v
+
     @property
     def allowed_origins_list(self) -> List[str]:
         v = self.ALLOWED_ORIGINS

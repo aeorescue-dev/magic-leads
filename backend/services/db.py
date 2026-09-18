@@ -3714,6 +3714,8 @@ class DatabaseService:
                     f"    - App Password inválida ou expirada (gerar nova em: Conta Google > Segurança > Senhas de app)\n"
                     f"    - Verificação em 2 etapas NÃO está ativa na conta {user}\n"
                     f"    - SMTP_USER não corresponde ao e-mail da conta Google autenticada\n"
+                    f"    - Espaço ou quebra de linha no fim da SMTP_PASS no Railway (o valor é\n"
+                    f"      normalizado via strip() no boot; ajuste a variável se o 535 persistir)\n"
                     f"  Traceback:\n{traceback.format_exc()}"
                 )
                 logger.error(err_msg)
