@@ -3749,6 +3749,17 @@ class DatabaseService:
                 },
                 timeout=15,
             )
+            raw = resp.text
+            print(
+                "[PASSWORD-RESET-API] Resposta BRUTA da Resend:\n"
+                f"  HTTP : {resp.status_code}\n"
+                f"  Body : {raw}",
+                flush=True,
+            )
+            logger.info(
+                "[PASSWORD-RESET-API] Resposta BRUTA da Resend: "
+                f"HTTP {resp.status_code} — {raw}"
+            )
             if resp.status_code == 200:
                 ok_msg = (
                     "[PASSWORD-RESET-API] E-mail de recuperação enviado via Resend "
@@ -3762,7 +3773,7 @@ class DatabaseService:
                 "============================================================\n"
                 " ERRO EMAIL DETALHADO (Resend recusou o envio)\n"
                 f"  HTTP  : {resp.status_code}\n"
-                f"  Resposta da API: {resp.text[:1000]}\n"
+                f"  Resposta da API: {raw}\n"
                 "  Possíveis causas:\n"
                 "    - EMAIL_FROM não é um domínio verificado na Resend\n"
                 "      (resend.com -> Domains; para teste use 'onboarding@resend.dev')\n"
