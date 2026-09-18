@@ -5,6 +5,7 @@ from typing import List, Optional
 
 import anyio
 
+from ..config import settings
 from ..models.schemas import EnrichedLead
 from ..utils.logger import logger
 from .access import (
@@ -3639,9 +3640,47 @@ class DatabaseService:
             conn.close()
 
     def send_password_reset_email(self, email: str, token: str) -> bool:
-        """Simula envio de email de reset (placeholder para integração real)."""
-        # Em produção, integrar com SendGrid, AWS SES, etc.
-        logger.info(f"[MOCK EMAIL] Password reset for {email}: https://app.magicleads.com/reset-password?token={token}")
+        """Envia o link de recuperação de senha (100% gratuito).
+
+        - Se SMTP_HOST estiver configurado (SMTP gratuito: Gmail app password,
+          Zoho, SMTP2GO free, etc.), envia e-mail real via smtplib (stdlib).
+        - Caso contrário (default), imprime o link de forma LEGÍVEL nos logs
+          do Railway, permitindo validar o fluxo completo sem custo algum.
+        """
+        reset_url = f"{settings.FRONTEND_URL.rstrip('/')}/reset-password?token={token}"
+
+        if settings.SMTP_HOST:
+            try:
+                import smtplib
+                from email.message import EmailMessage
+
+                msg = EmailMessage()
+                msg["Subject"] = "Magic Leads — Recuperação de senha"
+                msg["From"] = settings.SMTP_FROM or f"Magic Leads <{settings.SMTP_USER}>"
+                msg["To"] = email
+                msg.set_content(
+                    "Você solicitou a recuperação de senha na Magic Leads.\n\n"
+                    "Clique no link abaixo para redefinir sua senha:\n\n"
+                    f"{reset_url}\n\n"
+                    "O link é válido por 1 hora. Se não foi você, ignore este e-mail."
+                )
+                with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10) as server:
+                    server.starttls()
+                    server.login(settings.SMTP_USER, settings.SMTP_PASS)
+                    server.send_message(msg)
+                logger.info(f"[PASSWORD-RESET] E-mail enviado para {email} via SMTP {settings.SMTP_HOST}")
+                return True
+            except Exception as e:
+                logger.error(f"[PASSWORD-RESET] Falha ao enviar via SMTP ({e}); caindo para modo logs")
+
+        logger.info(
+            "============================================================\n"
+            " PASSWORD RESET — link de teste (modo logs, zero custo)\n"
+            "============================================================\n"
+            f" E-mail : {email}"
+        )
+        logger.info(f" Link   : {reset_url}")
+        logger.info("============================================================")
         return True
 
 
