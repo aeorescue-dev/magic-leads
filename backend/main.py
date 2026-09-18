@@ -7,17 +7,16 @@ import secrets
 import sqlite3
 import uuid
 from datetime import datetime, timedelta
-from typing import List, Optional
 
+import httpx
+import stripe
 from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-import httpx
 from pydantic import BaseModel, EmailStr
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
-import stripe
 
 from .config import settings
 from .models.schemas import (
@@ -278,15 +277,15 @@ def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-async def _get_user_id_from_token(token: str) -> Optional[int]:
+async def _get_user_id_from_token(token: str) -> int | None:
     """Valida o token no banco de dados e retorna o user_id se válido."""
     token_hash = _hash_token(token)
     return await db_service.validate_user_session(token_hash)
 
 
 async def _get_current_user(
-    authorization: Optional[str] = Header(None),
-    garimpador_token: Optional[str] = Cookie(None),
+    authorization: str | None = Header(None),
+    garimpador_token: str | None = Cookie(None),
 ) -> dict:
     """Obtém o usuário autenticado a partir do token (Authorization header ou cookie)."""
     token = None
@@ -316,9 +315,9 @@ async def _get_current_user(
 
 
 async def _get_optional_user(
-    authorization: Optional[str] = Header(None),
-    garimpador_token: Optional[str] = Cookie(None),
-) -> Optional[dict]:
+    authorization: str | None = Header(None),
+    garimpador_token: str | None = Cookie(None),
+) -> dict | None:
     """Como _get_current_user, mas retorna None quando não há sessão
     (para endpoints públicos que enriquecem a resposta com visibilidade)."""
     token = None
@@ -337,7 +336,7 @@ async def _get_optional_user(
     return {"id": user_id}
 
 
-def _require_admin(x_admin_secret: Optional[str] = Header(None)) -> bool:
+def _require_admin(x_admin_secret: str | None = Header(None)) -> bool:
     """Exige o header X-Admin-Secret nas rotas administrativas.
 
     Fail-closed: se ADMIN_SECRET não estiver configurado, TODAS as rotas admin
@@ -351,14 +350,14 @@ def _require_admin(x_admin_secret: Optional[str] = Header(None)) -> bool:
     return True
 
 
-def _check_cron_secret(x_cron_secret: Optional[str]) -> None:
+def _check_cron_secret(x_cron_secret: str | None) -> None:
     """Valida o header X-Cron-Secret. Fail-closed (antes aceitava requisições sem secret)."""
     expected = settings.CRON_SECRET
     if not expected or not x_cron_secret or not secrets.compare_digest(x_cron_secret, expected):
         raise HTTPException(status_code=401, detail="Não autorizado: CRON_SECRET inválido")
 
 
-async def _annotate_visibility(leads: list, user: Optional[dict]) -> None:
+async def _annotate_visibility(leads: list, user: dict | None) -> None:
     """Marca is_mine/hours_remaining/favorited/_revealed nos leads para o _to_lead_response."""
     user_id = user["id"] if user else None
 
@@ -420,7 +419,7 @@ async def get_leads(
     type: str = None,
     page: int = 1,
     per_page: int = 20,
-    user: Optional[dict] = Depends(_get_optional_user)
+    user: dict | None = Depends(_get_optional_user)
 ):
     """Retorna leads da cidade especificada com filtros opcionais"""
     try:
@@ -447,7 +446,7 @@ async def get_leads(
 
 # Busca global por endereço/nome/telefone
 @app.get("/api/leads/search", response_model=LeadsListResponse)
-async def search_leads(q: str = "", per_page: int = 50, user: Optional[dict] = Depends(_get_optional_user)):
+async def search_leads(q: str = "", per_page: int = 50, user: dict | None = Depends(_get_optional_user)):
     """Busca leads por endereço, nome do dono ou telefone."""
     try:
         results = await db_service.search_leads(q, limit=per_page)
@@ -467,7 +466,7 @@ async def search_leads(q: str = "", per_page: int = 50, user: Optional[dict] = D
 
 # Leads recentes de todas as cidades (para prévia ao vivo na home)
 @app.get("/api/leads/recent", response_model=LeadsListResponse)
-async def recent_leads(limit: int = 12, user: Optional[dict] = Depends(_get_optional_user)):
+async def recent_leads(limit: int = 12, user: dict | None = Depends(_get_optional_user)):
     """Retorna os leads RECENTES e QUALIFICADOS (endereço + 16 ofícios + gatilho
     preditivo), de todas as cidades/estados. Filtro feito em SQL para nunca zerar a lista."""
     try:
@@ -502,7 +501,7 @@ async def recent_leads(limit: int = 12, user: Optional[dict] = Depends(_get_opti
 
 # Demandas do dia (lote mais recente de todas as cidades) — feed "ver tudo"
 @app.get("/api/leads/today", response_model=LeadsListResponse)
-async def leads_today(limit: int = 60, page: int = 1, city: str = None, type: str = None, include_incomplete: bool = False, user: Optional[dict] = Depends(_get_optional_user)):
+async def leads_today(limit: int = 60, page: int = 1, city: str = None, type: str = None, include_incomplete: bool = False, user: dict | None = Depends(_get_optional_user)):
     """Retorna demandas dos últimos 7 dias.
 
     REGRA FIXA por default: apenas leads QUALIFICADOS (endereço + 16 ofícios +
@@ -712,7 +711,7 @@ async def lead_locations():
 
 # Dashboard Summary - estatísticas reais para o Pro Dashboard (DEVE vir antes de /{lead_id})
 @app.get("/api/leads/dashboard-summary")
-async def leads_dashboard_summary(user: Optional[dict] = Depends(_get_optional_user)):
+async def leads_dashboard_summary(user: dict | None = Depends(_get_optional_user)):
     """Retorna estatísticas reais do banco para o Pro Dashboard."""
     try:
         # Pega interesses do usuário logado
@@ -746,7 +745,7 @@ async def public_metrics():
 
 # Detalhe de um lead
 @app.get("/api/leads/{lead_id}", response_model=LeadResponse)
-async def get_lead(lead_id: int, user: Optional[dict] = Depends(_get_optional_user)):
+async def get_lead(lead_id: int, user: dict | None = Depends(_get_optional_user)):
     lead = await db_service.get_lead_by_id(lead_id)
     if not lead:
         raise HTTPException(status_code=404, detail="Lead não encontrado")
@@ -792,7 +791,7 @@ async def toggle_favorite(lead_id: int, user: dict = Depends(_get_current_user))
 
 
 # Notas do lead
-@app.get("/api/leads/{lead_id}/notes", response_model=List[NoteResponse])
+@app.get("/api/leads/{lead_id}/notes", response_model=list[NoteResponse])
 async def get_lead_notes(lead_id: int, user: dict = Depends(_get_current_user)):
     notes = await db_service.get_notes(lead_id)
     return notes
@@ -819,7 +818,7 @@ async def delete_lead_note(lead_id: int, note_id: int, user: dict = Depends(_get
 # ------------------------------------------------------------------
 # Notificações (com filtro de "recentes" para o painel)
 # ------------------------------------------------------------------
-@app.get("/api/notifications", response_model=List[NotificationResponse])
+@app.get("/api/notifications", response_model=list[NotificationResponse])
 async def list_notifications(
     user: dict = Depends(_get_current_user),
     filter: str = "recent",
@@ -996,7 +995,7 @@ async def run_scraper(
     request: Request,
     max_cities: int = 8,
     hours: int = None,
-    x_cron_secret: Optional[str] = Header(None),
+    x_cron_secret: str | None = Header(None),
 ):
     """Dispara o scraper nacional em background e responde na hora (o run leva 15min+).
 
@@ -1575,7 +1574,7 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
 
         # 5. Inserção com DLQ fallback
         inserted = 0
-        newly_added: List[dict] = []
+        newly_added: list[dict] = []
 
         for raw_lead in all_raw:
             enriched = EnrichedLead(
@@ -1791,7 +1790,7 @@ async def discover_available():
         return {"catalog": summary}
     except Exception as e:
         logger.error(f"Erro no discovery: {e}")
-        raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro: {e!s}")
 
 
 # Enriquecimento em lote: preenche owner_name = nome do proprietário (registro público)
@@ -1835,7 +1834,7 @@ async def enrich_leads(city: str = "NYC", limit: int = 500, user: dict = Depends
         }
     except Exception as e:
         logger.error(f"Erro no enriquecimento: {e}")
-        raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro: {e!s}")
 
 
 # Enriquecimento completo em lote: owner_name + mailing_address + skip_trace (phone/email)
@@ -1968,7 +1967,7 @@ async def enrich_all_leads(request: Request, limit_per_city: int = 200, _admin: 
         }
     except Exception as e:
         logger.error(f"Erro no enriquecimento completo: {e}")
-        raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro: {e!s}")
 
 
 # Reclassificação dos leads existentes para o novo modelo (16 ofícios + gatilhos preditivos)
@@ -2073,7 +2072,7 @@ async def admin_requalify_leads(request: Request, _admin: bool = Depends(_requir
         }
     except Exception as e:
         logger.error(f"Erro na reclassificação: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro: {e!s}")
 
 
 # Enriquecimento/consulta do dono de um único lead
@@ -2092,7 +2091,7 @@ async def enrich_single_lead(lead_id: int, user: dict = Depends(_get_current_use
         raise
     except Exception as e:
         logger.error(f"Erro ao enriquecer lead {lead_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro: {e!s}")
 
 
 # ------------------------------------------------------------------
@@ -2254,7 +2253,7 @@ async def update_user_company(user_id: int, payload: UserUpdate, user: dict = De
 
 
 @app.post("/api/auth/logout")
-async def logout_user(authorization: Optional[str] = Header(None), response: Response = None):
+async def logout_user(authorization: str | None = Header(None), response: Response = None):
     if authorization and authorization.startswith("Bearer "):
         token = authorization[len("Bearer "):].strip()
         # Remove do banco
@@ -2494,7 +2493,7 @@ async def mock_activate(user: dict = Depends(_get_current_user)):
 
 
 @app.post("/api/stripe/webhook")
-async def stripe_webhook(request: Request, stripe_signature: Optional[str] = Header(None)):
+async def stripe_webhook(request: Request, stripe_signature: str | None = Header(None)):
     """Webhook do Stripe: valida assinatura e libera 7 dias de acesso (idempotente).
 
     Fluxo (pagamento avulso, SEM recorrência):
@@ -2611,7 +2610,7 @@ async def get_cities_filter(user_id: int, user: dict = Depends(_get_current_user
 
 @app.put("/api/users/{user_id}/cities-filter")
 async def set_cities_filter(
-    user_id: int, cities: Optional[List[str]] = None,
+    user_id: int, cities: list[str] | None = None,
     user: dict = Depends(_get_current_user),
 ):
     if user["id"] != user_id:
@@ -2625,7 +2624,7 @@ async def set_cities_filter(
 # ------------------------------------------------------------------
 # Notificações por usuário
 # ------------------------------------------------------------------
-@app.get("/api/users/{user_id}/notifications", response_model=List[NotificationResponse])
+@app.get("/api/users/{user_id}/notifications", response_model=list[NotificationResponse])
 async def user_notifications(
     user_id: int,
     filter: str = "recent",
@@ -2869,7 +2868,7 @@ async def contact_lead(
 
 # Cron: expira holds vencidos + watchdog de reveals (chamado por GitHub Actions a cada hora)
 @app.get("/api/cron/expire-holds")
-async def cron_expire_holds(x_cron_secret: Optional[str] = Header(None)):
+async def cron_expire_holds(x_cron_secret: str | None = Header(None)):
     _check_cron_secret(x_cron_secret)
     try:
         expired = await db_service.expire_holds()
@@ -2921,7 +2920,7 @@ async def reject_lead(
     return {"status": "ok", "lead_status": result.get("lead_status")}
 
 
-@app.get("/api/leads/{lead_id}/history", response_model=List[HistoryEvent])
+@app.get("/api/leads/{lead_id}/history", response_model=list[HistoryEvent])
 async def lead_history(lead_id: int, user: dict = Depends(_get_current_user)):
     rows = await db_service.get_lead_history(lead_id)
     return [
@@ -2962,10 +2961,10 @@ async def my_taken_leads(limit: int = 100, user: dict = Depends(_get_current_use
 
 @app.get("/api/me/history")
 async def my_leads_history(
-    status: Optional[str] = None,
-    category: Optional[str] = None,
-    period: Optional[str] = None,
-    search: Optional[str] = None,
+    status: str | None = None,
+    category: str | None = None,
+    period: str | None = None,
+    search: str | None = None,
     needs_action: bool = False,
     limit: int = 100,
     user: dict = Depends(_get_current_user),
