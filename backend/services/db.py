@@ -3563,10 +3563,11 @@ class DatabaseService:
                 (user["id"],)
             )
 
-            # Gera token seguro
+            # Gera token seguro e armazena hash determinístico (sha256)
+            import hashlib
             import secrets
             token = secrets.token_urlsafe(32)
-            token_hash = secrets.token_urlsafe(32)  # hash para armazenar
+            token_hash = hashlib.sha256(token.encode()).hexdigest()
 
             expires_at = datetime.utcnow() + timedelta(hours=expires_hours)
 
@@ -3584,12 +3585,6 @@ class DatabaseService:
         """Valida token de reset. Retorna user_id se válido, None caso contrário."""
         conn = get_connection()
         try:
-            import secrets
-            token_hash = secrets.token_urlsafe(32)  # This won't match - we need to hash the token same way
-            # Actually we need to hash the token the same way we stored it
-            # Since we stored token_hash directly, we need to find by comparing
-            # Better: store hash of token using a deterministic method
-            # Let's use a simpler approach: hash with sha256
             import hashlib
             token_hash = hashlib.sha256(token.encode()).hexdigest()
 
