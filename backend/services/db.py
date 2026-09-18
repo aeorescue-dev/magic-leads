@@ -3702,11 +3702,11 @@ class DatabaseService:
 
             logger.info(
                 f"[PASSWORD-RESET-SMTP] Tentando envio — host={host}, port={port}, "
-                f"user={user}, from={smtp_from}"
+                f"user={user}, from={smtp_from}, pass={'*' * len(settings.SMTP_PASS)}"
             )
             print(
                 f"[PASSWORD-RESET-SMTP] Tentando envio — host={host}, port={port}, "
-                f"user={user}, from={smtp_from}",
+                f"user={user}, from={smtp_from}, pass={'*' * len(settings.SMTP_PASS)}",
                 flush=True,
             )
 
@@ -3742,65 +3742,58 @@ class DatabaseService:
                 print(ok_msg, flush=True)
                 return True
 
-            except smtplib.SMTPAuthenticationError as e:
-                err_msg = (
-                    f"[PASSWORD-RESET-SMTP] FALHA DE AUTENTICAÇÃO SMTP!\n"
-                    f"  Host: {host}:{port} | User: {user}\n"
-                    f"  Erro SMTP: {e}\n"
-                    f"  Possíveis causas:\n"
-                    f"    - App Password inválida ou expirada (gerar nova em: Conta Google > Segurança > Senhas de app)\n"
-                    f"    - Verificação em 2 etapas NÃO está ativa na conta {user}\n"
-                    f"    - SMTP_USER não corresponde ao e-mail da conta Google autenticada\n"
-                    f"    - Espaço ou quebra de linha no fim da SMTP_PASS no Railway (o valor é\n"
-                    f"      normalizado via strip() no boot; ajuste a variável se o 535 persistir)\n"
-                    f"  Traceback:\n{traceback.format_exc()}"
-                )
-                logger.error(err_msg)
-                print(err_msg, flush=True)
-
-            except smtplib.SMTPException as e:
-                err_msg = (
-                    f"[PASSWORD-RESET-SMTP] ERRO SMTP GERAL!\n"
-                    f"  Host: {host}:{port} | User: {user}\n"
-                    f"  Erro: {type(e).__name__}: {e}\n"
-                    f"  Traceback:\n{traceback.format_exc()}"
-                )
-                logger.error(err_msg)
-                print(err_msg, flush=True)
-
-            except (ConnectionRefusedError, OSError) as e:
-                err_msg = (
-                    f"[PASSWORD-RESET-SMTP] FALHA DE CONEXÃO SMTP!\n"
-                    f"  Host: {host}:{port}\n"
-                    f"  Erro: {type(e).__name__}: {e}\n"
-                    f"  Possíveis causas:\n"
-                    f"    - Railway bloqueando egresso na porta {port} (erro 'Network is unreachable').\n"
-                    f"      Defina SMTP_PORT=465 (SSL) se ainda estiver 587 — a 465 é liberada.\n"
-                    f"    - Host {host} inacessível (DNS ou firewall)\n"
-                    f"  Traceback:\n{traceback.format_exc()}"
-                )
-                logger.error(err_msg)
-                print(err_msg, flush=True)
-
-            except TimeoutError as e:
-                err_msg = (
-                    f"[PASSWORD-RESET-SMTP] TIMEOUT SMTP (15s)!\n"
-                    f"  Host: {host}:{port}\n"
-                    f"  Erro: {type(e).__name__}: {e}\n"
-                    f"  Traceback:\n{traceback.format_exc()}"
-                )
-                logger.error(err_msg)
-                print(err_msg, flush=True)
-
             except Exception as e:
+                # Diagnóstico completo: qualquer erro aqui aparece INTEGRALMENTE
+                # nos logs do Railway (stdout), com o traceback exato do Python.
+                exc_type = type(e).__name__
+                if isinstance(e, smtplib.SMTPAuthenticationError):
+                    hints = [
+                        "FALHA DE AUTENTICAÇÃO SMTP (535)",
+                        "  - App Password inválida/expirada (Conta Google > Segurança > Senhas de app)",
+                        "  - Verificação em 2 etapas DESATIVADA na conta Gmail",
+                        "  - SMTP_USER não corresponde à conta Google autenticada",
+                        "  - Espaço/quebra de linha no fim da SMTP_PASS no Railway",
+                    ]
+                elif isinstance(e, (ConnectionRefusedError, OSError)):
+                    hints = [
+                        "FALHA DE CONEXÃO",
+                        "  - Railway bloqueando egresso nessa porta ('Network is unreachable')",
+                        "  - Confira SMTP_PORT=465 no Railway (ou remova a variável)",
+                    ]
+                elif isinstance(e, TimeoutError):
+                    hints = [
+                        "TIMEOUT (15s)",
+                        "  - Sem egresso de rede ou DNS lento dentro do Railway",
+                    ]
+                else:
+                    hints = [f"ERRO INESPERADO ({e!r})"]
+
                 err_msg = (
-                    f"[PASSWORD-RESET-SMTP] ERRO INESPERADO!\n"
-                    f"  Host: {host}:{port} | User: {user}\n"
-                    f"  Erro: {type(e).__name__}: {e}\n"
-                    f"  Traceback:\n{traceback.format_exc()}"
+                    "============================================================\n"
+                    " ERRO SMTP DETALHADO\n"
+                    f"  Tipo  : {exc_type}\n"
+                    f"  Erro  : {e!r}\n"
+                    f"  Host  : {host}:{port}\n"
+                    f"  User  : {user}\n"
+                    f"  From  : {smtp_from}\n"
+                    "  Hints :\n"
+                    + "\n".join(f"    {h}" for h in hints)
+                    + "\n"
+                    "  Traceback:\n"
+                    f"{traceback.format_exc()}"
                 )
-                logger.error(err_msg)
+                print(f"ERRO SMTP DETALHADO: {exc_type}: {e!r}", flush=True)
                 print(err_msg, flush=True)
+                logger.error(err_msg)
+        else:
+            print(
+                "[PASSWORD-RESET-SMTP] Credenciais SMTP AUSENTES no ambiente "
+                "(SMTP_USER e/ou SMTP_PASS vazias no Railway) — usando modo logs.",
+                flush=True,
+            )
+            logger.warning(
+                "[PASSWORD-RESET-SMTP] Credenciais SMTP ausentes — stream para logs"
+            )
 
         logger.info(
             "============================================================\n"
