@@ -62,15 +62,16 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:3000"
     ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:3005,https://magicleads-oficial.vercel.app,https://magic-leads-frontend-final.vercel.app"
 
-    # E-mail de recuperação de senha — SMTP GRATUITO opcional.
-    # Se SMTP_HOST estiver vazio (default), o link é impresso nos logs (zero custo).
-    # Com SMTP_HOST/`SMTP_USER`/`SMTP_PASS` definidos, envia e-mail real via smtplib
-    # (compatível com Gmail app password, Zoho, SMTP2GO free, etc. — sem serviços pagos).
-    SMTP_HOST: str = ""
-    SMTP_PORT: int = 587
-    SMTP_USER: str = ""
-    SMTP_PASS: str = ""
-    SMTP_FROM: str = ""  # optional; default: "{SMTP_USER}"
+    # E-mail de recuperação de senha — Gmail SMTP (100% gratuito).
+    # Defaults prontos para Gmail. Para ATIVAR o envio real basta definir no Railway:
+    #   SMTP_USER=helpmagicleads@gmail.com e SMTP_PASS=<App Password do Gmail>
+    # (Gerar: Conta Google -> Segurança -> Senhas de app).
+    # Sem SMTP_USER/SMTP_PASS a rota imprime o link nos logs (modo dev, zero custo).
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587          # 587 = STARTTLS (Gmail); 465 = SSL
+    SMTP_USER: str = ""           # helpmagicleads@gmail.com (Railway env)
+    SMTP_PASS: str = ""           # App Password do Gmail (Railway env)
+    SMTP_FROM: str = "helpmagicleads@gmail.com"
 
     @field_validator(
         "STRIPE_API_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_ID_PRO",

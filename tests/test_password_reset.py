@@ -126,7 +126,12 @@ def test_reset_password_empty_payload_422():
 def test_logs_mode_prints_readable_link(monkeypatch):
     """Sem SMTP configurado, o link de reset é impresso de forma legível nos logs."""
     monkeypatch.setattr("backend.services.db.settings", type("S", (), {
-        "FRONTEND_URL": "https://app.magicleads.com", "SMTP_HOST": ""
+        "FRONTEND_URL": "https://app.magicleads.com",
+        "SMTP_HOST": "smtp.gmail.com",
+        "SMTP_PORT": 587,
+        "SMTP_USER": "",
+        "SMTP_PASS": "",
+        "SMTP_FROM": "helpmagicleads@gmail.com",
     })())
     captured, handler = _capture_reset_log()
     try:

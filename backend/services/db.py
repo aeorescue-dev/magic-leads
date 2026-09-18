@@ -3640,38 +3640,51 @@ class DatabaseService:
             conn.close()
 
     def send_password_reset_email(self, email: str, token: str) -> bool:
-        """Envia o link de recuperação de senha (100% gratuito).
+        """Envia o link de recuperação de senha.
 
-        - Se SMTP_HOST estiver configurado (SMTP gratuito: Gmail app password,
-          Zoho, SMTP2GO free, etc.), envia e-mail real via smtplib (stdlib).
-        - Caso contrário (default), imprime o link de forma LEGÍVEL nos logs
+        - SMTP REAL: exige SMTP_USER e SMTP_PASS configurados (defaults Gmail
+          já preenchidos em SMTP_HOST/PORT/FROM). Envia via smtplib (stdlib).
+          587 = STARTTLS, 465 = SSL. Qualquer falha cai para o modo logs.
+        - MODO LOGS (sem credenciais): imprime o link de forma LEGÍVEL nos logs
           do Railway, permitindo validar o fluxo completo sem custo algum.
         """
         reset_url = f"{settings.FRONTEND_URL.rstrip('/')}/reset-password?token={token}"
 
-        if settings.SMTP_HOST:
+        smtp_ready = bool(settings.SMTP_USER and settings.SMTP_PASS)
+
+        if smtp_ready:
             try:
                 import smtplib
+                import ssl
                 from email.message import EmailMessage
 
                 msg = EmailMessage()
                 msg["Subject"] = "Magic Leads — Recuperação de senha"
                 msg["From"] = settings.SMTP_FROM or f"Magic Leads <{settings.SMTP_USER}>"
                 msg["To"] = email
+                msg["Reply-To"] = settings.SMTP_FROM or settings.SMTP_USER
                 msg.set_content(
                     "Você solicitou a recuperação de senha na Magic Leads.\n\n"
                     "Clique no link abaixo para redefinir sua senha:\n\n"
                     f"{reset_url}\n\n"
-                    "O link é válido por 1 hora. Se não foi você, ignore este e-mail."
+                    "O link é válido por 1 hora. Se não foi você, ignore este e-mail.\n\n"
+                    "— Equipe Magic Leads"
                 )
-                with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10) as server:
-                    server.starttls()
+
+                port = int(settings.SMTP_PORT or 587)
+                if port == 465:
+                    server = smtplib.SMTP_SSL(settings.SMTP_HOST, port, timeout=15, context=ssl.create_default_context())
+                else:
+                    server = smtplib.SMTP(settings.SMTP_HOST, port, timeout=15)
+                    server.starttls(context=ssl.create_default_context())
+                with server:
                     server.login(settings.SMTP_USER, settings.SMTP_PASS)
                     server.send_message(msg)
-                logger.info(f"[PASSWORD-RESET] E-mail enviado para {email} via SMTP {settings.SMTP_HOST}")
+
+                logger.info(f"[PASSWORD-RESET-SMTP] E-mail de recuperação enviado para {email} via {settings.SMTP_HOST}:{port} (From: {msg['From']})")
                 return True
             except Exception as e:
-                logger.error(f"[PASSWORD-RESET] Falha ao enviar via SMTP ({e}); caindo para modo logs")
+                logger.error(f"[PASSWORD-RESET-SMTP] Falha ao enviar via SMTP ({e}); caindo para modo logs")
 
         logger.info(
             "============================================================\n"
