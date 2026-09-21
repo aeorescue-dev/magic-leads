@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import { Navbar } from "@/components/Navbar";
+import { TestComponent } from "@/components/TestComponent";
 import { Footer } from "@/components/Footer";
 import ErrorBoundary from "@/components/ErrorBoundary";
-import "../globals.css";
+import "../../globals.css";
 
 export const dynamic = 'force-dynamic';
 
@@ -25,7 +25,7 @@ export default function PublicLayout({
 }) {
   return (
     <>
-      <Navbar />
+      <TestComponent />
       <main className="min-h-screen">
         <ErrorBoundary>{children}</ErrorBoundary>
       </main>

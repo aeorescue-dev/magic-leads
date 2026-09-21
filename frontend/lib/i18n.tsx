@@ -2694,14 +2694,14 @@ function persistLocale(l: Lang) {
   setLocaleCookie(l);
 }
 
-export function LanguageProvider({ children }: { children: ReactNode }) {
-  const [lang, setLangState] = useState<Lang>("pt");
+export function LanguageProvider({ children, initialLocale }: { children: ReactNode; initialLocale?: Lang }) {
+  const [lang, setLangState] = useState<Lang>(initialLocale || "pt");
 
   useEffect(() => {
-    const initial = getInitialLang();
+    const initial = initialLocale || getInitialLang();
     setLangState(initial);
     persistLocale(initial);
-  }, []);
+  }, [initialLocale]);
 
   const setLang = (l: Lang) => {
     setLangState(l);

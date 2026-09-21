@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -7,9 +7,13 @@ import { LayoutDashboard, LogOut, Menu, Sparkles, X, Plus } from "lucide-react";
 import { getToken, logoutUser, demoLogin } from "@/lib/api-client";
 import { useI18n, LANGS } from "@/lib/i18n";
 
-const FLAGS: Record<string, string> = { pt: "🇧🇷", en: "🇺🇸", es: "🇪🇸" };
+const FLAGS: Record<string, string> = {
+  pt: "\uD83C\uDDE7\uDDE7",
+  en: "\uD83C\uDDFA\uDDF8",
+  es: "\uD83C\uDDEA\uDDF8",
+};
 
-export function Navbar() {
+export function NavbarNew() {
   const router = useRouter();
   const pathname = usePathname();
   const { lang, setLang, t } = useI18n();
@@ -20,7 +24,6 @@ export function Navbar() {
     setIsLogged(Boolean(getToken()));
   }, []);
 
-  // Fecha menu mobile ao navegar
   useEffect(() => {
     setMobileOpen(false);
   }, [pathname]);
@@ -47,22 +50,29 @@ export function Navbar() {
   );
 
   return (
-    <nav className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur-lg supports-[backdrop-filter]:bg-background/60">
+    <nav className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur-lg">
       <div className="container mx-auto px-4 h-16 flex items-center justify-between gap-4">
         <Link href="/" className="flex items-center gap-2 shrink-0">
           <span className="h-8 w-8 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white text-sm shadow-sm">
             <Sparkles className="h-4 w-4" />
           </span>
-          <span className="font-bold text-foreground text-lg tracking-tight">Magic Leads</span>
+          <span className="font-bold text-foreground text-lg tracking-tight">
+            Magic Leads
+          </span>
         </Link>
 
         <div className="hidden md:flex items-center gap-6">
-          {tryLink(t("nav.pricing"), false, "/#preco")}
-          {isLogged && tryLink(t("nav.dashboard"), pathname === "/dashboard", "/dashboard")}
+          <Link href="/#preco" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+            {t("nav.pricing")}
+          </Link>
+          {isLogged && (
+            <Link href="/dashboard" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+              {t("nav.dashboard")}
+            </Link>
+          )}
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Language selector */}
           <div className="flex items-center gap-1 rounded-lg border bg-secondary p-1" role="group" aria-label="Idioma">
             {LANGS.map((l) => (
               <button
@@ -106,18 +116,17 @@ export function Navbar() {
                 className="inline-flex items-center gap-2 rounded-lg bg-secondary px-4 py-2 text-sm font-medium text-secondary-foreground hover:bg-secondary/80 transition-colors"
               >
                 <Plus className="h-4 w-4" />
-                {t("nav.register") || 'Cadastrar'}
+                {t("nav.register") || "Cadastrar"}
               </Link>
               <button
                 onClick={handleDemoLogin}
                 className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
               >
-                {t("nav.demo") || 'Demo'}
+                {t("nav.demo") || "Demo"}
               </button>
             </div>
           )}
 
-          {/* Mobile toggle */}
           <button
             onClick={() => setMobileOpen((o) => !o)}
             className="md:hidden inline-flex items-center justify-center rounded-lg h-9 w-9 border hover:bg-secondary transition-colors"
@@ -128,36 +137,11 @@ export function Navbar() {
         </div>
       </div>
 
-      {/* Mobile menu */}
       {mobileOpen && (
-        <div className="md:hidden border-t bg-background px-4 py-4 space-y-3 animate-slide-down">
-          <Link href="/#preco" className="block text-sm text-muted-foreground hover:text-foreground">
-            {t("nav.pricing")}
-          </Link>
-          {isLogged && (
-            <Link href="/dashboard" className="block text-sm text-muted-foreground hover:text-foreground">
-              {t("nav.dashboard")}
-            </Link>
-          )}
-          <div className="pt-2 border-t">
-            {isLogged ? (
-              <button onClick={handleLogout} className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-secondary px-4 py-2 text-sm">
-                <LogOut className="h-4 w-4" /> {t("nav.logout")}
-              </button>
-            ) : (
-              <div className="space-y-2">
-                <Link
-                  href="/auth"
-                  className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-secondary px-4 py-2 text-sm"
-                >
-                  <Plus className="h-4 w-4" /> {t("nav.register") || 'Cadastrar'}
-                </Link>
-                <button onClick={handleDemoLogin} className="w-full rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">
-                  {t("nav.demo") || 'Demo'}
-                </button>
-              </div>
-            )}
-          </div>
+        <div className="md:hidden border-t bg-background px-4 py-4 space-y-3">
+          <button onClick={handleLogout} className="w-full text-left">
+            {t("nav.logout")}
+          </button>
         </div>
       )}
     </nav>

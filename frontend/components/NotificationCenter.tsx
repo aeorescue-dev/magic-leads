@@ -7,11 +7,13 @@ import { useI18n } from "@/lib/i18n";
 import { LeadResponse, fetchTodayLeads } from "@/lib/api-client";
 
 export function NotificationCenter() {
-  const { t } = useI18n();
+  const { lang, t } = useI18n();
   const router = useRouter();
   const [leads, setLeads] = useState<LeadResponse[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  const localePath = (href: string) => `/${lang}${href}`;
 
   const load = async () => {
     setLoading(true);
@@ -68,7 +70,7 @@ export function NotificationCenter() {
               leads.map((lead) => (
                 <button
                   key={lead.id}
-                  onClick={() => { setOpen(false); router.push("/dashboard"); }}
+                  onClick={() => { setOpen(false); router.push(localePath("/dashboard")); }}
                   className="w-full text-left px-4 py-3 hover:bg-muted/40 transition"
                 >
                   <div className="flex items-start gap-3">
@@ -98,7 +100,7 @@ export function NotificationCenter() {
 
           <div className="px-4 py-3 border-t bg-muted/40">
             <button
-              onClick={() => { setOpen(false); router.push("/dashboard/notifications"); }}
+              onClick={() => { setOpen(false); router.push(localePath("/dashboard/notifications")); }}
               className="text-sm font-medium text-primary hover:underline"
             >
               Ver todas as demandas do dia →

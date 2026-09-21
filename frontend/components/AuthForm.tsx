@@ -92,8 +92,10 @@ function AuthFormInner() {
     : reason === 'session_expired' || searchParams.get('session_expired') === '1'
       ? 'session_expired'
       : null;
-  const { t } = useI18n();
+  const { lang, t } = useI18n();
   const { signIn, loading: authLoading } = useAuth();
+
+  const localePath = (href: string) => `/${lang}${href}`;
 
   // Mensagem direta sem depender de t() — evita chave crua mesmo se i18n falhar.
   const sessionMessage = sessionReason === 'fifo_evicted'
@@ -166,7 +168,7 @@ function AuthFormInner() {
       } else {
         setSuccess(true);
         setTimeout(() => {
-          router.push('/dashboard');
+          router.push(localePath('/dashboard'));
           router.refresh();
         }, 800);
       }

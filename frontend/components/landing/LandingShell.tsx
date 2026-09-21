@@ -102,6 +102,8 @@ export default function LandingShell({ children }: { children: React.ReactNode }
   const router = useRouter();
   const { lang, setLang, t } = useI18n();
 
+  const localePath = (href: string) => `/${lang}${href}`;
+
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -225,7 +227,7 @@ export default function LandingShell({ children }: { children: React.ReactNode }
               <div className="w-full">
                 <DemoLoginButton className="w-full text-sm py-3.5">{t("nav.demo") || 'Demo'}</DemoLoginButton>
               </div>
-              <button onClick={() => { setModalOpen(false); router.push("/auth"); }} className="mt-3 w-full rounded-xl border border-[#e2e8f0] py-3 text-sm font-bold text-[#54617a] hover:border-[#0b1220]">
+              <button onClick={() => { setModalOpen(false); router.push(localePath("/auth")); }} className="mt-3 w-full rounded-xl border border-[#e2e8f0] py-3 text-sm font-bold text-[#54617a] hover:border-[#0b1220]">
                 {t("landing.enter")}
               </button>
               <p className="mt-4 text-center text-[11px] text-[#94a3b8]">{t("landing.seven")}</p>

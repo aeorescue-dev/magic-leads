@@ -1,6 +1,7 @@
 'use client';
 
 import { useRouter } from "next/navigation";
+import { useI18n } from "@/lib/i18n";
 import { demoLogin } from "@/lib/api-client";
 
 interface DemoLoginButtonProps {
@@ -11,10 +12,13 @@ interface DemoLoginButtonProps {
 
 export function DemoLoginButton({ children, variant = "primary", className = "" }: DemoLoginButtonProps) {
   const router = useRouter();
+  const { lang } = useI18n();
+
+  const localePath = (href: string) => `/${lang}${href}`;
 
   const handleClick = async () => {
     await demoLogin();
-    router.push("/dashboard");
+    router.push(localePath("/dashboard"));
   };
 
   const base =

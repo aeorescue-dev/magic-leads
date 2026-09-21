@@ -1,7 +1,7 @@
 'use client';
 
 import { usePathname } from "next/navigation";
-import { Navbar } from "@/components/Navbar";
+import { NavbarNew } from "@/components/NavbarNew";
 import { Footer } from "@/components/Footer";
 
 export function ShellChrome() {
@@ -10,7 +10,7 @@ export function ShellChrome() {
   const isDashboard = pathname.startsWith("/dashboard");
   return (
     <>
-      {!isLanding && !isDashboard && <Navbar />}
+      {!isLanding && !isDashboard && <NavbarNew />}
       {!isLanding && !isDashboard && <Footer />}
     </>
   );

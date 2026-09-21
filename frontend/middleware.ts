@@ -1,23 +1,54 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-/**
- * Protege as rotas protegidas verificando a sessão (cookie).
- * Verifica tanto o cookie garimpador_auth (MVP) quanto o garimpador_token (httpOnly).
- */
-const PROTECTED = ["/dashboard"];
+const LOCALES = ["pt", "en", "es"] as const;
+const DEFAULT_LOCALE = "pt";
+
+const PROTECTED_PATHS = ["/dashboard"];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const isProtected = PROTECTED.some((p) => pathname.startsWith(p));
+
+  // Skip static files, API routes, internal paths
+  if (
+    pathname.startsWith("/_next") ||
+    pathname.startsWith("/api") ||
+    pathname.startsWith("/static") ||
+    pathname.includes(".") ||
+    pathname === "/favicon.ico" ||
+    pathname === "/manifest.json" ||
+    pathname === "/robots.txt" ||
+    pathname === "/sitemap.xml"
+  ) {
+    return NextResponse.next();
+  }
+
+  // Check if pathname already has locale prefix
+  const pathnameHasLocale = LOCALES.some(
+    (locale) => pathname.startsWith(`/${locale}/`) || pathname === `/${locale}`
+  );
+
+  // If no locale in path, redirect to default locale
+  if (!pathnameHasLocale) {
+    const locale = DEFAULT_LOCALE;
+    const redirectUrl = new URL(`/${locale}${pathname}`, request.url);
+    return NextResponse.redirect(redirectUrl);
+  }
+
+  // Extract locale from path
+  const locale = pathname.split("/")[1];
+
+  // Check if path is protected (after locale)
+  const pathAfterLocale = pathname.slice(locale.length + 1) || "/";
+  const isProtected = PROTECTED_PATHS.some((p) => pathAfterLocale.startsWith(p));
 
   if (isProtected) {
-    // Verifica cookie de autenticação (MVP) ou token httpOnly
     const authCookie = request.cookies.get("garimpador_auth");
     const tokenCookie = request.cookies.get("garimpador_token");
-    
+
     if ((!authCookie || !authCookie.value) && (!tokenCookie || !tokenCookie.value)) {
-      return NextResponse.redirect(new URL("/", request.url));
+      const loginUrl = new URL(`/${locale}/`, request.url);
+      return NextResponse.redirect(loginUrl);
     }
   }
 
@@ -25,5 +56,7 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*"],
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|manifest.json|api/).*)",
+  ],
 };

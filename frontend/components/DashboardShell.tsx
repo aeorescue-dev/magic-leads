@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { Navbar } from "@/components/Navbar";
+import { NavbarNew } from "@/components/NavbarNew";
 import { Footer } from "@/components/Footer";
 
 export function DashboardShell({
@@ -11,7 +11,7 @@ export function DashboardShell({
 }) {
   return (
     <>
-      <Navbar />
+      <NavbarNew />
       {children}
       <Footer />
     </>

@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { useI18n } from "@/lib/i18n";
 import { fetchMe, getToken } from "@/lib/api-client";
 
 /**
@@ -14,6 +15,9 @@ import { fetchMe, getToken } from "@/lib/api-client";
  */
 export function PwaSessionRedirect() {
   const router = useRouter();
+  const { lang } = useI18n();
+
+  const localePath = (href: string) => `/${lang}${href}`;
 
   useEffect(() => {
     const redirect = async () => {
@@ -34,7 +38,7 @@ export function PwaSessionRedirect() {
       // que já aponta para o backend correto e envia o token no header).
       try {
         await fetchMe();
-        router.replace("/dashboard");
+        router.replace(localePath("/dashboard"));
       } catch {
         /* token expirado/sessão inválida → mantém na landing */
       }
@@ -42,7 +46,7 @@ export function PwaSessionRedirect() {
     redirect();
     // Só roda uma vez no load inicial.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [lang]);
 
   // Sem renderização visível: só faz o redirect quando aplicável.
   return null;
