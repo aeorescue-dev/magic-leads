@@ -1,0 +1,6 @@
+tree c910e63a677a86aa32ea2b8f690c42a48fe5ee8f
+parent 0f512c22b0391812b62571c5d7b96878006123fc
+author MagicLeads Deploy <deploy@magicleads.app> 1789583914 -0400
+committer MagicLeads Deploy <deploy@magicleads.app> 1789583914 -0400
+
+fix(config): strip whitespace/newlines from Stripe env vars (Railway copy-paste)
