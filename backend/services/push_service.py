@@ -285,31 +285,81 @@ class PushService:
                 })
         return results
 
-    async def send_new_lead_alert(self, lead: dict, category: str) -> int:
-        """Envia alerta de novo lead para usuários interessados na categoria."""
-        payload = _build_payload(
-            title=f"{PREFIXES['new_lead']} Nova oportunidade",
-            body=f"{category}: {lead.get('address', 'Endereço não informado')} — {lead.get('city', '')}",
-            tag=f"new_lead_{lead.get('id')}",
-            lead_id=lead.get("id"),
-            url=f"/dashboard?lead={lead.get('id')}",
-            category=category,
-            extra={"timestamp": lead.get("date_reported")}
+    async def send_new_lead_alert(self, lead: dict, category: str, payload: Dict = None) -> int:
+        """Envia push de nova oportunidade para usuários interessados na categoria.
+
+        Título/mensagem localizados por `user["locale"]` via translations.tr()
+        (fallback PT). Retorna quantas subscriptions receberam.
+        """
+        from .translations import tr
+
+        addr = lead.get("address") or "endereço"
+        city = lead.get("city") or ""
+        icon_url = (
+            "https://magicleads-oficial.vercel.app/icons/magicleads-brand.svg"
         )
-        return await self.send_to_category(category, payload)
+
+        def _payload_for(locale: Optional[str]):
+            return {
+                "title": tr("new_lead.push_title", locale),
+                "body": tr(
+                    "new_lead.main_msg", locale,
+                    category=category,
+                    addr=addr,
+                    city=city,
+                ),
+                "icon": icon_url,
+                "badge": icon_url,
+                "tag": f"new-lead-{lead.get('id')}",
+                "url": f"/dashboard?lead={lead.get('id')}",
+                "category": category,
+            }
+
+        users = await db_service.get_users_interested_in(category)
+        sent = 0
+        for user in users[:50]:
+            payload = _payload_for(normalize(user.get("locale")))
+            sent += await self.send_to_user(user["id"], payload)
+        return sent
 
     async def send_status_change_alert(self, lead: dict, new_status: str, category: str) -> int:
-        """Envia alerta de mudança de status."""
-        payload = _build_payload(
-            title=f"{PREFIXES['status_change']} Status atualizado",
-            body=f"O lead {lead.get('address', '')} — {lead.get('city', '')} agora está '{new_status}' ({category})",
-            tag=f"status_{lead.get('id')}_{new_status}",
-            lead_id=lead.get("id"),
-            url=f"/dashboard?lead={lead.get('id')}",
-            category=category,
-            extra={"status": new_status}
+        """Envia alerta de mudança de status localizado por `user["locale"]`.
+
+        Título/corpo por usuário via translations.tr() (fallback PT). Retorna
+        quantas subscriptions receberam.
+        """
+        from .translations import tr
+
+        addr = lead.get("address") or "endereço"
+        city = lead.get("city") or ""
+        icon_url = (
+            "https://magicleads-oficial.vercel.app/icons/magicleads-brand.svg"
         )
-        return await self.send_to_category(category, payload)
+
+        def _payload_for(locale: Optional[str]):
+            return {
+                "title": tr("status_change.title", locale),
+                "body": tr(
+                    "status_change.main_msg", locale,
+                    addr=addr,
+                    city=city,
+                    status=new_status,
+                    category=category,
+                ),
+                "icon": icon_url,
+                "badge": icon_url,
+                "tag": f"status_{lead.get('id')}_{new_status}",
+                "url": f"/dashboard?lead={lead.get('id')}",
+                "category": category,
+                "status": new_status,
+            }
+
+        users = await db_service.get_users_interested_in(category)
+        sent = 0
+        for user in users[:50]:
+            payload = _payload_for(normalize(user.get("locale")))
+            sent += await self.send_to_user(user["id"], payload)
+        return sent
 
 
 push_service = PushService()

@@ -512,6 +512,7 @@ export async function registerUser(data: {
   email: string;
   password: string;
   company_name: string;
+  locale?: string;
 }): Promise<AuthResponse> {
   const res = await fetch(`${API_URL}/api/auth/register`, {
     method: "POST",

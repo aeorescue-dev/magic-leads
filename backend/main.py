@@ -2122,6 +2122,7 @@ async def register_user(request: Request, payload: UserCreate, response: Respons
         user = await db_service.create_user(
             payload.email.lower(), pwd_hash, payload.company_name, plan="free",
             subscription_status="expired", plan_until=None,
+            locale=payload.locale if payload.locale else "pt",
         )
         if not user:
             raise HTTPException(status_code=409, detail="Email já cadastrado")
@@ -2248,6 +2249,33 @@ async def update_user_company(user_id: int, payload: UserUpdate, user: dict = De
         if len(name) > 120:
             raise HTTPException(status_code=422, detail="Nome muito longo (máx. 120 caracteres)")
         full = await db_service.update_user_company(int(user_id), name)
+        if not full:
+            raise HTTPException(status_code=404, detail="Usuário não encontrado")
+        return UserResponse(
+            id=full["id"],
+            email=full["email"],
+            company_name=full.get("company_name"),
+            plan=full.get("plan"),
+            subscription_status=full.get("subscription_status"),
+            locale=full.get("locale"),
+            created_at=full.get("created_at"),
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao atualizar empresa do usuário {user_id}: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao atualizar empresa")
+
+
+@app.patch("/api/users/{user_id}/locale", response_model=UserResponse)
+async def update_user_locale(user_id: int, payload: UserUpdate, user: dict = Depends(_get_current_user)):
+    try:
+        if int(user["id"]) != int(user_id):
+            raise HTTPException(status_code=403, detail="Sem permissão para editar este usuário")
+        locale = (payload.locale or "").strip().lower()
+        if locale not in ("pt", "en", "es"):
+            raise HTTPException(status_code=422, detail="Idioma inválido (use pt, en ou es)")
+        full = await db_service.update_user_locale(int(user_id), locale)
         if not full:
             raise HTTPException(status_code=404, detail="Usuário não encontrado")
         return UserResponse(

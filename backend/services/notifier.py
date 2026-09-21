@@ -72,44 +72,63 @@ async def guard_silent_fanout(
     return True
 
 
-async def notify_users_for_lead(
-    lead_id: int,
-    category: str,
-    event_type: str,
-    title: str,
-    message_fmt: str,
-    limit: int = 50,
-) -> int:
-    """Notifica os usuários interessados na categoria de um lead.
+    async def notify_users_for_lead(
+        lead_id: int,
+        category: str,
+        event_type: str,
+        title: str,
+        message_fmt: str,
+        limit: int = 50,
+    ) -> int:
+        """Notifica os usuários interessados na categoria de um lead.
 
-    message_fmt é um template com placeholders {address} e {city}.
-    Retorna quantas notificações foram criadas.
-    """
-    users = await db_service.get_users_interested_in(category)
-    sent = 0
-    for user in users[:limit]:
-        try:
-            msg = message_fmt.format(
-                address=user.get("_address", ""),
-                city=user.get("_city", ""),
+        title/message_fmt são os textos-PT fallback. Quando o usuário tem um
+        `locale` gravado (coluna users.locale, padrão "pt"), o título e a mensagem
+        são localizados pelos dicionários de services/translations (tr()).
+        Retorna quantas notificações foram criadas.
+        """
+        users = await db_service.get_users_interested_in(category)
+        sent = 0
+        for user in users[:limit]:
+            try:
+                # Localiza fallback PT por usuário (se locale presente).
+                from .translations import tr
+
+                locale = normalize(user.get("locale"))
+                if event_type == "new_lead":
+                    msg = tr(
+                        "new_lead.main_msg", locale,
+                        category=category,
+                        addr=user.get("_address", "") or title,
+                        city=user.get("_city", ""),
+                    )
+                    localized_title = tr("new_lead.title", locale)
+                elif event_type == "status_change":
+                    msg = tr(
+                        "status_change.main_msg", locale,
+                        addr=user.get("_address", "") or title,
+                        city=user.get("_city", ""),
+                        status="",  # preenchido pelo chamador via message_fmt quando aplicável
+                        category=category,
+                    )
+                    localized_title = tr("status_change.title", locale)
+                else:
+                    msg = message_fmt
+                    localized_title = title
+            except Exception:
+                msg = message_fmt
+                localized_title = title
+
+            created = await db_service.add_notification_for_user(
+                user_id=user["id"],
+                type=event_type,
+                title=localized_title,
+                message=msg,
+                lead_id=lead_id,
             )
-        except (KeyError, IndexError):
-            msg = message_fmt
-        created = await db_service.add_notification_for_user(
-            user_id=user["id"],
-            type=event_type,
-            title=title,
-            message=msg,
-            lead_id=lead_id,
-        )
-        if created:
-            sent += 1
-    if sent:
-        logger.info(
-            f"Notifier: {sent} usuário(s) notificado(s) para lead {lead_id} "
-            f"(categoria='{category}', tipo='{event_type}')"
-        )
-    return sent
+            if created:
+                sent += 1
+        return sent
 
 
 async def broadcast(event_type: str, title: str, message: str) -> int:
@@ -205,6 +224,17 @@ async def fanout_new_lead_batch(category: str, leads: list) -> FanoutReport:
             if used_today.get(uid, 0) >= DAILY_ALERT_LIMIT:
                 skipped[uid] += 1
                 continue
+            # Localiza título + mensagem no idioma do usuário
+            from .translations import tr as _tr
+
+            locale = _normalize(u.get("locale"))
+            localized_title = _tr("new_lead.title", locale)
+            localized_main = _tr(
+                "new_lead.main_msg", locale,
+                category=category,
+                addr=addr,
+                city=city,
+            )
             # Notifica in-app
             msg = f"Nova oportunidade em {category}: {addr} — {city}"
             created = await db_service.add_notification_for_user(

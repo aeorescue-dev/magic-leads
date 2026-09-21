@@ -128,6 +128,7 @@ CREATE TABLE IF NOT EXISTS users (
   conversions INTEGER DEFAULT 0,
   cities_filter TEXT DEFAULT NULL,
   push_enabled INTEGER DEFAULT 0,
+  locale TEXT DEFAULT 'pt',
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -611,6 +612,8 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN cities_filter TEXT DEFAULT NULL")
     if user_cols and "push_enabled" not in user_cols:
         conn.execute("ALTER TABLE users ADD COLUMN push_enabled INTEGER DEFAULT 0")
+    if user_cols and "locale" not in user_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN locale TEXT DEFAULT 'pt'")
 
     event_cols = {r["name"] for r in conn.execute("PRAGMA table_info(lead_events)").fetchall()}
     if event_cols:
@@ -1310,15 +1313,16 @@ class DatabaseService:
     # Usuários
     # ---------------------------------------------------------------
     def create_user(self, email: str, password_hash: str, company_name: str, plan: str = "free",
-                    subscription_status: Optional[str] = None, plan_until: Optional[str] = None) -> Optional[dict]:
+                    subscription_status: Optional[str] = None, plan_until: Optional[str] = None,
+                    locale: str = "pt") -> Optional[dict]:
         conn = get_connection()
         try:
             exists = conn.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
             if exists:
                 return None
             conn.execute(
-                "INSERT INTO users (email, password_hash, company_name, plan, subscription_status, plan_until) VALUES (?, ?, ?, ?, ?, ?)",
-                (email, password_hash, company_name, plan, subscription_status, plan_until),
+                "INSERT INTO users (email, password_hash, company_name, plan, subscription_status, plan_until, locale) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (email, password_hash, company_name, plan, subscription_status, plan_until, locale),
             )
             conn.commit()
             row = conn.execute(
@@ -1349,6 +1353,17 @@ class DatabaseService:
         conn = get_connection()
         try:
             conn.execute("UPDATE users SET company_name = ? WHERE id = ?", (company_name, user_id))
+            conn.commit()
+            row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def update_user_locale(self, user_id: int, locale: str) -> Optional[dict]:
+        """Atualiza o idioma do usuário (users.locale: pt|en|es)."""
+        conn = get_connection()
+        try:
+            conn.execute("UPDATE users SET locale = ? WHERE id = ?", (locale, user_id))
             conn.commit()
             row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
             return dict(row) if row else None
@@ -4043,8 +4058,9 @@ class AsyncDatabaseService:
         return await anyio.to_thread.run_sync(self._service.count_unread_notifications)
 
     async def create_user(self, email: str, password_hash: str, company_name: str, plan: str = "free",
-                           subscription_status: Optional[str] = None, plan_until: Optional[str] = None) -> Optional[dict]:
-        return await anyio.to_thread.run_sync(self._service.create_user, email, password_hash, company_name, plan, subscription_status, plan_until)
+                           subscription_status: Optional[str] = None, plan_until: Optional[str] = None,
+                           locale: str = "pt") -> Optional[dict]:
+        return await anyio.to_thread.run_sync(self._service.create_user, email, password_hash, company_name, plan, subscription_status, plan_until, locale)
 
     async def get_user_by_email(self, email: str) -> Optional[dict]:
         return await anyio.to_thread.run_sync(self._service.get_user_by_email, email)
@@ -4054,6 +4070,9 @@ class AsyncDatabaseService:
 
     async def update_user_company(self, user_id: int, company_name: str) -> Optional[dict]:
         return await anyio.to_thread.run_sync(self._service.update_user_company, user_id, company_name)
+
+    async def update_user_locale(self, user_id: int, locale: str) -> Optional[dict]:
+        return await anyio.to_thread.run_sync(self._service.update_user_locale, user_id, locale)
 
     async def update_user_plan(self, user_id: int, plan: str, subscription_status: str = "active") -> bool:
         return await anyio.to_thread.run_sync(self._service.update_user_plan, user_id, plan, subscription_status)

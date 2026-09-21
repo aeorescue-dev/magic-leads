@@ -244,6 +244,7 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str
     company_name: str
+    locale: Optional[str] = "pt"
 
 
 class UserLogin(BaseModel):
@@ -254,6 +255,7 @@ class UserLogin(BaseModel):
 class UserUpdate(BaseModel):
     company_name: Optional[str] = None
     cities_filter: Optional[List[str]] = None
+    locale: Optional[str] = None
 
 
 class UserResponse(BaseModel):
@@ -267,6 +269,7 @@ class UserResponse(BaseModel):
     leads_taken: int = 0
     conversions: int = 0
     push_enabled: bool = False
+    locale: str = "pt"
     created_at: Optional[str] = None
 
 
