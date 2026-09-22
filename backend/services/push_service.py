@@ -5,7 +5,7 @@ Envia notificações push via Web Push Protocol (VAPID) para subscriptions salva
 import asyncio
 import json
 import random
-from typing import Dict
+from typing import Dict, Optional
 
 import anyio
 from pywebpush import WebPushException, webpush
@@ -13,6 +13,7 @@ from pywebpush import WebPushException, webpush
 from ..config import settings
 from ..utils.logger import logger
 from .db import db_service
+from .translations import normalize
 
 MAX_RETRIES = 3
 BASE_BACKOFF = 1.0  # seconds

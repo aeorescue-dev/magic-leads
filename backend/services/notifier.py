@@ -22,6 +22,7 @@ from dataclasses import dataclass
 
 from ..utils.logger import logger
 from .db import db_service
+from .translations import normalize, tr
 
 DAILY_ALERT_LIMIT = 10
 
@@ -72,7 +73,7 @@ async def guard_silent_fanout(
     return True
 
 
-    async def notify_users_for_lead(
+async def notify_users_for_lead(
         lead_id: int,
         category: str,
         event_type: str,
@@ -92,8 +93,6 @@ async def guard_silent_fanout(
         for user in users[:limit]:
             try:
                 # Localiza fallback PT por usuário (se locale presente).
-                from .translations import tr
-
                 locale = normalize(user.get("locale"))
                 if event_type == "new_lead":
                     msg = tr(
@@ -224,17 +223,6 @@ async def fanout_new_lead_batch(category: str, leads: list) -> FanoutReport:
             if used_today.get(uid, 0) >= DAILY_ALERT_LIMIT:
                 skipped[uid] += 1
                 continue
-            # Localiza título + mensagem no idioma do usuário
-            from .translations import tr as _tr
-
-            locale = _normalize(u.get("locale"))
-            localized_title = _tr("new_lead.title", locale)
-            localized_main = _tr(
-                "new_lead.main_msg", locale,
-                category=category,
-                addr=addr,
-                city=city,
-            )
             # Notifica in-app
             msg = f"Nova oportunidade em {category}: {addr} — {city}"
             created = await db_service.add_notification_for_user(
