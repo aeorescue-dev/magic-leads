@@ -24,9 +24,9 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Check if pathname already has locale prefix
+  // Check if pathname already has locale prefix (aceita /pt, /pt/, /en, /en/, /es, /es/)
   const pathnameHasLocale = LOCALES.some(
-    (locale) => pathname.startsWith(`/${locale}/`) || pathname === `/${locale}`
+    (locale) => pathname.startsWith(`/${locale}/`) || pathname === `/${locale}` || pathname === `/${locale}/`
   );
 
   // If no locale in path, redirect to the locale the USER chose (cookie NEXT_LOCALE),
