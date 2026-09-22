@@ -30,24 +30,24 @@ export function middleware(request: NextRequest) {
   );
 
   // If no locale in path, redirect to the locale the USER chose (cookie NEXT_LOCALE),
-  // falling back to the default. For root "/", rewrite to default locale invisibly
-  // (no URL change). For other paths, redirect explicitly.
+  // falling back to the default. For root "/", rewrite to DEFAULT_LOCALE invisibly
+  // (no URL change, no cookie). For other paths, redirect explicitly using cookie or default.
   if (!pathnameHasLocale) {
     const cookieLocale = request.cookies.get("NEXT_LOCALE")?.value;
-    const locale =
-      cookieLocale && (LOCALES as readonly string[]).includes(cookieLocale)
-        ? (cookieLocale as string)
-        : DEFAULT_LOCALE;
+    const cookieIsValid = cookieLocale && (LOCALES as readonly string[]).includes(cookieLocale);
 
-    // Root "/": rewrite to default locale invisibly (no URL change)
+    // Root "/": always rewrite to DEFAULT_LOCALE invisibly (ignore cookie)
     if (pathname === "/") {
-      const rewriteUrl = new URL(`/${locale}`, request.url);
+      const rewriteUrl = new URL(`/${DEFAULT_LOCALE}`, request.url);
       const response = NextResponse.rewrite(rewriteUrl);
-      response.headers.set("x-middleware-locale", locale);
+      response.headers.set("x-middleware-locale", DEFAULT_LOCALE);
       return response;
     }
 
-    // Other paths: explicit redirect to locale prefix
+    // Other paths: explicit redirect using cookie or DEFAULT_LOCALE
+    const locale = cookieLocale && (LOCALES as readonly string[]).includes(cookieLocale)
+      ? (cookieLocale as string)
+      : DEFAULT_LOCALE;
     const target = `/${locale}${pathname}`;
     const redirectUrl = new URL(target, request.url);
     return NextResponse.redirect(redirectUrl);
