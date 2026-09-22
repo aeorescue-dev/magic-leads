@@ -7,7 +7,8 @@ const DEFAULT_LOCALE = "pt";
 const PROTECTED_PATHS = ["/dashboard"];
 
 export function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+  let { pathname } = request.nextUrl;
+  pathname = pathname.replace(/\/+$/, "") || "/";
 
   // Skip static files, API routes, internal paths
   if (
@@ -28,10 +29,12 @@ export function middleware(request: NextRequest) {
     (locale) => pathname.startsWith(`/${locale}/`) || pathname === `/${locale}`
   );
 
-  // If no locale in path, redirect to default locale
+  // If no locale in path, redirect to default locale (sem barra final -> evita loop /pt/ <-> /pt)
   if (!pathnameHasLocale) {
     const locale = DEFAULT_LOCALE;
-    const redirectUrl = new URL(`/${locale}${pathname}`, request.url);
+    const target = `/${locale}${pathname === "/" ? "" : pathname}`;
+    if (target === pathname) return NextResponse.next();
+    const redirectUrl = new URL(target, request.url);
     return NextResponse.redirect(redirectUrl);
   }
 
