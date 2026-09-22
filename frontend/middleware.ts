@@ -24,31 +24,22 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Check if pathname already has locale prefix (aceita /pt, /pt/, /en, /en/, /es, /es/)
+  // Check if pathname already has locale prefix
   const pathnameHasLocale = LOCALES.some(
-    (locale) => pathname.startsWith(`/${locale}/`) || pathname === `/${locale}` || pathname === `/${locale}/`
+    (locale) => pathname.startsWith(`/${locale}/`) || pathname === `/${locale}`
   );
 
   // If no locale in path, redirect to the locale the USER chose (cookie NEXT_LOCALE),
-  // falling back to the default. For root "/", rewrite to DEFAULT_LOCALE invisibly
-  // (no URL change, no cookie). For other paths, redirect explicitly using cookie or default.
+  // falling back to the default. This is what keeps the dashboard in the language
+  // the user logged in with (e.g. chose English -> stays English after login).
   if (!pathnameHasLocale) {
     const cookieLocale = request.cookies.get("NEXT_LOCALE")?.value;
-    const cookieIsValid = cookieLocale && (LOCALES as readonly string[]).includes(cookieLocale);
-
-    // Root "/": always rewrite to DEFAULT_LOCALE invisibly (ignore cookie)
-    if (pathname === "/") {
-      const rewriteUrl = new URL(`/${DEFAULT_LOCALE}`, request.url);
-      const response = NextResponse.rewrite(rewriteUrl);
-      response.headers.set("x-middleware-locale", DEFAULT_LOCALE);
-      return response;
-    }
-
-    // Other paths: explicit redirect using cookie or DEFAULT_LOCALE
-    const locale = cookieLocale && (LOCALES as readonly string[]).includes(cookieLocale)
-      ? (cookieLocale as string)
-      : DEFAULT_LOCALE;
-    const target = `/${locale}${pathname}`;
+    const locale =
+      cookieLocale && (LOCALES as readonly string[]).includes(cookieLocale)
+        ? (cookieLocale as string)
+        : DEFAULT_LOCALE;
+    const target = `/${locale}${pathname === "/" ? "" : pathname}`;
+    if (target === pathname) return NextResponse.next();
     const redirectUrl = new URL(target, request.url);
     return NextResponse.redirect(redirectUrl);
   }
