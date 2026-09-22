@@ -29,9 +29,15 @@ export function middleware(request: NextRequest) {
     (locale) => pathname.startsWith(`/${locale}/`) || pathname === `/${locale}`
   );
 
-  // If no locale in path, redirect to default locale (sem barra final -> evita loop /pt/ <-> /pt)
+  // If no locale in path, redirect to the locale the USER chose (cookie NEXT_LOCALE),
+  // falling back to the default. This is what keeps the dashboard in the language
+  // the user logged in with (e.g. chose English -> stays English after login).
   if (!pathnameHasLocale) {
-    const locale = DEFAULT_LOCALE;
+    const cookieLocale = request.cookies.get("NEXT_LOCALE")?.value;
+    const locale =
+      cookieLocale && (LOCALES as readonly string[]).includes(cookieLocale)
+        ? (cookieLocale as string)
+        : DEFAULT_LOCALE;
     const target = `/${locale}${pathname === "/" ? "" : pathname}`;
     if (target === pathname) return NextResponse.next();
     const redirectUrl = new URL(target, request.url);

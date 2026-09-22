@@ -6,7 +6,7 @@ import {
 
 const STORAGE_KEY = "garimpador.user";
 
-function readStoredUser(): AuthUser | null {
+export function readStoredUser(): AuthUser | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
@@ -94,7 +94,7 @@ export function useAuth() {
     return () => clearInterval(id);
   }, [user]);
 
-  const signIn = useCallback(async (email: string, password: string, companyName?: string) => {
+  const signIn = useCallback(async (email: string, password: string, companyName?: string, locale?: string) => {
     const withSubscription = async (u: AuthUser) => {
       setUser(u);
       storeUser(u);
@@ -102,7 +102,7 @@ export function useAuth() {
       return u;
     };
     if (companyName) {
-      const out = await registerUser({ email, password, company_name: companyName });
+      const out = await registerUser({ email, password, company_name: companyName, ...(locale ? { locale } : {}) });
       return withSubscription(out.user);
     }
     const out = await loginUser({ email, password });
