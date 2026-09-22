@@ -3,7 +3,6 @@ import type { NextRequest } from "next/server";
 
 const LOCALES = ["pt", "en", "es"] as const;
 const DEFAULT_LOCALE = "en";
-
 const PROTECTED_PATHS = ["/dashboard"];
 
 export function middleware(request: NextRequest) {
