@@ -28,17 +28,31 @@ export function middleware(request: NextRequest) {
     (locale) => pathname.startsWith(`/${locale}/`) || pathname === `/${locale}`
   );
 
-  // If no locale in path, redirect to the locale the USER chose (cookie NEXT_LOCALE),
-  // falling back to the default. This is what keeps the dashboard in the language
-  // the user logged in with (e.g. chose English -> stays English after login).
+  // If no locale in path
   if (!pathnameHasLocale) {
     const cookieLocale = request.cookies.get("NEXT_LOCALE")?.value;
     const locale =
       cookieLocale && (LOCALES as readonly string[]).includes(cookieLocale)
         ? (cookieLocale as string)
         : DEFAULT_LOCALE;
-    const target = `/${locale}${pathname === "/" ? "" : pathname}`;
-    if (target === pathname) return NextResponse.next();
+
+    // Root "/": ALWAYS rewrite to DEFAULT_LOCALE (en) invisibly, ignoring any cookie
+    if (pathname === "/") {
+      const rewriteUrl = new URL(`/${DEFAULT_LOCALE}`, request.url);
+      const response = NextResponse.rewrite(rewriteUrl);
+      response.headers.set("x-middleware-locale", DEFAULT_LOCALE);
+      // Clear any stale NEXT_LOCALE cookie that might force pt
+      response.cookies.set("NEXT_LOCALE", DEFAULT_LOCALE, {
+        path: "/",
+        maxAge: 60 * 60 * 24 * 365, // 1 year
+        sameSite: "lax",
+        secure: true,
+      });
+      return response;
+    }
+
+    // Other paths: explicit redirect using cookie or DEFAULT_LOCALE
+    const target = `/${locale}${pathname}`;
     const redirectUrl = new URL(target, request.url);
     return NextResponse.redirect(redirectUrl);
   }
