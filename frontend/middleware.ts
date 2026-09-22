@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 const LOCALES = ["pt", "en", "es"] as const;
-const DEFAULT_LOCALE = "pt";
+const DEFAULT_LOCALE = "en";
 
 const PROTECTED_PATHS = ["/dashboard"];
 
