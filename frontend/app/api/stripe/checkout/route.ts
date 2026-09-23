@@ -7,11 +7,11 @@ export async function POST(req: Request) {
     const { priceId, customerId, successUrl, cancelUrl } = body ?? {};
 
     if (!process.env.STRIPE_SECRET_KEY) {
-      return NextResponse.json({ error: "STRIPE_SECRET_KEY não configurada" }, { status: 500 });
+      return NextResponse.json({ error: "STRIPE_SECRET_KEY nÃ£o configurada" }, { status: 500 });
     }
 
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-      apiVersion: "2024-06-20",
+      apiVersion: "2023-08-16",
     });
 
     const session = await stripe.checkout.sessions.create({
@@ -24,9 +24,9 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ url: session.url });
   } catch (err) {
-    console.error("[stripe/checkout] Erro ao criar sessão", err);
+    console.error("[stripe/checkout] Erro ao criar sessÃ£o", err);
     return NextResponse.json(
-      { error: "Falha ao criar a sessão de checkout" },
+      { error: "Falha ao criar a sessÃ£o de checkout" },
       { status: 500 }
     );
   }
