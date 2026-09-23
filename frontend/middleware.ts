@@ -65,6 +65,12 @@ export function middleware(request: NextRequest) {
   const isProtected = PROTECTED_PATHS.some((p) => pathAfterLocale.startsWith(p));
 
   if (isProtected) {
+    const accessCookie = request.cookies.get("garimpador_access");
+    if (accessCookie && accessCookie.value === "blocked" && !pathAfterLocale.startsWith("/checkout")) {
+      const checkoutUrl = new URL("//checkout", request.url);
+      return NextResponse.redirect(checkoutUrl);
+    }
+
     const authCookie = request.cookies.get("garimpador_auth");
     const tokenCookie = request.cookies.get("garimpador_token");
 
