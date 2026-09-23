@@ -1,0 +1,2 @@
+Vercel CLI 59.23.2 (Node.js 24.19.0)
+Error: Invalid number of arguments. Usage: `vercel alias ls`

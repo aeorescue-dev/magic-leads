@@ -1,0 +1,48 @@
+Vercel CLI 59.23.2 (Node.js 24.19.0)
+Fetching deployment "garimpador-leads.vercel.app" in fabio-dev2
+> Fetched deployment "garimpador-leads-3e66txz9y-fabio-dev2.vercel.app" in fabio-dev2 [364ms]
+
+  General
+
+    id		dpl_CGzbhD2fkXKbjAAvuuZDrFws9XaY
+    name	garimpador-leads
+    target	production
+    status	● Ready
+    url		https://garimpador-leads-3e66txz9y-fabio-dev2.vercel.app
+    created	Sun Sep 20 2026 21:52:45 GMT-0400 (Horário de Verão do Leste) [1d ago]
+
+
+  Build Machine
+
+    requested build machine basic
+    actual assigned cores   2 vCPU (actual assignment)
+    memory                  8192 MiB
+    selection type          fixed
+    selection source        plan-default
+
+
+  Duration
+
+    build duration	36s
+    post-build duration	16s
+    billable duration	1m
+    CPU Minutes Usage	2 minutes (1m x 2vCPU)
+
+
+  Aliases
+
+    ╶ https://garimpador-leads.vercel.app
+    ╶ https://garimpador-leads-fabio-dev2.vercel.app
+    
+
+  Builds
+
+    ┌ .        [0ms]
+    ├── λ [locale] (785.32KB) [iad1]
+    ├── λ [locale].rsc (785.32KB) [iad1]
+    ├── λ [locale]/auth (785.32KB) [iad1]
+    ├── λ [locale]/auth.rsc (785.32KB) [iad1]
+    ├── λ [locale]/dashboard (785.32KB) [iad1]
+    └── 18 output items hidden
+    
+

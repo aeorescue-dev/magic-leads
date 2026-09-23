@@ -1,0 +1,10 @@
+Vercel CLI 59.23.2 (Node.js 24.19.0)
+> Assigning alias garimpador-leads-3e66txz9y-fabio-dev2.vercel.app to magicleads-oficial.vercel.app
+Creating alias
+{
+  "status": "error",
+  "reason": "api_error",
+  "message": "The chosen alias \"garimpador-leads-3e66txz9y-fabio-dev2.vercel.app\" is a deployment URL.",
+  "cliVersion": "59.23.2",
+  "invocationId": "ea8b5076-844c-4f6a-b530-12b612fd705e"
+}

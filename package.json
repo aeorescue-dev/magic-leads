@@ -1,0 +1,8 @@
+{
+  "name": "garimpador-leads",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "garimpador-oncode-run": "powershell -NoProfile -ExecutionPolicy Bypass -File \"garimpador-oncode-run.ps1\""
+  }
+}

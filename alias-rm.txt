@@ -1,0 +1,2 @@
+Vercel CLI 59.23.2 (Node.js 24.19.0)
+> Success! Alias magicleads-oficial.vercel.app removed [189ms]

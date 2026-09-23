@@ -1,0 +1,47 @@
+Vercel CLI 59.23.2 (Node.js 24.19.0)
+Fetching deployment "magic-leads-frontend-final-git-master-fabio-dev2.vercel.app" in fabio-dev2
+> Fetched deployment "magic-leads-frontend-final-npsxcelb5-fabio-dev2.vercel.app" in fabio-dev2 [411ms]
+
+  General
+
+    id		dpl_DeZ1QpQCnbaNVRHADeBcgS94Xc7N
+    name	magic-leads-frontend-final
+    target	preview
+    status	● Ready
+    url		https://magic-leads-frontend-final-npsxcelb5-fabio-dev2.vercel.app
+    created	Fri Sep 18 2026 09:36:16 GMT-0400 (Horário de Verão do Leste) [4d ago]
+
+
+  Build Machine
+
+    requested build machine basic
+    actual assigned cores   2 vCPU (actual assignment)
+    memory                  8192 MiB
+    selection type          fixed
+    selection source        plan-default
+
+
+  Duration
+
+    build duration	32s
+    post-build duration	17s
+    billable duration	1m
+    CPU Minutes Usage	2 minutes (1m x 2vCPU)
+
+
+  Aliases
+
+    ╶ https://magic-leads-frontend-final-git-master-fabio-dev2.vercel.app
+    
+
+  Builds
+
+    ┌ .        [0ms]
+    ├── λ index (731.95KB) [iad1]
+    ├── λ _not-found (731.95KB) [iad1]
+    ├── λ _not-found.rsc (731.95KB) [iad1]
+    ├── λ auth (731.95KB) [iad1]
+    ├── λ auth.rsc (731.95KB) [iad1]
+    └── 18 output items hidden
+    
+
