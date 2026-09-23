@@ -94,6 +94,20 @@ export function useAuth() {
     return () => clearInterval(id);
   }, [user]);
 
+  // HARD BLOCK (Fase 5): subscrição expirada/pausada => acesso TOTAL negado.
+  // Qualquer utilizador com can_access === false é forçado para /checkout e não
+  // consegue permanecer no dashboard/leads (bloqueio estrutural, não só visual).
+  useEffect(() => {
+    if (loading || !user || !subscription) return;
+    if (subscription.can_access) return;
+    if (typeof window === "undefined") return;
+    const { pathname } = window.location;
+    if (pathname.includes("/checkout")) return;
+    const locale = "locale" in user ? (user as { locale?: string }).locale : undefined;
+    const prefix = locale && locale !== "en" ? `/${locale}` : "";
+    window.location.replace(`${prefix}/checkout`);
+  }, [loading, user, subscription]);
+
   const signIn = useCallback(async (email: string, password: string, companyName?: string, locale?: string) => {
     const withSubscription = async (u: AuthUser) => {
       setUser(u);

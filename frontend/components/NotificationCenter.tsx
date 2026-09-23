@@ -57,15 +57,15 @@ export function NotificationCenter() {
       {open && (
         <div className="absolute right-0 top-full mt-2 w-80 md:w-96 bg-popover border rounded-xl shadow-2xl z-[100] overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b bg-muted/40">
-            <h3 className="font-semibold text-foreground text-sm">Ocorrências recentes</h3>
+            <h3 className="font-semibold text-foreground text-sm">{t("notifications.recent_title") || "Ocorrências recentes"}</h3>
             <button onClick={() => setOpen(false)} className="text-muted-foreground hover:text-foreground">✕</button>
           </div>
 
           <div className="max-h-96 overflow-y-auto divide-y">
             {loading ? (
-              <div className="px-4 py-8 text-center text-muted-foreground text-sm">Carregando…</div>
+              <div className="px-4 py-8 text-center text-muted-foreground text-sm">{t("notifications.loading") || "Carregando…"}</div>
             ) : leads.length === 0 ? (
-              <div className="px-4 py-8 text-center text-muted-foreground text-sm">Sem ocorrências reais.</div>
+              <div className="px-4 py-8 text-center text-muted-foreground text-sm">{t("notifications.empty_real") || "Sem ocorrências reais."}</div>
             ) : (
               leads.map((lead) => (
                 <button
@@ -103,7 +103,7 @@ export function NotificationCenter() {
               onClick={() => { setOpen(false); router.push(localePath("/dashboard/notifications")); }}
               className="text-sm font-medium text-primary hover:underline"
             >
-              Ver todas as demandas do dia →
+              {t("notifications.view_today") || "Ver todas as demandas do dia →"}
             </button>
           </div>
         </div>

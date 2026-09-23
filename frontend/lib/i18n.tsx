@@ -294,6 +294,10 @@ const PT: Dict = {
   "notifications.filter.all": "Todas",
   "notifications.filter.unread": "Não lidas",
   "notifications.filter.recent": "Recentes",
+  "notifications.recent_title": "Ocorrências recentes",
+  "notifications.loading": "Carregando…",
+  "notifications.empty_real": "Sem ocorrências reais.",
+  "notifications.view_today": "Ver todas as demandas do dia →",
 
   // Pricing page
   "pg.title": "Planos",
@@ -1214,6 +1218,10 @@ const EN: Dict = {
   "notifications.filter.all": "All",
   "notifications.filter.unread": "Unread",
   "notifications.filter.recent": "Recent",
+  "notifications.recent_title": "Recent occurrences",
+  "notifications.loading": "Loading…",
+  "notifications.empty_real": "No real occurrences yet.",
+  "notifications.view_today": "View all of today's leads →",
 
   "pg.title": "Pricing",
   "pg.pro": "Pro",
@@ -2128,6 +2136,10 @@ const ES: Dict = {
   "notifications.filter.all": "Todas",
   "notifications.filter.unread": "No leídas",
   "notifications.filter.recent": "Recientes",
+  "notifications.recent_title": "Ocurrencias recientes",
+  "notifications.loading": "Cargando…",
+  "notifications.empty_real": "Sin ocurrencias reales.",
+  "notifications.view_today": "Ver todas las demandas del día →",
 
   "pg.title": "Precios",
   "pg.pro": "Pro",
