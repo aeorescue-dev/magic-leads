@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { AlertTriangle, Loader2, RefreshCcw, ShieldAlert, X } from "lucide-react";
 import { RELEASE_REASONS, LeadResponse } from "@/lib/api-client";
+import { useI18n } from "@/lib/i18n";
 
 interface ReleaseModalProps {
   open: boolean;
@@ -23,6 +24,7 @@ export default function ReleaseModal({
   onClose,
   onRelease,
 }: ReleaseModalProps) {
+  const { t } = useI18n();
   const [reason, setReason] = useState<string>("");
   const [note, setNote] = useState<string>("");
 
@@ -80,7 +82,7 @@ export default function ReleaseModal({
               }`}>
                 {reason === r.value && <span className="h-2 w-2 rounded-full bg-rose-400" />}
               </span>
-              <span className="flex-1">{r.label}</span>
+                <span className="flex-1">{t(r.key) || r.label}</span>
               {r.suspicious && <ShieldAlert className="h-4 w-4 text-amber-400 shrink-0" />}
             </button>
           ))}

@@ -2770,6 +2770,26 @@ const ES: Dict = {
   "dashboard.toast.action_error": "Error en la acción",
 
   // Layout/SEO
+  // Release (liberación de lead) — ver RELEASE_REASONS en lib/api-client.ts
+  "release.reason.no_answer": "No respondió",
+  "release.reason.declined": "Cliente rechazó el servicio",
+  "release.reason.out_of_area": "Fuera del área de atención",
+  "release.reason.personal_emergency": "Emergencia personal",
+  "release.reason.changed_mind": "Cambié de idea (sin motivo)",
+  "release.reason.lazy": "Lo tomé sin tener tiempo",
+
+  // Checkout — nombre real de la empresa (remitente en mensajes)
+  "checkout.company_name.label": "Nombre real de su empresa",
+  "checkout.company_name.placeholder": "Ej.: Rocha Reparaciones",
+  "checkout.company_name.help": "Es el nombre que aparece como remitente en los mensajes a los clientes (WhatsApp, SMS y e-mail). Puede cambiarlo después en Configuración.",
+
+  // Dashboard — oportunidades recientes
+  "dashboard.opportunities.title": "Ocurrencias recientes",
+  "dashboard.opportunities.loading": "Cargando…",
+  "dashboard.opportunities.empty": "Sin ocurrencias reales.",
+  "dashboard.opportunities.see_all": "Ver todas las demandas de hoy →",
+  "dashboard.freshness.date": "Datos actualizados",
+
   "layout.title": "Magic Leads - Obras reales con dueño identificado",
   "layout.description": "Capturamos oportunidades de reforma y corrección (techo, estructura, fontanería, pintura) directo de registros públicos actualizados diariamente, con dueño identificado y 24h de reserva exclusiva por $79/semana.",
 };
