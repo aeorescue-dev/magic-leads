@@ -644,6 +644,16 @@ export async function updateCompanyName(userId: number, company_name: string): P
   );
 }
 
+export async function updateUserLocale(userId: number, locale: string): Promise<AuthUser> {
+  return handle<AuthUser>(
+    await fetch(`${API_URL}/api/users/${userId}/locale`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ locale }),
+    })
+  );
+}
+
 export async function setPushEnabled(enabled: boolean): Promise<{ status: string; push_enabled: boolean }> {
   return handle<{ status: string; push_enabled: boolean }>(
     await fetch(`${API_URL}/api/push/enabled`, {
@@ -930,12 +940,12 @@ export interface LeadOccurrence {
 // Penalidades / métricas do contractor (Phase 4.2)
 // ------------------------------------------------------------------
 export const RELEASE_REASONS = [
-  { value: "no_answer", label: "Não respondeu", acceptable: true },
-  { value: "declined", label: "Cliente recusou o serviço", acceptable: true },
-  { value: "out_of_area", label: "Fora da área de atendimento", acceptable: true },
-  { value: "personal_emergency", label: "Emergência pessoal", acceptable: true },
-  { value: "changed_mind", label: "Mudei de ideia (sem motivo)", suspicious: true },
-  { value: "lazy", label: "Peguei sem ter tempo", suspicious: true },
+  { value: "no_answer", key: "release.reason.no_answer", label: "Não respondeu", acceptable: true },
+  { value: "declined", key: "release.reason.declined", label: "Cliente recusou o serviço", acceptable: true },
+  { value: "out_of_area", key: "release.reason.out_of_area", label: "Fora da área de atendimento", acceptable: true },
+  { value: "personal_emergency", key: "release.reason.personal_emergency", label: "Emergência pessoal", acceptable: true },
+  { value: "changed_mind", key: "release.reason.changed_mind", label: "Mudei de ideia (sem motivo)", suspicious: true },
+  { value: "lazy", key: "release.reason.lazy", label: "Peguei sem ter tempo", suspicious: true },
 ] as const;
 
 export interface ContractorMetrics {

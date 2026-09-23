@@ -4,7 +4,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { LayoutDashboard, LogOut, Menu, Sparkles, X, Plus } from "lucide-react";
-import { getToken, logoutUser, demoLogin } from "@/lib/api-client";
+import { getToken, logoutUser, demoLogin, updateUserLocale } from "@/lib/api-client";
+import { readStoredUser } from "@/lib/auth";
 import { useI18n, LANGS } from "@/lib/i18n";
 
 const FLAGS: Record<string, string> = {
@@ -77,7 +78,13 @@ export function NavbarNew() {
             {LANGS.map((l) => (
               <button
                 key={l.code}
-                onClick={() => setLang(l.code)}
+                onClick={() => {
+                  setLang(l.code);
+                  const stored = readStoredUser();
+                  if (isLogged && stored?.id) {
+                    updateUserLocale(stored.id, l.code).catch(() => {});
+                  }
+                }}
                 title={l.label}
                 aria-pressed={l.code === lang}
                 className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium transition-all ${

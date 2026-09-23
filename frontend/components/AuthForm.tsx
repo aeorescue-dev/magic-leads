@@ -141,7 +141,7 @@ function AuthFormInner() {
     setErrors({});
 
     try {
-      const user = await signIn(email.trim(), password, isRegister ? companyName.trim() : undefined);
+      const user = await signIn(email.trim(), password, isRegister ? companyName.trim() : undefined, lang);
       if (isRegister) {
         // Cadastro concluído: o acesso só é liberado após o pagamento.
         // Cria a sessão do Stripe Checkout e redireciona imediatamente.

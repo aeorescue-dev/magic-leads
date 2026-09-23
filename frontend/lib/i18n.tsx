@@ -916,9 +916,59 @@ const PT: Dict = {
 
   // Push Notifications
 
+  // Dashboard - Trial/Subscription (new keys for i18n)
+  "dashboard.trial.paused": "Acesso pausado · Renove para voltar a receber leads",
+  "dashboard.trial.expired_body": "Sua assinatura expirou. Reative por $79/semana para voltar a receber oportunidades exclusivas.",
+  "dashboard.trial.expiring_soon": "⚠ Falta {days} dia{days, plural, one {dia} other {dias}} para expirar — Renove agora",
+  "dashboard.trial.expiring_body": "Continue recebendo as melhores oportunidades antes da concorrência. Renove por $79/semana.",
+  "dashboard.trial.active": "Acesso Completo • Renovação em {days} dia{days, plural, one {dia} other {dias}}",
+  "dashboard.trial.active_body": "Sua assinatura renova automaticamente. $79/semana para oportunidades exclusivas 24h antes da concorrência.",
+  "dashboard.trial.daily_limit": "Limite Diário: {used} de {limit} leads usados hoje",
+  "dashboard.trial.daily_limit_exceeded": "Volte amanhã e abra seus 10+ potenciais clientes. · Reset em {reset_at}",
+  "dashboard.trial.week_badge": "$79/sem",
+  "dashboard.trial.resume": "Renovar / assinar",
+  "dashboard.trial.cta": "Assinar $79/semana",
+  "dashboard.trial.subscribe": "Assinar $79/semana para continuar acessando os leads com exclusividade",
+  "dashboard.trial.weekly": "$79/semana",
+  "dashboard.trial.daily_limit_label": "Limite Diário: {used} de {limit} leads usados hoje",
+  "dashboard.trial.daily_limit_reset": "Volte amanhã e abra seus 10+ potenciais clientes. · Reset em {reset_at}",
+"dashboard.toast.daily_limit": "Limite de 10 leads/dia atingido. Volte amanhã e abra seus 10+ potenciais clientes.",
+  "dashboard.toast.conversion": "Conversão registrada. Parabéns!",
+  "dashboard.toast.conversion_error": "Erro ao registrar conversão",
+  "dashboard.toast.action_error": "Erro na ação",
+
   // Layout/SEO (for metadata)
   "layout.title": "Magic Leads - Obras reais com dono identificado",
   "layout.description": "Capturamos oportunidades de reforma e correção (telhado, estrutura, encanamento, pintura) direto de registros públicos atualizados diariamente, com dono identificado e 24h de reserva exclusiva por $79/semana.",
+
+  // Release (liberaçao de lead) — ver RELEASE_REASONS em lib/api-client.ts
+  "release.title": "Liberar oportunidade",
+  "release.title.short": "Liberar lead",
+  "release.reason.title": "Motivo da liberação",
+  "release.reason.no_answer": "Não respondeu",
+  "release.reason.declined": "Cliente recusou o serviço",
+  "release.reason.out_of_area": "Fora da área de atendimento",
+  "release.reason.personal_emergency": "Emergência pessoal",
+  "release.reason.changed_mind": "Mudei de ideia (sem motivo)",
+  "release.reason.lazy": "Peguei sem ter tempo",
+  "release.note.placeholder": "Observações (opcional)",
+  "release.warn.threshold": "Você já acumulou {count} liberações suspeitas",
+  "release.warn.general": "Liberações suspeitas (mudei de ideia / sem tempo) podem reduzir sua prioridade e, com 10, suspendem a conta por 30 dias.",
+  "release.warn.suspension": "Após 10, sua conta fica suspensa por 30 dias.",
+  "release.cancel": "Cancelar",
+  "release.confirm": "Liberar lead",
+
+  // Checkout — nome da empresa (remetente WhatsApp/SMS/e-mail)
+  "checkout.company_name.label": "Nome real da sua empresa",
+  "checkout.company_name.placeholder": "Ex.: Rocha Reparos",
+  "checkout.company_name.help": "É o nome que aparece como remetente nas mensagens aos clientes (WhatsApp, SMS e e-mail). Você pode alterar depois em Configurações.",
+
+  // NotificationCenter — miniatura do dashboard
+  "dashboard.opportunities.title": "Ocorrências recentes",
+  "dashboard.opportunities.loading": "Carregando…",
+  "dashboard.opportunities.empty": "Sem ocorrências reais.",
+  "dashboard.opportunities.load_all": "Ver todas as demandas do dia →",
+  "dashboard.freshness.date": "Dados atualizados",
 };
 
 const EN: Dict = {
@@ -1783,9 +1833,57 @@ const EN: Dict = {
 
   // Push Notifications
 
+  // Dashboard - Trial/Subscription (new keys for i18n)
+  "dashboard.trial.paused": "Access paused · Renew to start receiving leads again",
+  "dashboard.trial.expired_body": "Your subscription has expired. Reactivate for $79/week to get exclusive opportunities back.",
+  "dashboard.trial.expiring_soon": "⚠ {days} day{days, plural, one {day} other {days}} left — Renew now",
+  "dashboard.trial.expiring_body": "Keep getting the best opportunities before the competition. Renew for $79/week.",
+  "dashboard.trial.active": "Full Access • Renewal in {days} day{days, plural, one {day} other {days}}",
+  "dashboard.trial.active_body": "Your subscription renews automatically. $79/week for exclusive opportunities 24h before the competition.",
+  "dashboard.trial.daily_limit": "Daily Limit: {used} of {limit} leads used today",
+  "dashboard.trial.daily_limit_exceeded": "Come back tomorrow for your 10+ potential clients. · Reset in {reset_at}",
+  "dashboard.trial.week_badge": "$79/wk",
+  "dashboard.trial.resume": "Renew / subscribe",
+  "dashboard.trial.cta": "Subscribe $79/week",
+  "dashboard.trial.subscribe": "Subscribe $79/week to keep accessing exclusive leads",
+  "dashboard.trial.weekly": "$79/week",
+  "dashboard.trial.daily_limit_label": "Daily Limit: {used} of {limit} leads used today",
+  "dashboard.trial.daily_limit_reset": "Come back tomorrow for your 10+ potential clients. · Reset in {reset_at}",
+  "dashboard.toast.daily_limit": "Daily limit of 10 leads reached. Come back tomorrow for your 10+ potential clients.",
+  "dashboard.toast.conversion": "Conversion recorded. Congratulations!",
+  "dashboard.toast.conversion_error": "Error recording conversion",
+  "dashboard.toast.action_error": "Action error",
+
   // Layout/SEO
   "layout.title": "Magic Leads - Real works with owner identified",
   "layout.description": "We capture remodeling and repair opportunities (roof, structure, plumbing, paint) straight from public records updated daily. We validate address and owner before you waste a minute. Traditional platforms sell the same lead to 3 to 8 competitors — you get the address, the owner and a 24h exclusive hold for $79/week.",
+
+  // Release (lead) — reasons as dynamic keys
+  "release.title": "Release opportunity",
+  "release.reason_title": "Release reason",
+  "release.reason.no_answer": "Did not answer",
+  "release.reason.declined": "Client declined the service",
+  "release.reason.out_of_area": "Outside service area",
+  "release.reason.personal_emergency": "Personal emergency",
+  "release.reason.changed_mind": "Changed my mind (no reason)",
+  "release.reason.lazy": "Grabbed it with no time",
+  "release.note_placeholder": "Notes (optional)",
+  "release.warn.threshold": "You already have {count} suspicious releases",
+  "release.warn.general": "Suspicious releases (changed my mind / no time) can lower your priority and, at 10, suspend your account for 30 days.",
+  "release.cancel": "Cancel",
+  "release.confirm": "Release lead",
+
+  // Checkout — company name (sender identity)
+  "checkout.company_name": "Your real company name",
+  "checkout.company_name.placeholder": "Ex.: Rocha Repairs",
+  "checkout.company_name_help": "This is the name shown as the sender in messages to clients (WhatsApp, SMS and e-mail). You can change it later in Settings.",
+
+  // Dashboard — opportunities list
+  "dashboard.opportunities.title": "Recent records",
+  "dashboard.opportunities.loading": "Loading…",
+  "dashboard.opportunities.empty": "No real records yet.",
+  "dashboard.opportunities.see_all": "See all today's leads →",
+  "dashboard.freshness.date": "Data updated",
 };
 
 const ES: Dict = {
@@ -2649,6 +2747,27 @@ const ES: Dict = {
   "dashboard.auth.back_to_login": "Volver al login",
 
   // Push Notifications
+
+  // Dashboard - Trial/Subscription (new keys for i18n)
+  "dashboard.trial.paused": "Acceso pausado · Renueva para volver a recibir leads",
+  "dashboard.trial.expired_body": "Tu suscripción expiró. Reactiva por $79/semana para volver a recibir oportunidades exclusivas.",
+  "dashboard.trial.expiring_soon": "⚠ Falta {days} día{days, plural, one {día} other {días}} para expirar — Renueva ahora",
+  "dashboard.trial.expiring_body": "Sigue recibiendo las mejores oportunidades antes de la competencia. Renueva por $79/semana.",
+  "dashboard.trial.active": "Acceso Completo • Renovación en {days} día{days, plural, one {día} other {días}}",
+  "dashboard.trial.active_body": "Tu suscripción renueva automáticamente. $79/semana para oportunidades exclusivas 24h antes de la competencia.",
+  "dashboard.trial.daily_limit": "Límite Diario: {used} de {limit} leads usados hoy",
+  "dashboard.trial.daily_limit_exceeded": "Vuelve mañana y abre tus 10+ clientes potenciales. · Reset en {reset_at}",
+  "dashboard.trial.week_badge": "$79/sem",
+  "dashboard.trial.resume": "Renovar / suscribirse",
+  "dashboard.trial.cta": "Suscribirse $79/semana",
+  "dashboard.trial.subscribe": "Suscribirse $79/semana para seguir accediendo a los leads con exclusividad",
+  "dashboard.trial.weekly": "$79/semana",
+  "dashboard.trial.daily_limit_label": "Límite Diario: {used} de {limit} leads usados hoy",
+"dashboard.trial.daily_limit_reset": "Vuelve mañana y abre tus 10+ clientes potenciales. · Reset en {reset_at}",
+  "dashboard.toast.daily_limit": "Límite de 10 leads/día alcanzado. Vuelve mañana para tus 10+ clientes potenciales.",
+  "dashboard.toast.conversion": "Conversión registrada. ¡Felicidades!",
+  "dashboard.toast.conversion_error": "Error al registrar conversión",
+  "dashboard.toast.action_error": "Error en la acción",
 
   // Layout/SEO
   "layout.title": "Magic Leads - Obras reales con dueño identificado",

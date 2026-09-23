@@ -1,12 +1,11 @@
 "use client";
 
-// Checkout avulso de 7 dias ($79): chama /api/billing/checkout e redireciona
-// o navegador (mesma aba) para a sessão hospedada do Stripe.
 import { useEffect, useMemo, useState } from "react";
 import { Building2, CreditCard, Loader2, ShieldCheck, X } from "lucide-react";
 import { startCheckout, SUBSCRIPTION_PLAN } from "@/lib/billing";
 import { updateCompanyName } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth";
+import { useI18n } from "@/lib/i18n";
 
 interface CheckoutModalProps {
   open: boolean;
@@ -17,6 +16,7 @@ interface CheckoutModalProps {
 
 export default function CheckoutModal({ open, onClose, isDark = false }: CheckoutModalProps) {
   const { user, updateUser } = useAuth();
+  const { t } = useI18n();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [companyName, setCompanyName] = useState("");
@@ -45,7 +45,7 @@ export default function CheckoutModal({ open, onClose, isDark = false }: Checkou
   const handleSubscribe = async () => {
     const name = companyName.trim();
     if (!name) {
-      setError("Informe o nome da sua empresa para continuar.");
+      setError(t("checkout.error_company_req"));
       return;
     }
     setBusy(true);
@@ -64,10 +64,10 @@ export default function CheckoutModal({ open, onClose, isDark = false }: Checkou
         window.location.href = res.checkout_url;
         return;
       }
-      setError("Não foi possível gerar o link de pagamento. Tente novamente.");
+      setError(t("checkout.error_payment_fail"));
       setBusy(false);
     } catch (e: any) {
-      setError(e?.message || "Falha ao iniciar o pagamento");
+      setError(e?.message || t("checkout.error_generic_fail"));
       setBusy(false);
     }
   };
@@ -87,7 +87,7 @@ export default function CheckoutModal({ open, onClose, isDark = false }: Checkou
         <>
           <div className="flex items-center gap-2">
               <CreditCard className="w-5 h-5 text-emerald-500" />
-              <h3 className={`text-lg font-semibold ${c.strong}`}>Assinar Magic Leads</h3>
+              <h3 className={`text-lg font-semibold ${c.strong}`}>{t("checkout.title")}</h3>
             </div>
 
             <div className={`rounded-xl border p-4 flex items-center justify-between ${c.box}`}>
@@ -146,12 +146,21 @@ export default function CheckoutModal({ open, onClose, isDark = false }: Checkou
               disabled={busy}
               className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl font-semibold text-sm ${c.btn} disabled:opacity-50`}
             >
-              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
-              {busy ? "Processando…" : `Pagar $${SUBSCRIPTION_PLAN.amount}/semana`}
+              {busy ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  {t("checkout.btn_processing")}
+                </>
+              ) : (
+                <>
+                  <CreditCard className="w-4 h-4" />
+                  {t("checkout.btn_pay_label").replace("${amount}", String(SUBSCRIPTION_PLAN.amount))}
+                </>
+              )}
             </button>
 
             <p className={`text-[11px] text-center ${c.textSoft}`}>
-              Pagamento seguro processado pelo Stripe. Pague uma vez e o acesso fica liberado por 7 dias, sem renovação automática.
+              {t("checkout.payment_secure")}
             </p>
           </>
       </div>

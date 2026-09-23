@@ -515,7 +515,7 @@ const LEAD_TYPES = [
   const handleHistoryReserve = async (lead: MyLeadHistoryItem) => {
     if (busyAction || (subscription && !subscription.can_access)) return;
     if (dailyStats && dailyStats.remaining === 0) {
-      showToast(`Limite de 10 leads/dia atingido. Volte amanhã e abra seus 10+ potenciais clientes.`, "warning");
+      showToast(t("dashboard.toast.daily_limit"), "warning");
       return;
     }
     // Consentimento antes de re-revelar os dados do proprietário (conta novamente)
@@ -526,11 +526,11 @@ const LEAD_TYPES = [
     setBusyAction(true);
     try {
       await convertLead(lead.id);
-      showToast("Conversão registrada. Parabéns!", "success");
+      showToast(t("dashboard.toast.conversion"), "success");
       if (userId) refreshNotifications();
       refreshHistory();
     } catch (e: any) {
-      showToast(e?.message || "Erro ao registrar conversão", "error");
+      showToast(e?.message || t("dashboard.toast.conversion_error"), "error");
     } finally {
       setBusyAction(false);
     }
@@ -712,7 +712,7 @@ const LEAD_TYPES = [
   const handleQuickReserve = async (lead: LeadResponse) => {
     if (busyAction || (subscription && !subscription.can_access)) return;
     if (dailyStats && dailyStats.remaining === 0) {
-      showToast(`Limite de 10 leads/dia atingido. Volte amanhã e abra seus 10+ potenciais clientes.`, "warning");
+      showToast(t("dashboard.toast.daily_limit"), "warning");
       return;
     }
     // Buscar histórico e ocorrências antes de abrir o modal
@@ -750,7 +750,7 @@ const LEAD_TYPES = [
       return;
     }
     if (dailyStats && dailyStats.remaining === 0) {
-      showToast(`Limite de 10 leads/dia atingido. Volte amanhã e abra seus 10+ potenciais clientes.`, "warning");
+      showToast(t("dashboard.toast.daily_limit"), "warning");
       return;
     }
     setBusyAction(true);
@@ -977,7 +977,7 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
               <CreditCard className="h-4 w-4 text-emerald-500" />
               <span className="flex-1 text-left">{t("dashboard.nav.plans")}</span>
               <span className="text-[10px] font-bold bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full">
-                $79/sem
+                  {t("dashboard.trial.week_badge")}
               </span>
             </button>
             <Link
@@ -1185,24 +1185,24 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                   if (expired) {
                     return (
                       <>
-                        <p className="text-sm font-semibold text-rose-400">Acesso pausado · Renove para voltar a receber leads</p>
-                        <p className="text-xs text-slate-400">Sua assinatura expirou. Reative por $79/semana para voltar a receber oportunidades exclusivas.</p>
+                        <p className="text-sm font-semibold text-rose-400">{t("dashboard.trial.paused")}</p>
+                        <p className="text-xs text-slate-400">{t("dashboard.trial.expired_body")}</p>
                       </>
                     );
                   }
                   if (expiringSoon) {
                     return (
                       <>
-                        <p className="text-sm font-semibold text-amber-400">⚠ Falta {days} dia{days > 1 ? "s" : ""} para expirar — Renove agora</p>
-                        <p className="text-xs text-slate-400">Continue recebendo as melhores oportunidades antes da concorrência. Renove por $79/semana.</p>
+                        <p className="text-sm font-semibold text-amber-400">{t("dashboard.trial.expiring_soon").replace("{days}", String(days))}</p>
+                        <p className="text-xs text-slate-400">{t("dashboard.trial.expiring_body")}</p>
                       </>
                     );
                   }
                   // Ativo com dias restantes
                   return (
                     <>
-                      <p className="text-sm font-semibold text-emerald-400">Acesso Completo • Renovação em {days} dia{days > 1 ? "s" : ""}</p>
-                      <p className="text-xs text-slate-400">Sua assinatura renova automaticamente. $79/semana para oportunidades exclusivas 24h antes da concorrência.</p>
+                      <p className="text-sm font-semibold text-emerald-400">{t("dashboard.trial.active").replace("{days}", String(days))}</p>
+                      <p className="text-xs text-slate-400">{t("dashboard.trial.active_body")}</p>
                     </>
                   );
                 })()}
@@ -1218,7 +1218,7 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
               </div>
               <div>
                 <p className="text-sm font-semibold text-amber-400">
-                  Limite Diário: {dailyStats?.used ?? 0} de {dailyStats?.limit ?? 10} leads usados hoje
+                  {t("dashboard.trial.daily_limit_label").replace("{used}", String(dailyStats?.used ?? 0)).replace("{limit}", String(dailyStats?.limit ?? 10))}
                 </p>
                 <div className="w-full max-w-xs h-2 bg-white/10 rounded-full overflow-hidden mt-1">
                   <div 
@@ -1230,7 +1230,7 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
             </div>
             {dailyStats && dailyStats.remaining === 0 && (
               <div className="text-xs text-red-400 font-medium">
-                Volte amanhã e abra seus 10+ potenciais clientes. · Reset em {dailyStats.reset_at ? formatRelativeTime(dailyStats.reset_at, t) : "breve"}
+                {t("dashboard.trial.daily_limit_exceeded").replace("{reset_at}", dailyStats.reset_at ? formatRelativeTime(dailyStats.reset_at, t) : "breve")}
               </div>
             )}
           </div>
@@ -2299,9 +2299,9 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                       return;
                     }
                     // Check daily limit
-                    if (dailyStats && dailyStats.remaining === 0) {
-                      showToast(`Limite de 10 leads/dia atingido. Volte amanhã e abra seus 10+ potenciais clientes.`, "warning");
-                      return;
+if (dailyStats && dailyStats.remaining === 0) {
+      showToast(t("dashboard.toast.daily_limit"), "warning");
+      return;
                     }
                     // Consentimento antes de revelar os dados do proprietário
                     setRevealTarget(selectedLead);
@@ -2676,14 +2676,14 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                   : t("dashboard.subscription.expired")}
             </h2>
             <p className={`text-sm mt-2 ${T.text2}`}>
-              {subscription.message || "Assine $79/semana para continuar acessando os leads com exclusividade."}
+              {subscription.message || t("dashboard.trial.subscribe")}
             </p>
             <button
               onClick={() => setShowCheckout(true)}
               className="mt-6 inline-flex items-center justify-center gap-2 w-full px-5 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-bold transition"
             >
               <CreditCard className="h-4 w-4" />
-              Assinar $79/semana
+              {t("dashboard.trial.cta")}
             </button>
             <button
               onClick={() => signOut()}
