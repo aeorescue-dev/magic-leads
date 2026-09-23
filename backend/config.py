@@ -52,7 +52,9 @@ class Settings(BaseSettings):
     ]
 
     # Enriquecimento
-    ENRICHMENT_DAILY_BUDGET: int = 300  # Máximo de lookups de owner por dia
+    # 0 = ILIMITADO (Lookups de owner sem teto diário).
+    # Para reativar um limite, define ENRICHMENT_DAILY_BUDGET=<n> na env var.
+    ENRICHMENT_DAILY_BUDGET: int = 0  # Máximo de lookups de owner por dia
 
     # Scheduler interno (independente do GH Actions — redundância no Railway)
     SCRAPER_SELF_SCHEDULED: bool = True   # True = scheduler interno roda a cada N horas

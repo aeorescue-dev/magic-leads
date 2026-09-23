@@ -138,7 +138,9 @@ class OwnerEnrichment:
         self._budget_used: int = 0
 
     def _budget_available(self) -> bool:
-        """Reseta o contador diário quando vira o dia e checa a cota."""
+        """True se a cota diária ainda não foi usada OU cota = 0 (ilimitada)."""
+        if settings.ENRICHMENT_DAILY_BUDGET <= 0:
+            return True
         today = date.today()
         if self._budget_date != today:
             self._budget_date = today
@@ -146,9 +148,12 @@ class OwnerEnrichment:
         return self._budget_used < settings.ENRICHMENT_DAILY_BUDGET
 
     def _consume_budget(self) -> None:
-        self._budget_used += 1
+        if settings.ENRICHMENT_DAILY_BUDGET > 0:
+            self._budget_used += 1
 
     def budget_remaining(self) -> int:
+        if settings.ENRICHMENT_DAILY_BUDGET <= 0:
+            return 1_000_000  # "∞" — sem cota (a UI mostra "ilimitado")
         self._budget_available()
         return max(0, settings.ENRICHMENT_DAILY_BUDGET - self._budget_used)
 
