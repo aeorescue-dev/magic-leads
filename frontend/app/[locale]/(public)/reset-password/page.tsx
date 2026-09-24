@@ -26,16 +26,16 @@ export default function ResetPasswordPage() {
         <div className="w-full max-w-md bg-slate-900 rounded-2xl border border-slate-700 p-8">
           <AlertTriangle className="h-12 w-12 text-red-400 mx-auto mb-4" />
           <h1 className="text-xl font-semibold text-center text-white mb-2">
-            {t('dashboard.auth.reset_token_invalid') || 'Token inválido ou ausente'}
+            {t('dashboard.auth.reset_token_invalid')}
           </h1>
           <p className="text-slate-400 text-center mb-6">
-            {t('dashboard.auth.reset_token_invalid') || 'Token inválido ou expirado. Solicite um novo e-mail.'}
+            {t('dashboard.auth.reset_token_invalid')}
           </p>
           <Link
             href="/auth"
             className="w-full py-3 rounded-lg bg-emerald-500 text-slate-950 font-medium hover:bg-emerald-400 transition-colors text-center block"
           >
-            {t('dashboard.auth.forgot_password') || 'Solicitar novo link'}
+            {t('dashboard.auth.forgot_password')}
           </Link>
         </div>
       </div>
@@ -46,11 +46,11 @@ export default function ResetPasswordPage() {
     e.preventDefault();
     setError('');
     if (password !== confirmPassword) {
-      setError(t('dashboard.auth.password_mismatch') || 'As senhas não coincidem.');
+      setError(t('dashboard.auth.password_mismatch'));
       return;
     }
     if (password.length < 6) {
-      setError(t('dashboard.auth.password_min') || 'A senha deve ter pelo menos 6 caracteres.');
+      setError(t('dashboard.auth.password_min'));
       return;
     }
 
@@ -60,7 +60,7 @@ export default function ResetPasswordPage() {
       setSuccess(true);
       setTimeout(() => router.push('/auth?reset=success'), 2000);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('dashboard.auth.reset_token_invalid') || 'Token inválido ou expirado.');
+      setError(err instanceof Error ? err.message : t('dashboard.auth.reset_token_invalid'));
     } finally {
       setSubmitting(false);
     }
@@ -72,16 +72,16 @@ export default function ResetPasswordPage() {
         <div className="w-full max-w-md bg-slate-900 rounded-2xl border border-slate-700 p-8 text-center">
           <CheckCircle className="h-16 w-16 text-emerald-500 mx-auto mb-4" />
           <h1 className="text-2xl font-bold text-white mb-2">
-            {t('dashboard.auth.reset_success') || 'Senha redefinida com sucesso!'}
+            {t('dashboard.auth.reset_success')}
           </h1>
           <p className="text-slate-400 mb-6">
-            Faça login com sua nova senha.
+            {t("reset.login_with_new")}
           </p>
           <Link
             href="/auth"
             className="w-full py-3 rounded-lg bg-emerald-500 text-slate-950 font-medium hover:bg-emerald-400 transition-colors text-center block"
           >
-            Ir para login
+            {t("reset.go_to_login")}
           </Link>
         </div>
       </div>
@@ -103,10 +103,10 @@ export default function ResetPasswordPage() {
         </div>
 
         <h1 className="text-2xl font-bold text-white text-center mb-2">
-          {t('dashboard.auth.reset_password') || 'Redefinir senha'}
+          {t('dashboard.auth.reset_password')}
         </h1>
         <p className="text-slate-400 text-center mb-6">
-          {t('dashboard.auth.new_password') || 'Digite sua nova senha abaixo'}
+          {t('dashboard.auth.new_password')}
         </p>
 
         {error && (
@@ -123,7 +123,7 @@ export default function ResetPasswordPage() {
               type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder={t('dashboard.auth.new_password') || 'Nova senha'}
+              placeholder={t('dashboard.auth.new_password')}
               className="w-full pl-10 pr-4 py-3 rounded-lg border border-slate-700 bg-slate-800 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
               disabled={submitting}
               autoComplete="new-password"
@@ -134,7 +134,7 @@ export default function ResetPasswordPage() {
               type="button"
               onClick={() => setShowPassword(!showPassword)}
               className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"
-              aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+              aria-label={showPassword ? t("reset.hide_password") : t("reset.show_password")}
             >
               {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
             </button>
@@ -146,7 +146,7 @@ export default function ResetPasswordPage() {
               type={showPassword ? 'text' : 'password'}
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              placeholder={t('dashboard.auth.confirm_password') || 'Confirmar nova senha'}
+              placeholder={t('dashboard.auth.confirm_password')}
               className="w-full pl-10 pr-4 py-3 rounded-lg border border-slate-700 bg-slate-800 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
               disabled={submitting}
               autoComplete="new-password"
@@ -157,7 +157,7 @@ export default function ResetPasswordPage() {
               type="button"
               onClick={() => setShowPassword(!showPassword)}
               className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"
-              aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+              aria-label={showPassword ? t("reset.hide_password") : t("reset.show_password")}
             >
               {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
             </button>
@@ -170,12 +170,12 @@ export default function ResetPasswordPage() {
           >
             {submitting && <Loader2 className="h-5 w-5 animate-spin" />}
             {!submitting && <Lock className="h-5 w-5" />}
-            <span className="font-semibold">{t('dashboard.auth.reset_password') || 'Redefinir senha'}</span>
+            <span className="font-semibold">{t('dashboard.auth.reset_password')}</span>
           </button>
 
           <p className="text-center text-sm text-slate-500 mt-4">
             <Link href="/auth" className="text-emerald-400 hover:underline">
-              {t('dashboard.auth.back_to_login') || 'Voltar ao login'}
+              {t('dashboard.auth.back_to_login')}
             </Link>
           </p>
         </form>

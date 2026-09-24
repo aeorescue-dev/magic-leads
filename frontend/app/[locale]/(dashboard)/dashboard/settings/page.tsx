@@ -9,15 +9,9 @@ import { useI18n } from "@/lib/i18n";
 import { updateCompanyName } from "@/lib/api-client";
 import CheckoutModal from "@/components/CheckoutModal";
 
-const PLAN_LABELS: Record<string, string> = {
-  free: "Free",
-  pro: "Pro",
-  enterprise: "Enterprise",
-};
-
 export default function DashboardSettingsPage() {
   const { user, loading, signOut, updateUser } = useAuth();
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const router = useRouter();
   const [showCheckout, setShowCheckout] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -25,6 +19,8 @@ export default function DashboardSettingsPage() {
   const [companyDraft, setCompanyDraft] = useState("");
   const [companyError, setCompanyError] = useState("");
   const [savingCompany, setSavingCompany] = useState(false);
+
+  const planLabel = (plan: string) => t(`plan.${plan}`);
 
   const handleLogout = async () => {
     setLoggingOut(true);
@@ -136,7 +132,7 @@ export default function DashboardSettingsPage() {
                 </div>
                 <div className="rounded-xl bg-white/5 border border-white/10 p-3">
                   <p className="text-xs text-slate-400">{t("dashboard.settings.plan")}</p>
-                  <p className="font-medium capitalize">{PLAN_LABELS[user.plan || "free"] || user.plan}</p>
+                  <p className="font-medium capitalize">{planLabel(user.plan || "free")}</p>
                 </div>
                 <div className="rounded-xl bg-white/5 border border-white/10 p-3">
                   <p className="text-xs text-slate-400">{t("dashboard.settings.status")}</p>
@@ -146,7 +142,7 @@ export default function DashboardSettingsPage() {
               <div className="rounded-xl bg-white/5 border border-white/10 p-3 text-sm">
                 <p className="text-xs text-slate-400">{t("dashboard.settings.access_until")}</p>
                 <p className="font-medium">
-                  {user.plan_until ? new Date(user.plan_until.replace(" ", "T")).toLocaleDateString("pt-BR") : "—"}
+                  {user.plan_until ? new Date(user.plan_until.replace(" ", "T")).toLocaleDateString(lang === "en" ? "en-US" : lang === "es" ? "es-ES" : "pt-BR") : "—"}
                 </p>
               </div>
             </div>

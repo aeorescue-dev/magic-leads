@@ -31,7 +31,7 @@ function ForgotPasswordForm({ onClose }: { onClose: () => void }) {
       setSuccess(true);
       setTimeout(onClose, 2000);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Erro ao solicitar reset');
+      alert(err instanceof Error ? err.message : t("auth.reset_error"));
     } finally {
       setSubmitting(false);
     }
@@ -41,8 +41,8 @@ function ForgotPasswordForm({ onClose }: { onClose: () => void }) {
     return (
       <div className="text-center py-8">
         <CheckCircle className="h-12 w-12 text-emerald-500 mx-auto mb-3" />
-        <h3 className="text-lg font-semibold">Email enviado!</h3>
-        <p className="text-sm text-muted-foreground mt-1">Verifique sua caixa de entrada.</p>
+        <h3 className="text-lg font-semibold">{t("auth.email_sent")}</h3>
+        <p className="text-sm text-muted-foreground mt-1">{t("auth.check_inbox")}</p>
       </div>
     );
   }
@@ -69,14 +69,14 @@ function ForgotPasswordForm({ onClose }: { onClose: () => void }) {
       >
         {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
         <ArrowRight className="h-4 w-4" />
-        {t('dashboard.auth.reset_password') || 'Enviar link de reset'}
+        {t('dashboard.auth.reset_password')}
       </button>
       <button
         type="button"
         onClick={onClose}
         className="w-full py-2 text-sm text-muted-foreground hover:text-foreground"
       >
-        {t('dashboard.auth.cancel') || 'Cancelar'}
+        {t('dashboard.auth.cancel')}
       </button>
     </form>
   );
@@ -295,7 +295,7 @@ function AuthFormInner() {
             type="button"
             onClick={() => setShowPassword(!showPassword)}
             className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+            aria-label={showPassword ? t("auth.hide_password") : t("auth.show_password")}
           >
             {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
           </button>

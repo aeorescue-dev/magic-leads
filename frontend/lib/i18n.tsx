@@ -306,27 +306,6 @@ const PT: Dict = {
   "pg.14days": "Acesso por 7 dias",
   "pg.sub": "Painel completo por $79/semana. Pague, use, cancele quando quiser.",
 
-  // Checkout
-  "checkout.title": "Assinar Magic Leads",
-  "checkout.plan": "Plano Pro · semanal",
-  "checkout.per_week": "por semana",
-  "checkout.total": "Total agora",
-  "checkout.billed": "Cobrança única de $79 desbloqueia 1 semana de acesso",
-  "checkout.annual": "Equivale a $4.108/ano — coberto com folga por 1 job de $5.000/mês",
-  "checkout.start": "Assinar agora",
-  "checkout.security": "Pagamento seguro via Stripe. Sem contrato. Pode parar quando quiser.",
-  "checkout.mock.note": "Integração de pagamento via Stripe será ativada em produção. Por enquanto, o ambiente local simula a liberação da semana.",
-  "checkout.mock.done": "Semana liberada! Seu acesso está ativo.",
-  "checkout.f1": "Acesso ilimitado à base de oportunidades",
-  "checkout.f2": "Dono identificado + mensagem pronta",
-  "checkout.f3": "Hold de 24h e histórico completo",
-  "checkout.error_company_req": "Informe o nome real da sua empresa",
-  "checkout.error_payment_fail": "Falha ao processar o pagamento. Tente novamente.",
-  "checkout.error_generic_fail": "Erro inesperado ao processar o pagamento. Tente novamente.",
-  "checkout.btn_processing": "Processando...",
-  "checkout.btn_pay_label": "Assinar por ${amount}/semana",
-  "checkout.payment_secure": "Pagamento 100% seguro via Stripe.",
-
   // Dashboard
   "db.title": "Seus Leads",
   "db.loading": "Carregando...",
@@ -1043,6 +1022,35 @@ const PT: Dict = {
   "dashboard.reveal.confirm": "Reservar 1 Hora · Revelar",
   "dashboard.reveal.remaining": "Você ainda tem {remaining} de {limit} revelações hoje.",
   "dashboard.lock.logout": "Sair da conta",
+
+  // Plan labels
+  "plan.free": "Grátis",
+  "plan.pro": "Pro",
+  "plan.enterprise": "Enterprise",
+
+  // Reset password page
+  "reset.login_with_new": "Faça login com sua nova senha",
+  "reset.go_to_login": "Ir para login",
+  "reset.hide_password": "Ocultar senha",
+  "reset.show_password": "Mostrar senha",
+
+  // Auth form - Forgot password
+  "auth.email_sent": "Email enviado!",
+  "auth.check_inbox": "Verifique sua caixa de entrada.",
+  "auth.reset_error": "Erro ao solicitar reset",
+  "auth.hide_password": "Ocultar senha",
+  "auth.show_password": "Mostrar senha",
+
+  // Protected page
+  "protected.title": "Página Protegida",
+
+  // Checkout page
+  "checkout.secure": "Pagamento seguro",
+  "checkout.title": "Reativa a tua subscrição",
+  "checkout.subtitle": "A tua subscrição expirou ou foi pausada. Reactiva-a para continuar a aceder às leads.",
+  "checkout.notice": "Subscrição em pausa. Contacta o suporte ou reativa o plano para recuperar o acesso.",
+  "checkout.choose_plan": "Escolher plano",
+  "checkout.back_home": "Voltar ao início",
 };
 
 const EN: Dict = {
@@ -1298,27 +1306,6 @@ const EN: Dict = {
   "pg.start": "Subscribe now",
   "pg.14days": "Access for 7 days",
   "pg.sub": "Full dashboard for $79/week. Pay, use, cancel whenever you want.",
-
-  // Checkout
-  "checkout.title": "Subscribe to Magic Leads",
-  "checkout.plan": "Pro plan · weekly",
-  "checkout.per_week": "per week",
-  "checkout.total": "Total now",
-  "checkout.billed": "One $79 charge unlocks 1 week of access",
-  "checkout.annual": "That's $4,108/year — comfortably covered by one $5K job/month",
-  "checkout.start": "Subscribe now",
-  "checkout.security": "Secure payment via Stripe. No contract. Stop whenever you want.",
-  "checkout.mock.note": "Stripe payment integration will be enabled in production. For now, the local environment simulates the week unlock.",
-  "checkout.mock.done": "Week unlocked! Your access is active.",
-  "checkout.f1": "Unlimited access to the opportunities base",
-  "checkout.f2": "Owner identified + ready-to-send message",
-  "checkout.f3": "24h hold and full history",
-  "checkout.error_company_req": "Enter your real company name",
-  "checkout.error_payment_fail": "Failed to process payment. Please try again.",
-  "checkout.error_generic_fail": "Unexpected error processing payment. Please try again.",
-  "checkout.btn_processing": "Processing...",
-  "checkout.btn_pay_label": "Subscribe for ${amount}/week",
-  "checkout.payment_secure": "100% secure payment via Stripe.",
 
   "db.title": "Your Leads",
   "db.loading": "Loading...",
@@ -2043,6 +2030,35 @@ const EN: Dict = {
   "dashboard.reveal.confirm": "Reserve 1 Hour · Reveal",
   "dashboard.reveal.remaining": "You still have {remaining} of {limit} reveals today.",
   "dashboard.lock.logout": "Sign out",
+
+  // Plan labels
+  "plan.free": "Free",
+  "plan.pro": "Pro",
+  "plan.enterprise": "Enterprise",
+
+  // Reset password page
+  "reset.login_with_new": "Log in with your new password",
+  "reset.go_to_login": "Go to login",
+  "reset.hide_password": "Hide password",
+  "reset.show_password": "Show password",
+
+  // Auth form - Forgot password
+  "auth.email_sent": "Email sent!",
+  "auth.check_inbox": "Check your inbox.",
+  "auth.reset_error": "Error requesting reset",
+  "auth.hide_password": "Hide password",
+  "auth.show_password": "Show password",
+
+  // Protected page
+  "protected.title": "Protected Page",
+
+  // Checkout page
+  "checkout.secure": "Secure payment",
+  "checkout.title": "Reactivate your subscription",
+  "checkout.subtitle": "Your subscription has expired or been paused. Reactivate to continue accessing leads.",
+  "checkout.notice": "Subscription paused. Contact support or reactivate plan to regain access.",
+  "checkout.choose_plan": "Choose plan",
+  "checkout.back_home": "Back to home",
 };
 
 const ES: Dict = {
@@ -2297,27 +2313,6 @@ const ES: Dict = {
   "pg.start": "Suscribirse ahora",
   "pg.14days": "Acceso por 7 días",
   "pg.sub": "Panel completo por $79/semana. Paga, usa, cancela cuando quieras.",
-
-  // Checkout
-  "checkout.title": "Suscríbete a Magic Leads",
-  "checkout.plan": "Plan Pro · semanal",
-  "checkout.per_week": "por semana",
-  "checkout.total": "Total ahora",
-  "checkout.billed": "Un cobro de $79 desbloquea 1 semana de acceso",
-  "checkout.annual": "Equivale a $4.108/año — cubierto con holgura por 1 trabajo de $5.000/mes",
-  "checkout.start": "Suscribirse ahora",
-  "checkout.security": "Pago seguro vía Stripe. Sin contrato. Puedes parar cuando quieras.",
-  "checkout.mock.note": "La integración de pago vía Stripe se activará en producción. Por ahora, el entorno local simula la liberación de la semana.",
-  "checkout.mock.done": "¡Semana liberada! Tu acceso está activo.",
-  "checkout.f1": "Acceso completo a la base de oportunidades",
-  "checkout.f2": "Dueño identificado + mensaje listo",
-  "checkout.f3": "Hold de 24h e historial completo",
-  "checkout.error_company_req": "Ingrese el nombre real de su empresa",
-  "checkout.error_payment_fail": "Error al procesar el pago. Inténtelo de nuevo.",
-  "checkout.error_generic_fail": "Error inesperado al procesar el pago. Inténtelo de nuevo.",
-  "checkout.btn_processing": "Procesando...",
-  "checkout.btn_pay_label": "Suscríbase por ${amount}/semana",
-  "checkout.payment_secure": "Pago 100% seguro vía Stripe.",
 
   "db.title": "Tus Prospectos",
   "db.loading": "Cargando...",
@@ -3031,6 +3026,35 @@ const ES: Dict = {
   "dashboard.opportunities.empty": "Sin ocurrencias reales.",
   "dashboard.opportunities.see_all": "Ver todas las demandas de hoy →",
   "dashboard.freshness.date": "Datos actualizados",
+
+  // Plan labels
+  "plan.free": "Gratis",
+  "plan.pro": "Pro",
+  "plan.enterprise": "Enterprise",
+
+  // Reset password page
+  "reset.login_with_new": "Inicia sesión con tu nueva contraseña",
+  "reset.go_to_login": "Ir al login",
+  "reset.hide_password": "Ocultar contraseña",
+  "reset.show_password": "Mostrar contraseña",
+
+  // Auth form - Forgot password
+  "auth.email_sent": "¡Email enviado!",
+  "auth.check_inbox": "Revisa tu bandeja de entrada.",
+  "auth.reset_error": "Error al solicitar reset",
+  "auth.hide_password": "Ocultar contraseña",
+  "auth.show_password": "Mostrar contraseña",
+
+  // Protected page
+  "protected.title": "Página Protegida",
+
+  // Checkout page
+  "checkout.secure": "Pago seguro",
+  "checkout.title": "Reactiva tu suscripción",
+  "checkout.subtitle": "Tu suscripción ha expirado o se ha pausado. Reactívala para seguir accediendo a las oportunidades.",
+  "checkout.notice": "Suscripción en pausa. Contacta con soporte o reactiva el plan para recuperar el acceso.",
+  "checkout.choose_plan": "Elegir plan",
+  "checkout.back_home": "Volver al inicio",
 
   "layout.title": "Magic Leads - Obras reales con dueño identificado",
   "layout.description": "Capturamos oportunidades de reforma y corrección (techo, estructura, fontanería, pintura) directo de registros públicos actualizados diariamente, con dueño identificado y 24h de reserva exclusiva por $79/semana.",
