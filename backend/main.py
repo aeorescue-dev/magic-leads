@@ -53,6 +53,7 @@ from .scrapers.socrata_discovery import socrata_discovery
 from .services import notifier, security
 from .services.db import db_service
 from .services.enrichment import owner_enrichment
+from .services.phone_lookup import phone_lookup_service
 from .services.push_service import push_service
 from .utils.logger import logger
 
@@ -2791,6 +2792,41 @@ async def reserve_lead(
             )
 
         lead = result.get("lead") or {}
+
+        # ENRIQUECIMENTO ON-DEMAND: se dados do dono faltam, busca nas APIs externas
+        try:
+            owner_name = lead.get("owner_name")
+            owner_phone = lead.get("owner_phone")
+            owner_email = lead.get("owner_email")
+            mailing_address = lead.get("mailing_address")
+
+            needs_enrichment = not owner_name or not owner_phone or not mailing_address
+
+            if needs_enrichment:
+                # Enriquecimento de nome + mailing address (Socrata/CKAN)
+                enrich_result = await owner_enrichment.enrich(lead.get("address", ""), lead.get("city", ""))
+                if enrich_result:
+                    if not owner_name and enrich_result.get("owner_name"):
+                        owner_name = enrich_result["owner_name"]
+                        await db_service.update_owner(lead_id, owner_name)
+                    if not mailing_address and enrich_result.get("mailing_address"):
+                        mailing_address = enrich_result["mailing_address"]
+                        await db_service.update_mailing_address(lead_id, mailing_address)
+
+                # Busca de telefone (mock provider em dev, Searchbug em prod)
+                if not owner_phone:
+                    phone_result = await phone_lookup_service.lookup(lead.get("address", ""), lead.get("city", ""), lead.get("state", ""))
+                    if phone_result.success:
+                        owner_phone = phone_result.phone
+                        await db_service.update_owner_phone(lead_id, owner_phone)
+
+                # Recarrega lead com dados enriquecidos
+                enriched_lead = await db_service.get_lead_by_id(lead_id)
+                if enriched_lead:
+                    lead = dict(enriched_lead)
+
+        except Exception as e:
+            logger.warning(f"Enriquecimento on-demand falhou para lead {lead_id}: {e}")
 
         # Registra interação
         await db_service.record_event(lead_id, "revealed")
