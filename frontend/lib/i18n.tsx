@@ -3127,7 +3127,9 @@ function formatPlural(text: string, values: Record<string, string | number>): st
   
   // First, process all plural rules
   let result = text;
-  const pluralRegex = /\{(\w+),\s*plural\s*,\s*([^}]+)\}/g;
+  // Match ICU MessageFormat plural syntax with nested braces support
+  // Matches: {var, plural, one {singular} other {plural}}
+  const pluralRegex = /\{(\w+),\s*plural\s*,\s*((?:[^{}]|\{[^{}]*\})*)\}/g;
   
   result = result.replace(pluralRegex, (match, variable, pluralRules) => {
     const value = values[variable];
