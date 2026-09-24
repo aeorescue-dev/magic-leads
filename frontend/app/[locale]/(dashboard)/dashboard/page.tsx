@@ -1193,7 +1193,7 @@ const LEAD_TYPES = [
                   if (expiringSoon) {
                     return (
                       <>
-                        <p className="text-sm font-semibold text-amber-400">{t("dashboard.trial.expiring_soon").replace("{days}", String(days))}</p>
+                        <p className="text-sm font-semibold text-amber-400">{t("dashboard.trial.expiring_soon", { days })}</p>
                         <p className="text-xs text-slate-400">{t("dashboard.trial.expiring_body")}</p>
                       </>
                     );
@@ -1201,7 +1201,7 @@ const LEAD_TYPES = [
                   // Ativo com dias restantes
                   return (
                     <>
-                      <p className="text-sm font-semibold text-emerald-400">{t("dashboard.trial.active").replace("{days}", String(days))}</p>
+                      <p className="text-sm font-semibold text-emerald-400">{t("dashboard.trial.active", { days })}</p>
                       <p className="text-xs text-slate-400">{t("dashboard.trial.active_body")}</p>
                     </>
                   );
@@ -1218,7 +1218,7 @@ const LEAD_TYPES = [
               </div>
               <div>
                 <p className="text-sm font-semibold text-amber-400">
-                  {t("dashboard.trial.daily_limit_label").replace("{used}", String(dailyStats?.used ?? 0)).replace("{limit}", String(dailyStats?.limit ?? 10))}
+                  {t("dashboard.trial.daily_limit_label", { used: dailyStats?.used ?? 0, limit: dailyStats?.limit ?? 10 })}
                 </p>
                 <div className="w-full max-w-xs h-2 bg-white/10 rounded-full overflow-hidden mt-1">
                   <div 
@@ -2614,10 +2614,10 @@ if (dailyStats && dailyStats.remaining === 0) {
                     defaultChecked
                     className="mt-0.5 h-4 w-4 accent-indigo-500"
                   />
-                  <span>
-                    <span className="font-semibold">{t("dashboard.reveal.consent").replace("{used}", String(dailyStats?.used ?? 1)).replace("{limit}", String(dailyStats?.limit ?? 10))}</span>
+<span>
+                    <span className="font-semibold">{t("dashboard.reveal.consent", { used: dailyStats?.used ?? 1, limit: dailyStats?.limit ?? 10 })}</span>
                     <span className={`block text-xs mt-1 ${T.text2}`}>
-                      {t("dashboard.reveal.timeout").replace("{title}", t("dashboard.opportunities.title"))}
+                      {t("dashboard.reveal.timeout", { title: t("dashboard.opportunities.title") })}
                     </span>
                   </span>
                 </label>
@@ -2643,7 +2643,7 @@ if (dailyStats && dailyStats.remaining === 0) {
             </div>
             {dailyStats && dailyStats.remaining > 0 && dailyStats.remaining <= 2 && (
               <p className="text-[11px] text-amber-400 mt-2 text-center">
-                {t("dashboard.reveal.remaining").replace("{remaining}", String(dailyStats.remaining)).replace("{limit}", String(dailyStats.limit))}
+                {t("dashboard.reveal.remaining", { remaining: dailyStats.remaining, limit: dailyStats.limit })}
               </p>
             )}
           </div>

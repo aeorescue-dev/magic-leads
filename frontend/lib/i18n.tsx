@@ -3072,13 +3072,13 @@ export const DICTS: Record<Lang, Dict> = { pt: PT, en: EN, es: ES };
 interface I18nCtx {
   lang: Lang;
   setLang: (l: Lang) => void;
-  t: (key: string) => string;
+  t: (key: string, values?: Record<string, string | number>) => string;
 }
 
 const Ctx = createContext<I18nCtx>({
   lang: "pt",
   setLang: () => {},
-  t: (k) => k,
+  t: (k, _v?) => k,
 });
 
 function getInitialLang(): Lang {
@@ -3120,7 +3120,47 @@ export function LanguageProvider({ children, initialLocale }: { children: ReactN
     persistLocale(l);
   };
 
-  const t = (key: string) => DICTS[lang][key] ?? key;
+  // ICU MessageFormat pluralization support
+function formatPlural(text: string, values: Record<string, string | number>): string {
+  // Handle ICU MessageFormat pluralization: {var, plural, one {...} other {...}}
+  return text.replace(/\{(\w+),\s*plural\s*,\s*([^}]+)\}/g, (match, variable, pluralRules) => {
+    const value = values[variable];
+    if (value === undefined) return match;
+    
+    const num = typeof value === 'string' ? parseInt(value, 10) : Number(value);
+    if (isNaN(num)) return match;
+
+    // Parse plural rules: one {...} other {...} (simplified for PT/EN/ES)
+    const rules: Record<string, string> = {};
+    const ruleRegex = /(\w+)\s+\{([^}]+)\}/g;
+    let ruleMatch;
+    while ((ruleMatch = ruleRegex.exec(pluralRules)) !== null) {
+      rules[ruleMatch[1]] = ruleMatch[2];
+    }
+
+    // Determine plural category (simplified for PT/EN/ES)
+    let category = 'other';
+    if (num === 1) category = 'one';
+    else if (num === 0) category = 'zero';
+    else if (num === 2) category = 'two';
+    else if (num >= 3 && num <= 10) category = 'few';
+    else if (num >= 11 && num <= 99) category = 'many';
+
+    const selectedRule = rules[category] || rules['other'];
+    if (!selectedRule) return match;
+
+    // Replace the variable in the selected rule
+    return selectedRule.replace(new RegExp(`\\{${variable}\\}`, 'g'), String(value));
+  });
+}
+
+const t = (key: string, values?: Record<string, string | number>) => {
+  const translation = DICTS[lang][key] ?? key;
+  if (values && Object.keys(values).length > 0) {
+    return formatPlural(translation, values);
+  }
+  return translation;
+};
 
   return (
     <Ctx.Provider value={{ lang, setLang, t }}>{children}</Ctx.Provider>
