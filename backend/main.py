@@ -1411,39 +1411,86 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                     core_kws = ["roof", "roofing", "plumbing", "water", "paint", "facade", "boiler", "heating", "sprinkler", "sewer", "electrical", "leak", "mold", "chimney", "siding", "foundation"]
 
                     out = []
+                    total_fetched = len(rows)
+                    filtered_status = 0
+                    filtered_date = 0
+                    filtered_kws = 0
+                    filtered_business = 0
+                    filtered_owner = 0
+                    filtered_other = 0
+
                     for row in rows:
                         try:
                             if str(row.get("permit_status") or "") != "Permit Issued":
+                                filtered_status += 1
                                 continue
                             app_date = row.get("approved_date") or row.get("issued_date")
                             if app_date:
                                 try:
                                     ad = datetime.fromisoformat(str(app_date).replace("Z", "+00:00").replace("+00:00:00", "+00:00"))
                                     if ad < datetime.now() - timedelta(days=60):
+                                        filtered_date += 1
                                         continue
                                 except Exception:
                                     pass
                             desc = str(row.get("job_description") or "").strip().lower()
                             if not any(kw in desc for kw in core_kws):
+                                filtered_kws += 1
                                 continue
+                            
+                            # RELAXED: applicant_business_name filter
+                            # Original blocked ALL rows with applicant_business_name != ("-", "none", "n/a")
+                            # Now: only block if it's clearly a large corporation (not individual contractor)
+                            a_b = _norm(row.get("applicant_business_name"))
+                            if a_b and a_b not in ("-", "none", "n/a", ""):
+                                # Check if it looks like an individual contractor (name-like) vs corporation
+                                # Allow if business name contains person-name patterns
+                                name_indicators = ["inc", "llc", "corp", "corporation", "ltd", "enterprises", "contracting", "construction", "building", "home improvement"]
+                                if not any(ind in a_b for ind in name_indicators):
+                                    # Looks like a real person's name or small contractor - ALLOW
+                                    pass
+                                else:
+                                    filtered_business += 1
+                                    continue
+                            
+                            # RELAXED: owner/applicant name matching
+                            # Original required exact match of last name (and optionally first name)
+                            # Now: allow if either owner_name or applicant name has reasonable overlap
                             a_f, a_l = _norm(row.get("applicant_first_name")), _norm(row.get("applicant_last_name"))
                             owner = _norm(row.get("owner_name"))
-                            a_b = _norm(row.get("applicant_business_name"))
-                            _o_b = row.get("owner_business_name")
-                            if a_b and a_b not in ("-", "none", "n/a"):
+                            if not owner and not a_l:
+                                filtered_owner += 1
                                 continue
-                            if not owner or not a_l:
-                                continue
-                            if not (a_l in owner or (a_f and a_f in owner)):
-                                continue
+                            # If we have both owner and applicant names, check for reasonable overlap
+                            if owner and a_l:
+                                # Allow if last name matches OR first name matches OR owner contains applicant name parts
+                                name_match = (
+                                    a_l in owner or 
+                                    (a_f and a_f in owner) or
+                                    owner in a_l or  # owner name might be shorter
+                                    any(part in owner for part in [a_f, a_l] if part)
+                                )
+                                if not name_match:
+                                    filtered_owner += 1
+                                    continue
+                            elif not owner and a_l:
+                                # No owner name but have applicant last name - allow (common in permits)
+                                pass
+                            elif owner and not a_l:
+                                # Have owner name but no applicant last name - allow
+                                pass
+                            
                             job_no = str(row.get("job_filing_number") or "").strip()
                             if not job_no:
+                                filtered_other += 1
                                 continue
                             if "not yet issued" in str(row.get("work_permit") or "").lower():
+                                filtered_other += 1
                                 continue
                             house = " ".join(str(row.get("house_no") or "").split())
                             street = " ".join(str(row.get("street_name") or "").split())
                             if not (house and street):
+                                filtered_other += 1
                                 continue
                             boro = str(row.get("borough") or "").strip()
                             zipc = str(row.get("zip_code") or "").strip() or None
@@ -1474,7 +1521,16 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                             ))
                         except Exception as e:
                             logger.warning(f"DOB Permits row error: {e}")
+                            filtered_other += 1
                             continue
+
+                    # DETAILED LOGGING for debugging
+                    logger.info(
+                        f"DOB Permits FILTER STATS: fetched={total_fetched}, "
+                        f"status={filtered_status}, date={filtered_date}, kws={filtered_kws}, "
+                        f"business={filtered_business}, owner={filtered_owner}, other={filtered_other}, "
+                        f"PASSED={len(out)}"
+                    )
                     leads = out
 
                 elif city != "Boston":
