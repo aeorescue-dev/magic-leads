@@ -51,6 +51,12 @@ def seed_users():
     try:
         c = conn.cursor()
 
+        # Garante a coluna locale (adicionada por migração do app) antes de usar
+        user_cols = {r["name"] for r in c.execute("PRAGMA table_info(users)").fetchall()}
+        if user_cols and "locale" not in user_cols:
+            c.execute("ALTER TABLE users ADD COLUMN locale TEXT DEFAULT 'pt'")
+            conn.commit()
+
         for user_def in USERS_TO_SEED:
             email = user_def["email"]
 
