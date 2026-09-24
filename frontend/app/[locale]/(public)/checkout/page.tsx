@@ -1,1 +1,58 @@
-'use client';  import Link from 'next/link'; import { ArrowLeft, CreditCard, CheckCircle2, Lock } from 'lucide-react'; import { useI18n } from '@/lib/i18n';  // force-vercel-deploy trigger\nexport default function CheckoutPage() {   const { t } = useI18n();    return (     <div className="min-h-screen flex items-center justify-center bg-slate-950 px-4">       <div className="w-full max-w-md bg-slate-900 rounded-2xl border border-slate-700 p-8">         <div className="flex items-center justify-between mb-6">           <Link href="/" className="text-slate-400 hover:text-white transition-colors" aria-label="Voltar">             <ArrowLeft className="h-5 w-5" />           </Link>           <div className="flex items-center gap-2 text-slate-400">             <Lock className="h-4 w-4" />             <span className="text-xs">{t('checkout.secure') || 'Pagamento seguro'}</span>           </div>         </div>          <div className="flex items-center justify-center mb-6">           <div className="h-14 w-14 rounded-2xl bg-emerald-500/15 flex items-center justify-center border border-emerald-500/30">             <CreditCard className="h-7 w-7 text-emerald-400" />           </div>         </div>          <h1 className="text-2xl font-bold text-white text-center mb-2">           {t('checkout.title') || 'Reativa a tua subscri├º├úo'}         </h1>         <p className="text-slate-400 text-center mb-6">           {t('checkout.subtitle') || 'A tua subscri├º├úo expirou ou foi pausada. Reactiva-a para continuar a aceder ├ás leads.'}         </p>          <div className="rounded-xl bg-emerald-500/15 border border-emerald-500/30 p-4 flex items-start gap-3 mb-6">           <CheckCircle2 className="h-5 w-5 text-emerald-400 shrink-0 mt-0.5" />           <p className="text-sm text-emerald-300">             {t('checkout.notice') || 'Subscri├º├úo em pausa. Contacta o suporte ou reativa o plano para recuperar o acesso.'}           </p>         </div>          <Link           href="/pricing"           className="w-full py-3 rounded-lg bg-emerald-500 text-slate-950 font-semibold hover:bg-emerald-400 transition-colors text-center block"         >           {t('checkout.choose_plan') || 'Escolher plano'}         </Link>          <p className="text-center text-sm text-slate-500 mt-4">           <Link href="/" className="text-emerald-400 hover:underline">             {t('checkout.back_home') || 'Voltar ao in├¡cio'}           </Link>         </p>       </div>     </div>   ); }
+'use client';
+
+import Link from 'next/link';
+import { ArrowLeft, CreditCard, CheckCircle2, Lock } from 'lucide-react';
+import { useI18n } from '@/lib/i18n';
+
+export default function CheckoutPage() {
+  const { t } = useI18n();
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-950 px-4">
+      <div className="w-full max-w-md bg-slate-900 rounded-2xl border border-slate-700 p-8">
+        <div className="flex items-center justify-between mb-6">
+          <Link href="/" className="text-slate-400 hover:text-white transition-colors" aria-label="Voltar">
+            <ArrowLeft className="h-5 w-5" />
+          </Link>
+          <div className="flex items-center gap-2 text-slate-400">
+            <Lock className="h-4 w-4" />
+            <span className="text-xs">{t('checkout.secure') || 'Pagamento seguro'}</span>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-center mb-6">
+          <div className="h-14 w-14 rounded-2xl bg-emerald-500/15 flex items-center justify-center border border-emerald-500/30">
+            <CreditCard className="h-7 w-7 text-emerald-400" />
+          </div>
+        </div>
+
+        <h1 className="text-2xl font-bold text-white text-center mb-2">
+          {t('checkout.title') || 'Reativa a tua subscrição'}
+        </h1>
+        <p className="text-slate-400 text-center mb-6">
+          {t('checkout.subtitle') || 'A tua subscrição expirou ou foi pausada. Reactiva-a para continuar a aceder às leads.'}
+        </p>
+
+        <div className="rounded-xl bg-emerald-500/15 border border-emerald-500/30 p-4 flex items-start gap-3 mb-6">
+          <CheckCircle2 className="h-5 w-5 text-emerald-400 shrink-0 mt-0.5" />
+          <p className="text-sm text-emerald-300">
+            {t('checkout.notice') || 'Subscrição em pausa. Contacta o suporte ou reativa o plano para recuperar o acesso.'}
+          </p>
+        </div>
+
+        <Link
+          href="/pricing"
+          className="w-full py-3 rounded-lg bg-emerald-500 text-slate-950 font-semibold hover:bg-emerald-400 transition-colors text-center block"
+        >
+          {t('checkout.choose_plan') || 'Escolher plano'}
+        </Link>
+
+        <p className="text-center text-sm text-slate-500 mt-4">
+          <Link href="/" className="text-emerald-400 hover:underline">
+            {t('checkout.back_home') || 'Voltar ao início'}
+          </Link>
+        </p>
+      </div>
+    </div>
+  );
+}
