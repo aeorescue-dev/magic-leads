@@ -967,6 +967,8 @@ const PT: Dict = {
   "checkout.feat1": "Sem renovação automática — você decide quando renovar.",
   "checkout.feat2": "Reservas exclusivas, alertas, favoritos e dashboard completo por 7 dias.",
   "checkout.feat3": "Preço fixo: $79/semana, sem porcentagem de comissão sobre jobs.",
+  "checkout.btn_pay_label": "Assinar agora por $79/semana",
+  "checkout.payment_secure": "Pagamento 100% seguro",
 
   // db — extensões do modal de contato
   "db.sms.body": "enviado com sucesso",
@@ -1977,6 +1979,8 @@ const EN: Dict = {
   "checkout.feat1": "No automatic renewal — you decide when to renew.",
   "checkout.feat2": "Exclusive reservations, alerts, favorites and full dashboard for 7 days.",
   "checkout.feat3": "Fixed price: $79/week, no commission percentage on jobs.",
+  "checkout.btn_pay_label": "Subscribe now for $79/week",
+  "checkout.payment_secure": "100% secure payment",
 
   // db — contact modal extensions
   "db.sms.body": "sent successfully",
@@ -2969,6 +2973,8 @@ const ES: Dict = {
   "checkout.feat1": "Sin renovación automática — tú decides cuándo renovar.",
   "checkout.feat2": "Reservas exclusivas, alertas, favoritos y panel completo por 7 días.",
   "checkout.feat3": "Precio fijo: $79/semana, sin porcentaje de comisión sobre trabajos.",
+  "checkout.btn_pay_label": "Suscribirse ahora por $79/semana",
+  "checkout.payment_secure": "Pago 100% seguro",
 
   // db — extensiones del modal de contacto
   "db.sms.body": "enviado con éxito",
