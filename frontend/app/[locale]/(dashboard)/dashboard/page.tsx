@@ -1311,7 +1311,7 @@ const LEAD_TYPES = [
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
             {[
               { label: t("dashboard.kpi.interested") || "No seu interesse", value: dashboardSummary?.total_interested ?? 0, delta: t("dashboard.kpi.opportunities") || "oportunidades reais", icon: Building2, color: "#6366f1" },
-              { label: "Última Varredura", value: publicMetrics?.last_scrape?.novas_oportunidades ?? scrapeCount + 500, delta: "atualizado agora", icon: TrendingUp, color: "#22c55e" },
+              { label: t("dashboard.kpi.last_scrape"), value: publicMetrics?.last_scrape?.novas_oportunidades ?? scrapeCount + 500, delta: t("dashboard.kpi.updated_now"), icon: TrendingUp, color: "#22c55e" },
               { label: t("dashboard.kpi.with_contact") || "Com contato", value: dashboardSummary?.with_contact ?? 0, delta: t("dashboard.kpi.ready_call") || "prontas p/ ligar", icon: Phone, color: "#f59e0b" },
               { label: t("dashboard.kpi.urgent") || "Urgentes", value: dashboardSummary?.urgent ?? 0, delta: t("dashboard.kpi.need_action") || "precisam ação", icon: AlertCircle, color: "#ef4444" },
             ].map((k) => (
@@ -2051,16 +2051,16 @@ const LEAD_TYPES = [
                   <span className="font-semibold truncate">{selectedLead.owner_email || t("dashboard.detail.no_data")}</span>
                 </div>
                 <div>
-                  <span className="text-xs text-slate-400 block">{t("dashboard.col.date")}</span>
+                  <span className="text-xs text-slate-400 block">{t("db.col.date")}</span>
                   <span className="font-semibold" suppressHydrationWarning>
-                    {selectedLead.date_reported ? new Date(selectedLead.date_reported).toLocaleDateString("pt-BR") : "—"}
+                    {selectedLead.date_reported ? new Date(selectedLead.date_reported).toLocaleDateString(lang === "en" ? "en-US" : lang === "es" ? "es-ES" : "pt-BR") : "—"}
                   </span>
                 </div>
                 {selectedLead.last_synced && (
                   <div>
                     <span className="text-xs text-slate-400 block">{t("dashboard.freshness.synced")}</span>
                     <span className="font-semibold" suppressHydrationWarning>
-                      {new Date(selectedLead.last_synced).toLocaleDateString("pt-BR")}
+                      {new Date(selectedLead.last_synced).toLocaleDateString(lang === "en" ? "en-US" : lang === "es" ? "es-ES" : "pt-BR")}
                     </span>
                   </div>
                 )}
