@@ -204,7 +204,8 @@ async def fanout_new_lead_batch(category: str, leads: list) -> FanoutReport:
 
     # --- 3) Itera leads → usuários → dedup → cap → notifica ---
     skipped: dict = defaultdict(int)  # user_id → skipped count
-    push_queue: dict = defaultdict(list)  # user_id → [lead, ...]
+    skipped_locales: dict = {}  # user_id → locale (para digests localizados)
+    push_queue: dict = defaultdict(list)  # user_id → [(lead, locale), ...]
     sent = 0
 
     for lead in leads:
@@ -212,30 +213,37 @@ async def fanout_new_lead_batch(category: str, leads: list) -> FanoutReport:
         if not lid:
             continue
         city = (lead.get("city") or "").strip()
-        addr = lead.get("address") or "endereço"
+        addr = lead.get("address") or ""
         users = await _users_for_city(city)
         for u in users:
             uid = u["id"]
+            locale = normalize(u.get("locale"))
             # Dedup
             if (uid, lid) in already_notified:
                 continue
             # Cap
             if used_today.get(uid, 0) >= DAILY_ALERT_LIMIT:
                 skipped[uid] += 1
+                skipped_locales[uid] = locale
                 continue
-            # Notifica in-app
-            msg = f"Nova oportunidade em {category}: {addr} — {city}"
+            # Notifica in-app (localizado pelo locale do usuário)
+            msg = tr(
+                "new_lead.main_msg", locale,
+                category=category,
+                addr=addr,
+                city=city,
+            )
             created = await db_service.add_notification_for_user(
                 user_id=uid,
                 type="new_lead",
-                title="Nova oportunidade",
+                title=tr("new_lead.title", locale),
                 message=msg,
                 lead_id=lid,
             )
             if created:
                 sent += 1
                 used_today[uid] = used_today.get(uid, 0) + 1
-                push_queue[uid].append(lead)
+                push_queue[uid].append((lead, locale))
 
     # --- 4) Digest para usuários que atingiram o teto ---
     for uid, cnt in skipped.items():
@@ -244,14 +252,19 @@ async def fanout_new_lead_batch(category: str, leads: list) -> FanoutReport:
 
     # --- 5) Push in-app-notificados (respeita city + cap automaticamente) ---
     for uid, push_leads in push_queue.items():
-        for lead in push_leads:
+        for lead, locale in push_leads:
             lid = lead.get("id")
-            addr = lead.get("address") or "Endereço não informado"
+            addr = lead.get("address") or ""
             city = lead.get("city") or ""
             try:
                 await push_service.send_to_user(uid, {
-                    "title": "Nova oportunidade",
-                    "body": f"{category}: {addr} — {city}",
+                    "title": tr("new_lead.title", locale),
+                    "body": tr(
+                        "new_lead.main_msg", locale,
+                        category=category,
+                        addr=addr,
+                        city=city,
+                    ),
                     "icon": "https://magicleads-oficial.vercel.app/icons/magicleads-brand.svg",
                     "badge": "https://magicleads-oficial.vercel.app/icons/magicleads-brand.svg",
                     "tag": f"new_lead_{lid}",
@@ -270,10 +283,11 @@ async def fanout_new_lead_batch(category: str, leads: list) -> FanoutReport:
         if cnt > 0:
             try:
                 await push_service.send_to_user(uid, {
-                    "title": "Resumo diário de alertas",
-                    "body": (
-                        f"Mais {cnt} ofertas chegaram hoje "
-                        f"— o limite de 10 renova amanhã."
+                    "title": tr("new_lead.batch_title", skipped_locales.get(uid)),
+                    "body": tr(
+                        "new_lead.digest_body", skipped_locales.get(uid),
+                        n=cnt,
+                        limit=DAILY_ALERT_LIMIT,
                     ),
                     "icon": "https://magicleads-oficial.vercel.app/icons/magicleads-brand.svg",
                     "badge": "https://magicleads-oficial.vercel.app/icons/magicleads-brand.svg",
