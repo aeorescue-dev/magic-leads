@@ -90,43 +90,62 @@ async def notify_users_for_lead(
         """
         users = await db_service.get_users_interested_in(category)
         sent = 0
+        
+        # Retry configuration for in-app notifications
+        MAX_RETRIES = 3
+        BASE_BACKOFF = 0.5  # seconds
+        MAX_BACKOFF = 5.0  # seconds
+        
         for user in users[:limit]:
-            try:
-                # Localiza fallback PT por usuário (se locale presente).
-                locale = normalize(user.get("locale"))
-                if event_type == "new_lead":
-                    msg = tr(
-                        "new_lead.main_msg", locale,
-                        category=category,
-                        addr=user.get("_address", "") or title,
-                        city=user.get("_city", ""),
-                    )
-                    localized_title = tr("new_lead.title", locale)
-                elif event_type == "status_change":
-                    msg = tr(
-                        "status_change.main_msg", locale,
-                        addr=user.get("_address", "") or title,
-                        city=user.get("_city", ""),
-                        status="",  # preenchido pelo chamador via message_fmt quando aplicável
-                        category=category,
-                    )
-                    localized_title = tr("status_change.title", locale)
-                else:
-                    msg = message_fmt
-                    localized_title = title
-            except Exception:
+            # Localiza fallback PT por usuário (se locale presente).
+            locale = normalize(user.get("locale"))
+            if event_type == "new_lead":
+                msg = tr(
+                    "new_lead.main_msg", locale,
+                    category=category,
+                    addr=user.get("_address", "") or title,
+                    city=user.get("_city", ""),
+                )
+                localized_title = tr("new_lead.title", locale)
+            elif event_type == "status_change":
+                msg = tr(
+                    "status_change.main_msg", locale,
+                    addr=user.get("_address", "") or title,
+                    city=user.get("_city", ""),
+                    status="",  # preenchido pelo chamador via message_fmt quando aplicável
+                    category=category,
+                )
+                localized_title = tr("status_change.title", locale)
+            else:
                 msg = message_fmt
                 localized_title = title
 
-            created = await db_service.add_notification_for_user(
-                user_id=user["id"],
-                type=event_type,
-                title=localized_title,
-                message=msg,
-                lead_id=lead_id,
-            )
-            if created:
-                sent += 1
+            # Retry with exponential backoff for DB operation
+            for attempt in range(3 + 1):
+                try:
+                    created = await db_service.add_notification_for_user(
+                        user_id=user["id"],
+                        type=event_type,
+                        title=localized_title,
+                        message=msg,
+                        lead_id=lead_id,
+                    )
+                    if created:
+                        sent += 1
+                    break  # Sucesso, sai do loop de retry
+                except Exception as e:
+                    if attempt < 3:
+                        wait_time = min(0.5 * (2 ** attempt) + random.uniform(0, 0.2), 5.0)
+                        logger.warning(f"Notificação in-app user={user['id']} lead={lead_id} (tentativa {attempt + 1}/4): {e}. Retry em {wait_time:.1f}s")
+                        await asyncio.sleep(wait_time)
+                        continue
+                    logger.error(f"Notificação in-app user={user['id']} lead={lead_id} falhou após 4 tentativas: {e}")
+                    # Salva na DLQ para reprocessamento posterior
+                    try:
+                        await db_service._save_notification_dlq(user["id"], event_type, localized_title, msg, lead_id, str(e))
+                    except Exception:
+                        pass
+                    break
         return sent
 
 
@@ -226,24 +245,40 @@ async def fanout_new_lead_batch(category: str, leads: list) -> FanoutReport:
                 skipped[uid] += 1
                 skipped_locales[uid] = locale
                 continue
-            # Notifica in-app (localizado pelo locale do usuário)
+            # Notifica in-app (localizado pelo locale do usuário) com retry
             msg = tr(
                 "new_lead.main_msg", locale,
                 category=category,
                 addr=addr,
                 city=city,
             )
-            created = await db_service.add_notification_for_user(
-                user_id=uid,
-                type="new_lead",
-                title=tr("new_lead.title", locale),
-                message=msg,
-                lead_id=lid,
-            )
-            if created:
-                sent += 1
-                used_today[uid] = used_today.get(uid, 0) + 1
-                push_queue[uid].append((lead, locale))
+            for attempt in range(3 + 1):
+                try:
+                    created = await db_service.add_notification_for_user(
+                        user_id=uid,
+                        type="new_lead",
+                        title=tr("new_lead.title", locale),
+                        message=msg,
+                        lead_id=lid,
+                    )
+                    if created:
+                        sent += 1
+                        used_today[uid] = used_today.get(uid, 0) + 1
+                        push_queue[uid].append((lead, locale))
+                    break  # Sucesso, sai do loop de retry
+                except Exception as e:
+                    if attempt < 3:
+                        wait_time = min(0.5 * (2 ** attempt) + random.uniform(0, 0.2), 5.0)
+                        logger.warning(f"Notificação in-app batch user={uid} lead={lid} (tentativa {attempt + 1}/4): {e}. Retry em {wait_time:.1f}s")
+                        await asyncio.sleep(wait_time)
+                        continue
+                    logger.error(f"Notificação in-app batch user={uid} lead={lid} falhou após 4 tentativas: {e}")
+                    # Salva na DLQ para reprocessamento posterior
+                    try:
+                        await db_service._save_notification_dlq(uid, "new_lead", tr("new_lead.title", locale), msg, lid, str(e))
+                    except Exception:
+                        pass
+                    break
 
     # --- 4) Digest para usuários que atingiram o teto ---
     for uid, cnt in skipped.items():

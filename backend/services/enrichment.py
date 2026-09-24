@@ -9,6 +9,8 @@ Estratégia multicaminho para máxima consistência:
 
 Por cidade, usa o dataset Socrata/CKAN que contém owner + endereço no mesmo registro.
 """
+import asyncio
+import random
 import re
 from datetime import date
 from typing import Any, Dict, List, Optional
@@ -18,16 +20,22 @@ import httpx
 from ..config import settings
 from ..utils.logger import logger
 
+
+# Retry configuration for enrichment
+ENRICHMENT_MAX_RETRIES = 3
+ENRICHMENT_BASE_BACKOFF = 1.0  # seconds
+ENRICHMENT_MAX_BACKOFF = 30.0  # seconds
+
+
 CITY_DATASETS: Dict[str, Dict] = {
     "NYC": {
-        # PLUTO (Primary Land Use Tax Lot Output) — dono de todos os lotes, mais completo que BuildCom
         "domain": "data.cityofnewyork.us",
         "dataset": "64uk-42ks",
         "owner_col": "ownername",
-        "num_col": None,  # address é endereço completo ("323 EAST 12 STREET")
+        "num_col": None,
         "street_col": None,
         "address_col": "address",
-        "zip_col": None,  # não usado (sem coluna separada confiável)
+        "zip_col": None,
         "mailing_addr_col": None,
         "mailing_city_col": None,
         "mailing_zip_col": None,
@@ -40,7 +48,7 @@ CITY_DATASETS: Dict[str, Dict] = {
         "owner_col": "owner1",
         "num_col": "siteaddrnum",
         "street_col": "sitestreetname",
-        "zip_col": None,  # not in dataset
+        "zip_col": None,
         "mailing_addr_col": "ownaddr2",
         "mailing_city_col": "ownercity",
         "mailing_zip_col": "ownerzip",
@@ -49,7 +57,7 @@ CITY_DATASETS: Dict[str, Dict] = {
     },
     "NORFOLK": {
         "domain": "data.norfolk.gov",
-        "dataset": "qva7-tzrf",  # Property Assessment FY27
+        "dataset": "qva7-tzrf",
         "owner_col": "owner",
         "num_col": "property_street_number",
         "street_col": "property_street_name",
@@ -62,9 +70,9 @@ CITY_DATASETS: Dict[str, Dict] = {
     },
     "BOSTON": {
         "domain": "data.boston.gov",
-        "dataset": "bdb17c2b-e9ab-44e4-a070-bf804a0e1a7f",  # Property Assessment 2015
+        "dataset": "bdb17c2b-e9ab-44e4-a070-bf804a0e1a7f",
         "owner_col": "OWNER",
-        "num_col": None,  # use full_address parsing
+        "num_col": None,
         "street_col": "full_address",
         "zip_col": "ZIPCODE",
         "mailing_addr_col": "OWNER_MAIL_ADDRESS",
@@ -75,9 +83,9 @@ CITY_DATASETS: Dict[str, Dict] = {
     },
     "CHICAGO": {
         "domain": "datacatalog.cookcountyil.gov",
-        "dataset": "3723-97qp",  # Cook County Assessor - Parcel Addresses (owner + mailing)
+        "dataset": "3723-97qp",
         "owner_col": "owner_address_name",
-        "num_col": None,  # endereço completo em um só campo (prop_address_full)
+        "num_col": None,
         "street_col": None,
         "address_col": "prop_address_full",
         "city_filter_col": "prop_address_city_name",
@@ -93,6 +101,7 @@ CITY_DATASETS: Dict[str, Dict] = {
         "number_as_string": True,
     },
 }
+
 
 _SUFFIX = {
     "STREET": "ST", "AVENUE": "AVE", "PLACE": "PL", "ROAD": "RD",
@@ -129,6 +138,12 @@ def parse_address(address: str) -> Optional[tuple]:
     return p[0].strip(), p[1].strip()
 
 
+# Retry configuration for enrichment
+ENRICHMENT_MAX_RETRIES = 3
+ENRICHMENT_BASE_BACKOFF = 1.0  # seconds
+ENRICHMENT_MAX_BACKOFF = 30.0  # seconds
+
+
 class OwnerEnrichment:
     """Consultas de nome do proprietário + mailing address por endereço (com cache)."""
 
@@ -153,7 +168,7 @@ class OwnerEnrichment:
 
     def budget_remaining(self) -> int:
         if settings.ENRICHMENT_DAILY_BUDGET <= 0:
-            return 1_000_000  # "∞" — sem cota (a UI mostra "ilimitado")
+            return 1_000_000
         self._budget_available()
         return max(0, settings.ENRICHMENT_DAILY_BUDGET - self._budget_used)
 
@@ -193,8 +208,6 @@ class OwnerEnrichment:
         if not parsed:
             return None
         num, street = parsed
-        # Keep original street for query (dataset uses full names like ROAD, AVENUE)
-        # Also create normalized version for client-side comparison if needed
 
         if cfg["type"] == "socrata":
             return await self._lookup_socrata(address, num, street, cfg)
@@ -206,7 +219,6 @@ class OwnerEnrichment:
         domain = cfg["domain"]
         dset = cfg["dataset"]
 
-        # Build select columns
         select_cols = [cfg["owner_col"]]
         if cfg.get("mailing_addr_col"):
             select_cols.append(cfg["mailing_addr_col"])
@@ -235,39 +247,28 @@ class OwnerEnrichment:
         city_filter_col = cfg.get("city_filter_col")
         city_filter_value = cfg.get("city_filter_value")
 
-        # Use original street name for query (dataset has full names like ROAD, AVENUE)
-        # Also create normalized version for client-side comparison
-        street_for_query = street_norm  # Keep original (not abbreviated)
-        # Collaps multi-spaces (ex.: "323 EAST   12 STREET" -> "323 EAST 12 STREET")
+        street_for_query = street_norm
         street_for_query = re.sub(r"\s+", " ", street_for_query).strip()
-        # Don't abbreviate suffixes in query - dataset uses full names
 
-        # Build queries in order of preference
         queries = []
 
         if address_col:
-            # Full-address dataset (e.g. Cook County): "153 W NORTH AVE" em um campo só
             full_address = f"{num} {street_for_query}"
-            # Escape single quotes for Socrata
             full_address_esc = full_address.replace("'", "''")
             city_part = ""
             if city_filter_col and city_filter_value:
                 city_esc = city_filter_value.replace("'", "''")
                 city_part = f" AND {city_filter_col} = '{city_esc}'"
-            # Prefix-exact (endereço começa com número+rua): usa índice, mais rápido que %...%
             queries.append(f"{address_col} like '{full_address_esc}%'{city_part}")
 
         if num_col and street_col:
-            # Prefix-exact primeiro (usa índice, ~1s) e broad como fallback
             if cfg.get("number_as_string", True):
-                # Number as string in Socrata - use single quotes
                 queries.append(f"{street_col} like '{street_for_query}%' AND {num_col} = '{num}'")
                 queries.append(f"{street_col} like '%{street_for_query}%' AND {num_col} = '{num}'")
             else:
                 queries.append(f"{street_col} like '{street_for_query}%' AND {num_col} = {num}")
                 queries.append(f"{street_col} like '%{street_for_query}%' AND {num_col} = {num}")
 
-        # Prefix fallback
         if num_col and street_col and len(num) > 1:
             prefix = num[:max(1, len(num) - 1)]
             if cfg.get("number_as_string", True):
@@ -275,43 +276,56 @@ class OwnerEnrichment:
             else:
                 queries.append(f"{street_col} like '%{street_for_query}%' AND {num_col} like {prefix}%")
 
-        # Street only (broad match, filter client-side)
         if street_col:
             queries.append(f"{street_col} like '%{street_for_query}%'")
 
         async with httpx.AsyncClient(timeout=90) as client:
             for where in queries:
-                try:
-                    params = {
-                        "$select": sel,
-                        "$limit": "5",  # Get a few to filter client-side
-                        "$where": where,
-                    }
-                    if cfg.get("order_col"):
-                        order = cfg["order_col"]
-                        if cfg.get("order_dir"):
-                            order = f"{order} {cfg['order_dir']}"
-                        params["$order"] = order
-                    resp = await client.get(base, params=params, headers=self._headers())
-                    if resp.status_code != 200:
-                        continue
-                    data = resp.json()
-                except httpx.HTTPError as e:
-                    logger.debug(f"Erro enrichment {domain}: {e}")
+                for attempt in range(ENRICHMENT_MAX_RETRIES + 1):
+                    try:
+                        params = {
+                            "$select": sel,
+                            "$limit": "5",
+                            "$where": where,
+                        }
+                        if cfg.get("order_col"):
+                            order = cfg["order_col"]
+                            if cfg.get("order_dir"):
+                                order = f"{order} {cfg['order_dir']}"
+                            params["$order"] = order
+                        resp = await client.get(base, params=params, headers=self._headers())
+                        if resp.status_code != 200:
+                            if attempt < ENRICHMENT_MAX_RETRIES:
+                                wait_time = min(ENRICHMENT_BASE_BACKOFF * (2 ** attempt) + random.uniform(0, 0.5), 30.0)
+                                logger.warning(f"Enrichment {domain} status {resp.status_code} (tentativa {attempt + 1}/{ENRICHMENT_MAX_RETRIES + 1}). Retry em {wait_time:.1f}s")
+                                await asyncio.sleep(wait_time)
+                                continue
+                            continue
+                        data = resp.json()
+                        break
+                    except httpx.HTTPError as e:
+                        if attempt < ENRICHMENT_MAX_RETRIES:
+                            wait_time = min(ENRICHMENT_BASE_BACKOFF * (2 ** attempt) + random.uniform(0, 0.5), 30.0)
+                            logger.warning(f"Erro enrichment {domain} (tentativa {attempt + 1}/{ENRICHMENT_MAX_RETRIES + 1}): {e}. Retry em {wait_time:.1f}s")
+                            await asyncio.sleep(wait_time)
+                            continue
+                        logger.debug(f"Erro enrichment {domain}: {e}")
+                        break
+                    except Exception as e:
+                        logger.debug(f"Erro inesperado enrichment {domain}: {e}")
+                        break
+
+                if 'data' not in locals() or not data:
                     continue
 
                 if isinstance(data, list) and data:
                     if num_col:
-                        # Filter client-side for exact number match if we have num_col
                         for row in data:
                             row_num = str(row.get(num_col) or "").strip()
                             if row_num == num:
                                 return self._build_result(row, cfg, original_address)
-                        # If no exact number match, return first (street match)
                         return self._build_result(data[0], cfg, original_address)
                     else:
-                        # Full-address dataset: prefer exact full-address match
-                        # Cook County tem várias linhas por imóvel (um por ano)
                         best = None
                         best_year = -1
                         for row in data:
@@ -336,8 +350,6 @@ class OwnerEnrichment:
         dset = cfg["dataset"]
         base = f"https://{domain}/api/3/action/datastore_search"
 
-        # CKAN uses different query format - we'll search by full_address
-        # Build field list
         fields = [cfg["owner_col"]]
         if cfg.get("mailing_addr_col"):
             fields.append(cfg["mailing_addr_col"])
@@ -350,24 +362,40 @@ class OwnerEnrichment:
         if cfg.get("zip_col"):
             fields.append(cfg["zip_col"])
 
-        # Search by street name in full_address
         street_search = street_norm.split()[0] if street_norm else ""
         if not street_search:
             return None
 
-        try:
-            async with httpx.AsyncClient(timeout=90) as client:
-                resp = await client.get(base, params={
-                    "resource_id": dset,
-                    "limit": "10",
-                    "fields": ",".join(fields),
-                    "q": street_search,  # Full-text search
-                }, headers=self._headers())
-                if resp.status_code != 200:
-                    return None
-                result = resp.json()
-        except httpx.HTTPError as e:
-            logger.debug(f"Erro enrichment CKAN {domain}: {e}")
+        for attempt in range(ENRICHMENT_MAX_RETRIES + 1):
+            try:
+                async with httpx.AsyncClient(timeout=90) as client:
+                    resp = await client.get(base, params={
+                        "resource_id": dset,
+                        "limit": "10",
+                        "fields": ",".join(fields),
+                        "q": street_search,
+                    }, headers=self._headers())
+                    if resp.status_code != 200:
+                        if attempt < ENRICHMENT_MAX_RETRIES:
+                            wait_time = min(ENRICHMENT_BASE_BACKOFF * (2 ** attempt) + random.uniform(0, 0.5), 30.0)
+                            logger.warning(f"CKAN {domain} status {resp.status_code} (tentativa {attempt + 1}/{ENRICHMENT_MAX_RETRIES + 1}). Retry em {wait_time:.1f}s")
+                            await asyncio.sleep(wait_time)
+                            continue
+                        return None
+                    result = resp.json()
+                    break
+            except httpx.HTTPError as e:
+                if attempt < ENRICHMENT_MAX_RETRIES:
+                    wait_time = min(ENRICHMENT_BASE_BACKOFF * (2 ** attempt) + random.uniform(0, 0.5), 30.0)
+                    logger.warning(f"Erro enrichment CKAN {domain} (tentativa {attempt + 1}/{ENRICHMENT_MAX_RETRIES + 1}): {e}. Retry em {wait_time:.1f}s")
+                    await asyncio.sleep(wait_time)
+                    continue
+                logger.debug(f"Erro enrichment CKAN {domain}: {e}")
+                return None
+            except Exception:
+                logger.debug(f"Erro inesperado enrichment CKAN {domain}")
+                return None
+        else:
             return None
 
         if not result.get("success"):
@@ -377,20 +405,16 @@ class OwnerEnrichment:
         if not records:
             return None
 
-        # Filter client-side for best match
         for row in records:
             full_addr = str(row.get(cfg["street_col"]) or "").upper()
             if street_norm in full_addr:
-                # Try to match number
                 if num:
                     addr_part = full_addr.split(",")[0].strip()
                     addr_num = addr_part.split(" ")[0] if " " in addr_part else addr_part
                     if addr_num == num:
                         return self._build_result(row, cfg, original_address)
-                # Return first street match
                 return self._build_result(row, cfg, original_address)
 
-        # Fallback: return first record
         return self._build_result(records[0], cfg, original_address)
 
     def _build_result(self, row: Dict, cfg: Dict, original_address: str) -> Dict[str, Any]:
@@ -404,7 +428,6 @@ class OwnerEnrichment:
             "matched_address": original_address,
         }
 
-        # Add mailing address if available
         mailing_parts = []
         if cfg.get("mailing_addr_col"):
             addr = str(row.get(cfg["mailing_addr_col"]) or "").strip()
@@ -425,7 +448,6 @@ class OwnerEnrichment:
         return result
 
     async def enrich_batch(self, address_city_pairs: List[tuple]) -> Dict[str, Optional[Dict[str, Any]]]:
-        """Enriquece uma lista de (address, city), retornando dict address->result."""
         out = {}
         seen = set()
         for address, city in address_city_pairs:

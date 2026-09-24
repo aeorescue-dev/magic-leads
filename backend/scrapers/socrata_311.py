@@ -17,17 +17,42 @@ class Socrata311Scraper:
 
     def __init__(self):
         self.keywords = settings.SCRAPER_KEYWORDS
-        self.timeout = 30
+        import asyncio
+import random
+import re
+from datetime import datetime, timedelta
+from typing import List, Optional
 
-    # Datasets Socrata por cidade (dataset IDs públicos)
-    NYC_DATASET = "erm2-nwe9"  # 311 Service Requests from 2020 to Present
-    CHICAGO_DATASET = "v6vf-nfxy"  # 311 Service Requests
+import httpx
+
+from ..config import settings
+from ..models.schemas import IssueCategory, RawLead311, UrgencyLevel
+from ..utils.logger import logger
+
+
+class Socrata311Scraper:
+    """
+    Scrapa dados de 311 Service Requests via Socrata API.
+    Suporta NYC, Chicago, Miami, etc.
+    """
+
+    # Retry configuration
+    MAX_RETRIES = 3
+    BASE_BACKOFF = 1.0  # seconds
+    MAX_BACKOFF = 30.0  # seconds
+
+    def __init__(self):
+        self.keywords = settings.SCRAPER_KEYWORDS
+        self.timeout = 30
 
     async def _fetch_soql(
         self, domain: str, dataset: str, select: str, where: str,
         limit: int = 50000, order: str = None, timeout: int = None
     ) -> list:
-        """Consulta genérica via Socrata SoQL API (/resource/{id}.json), retorna lista de dicts."""
+        """Consulta genérica via Socrata SoQL API (/resource/{id}.json), retorna lista de dicts.
+        
+        Inclui retry com backoff exponencial para falhas transitórias de rede.
+        """
         t = timeout or self.timeout
         url = f"https://{domain}/resource/{dataset}.json"
         params = {
@@ -39,20 +64,31 @@ class Socrata311Scraper:
         if order:
             params["$order"] = order
 
-        async with httpx.AsyncClient(timeout=t) as client:
+        for attempt in range(self.MAX_RETRIES + 1):
             try:
                 headers = {}
                 if settings.SOCRATA_APP_TOKEN:
                     headers["X-App-Token"] = settings.SOCRATA_APP_TOKEN
-                response = await client.get(url, params=params, headers=headers)
-                response.raise_for_status()
-                data = response.json()
-                if isinstance(data, dict):  # erro retornado como dict
-                    logger.error(f"Erro Socrata: {data}")
-                    return []
-                return data or []
+                async with httpx.AsyncClient(timeout=t) as client:
+                    response = await client.get(url, params=params, headers=headers)
+                    response.raise_for_status()
+                    data = response.json()
+                    if isinstance(data, dict):  # erro retornado como dict
+                        logger.error(f"Erro Socrata: {data}")
+                        return []
+                    return data or []
             except httpx.HTTPError as e:
-                logger.error(f"Erro ao conectar {domain}: {e}")
+                # Se não é a última tentativa, espera com backoff exponencial
+                if attempt < self.MAX_RETRIES:
+                    wait_time = min(self.BASE_BACKOFF * (2 ** attempt) + random.uniform(0, 0.5), 30.0)
+                    logger.warning(f"Erro Socrata {domain} (tentativa {attempt + 1}/{self.MAX_RETRIES + 1}): {e}. Retry em {wait_time:.1f}s")
+                    await asyncio.sleep(wait_time)
+                    continue
+                logger.error(f"Erro ao conectar {domain} após {self.MAX_RETRIES + 1} tentativas: {e}")
+                return []
+            except Exception as e:
+                # Erros não-HTTP não fazem retry
+                logger.error(f"Erro inesperado ao conectar {domain}: {e}")
                 return []
 
     async def fetch_nyc_311(self) -> List[RawLead311]:

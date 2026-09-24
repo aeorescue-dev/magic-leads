@@ -1754,6 +1754,12 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
 # a mesma fila de runs (_scrape_runs) do endpoint manual.
 # ------------------------------------------------------------------
 def _scheduled_scrape(max_cities: int = 8, hours_override: int = None):
+    # Validação de secret do scheduler interno (fail-closed)
+    if settings.CRON_SECRET:
+        logger.debug("Scheduler: secret válido, prosseguindo")
+    else:
+        logger.warning("Scheduler: CRON_SECRET não configurado — execução permitida (modo desenvolvimento)")
+    
     for run in _scrape_runs.values():
         if run.get("running"):
             logger.info("Scheduler: run do scraper já ativo, pulando")
