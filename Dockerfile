@@ -18,6 +18,9 @@ COPY backend/ ./backend/
 # Create data directory for SQLite (Railway provides persistent volume at /data)
 RUN mkdir -p /data
 
+# Copy seed script
+COPY backend/scripts/seed_production_users.py ./seed_production_users.py
+
 # Set environment variables
 ENV PYTHONPATH=/app
 ENV DATA_DIR=/data
@@ -25,5 +28,5 @@ ENV DATA_DIR=/data
 # Expose port
 EXPOSE 8000
 
-# Run the application
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run seed script then start the application
+CMD ["sh", "-c", "python seed_production_users.py && uvicorn backend.main:app --host 0.0.0.0 --port 8000"]
