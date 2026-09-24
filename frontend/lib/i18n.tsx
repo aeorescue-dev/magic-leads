@@ -3123,7 +3123,13 @@ export function LanguageProvider({ children, initialLocale }: { children: ReactN
   // ICU MessageFormat pluralization support
 function formatPlural(text: string, values: Record<string, string | number>): string {
   // Handle ICU MessageFormat pluralization: {var, plural, one {...} other {...}}
-  return text.replace(/\{(\w+),\s*plural\s*,\s*([^}]+)\}/g, (match, variable, pluralRules) => {
+  // Supports format: {var} word{var, plural, one {singular} other {plural}}
+  
+  // First, process all plural rules
+  let result = text;
+  const pluralRegex = /\{(\w+),\s*plural\s*,\s*([^}]+)\}/g;
+  
+  result = result.replace(pluralRegex, (match, variable, pluralRules) => {
     const value = values[variable];
     if (value === undefined) return match;
     
@@ -3149,9 +3155,16 @@ function formatPlural(text: string, values: Record<string, string | number>): st
     const selectedRule = rules[category] || rules['other'];
     if (!selectedRule) return match;
 
-    // Replace the variable in the selected rule
-    return selectedRule.replace(new RegExp(`\\{${variable}\\}`, 'g'), String(value));
+    // Return the selected plural form
+    return selectedRule;
   });
+
+  // After processing plural rules, replace remaining {var} with actual values
+  for (const [key, value] of Object.entries(values)) {
+    result = result.replace(new RegExp(`\\{${key}\\}`, 'g'), String(value));
+  }
+
+  return result;
 }
 
 const t = (key: string, values?: Record<string, string | number>) => {
