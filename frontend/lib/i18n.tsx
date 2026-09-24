@@ -320,6 +320,12 @@ const PT: Dict = {
   "checkout.f1": "Acesso ilimitado à base de oportunidades",
   "checkout.f2": "Dono identificado + mensagem pronta",
   "checkout.f3": "Hold de 24h e histórico completo",
+  "checkout.error_company_req": "Informe o nome real da sua empresa",
+  "checkout.error_payment_fail": "Falha ao processar o pagamento. Tente novamente.",
+  "checkout.error_generic_fail": "Erro inesperado ao processar o pagamento. Tente novamente.",
+  "checkout.btn_processing": "Processando...",
+  "checkout.btn_pay_label": "Assinar por ${amount}/semana",
+  "checkout.payment_secure": "Pagamento 100% seguro via Stripe.",
 
   // Dashboard
   "db.title": "Seus Leads",
@@ -1243,6 +1249,12 @@ const EN: Dict = {
   "checkout.f1": "Unlimited access to the opportunities base",
   "checkout.f2": "Owner identified + ready-to-send message",
   "checkout.f3": "24h hold and full history",
+  "checkout.error_company_req": "Enter your real company name",
+  "checkout.error_payment_fail": "Failed to process payment. Please try again.",
+  "checkout.error_generic_fail": "Unexpected error processing payment. Please try again.",
+  "checkout.btn_processing": "Processing...",
+  "checkout.btn_pay_label": "Subscribe for ${amount}/week",
+  "checkout.payment_secure": "100% secure payment via Stripe.",
 
   "db.title": "Your Leads",
   "db.loading": "Loading...",
@@ -2161,6 +2173,12 @@ const ES: Dict = {
   "checkout.f1": "Acceso completo a la base de oportunidades",
   "checkout.f2": "Dueño identificado + mensaje listo",
   "checkout.f3": "Hold de 24h e historial completo",
+  "checkout.error_company_req": "Ingrese el nombre real de su empresa",
+  "checkout.error_payment_fail": "Error al procesar el pago. Inténtelo de nuevo.",
+  "checkout.error_generic_fail": "Error inesperado al procesar el pago. Inténtelo de nuevo.",
+  "checkout.btn_processing": "Procesando...",
+  "checkout.btn_pay_label": "Suscríbase por ${amount}/semana",
+  "checkout.payment_secure": "Pago 100% seguro vía Stripe.",
 
   "db.title": "Tus Prospectos",
   "db.loading": "Cargando...",
