@@ -106,7 +106,7 @@ export function ContactModal({ lead, onClose, onContacted }: ContactModalProps) 
         </div>
 
         <div className="rounded-xl bg-muted p-4 mb-4">
-          <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">{t("price.f3")}</p>
+          <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">{t("db.message")}</p>
           <p className="text-sm">{message}</p>
         </div>
 

@@ -92,50 +92,49 @@ export default function CheckoutModal({ open, onClose, isDark = false }: Checkou
 
             <div className={`rounded-xl border p-4 flex items-center justify-between ${c.box}`}>
               <div>
-                <p className={`text-sm font-semibold ${c.strong}`}>Plano {SUBSCRIPTION_PLAN.name}</p>
-                <p className={`text-xs ${c.textSoft}`}>Pagamento único por semana</p>
+                <p className={`text-sm font-semibold ${c.strong}`}>{t("checkout.plan_label")} {SUBSCRIPTION_PLAN.name}</p>
+                <p className={`text-xs ${c.textSoft}`}>{t("checkout.pay_once")}</p>
               </div>
               <div className="text-right">
                 <p className={`text-2xl font-bold text-emerald-500`}>
                   ${SUBSCRIPTION_PLAN.amount}
-                  <span className={`text-sm font-medium ${c.textSoft}`}>/semana</span>
+                  <span className={`text-sm font-medium ${c.textSoft}`}>{t("checkout.per_week")}</span>
                 </p>
-                <p className={`text-xs ${c.textSoft}`}>~${SUBSCRIPTION_PLAN.annual}/ano</p>
+                <p className={`text-xs ${c.textSoft}`}>{t("checkout.annual_short").replace("${amount}", String(SUBSCRIPTION_PLAN.annual))}</p>
               </div>
             </div>
 
             <ul className={`space-y-2 text-sm ${c.text}`}>
               <li className="flex items-start gap-2">
                 <ShieldCheck className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
-                Sem renovação automática — você decide quando renovar.
+                {t("checkout.feat1")}
               </li>
               <li className="flex items-start gap-2">
                 <ShieldCheck className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
-                Reservas exclusivas, alertas, favoritos e dashboard completo por 7 dias.
+                {t("checkout.feat2")}
               </li>
               <li className="flex items-start gap-2">
                 <ShieldCheck className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
-                Preço fixo: $79/semana, sem porcentagem de comissão sobre jobs.
+                {t("checkout.feat3")}
               </li>
             </ul>
 
             <div className={`rounded-xl border p-4 space-y-2 ${c.box}`}>
               <label className={`flex items-center gap-2 text-sm font-semibold ${c.strong}`}>
                 <Building2 className="w-4 h-4 text-emerald-500" />
-                Nome real da sua empresa
+                {t("checkout.company_name.label")}
               </label>
               <input
                 type="text"
                 value={companyName}
                 onChange={(e) => setCompanyName(e.target.value)}
-                placeholder="Ex.: Rocha Reparos"
+                placeholder={t("checkout.company_name.placeholder")}
                 disabled={busy}
                 maxLength={120}
                 className={`w-full px-3 py-2.5 rounded-lg border text-sm outline-none transition-colors focus:ring-2 focus:ring-emerald-500/30 disabled:opacity-50 ${c.input}`}
               />
               <p className={`text-[11px] leading-relaxed ${c.textSoft}`}>
-                É o nome que aparece como remetente nas mensagens aos clientes (WhatsApp, SMS e e-mail).
-                Você pode alterar depois em Configurações.
+                {t("checkout.company_name.help")}
               </p>
             </div>
 

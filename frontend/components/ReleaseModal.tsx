@@ -38,7 +38,9 @@ export default function ReleaseModal({
   const border = isDark ? "border-white/10" : "border-slate-200";
   const inputBg = isDark ? "bg-white/5" : "bg-slate-100";
 
-  const warnThreshold = suspiciousCount >= 3 ? "Você já acumulou " + suspiciousCount + " liberações suspeitas" : "Liberações suspeitas (mudei de ideia / sem tempo) podem reduzir sua prioridade e, com 10, suspendem a conta por 30 dias.";
+  const warnThreshold = suspiciousCount >= 3
+    ? t("release.warn.threshold").replace("{count}", String(suspiciousCount))
+    : t("release.warn.general");
 
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
@@ -53,7 +55,7 @@ export default function ReleaseModal({
               <RefreshCcw className={`h-5 w-5 ${isDark ? "text-rose-400" : "text-rose-600"}`} />
             </div>
             <div>
-              <h3 className={`font-bold text-base ${text}`}>Liberar oportunidade</h3>
+              <h3 className={`font-bold text-base ${text}`}>{t("release.title")}</h3>
               <p className={`text-xs truncate max-w-[240px] ${text2}`}>{lead.address}</p>
             </div>
           </div>
@@ -63,7 +65,7 @@ export default function ReleaseModal({
         </div>
 
         <div className="space-y-2">
-          <p className={`text-xs font-semibold uppercase tracking-wider ${text2}`}>Motivo da liberação</p>
+          <p className={`text-xs font-semibold uppercase tracking-wider ${text2}`}>{t("release.reason.title")}</p>
           {RELEASE_REASONS.map((r: any) => (
             <button
               key={r.value}
@@ -93,7 +95,7 @@ export default function ReleaseModal({
             isDark ? "bg-amber-500/10 border-amber-500/30 text-amber-200" : "bg-amber-50 border-amber-200 text-amber-700"
           }`}>
             <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-            <span>{warnThreshold}. Após 10, sua conta fica suspensa por 30 dias.</span>
+            <span>{warnThreshold}. {t("release.warn.suspension")}</span>
           </div>
         )}
 
@@ -101,7 +103,7 @@ export default function ReleaseModal({
           value={note}
           onChange={(e) => setNote(e.target.value)}
           disabled={busy}
-          placeholder="Observações (opcional)"
+          placeholder={t("release.note.placeholder")}
           className={`w-full text-sm rounded-xl px-3 py-2.5 border outline-none ${border} ${inputBg} ${text} placeholder:opacity-50`}
           rows={2}
         />
@@ -112,7 +114,7 @@ export default function ReleaseModal({
             disabled={busy}
             className={`flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold disabled:opacity-50 ${isDark ? "bg-white/10 hover:bg-white/15 text-slate-300" : "bg-slate-100 hover:bg-slate-200 text-slate-700"}`}
           >
-            Cancelar
+            {t("release.cancel")}
           </button>
           <button
             onClick={() => reason && onRelease(reason, note || undefined)}
@@ -120,7 +122,7 @@ export default function ReleaseModal({
             className="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold bg-rose-500 hover:bg-rose-400 text-white transition disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-            Liberar lead
+            {t("release.confirm")}
           </button>
         </div>
       </div>

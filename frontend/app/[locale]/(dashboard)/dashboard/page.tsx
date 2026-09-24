@@ -898,11 +898,11 @@ const LEAD_TYPES = [
     [filteredLeads, shown]
   );
 
-  // Use Dashboard Summary for real KPIs (falls back to stats if summary not loaded)
+// Use Dashboard Summary for real KPIs (falls back to stats if summary not loaded)
   const realTotalLeads = dashboardSummary?.total_interested ?? (stats?.total ?? stats?.total_leads ?? 1249);
   const lastScrapeText = String(dashboardSummary?.last_scrape ?? "");
-const scrapeCount = Number(lastScrapeText.match(/\d+/)?.[0] || 0);
-const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
+  const scrapeCount = Number(lastScrapeText.match(/\d+/)?.[0] || 0);
+  const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
   const urgentCount = dashboardSummary?.urgent ?? 0;
 
   const T = theme === "dark" ? DARK : LIGHT;
@@ -1462,14 +1462,14 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                   }`}
                 >
                   <AlertCircle className="h-3.5 w-3.5" />
-                  Só o que precisa de ação hoje
+                  {t("dashboard.only_needs_action")}
                 </button>
               </div>
 
               {/* KPIs do histórico */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
                 <div className={`border rounded-2xl p-4 transition ${isDark ? "bg-[#10121a] border-white/5" : "bg-white border-slate-200 shadow-sm"}`}>
-                  <div className={`text-xs font-medium ${T.text2}`}>Usados hoje</div>
+                  <div className={`text-xs font-medium ${T.text2}`}>{t("dashboard.history.used_today")}</div>
                   <div className="text-2xl md:text-3xl font-bold mt-1 text-indigo-400">
                     {historyKpis?.today_used ?? 0} <span className="text-base font-semibold text-slate-500">/ {historyKpis?.today_limit ?? 10}</span>
                   </div>
@@ -1479,30 +1479,30 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                 </div>
 
                 <div className={`border rounded-2xl p-4 transition ${isDark ? "bg-[#10121a] border-white/5" : "bg-white border-slate-200 shadow-sm"}`}>
-                  <div className={`text-xs font-medium ${T.text2}`}>Total reservado</div>
+                  <div className={`text-xs font-medium ${T.text2}`}>{t("dashboard.history.total_reserved")}</div>
                   <div className="text-2xl md:text-3xl font-bold mt-1 text-emerald-400">
                     {historyKpis?.total_reserved ?? 0}
                   </div>
-                  <div className={`text-[11px] mt-2 ${T.text2}`}>desde o início</div>
+                  <div className={`text-[11px] mt-2 ${T.text2}`}>{t("dashboard.history.since_start")}</div>
                 </div>
 
                 <div className={`border rounded-2xl p-4 transition ${isDark ? "bg-[#10121a] border-white/5" : "bg-white border-slate-200 shadow-sm"}`}>
-                  <div className={`text-xs font-medium ${T.text2}`}>Convertidos</div>
+                  <div className={`text-xs font-medium ${T.text2}`}>{t("dashboard.history.converted")}</div>
                   <div className="text-2xl md:text-3xl font-bold mt-1 text-emerald-500">
                     {historyKpis?.converted ?? 0}
                   </div>
                   <div className="text-[11px] mt-2 text-emerald-400 font-medium">
-                    {historyKpis?.conversion_rate ?? 0}% de aproveitamento
+                    {t("dashboard.history.conversion_rate").replace("{rate}", String(historyKpis?.conversion_rate ?? 0))}
                   </div>
                 </div>
 
                 <div className="border rounded-2xl p-4 transition border-amber-500/20 bg-amber-500/5">
-                  <div className="text-xs font-medium text-amber-300">Precisam de ação</div>
+                  <div className="text-xs font-medium text-amber-300">{t("dashboard.history.needs_action")}</div>
                   <div className="text-2xl md:text-3xl font-bold mt-1 text-amber-400">
                     {historyKpis?.needs_action ?? 0}
                   </div>
                   <div className="text-[11px] mt-2 text-amber-300/80">
-                    reservados/negociação em aberto
+                    {t("dashboard.history.needs_action_sub")}
                   </div>
                 </div>
               </div>
@@ -1511,12 +1511,12 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
               <div className="space-y-2.5">
                 <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
                   {[
-                    { value: "", label: "Todos" },
-                    { value: "reserved", label: "Reservado" },
-                    { value: "negotiating", label: "Em negociação" },
-                    { value: "hold_expired", label: "Hold expirou" },
-                    { value: "converted", label: "Convertido" },
-                    { value: "released", label: "Liberado" },
+                    { value: "", label: t("dashboard.history.filter_all") },
+                    { value: "reserved", label: t("dashboard.history.filter_reserved") },
+                    { value: "negotiating", label: t("dashboard.history.filter_negotiating") },
+                    { value: "hold_expired", label: t("dashboard.history.filter_hold_expired") },
+                    { value: "converted", label: t("dashboard.history.filter_converted") },
+                    { value: "released", label: t("dashboard.history.filter_released") },
                   ].map((opt) => (
                     <button
                       key={opt.value}
@@ -1535,10 +1535,10 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none">
                     {[
-                      { value: "", label: "Todo período" },
-                      { value: "today", label: "Hoje" },
-                      { value: "7d", label: "7 dias" },
-                      { value: "month", label: "Mês" },
+                      { value: "", label: t("dashboard.history.period_all") },
+                      { value: "today", label: t("dashboard.history.period_today") },
+                      { value: "7d", label: t("dashboard.history.period_7d") },
+                      { value: "month", label: t("dashboard.history.period_month") },
                     ].map((opt) => (
                       <button
                         key={opt.value}
@@ -1559,7 +1559,7 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                     onChange={(e) => setHistoryCategory(e.target.value)}
                     className={`text-xs font-medium rounded-lg px-2.5 py-1.5 border outline-none ${T.border} ${isDark ? "bg-[#151822] text-slate-200" : "bg-white text-slate-800"}`}
                   >
-                    <option value="">Todas as categorias</option>
+                    <option value="">{t("dashboard.history.all_categories")}</option>
                     {CATEGORIES.map((c) => (
                       <option key={c.key} value={c.key}>{t(c.labelKey)}</option>
                     ))}
@@ -1608,12 +1608,12 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                         : lead.my_status === "negotiating"
                           ? { label: t("dashboard.status.negotiation"), cls: "bg-amber-500/15 text-amber-400", icon: <MessageSquare className="h-3 w-3" /> }
                           : lead.my_status === "hold_expired"
-                            ? { label: "Hold expirou", cls: "bg-slate-500/15 text-slate-400", icon: <Clock className="h-3 w-3" /> }
+                            ? { label: t("dashboard.history.filter_hold_expired"), cls: "bg-slate-500/15 text-slate-400", icon: <Clock className="h-3 w-3" /> }
                             : lead.my_status === "converted"
-                              ? { label: "Convertido", cls: "bg-emerald-500/15 text-emerald-400", icon: <BadgeCheck className="h-3 w-3" /> }
+                              ? { label: t("dashboard.status.converted"), cls: "bg-emerald-500/15 text-emerald-400", icon: <BadgeCheck className="h-3 w-3" /> }
                               : lead.my_status === "released"
-                                ? { label: "Liberado", cls: "bg-slate-500/15 text-slate-400", icon: <RefreshCcw className="h-3 w-3" /> }
-                                : { label: "Disponível", cls: "bg-sky-500/15 text-sky-400", icon: <CheckCircle2 className="h-3 w-3" /> };
+                                ? { label: t("dashboard.history.filter_released"), cls: "bg-slate-500/15 text-slate-400", icon: <RefreshCcw className="h-3 w-3" /> }
+                                : { label: t("dashboard.status.available"), cls: "bg-sky-500/15 text-sky-400", icon: <CheckCircle2 className="h-3 w-3" /> };
                     return (
                       <div
                         key={lead.id}
@@ -1647,26 +1647,26 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                               {lead.owner_name && <span className="font-medium">{lead.owner_name}</span>}
                               <span className="flex items-center gap-1">
                                 <Clock className="h-3 w-3" />
-                                Reservado em {lead.held_at ? formatRelativeTime(lead.held_at, t) : "—"}
+                                {t("dashboard.history.reserved_on")} {lead.held_at ? formatRelativeTime(lead.held_at, t) : "—"}
                               </span>
                               {lead.my_status === "reserved" && lead.hold_expires_at && (
-                                <span className="text-rose-400 font-semibold">Expira em {countdownLabel(lead.hold_expires_at)}</span>
+                                <span className="text-rose-400 font-semibold">{t("dashboard.history.expires_in")} {countdownLabel(lead.hold_expires_at)}</span>
                               )}
                               {lead.hold_released_at && (
-                                <span>Liberado em {formatRelativeTime(lead.hold_released_at, t)}</span>
+                                <span>{t("dashboard.history.released_on")} {formatRelativeTime(lead.hold_released_at, t)}</span>
                               )}
                               {lead.converted_at && (
-                                <span className="text-emerald-400">Convertido em {formatRelativeTime(lead.converted_at, t)}</span>
+                                <span className="text-emerald-400">{t("dashboard.history.converted_on")} {formatRelativeTime(lead.converted_at, t)}</span>
                               )}
                               {(lead.contact_count ?? 0) > 0 && (
                                 <span className="flex items-center gap-1">
-                                  <Phone className="h-3 w-3" /> {lead.contact_count} contato(s)
+                                  <Phone className="h-3 w-3" /> {t("dashboard.history.contacts").replace("{count}", String(lead.contact_count))}
                                 </span>
                               )}
                             </div>
                             {lead.release_reason && (
                               <div className="text-[11px] mt-1 text-slate-500">
-                                Motivo: {lead.release_reason}
+                                {t("dashboard.field.reason")}: {lead.release_reason}
                               </div>
                             )}
                           </div>
@@ -1678,7 +1678,7 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                                 disabled={busyAction}
                                 className="inline-flex items-center gap-1.5 text-[11px] font-semibold bg-white/10 hover:bg-rose-500/20 text-slate-300 hover:text-rose-400 px-3 py-1.5 rounded-lg transition disabled:opacity-50"
                               >
-                                <RefreshCcw className="h-3 w-3" /> Largar
+                                <RefreshCcw className="h-3 w-3" /> {t("dashboard.action.drop")}
                               </button>
                             )}
                             {lead.my_status === "negotiating" && (
@@ -1687,7 +1687,7 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                                 disabled={busyAction}
                                 className="inline-flex items-center gap-1.5 text-[11px] font-bold bg-emerald-500 hover:bg-emerald-400 text-slate-950 px-3 py-1.5 rounded-lg transition disabled:opacity-50"
                               >
-                                <BadgeCheck className="h-3 w-3" /> Registrar conversão
+                                <BadgeCheck className="h-3 w-3" /> {t("dashboard.action.record_conversion")}
                               </button>
                             )}
                             {(lead.my_status === "hold_expired" || lead.my_status === "released" || lead.my_status === "available") && (
@@ -1696,7 +1696,7 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                                 disabled={busyAction || (subscription && !subscription.can_access) || (dailyStats?.remaining === 0)}
                                 className="inline-flex items-center gap-1.5 text-[11px] font-bold bg-indigo-500 hover:bg-indigo-400 text-white px-3 py-1.5 rounded-lg transition disabled:opacity-50"
                               >
-                                <Lock className="h-3 w-3" /> Re-reservar
+                                <Lock className="h-3 w-3" /> {t("dashboard.action.rereserve")}
                               </button>
                             )}
                           </div>
@@ -1744,7 +1744,7 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                       </div>
                       <div className="flex-1 text-left">
                         <div className="text-sm font-semibold">{t(cat.labelKey)}</div>
-                        <div className={`text-[11px] ${T.text2}`}>Alerta ativo em tempo real</div>
+                        <div className={`text-[11px] ${T.text2}`}>{t("dashboard.interests.live_alert")}</div>
                       </div>
                       <div
                         className={`h-5 w-5 rounded-md flex items-center justify-center border transition ${
@@ -1827,23 +1827,23 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
 
                             {lead.owner_name && (
                               <span className="text-[10px] font-semibold uppercase bg-emerald-500/15 text-emerald-400 px-2.5 py-1 rounded-full flex items-center gap-1">
-                                <CheckCircle2 className="h-3 w-3" /> Dono identificado
+                                <CheckCircle2 className="h-3 w-3" /> {t("dashboard.badge.owner_identified")}
                               </span>
                             )}
 
                             {vis === "available" && (
                               <span className="text-[10px] font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-400 px-2.5 py-1 rounded-full flex items-center gap-1">
-                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" /> Disponível
+                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" /> {t("dashboard.status.available")}
                               </span>
                             )}
                             {isMine && (
                               <span className="text-[10px] font-bold uppercase tracking-wider bg-rose-500/15 text-rose-400 px-2.5 py-1 rounded-full flex items-center gap-1">
-                                <Lock className="h-3 w-3" /> Seu · {reservedUntil ? countdownLabel(reservedUntil) : "24h"}
+                                <Lock className="h-3 w-3" /> {t("dashboard.badge.yours").replace("{time}", reservedUntil ? countdownLabel(reservedUntil) : "24h")}
                               </span>
                             )}
                             {vis === "reserved_by_other" && (
                               <span className="text-[10px] font-bold uppercase tracking-wider bg-slate-500/15 text-slate-400 px-2.5 py-1 rounded-full flex items-center gap-1">
-                                <Lock className="h-3 w-3" /> Reservado
+                                <Lock className="h-3 w-3" /> {t("dashboard.status.reserved")}
                               </span>
                             )}
 
@@ -1862,7 +1862,7 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                                 {lead.owner_name && (
                                   <>
                                     <span className="font-medium text-slate-300">
-                                      Proprietário: {lead.owner_name}
+                                      {t("dashboard.field.owner")}: {lead.owner_name}
                                     </span>
                                     {lead.mailing_address && (
                                       <span className="text-slate-400">📬 {lead.mailing_address}</span>
@@ -1888,10 +1888,10 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                                       (subscription && !subscription.can_access) || (dailyStats && dailyStats.remaining === 0) ? "opacity-30 cursor-not-allowed" : ""
                                     }`}
                                   >
-                                    <Lock className="h-3 w-3" /> Reservar 1 Hora
+                                    <Lock className="h-3 w-3" /> {t("dashboard.action.reserve_1h")}
                                   </button>
                                   <span className="text-[10px] text-slate-500 flex items-center gap-1">
-                                    <ShieldCheck className="h-3 w-3" /> Dados do dono protegidos
+                                    <ShieldCheck className="h-3 w-3" /> {t("dashboard.data_protected")}
                                   </span>
                                 </div>
                               )}
@@ -1899,13 +1899,13 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                                 <>
                                 <div className="flex items-center gap-2 mt-3 flex-wrap">
                                   <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-400 px-2.5 py-1 rounded-full">
-                                    <BadgeCheck className="h-3 w-3" /> Revelado
+                                    <BadgeCheck className="h-3 w-3" /> {t("dashboard.action.revealed")}
                                   </span>
                                   <button
                                     onClick={(e) => { e.stopPropagation(); openMaps(lead.address); }}
                                     className="flex items-center gap-1.5 text-[11px] font-semibold bg-slate-500/15 text-slate-300 px-3 py-1.5 rounded-lg hover:bg-slate-500/25 transition"
                                   >
-                                    <Navigation className="h-3 w-3" /> Mapa
+                                    <Navigation className="h-3 w-3" /> {t("dashboard.action.map")}
                                   </button>
                                   {lead.owner_phone && (
                                     <a
@@ -1915,7 +1915,7 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                                       onClick={(e) => e.stopPropagation()}
                                       className="flex items-center gap-1.5 text-[11px] font-semibold bg-emerald-500/15 text-emerald-400 px-3 py-1.5 rounded-lg hover:bg-emerald-500/25 transition"
                                     >
-                                      WhatsApp
+                                      {t("dashboard.detail.whatsapp")}
                                     </a>
                                   )}
                                   {lead.owner_phone && (
@@ -1924,7 +1924,7 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                                       onClick={(e) => e.stopPropagation()}
                                       className="flex items-center gap-1.5 text-[11px] font-semibold bg-green-500/15 text-green-400 px-3 py-1.5 rounded-lg hover:bg-green-500/25 transition"
                                     >
-                                      <MessageSquare className="h-3 w-3" /> SMS
+                                      <MessageSquare className="h-3 w-3" /> {t("dashboard.detail.sms")}
                                     </a>
                                   )}
                                   <button
@@ -1932,7 +1932,7 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                                     disabled={busyAction}
                                     className="flex items-center gap-1.5 text-[11px] font-semibold bg-white/10 hover:bg-rose-500/20 text-slate-300 hover:text-rose-400 px-3 py-1.5 rounded-lg transition disabled:opacity-50"
                                   >
-                                    <RefreshCcw className="h-3 w-3" /> Largar
+<RefreshCcw className="h-3 w-3" /> {t("dashboard.action.drop")}
                                   </button>
                                 </div>
                                 {/* Embedded map + navigation buttons */}
@@ -2203,13 +2203,13 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
               {selectedLead.closed_dt && (
                 <div className="text-xs text-slate-400">
                   <BadgeCheck className="h-3.5 w-3.5 inline mr-1" />
-                  Fechado em {formatRelativeTime(selectedLead.closed_dt, t)}
+                  {t("dashboard.reveal.closed_on")} {formatRelativeTime(selectedLead.closed_dt, t)}
                 </div>
               )}
               {(selectedLead.resolution_description || selectedLead.closure_reason) && (
                 <div className="text-xs leading-relaxed text-emerald-300/90">
                   <BadgeCheck className="h-3.5 w-3.5 inline mr-1" />
-                  Resolução: {selectedLead.resolution_description || selectedLead.closure_reason}
+                  {t("dashboard.field.resolution")}: {selectedLead.resolution_description || selectedLead.closure_reason}
                 </div>
               )}
             </div>
@@ -2231,7 +2231,7 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                         <p className="text-sm text-slate-300">{event.detail || event.event_type}</p>
                         <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-1">
                           <span>{formatRelativeTime(event.created_at, t)}</span>
-                          {event.user_id && <span>· Por usuário #{event.user_id}</span>}
+{event.user_id && <span>· {t("dashboard.reveal.by_user")} #{event.user_id}</span>}
                         </div>
                       </div>
                     </div>
@@ -2245,7 +2245,7 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
               <div className="space-y-3 pt-2 border-t border-white/10">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
                   <Building2 className="h-3.5 w-3.5" />
-                  Histórico de ocorrências do imóvel
+                  {t("dashboard.reveal.section_prop_history")}
                 </h4>
                 <div className="space-y-2 max-h-60 overflow-y-auto">
                   {leadOccurrences.map((oc) => (
@@ -2273,11 +2273,11 @@ const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
                       {oc.department && <div className="text-[11px] text-slate-500 mt-0.5">{oc.department}</div>}
                       {(oc.resolution_description || oc.closure_reason) && (
                         <div className="text-[11px] text-emerald-300/90 mt-1">
-                          Resolução: {oc.resolution_description || oc.closure_reason}
+                          {t("dashboard.field.resolution")}: {oc.resolution_description || oc.closure_reason}
                         </div>
                       )}
                       {oc.closed_at && (
-                        <div className="text-[11px] text-slate-500 mt-1">Fechado em {formatRelativeTime(oc.closed_at, t)}</div>
+                        <div className="text-[11px] text-slate-500 mt-1">{t("dashboard.reveal.closed_on")} {formatRelativeTime(oc.closed_at, t)}</div>
                       )}
                     </div>
                   ))}
@@ -2422,15 +2422,14 @@ if (dailyStats && dailyStats.remaining === 0) {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap mb-1">
                   <h2 className="text-lg font-bold" style={{ color: isDark ? "#fff" : "#0f172a" }}>
-                    Revelar dados do proprietário
+                    {t("dashboard.reveal.title")}
                   </h2>
                   <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${revealTarget.source_type === "dob_violation" ? "bg-amber-500/15 text-amber-400" : revealTarget.source_type === "permit" ? "bg-sky-500/15 text-sky-400" : "bg-slate-500/15 text-slate-400"}`}>
-                    {revealTarget.source_type === "dob_violation" ? "Obrigação legal" : revealTarget.source_type === "permit" ? "Obra autorizada" : "Chamado aberto"}
+                    {revealTarget.source_type === "dob_violation" ? t("dashboard.lead_type.obligation") : revealTarget.source_type === "permit" ? t("dashboard.lead_type.permit") : t("dashboard.lead_type.open")}
                   </span>
                 </div>
                 <p className={`text-sm ${T.text2}`}>
-                  Ao reservar por <span className="font-semibold">1 hora</span>, você autoriza verificar
-                  nome, endereço completo, telefone, SMS/e-mail e mapa de direção deste lead.
+                  {t("dashboard.reveal.authorize_prefix")} <span className="font-semibold">{t("dashboard.reveal.authorize_hours")}</span>{t("dashboard.reveal.authorize_suffix")}
                 </p>
               </div>
             </div>
@@ -2450,30 +2449,30 @@ if (dailyStats && dailyStats.remaining === 0) {
               <div className="mt-4 space-y-1.5">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
                   <Building2 className="h-3.5 w-3.5" />
-                  Detalhes da Ocorrência
+                  {t("dashboard.reveal.section_occ")}
                 </h4>
                 <div className="rounded-lg border bg-muted/40 p-3 space-y-1.5 text-sm">
                   {revealTarget.department && (
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground">Departamento</span>
+                      <span className="text-muted-foreground">{t("dashboard.field.department")}</span>
                       <span className="font-medium truncate">{revealTarget.department}</span>
                     </div>
                   )}
                   {revealTarget.case_status && (
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground">Status do Caso</span>
+                      <span className="text-muted-foreground">{t("dashboard.field.case_status")}</span>
                       <span className="font-medium truncate">{revealTarget.case_status}</span>
                     </div>
                   )}
                   {revealTarget.descriptor && (
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground">Descritor</span>
+                      <span className="text-muted-foreground">{t("dashboard.field.descriptor")}</span>
                       <span className="font-medium truncate">{revealTarget.descriptor}</span>
                     </div>
                   )}
                   {(revealTarget.neighborhood || revealTarget.ward || revealTarget.precinct) && (
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground">Localização</span>
+                      <span className="text-muted-foreground">{t("dashboard.reveal.location")}</span>
                       <span className="font-medium truncate">
                         {[revealTarget.neighborhood, revealTarget.ward && revealTarget.ward.replace(/^\d+\s*/, ""), revealTarget.precinct && revealTarget.precinct.replace("Precinct ", "Pct ")]
                           .filter(Boolean)
@@ -2489,44 +2488,44 @@ if (dailyStats && dailyStats.remaining === 0) {
             {/* SECTION 2: Detalhes do Chamado */}
             {(revealTarget.case_title || revealTarget.subject || revealTarget.reason || revealTarget.type || revealTarget.queue || revealTarget.closure_reason || revealTarget.resolution_description || revealTarget.sla_target_dt || revealTarget.closed_dt) && (
               <div className="mt-4 space-y-1.5">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
-                  <Tag className="h-3.5 w-3.5" />
-                  Detalhes do Chamado
+<h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+                  <FolderOpen className="h-3.5 w-3.5" />
+                  {t("dashboard.reveal.section_case")}
                 </h4>
                 <div className="rounded-lg border bg-muted/40 p-3 space-y-1.5 text-sm">
                   {revealTarget.case_title && (
                     <div className="flex items-start justify-between gap-2">
-                      <span className="text-muted-foreground shrink-0">Título</span>
+                      <span className="text-muted-foreground shrink-0">{t("dashboard.field.subject")}</span>
                       <span className="font-medium truncate">{revealTarget.case_title}</span>
                     </div>
                   )}
                   {revealTarget.subject && (
                     <div className="flex items-start justify-between gap-2">
-                      <span className="text-muted-foreground shrink-0">Assunto</span>
+                      <span className="text-muted-foreground shrink-0">{t("dashboard.field.subject")}</span>
                       <span className="font-medium truncate">{revealTarget.subject}</span>
                     </div>
                   )}
                   {revealTarget.reason && (
                     <div className="flex items-start justify-between gap-2">
-                      <span className="text-muted-foreground shrink-0">Motivo</span>
+                      <span className="text-muted-foreground shrink-0">{t("dashboard.field.reason")}</span>
                       <span className="font-medium truncate">{revealTarget.reason}</span>
                     </div>
                   )}
                   {revealTarget.type && (
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground">Tipo</span>
+                      <span className="text-muted-foreground">{t("dashboard.field.type")}</span>
                       <span className="font-medium truncate">{revealTarget.type}</span>
                     </div>
                   )}
                   {revealTarget.queue && (
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground">Fila</span>
+                      <span className="text-muted-foreground">{t("dashboard.field.queue")}</span>
                       <span className="font-medium truncate">{revealTarget.queue}</span>
                     </div>
                   )}
                   {(revealTarget.resolution_description || revealTarget.closure_reason) && (
                     <div className="flex items-start justify-between gap-2">
-                      <span className="text-muted-foreground shrink-0">Resolução</span>
+                      <span className="text-muted-foreground shrink-0">{t("dashboard.field.resolution")}</span>
                       <span className="font-medium truncate text-emerald-300/90">{revealTarget.resolution_description || revealTarget.closure_reason}</span>
                     </div>
                   )}
@@ -2538,7 +2537,7 @@ if (dailyStats && dailyStats.remaining === 0) {
                   )}
                   {revealTarget.closed_dt && (
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground">Fechado em</span>
+                      <span className="text-muted-foreground">{t("dashboard.reveal.closed_on")}</span>
                       <span className="font-medium truncate">{formatRelativeTime(revealTarget.closed_dt, t)}</span>
                     </div>
                   )}
@@ -2551,7 +2550,7 @@ if (dailyStats && dailyStats.remaining === 0) {
               <div className="mt-4 space-y-1.5">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
                   <Clock className="h-3.5 w-3.5" />
-                  Histórico do Lead
+                  {t("dashboard.reveal.section_lead_history")}
                 </h4>
                 <div className="rounded-lg border bg-muted/40 p-3 space-y-2 max-h-48 overflow-y-auto">
                   {revealTarget._history.map((event) => (
@@ -2559,7 +2558,7 @@ if (dailyStats && dailyStats.remaining === 0) {
                       <p className="text-sm text-slate-300">{event.detail || event.event_type}</p>
                       <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-1">
                         <span>{formatRelativeTime(event.created_at, t)}</span>
-                        {event.user_id && <span>· Por usuário #{event.user_id}</span>}
+                        {event.user_id && <span>· {t("dashboard.reveal.by_user")} #{event.user_id}</span>}
                       </div>
                     </div>
                   ))}
@@ -2572,7 +2571,7 @@ if (dailyStats && dailyStats.remaining === 0) {
               <div className="mt-4 space-y-1.5">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
                   <Building2 className="h-3.5 w-3.5" />
-                  Histórico de Ocorrências do Imóvel
+                  {t("dashboard.reveal.section_prop_history")}
                 </h4>
                 <div className="rounded-lg border bg-muted/40 p-3 space-y-2 max-h-60 overflow-y-auto">
                   {revealTarget._occurrences.map((oc) => (
@@ -2595,10 +2594,10 @@ if (dailyStats && dailyStats.remaining === 0) {
                       {oc.descriptor && <p className="text-sm text-slate-300 mt-1">{oc.descriptor}</p>}
                       {oc.department && <div className="text-[11px] text-slate-500 mt-0.5">{oc.department}</div>}
                       {(oc.resolution_description || oc.closure_reason) && (
-                        <div className="text-[11px] text-emerald-300/90 mt-1">Resolução: {oc.resolution_description || oc.closure_reason}</div>
+                        <div className="text-[11px] text-emerald-300/90 mt-1">{t("dashboard.field.resolution")}: {oc.resolution_description || oc.closure_reason}</div>
                       )}
                       {oc.closed_at && (
-                        <div className="text-[11px] text-slate-500 mt-1">Fechado em {formatRelativeTime(oc.closed_at, t)}</div>
+                        <div className="text-[11px] text-slate-500 mt-1">{t("dashboard.reveal.closed_on")} {formatRelativeTime(oc.closed_at, t)}</div>
                       )}
                     </div>
                   ))}
@@ -2616,11 +2615,9 @@ if (dailyStats && dailyStats.remaining === 0) {
                     className="mt-0.5 h-4 w-4 accent-indigo-500"
                   />
                   <span>
-                    <span className="font-semibold">Concordo em verificar dados deste lead (1/10 hoje).</span>
+                    <span className="font-semibold">{t("dashboard.reveal.consent").replace("{used}", String(dailyStats?.used ?? 1)).replace("{limit}", String(dailyStats?.limit ?? 10))}</span>
                     <span className={`block text-xs mt-1 ${T.text2}`}>
-                      Se eu não agir em 1 hora, o lead volta a{" "}
-                      {t("dashboard.opportunities.title") || "Oportunidades para você"} e pode ser revelado
-                      por outro empreiteiro.
+                      {t("dashboard.reveal.timeout").replace("{title}", t("dashboard.opportunities.title"))}
                     </span>
                   </span>
                 </label>
@@ -2634,19 +2631,19 @@ if (dailyStats && dailyStats.remaining === 0) {
                 className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-white text-sm font-bold transition disabled:opacity-50"
               >
                 {busyAction ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lock className="h-4 w-4" />}
-                Reservar 1 Hora · Revelar
+                {t("dashboard.reveal.confirm")}
               </button>
               <button
                 onClick={closeRevealModal}
                 disabled={busyAction}
                 className={`px-4 py-2.5 rounded-xl text-sm font-semibold transition disabled:opacity-50 ${isDark ? "bg-white/10 text-slate-300 hover:bg-white/20" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}
               >
-                Cancelar
+                {t("dashboard.detail.close")}
               </button>
             </div>
             {dailyStats && dailyStats.remaining > 0 && dailyStats.remaining <= 2 && (
               <p className="text-[11px] text-amber-400 mt-2 text-center">
-                Você ainda tem {dailyStats.remaining} de {dailyStats.limit} revelações hoje.
+                {t("dashboard.reveal.remaining").replace("{remaining}", String(dailyStats.remaining)).replace("{limit}", String(dailyStats.limit))}
               </p>
             )}
           </div>
@@ -2689,7 +2686,7 @@ if (dailyStats && dailyStats.remaining === 0) {
               onClick={() => signOut()}
               className="mt-3 text-xs font-medium text-slate-400 hover:text-slate-200 underline underline-offset-2"
             >
-              Sair da conta
+              {t("dashboard.lock.logout")}
             </button>
           </div>
         </div>
