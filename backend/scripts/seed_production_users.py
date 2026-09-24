@@ -4,8 +4,8 @@ Seed script to ensure demo and test users exist in production SQLite database.
 Run on Railway after deployment: python seed_production_users.py
 """
 import os
-import sys
 import sqlite3
+import sys
 
 # Add /app to path for imports
 sys.path.insert(0, '/app')
@@ -39,58 +39,56 @@ USERS_TO_SEED = [
     },
 ]
 
+
 def seed_users():
     """Create or update users with correct passwords and Pro plans."""
     print(f"Looking for database at: {DB_PATH}")
     if not os.path.exists(DB_PATH):
         print(f"Database not found at {DB_PATH}")
         return False
-    
+
     conn = sqlite3.connect(DB_PATH)
     try:
         c = conn.cursor()
-        
+
         for user_def in USERS_TO_SEED:
             email = user_def["email"]
-            password = user_def["password"]
-            
+
             # Check if user exists
             c.execute("SELECT id, email, plan, subscription_status FROM users WHERE email = ?", (email,))
             user = c.fetchone()
-            
-            pwd_hash = hash_password(user_def["password"])
-            
+
             if user:
                 print(f"User {email} exists, updating...")
                 c.execute("""
-                    UPDATE users 
-                    SET password_hash = ?, company_name = ?, plan = 'pro', 
+                    UPDATE users
+                    SET password_hash = ?, company_name = ?, plan = 'pro',
                         subscription_status = 'active', plan_until = '2025-12-31', locale = 'pt'
                     WHERE email = ?
                 """, (hash_password(user_def["password"]), user_def["company_name"], email))
                 print(f"  Updated {email} with Pro plan")
             else:
                 # Create user
-                pwd_hash = hash_password(user_def["password"])
                 c.execute("""
-                    INSERT INTO users 
+                    INSERT INTO users
                     (email, password_hash, company_name, plan, subscription_status, plan_until, locale)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (user_def["email"], hash_password(user_def["password"]), 
+                """, (user_def["email"], hash_password(user_def["password"]),
                       user_def["company_name"], "pro", "active", "2025-12-31", "pt"))
                 user_id = c.lastrowid
                 print(f"Created user {email} with id {user_id}")
-        
+
         conn.commit()
         print("All users seeded successfully!")
         return True
-        
+
     except Exception as e:
         print(f"Error: {e}")
         conn.rollback()
         return False
     finally:
         conn.close()
+
 
 if __name__ == "__main__":
     print("Seeding production users...")
