@@ -2658,6 +2658,8 @@ if (dailyStats && dailyStats.remaining === 0) {
         isDark={isDark}
         mode={subscription?.status === "expired" || subscription?.status === "pending_payment" ? "new" : "reactivate"}
       />
+      {/* DEBUG: log subscription status used for mode */}
+      {(() => { console.log("[Dashboard] subscription:", subscription?.status, "| can_access:", subscription?.can_access, "| mode:", subscription?.status === "expired" || subscription?.status === "pending_payment" ? "new" : "reactivate"); return null; })()}
       
       {/* LOCK SCREEN: período (trial/plano) expirado */}
       {subscription && !subscription.can_access && (
