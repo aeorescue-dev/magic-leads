@@ -1,36 +1,20 @@
-"""Searchbug API Service — Modular, mockable, ready for production keys.
-
-This module isolates all Searchbug API interactions. When API keys are not
-configured, it runs in MOCK mode returning structured empty responses so the
-rest of the system works without changes. When keys are added to env vars,
-it seamlessly switches to live API calls.
-
-Env vars required for live mode:
-  SEARCHBUG_API_KEY — your Searchbug API key
-  SEARCHBUG_BASE_URL — optional, defaults to "https://ws.searchbug.com"
-
-Usage:
-  from .services.searchbug import searchbug_service
-  result = await searchbug_service.lookup_phone(address, city, state)
-"""
-
-"""Searchbug API Service — Modular, mockable, ready for production keys.
-
-This module isolates all Searchbug API interactions. When API keys are not
-configured, it runs in MOCK mode returning structured empty responses so the
-rest of the system works without changes. When keys are added to env vars,
-it seamlessly switches to live API calls.
-
-Env vars required for live mode:
-  SEARCHBUG_API_KEY — your Searchbug API key
-  SEARCHBUG_BASE_URL — optional, defaults to "https://ws.searchbug.com"
-
-Usage:
-  from .services.searchbug import searchbug_service
-  result = await searchbug_service.lookup_phone(address, city, state)
-"""
-
 from __future__ import annotations
+
+"""Searchbug API Service — Modular, mockable, ready for production keys.
+
+This module isolates all Searchbug API interactions. When API keys are not
+configured, it runs in MOCK mode returning structured empty responses so the
+rest of the system works without changes. When keys are added to env vars,
+it seamlessly switches to live API calls.
+
+Env vars required for live mode:
+  SEARCHBUG_API_KEY — your Searchbug API key
+  SEARCHBUG_BASE_URL — optional, defaults to "https://ws.searchbug.com"
+
+Usage:
+  from .services.searchbug import searchbug_service
+  result = await searchbug_service.lookup_phone(address, city, state)
+"""
 
 import os
 import asyncio
@@ -87,7 +71,7 @@ def normalize_us_phone(phone: str) -> str:
         # Already has + prefix
         return phone
     else:
-        # Unknown format, try adding +1 if 10 digits, otherwise return as-is with +
+        # Unknown format, try to add +1 if 10 digits, otherwise return as-is with +
         if len(digits) == 10:
             return f"+1{digits}"
         logger.warning(f"Unrecognized phone format, returning with + prefix: {digits}")
