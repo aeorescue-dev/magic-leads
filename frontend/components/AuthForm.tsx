@@ -143,7 +143,6 @@ function AuthFormInner() {
 
     try {
       const user = await signIn(email.trim(), password, isRegister ? companyName.trim() : undefined, lang);
-      console.log("[AuthForm] signIn result:", user?.email, "| subscription_status:", user?.subscription_status);
       if (isRegister) {
         // Cadastro concluído: o acesso só é liberado após o pagamento.
         // Cria a sessão do Stripe Checkout e redireciona imediatamente.

@@ -18,9 +18,6 @@ interface CheckoutModalProps {
 export default function CheckoutModal({ open, onClose, isDark = false, mode = "new" }: CheckoutModalProps) {
   const { user, updateUser } = useAuth();
   const { t } = useI18n();
-
-  // DEBUG: log mode and user subscription status
-  console.log("[CheckoutModal] mode:", mode, "| user:", user?.email, "| subscription_status:", user?.subscription_status, "| plan:", user?.plan);
   const startCheckout = useStartCheckout();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
