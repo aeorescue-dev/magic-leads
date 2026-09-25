@@ -159,7 +159,7 @@ function countdownLabel(expiresAt: string): string {
 function DashboardPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user, subscription, loading: authLoading, signOut } = useAuth();
+  const { user, subscription, loading: authLoading, signOut, refreshSubscription } = useAuth();
   const { t, lang } = useI18n();
 
   // DECLARE userId BEFORE ALL HANDLERS
@@ -323,6 +323,18 @@ const LEAD_TYPES = [
       setActiveTab("favorites");
     }
   }, [searchParams]);
+
+  // Handle Stripe success return ?paid=1
+  useEffect(() => {
+    if (searchParams?.get("paid") === "1") {
+      refreshSubscription();
+      showToast("Pagamento confirmado com sucesso!", "success");
+      // Clean URL to avoid re-triggering on refresh
+      const url = new URL(window.location.href);
+      url.searchParams.delete("paid");
+      router.replace(url.pathname + url.search, { scroll: false });
+    }
+  }, [searchParams, refreshSubscription, router, showToast]);
 
   // Load user interests
   useEffect(() => {

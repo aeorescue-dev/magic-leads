@@ -125,7 +125,13 @@ export function useAuth() {
     storeUser(u);
   }, []);
 
-  return { user, subscription, loading, signIn, signOut, updateUser };
+  const refreshSubscription = useCallback(async () => {
+    if (user?.id) {
+      await refreshUserSubscription(user, setSubscription);
+    }
+  }, [user]);
+
+  return { user, subscription, loading, signIn, signOut, updateUser, refreshSubscription };
 }
 
 export default useAuth;
