@@ -1835,6 +1835,18 @@ async def _lifespan(app):
             "[EMAIL-STARTUP] Modo logs (sem EMAIL_API_KEY nem SMTP_USER/PASS) — "
             "links de reset impressos nos logs"
         )
+
+    # Validação Stripe no startup
+    if settings.STRIPE_API_KEY and settings.STRIPE_PRICE_ID_PRO and settings.STRIPE_WEBHOOK_SECRET:
+        if settings.STRIPE_API_KEY.startswith("sk_live_"):
+            logger.info("✅ Stripe LIVE configurado — pagamentos em PRODUÇÃO")
+        elif settings.STRIPE_API_KEY.startswith("sk_test_"):
+            logger.warning("⚠️ Stripe TEST configurado — pagamentos em MODO TESTE (não use em produção)")
+        else:
+            logger.warning(f"⚠️ Stripe key prefixo desconhecido: {settings.STRIPE_API_KEY[:12]}...")
+        logger.info(f"✅ Stripe PRICE_ID: {settings.STRIPE_PRICE_ID_PRO}")
+    else:
+        logger.warning("⚠️ Stripe NÃO configurado completamente — checkout usará mock")
     yield
     if _scheduler_task:
         _scheduler_task.cancel()
@@ -2655,7 +2667,7 @@ async def stripe_webhook(request: Request, stripe_signature: str | None = Header
 
     payload = await request.body()
     try:
-        stripe.api_key = settings.STRIPE_API_KEY or "sk_test_placeholder"
+        stripe.api_key = settings.STRIPE_API_KEY
         event = stripe.Webhook.construct_event(
             payload, stripe_signature, settings.STRIPE_WEBHOOK_SECRET
         )
