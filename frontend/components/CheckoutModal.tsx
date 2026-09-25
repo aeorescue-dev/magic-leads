@@ -12,9 +12,10 @@ interface CheckoutModalProps {
   onClose: () => void;
   onActivated?: () => void;
   isDark?: boolean;
+  mode?: "new" | "reactivate"; // "new" = first payment, "reactivate" = expired subscription
 }
 
-export default function CheckoutModal({ open, onClose, isDark = false }: CheckoutModalProps) {
+export default function CheckoutModal({ open, onClose, isDark = false, mode = "new" }: CheckoutModalProps) {
   const { user, updateUser } = useAuth();
   const { t } = useI18n();
   const startCheckout = useStartCheckout();
@@ -88,7 +89,9 @@ export default function CheckoutModal({ open, onClose, isDark = false }: Checkou
         <>
           <div className="flex items-center gap-2">
               <CreditCard className="w-5 h-5 text-emerald-500" />
-              <h3 className={`text-lg font-semibold ${c.strong}`}>{t("checkout.title")}</h3>
+              <h3 className={`text-lg font-semibold ${c.strong}`}>
+                {t(mode === "reactivate" ? "checkout.title_reactivate" : "checkout.title_new")}
+              </h3>
             </div>
 
             <div className={`rounded-xl border p-4 flex items-center justify-between ${c.box}`}>

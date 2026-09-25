@@ -2656,6 +2656,7 @@ if (dailyStats && dailyStats.remaining === 0) {
         onClose={() => setShowCheckout(false)}
         onActivated={() => window.location.reload()}
         isDark={isDark}
+        mode={subscription?.status === "expired" || subscription?.status === "pending_payment" ? "new" : "reactivate"}
       />
       
       {/* LOCK SCREEN: período (trial/plano) expirado */}

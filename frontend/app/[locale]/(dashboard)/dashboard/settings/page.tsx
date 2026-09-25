@@ -195,6 +195,7 @@ export default function DashboardSettingsPage() {
           onClose={() => setShowCheckout(false)}
           onActivated={() => window.location.reload()}
           isDark
+          mode={user?.subscription_status === "expired" || user?.subscription_status === "pending_payment" ? "new" : "reactivate"}
         />
       </div>
     </div>

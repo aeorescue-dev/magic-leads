@@ -970,6 +970,8 @@ const PT: Dict = {
   "checkout.per_week": "/semana",
   "checkout.btn_pay_label": "Assinar agora por $79/semana",
   "checkout.payment_secure": "Pagamento 100% seguro",
+  "checkout.title_new": "Assinar agora — Acesso por 7 dias",
+  "checkout.title_reactivate": "Reativar a tua subscrição",
 
   // db — extensões do modal de contato
   "db.sms.body": "enviado com sucesso",
@@ -1983,6 +1985,8 @@ const EN: Dict = {
   "checkout.per_week": "/week",
   "checkout.btn_pay_label": "Subscribe now for $79/week",
   "checkout.payment_secure": "100% secure payment",
+  "checkout.title_new": "Subscribe now — 7-day access",
+  "checkout.title_reactivate": "Reactivate your subscription",
 
   // db — contact modal extensions
   "db.sms.body": "sent successfully",
@@ -2975,9 +2979,11 @@ const ES: Dict = {
   "checkout.feat1": "Sin renovación automática — tú decides cuándo renovar.",
   "checkout.feat2": "Reservas exclusivas, alertas, favoritos y panel completo por 7 días.",
   "checkout.feat3": "Precio fijo: $79/semana, sin porcentaje de comisión sobre trabajos.",
-  "checkout.per_week": "/semana",
+"checkout.per_week": "/semana",
   "checkout.btn_pay_label": "Suscribirse ahora por $79/semana",
   "checkout.payment_secure": "Pago 100% seguro",
+  "checkout.title_new": "Suscribirse ahora — Acceso por 7 días",
+  "checkout.title_reactivate": "Reactivar tu suscripción",
 
   // db — extensiones del modal de contacto
   "db.sms.body": "enviado con éxito",

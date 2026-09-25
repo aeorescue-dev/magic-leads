@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { TestComponent } from "@/components/TestComponent";
 import { Footer } from "@/components/Footer";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import "../../globals.css";
@@ -25,7 +24,6 @@ export default function PublicLayout({
 }) {
   return (
     <>
-      <TestComponent />
       <main className="min-h-screen">
         <ErrorBoundary>{children}</ErrorBoundary>
       </main>
