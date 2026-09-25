@@ -4,7 +4,6 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useI18n, type Lang } from "@/lib/i18n";
 import { AuthForm } from "@/components/AuthForm";
-import { DemoLoginButton } from "@/components/DemoLoginButton";
 
 // ------------------------------------------------------------------
 // Shared helpers
@@ -220,14 +219,7 @@ export default function LandingShell({ children }: { children: React.ReactNode }
               <div className="mt-5">
                 <AuthForm />
               </div>
-              <div className="relative my-6">
-                <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-[#eef1f6]" /></div>
-                <div className="relative flex justify-center text-sm"><span className="bg-white px-4 text-[#94a3b8]">{t('auth.or_demo') || 'ou'}</span></div>
-              </div>
-              <div className="w-full">
-                <DemoLoginButton className="w-full text-sm py-3.5">{t("nav.demo") || 'Demo'}</DemoLoginButton>
-              </div>
-              <button onClick={() => { setModalOpen(false); router.push(localePath("/auth")); }} className="mt-3 w-full rounded-xl border border-[#e2e8f0] py-3 text-sm font-bold text-[#54617a] hover:border-[#0b1220]">
+              <button onClick={() => { setModalOpen(false); router.push(localePath("/auth")); }} className="mt-6 w-full rounded-xl border border-[#e2e8f0] py-3 text-sm font-bold text-[#54617a] hover:border-[#0b1220]">
                 {t("landing.enter")}
               </button>
               <p className="mt-4 text-center text-[11px] text-[#94a3b8]">{t("landing.seven")}</p>
