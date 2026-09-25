@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     TRUTHFINDER_API_KEY: str = ""  # Optional, para skip tracing
     GOOGLE_GEOCODER_API_KEY: str = ""  # Optional
     GEMINI_API_KEY: str = ""  # Optional para visão
+    SEARCHBUG_API_KEY: str = ""  # Optional, para busca de telefone (Searchbug)
+    SEARCHBUG_BASE_URL: str = "https://ws.searchbug.com"  # Optional, base URL da API Searchbug
 
     # Scraper Config
     SOCRATA_APP_TOKEN: str = ""  # App Token Socrata (pool dedicado, cota maior)
@@ -85,6 +87,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "STRIPE_API_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_ID_PRO",
+        "SEARCHBUG_API_KEY", "SEARCHBUG_BASE_URL",
         mode="before",
     )
     @classmethod
