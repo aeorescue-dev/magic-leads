@@ -24,6 +24,7 @@ import { useI18n } from "@/lib/i18n";
 import { buildOutreachMessage } from "@/lib/outreach";
 import CheckoutModal from "@/components/CheckoutModal";
 import ReleaseModal from "@/components/ReleaseModal";
+import WelcomePopup from "@/components/WelcomePopup";
 import { PushNotificationButton } from "@/components/PushNotificationButton";
 import PushOnboardingBanner from "@/components/PushOnboardingBanner";
 import { LeadLocationMap } from "@/components/LeadLocationMap";
@@ -252,6 +253,8 @@ const LEAD_TYPES = [
   const [showCheckout, setShowCheckout] = useState(false);
   const checkoutAutoOpened = useRef(false);
   const [selectedLead, setSelectedLead] = useState<LeadResponse | null>(null);
+  const [showWelcomePopup, setShowWelcomePopup] = useState(false);
+  const welcomePopupChecked = useRef(false);
 
   // Lead details sub-states
   const [leadStatus, setLeadStatus] = useState<string>("available");
@@ -316,6 +319,16 @@ const LEAD_TYPES = [
       router.replace("/");
     }
   }, [authLoading, user, router]);
+
+  // Welcome Popup: show once on first login after payment
+  useEffect(() => {
+    if (authLoading || !user || welcomePopupChecked.current) return;
+    welcomePopupChecked.current = true;
+
+    if (!user.welcome_popup_shown && user.subscription_status === "active") {
+      setShowWelcomePopup(true);
+    }
+  }, [authLoading, user]);
 
   // Sync favorites tab from URL param ?fav=1
   useEffect(() => {
@@ -2669,6 +2682,12 @@ if (dailyStats && dailyStats.remaining === 0) {
         onActivated={() => window.location.reload()}
         isDark={isDark}
         mode={subscription?.status === "expired" || subscription?.status === "pending_payment" ? "new" : "reactivate"}
+      />
+      {/* WELCOME POPUP (First login after payment) */}
+      <WelcomePopup
+        open={showWelcomePopup}
+        onClose={() => setShowWelcomePopup(false)}
+        isDark={isDark}
       />
       {/* LOCK SCREEN: período (trial/plano) expirado */}
       {subscription && !subscription.can_access && (

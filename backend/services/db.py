@@ -129,6 +129,9 @@ CREATE TABLE IF NOT EXISTS users (
   cities_filter TEXT DEFAULT NULL,
   push_enabled INTEGER DEFAULT 0,
   locale TEXT DEFAULT 'pt',
+  welcome_popup_shown INTEGER DEFAULT 0,
+  refund_count_today INTEGER DEFAULT 0,
+  last_refund_date TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -187,15 +190,6 @@ CREATE TABLE IF NOT EXISTS leads (
   on_time TEXT,
   sla_target_dt TEXT,
   closed_dt TEXT,
-  submitted_photo TEXT,
-  closed_photo TEXT,
-  source TEXT,
-  neighborhood TEXT,
-  ward TEXT,
-  precinct TEXT,
-  descriptor TEXT,
-  resolution_description TEXT,
-  resolution_action_updated_date TEXT,
   status TEXT DEFAULT 'new',
   favorited INTEGER DEFAULT 0,
   lead_status TEXT DEFAULT 'available',
@@ -204,6 +198,8 @@ CREATE TABLE IF NOT EXISTS leads (
   contact_count INTEGER DEFAULT 0,
   converted_by INTEGER,
   converted_at TEXT,
+  revealed_at TEXT,
+  refund_blocked INTEGER DEFAULT 0,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(external_id, source_type),
@@ -328,6 +324,9 @@ CREATE TABLE IF NOT EXISTS lead_reveals (
   notified_30 INTEGER DEFAULT 0,
   notified_45 INTEGER DEFAULT 0,
   returned_to_pool INTEGER DEFAULT 0,
+  refunded INTEGER DEFAULT 0,
+  refund_reason TEXT,
+  refunded_at TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -1364,6 +1363,17 @@ class DatabaseService:
         conn = get_connection()
         try:
             conn.execute("UPDATE users SET locale = ? WHERE id = ?", (locale, user_id))
+            conn.commit()
+            row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def update_user_welcome_popup(self, user_id: int) -> Optional[dict]:
+        """Marca o welcome popup como visto pelo usuário."""
+        conn = get_connection()
+        try:
+            conn.execute("UPDATE users SET welcome_popup_shown = 1 WHERE id = ?", (user_id,))
             conn.commit()
             row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
             return dict(row) if row else None
@@ -3600,6 +3610,243 @@ class DatabaseService:
         finally:
             conn.close()
 
+    # ===== REFUND / ANTI-FRAUD (Reserve 1 Hour) =====
+
+    REPORT_WINDOW_MIN = 5  # Janela de 5 minutos para reportar número inválido
+    MAX_REFUNDS_PER_DAY = 2  # Máximo 2 estornos por usuário por dia
+
+    def can_report_invalid_number(self, user_id: int, lead_id: int) -> dict:
+        """Verifica se o usuário pode reportar número inválido para este lead.
+
+        Regras:
+        - Janela de 5 minutos após o reveal (REPORT_WINDOW_MIN)
+        - Lead não pode ter status "in_negotiation" ou "converted" (Regra C)
+        - Máximo 2 estornos por dia por usuário (Regra D)
+        - Lead não pode ter refund_blocked = 1
+
+        Retorna dict com 'allowed': bool, 'reason': str, 'revealed_at': datetime|None
+        """
+        conn = get_connection()
+        try:
+            today = datetime.utcnow().date().isoformat()
+
+            # 1. Busca o reveal ativo para este lead/usuário hoje
+            reveal = conn.execute(
+                """SELECT r.revealed_at, r.lead_id, r.user_id
+                   FROM lead_reveals r
+                   WHERE r.user_id = ? AND r.lead_id = ? AND r.revealed_date = ?
+                     AND r.returned_to_pool = 0
+                   ORDER BY r.id DESC LIMIT 1""",
+                (user_id, lead_id, today),
+            ).fetchone()
+
+            if not reveal:
+                return {"allowed": False, "reason": "no_active_reveal", "revealed_at": None}
+
+            # 2. Verifica janela de 5 minutos
+            try:
+                revealed_dt = datetime.fromisoformat(reveal["revealed_at"].replace("Z", "+00:00"))
+            except Exception:
+                return {"allowed": False, "reason": "invalid_revealed_at", "revealed_at": None}
+
+            elapsed_min = (datetime.utcnow() - revealed_dt).total_seconds() / 60.0
+            if elapsed_min > self.REPORT_WINDOW_MIN:
+                return {
+                    "allowed": False,
+                    "reason": "report_window_expired",
+                    "revealed_at": revealed_dt,
+                    "elapsed_min": round(elapsed_min, 1),
+                }
+
+            # 3. Verifica se lead tem status que bloqueia estorno (Regra C)
+            lead = conn.execute(
+                "SELECT lead_status, refund_blocked FROM leads WHERE id = ?", (lead_id,)
+            ).fetchone()
+            if lead:
+                if lead["lead_status"] in ("in_negotiation", "converted"):
+                    return {
+                        "allowed": False,
+                        "reason": "lead_status_blocked",
+                        "lead_status": lead["lead_status"],
+                        "revealed_at": reveal["revealed_at"],
+                    }
+                if lead["refund_blocked"]:
+                    return {
+                        "allowed": False,
+                        "reason": "refund_blocked",
+                        "revealed_at": reveal["revealed_at"],
+                    }
+
+            # 4. Verifica limite de estornos por dia (Regra D)
+            refund_count = conn.execute(
+                """SELECT COUNT(*) as cnt FROM lead_reveals
+                   WHERE user_id = ? AND refunded = 1 AND revealed_date = ?""",
+                (user_id, today),
+            ).fetchone()
+            refund_count_today = refund_count["cnt"] if refund_count else 0
+            if refund_count_today >= self.MAX_REFUNDS_PER_DAY:
+                return {
+                    "allowed": False,
+                    "reason": "daily_refund_limit_exceeded",
+                    "refund_count_today": refund_count_today,
+                    "max_per_day": self.MAX_REFUNDS_PER_DAY,
+                    "revealed_at": reveal["revealed_at"],
+                }
+
+            # 4b. Verifica limite no users table (para consistência)
+            user_refund = conn.execute(
+                "SELECT refund_count_today, last_refund_date FROM users WHERE id = ?", (user_id,)
+            ).fetchone()
+            if user_refund:
+                user_last_date = user_refund["last_refund_date"]
+                user_count = user_refund["refund_count_today"] or 0
+                if user_last_date == today and user_count >= self.MAX_REFUNDS_PER_DAY:
+                    return {
+                        "allowed": False,
+                        "reason": "daily_refund_limit_exceeded",
+                        "refund_count_today": user_count,
+                        "max_per_day": self.MAX_REFUNDS_PER_DAY,
+                        "revealed_at": reveal["revealed_at"],
+                    }
+
+            return {
+                "allowed": True,
+                "reason": "ok",
+                "revealed_at": reveal["revealed_at"],
+            }
+        finally:
+            conn.close()
+
+    def process_refund(self, user_id: int, lead_id: int, reason: str = "invalid_number") -> dict:
+        """Processa estorno de cota diária por número inválido.
+
+        Regras aplicadas (já validadas em can_report_invalid_number):
+        - Janela de 5 minutos
+        - Lead não está em negociação/convertido
+        - Máximo 2 por dia
+        - Marca refund_blocked no lead e atualiza contadores
+
+        Retorna dict com 'success': bool, 'reason': str, 'remaining': int
+        """
+        conn = get_connection()
+        try:
+            today = datetime.utcnow().date().isoformat()
+
+            # Re-valida permissões (defesa em profundidade)
+            can_report = self.can_report_invalid_number(user_id, lead_id)
+            if not can_report["allowed"]:
+                return {
+                    "success": False,
+                    "reason": can_report["reason"],
+                    "remaining": 0,
+                }
+
+            conn.execute("BEGIN IMMEDIATE")
+
+            # 1. Marca o reveal como refunded
+            conn.execute(
+                """UPDATE lead_reveals SET refunded = 1, refund_reason = ?, refunded_at = CURRENT_TIMESTAMP
+                   WHERE user_id = ? AND lead_id = ? AND revealed_date = ? AND refunded = 0""",
+                (reason, user_id, lead_id, today),
+            )
+
+            # 2. Decrementa user_daily_stats (devolve a cota)
+            today = datetime.utcnow().date().isoformat()
+            stat = conn.execute(
+                "SELECT leads_used FROM user_daily_stats WHERE user_id = ? AND date = ?",
+                (user_id, today),
+            ).fetchone()
+            if stat and stat["leads_used"] > 0:
+                conn.execute(
+                    "UPDATE user_daily_stats SET leads_used = leads_used - 1 WHERE user_id = ? AND date = ?",
+                    (user_id, today),
+                )
+
+            # 3. Atualiza contadores de refund no usuário
+            conn.execute(
+                """UPDATE users SET
+                      refund_count_today = refund_count_today + 1,
+                      last_refund_date = ?
+                    WHERE id = ?""",
+                (today, user_id),
+            )
+
+            # 4. Marca lead como refund_blocked (impede novo estorno no mesmo lead)
+            conn.execute(
+                "UPDATE leads SET refund_blocked = 1 WHERE id = ?", (lead_id,)
+            )
+
+            conn.commit()
+
+            # Calcula restante
+            new_refund_count = conn.execute(
+                "SELECT refund_count_today FROM users WHERE id = ?", (user_id,)
+            ).fetchone()
+            remaining = max(0, self.MAX_REFUNDS_PER_DAY - (new_refund_count["refund_count_today"] if new_refund_count else 0))
+
+            self._event(conn, lead_id, user_id, "refund", f"Estorno de cota: {reason}")
+
+            return {
+                "success": True,
+                "reason": "ok",
+                "remaining": remaining,
+                "refund_count_today": new_refund_count["refund_count_today"] if new_refund_count else 1,
+            }
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Erro ao processar estorno: {e}")
+            return {"success": False, "reason": f"internal_error: {e}", "remaining": 0}
+        finally:
+            conn.close()
+
+    def block_lead_refund(self, lead_id: int, reason: str = "status_changed") -> bool:
+        """Bloqueia estorno no lead (ex.: quando muda para 'in_negotiation' ou 'converted')."""
+        conn = get_connection()
+        try:
+            conn.execute(
+                "UPDATE leads SET refund_blocked = 1 WHERE id = ?", (lead_id,)
+            )
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Erro ao bloquear estorno no lead {lead_id}: {e}")
+            return False
+        finally:
+            conn.close()
+
+    def unblock_lead_refund(self, lead_id: int) -> bool:
+        """Desbloqueia estorno no lead (uso administrativo)."""
+        conn = get_connection()
+        try:
+            conn.execute("UPDATE leads SET refund_blocked = 0 WHERE id = ?", (lead_id,))
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Erro ao desbloquear estorno no lead {lead_id}: {e}")
+            return False
+        finally:
+            conn.close()
+
+    def get_user_refund_status(self, user_id: int) -> dict:
+        """Retorna status de estornos do usuário hoje."""
+        conn = get_connection()
+        try:
+            today = datetime.utcnow().date().isoformat()
+            refund_count = conn.execute(
+                "SELECT refund_count_today, last_refund_date FROM users WHERE id = ?", (user_id,)
+            ).fetchone()
+            count = refund_count["refund_count_today"] if refund_count else 0
+            last_date = refund_count["last_refund_date"] if refund_count else None
+            effective_count = count if last_date == today else 0
+            return {
+                "used_today": effective_count,
+                "max_per_day": self.MAX_REFUNDS_PER_DAY,
+                "remaining": max(0, self.MAX_REFUNDS_PER_DAY - effective_count),
+                "last_refund_date": last_date,
+            }
+        finally:
+            conn.close()
+
     # ===== PASSWORD RESET =====
 
     def create_password_reset_token(self, email: str, expires_hours: int = 1) -> Optional[str]:
@@ -4073,6 +4320,9 @@ class AsyncDatabaseService:
 
     async def update_user_locale(self, user_id: int, locale: str) -> Optional[dict]:
         return await anyio.to_thread.run_sync(self._service.update_user_locale, user_id, locale)
+
+    async def update_user_welcome_popup(self, user_id: int) -> Optional[dict]:
+        return await anyio.to_thread.run_sync(self._service.update_user_welcome_popup, user_id)
 
     async def update_user_plan(self, user_id: int, plan: str, subscription_status: str = "active") -> bool:
         return await anyio.to_thread.run_sync(self._service.update_user_plan, user_id, plan, subscription_status)

@@ -500,6 +500,7 @@ export interface AuthUser {
   leads_taken: number;
   conversions: number;
   push_enabled?: boolean;
+  welcome_popup_shown?: boolean;
   created_at?: string;
 }
 

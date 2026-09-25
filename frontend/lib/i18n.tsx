@@ -926,6 +926,26 @@ const PT: Dict = {
   "dashboard.toast.conversion": "Conversão registrada. Parabéns!",
   "dashboard.toast.conversion_error": "Erro ao registrar conversão",
   "dashboard.toast.action_error": "Erro na ação",
+  "dashboard.toast.refund_success": "Cota diária devolvida — número inválido reportado",
+  "dashboard.toast.refund_error": "Não foi possível processar o estorno",
+  "dashboard.toast.refund_limit": "Limite de 2 estornos por dia atingido",
+  "dashboard.toast.refund_window_expired": "Janela de 5 minutos para reportar expirou",
+  "dashboard.toast.refund_blocked": "Estorno bloqueado: lead em negociação ou convertido",
+
+  // Welcome Popup (First login after payment)
+  "dashboard.welcome.title": "Aviso Importante sobre os Seus Leads",
+  "dashboard.welcome.body": "Trabalhamos com bases de dados de alta performance para revelar contactos atualizados em milissegundos. No entanto, devido à volatilidade de registos, a nossa taxa de assertividade estimada é de 80% a 85%.\n\nA nossa garantia: Se o número retornado estiver inválido ou vazio, o seu crédito diário é devolvido automaticamente na hora, sem qualquer prejuízo para o seu limite.\n\nPedimos apenas que valide o contacto logo após a abertura para mantermos a plataforma justa para todos.",
+  "dashboard.welcome.button": "Compreendi",
+  "dashboard.welcome.bullet_accuracy": "Assertividade 80-85%",
+  "dashboard.welcome.bullet_refund": "Estorno automático se inválido",
+  "dashboard.welcome.bullet_no_cost": "Sem custo ao seu limite",
+  "dashboard.welcome.bullet_validate": "Valide o contacto ao revelar",
+
+  // Report Invalid Number Modal
+  "dashboard.report.title": "Reportar Número Inválido",
+  "dashboard.report.body": "O número de telefone revelado está inválido, vazio ou não atende?",
+  "dashboard.report.button": "Reportar e Devolver Cota",
+  "dashboard.report.cancel": "Cancelar",
 
   // Layout/SEO (for metadata)
   "layout.title": "Magic Leads - Obras reais com dono identificado",
@@ -1933,6 +1953,26 @@ const EN: Dict = {
   "dashboard.toast.conversion": "Conversion recorded. Congratulations!",
   "dashboard.toast.conversion_error": "Error recording conversion",
   "dashboard.toast.action_error": "Action error",
+  "dashboard.toast.refund_success": "Daily quota refunded — invalid number reported",
+  "dashboard.toast.refund_error": "Failed to process refund",
+  "dashboard.toast.refund_limit": "Daily limit of 2 refunds reached",
+  "dashboard.toast.refund_window_expired": "5-minute report window expired",
+  "dashboard.toast.refund_blocked": "Refund blocked: lead in negotiation or converted",
+
+  // Welcome Popup (First login after payment)
+  "dashboard.welcome.title": "Important Notice About Your Leads",
+  "dashboard.welcome.body": "We use high-performance databases to reveal updated contacts in milliseconds. However, due to record volatility, our estimated accuracy rate is 80% to 85%.\n\nOur guarantee: If the returned number is invalid or empty, your daily credit is refunded automatically and instantly, at no cost to your limit.\n\nWe only ask that you validate the contact immediately after revealing to keep the platform fair for everyone.",
+  "dashboard.welcome.button": "Understood",
+  "dashboard.welcome.bullet_accuracy": "80-85% accuracy",
+  "dashboard.welcome.bullet_refund": "Auto refund if invalid",
+  "dashboard.welcome.bullet_no_cost": "No cost to your limit",
+  "dashboard.welcome.bullet_validate": "Validate contact on reveal",
+
+  // Report Invalid Number Modal
+  "dashboard.report.title": "Report Invalid Number",
+  "dashboard.report.body": "Is the revealed phone number invalid, empty, or not answering?",
+  "dashboard.report.button": "Report & Refund Quota",
+  "dashboard.report.cancel": "Cancel",
 
   // Layout/SEO
   "layout.title": "Magic Leads - Real works with owner identified",
@@ -2948,6 +2988,26 @@ const ES: Dict = {
   "dashboard.toast.conversion": "Conversión registrada. ¡Felicidades!",
   "dashboard.toast.conversion_error": "Error al registrar conversión",
   "dashboard.toast.action_error": "Error en la acción",
+  "dashboard.toast.refund_success": "Cuota diaria devuelta — número inválido reportado",
+  "dashboard.toast.refund_error": "No se pudo procesar el estorno",
+  "dashboard.toast.refund_limit": "Límite de 2 estornos por día alcanzado",
+  "dashboard.toast.refund_window_expired": "Ventana de 5 minutos para reportar expirada",
+  "dashboard.toast.refund_blocked": "Estorno bloqueado: lead en negociación o convertido",
+
+  // Welcome Popup (First login after payment)
+  "dashboard.welcome.title": "Aviso Importante sobre sus Leads",
+  "dashboard.welcome.body": "Trabajamos con bases de datos de alto rendimiento para revelar contactos actualizados en milisegundos. Sin embargo, debido a la volatilidad de los registros, nuestra tasa de precisión estimada es del 80% al 85%.\n\nNuestra garantía: Si el número retornado es inválido o está vacío, su crédito diario se devuelve automáticamente al instante, sin costo para su límite.\n\nSolo le pedimos que valide el contacto inmediatamente después de revelar para mantener la plataforma justa para todos.",
+  "dashboard.welcome.button": "Entendido",
+  "dashboard.welcome.bullet_accuracy": "Precisión 80-85%",
+  "dashboard.welcome.bullet_refund": "Reembolso automático si inválido",
+  "dashboard.welcome.bullet_no_cost": "Sin costo a su límite",
+  "dashboard.welcome.bullet_validate": "Valide el contacto al revelar",
+
+  // Report Invalid Number Modal
+  "dashboard.report.title": "Reportar Número Inválido",
+  "dashboard.report.body": "¿El número de teléfono revelado es inválido, está vacío o no responde?",
+  "dashboard.report.button": "Reportar y Devolver Cuota",
+  "dashboard.report.cancel": "Cancelar",
 
   // Layout/SEO
   // Release — liberación de lead

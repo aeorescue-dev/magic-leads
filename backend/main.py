@@ -55,6 +55,7 @@ from .services.db import db_service
 from .services.enrichment import owner_enrichment
 from .services.phone_lookup import phone_lookup_service
 from .services.push_service import push_service
+from .services.searchbug import searchbug_service
 from .utils.logger import logger
 
 
@@ -2372,6 +2373,21 @@ async def update_user_locale(user_id: int, payload: UserUpdate, user: dict = Dep
         raise HTTPException(status_code=500, detail="Erro ao atualizar empresa")
 
 
+@app.post("/api/user/welcome-popup")
+async def mark_welcome_popup_shown(user: dict = Depends(_get_current_user)):
+    """Marca o welcome popup como visto pelo usuário."""
+    try:
+        full = await db_service.update_user_welcome_popup(user["id"])
+        if not full:
+            raise HTTPException(status_code=404, detail="Usuário não encontrado")
+        return {"status": "ok", "welcome_popup_shown": full.get("welcome_popup_shown", True)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao marcar welcome popup: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao atualizar preferência")
+
+
 @app.post("/api/auth/logout")
 async def logout_user(authorization: str | None = Header(None), response: Response = None):
     if authorization and authorization.startswith("Bearer "):
@@ -2925,6 +2941,8 @@ async def reserve_lead(
 
             needs_enrichment = not owner_name or not owner_phone or not mailing_address
 
+            enrichment_failed = False
+
             if needs_enrichment:
                 # Enriquecimento de nome + mailing address (Socrata/CKAN)
                 enrich_result = await owner_enrichment.enrich(lead.get("address", ""), lead.get("city", ""))
@@ -2935,13 +2953,17 @@ async def reserve_lead(
                     if not mailing_address and enrich_result.get("mailing_address"):
                         mailing_address = enrich_result["mailing_address"]
                         await db_service.update_mailing_address(lead_id, mailing_address)
+                else:
+                    enrichment_failed = True
 
-                # Busca de telefone (mock provider em dev, Searchbug em prod)
+                # Busca de telefone (Searchbug em prod, mock em dev)
                 if not owner_phone:
-                    phone_result = await phone_lookup_service.lookup(lead.get("address", ""), lead.get("city", ""), lead.get("state", ""))
+                    phone_result = await searchbug_service.lookup_phone(lead.get("address", ""), lead.get("city", ""), lead.get("state", ""))
                     if phone_result.success:
                         owner_phone = phone_result.phone
                         await db_service.update_owner_phone(lead_id, owner_phone)
+                    else:
+                        enrichment_failed = True
 
                 # Recarrega lead com dados enriquecidos
                 enriched_lead = await db_service.get_lead_by_id(lead_id)
@@ -2950,6 +2972,14 @@ async def reserve_lead(
 
         except Exception as e:
             logger.warning(f"Enriquecimento on-demand falhou para lead {lead_id}: {e}")
+            enrichment_failed = True
+
+        # REGRA A: Se enriquecimento falhou ou dados vazios, não debita a cota diária
+        if enrichment_failed or not lead.get("owner_name") or not lead.get("owner_phone"):
+            logger.info(f"Regra A aplicada: estorno de cota por dados vazios/falha no lead {lead_id}")
+            refund_result = await db_service.process_refund(user_id, lead_id, reason="enrichment_failed")
+            if not refund_result.get("success"):
+                logger.warning(f"Falha ao processar estorno Regra A: {refund_result.get('reason')}")
 
         # Registra interação
         await db_service.record_event(lead_id, "revealed")
@@ -3070,6 +3100,52 @@ async def contact_lead(
     return {"status": "ok", "channel": payload.channel, "contact_count": result.get("contact_count", 0)}
 
 
+@app.post("/api/leads/{lead_id}/report-invalid")
+async def report_invalid_number(lead_id: int, user: dict = Depends(_get_current_user)):
+    """Reporta número inválido/vazio para estorno de cota diária.
+
+    Regras (Regra B, C, D):
+    - Janela de 5 minutos após reveal (Regra B)
+    - Lead não pode estar em negociação/convertido (Regra C)
+    - Máximo 2 estornos por usuário/dia (Regra D)
+    - Lead não pode ter refund_blocked
+    """
+    user_id = user["id"]
+
+    # Valida permissões
+    can_report = await db_service.can_report_invalid_number(user_id, lead_id)
+    if not can_report["allowed"]:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": can_report["reason"],
+                "message": {
+                    "report_window_expired": "Janela de 5 minutos para reportar expirou",
+                    "lead_status_blocked": "Lead em negociação ou convertido — estorno bloqueado",
+                    "refund_blocked": "Estorno já processado ou bloqueado para este lead",
+                    "daily_refund_limit_exceeded": f"Limite de {db_service.MAX_REFUNDS_PER_DAY} estornos por dia atingido",
+                    "no_active_reveal": "Nenhum reveal ativo para este lead",
+                    "invalid_revealed_at": "Dados de reveal inválidos",
+                }.get(can_report["reason"], "Não foi possível processar o estorno"),
+            }
+        )
+
+    # Processa estorno
+    refund_result = await db_service.process_refund(user_id, lead_id, reason="invalid_number")
+    if not refund_result["success"]:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": refund_result["reason"], "message": "Falha ao processar estorno"}
+        )
+
+    return {
+        "status": "ok",
+        "message": "Cota diária devolvida com sucesso",
+        "refunds_remaining_today": refund_result["remaining"],
+        "refund_count_today": refund_result["refund_count_today"],
+    }
+
+
 # Cron: expira holds vencidos + watchdog de reveals (chamado por GitHub Actions a cada hora)
 @app.get("/api/cron/expire-holds")
 async def cron_expire_holds(x_cron_secret: str | None = Header(None)):
@@ -3102,6 +3178,8 @@ async def negotiate_lead(lead_id: int, user: dict = Depends(_get_current_user)):
     result = await db_service.mark_negotiation(lead_id, user["id"])
     if not result:
         raise HTTPException(status_code=409, detail="Não foi possível marcar negociação")
+    # Regra C: bloqueia estorno quando lead entra em negociação
+    await db_service.block_lead_refund(lead_id, reason="negotiation_started")
     return {"status": "ok", "lead_status": result.get("lead_status")}
 
 
@@ -3110,6 +3188,8 @@ async def convert_lead(lead_id: int, user: dict = Depends(_get_current_user)):
     result = await db_service.convert_lead(lead_id, user["id"])
     if not result:
         raise HTTPException(status_code=409, detail="Não foi possível confirmar conversão")
+    # Regra C: bloqueia estorno quando lead é convertido
+    await db_service.block_lead_refund(lead_id, reason="converted")
     return {"status": "ok", "lead_status": result.get("lead_status")}
 
 
