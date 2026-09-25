@@ -2594,8 +2594,14 @@ async def create_checkout(request: Request, user: dict = Depends(_get_current_us
     try:
         mock, checkout_url = _create_stripe_checkout_session(user["id"], locale)
     except Exception as e:
-        logger.error(f"Erro ao criar checkout Stripe: {e}")
-        raise HTTPException(status_code=502, detail="Falha ao iniciar checkout")
+        logger.error(f"Erro ao criar checkout Stripe: {type(e).__name__}: {e}")
+        # Include Stripe error details if available
+        detail = "Falha ao iniciar checkout"
+        if hasattr(e, 'user_message'):
+            detail = f"Stripe: {e.user_message}"
+        elif hasattr(e, 'code'):
+            detail = f"Stripe error ({e.code}): {e}"
+        raise HTTPException(status_code=502, detail=detail)
 
     return {"mock": mock, "checkout_url": checkout_url, "plan": _plan_payload()}
 
@@ -2620,8 +2626,13 @@ async def stripe_create_checkout(request: Request, user: dict = Depends(_get_cur
     try:
         mock, checkout_url = _create_stripe_checkout_session(user["id"], locale)
     except Exception as e:
-        logger.error(f"Erro ao criar checkout Stripe: {e}")
-        raise HTTPException(status_code=502, detail="Falha ao iniciar checkout")
+        logger.error(f"Erro ao criar checkout Stripe: {type(e).__name__}: {e}")
+        detail = "Falha ao iniciar checkout"
+        if hasattr(e, 'user_message'):
+            detail = f"Stripe: {e.user_message}"
+        elif hasattr(e, 'code'):
+            detail = f"Stripe error ({e.code}): {e}"
+        raise HTTPException(status_code=502, detail=detail)
     return {
         "mock": mock,
         "checkout_url": checkout_url,
