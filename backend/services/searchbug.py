@@ -14,11 +14,28 @@ Usage:
   result = await searchbug_service.lookup_phone(address, city, state)
 """
 
+"""Searchbug API Service — Modular, mockable, ready for production keys.
+
+This module isolates all Searchbug API interactions. When API keys are not
+configured, it runs in MOCK mode returning structured empty responses so the
+rest of the system works without changes. When keys are added to env vars,
+it seamlessly switches to live API calls.
+
+Env vars required for live mode:
+  SEARCHBUG_API_KEY — your Searchbug API key
+  SEARCHBUG_BASE_URL — optional, defaults to "https://ws.searchbug.com"
+
+Usage:
+  from .services.searchbug import searchbug_service
+  result = await searchbug_service.lookup_phone(address, city, state)
+"""
+
 from __future__ import annotations
 
 import os
 import asyncio
 import logging
+import re
 from dataclasses import dataclass
 from typing import Optional
 
@@ -28,6 +45,82 @@ from ..config import settings
 from ..utils.logger import logger
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_us_phone(phone: str) -> str:
+    """Normalize US phone number to E.164 format (+1XXXXXXXXXX).
+
+    Handles various input formats:
+    - (555) 123-4567
+    - 555-123-4567
+    - 555.123.4567
+    - 5551234567
+    - +15551234567
+    - 15551234567
+
+    Returns E.164 format: +1XXXXXXXXXX (11 digits after +)
+    Returns original string if normalization fails.
+    """
+    if not phone:
+        return phone
+
+    # Extract only digits
+    digits = re.sub(r"\D", "", str(phone))
+
+    # Handle various US number formats
+    # 10 digits (no country code): assume US, add +1
+    # 11 digits starting with 1: US with country code
+    # 11 digits not starting with 1: invalid, return as-is
+    # Other lengths: return as-is
+
+    if len(digits) == 10:
+        # Standard US 10-digit: add country code
+        return f"+1{digits}"
+    elif len(digits) == 11 and digits.startswith("1"):
+        # 11 digits with leading 1: already has country code
+        return f"+{digits}"
+    elif len(digits) == 11 and not digits.startswith("1"):
+        # 11 digits but doesn't start with 1 - likely invalid, return original
+        logger.warning(f"Phone number has 11 digits but doesn't start with 1: {digits}")
+        return f"+{digits}"  # Still try with +
+    elif digits.startswith("+"):
+        # Already has + prefix
+        return phone
+    else:
+        # Unknown format, try adding +1 if 10 digits, otherwise return as-is with +
+        if len(digits) == 10:
+            return f"+1{digits}"
+        logger.warning(f"Unrecognized phone format, returning with + prefix: {digits}")
+        return f"+{digits}"
+
+
+def format_us_phone_display(phone_e164: str) -> str:
+    """Format E.164 US phone for display: (XXX) XXX-XXXX.
+
+    Args:
+        phone_e164: Phone in E.164 format (+1XXXXXXXXXX)
+
+    Returns:
+        Formatted string: (XXX) XXX-XXXX
+        Returns original if not valid E.164 US format.
+    """
+    if not phone_e164:
+        return phone_e164
+
+    # Extract digits after +1
+    if phone_e164.startswith("+1") and len(phone_e164) == 12:
+        digits = phone_e164[2:]
+        return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
+    elif phone_e164.startswith("1") and len(phone_e164) == 11:
+        digits = phone_e164[1:]
+        return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
+
+    # Fallback: try to format any 10-digit number
+    digits = re.sub(r"\D", "", phone_e164)
+    if len(digits) == 10:
+        return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
+
+    return phone_e164
 
 
 @dataclass
@@ -123,7 +216,7 @@ class SearchbugService:
 
             return SearchbugPhoneResult(
                 success=True,
-                phone=str(phone).strip(),
+                phone=normalize_us_phone(str(phone).strip()),
                 phone_type=str(phone_type).strip().lower() if phone_type else None,
                 carrier=str(carrier).strip() if carrier else None,
                 is_connected=bool(is_connected) if is_connected is not None else None,
