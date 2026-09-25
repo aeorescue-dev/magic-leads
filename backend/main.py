@@ -2532,12 +2532,20 @@ def _create_stripe_checkout_session(user_id: int, locale: str = "auto") -> tuple
     stripe_locale = stripe_locale_map.get(locale, "auto")
 
     stripe.api_key = settings.STRIPE_API_KEY
+    # Build cancel_url with locale prefix to return user to dashboard (not landing page)
+    if locale and locale != "auto":
+        cancel_path = f"/{locale}/dashboard"
+    else:
+        cancel_path = "/dashboard"
+    cancel_url = f"{settings.FRONTEND_URL.rstrip('/')}{cancel_path}"
+    success_url = f"{settings.FRONTEND_URL.rstrip('/')}/dashboard?paid=1"
+
     session = stripe.checkout.Session.create(
         mode="payment",
         currency="usd",
         line_items=[{"price": settings.STRIPE_PRICE_ID_PRO, "quantity": 1}],
-        success_url=f"{settings.FRONTEND_URL.rstrip('/')}/dashboard?paid=1",
-        cancel_url=f"{settings.FRONTEND_URL.rstrip('/')}/",
+        success_url=success_url,
+        cancel_url=cancel_url,
         client_reference_id=str(user_id),
         locale=stripe_locale,
         metadata={
