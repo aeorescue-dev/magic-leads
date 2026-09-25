@@ -1,3 +1,4 @@
+import { useI18n } from "@/lib/i18n";
 import { activateWeekMock, createCheckoutSession } from "@/lib/api-client";
 
 export const SUBSCRIPTION_PLAN = {
@@ -13,9 +14,12 @@ export interface CheckoutResult {
   checkout_url: string | null;
 }
 
-export async function startCheckout(): Promise<CheckoutResult> {
-  const res = await createCheckoutSession();
-  return { mock: res.mock, checkout_url: res.checkout_url };
+export function useStartCheckout() {
+  const { lang } = useI18n();
+  return async (): Promise<CheckoutResult> => {
+    const res = await createCheckoutSession(lang);
+    return { mock: res.mock, checkout_url: res.checkout_url };
+  };
 }
 
 export async function confirmMockWeek() {

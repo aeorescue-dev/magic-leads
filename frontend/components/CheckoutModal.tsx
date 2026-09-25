@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Building2, CreditCard, Loader2, ShieldCheck, X } from "lucide-react";
-import { startCheckout, SUBSCRIPTION_PLAN } from "@/lib/billing";
+import { useStartCheckout, SUBSCRIPTION_PLAN } from "@/lib/billing";
 import { updateCompanyName } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
@@ -17,6 +17,7 @@ interface CheckoutModalProps {
 export default function CheckoutModal({ open, onClose, isDark = false }: CheckoutModalProps) {
   const { user, updateUser } = useAuth();
   const { t } = useI18n();
+  const startCheckout = useStartCheckout();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [companyName, setCompanyName] = useState("");

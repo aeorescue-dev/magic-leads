@@ -610,11 +610,11 @@ export interface ActivateWeekResponse {
   plan_until?: string;
 }
 
-export async function createCheckoutSession(): Promise<CheckoutResponse> {
+export async function createCheckoutSession(locale?: string): Promise<CheckoutResponse> {
   return handle<CheckoutResponse>(
     await fetch(`${API_URL}/api/billing/checkout`, {
       method: "POST",
-      headers: { ...authHeaders() },
+      headers: { ...authHeaders(), "Accept-Language": locale || "" },
     })
   );
 }

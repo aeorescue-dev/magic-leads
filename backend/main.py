@@ -2513,7 +2513,7 @@ def _stripe_configured() -> bool:
     )
 
 
-def _create_stripe_checkout_session(user_id: int) -> tuple:
+def _create_stripe_checkout_session(user_id: int, locale: str = "auto") -> tuple:
     """Cria sessão Stripe de PAGAMENTO AVULSO (sem recorrência) de 7 dias.
 
     Retorna (mock: bool, checkout_url: Optional[str]). Pagamento único em USD;
@@ -2523,6 +2523,14 @@ def _create_stripe_checkout_session(user_id: int) -> tuple:
     if not has_stripe:
         return True, None
 
+    # Map frontend locale to Stripe supported locales
+    stripe_locale_map = {
+        "pt": "pt",
+        "en": "en",
+        "es": "es",
+    }
+    stripe_locale = stripe_locale_map.get(locale, "auto")
+
     stripe.api_key = settings.STRIPE_API_KEY
     session = stripe.checkout.Session.create(
         mode="payment",
@@ -2531,6 +2539,7 @@ def _create_stripe_checkout_session(user_id: int) -> tuple:
         success_url=f"{settings.FRONTEND_URL.rstrip('/')}/dashboard?paid=1",
         cancel_url=f"{settings.FRONTEND_URL.rstrip('/')}/",
         client_reference_id=str(user_id),
+        locale=stripe_locale,
         metadata={
             "user_id": str(user_id),
             "access": "7_days",
@@ -2541,7 +2550,7 @@ def _create_stripe_checkout_session(user_id: int) -> tuple:
 
 
 @app.post("/api/billing/checkout")
-async def create_checkout(user: dict = Depends(_get_current_user)):
+async def create_checkout(request: Request, user: dict = Depends(_get_current_user)):
     """Cria sessão de checkout do acesso de 7 dias ($79, pagamento avulso).
 
     Se STRIPE_API_KEY + STRIPE_PRICE_ID_PRO estiverem configurados, cria uma
@@ -2552,8 +2561,18 @@ async def create_checkout(user: dict = Depends(_get_current_user)):
     if not full:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
 
+    # Extract locale from Accept-Language header (sent by frontend)
+    accept_language = request.headers.get("accept-language", "").lower()
+    locale = "auto"
+    if accept_language.startswith("pt"):
+        locale = "pt"
+    elif accept_language.startswith("en"):
+        locale = "en"
+    elif accept_language.startswith("es"):
+        locale = "es"
+
     try:
-        mock, checkout_url = _create_stripe_checkout_session(user["id"])
+        mock, checkout_url = _create_stripe_checkout_session(user["id"], locale)
     except Exception as e:
         logger.error(f"Erro ao criar checkout Stripe: {e}")
         raise HTTPException(status_code=502, detail="Falha ao iniciar checkout")
@@ -2562,13 +2581,24 @@ async def create_checkout(user: dict = Depends(_get_current_user)):
 
 
 @app.post("/api/stripe/create-checkout")
-async def stripe_create_checkout(user: dict = Depends(_get_current_user)):
+async def stripe_create_checkout(request: Request, user: dict = Depends(_get_current_user)):
     """Alias autenticado para o checkout de pagamento avulso (7 dias)."""
     full = await db_service.get_user_by_id(user["id"])
     if not full:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
+
+    # Extract locale from Accept-Language header (sent by frontend)
+    accept_language = request.headers.get("accept-language", "").lower()
+    locale = "auto"
+    if accept_language.startswith("pt"):
+        locale = "pt"
+    elif accept_language.startswith("en"):
+        locale = "en"
+    elif accept_language.startswith("es"):
+        locale = "es"
+
     try:
-        mock, checkout_url = _create_stripe_checkout_session(user["id"])
+        mock, checkout_url = _create_stripe_checkout_session(user["id"], locale)
     except Exception as e:
         logger.error(f"Erro ao criar checkout Stripe: {e}")
         raise HTTPException(status_code=502, detail="Falha ao iniciar checkout")

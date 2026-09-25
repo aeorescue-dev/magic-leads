@@ -6,7 +6,7 @@ import { Suspense } from 'react';
 import { Loader2, Eye, EyeOff, Mail, Lock, Building2, ArrowRight, CheckCircle, AlertTriangle, X } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { useI18n } from '@/lib/i18n';
-import { startCheckout } from '@/lib/billing';
+import { useStartCheckout } from '@/lib/billing';
 import { requestPasswordReset } from '@/lib/api-client';
 
 interface FormErrors {
@@ -94,6 +94,7 @@ function AuthFormInner() {
       : null;
   const { lang, t } = useI18n();
   const { signIn, loading: authLoading } = useAuth();
+  const startCheckout = useStartCheckout();
 
   const localePath = (href: string) => `/${lang}${href}`;
 
