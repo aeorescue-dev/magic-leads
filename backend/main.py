@@ -2446,9 +2446,9 @@ async def demo_login(response: Response = None):
             key="garimpador_token",
             value=token,
             httponly=True,
-secure=not settings.DEBUG,
-            samesite="lax",
-            max_age=30 * 24 * 60 * 60,
+            secure=True,
+            samesite="none",
+            max_age=30 * 24 * 60 * 60,  # 30 dias
             path="/",
         )
 
