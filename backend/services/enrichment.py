@@ -277,6 +277,9 @@ class OwnerEnrichment:
 
         if street_col:
             queries.append(f"{street_col} like '%{street_for_query}%'")
+        elif address_col:
+            # Fallback para cidades sem street_col separado (ex: NYC): busca por rua no address_col
+            queries.append(f"{address_col} like '%{street_for_query}%'")
 
         async with httpx.AsyncClient(timeout=90) as client:
             for where in queries:
@@ -301,7 +304,6 @@ class OwnerEnrichment:
                                 continue
                             continue
                         data = resp.json()
-                        logger.warning(f"Socrata response: domain={domain} status={resp.status_code} rows={len(data) if isinstance(data, list) else 'N/A'} first_keys={list(data[0].keys()) if isinstance(data, list) and data else 'N/A'}")
                         break
                     except httpx.HTTPError as e:
                         if attempt < ENRICHMENT_MAX_RETRIES:
@@ -418,10 +420,8 @@ class OwnerEnrichment:
         return self._build_result(records[0], cfg, original_address)
 
     def _build_result(self, row: Dict, cfg: Dict, original_address: str) -> Dict[str, Any]:
-        owner_col = cfg["owner_col"]
-        owner = str(row.get(owner_col) or "").strip()
+        owner = str(row.get(cfg["owner_col"]) or "").strip()
         if not owner or owner.upper().startswith("N/A"):
-            logger.warning(f"_build_result None: owner_col={owner_col} row_keys={list(row.keys())} owner_raw={row.get(owner_col)}")
             return None
 
         result = {

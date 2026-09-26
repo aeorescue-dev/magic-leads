@@ -1907,7 +1907,6 @@ async def enrich_leads(city: str = "NYC", limit: int = 500, user: dict = Depends
         found = 0
         for row in rows:
             enrich_result = await owner_enrichment.enrich(row["address"], row["city"])
-            logger.warning(f"DEBUG enrich: lead={row['id']} addr={row['address']} city={row['city']} result={enrich_result}")
             if enrich_result and enrich_result.get("owner_name"):
                 await db_service.update_owner(row["id"], enrich_result["owner_name"])
                 found += 1
