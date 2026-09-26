@@ -327,7 +327,8 @@ const LEAD_TYPES = [
 
     let dismissedLocally = false;
     try {
-      dismissedLocally = localStorage.getItem("garimpador.welcome_popup_shown") === "1";
+      const storageKey = `magic_leads_notice_seen_${user.id}`;
+      dismissedLocally = localStorage.getItem(storageKey) === "true";
     } catch (e) {
       console.error("Erro ao ler welcome popup do localStorage:", e);
     }
