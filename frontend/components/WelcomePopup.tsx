@@ -36,6 +36,11 @@ export default function WelcomePopup({ open, onClose, isDark = false }: WelcomeP
     } catch (e) {
       console.error("Erro ao marcar welcome popup:", e);
     }
+    try {
+      localStorage.setItem("garimpador.welcome_popup_shown", "1");
+    } catch (e) {
+      console.error("Erro ao salvar welcome popup no localStorage:", e);
+    }
     onClose();
   };
 

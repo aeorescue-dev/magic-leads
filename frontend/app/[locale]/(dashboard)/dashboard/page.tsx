@@ -320,12 +320,19 @@ const LEAD_TYPES = [
     }
   }, [authLoading, user, router]);
 
-  // Welcome Popup: show once on first login after payment
+  // Welcome Popup: show once on first login after payment (persistido em localStorage)
   useEffect(() => {
     if (authLoading || !user || welcomePopupChecked.current) return;
     welcomePopupChecked.current = true;
 
-    if (!user.welcome_popup_shown && user.subscription_status === "active") {
+    let dismissedLocally = false;
+    try {
+      dismissedLocally = localStorage.getItem("garimpador.welcome_popup_shown") === "1";
+    } catch (e) {
+      console.error("Erro ao ler welcome popup do localStorage:", e);
+    }
+
+    if (!dismissedLocally && !user.welcome_popup_shown && user.subscription_status === "active") {
       setShowWelcomePopup(true);
     }
   }, [authLoading, user]);
