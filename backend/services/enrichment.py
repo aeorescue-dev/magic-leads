@@ -417,8 +417,10 @@ class OwnerEnrichment:
         return self._build_result(records[0], cfg, original_address)
 
     def _build_result(self, row: Dict, cfg: Dict, original_address: str) -> Dict[str, Any]:
-        owner = str(row.get(cfg["owner_col"]) or "").strip()
+        owner_col = cfg["owner_col"]
+        owner = str(row.get(owner_col) or "").strip()
         if not owner or owner.upper().startswith("N/A"):
+            logger.warning(f"_build_result None: owner_col={owner_col} row_keys={list(row.keys())} owner_raw={row.get(owner_col)}")
             return None
 
         result = {
