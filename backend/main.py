@@ -2981,10 +2981,10 @@ async def reserve_lead(
             logger.warning(f"Enriquecimento on-demand falhou para lead {lead_id}: {e}")
             enrichment_failed = True
 
-        # REGRA A: Se enriquecimento falhou ou dados ESSENCIAIS vazios (nome + endereço), não debita a cota diária
-        # Telefone é opcional (Searchbug pode falhar por config externa)
-        if enrichment_failed or not lead.get("owner_name") or not lead.get("mailing_address"):
-            logger.info(f"Regra A aplicada: estorno de cota por dados essenciais vazios/falha no lead {lead_id}")
+        # REGRA A: Se enriquecimento falhou ou dado ESSENCIAL (owner_name) vazio, não debita a cota diária
+        # mailing_address e telefone são opcionais
+        if enrichment_failed or not lead.get("owner_name"):
+            logger.info(f"Regra A aplicada: estorno de cota por owner_name vazio/falha no lead {lead_id}")
             refund_result = await db_service.process_refund(user_id, lead_id, reason="enrichment_failed")
             if not refund_result.get("success"):
                 logger.warning(f"Falha ao processar estorno Regra A: {refund_result.get('reason')}")
