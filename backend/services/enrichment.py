@@ -301,6 +301,7 @@ class OwnerEnrichment:
                                 continue
                             continue
                         data = resp.json()
+                        logger.warning(f"Socrata response: domain={domain} status={resp.status_code} rows={len(data) if isinstance(data, list) else 'N/A'} first_keys={list(data[0].keys()) if isinstance(data, list) and data else 'N/A'}")
                         break
                     except httpx.HTTPError as e:
                         if attempt < ENRICHMENT_MAX_RETRIES:
