@@ -2917,11 +2917,13 @@ async def reserve_lead(
     # 2. COM CONSENTIMENTO => REVEAL (reserva 60min + conta 1/10 com idempotência)
     if payload.consent:
         key = payload.idempotency or f"{user_id}:{lead_id}"
+        logger.info(f"[RESERVE] Calling reveal_lead user_id={user_id} lead_id={lead_id} key={key} minutes={minutes}")
         try:
             result = await db_service.reveal_lead(user_id, lead_id, key, minutes=minutes)
+            logger.info(f"[RESERVE] reveal_lead result: {result}")
         except Exception as e:
-            logger.error(f"Erro ao revelar lead {lead_id}: {e}")
-            raise HTTPException(status_code=500, detail="Erro ao processar reserva")
+            logger.exception(f"[RESERVE] EXCEPTION in reveal_lead user_id={user_id} lead_id={lead_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"Erro ao processar reserva: {e}")
         
         if not result:
             raise HTTPException(status_code=404, detail="Lead não encontrado")
