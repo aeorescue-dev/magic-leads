@@ -552,6 +552,10 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE leads ADD COLUMN converted_at TEXT")
     if "mailing_address" not in cols:
         conn.execute("ALTER TABLE leads ADD COLUMN mailing_address TEXT")
+    if "revealed_at" not in cols:
+        conn.execute("ALTER TABLE leads ADD COLUMN revealed_at TEXT")
+    if "refund_blocked" not in cols:
+        conn.execute("ALTER TABLE leads ADD COLUMN refund_blocked INTEGER DEFAULT 0")
     extra_cols = {
         "address_unit": "TEXT",
         "address_type": "TEXT",
@@ -613,6 +617,12 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN push_enabled INTEGER DEFAULT 0")
     if user_cols and "locale" not in user_cols:
         conn.execute("ALTER TABLE users ADD COLUMN locale TEXT DEFAULT 'pt'")
+    if user_cols and "welcome_popup_shown" not in user_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN welcome_popup_shown INTEGER DEFAULT 0")
+    if user_cols and "refund_count_today" not in user_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN refund_count_today INTEGER DEFAULT 0")
+    if user_cols and "last_refund_date" not in user_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN last_refund_date TEXT")
 
     event_cols = {r["name"] for r in conn.execute("PRAGMA table_info(lead_events)").fetchall()}
     if event_cols:

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Searchbug API Service — Modular, mockable, ready for production keys.
 
 This module isolates all Searchbug API interactions. When API keys are not
@@ -16,9 +14,10 @@ Usage:
   result = await searchbug_service.lookup_phone(address, city, state)
 """
 
-import os
+from __future__ import annotations
+
 import asyncio
-import logging
+import os
 import re
 from dataclasses import dataclass
 from typing import Optional
@@ -27,8 +26,6 @@ import httpx
 
 from ..config import settings
 from ..utils.logger import logger
-
-logger = logging.getLogger(__name__)
 
 
 def normalize_us_phone(phone: str) -> str:

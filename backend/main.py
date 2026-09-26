@@ -53,7 +53,6 @@ from .scrapers.socrata_discovery import socrata_discovery
 from .services import notifier, security
 from .services.db import db_service
 from .services.enrichment import owner_enrichment
-from .services.phone_lookup import phone_lookup_service
 from .services.push_service import push_service
 from .services.searchbug import searchbug_service
 from .utils.logger import logger
@@ -1438,7 +1437,7 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                             if not any(kw in desc for kw in core_kws):
                                 filtered_kws += 1
                                 continue
-                            
+
                             # RELAXED: applicant_business_name filter
                             # Original blocked ALL rows with applicant_business_name != ("-", "none", "n/a")
                             # Now: only block if it's clearly a large corporation (not individual contractor)
@@ -1453,7 +1452,7 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                                 else:
                                     filtered_business += 1
                                     continue
-                            
+
                             # RELAXED: owner/applicant name matching
                             # Original required exact match of last name (and optionally first name)
                             # Now: allow if either owner_name or applicant name has reasonable overlap
@@ -1466,7 +1465,7 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                             if owner and a_l:
                                 # Allow if last name matches OR first name matches OR owner contains applicant name parts
                                 name_match = (
-                                    a_l in owner or 
+                                    a_l in owner or
                                     (a_f and a_f in owner) or
                                     owner in a_l or  # owner name might be shorter
                                     any(part in owner for part in [a_f, a_l] if part)
@@ -1480,7 +1479,7 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                             elif owner and not a_l:
                                 # Have owner name but no applicant last name - allow
                                 pass
-                            
+
                             job_no = str(row.get("job_filing_number") or "").strip()
                             if not job_no:
                                 filtered_other += 1
@@ -1760,7 +1759,7 @@ def _scheduled_scrape(max_cities: int = 8, hours_override: int = None):
         logger.debug("Scheduler: secret válido, prosseguindo")
     else:
         logger.warning("Scheduler: CRON_SECRET não configurado — execução permitida (modo desenvolvimento)")
-    
+
     for run in _scrape_runs.values():
         if run.get("running"):
             logger.info("Scheduler: run do scraper já ativo, pulando")
@@ -2924,7 +2923,7 @@ async def reserve_lead(
         except Exception as e:
             logger.exception(f"[RESERVE] EXCEPTION in reveal_lead user_id={user_id} lead_id={lead_id}: {e}")
             raise HTTPException(status_code=500, detail=f"Erro ao processar reserva: {e}")
-        
+
         if not result:
             raise HTTPException(status_code=404, detail="Lead não encontrado")
         if result.get("error") == "not_found":
@@ -2943,7 +2942,6 @@ async def reserve_lead(
         try:
             owner_name = lead.get("owner_name")
             owner_phone = lead.get("owner_phone")
-            owner_email = lead.get("owner_email")
             mailing_address = lead.get("mailing_address")
 
             needs_enrichment = not owner_name or not owner_phone or not mailing_address

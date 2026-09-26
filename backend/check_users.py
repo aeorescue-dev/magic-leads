@@ -1,5 +1,5 @@
-import sqlite3
 import os
+import sqlite3
 
 # Database is at project root
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'leads.db')

@@ -1,23 +1,4 @@
-import re
-from datetime import datetime, timedelta
-from typing import List, Optional
-
-import httpx
-
-from ..config import settings
-from ..models.schemas import IssueCategory, RawLead311, UrgencyLevel
-from ..utils.logger import logger
-
-
-class Socrata311Scraper:
-    """
-    Scrapa dados de 311 Service Requests via Socrata API.
-    Suporta NYC, Chicago, Miami, etc.
-    """
-
-    def __init__(self):
-        self.keywords = settings.SCRAPER_KEYWORDS
-        import asyncio
+import asyncio
 import random
 import re
 from datetime import datetime, timedelta
@@ -50,7 +31,7 @@ class Socrata311Scraper:
         limit: int = 50000, order: str = None, timeout: int = None
     ) -> list:
         """Consulta genérica via Socrata SoQL API (/resource/{id}.json), retorna lista de dicts.
-        
+
         Inclui retry com backoff exponencial para falhas transitórias de rede.
         """
         t = timeout or self.timeout

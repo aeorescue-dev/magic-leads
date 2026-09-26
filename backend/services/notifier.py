@@ -17,6 +17,8 @@ foi encontrado, isso é tratado como bloqueio de fluxo e escalado (log CRITICAL
 + auditoria). Cap diário atingido NÃO é bloqueio (há elegíveis).
 """
 
+import asyncio
+import random
 from collections import defaultdict
 from dataclasses import dataclass
 
@@ -90,12 +92,7 @@ async def notify_users_for_lead(
         """
         users = await db_service.get_users_interested_in(category)
         sent = 0
-        
-        # Retry configuration for in-app notifications
-        MAX_RETRIES = 3
-        BASE_BACKOFF = 0.5  # seconds
-        MAX_BACKOFF = 5.0  # seconds
-        
+
         for user in users[:limit]:
             # Localiza fallback PT por usuário (se locale presente).
             locale = normalize(user.get("locale"))

@@ -1,4 +1,3 @@
-import re
 
 with open(r'C:\Users\Fabio\Documents\Default Project\garimpador-leads\backend\main.py', 'r', encoding='utf-8') as f:
     content = f.read()

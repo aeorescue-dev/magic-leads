@@ -20,7 +20,6 @@ import httpx
 from ..config import settings
 from ..utils.logger import logger
 
-
 # Retry configuration for enrichment
 ENRICHMENT_MAX_RETRIES = 3
 ENRICHMENT_BASE_BACKOFF = 1.0  # seconds
