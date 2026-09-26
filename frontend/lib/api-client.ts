@@ -192,7 +192,7 @@ export async function fetchLeads(params: {
   q.append("page", String(params.page || 1));
   q.append("per_page", String(params.per_page || 20));
 
-  return handle<LeadsListResponse>(await fetch(`${API_URL}/api/leads?${q}`, { headers: { ...authHeaders() } }));
+  return handle<LeadsListResponse>(await fetch(`${API_URL}/api/leads?${q}`, { credentials: "include", headers: { ...authHeaders() } }));
 }
 
 export async function fetchTodayLeads(limit: number = 60, city?: string, includeIncomplete: boolean = false, page: number = 1, type?: string): Promise<LeadsListResponse> {
@@ -200,7 +200,7 @@ export async function fetchTodayLeads(limit: number = 60, city?: string, include
   if (city && city !== "Todas") q.set("city", city);
   if (includeIncomplete) q.set("include_incomplete", "true");
   if (type) q.set("type", type);
-  return handle<LeadsListResponse>(await fetch(`${API_URL}/api/leads/today?${q.toString()}`, { headers: { ...authHeaders() } }));
+  return handle<LeadsListResponse>(await fetch(`${API_URL}/api/leads/today?${q.toString()}`, { credentials: "include", headers: { ...authHeaders() } }));
 }
 
 export interface DashboardSummary {
@@ -214,7 +214,7 @@ export interface DashboardSummary {
 }
 
 export async function fetchDashboardSummary(): Promise<DashboardSummary> {
-  return handle<DashboardSummary>(await fetch(`${API_URL}/api/leads/dashboard-summary`, { headers: { ...authHeaders() } }));
+  return handle<DashboardSummary>(await fetch(`${API_URL}/api/leads/dashboard-summary`, { credentials: "include", headers: { ...authHeaders() } }));
 }
 
 export interface PublicMetrics {
@@ -333,6 +333,7 @@ export interface InterestCountResponse {
 }
 export async function fetchUserInterestCount(userId: number): Promise<InterestCountResponse> {
   return handle<InterestCountResponse>(await fetch(`${API_URL}/api/users/${userId}/interest-count`, {
+    credentials: "include",
     headers: { ...authHeaders() },
   }));
 }
@@ -379,13 +380,14 @@ export async function fetchLocationsHierarchy(): Promise<LocationHierarchy> {
 export async function searchLeads(q: string): Promise<LeadsListResponse> {
   const params = new URLSearchParams({ q, per_page: "50" });
   return handle<LeadsListResponse>(
-    await fetch(`${API_URL}/api/leads/search?${params}`, { headers: { ...authHeaders() } })
+    await fetch(`${API_URL}/api/leads/search?${params}`, { credentials: "include", headers: { ...authHeaders() } })
   );
 }
 
 export async function fetchLeadById(id: string): Promise<LeadResponse | null> {
   try {
     return handle<LeadResponse>(await fetch(`${API_URL}/api/leads/${id}`, {
+      credentials: "include",
       headers: authHeaders(),
     }));
   } catch {
@@ -397,6 +399,7 @@ export async function updateLeadStatus(id: string, status: string): Promise<Lead
   return handle<LeadResponse>(
     await fetch(`${API_URL}/api/leads/${id}`, {
       method: "PATCH",
+      credentials: "include",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ status }),
     })
@@ -407,6 +410,7 @@ export async function updateOwnerPhone(id: string, phone: string): Promise<LeadR
   return handle<LeadResponse>(
     await fetch(`${API_URL}/api/leads/${id}`, {
       method: "PATCH",
+      credentials: "include",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ owner_phone: phone }),
     })
@@ -417,6 +421,7 @@ export async function toggleFavorite(id: string): Promise<LeadResponse> {
   return handle<LeadResponse>(
     await fetch(`${API_URL}/api/leads/${id}/favorite`, {
       method: "POST",
+      credentials: "include",
       headers: authHeaders(),
     })
   );
@@ -426,6 +431,7 @@ export async function recordContact(id: string, channel: string): Promise<{ stat
   return handle<{ status: string; channel: string }>(
     await fetch(`${API_URL}/api/leads/${id}/contact`, {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ channel }),
     })
@@ -434,6 +440,7 @@ export async function recordContact(id: string, channel: string): Promise<{ stat
 
 export async function fetchNotes(id: string): Promise<Note[]> {
   return handle<Note[]>(await fetch(`${API_URL}/api/leads/${id}/notes`, {
+    credentials: "include",
     headers: authHeaders(),
   }));
 }
@@ -443,6 +450,7 @@ export async function addNote(id: string, note: string): Promise<Note> {
   return handle<Note>(
     await fetch(`${API_URL}/api/leads/${id}/notes?${params}`, {
       method: "POST",
+      credentials: "include",
       headers: authHeaders(),
     })
   );
@@ -452,6 +460,7 @@ export async function deleteNote(id: string, noteId: number): Promise<{ status: 
   return handle<{ status: string }>(
     await fetch(`${API_URL}/api/leads/${id}/notes/${noteId}`, {
       method: "DELETE",
+      credentials: "include",
       headers: authHeaders(),
     })
   );
@@ -461,6 +470,7 @@ export async function enrichLeads(city: string = "NYC", limit: number = 500): Pr
   return handle<{ status: string; processed: number; owners_found: number }>(
     await fetch(`${API_URL}/api/scraper/enrich?city=${city}&limit=${limit}`, {
       method: "POST",
+      credentials: "include",
       headers: authHeaders(),
     })
   );
@@ -481,6 +491,7 @@ export type NotificationFilter = "recent" | "unread" | "all";
 export async function fetchNotifications(filter: NotificationFilter = "recent"): Promise<Notification[]> {
   return handle<Notification[]>(
     await fetch(`${API_URL}/api/notifications?filter=${filter}`, {
+      credentials: "include",
       headers: authHeaders(),
     })
   );
@@ -517,6 +528,7 @@ export async function registerUser(data: {
 }): Promise<AuthResponse> {
   const res = await fetch(`${API_URL}/api/auth/register`, {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
@@ -529,6 +541,7 @@ export async function registerUser(data: {
 export async function loginUser(data: { email: string; password: string }): Promise<AuthResponse> {
   const res = await fetch(`${API_URL}/api/auth/login`, {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
@@ -542,6 +555,7 @@ export async function logoutUser(): Promise<void> {
   try {
     await fetch(`${API_URL}/api/auth/logout`, {
       method: "POST",
+      credentials: "include",
       headers: { ...authHeaders() },
     });
   } catch {
@@ -555,6 +569,7 @@ export async function requestPasswordReset(email: string): Promise<{ message?: s
   return handle<{ message?: string }>(
     await fetch(`${API_URL}/api/auth/forgot-password`, {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email }),
     }),
@@ -569,6 +584,7 @@ export async function resetPassword(
   return handle<{ message?: string }>(
     await fetch(`${API_URL}/api/auth/reset-password`, {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token, new_password, confirm_password }),
     }),
@@ -577,7 +593,7 @@ export async function resetPassword(
 
 export async function demoLogin(): Promise<AuthUser> {
   const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
-  const res = await fetch(`${API_BASE}/api/auth/demo`, { method: "POST" });
+  const res = await fetch(`${API_BASE}/api/auth/demo`, { method: "POST", credentials: "include" });
   if (!res.ok) throw new Error("Demo login failed");
   const data = await res.json();
   setToken(data.token);
@@ -615,6 +631,7 @@ export async function createCheckoutSession(locale?: string): Promise<CheckoutRe
   return handle<CheckoutResponse>(
     await fetch(`${API_URL}/api/billing/checkout`, {
       method: "POST",
+      credentials: "include",
       headers: { ...authHeaders(), "Accept-Language": locale || "" },
     })
   );
@@ -624,6 +641,7 @@ export async function activateWeekMock(): Promise<ActivateWeekResponse> {
   return handle<ActivateWeekResponse>(
     await fetch(`${API_URL}/api/billing/mock-activate`, {
       method: "POST",
+      credentials: "include",
       headers: { ...authHeaders() },
     })
   );
@@ -631,7 +649,7 @@ export async function activateWeekMock(): Promise<ActivateWeekResponse> {
 
 export async function fetchMe(): Promise<AuthUser> {
   return handle<AuthUser>(
-    await fetch(`${API_URL}/api/auth/me`, { headers: { ...authHeaders() } })
+    await fetch(`${API_URL}/api/auth/me`, { credentials: "include", headers: { ...authHeaders() } })
   );
 }
 
@@ -639,6 +657,7 @@ export async function updateCompanyName(userId: number, company_name: string): P
   return handle<AuthUser>(
     await fetch(`${API_URL}/api/users/${userId}/company`, {
       method: "PATCH",
+      credentials: "include",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ company_name }),
     })
@@ -649,6 +668,7 @@ export async function updateUserLocale(userId: number, locale: string): Promise<
   return handle<AuthUser>(
     await fetch(`${API_URL}/api/users/${userId}/locale`, {
       method: "PATCH",
+      credentials: "include",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ locale }),
     })
@@ -659,6 +679,7 @@ export async function setPushEnabled(enabled: boolean): Promise<{ status: string
   return handle<{ status: string; push_enabled: boolean }>(
     await fetch(`${API_URL}/api/push/enabled`, {
       method: "PATCH",
+      credentials: "include",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ enabled }),
     })
@@ -668,7 +689,7 @@ export async function setPushEnabled(enabled: boolean): Promise<{ status: string
 export async function fetchPushEnabled(): Promise<boolean> {
   try {
     const r = await handle<{ subscriptions: { endpoint: string }[] }>(
-      await fetch(`${API_URL}/api/push/subscriptions`, { headers: { ...authHeaders() } })
+      await fetch(`${API_URL}/api/push/subscriptions`, { credentials: "include", headers: { ...authHeaders() } })
     );
     return (r.subscriptions?.length ?? 0) > 0;
   } catch {
@@ -681,7 +702,7 @@ export async function fetchPushEnabled(): Promise<boolean> {
 // ------------------------------------------------------------------
 export async function fetchUserInterests(userId: number): Promise<string[]> {
   const r = await handle<{ categories: string[] }>(
-    await fetch(`${API_URL}/api/users/${userId}/interests`, { headers: { ...authHeaders() } })
+    await fetch(`${API_URL}/api/users/${userId}/interests`, { credentials: "include", headers: { ...authHeaders() } })
   );
   return r.categories;
 }
@@ -690,6 +711,7 @@ export async function updateUserInterests(userId: number, categories: string[]):
   const r = await handle<{ categories: string[] }>(
     await fetch(`${API_URL}/api/users/${userId}/interests`, {
       method: "PUT",
+      credentials: "include",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ categories }),
     })
@@ -707,6 +729,7 @@ export async function fetchUserNotifications(
 ): Promise<Notification[]> {
   return handle<Notification[]>(
     await fetch(`${API_URL}/api/users/${userId}/notifications?filter=${filter}&limit=${limit}`, {
+      credentials: "include",
       headers: { ...authHeaders() },
     })
   );
@@ -715,6 +738,7 @@ export async function fetchUserNotifications(
 export async function fetchUserUnreadCount(userId: number): Promise<number> {
   const r = await handle<{ unread: number }>(
     await fetch(`${API_URL}/api/users/${userId}/notifications/unread-count`, {
+      credentials: "include",
       headers: { ...authHeaders() },
     })
   );
@@ -725,6 +749,7 @@ export async function markUserNotificationRead(userId: number, notificationId: n
   await handle<{ status: string }>(
     await fetch(`${API_URL}/api/users/${userId}/notifications/${notificationId}/read`, {
       method: "POST",
+      credentials: "include",
       headers: { ...authHeaders() },
     })
   );
@@ -734,6 +759,7 @@ export async function markAllUserNotificationsRead(userId: number): Promise<numb
   const r = await handle<{ status: string; marked: number }>(
     await fetch(`${API_URL}/api/users/${userId}/notifications/read-all`, {
       method: "POST",
+      credentials: "include",
       headers: { ...authHeaders() },
     })
   );
@@ -762,6 +788,7 @@ export interface DailyStats {
 export async function fetchUserSubscriptionStatus(userId: number): Promise<SubscriptionStatus> {
   return handle<SubscriptionStatus>(
     await fetch(`${API_URL}/api/users/${userId}/subscription-status`, {
+      credentials: "include",
       headers: { ...authHeaders() },
     })
   );
@@ -770,6 +797,7 @@ export async function fetchUserSubscriptionStatus(userId: number): Promise<Subsc
 export async function fetchUserDailyStats(userId: number): Promise<DailyStats> {
   return handle<DailyStats>(
     await fetch(`${API_URL}/api/users/${userId}/daily-stats`, {
+      credentials: "include",
       headers: { ...authHeaders() },
     })
   );
@@ -779,6 +807,7 @@ export async function startUserTrial(userId: number): Promise<{ status: string; 
   return handle<{ status: string; message: string }>(
     await fetch(`${API_URL}/api/users/${userId}/start-trial`, {
       method: "POST",
+      credentials: "include",
       headers: { ...authHeaders() },
     })
   );
@@ -834,7 +863,7 @@ export interface HistoryEvent {
 
 export async function fetchLeadStatus(leadId: string | number): Promise<LeadStatusInfo> {
   return handle<LeadStatusInfo>(
-    await fetch(`${API_URL}/api/leads/${leadId}/status`, { headers: { ...authHeaders() } })
+    await fetch(`${API_URL}/api/leads/${leadId}/status`, { credentials: "include", headers: { ...authHeaders() } })
   );
 }
 
@@ -846,6 +875,7 @@ export async function reserveLead(
   return handle<HoldResult>(
     await fetch(`${API_URL}/api/leads/${leadId}/reserve`, {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ minutes, consent: opts.consent ?? false, idempotency: opts.idempotency }),
     })
@@ -860,6 +890,7 @@ export async function releaseLead(
   return handle<HoldResult>(
     await fetch(`${API_URL}/api/leads/${leadId}/release`, {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ reason, note }),
     })
@@ -870,6 +901,7 @@ export async function contactLead(leadId: string | number, channel = "sms"): Pro
   return handle<{ status: string; channel: string; contact_count: number }>(
     await fetch(`${API_URL}/api/leads/${leadId}/contact`, {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ channel }),
     })
@@ -880,6 +912,7 @@ export async function negotiateLead(leadId: string | number): Promise<{ status: 
   return handle<{ status: string; lead_status: string }>(
     await fetch(`${API_URL}/api/leads/${leadId}/negotiate`, {
       method: "POST",
+      credentials: "include",
       headers: { ...authHeaders() },
     })
   );
@@ -889,6 +922,7 @@ export async function convertLead(leadId: string | number): Promise<{ status: st
   return handle<{ status: string; lead_status: string }>(
     await fetch(`${API_URL}/api/leads/${leadId}/convert`, {
       method: "POST",
+      credentials: "include",
       headers: { ...authHeaders() },
     })
   );
@@ -898,6 +932,7 @@ export async function rejectLead(leadId: string | number, reason?: string): Prom
   return handle<{ status: string; lead_status: string }>(
     await fetch(`${API_URL}/api/leads/${leadId}/reject`, {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ reason }),
     })
@@ -906,13 +941,13 @@ export async function rejectLead(leadId: string | number, reason?: string): Prom
 
 export async function fetchLeadHistory(leadId: string | number): Promise<HistoryEvent[]> {
   return handle<HistoryEvent[]>(
-    await fetch(`${API_URL}/api/leads/${leadId}/history`, { headers: { ...authHeaders() } })
+    await fetch(`${API_URL}/api/leads/${leadId}/history`, { credentials: "include", headers: { ...authHeaders() } })
   );
 }
 
 export async function fetchLeadOccurrences(leadId: string | number): Promise<LeadOccurrence[]> {
   return handle<LeadOccurrence[]>(
-    await fetch(`${API_URL}/api/leads/${leadId}/occurrences`, { headers: { ...authHeaders() } })
+    await fetch(`${API_URL}/api/leads/${leadId}/occurrences`, { credentials: "include", headers: { ...authHeaders() } })
   );
 }
 
@@ -960,13 +995,13 @@ export interface ContractorMetrics {
 
 export async function fetchContractorMetrics(): Promise<ContractorMetrics> {
   return handle<ContractorMetrics>(
-    await fetch(`${API_URL}/api/contractor/metrics`, { headers: { ...authHeaders() } })
+    await fetch(`${API_URL}/api/contractor/metrics`, { credentials: "include", headers: { ...authHeaders() } })
   );
 }
 
 export async function fetchMyTakenLeads(limit = 100): Promise<LeadsListResponse> {
   return handle<LeadsListResponse>(
-    await fetch(`${API_URL}/api/me/taken-leads?limit=${limit}`, { headers: { ...authHeaders() } })
+    await fetch(`${API_URL}/api/me/taken-leads?limit=${limit}`, { credentials: "include", headers: { ...authHeaders() } })
   );
 }
 
@@ -1024,6 +1059,6 @@ export async function fetchMyLeadsHistory(params: {
   if (params.limit) qs.set("limit", String(params.limit));
   const q = qs.toString();
   return handle<MyLeadsHistoryResponse>(
-    await fetch(`${API_URL}/api/me/history${q ? `?${q}` : ""}`, { headers: { ...authHeaders() } })
+    await fetch(`${API_URL}/api/me/history${q ? `?${q}` : ""}`, { credentials: "include", headers: { ...authHeaders() } })
   );
 }
