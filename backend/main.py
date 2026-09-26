@@ -2176,9 +2176,10 @@ async def enrich_single_lead(lead_id: int, user: dict = Depends(_get_current_use
         if not lead:
             raise HTTPException(status_code=404, detail="Lead não encontrado")
         owner = await owner_enrichment.enrich(lead["address"], lead["city"])
-        if owner:
-            await db_service.update_owner(lead_id, owner)
-        return {"lead_id": lead_id, "owner_name": owner}
+        owner_name = owner.get("owner_name") if owner else None
+        if owner_name:
+            await db_service.update_owner(lead_id, owner_name)
+        return {"lead_id": lead_id, "owner_name": owner_name}
     except HTTPException:
         raise
     except Exception as e:
