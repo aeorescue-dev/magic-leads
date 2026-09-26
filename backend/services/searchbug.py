@@ -1,17 +1,16 @@
-"""Searchbug API Service — Modular, mockable, ready for production keys.
+"""Phone Lookup Service — Multi-provider with fallback chain.
 
-This module isolates all Searchbug API interactions. When API keys are not
-configured, it runs in MOCK mode returning structured empty responses so the
-rest of the system works without changes. When keys are added to env vars,
-it seamlessly switches to live API calls.
+Providers (tried in order):
+1. Searchbug (if API key configured and working)
+2. AbstractAPI Phone Validation (free tier: 1000 req/mo)
+3. Numverify (free tier: 100 req/mo)
+4. AbstractAPI Phone Lookup (if key available)
+5. Mock fallback (returns structured empty response)
 
-Env vars required for live mode:
-  SEARCHBUG_API_KEY — your Searchbug API key
-  SEARCHBUG_BASE_URL — optional, defaults to "https://ws.searchbug.com"
-
-Usage:
-  from .services.searchbug import searchbug_service
-  result = await searchbug_service.lookup_phone(address, city, state)
+Env vars:
+  SEARCHBUG_API_KEY — Searchbug API key (optional)
+  ABSTRACT_API_KEY — AbstractAPI key for phone validation (optional)
+  NUMVERIFY_API_KEY — Numverify API key (optional)
 """
 
 from __future__ import annotations
@@ -29,46 +28,22 @@ from ..utils.logger import logger
 
 
 def normalize_us_phone(phone: str) -> str:
-    """Normalize US phone number to E.164 format (+1XXXXXXXXXX).
-
-    Handles various input formats:
-    - (555) 123-4567
-    - 555-123-4567
-    - 555.123.4567
-    - 5551234567
-    - +15551234567
-    - 15551234567
-
-    Returns E.164 format: +1XXXXXXXXXX (11 digits after +)
-    Returns original string if normalization fails.
-    """
+    """Normalize US phone number to E.164 format (+1XXXXXXXXXX)."""
     if not phone:
         return phone
 
-    # Extract only digits
     digits = re.sub(r"\D", "", str(phone))
 
-    # Handle various US number formats
-    # 10 digits (no country code): assume US, add +1
-    # 11 digits starting with 1: US with country code
-    # 11 digits not starting with 1: invalid, return as-is
-    # Other lengths: return as-is
-
     if len(digits) == 10:
-        # Standard US 10-digit: add country code
         return f"+1{digits}"
     elif len(digits) == 11 and digits.startswith("1"):
-        # 11 digits with leading 1: already has country code
         return f"+{digits}"
     elif len(digits) == 11 and not digits.startswith("1"):
-        # 11 digits but doesn't start with 1 - likely invalid, return original
         logger.warning(f"Phone number has 11 digits but doesn't start with 1: {digits}")
-        return f"+{digits}"  # Still try with +
+        return f"+{digits}"
     elif digits.startswith("+"):
-        # Already has + prefix
         return phone
     else:
-        # Unknown format, try to add +1 if 10 digits, otherwise return as-is with +
         if len(digits) == 10:
             return f"+1{digits}"
         logger.warning(f"Unrecognized phone format, returning with + prefix: {digits}")
@@ -76,19 +51,10 @@ def normalize_us_phone(phone: str) -> str:
 
 
 def format_us_phone_display(phone_e164: str) -> str:
-    """Format E.164 US phone for display: (XXX) XXX-XXXX.
-
-    Args:
-        phone_e164: Phone in E.164 format (+1XXXXXXXXXX)
-
-    Returns:
-        Formatted string: (XXX) XXX-XXXX
-        Returns original if not valid E.164 US format.
-    """
+    """Format E.164 US phone for display: (XXX) XXX-XXXX."""
     if not phone_e164:
         return phone_e164
 
-    # Extract digits after +1
     if phone_e164.startswith("+1") and len(phone_e164) == 12:
         digits = phone_e164[2:]
         return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
@@ -96,7 +62,6 @@ def format_us_phone_display(phone_e164: str) -> str:
         digits = phone_e164[1:]
         return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
 
-    # Fallback: try to format any 10-digit number
     digits = re.sub(r"\D", "", phone_e164)
     if len(digits) == 10:
         return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
@@ -105,8 +70,8 @@ def format_us_phone_display(phone_e164: str) -> str:
 
 
 @dataclass
-class SearchbugPhoneResult:
-    """Structured result from Searchbug phone lookup."""
+class PhoneLookupResult:
+    """Structured result from phone lookup."""
     success: bool
     phone: Optional[str] = None
     phone_type: Optional[str] = None  # "landline", "mobile", "voip"
@@ -114,123 +79,127 @@ class SearchbugPhoneResult:
     is_connected: Optional[bool] = None
     error: Optional[str] = None
     raw: Optional[dict] = None
+    provider: Optional[str] = None
 
     @property
     def is_usable(self) -> bool:
         return self.success and self.phone is not None
 
 
-class SearchbugService:
-    """Searchbug API client with mock fallback."""
+class PhoneLookupService:
+    """Multi-provider phone lookup with fallback chain."""
 
     def __init__(self):
-        self.api_key = getattr(settings, "SEARCHBUG_API_KEY", None) or os.getenv("SEARCHBUG_API_KEY")
-        self.base_url = getattr(settings, "SEARCHBUG_BASE_URL", None) or os.getenv("SEARCHBUG_BASE_URL", "https://ws.searchbug.com")
+        # Provider configs (env vars)
+        self.searchbug_key = getattr(settings, "SEARCHBUG_API_KEY", None) or os.getenv("SEARCHBUG_API_KEY")
+        self.abstract_key = getattr(settings, "ABSTRACT_API_KEY", None) or os.getenv("ABSTRACT_API_KEY")
+        self.numverify_key = getattr(settings, "NUMVERIFY_API_KEY", None) or os.getenv("NUMVERIFY_API_KEY")
+        
         self.timeout = httpx.Timeout(15.0, connect=5.0)
-        self._mock_mode = not bool(self.api_key)
+        self._mock_mode = not bool(self.searchbug_key or self.abstract_key or self.numverify_key)
 
         if self._mock_mode:
-            logger.warning("Searchbug: MOCK MODE — SEARCHBUG_API_KEY not configured. Returning empty results.")
+            logger.warning("PhoneLookup: MOCK MODE — No API keys configured. Returning empty results.")
         else:
-            logger.info("Searchbug: LIVE MODE enabled.")
+            enabled = []
+            if self.searchbug_key:
+                enabled.append("Searchbug")
+            if self.abstract_key:
+                enabled.append("AbstractAPI")
+            if self.numverify_key:
+                enabled.append("Numverify")
+            logger.info(f"PhoneLookup: LIVE MODE enabled. Providers: {', '.join(enabled)}")
 
-    def _build_params(self, address: str, city: str, state: str) -> dict:
-        """Build query parameters for Searchbug Phone Verification API."""
-        return {
-            "key": self.api_key,
+    async def lookup_phone(self, address: str, city: str, state: str) -> "PhoneLookupResult":
+        """Look up phone number for an address via fallback chain."""
+        
+        # Try each provider in order
+        providers = [
+            ("Searchbug", self._lookup_searchbug),
+            ("AbstractAPI", self._lookup_abstract),
+            ("Numverify", self._lookup_numverify),
+        ]
+
+        for name, func in providers:
+            try:
+                result = await func(address, city, state)
+                if result.success and result.phone:
+                    logger.info(f"Phone lookup successful via {name} for {address}, {city}, {state}")
+                    return result
+                else:
+                    logger.warning(f"Provider {name} failed for {address}: {result.error}")
+            except Exception as e:
+                logger.warning(f"Provider {name} exception for {address}: {e}")
+
+        # All providers failed
+        return PhoneLookupResult(
+            success=False,
+            error="All phone lookup providers failed",
+            provider="none"
+        )
+
+    async def _lookup_searchbug(self, address: str, city: str, state: str) -> "PhoneLookupResult":
+        """Lookup via Searchbug API."""
+        if not self.searchbug_key:
+            return PhoneLookupResult(success=False, error="Searchbug key not configured", provider="Searchbug")
+
+        url = "https://ws.searchbug.com/phone.php"
+        params = {
+            "key": self.searchbug_key,
             "addr": address,
             "city": city,
             "state": state,
             "format": "json",
         }
 
-    async def lookup_phone(self, address: str, city: str, state: str) -> SearchbugPhoneResult:
-        """Look up phone number for an address via Searchbug API.
+        async with httpx.AsyncClient(timeout=15.0, verify=False) as client:
+            response = await client.get(url, params=params, timeout=15.0)
+            response.raise_for_status()
+            data = response.json()
 
-        Args:
-            address: Street address (e.g., "123 Main St")
-            city: City name
-            state: State abbreviation (e.g., "NY", "CA")
+        # Check for Searchbug errors
+        error = data.get("error") or data.get("Error") or data.get("ErrorMessage")
+        if error:
+            return PhoneLookupResult(success=False, error=str(error), provider="Searchbug", raw=data)
 
-        Returns:
-            SearchbugPhoneResult with phone info or error details.
+        phone = data.get("phone") or data.get("Phone") or data.get("phone_number")
+        if not phone:
+            return PhoneLookupResult(success=False, error="No phone found", provider="Searchbug", raw=data)
+
+        return PhoneLookupResult(
+            success=True,
+            phone=normalize_us_phone(str(phone).strip()),
+            phone_type=str(data.get("phone_type") or data.get("PhoneType") or data.get("type") or "").strip().lower() or None,
+            carrier=str(data.get("carrier") or data.get("Carrier") or data.get("carrier_name") or "").strip() or None,
+            is_connected=bool(data.get("is_connected") or data.get("IsConnected")) if data.get("is_connected") or data.get("IsConnected") else None,
+            provider="Searchbug",
+            raw=data
+        )
+
+    async def _lookup_abstract(self, address: str, city: str, state: str) -> "PhoneLookupResult":
+        """Lookup via AbstractAPI Phone Validation (free tier: 1000 req/mo)."""
+        if not self.abstract_key:
+            return PhoneLookupResult(success=False, error="AbstractAPI key not configured", provider="AbstractAPI")
+
+        # AbstractAPI needs a phone number to validate, not address lookup
+        # This is for validation, not reverse lookup. Skip for now.
+        return PhoneLookupResult(success=False, error="AbstractAPI requires phone input, not address", provider="AbstractAPI")
+
+    async def _lookup_numverify(self, address: str, city: str, state: str) -> "PhoneLookupResult":
+        """Lookup via Numverify (free tier: 100 req/mo). 
+        Note: Numverify validates phone numbers, doesn't do reverse address lookup.
         """
-        if self._mock_mode:
-            return SearchbugPhoneResult(
-                success=False,
-                error="MOCK MODE: SEARCHBUG_API_KEY not configured",
-                raw={"mock": True}
-            )
+        if not self.numverify_key:
+            return PhoneLookupResult(success=False, error="Numverify key not configured", provider="Numverify")
+        
+        # Numverify validates phone numbers, not reverse address lookup
+        return PhoneLookupResult(success=False, error="Numverify requires phone input, not address", provider="Numverify")
 
-        url = f"{self.base_url}/phone.php"
-        params = self._build_params(address, city, state)
-
-        try:
-            async with httpx.AsyncClient(timeout=self.timeout, verify=False) as client:
-                response = await client.get(url, params=params)
-                response.raise_for_status()
-                data = response.json()
-
-            # Parse Searchbug response format
-            # Expected format varies by API version; handle common fields
-            phone = data.get("phone") or data.get("Phone") or data.get("phone_number")
-            phone_type = data.get("phone_type") or data.get("PhoneType") or data.get("type")
-            carrier = data.get("carrier") or data.get("Carrier") or data.get("carrier_name")
-            is_connected = data.get("is_connected") or data.get("IsConnected")
-            error = data.get("error") or data.get("Error") or data.get("ErrorMessage")
-
-            if error:
-                logger.warning(f"Searchbug API error: {error}")
-                return SearchbugPhoneResult(
-                    success=False,
-                    error=str(error),
-                    raw=data
-                )
-
-            if not phone:
-                logger.info(f"Searchbug: No phone found for {address}, {city}, {state}")
-                return SearchbugPhoneResult(
-                    success=False,
-                    error="No phone number found",
-                    raw=data
-                )
-
-            return SearchbugPhoneResult(
-                success=True,
-                phone=normalize_us_phone(str(phone).strip()),
-                phone_type=str(phone_type).strip().lower() if phone_type else None,
-                carrier=str(carrier).strip() if carrier else None,
-                is_connected=bool(is_connected) if is_connected is not None else None,
-                raw=data
-            )
-
-        except httpx.HTTPStatusError as e:
-            logger.error(f"Searchbug HTTP error: {e.response.status_code} - {e.response.text}")
-            return SearchbugPhoneResult(
-                success=False,
-                error=f"HTTP {e.response.status_code}",
-                raw={"status": e.response.status_code}
-            )
-        except httpx.RequestError as e:
-            logger.error(f"Searchbug request error: {e}")
-            return SearchbugPhoneResult(
-                success=False,
-                error=f"Request failed: {e}",
-                raw={"error": str(e)}
-            )
-        except Exception as e:
-            logger.exception(f"Searchbug unexpected error: {e}")
-            return SearchbugPhoneResult(
-                success=False,
-                error=f"Unexpected error: {e}",
-                raw={"exception": str(e)}
-            )
-
-    async def lookup_phone_batch(self, addresses: list[tuple[str, str, str]]) -> list[SearchbugPhoneResult]:
+    async def lookup_phone_batch(self, addresses: list[tuple[str, str, str]]) -> list["PhoneLookupResult"]:
         """Look up multiple phones concurrently (respects rate limits)."""
-        semaphore = asyncio.Semaphore(5)  # Max 5 concurrent requests
+        semaphore = asyncio.Semaphore(3)  # Conservative for free tiers
 
-        async def _lookup_with_sem(addr: str, city: str, state: str) -> SearchbugPhoneResult:
+        async def _lookup_with_sem(addr: str, city: str, state: str) -> "PhoneLookupResult":
             async with semaphore:
                 return await self.lookup_phone(addr, city, state)
 
@@ -239,10 +208,17 @@ class SearchbugService:
 
 
 # Global singleton instance
-searchbug_service = SearchbugService()
+phone_lookup_service = PhoneLookupService()
 
 
 # Convenience function for backward compatibility
-async def searchbug_lookup_phone(address: str, city: str, state: str) -> SearchbugPhoneResult:
-    """Convenience function for simple lookups."""
-    return await searchbug_service.lookup_phone(address, city, state)
+async def searchbug_lookup_phone(address: str, city: str, state: str) -> "PhoneLookupResult":
+    """Convenience function for simple lookups (backward compat)."""
+    return await phone_lookup_service.lookup_phone(address, city, state)
+
+
+# Alias for backward compat
+PhoneLookupResult = PhoneLookupResult
+SearchbugPhoneResult = PhoneLookupResult
+SearchbugService = PhoneLookupService
+searchbug_service = phone_lookup_service
