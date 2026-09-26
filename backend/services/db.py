@@ -4166,6 +4166,10 @@ class DatabaseService:
 class AsyncDatabaseService:
     """Wrappers async sobre o DatabaseService (para endpoints FastAPI async)."""
 
+    REVEAL_HOLD_MINUTES = DatabaseService.REVEAL_HOLD_MINUTES
+    REPORT_WINDOW_MIN = DatabaseService.REPORT_WINDOW_MIN
+    MAX_REFUNDS_PER_DAY = DatabaseService.MAX_REFUNDS_PER_DAY
+
     def __init__(self):
         self._service = DatabaseService()
 
@@ -4578,6 +4582,15 @@ class AsyncDatabaseService:
 
     async def flag_reveal_contact(self, user_id: int, lead_id: int) -> bool:
         return await anyio.to_thread.run_sync(self._service.flag_reveal_contact, user_id, lead_id)
+
+    async def can_report_invalid_number(self, user_id: int, lead_id: int) -> dict:
+        return await anyio.to_thread.run_sync(self._service.can_report_invalid_number, user_id, lead_id)
+
+    async def process_refund(self, user_id: int, lead_id: int, reason: str = "invalid_number") -> dict:
+        return await anyio.to_thread.run_sync(self._service.process_refund, user_id, lead_id, reason)
+
+    async def block_lead_refund(self, lead_id: int, reason: str = "status_changed") -> bool:
+        return await anyio.to_thread.run_sync(self._service.block_lead_refund, lead_id, reason)
 
     async def check_reveal_watchdogs(self) -> int:
         return await anyio.to_thread.run_sync(self._service.check_reveal_watchdogs)
