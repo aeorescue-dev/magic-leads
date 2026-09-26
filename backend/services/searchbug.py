@@ -95,7 +95,7 @@ class PhoneLookupService:
     def __init__(self):
         # Provider configs (env vars)
         self.searchbug_key = getattr(settings, "SEARCHBUG_API_KEY", None) or os.getenv("SEARCHBUG_API_KEY")
-        
+
         self.timeout = httpx.Timeout(20.0, connect=10.0)
         self._mock_mode = False  # Always try real providers first
 
@@ -106,7 +106,7 @@ class PhoneLookupService:
 
     async def lookup_phone(self, address: str, city: str, state: str) -> "PhoneLookupResult":
         """Look up phone number for an address via fallback chain."""
-        
+
         # Provider chain (ordered by reliability/cost)
         providers = [
             ("Searchbug", self._lookup_searchbug),
@@ -135,7 +135,6 @@ class PhoneLookupService:
         if not self.searchbug_key:
             return PhoneLookupResult(success=False, error="Searchbug key not configured", provider="Searchbug")
 
-        url = "https://ws.searchbug.com/phone.php"
         params = {
             "key": self.searchbug_key,
             "addr": address,
@@ -147,7 +146,7 @@ class PhoneLookupService:
         try:
             async with httpx.AsyncClient(timeout=15.0, verify=False) as client:
                 response = await client.get("https://ws.searchbug.com/phone.php", params=params, timeout=15.0, verify=False, follow_redirects=True)
-                
+
                 if response.status_code != 200:
                     return PhoneLookupResult(success=False, error=f"HTTP {response.status_code}", provider="Searchbug")
 
@@ -174,30 +173,6 @@ class PhoneLookupService:
         except Exception as e:
             logger.warning(f"Searchbug error: {e}")
             return PhoneLookupResult(success=False, error=str(e), provider="Searchbug")
-
-    async def lookup_phone(self, address: str, city: str, state: str) -> "PhoneLookupResult":
-        """Look up phone number for an address via fallback chain."""
-        
-        providers = [
-            ("Searchbug", self._lookup_searchbug),
-        ]
-
-        for name, func in providers:
-            try:
-                result = await func(address, city, state)
-                if result.success and result.phone:
-                    logger.info(f"Phone lookup successful via {name} for {address}, {city}, {state}")
-                    return result
-                else:
-                    logger.warning(f"Provider {name} failed for {address}: {result.error}")
-            except Exception as e:
-                logger.warning(f"Provider {name} exception for {address}: {e}")
-
-        return PhoneLookupResult(
-            success=False,
-            error="All phone lookup providers failed",
-            provider="none"
-        )
 
     async def lookup_phone_batch(self, addresses: list[tuple[str, str, str]]) -> list["PhoneLookupResult"]:
         """Look up multiple phones concurrently (respects rate limits)."""
