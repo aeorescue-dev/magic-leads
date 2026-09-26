@@ -148,7 +148,8 @@ class PhoneLookupService:
                 response = await client.get("https://ws.searchbug.com/phone.php", params=params, timeout=15.0, follow_redirects=True)
 
                 if response.status_code != 200:
-                    return PhoneLookupResult(success=False, error=f"HTTP {response.status_code}", provider="Searchbug")
+                    logger.error(f"Searchbug HTTP {response.status_code} for {address}, {city}, {state}: {response.text[:500]}")
+                    return PhoneLookupResult(success=False, error=f"HTTP {response.status_code}: {response.text[:200]}", provider="Searchbug")
 
                 data = response.json()
 
