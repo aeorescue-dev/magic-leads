@@ -1911,6 +1911,7 @@ async def enrich_leads(city: str = "NYC", limit: int = 500, user: dict = Depends
                 await db_service.update_owner(row["id"], enrich_result["owner_name"])
                 found += 1
             updated += 1
+            await asyncio.sleep(0.15)  # throttling Socrata API
 
         logger.info(f"Enriquecimento: {found} donos encontrados de {updated} leads")
         if found > 0:
