@@ -145,7 +145,7 @@ class PhoneLookupService:
 
         try:
             async with httpx.AsyncClient(timeout=15.0, verify=False) as client:
-                response = await client.get("https://ws.searchbug.com/phone.php", params=params, timeout=15.0, verify=False, follow_redirects=True)
+                response = await client.get("https://ws.searchbug.com/phone.php", params=params, timeout=15.0, follow_redirects=True)
 
                 if response.status_code != 200:
                     return PhoneLookupResult(success=False, error=f"HTTP {response.status_code}", provider="Searchbug")
