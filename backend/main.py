@@ -52,7 +52,6 @@ from .scrapers.socrata_311 import socrata_scraper
 from .scrapers.socrata_discovery import socrata_discovery
 from .services import notifier, security
 from .services.db import db_service
-from .services import db as dbmod
 from .services.enrichment import owner_enrichment
 from .services.push_service import push_service
 from .services.searchbug import searchbug_service
@@ -2169,33 +2168,6 @@ async def admin_requalify_leads(request: Request, _admin: bool = Depends(_requir
         raise HTTPException(status_code=500, detail=f"Erro: {e!s}")
 
 
-# TEMP: Promover usuário para Pro (remover após uso)
-@app.post("/api/admin/promote-user")
-async def admin_promote_user(payload: dict, _admin: bool = Depends(_require_admin)):
-    """Promove usuário para plano Pro (temporário)."""
-    try:
-        email = payload.get("email")
-        if not email:
-            raise HTTPException(status_code=400, detail="email obrigatório")
-        conn = dbmod.get_connection()
-        try:
-            conn.execute(
-                "UPDATE users SET plan = 'pro', subscription_status = 'active', plan_until = datetime('now', '+1 year') WHERE email = ?",
-                (email.lower(),)
-            )
-            conn.execute(
-                "UPDATE user_daily_stats SET leads_used = 0 WHERE user_id = (SELECT id FROM users WHERE email = ?) AND date = date('now')",
-                (email.lower(),)
-            )
-            conn.commit()
-            return {"status": "success", "message": f"Usuário {email} promovido a Pro"}
-        finally:
-            conn.close()
-    except Exception as e:
-        logger.error(f"Erro ao promover usuário: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Erro: {e!s}")
-
-
 # Enriquecimento/consulta do dono de um único lead
 @app.post("/api/leads/{lead_id}/enrich")
 async def enrich_single_lead(lead_id: int, user: dict = Depends(_get_current_user)):
@@ -2991,14 +2963,14 @@ async def reserve_lead(
                 else:
                     enrichment_failed = True
 
-                # Busca de telefone (Searchbug em prod, mock em dev)
+                # Busca de telefone (Searchbug em prod, mock em dev) — opcional, não falha o enriquecimento
                 if not owner_phone:
                     phone_result = await searchbug_service.lookup_phone(lead.get("address", ""), lead.get("city", ""), lead.get("state", ""))
                     if phone_result.success:
                         owner_phone = phone_result.phone
                         await db_service.update_owner_phone(lead_id, owner_phone)
                     else:
-                        enrichment_failed = True
+                        logger.info(f"Searchbug phone lookup falhou para lead {lead_id}: {phone_result.error} — continuando sem telefone")
 
                 # Recarrega lead com dados enriquecidos
                 enriched_lead = await db_service.get_lead_by_id(lead_id)
@@ -3009,9 +2981,10 @@ async def reserve_lead(
             logger.warning(f"Enriquecimento on-demand falhou para lead {lead_id}: {e}")
             enrichment_failed = True
 
-        # REGRA A: Se enriquecimento falhou ou dados vazios, não debita a cota diária
-        if enrichment_failed or not lead.get("owner_name") or not lead.get("owner_phone"):
-            logger.info(f"Regra A aplicada: estorno de cota por dados vazios/falha no lead {lead_id}")
+        # REGRA A: Se enriquecimento falhou ou dados ESSENCIAIS vazios (nome + endereço), não debita a cota diária
+        # Telefone é opcional (Searchbug pode falhar por config externa)
+        if enrichment_failed or not lead.get("owner_name") or not lead.get("mailing_address"):
+            logger.info(f"Regra A aplicada: estorno de cota por dados essenciais vazios/falha no lead {lead_id}")
             refund_result = await db_service.process_refund(user_id, lead_id, reason="enrichment_failed")
             if not refund_result.get("success"):
                 logger.warning(f"Falha ao processar estorno Regra A: {refund_result.get('reason')}")
