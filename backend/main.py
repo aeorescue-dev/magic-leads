@@ -2177,7 +2177,7 @@ async def admin_promote_user(payload: dict, _admin: bool = Depends(_require_admi
         email = payload.get("email")
         if not email:
             raise HTTPException(status_code=400, detail="email obrigatório")
-        conn = db_service.dbmod.get_connection()
+        conn = dbmod.get_connection()
         try:
             conn.execute(
                 "UPDATE users SET plan = 'pro', subscription_status = 'active', plan_until = datetime('now', '+1 year') WHERE email = ?",
