@@ -195,11 +195,11 @@ class OwnerEnrichment:
             return self._cache[cache_key]
         if not self._budget_available():
             logger.info(f"Enriquecimento: cota diária esgotada ({settings.ENRICHMENT_DAILY_BUDGET}/dia) — pulando {address}")
-            self._cache[cache_key] = None
             return None
         self._consume_budget()
         result = await self._lookup(address, cfg)
-        self._cache[cache_key] = result
+        if result is not None:
+            self._cache[cache_key] = result
         return result
 
     async def _lookup(self, address: str, cfg: Dict) -> Optional[Dict[str, Any]]:

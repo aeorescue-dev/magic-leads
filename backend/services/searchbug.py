@@ -166,7 +166,7 @@ class SearchbugService:
         params = self._build_params(address, city, state)
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            async with httpx.AsyncClient(timeout=self.timeout, verify=False) as client:
                 response = await client.get(url, params=params)
                 response.raise_for_status()
                 data = response.json()
