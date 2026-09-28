@@ -809,10 +809,11 @@ const URGENCIES = ["all", "high", "medium", "low"];
         owner_phone: res?.owner?.phone ?? revealTarget.owner_phone,
         owner_email: res?.owner?.email ?? revealTarget.owner_email,
         mailing_address: res?.owner?.mailing_address ?? revealTarget.mailing_address,
-        revealed: true,
+        my_status: "reserved" as const,
         status: "reserved",
-        visibility_status: "reserved_by_me",
+        visibility_status: "reserved_by_me" as const,
         reserved_by_me: { expires_at: res?.expires_at },
+        revealed: true,
       };
       setLeads((prev) =>
         prev.map((l) => (l.id === revealTarget.id ? { ...l, ...revealedFields } : l))
@@ -823,7 +824,20 @@ const URGENCIES = ["all", "high", "medium", "low"];
       if (userId) refreshNotifications();
       refreshHistory();
     } catch (e: any) {
-      showToast(e?.message || "Erro ao revelar lead", "error");
+      // Handle already-reserved case gracefully
+      if (e?.error === "already_reserved" || e?.status === 409) {
+        showToast("Lead já reservado por você", "warning");
+        // Refresh lead data to show correct state
+        try {
+          const fresh = await fetchLeadById(revealTarget.id);
+          if (fresh) {
+            setLeads((prev) => prev.map((l) => (l.id === revealTarget.id ? { ...l, ...fresh } : l)));
+            setSelectedLead((prev) => prev && prev.id === revealTarget.id ? { ...prev, ...fresh } : prev);
+          }
+        } catch { }
+      } else {
+        showToast(e?.message || "Erro ao revelar lead", "error");
+      }
     } finally {
       setBusyAction(false);
       setRevealTarget(null);

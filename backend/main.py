@@ -3056,7 +3056,26 @@ async def reserve_lead(
         if result.get("error") == "not_found":
             raise HTTPException(status_code=404, detail="Lead não encontrado")
         if result.get("error") == "already_reserved":
-            raise HTTPException(status_code=409, detail="Lead já reservado por outro usuário")
+            # Return lead data even when already reserved, so frontend can update UI
+            lead = result.get("lead") or {}
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": "already_reserved",
+                    "detail": "Lead já reservado por você",
+                    "lead": {
+                        "id": lead.get("id"),
+                        "owner_name": lead.get("owner_name"),
+                        "owner_phone": lead.get("owner_phone"),
+                        "owner_email": lead.get("owner_email"),
+                        "mailing_address": lead.get("mailing_address"),
+                        "my_status": "reserved",
+                        "status": "reserved",
+                        "visibility_status": "reserved_by_me",
+                        "reserved_by_me": { "expires_at": lead.get("reserved_until") },
+                    }
+                }
+            )
         if result.get("error") == "limit_reached":
             raise HTTPException(
                 status_code=429,

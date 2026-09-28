@@ -100,6 +100,8 @@ export interface LeadResponse {
   reserved_by_other?: { contractor_id?: number; contractor_name?: string; expires_at?: string };
   // Reveal por consentimento: true = dados do proprietário liberados para o usuário
   revealed?: boolean;
+  // My status (para UI)
+  my_status?: "available" | "reserved" | "negotiating" | "converted" | "released" | "hold_expired";
 }
 
 export interface LeadsListResponse {
