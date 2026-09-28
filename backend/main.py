@@ -3363,10 +3363,12 @@ async def debug_searchbug_test(
     Acessível via browser: https://<api-url>/debug/searchbug-test
     Parâmetros opcionais: address, city, state, owner_name, zip_code
     """
-    from .services.searchbug import phone_lookup_service
-    import json
     import os
+
+    import httpx
+
     from .config import settings
+    from .services.searchbug import phone_lookup_service
 
     # 1. Verifica credenciais no ambiente
     account_code = getattr(settings, "SEARCHBUG_ACCOUNT_CODE", None) or os.getenv("SEARCHBUG_ACCOUNT_CODE")
