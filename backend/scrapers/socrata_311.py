@@ -22,6 +22,9 @@ class Socrata311Scraper:
     BASE_BACKOFF = 1.0  # seconds
     MAX_BACKOFF = 30.0  # seconds
 
+    # 311 Service Requests (era referenciado por fetch_nyc_311 mas nunca definido)
+    NYC_DATASET = "erm2-nwe9"
+
     def __init__(self):
         self.keywords = settings.SCRAPER_KEYWORDS
         self.timeout = 30
@@ -134,10 +137,79 @@ class Socrata311Scraper:
         keywords_or = " OR ".join([f"complaint_type like '%{kw}%'" for kw in self.keywords])
         return f"created_date > '{since}' AND ({keywords_or})"
 
+    @staticmethod
+    def _clean_bbl(value) -> str | None:
+        """Normaliza um BBL de NYC (borough-block-lot) para 9-10 digitos.
+
+        Devolve None para qualquer valor que nao seja um BBL plausivel, para que
+        um campo sujo nunca seja usado como chave de casamento de proprietario.
+        """
+        if value in (None, ""):
+            return None
+        raw = str(value).strip()
+        # Valores vindo de colunas float/decimal: "1002360026.0" -> parte inteira
+        if "." in raw:
+            whole, _, frac = raw.partition(".")
+            if frac and set(frac) <= {"0"}:
+                raw = whole
+        digits = re.sub(r"[^0-9]", "", raw)
+        if not (9 <= len(digits) <= 10):
+            return None
+        return digits
+
+    @staticmethod
+    def _compose_address_parts(incident_address, street_name, intersection=None) -> str:
+        """Monta o endereco completo de NYC a partir dos campos 311.
+
+        Semantica real do dataset:
+          - incident_address: as vezes so o numero ("1684A"), as vezes o endereco
+            completo ("31-67 49 STREET")
+          - street_name: sempre so o nome da rua ("EAST 87 STREET")
+
+        Casos cobertos:
+          - num + rua            -> "1684A EAST 87 STREET"
+          - endereco completo    -> usado tal e qual, sem duplicar a rua
+          - so rua               -> "MAIN ST"
+          - so cruzamento        -> "5TH AVE AND 34TH ST"
+        """
+        inc = str(incident_address or "").strip()
+        st = str(street_name or "").strip()
+        itr = str(intersection or "").strip()
+
+        # Sem numero e sem rua mas com cruzamento: usar a intersecao
+        if not st and not inc:
+            return itr
+
+        # incident_address ja contem a rua: nao duplicar
+        if inc and st and st.upper() in inc.upper():
+            return inc
+
+        # incident_address ja tem varias palavras e nao e so o numero
+        if inc and len(inc.split()) > 1:
+            return inc
+
+        if inc and st:
+            return f"{inc} {st}"
+
+        if inc:
+            return inc
+
+        if st:
+            return st
+
+        return itr
+
     def _parse_nyc_row(self, row: dict) -> RawLead311 | None:
         """Parse um dict de dados NYC (SoQL)"""
         try:
-            street = row.get("incident_address") or row.get("street_name") or ""
+            # No 311 de NYC "incident_address" e o numero da casa e "street_name" e o
+            # nome da rua: sao complementares. Usar "or" descartava a rua e gravava
+            # enderecos sem nome de rua (93,4% do inventario de NYC), impossibilitando
+            # qualquer enriquecimento posterior.
+            street = self._compose_address_parts(
+                row.get("incident_address"), row.get("street_name"),
+                row.get("intersection"),
+            )
             zip_code = row.get("incident_zip") or None
             address = f"{street}, NYC, NY" if street else "NYC, NY"
             if zip_code:
@@ -153,6 +225,7 @@ class Socrata311Scraper:
                 city="NYC",
                 state="NY",
                 zip_code=zip_code,
+                bbl=self._clean_bbl(row.get("bbl")),
                 issue_description=row.get("complaint_type") or "",
                 created_at=created_at,
                 lat=float(row["latitude"]) if row.get("latitude") is not None else None,
@@ -287,6 +360,19 @@ class Socrata311Scraper:
             ),
         }
 
+        # Endereco partido em numero + rua: datasets como o 311 de NYC
+        # (incident_address/street_name) e HPD Violations (housenumber/streetname)
+        # so ficam correctos se as duas colunas forem juntas. Sem este par, o
+        # addr_col abaixo devolveria apenas o numero e o lead ficava sem rua.
+        addr_num_col = find(
+            "incident_address", "housenumber", "house_no", "house_number", "street_number",
+        )
+        addr_street_col = find("streetname", "street_name", "street")
+
+        # BBL (borough-block-lot): identificador canonico de imovel em NYC.
+        # Quando presente, o enriquecimento de proprietario passa a ser exacto.
+        bbl_col = find("bbl", "borough_block_lot", "bb_l")
+
         return {
             "date": date_col,
             "desc": desc_col,
@@ -294,6 +380,9 @@ class Socrata311Scraper:
             "lng": lng_col,
             "ext": ext_col,
             "addr": addr_col,
+            "addr_num": addr_num_col,
+            "addr_street": addr_street_col,
+            "bbl": bbl_col,
             "city": city_col,
             "zip": zip_col,
             "hist": hist,
@@ -304,12 +393,14 @@ class Socrata311Scraper:
     async def fetch_from_dataset(
         self, domain: str, dataset_id: str, city: str, state: str,
         field_names: List[str], hours: int = 48, limit: int = 50000,
-        keyword_filter: bool = True,
+        keyword_filter: bool = True, source_type: Optional[str] = None,
     ) -> List[RawLead311]:
         """Busca 311 genérico de qualquer cidade Socrata, detectando as colunas.
 
         keyword_filter=True  -> filtra por palavras-chave (scrape incremental).
         keyword_filter=False -> traz todos os registros da janela (usado no backfill).
+        source_type          -> classifica o lead (ex: "hpd_violation"). Sem isto
+                               tudo cai em "311" e os filtros da UI ficam vazios.
         """
         cols = self._guess_columns(field_names)
         if not cols["_has_date"] or not cols["_has_desc"]:
@@ -340,7 +431,7 @@ class Socrata311Scraper:
 
         leads = []
         for row in rows:
-            lead = self._parse_generic_row(row, cols, city, state)
+            lead = self._parse_generic_row(row, cols, city, state, source_type=source_type)
             if not lead:
                 continue
             if keyword_filter:
@@ -391,7 +482,7 @@ class Socrata311Scraper:
             return IssueCategory.STRUCTURE
         if any(k in desc for k in ["grass", "weed", "vegetation", "overgrown", "blight", "high weeds", "vacant lot", "tall grass", "brush", "excessive vegetation"]):
             return IssueCategory.GRASS
-        if source_type in ("permit", "dob_violation", "tax_delinquency"):
+        if source_type in ("permit", "dob_violation", "hpd_violation", "tax_delinquency"):
             return IssueCategory.PERMIT_REJECTED  # Obras & Permissões
         return IssueCategory.STRUCTURE  # fallback conservador
 
@@ -427,7 +518,8 @@ class Socrata311Scraper:
             return UrgencyLevel.LOW
         return UrgencyLevel.MEDIUM
 
-    def _parse_generic_row(self, row: dict, cols: dict, city: str, state: str) -> RawLead311 | None:
+    def _parse_generic_row(self, row: dict, cols: dict, city: str, state: str,
+                           source_type: Optional[str] = None) -> RawLead311 | None:
         try:
             ext = str(row.get(cols["ext"]) or "") if cols["ext"] else ""
             if not ext:
@@ -442,7 +534,15 @@ class Socrata311Scraper:
                 created_at = datetime.now()
 
             addr = ""
-            if cols["addr"]:
+            # Preferir o par numero+rua quando o dataset o expoe separado
+            _num_col = cols.get("addr_num")
+            _st_col = cols.get("addr_street")
+            if _num_col and _st_col:
+                addr = self._compose_address_parts(
+                    row.get(_num_col),
+                    row.get(_st_col),
+                )
+            if not addr and cols["addr"]:
                 addr = str(row.get(cols["addr"]) or "").strip()
             zipc = row.get(cols["zip"]) if cols["zip"] else None
 
@@ -496,17 +596,23 @@ class Socrata311Scraper:
             # case_title: usa a coluna de descrição se não haver detecção própria
             case_title = _val("case_title") or (str(row.get(cols["desc"]) or "").strip() or None)
 
+            # BBL: só aceitar dígitos (10 = borough+block+lot em NYC)
+            bbl_col = cols.get("bbl")
+            bbl = self._clean_bbl(row.get(bbl_col) if bbl_col else None)
+
             return RawLead311(
                 external_id=ext,
                 address=full_addr,
                 city=city,
                 state=state,
                 zip_code=str(zipc) if zipc else None,
+                bbl=bbl,
+                source_type=source_type,
                 issue_description=str(row.get(cols["desc"]) or ""),
                 created_at=created_at,
                 lat=lat,
                 lng=lng,
-                issue_category=self._infer_category(str(row.get(cols["desc"]) or "")),
+                issue_category=self._infer_category(str(row.get(cols["desc"]) or ""), source_type),
                 case_title=case_title,
                 subject=_val("subject"),
                 reason=_val("reason"),

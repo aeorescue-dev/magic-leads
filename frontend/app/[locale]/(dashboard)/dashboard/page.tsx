@@ -1,7 +1,7 @@
 "use client";
 
 // Assinatura: contas sem acesso vigente abrem o modal de checkout (CheckoutModal),
-// que coleta o nome da empresa e redireciona para a sessão Stripe do Plano Pro.
+// que coleta o nome da empresa e redireciona para a sessÃƒÂ£o Stripe do Plano Pro.
 export const dynamic = 'force-dynamic';
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -44,7 +44,7 @@ import {
   fetchPublicMetrics, PublicMetrics, EMPTY_PUBLIC_METRICS
 } from "@/lib/api-client";
 
-// Tipo enriquecido para o modal de revelação (com histórico e ocorrências)
+// Tipo enriquecido para o modal de revelaÃƒÂ§ÃƒÂ£o (com histÃƒÂ³rico e ocorrÃƒÂªncias)
 type EnrichedLead = LeadResponse & {
   _history?: HistoryEvent[];
   _occurrences?: LeadOccurrence[];
@@ -129,22 +129,22 @@ function formatRelativeTime(dateStr: string, t: (k: string) => string): string {
   const diffMin = Math.floor(diffSec / 60);
   if (diffMin < 60) {
     return diffMin === 1
-      ? `1 ${t("dashboard.time.min_ago") || "min atrás"}`
-      : `${diffMin} ${t("dashboard.time.mins_ago") || "min atrás"}`;
+      ? `1 ${t("dashboard.time.min_ago") || "min atrÃƒÂ¡s"}`
+      : `${diffMin} ${t("dashboard.time.mins_ago") || "min atrÃƒÂ¡s"}`;
   }
   const diffHours = Math.floor(diffMin / 60);
   if (diffHours < 24) {
     return diffHours === 1
-      ? `1 ${t("dashboard.time.hour_ago") || "h atrás"}`
-      : `${diffHours} ${t("dashboard.time.hours_ago") || "h atrás"}`;
+      ? `1 ${t("dashboard.time.hour_ago") || "h atrÃƒÂ¡s"}`
+      : `${diffHours} ${t("dashboard.time.hours_ago") || "h atrÃƒÂ¡s"}`;
   }
   const diffDays = Math.floor(diffHours / 24);
   if (diffDays === 1) return t("dashboard.time.yesterday") || "ontem";
-  return `${diffDays} ${t("dashboard.time.days_ago") || "dias atrás"}`;
+  return `${diffDays} ${t("dashboard.time.days_ago") || "dias atrÃƒÂ¡s"}`;
 }
 
-// Countdown "Xh Ym" a partir de um ISO/UTC de expiração (Phase 4.2)
-// Fallback = 60 min, que é a janela de reserva real do plano. NÃO usar "24h":
+// Countdown "Xh Ym" a partir de um ISO/UTC de expiraÃƒÂ§ÃƒÂ£o (Phase 4.2)
+// Fallback = 60 min, que ÃƒÂ© a janela de reserva real do plano. NÃƒÆ’O usar "24h":
 // o hold tem 60 minutos e mostrar 24h seria uma promessa falsa ao utilizador.
 const HOLD_FALLBACK = "60m";
 function countdownLabel(expiresAt: string): string {
@@ -196,14 +196,16 @@ function DashboardPageInner() {
   const CITIES = ["all", "NYC", "Chicago", "Dallas", "Boston"];
   const CATEGORIES_FILTER = ["all", ...CATEGORIES.map(c => c.key)];
 const URGENCIES = ["all", "high", "medium", "low"];
-const LEAD_TYPES = [
-  { value: "all", labelKey: "dashboard.filter.all_types" },
-  { value: "dob_violation", labelKey: "dashboard.lead_type.obligation" },
-  { value: "permit", labelKey: "dashboard.lead_type.permit" },
-  { value: "311", labelKey: "dashboard.lead_type.open" },
-];
+  const LEAD_TYPES = [
+    { value: "all", labelKey: "dashboard.filter.all_types" },
+    // "Obrigacao legal" e um grupo: violacoes do DOB e do HPD sao a mesma categoria
+    { value: "dob_violation,hpd_violation", labelKey: "dashboard.lead_type.obligation" },
+    { value: "permit", labelKey: "dashboard.lead_type.permit" },
+    { value: "311", labelKey: "dashboard.lead_type.open" },
+  ];
+  const OBLIGATION_TYPES: readonly string[] = ["dob_violation", "hpd_violation"];
 
-// Handlers para ações do lead (Maps, SMS, WhatsApp)
+// Handlers para aÃƒÂ§ÃƒÂµes do lead (Maps, SMS, WhatsApp)
   const openMaps = (address: string) => {
     const dest = encodeURIComponent(address);
     const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -215,8 +217,8 @@ const LEAD_TYPES = [
 
   const buildMsgs = (lead: LeadResponse) =>
     buildOutreachMessage({
-      owner: lead.owner_name || "—",
-      company: user?.company_name || "—",
+      owner: lead.owner_name || "Ã¢â‚¬â€",
+      company: user?.company_name || "Ã¢â‚¬â€",
       city: lead.city || "",
       category: lead.issue_category || "Other",
     });
@@ -237,7 +239,7 @@ const LEAD_TYPES = [
     window.open(`https://wa.me/${clean}`, "_blank", "noopener,noreferrer");
   };
 
-// My Leads / Histórico (tab dedicada)
+// My Leads / HistÃƒÂ³rico (tab dedicada)
   const [historyLeads, setHistoryLeads] = useState<MyLeadHistoryItem[]>([]);
   const [historyKpis, setHistoryKpis] = useState<MyLeadsHistoryKpis | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -272,7 +274,7 @@ const LEAD_TYPES = [
   const [revealTarget, setRevealTarget] = useState<EnrichedLead | null>(null);
   const [contractorMetrics, setContractorMetrics] = useState<ContractorMetrics | null>(null);
   
-  // Toast notifications (fila empilhável + auto-dismiss 4s)
+  // Toast notifications (fila empilhÃƒÂ¡vel + auto-dismiss 4s)
   const [toasts, setToasts] = useState<{ id: number; message: string; type: "success" | "error" | "warning" }[]>([]);
 
   const showToast = useCallback((message: string, type: "success" | "error" | "warning" = "success") => {
@@ -284,7 +286,7 @@ const LEAD_TYPES = [
   }, []);
 
   // Conta nova/inativa (sem acesso vigente): abre o modal de checkout do Plano Pro
-  // assim que o status é conhecido — mesmo fluxo fluido de renovação, sem tela travada.
+  // assim que o status ÃƒÂ© conhecido Ã¢â‚¬â€ mesmo fluxo fluido de renovaÃƒÂ§ÃƒÂ£o, sem tela travada.
   useEffect(() => {
     if (subscription && !subscription.can_access && !checkoutAutoOpened.current) {
       checkoutAutoOpened.current = true;
@@ -500,7 +502,7 @@ const LEAD_TYPES = [
     }
   }, [userId]);
 
-  // Fetch "Meus Leads / Histórico" quando a aba está ativa ou filtros mudam
+  // Fetch "Meus Leads / HistÃƒÂ³rico" quando a aba estÃƒÂ¡ ativa ou filtros mudam
   useEffect(() => {
     if (activeTab !== "history" || !userId) return;
     let active = true;
@@ -518,7 +520,7 @@ const LEAD_TYPES = [
         setHistoryLeads(res.leads);
         setHistoryKpis(res.kpis);
       } catch (e) {
-        console.error("Erro ao buscar histórico:", e);
+        console.error("Erro ao buscar histÃƒÂ³rico:", e);
         if (active) setHistoryLeads([]);
       } finally {
         if (active) setHistoryLoading(false);
@@ -531,7 +533,7 @@ const LEAD_TYPES = [
     };
   }, [userId, activeTab, historyStatus, historyPeriod, historySearch, historyNeedsAction]);
 
-  // Ações dentro do histórico (reservar de novo / converter)
+  // AÃƒÂ§ÃƒÂµes dentro do histÃƒÂ³rico (reservar de novo / converter)
   const refreshHistory = useCallback(() => {
     if (activeTab !== "history" || !userId) return;
     fetchMyLeadsHistory({
@@ -545,7 +547,7 @@ const LEAD_TYPES = [
         setHistoryLeads(res.leads);
         setHistoryKpis(res.kpis);
       })
-      .catch((e) => console.error("Erro ao atualizar histórico:", e));
+      .catch((e) => console.error("Erro ao atualizar histÃƒÂ³rico:", e));
   }, [userId, activeTab, historyStatus, historyPeriod, historySearch, historyNeedsAction]);
 
   const handleHistoryReserve = async (lead: MyLeadHistoryItem) => {
@@ -554,7 +556,7 @@ const LEAD_TYPES = [
       showToast(t("dashboard.toast.daily_limit"), "warning");
       return;
     }
-    // Consentimento antes de re-revelar os dados do proprietário (conta novamente)
+    // Consentimento antes de re-revelar os dados do proprietÃƒÂ¡rio (conta novamente)
     setRevealTarget(lead);
   };
 
@@ -751,7 +753,7 @@ const LEAD_TYPES = [
       showToast(t("dashboard.toast.daily_limit"), "warning");
       return;
     }
-    // Buscar histórico e ocorrências antes de abrir o modal
+    // Buscar histÃƒÂ³rico e ocorrÃƒÂªncias antes de abrir o modal
     setBusyAction(true);
     try {
       const [history, occurrences] = await Promise.all([
@@ -793,7 +795,7 @@ const LEAD_TYPES = [
     try {
       const idKey = `u${userId}:l${revealTarget.id}:${new Date().toISOString().slice(0, 10)}`;
       const res = await reserveLead(revealTarget.id, 60, { consent: true, idempotency: idKey });
-      showToast(res?.message || "Dados revelados — reserva de 1 hora ativa", "success");
+      showToast(res?.message || "Dados revelados Ã¢â‚¬â€ reserva de 1 hora ativa", "success");
       if (dailyStats) {
         try {
           const stats = await fetchUserDailyStats(userId!);
@@ -1037,7 +1039,7 @@ const LEAD_TYPES = [
                 {user?.company_name || "Contratante Pro"}
               </div>
               <div className="text-[11px] text-emerald-400 font-medium capitalize">
-                {user?.plan ? `Plano ${user.plan}` : "Teste Grátis (7d)"}
+                {user?.plan ? `Plano ${user.plan}` : "Teste GrÃƒÂ¡tis (7d)"}
               </div>
             </div>
             <button
@@ -1274,7 +1276,7 @@ const LEAD_TYPES = [
           {/* FILTER BAR */}
           <div className={`flex flex-wrap items-center gap-3 p-4 rounded-xl border ${theme === "dark" ? "bg-[#10121a] border-white/5" : "bg-white border-slate-200 shadow-sm"}`}>
             <div className="flex items-center gap-2">
-              <span className={`text-xs font-medium ${T.text2}`}>{t("dashboard.filter.city") || "📍 Cidade:"}</span>
+              <span className={`text-xs font-medium ${T.text2}`}>{t("dashboard.filter.city") || "Ã°Å¸â€œÂ Cidade:"}</span>
               <select
                 value={selectedCity}
                 onChange={(e) => setSelectedCity(e.target.value)}
@@ -1284,7 +1286,7 @@ const LEAD_TYPES = [
               </select>
             </div>
             <div className="flex items-center gap-2">
-              <span className={`text-xs font-medium ${T.text2}`}>{t("dashboard.filter.category") || "🔧 Categoria:"}</span>
+              <span className={`text-xs font-medium ${T.text2}`}>{t("dashboard.filter.category") || "Ã°Å¸â€Â§ Categoria:"}</span>
               <select
                 value={selectedCategory}
                 onChange={(e) => setSelectedCategory(e.target.value)}
@@ -1294,7 +1296,7 @@ const LEAD_TYPES = [
               </select>
             </div>
             <div className="flex items-center gap-2">
-              <span className={`text-xs font-medium ${T.text2}`}>{t("dashboard.filter.urgency") || "⚡ Urgência:"}</span>
+              <span className={`text-xs font-medium ${T.text2}`}>{t("dashboard.filter.urgency") || "Ã¢Å¡Â¡ UrgÃƒÂªncia:"}</span>
               <select
                 value={selectedUrgency}
                 onChange={(e) => setSelectedUrgency(e.target.value)}
@@ -1316,7 +1318,7 @@ const LEAD_TYPES = [
             <div className="flex-1" />
             <div className="flex items-center gap-2 text-xs" style={{ color: theme === "dark" ? "#94a3b8" : "#64748b" }}>
               <span>{filteredLeads.length} {t("dashboard.filter.showing") || "oportunidades"}</span>
-              <span>·</span>
+              <span>Ã‚Â·</span>
               <span>{newAlerts.length} {t("dashboard.filter.new") || "novas"}</span>
             </div>
           </div>
@@ -1330,7 +1332,7 @@ const LEAD_TYPES = [
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
                   </span>
-                  <span>{t("dashboard.freshness.updating") || "Atualizando dados…"}</span>
+                  <span>{t("dashboard.freshness.updating") || "Atualizando dadosÃ¢â‚¬Â¦"}</span>
                 </>
               ) : scraperState?.last_run?.finished_at ? (
                 <>
@@ -1338,7 +1340,7 @@ const LEAD_TYPES = [
                   <span>{`${t("dashboard.freshness.updated") || "Dados atualizados"}: ${formatRelativeTime(scraperState.last_run.finished_at, t)}`}</span>
                 </>
               ) : (
-                <span>{t("dashboard.freshness.warmup") || "Coletando dados…"}</span>
+                <span>{t("dashboard.freshness.warmup") || "Coletando dadosÃ¢â‚¬Â¦"}</span>
               )}
             </div>
           </div>
@@ -1349,7 +1351,7 @@ const LEAD_TYPES = [
               { label: t("dashboard.kpi.interested") || "No seu interesse", value: dashboardSummary?.total_interested ?? 0, delta: t("dashboard.kpi.opportunities") || "oportunidades reais", icon: Building2, color: "#6366f1" },
               { label: t("dashboard.kpi.last_scrape"), value: publicMetrics?.last_scrape?.novas_oportunidades ?? scrapeCount + 500, delta: t("dashboard.kpi.updated_now"), icon: TrendingUp, color: "#22c55e" },
               { label: t("dashboard.kpi.with_contact") || "Com contato", value: dashboardSummary?.with_contact ?? 0, delta: t("dashboard.kpi.ready_call") || "prontas p/ ligar", icon: Phone, color: "#f59e0b" },
-              { label: t("dashboard.kpi.urgent") || "Urgentes", value: dashboardSummary?.urgent ?? 0, delta: t("dashboard.kpi.need_action") || "precisam ação", icon: AlertCircle, color: "#ef4444" },
+              { label: t("dashboard.kpi.urgent") || "Urgentes", value: dashboardSummary?.urgent ?? 0, delta: t("dashboard.kpi.need_action") || "precisam aÃƒÂ§ÃƒÂ£o", icon: AlertCircle, color: "#ef4444" },
             ].map((k) => (
               <div key={k.label} className={`border rounded-xl p-4 transition-colors ${theme === "dark" ? "bg-[#10121a] border-white/5" : "bg-white border-slate-200 shadow-sm"}`}>
                 <div className="flex items-center gap-2">
@@ -1408,7 +1410,7 @@ const LEAD_TYPES = [
             })()}
           </div>
 
-          {/* ALERTS TAB: NOTIFICAÇÕES */}
+          {/* ALERTS TAB: NOTIFICAÃƒâ€¡Ãƒâ€¢ES */}
           {activeTab === "alerts" ? (
             <section className="space-y-5">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -1439,8 +1441,8 @@ const LEAD_TYPES = [
               {notifications.length === 0 ? (
                 <div className={`rounded-2xl border p-8 text-center ${isDark ? "bg-[#10121a] border-white/5" : "bg-white border-slate-200"}`}>
                   <Bell className="w-10 h-10 text-slate-400 mx-auto mb-3" />
-                  <h3 className="font-semibold mb-1">{t("dashboard.topbar.no_notifications") || "Sem notificações"}</h3>
-                  <p className={`text-sm ${T.text2}`}>Você receberá alertas de novas oportunidades e atualizações aqui.</p>
+                  <h3 className="font-semibold mb-1">{t("dashboard.topbar.no_notifications") || "Sem notificaÃƒÂ§ÃƒÂµes"}</h3>
+                  <p className={`text-sm ${T.text2}`}>VocÃƒÂª receberÃƒÂ¡ alertas de novas oportunidades e atualizaÃƒÂ§ÃƒÂµes aqui.</p>
                 </div>
               ) : (
                 <div className={`border rounded-2xl overflow-hidden divide-y ${T.border}`}>
@@ -1475,18 +1477,18 @@ const LEAD_TYPES = [
             </section>
           ) : null}
 
-          {/* HISTORY TAB: MEUS LEADS / HISTÓRICO */}
+          {/* HISTORY TAB: MEUS LEADS / HISTÃƒâ€œRICO */}
           {activeTab === "history" ? (
             <section className="space-y-5">
-              {/* Header + filtro de ação */}
+              {/* Header + filtro de aÃƒÂ§ÃƒÂ£o */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <h2 className="text-xl font-bold flex items-center gap-2">
                     <History className="h-5 w-5 text-indigo-400" />
-                    {t("dashboard.history.title") || "Meus Leads / Histórico"}
+                    {t("dashboard.history.title") || "Meus Leads / HistÃƒÂ³rico"}
                   </h2>
                   <p className={`text-xs mt-0.5 ${T.text2}`}>
-                    {t("dashboard.history.sub") || "Todos os leads que você pegou — reservados, em negociação, convertidos, liberados e holds expirados."}
+                    {t("dashboard.history.sub") || "Todos os leads que vocÃƒÂª pegou Ã¢â‚¬â€ reservados, em negociaÃƒÂ§ÃƒÂ£o, convertidos, liberados e holds expirados."}
                   </p>
                 </div>
                 <button
@@ -1502,7 +1504,7 @@ const LEAD_TYPES = [
                 </button>
               </div>
 
-              {/* KPIs do histórico */}
+              {/* KPIs do histÃƒÂ³rico */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
                 <div className={`border rounded-2xl p-4 transition ${isDark ? "bg-[#10121a] border-white/5" : "bg-white border-slate-200 shadow-sm"}`}>
                   <div className={`text-xs font-medium ${T.text2}`}>{t("dashboard.history.used_today")}</div>
@@ -1617,11 +1619,11 @@ const LEAD_TYPES = [
               {historyLoading ? (
                 <div className="flex flex-col items-center justify-center py-16 gap-2">
                   <Loader2 className="h-6 w-6 animate-spin text-indigo-500" />
-                  <span className={`text-xs ${T.text2}`}>Carregando seu histórico...</span>
+                  <span className={`text-xs ${T.text2}`}>Carregando seu histÃƒÂ³rico...</span>
                 </div>
               ) : historyLeads.filter((l) => !historyCategory || catOfLead(l).key === historyCategory).length === 0 ? (
                 <div className={`text-center py-16 border rounded-2xl ${T.border}`}>
-                  <div className="text-4xl mb-3">📋</div>
+                  <div className="text-4xl mb-3">Ã°Å¸â€œâ€¹</div>
                   <div className={`text-sm font-medium ${isDark ? "text-slate-300" : "text-slate-700"}`}>
                     {historyStatus || historyCategory || historyPeriod || historySearch || historyNeedsAction
                       ? t("dashboard.history.empty")
@@ -1640,7 +1642,7 @@ const LEAD_TYPES = [
                     const CatIcon = cat.icon;
                     const badge =
                       lead.my_status === "reserved"
-                        ? { label: `Seu · ${lead.hold_expires_at ? countdownLabel(lead.hold_expires_at) : HOLD_FALLBACK}`, cls: "bg-rose-500/15 text-rose-400", icon: <Lock className="h-3 w-3" /> }
+                        ? { label: `Seu Ã‚Â· ${lead.hold_expires_at ? countdownLabel(lead.hold_expires_at) : HOLD_FALLBACK}`, cls: "bg-rose-500/15 text-rose-400", icon: <Lock className="h-3 w-3" /> }
                         : lead.my_status === "negotiating"
                           ? { label: t("dashboard.status.negotiation"), cls: "bg-amber-500/15 text-amber-400", icon: <MessageSquare className="h-3 w-3" /> }
                           : lead.my_status === "hold_expired"
@@ -1663,7 +1665,7 @@ const LEAD_TYPES = [
 
                           {(lead.source_type && (() => {
                             const st = lead.source_type;
-                            if (st === "dob_violation") return <span className="text-[10px] font-semibold uppercase tracking-wider bg-amber-500/15 text-amber-400 px-2.5 py-1 rounded-full flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> {t("dashboard.lead_type.obligation")}</span>;
+                            if (OBLIGATION_TYPES.includes(st)) return <span className="text-[10px] font-semibold uppercase tracking-wider bg-amber-500/15 text-amber-400 px-2.5 py-1 rounded-full flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> {t("dashboard.lead_type.obligation")}</span>;
                             if (st === "permit") return <span className="text-[10px] font-semibold uppercase tracking-wider bg-sky-500/15 text-sky-400 px-2.5 py-1 rounded-full flex items-center gap-1"><HardHat className="h-3 w-3" /> {t("dashboard.lead_type.permit")}</span>;
                             return <span className="text-[10px] font-semibold uppercase tracking-wider bg-slate-500/15 text-slate-400 px-2.5 py-1 rounded-full flex items-center gap-1"><FolderOpen className="h-3 w-3" /> {t("dashboard.lead_type.open")}</span>;
                           })())}
@@ -1683,7 +1685,7 @@ const LEAD_TYPES = [
                               {lead.owner_name && <span className="font-medium">{lead.owner_name}</span>}
                               <span className="flex items-center gap-1">
                                 <Clock className="h-3 w-3" />
-                                {t("dashboard.history.reserved_on")} {lead.held_at ? formatRelativeTime(lead.held_at, t) : "—"}
+                                {t("dashboard.history.reserved_on")} {lead.held_at ? formatRelativeTime(lead.held_at, t) : "Ã¢â‚¬â€"}
                               </span>
                               {lead.my_status === "reserved" && lead.hold_expires_at && (
                                 <span className="text-rose-400 font-semibold">{t("dashboard.history.expires_in")} {countdownLabel(lead.hold_expires_at)}</span>
@@ -1824,7 +1826,7 @@ const LEAD_TYPES = [
                   </div>
                 ) : filteredLeads.length === 0 ? (
                   <div className="p-12 text-center">
-                    <div className="text-4xl mb-3">🧰</div>
+                    <div className="text-4xl mb-3">Ã°Å¸Â§Â°</div>
                     <div className={`text-sm font-medium ${isDark ? "text-slate-300" : "text-slate-700"}`}>
                       {t("dashboard.feed.empty")}
                     </div>
@@ -1856,7 +1858,7 @@ const LEAD_TYPES = [
 
                             {(lead.source_type && (() => {
                               const st = lead.source_type;
-                              if (st === "dob_violation") return <span className="text-[10px] font-semibold uppercase tracking-wider bg-amber-500/15 text-amber-400 px-2.5 py-1 rounded-full flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> {t("dashboard.lead_type.obligation")}</span>;
+                              if (OBLIGATION_TYPES.includes(st)) return <span className="text-[10px] font-semibold uppercase tracking-wider bg-amber-500/15 text-amber-400 px-2.5 py-1 rounded-full flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> {t("dashboard.lead_type.obligation")}</span>;
                               if (st === "permit") return <span className="text-[10px] font-semibold uppercase tracking-wider bg-sky-500/15 text-sky-400 px-2.5 py-1 rounded-full flex items-center gap-1"><HardHat className="h-3 w-3" /> {t("dashboard.lead_type.permit")}</span>;
                               return <span className="text-[10px] font-semibold uppercase tracking-wider bg-slate-500/15 text-slate-400 px-2.5 py-1 rounded-full flex items-center gap-1"><FolderOpen className="h-3 w-3" /> {t("dashboard.lead_type.open")}</span>;
                             })())}
@@ -1901,15 +1903,15 @@ const LEAD_TYPES = [
                                       {t("dashboard.field.owner")}: {lead.owner_name}
                                     </span>
                                     {lead.mailing_address && (
-                                      <span className="text-slate-400">📬 {lead.mailing_address}</span>
+                                      <span className="text-slate-400">Ã°Å¸â€œÂ¬ {lead.mailing_address}</span>
                                     )}
                                   </>
                                 )}
-                                <span>·</span>
+                                <span>Ã‚Â·</span>
                                 <span>{t("dashboard.freshness.reported")}: {formatRelativeTime(lead.date_reported, t)}</span>
                                 {lead.last_synced && (
                                   <>
-                                    <span>·</span>
+                                    <span>Ã‚Â·</span>
                                     <span>{t("dashboard.freshness.synced")}: {formatRelativeTime(lead.last_synced, t)}</span>
                                   </>
                                 )}
@@ -2000,7 +2002,7 @@ const LEAD_TYPES = [
                                 <Star className={`h-4 w-4 ${lead.favorited ? "fill-amber-400" : ""}`} />
                               </button>
                               <span className="flex items-center gap-1 text-xs font-semibold text-indigo-400 group-hover:translate-x-0.5 transition">
-                                Ver análise <ArrowUpRight className="h-3.5 w-3.5" />
+                                Ver anÃƒÂ¡lise <ArrowUpRight className="h-3.5 w-3.5" />
                               </span>
                             </div>
                           </div>
@@ -2089,7 +2091,7 @@ const LEAD_TYPES = [
                 <div>
                   <span className="text-xs text-slate-400 block">{t("db.col.date")}</span>
                   <span className="font-semibold" suppressHydrationWarning>
-                    {selectedLead.date_reported ? new Date(selectedLead.date_reported).toLocaleDateString(lang === "en" ? "en-US" : lang === "es" ? "es-ES" : "pt-BR") : "—"}
+                    {selectedLead.date_reported ? new Date(selectedLead.date_reported).toLocaleDateString(lang === "en" ? "en-US" : lang === "es" ? "es-ES" : "pt-BR") : "Ã¢â‚¬â€"}
                   </span>
                 </div>
                 {selectedLead.last_synced && (
@@ -2102,8 +2104,8 @@ const LEAD_TYPES = [
                 )}
                 {selectedLead.mailing_address && (
                   <div className="sm:col-span-2">
-                    <span className="text-xs text-slate-400 block">{t("dashboard.field.mailing_address") || "Endereço de correspondência"}</span>
-                    <span className="font-semibold">📬 {selectedLead.mailing_address}</span>
+                    <span className="text-xs text-slate-400 block">{t("dashboard.field.mailing_address") || "EndereÃƒÂ§o de correspondÃƒÂªncia"}</span>
+                    <span className="font-semibold">Ã°Å¸â€œÂ¬ {selectedLead.mailing_address}</span>
                   </div>
                 )}
               </div>
@@ -2200,7 +2202,7 @@ const LEAD_TYPES = [
               })()}
 
               <p className="text-sm leading-relaxed text-slate-300">
-                {selectedLead.issue_description || selectedLead.case_title || "Registro oficial de manutenção pública."}
+                {selectedLead.issue_description || selectedLead.case_title || "Registro oficial de manutenÃƒÂ§ÃƒÂ£o pÃƒÂºblica."}
               </p>
 
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
@@ -2267,7 +2269,7 @@ const LEAD_TYPES = [
                         <p className="text-sm text-slate-300">{event.detail || event.event_type}</p>
                         <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-1">
                           <span>{formatRelativeTime(event.created_at, t)}</span>
-{event.user_id && <span>· {t("dashboard.reveal.by_user")} #{event.user_id}</span>}
+{event.user_id && <span>Ã‚Â· {t("dashboard.reveal.by_user")} #{event.user_id}</span>}
                         </div>
                       </div>
                     </div>
@@ -2276,7 +2278,7 @@ const LEAD_TYPES = [
               </div>
             )}
 
-            {/* Ocorrências do imóvel (histórico 311 - Parte B) */}
+            {/* OcorrÃƒÂªncias do imÃƒÂ³vel (histÃƒÂ³rico 311 - Parte B) */}
             {leadOccurrences.length > 0 && (
               <div className="space-y-3 pt-2 border-t border-white/10">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
@@ -2287,7 +2289,7 @@ const LEAD_TYPES = [
                   {leadOccurrences.map((oc) => (
                     <div key={oc.id || oc.external_id || `${oc.case_title}-${oc.opened_at}`} className="p-3 rounded-xl border border-white/5 bg-white/5">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs font-semibold text-slate-200">{oc.case_title || "Ocorrência"}</span>
+                        <span className="text-xs font-semibold text-slate-200">{oc.case_title || "OcorrÃƒÂªncia"}</span>
                         {oc.case_status && (
                           <span
                             className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
@@ -2339,7 +2341,7 @@ if (dailyStats && dailyStats.remaining === 0) {
       showToast(t("dashboard.toast.daily_limit"), "warning");
       return;
                     }
-                    // Consentimento antes de revelar os dados do proprietário
+                    // Consentimento antes de revelar os dados do proprietÃƒÂ¡rio
                     setRevealTarget(selectedLead);
                   }}
                   disabled={busyAction || (subscription && !subscription.can_access) || (dailyStats?.remaining === 0)}
@@ -2443,7 +2445,7 @@ if (dailyStats && dailyStats.remaining === 0) {
         onRelease={confirmRelease}
       />
 
-      {/* REVEAL CONSENT MODAL (dados do proprietário protegidos) */}
+      {/* REVEAL CONSENT MODAL (dados do proprietÃƒÂ¡rio protegidos) */}
       {revealTarget && (
         <div className="fixed inset-0 z-[85] flex items-center justify-center p-4" style={{ backgroundColor: isDark ? "rgba(11,13,18,0.85)" : "rgba(248,250,252,0.9)" }} onClick={closeRevealModal}>
           <div
@@ -2460,9 +2462,15 @@ if (dailyStats && dailyStats.remaining === 0) {
                   <h2 className="text-lg font-bold" style={{ color: isDark ? "#fff" : "#0f172a" }}>
                     {t("dashboard.reveal.title")}
                   </h2>
-                  <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${revealTarget.source_type === "dob_violation" ? "bg-amber-500/15 text-amber-400" : revealTarget.source_type === "permit" ? "bg-sky-500/15 text-sky-400" : "bg-slate-500/15 text-slate-400"}`}>
-                    {revealTarget.source_type === "dob_violation" ? t("dashboard.lead_type.obligation") : revealTarget.source_type === "permit" ? t("dashboard.lead_type.permit") : t("dashboard.lead_type.open")}
-                  </span>
+                    {(() => {
+                      const isObligation = !!revealTarget.source_type && OBLIGATION_TYPES.includes(revealTarget.source_type);
+                      const isPermit = revealTarget.source_type === "permit";
+                      return (
+                        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${isObligation ? "bg-amber-500/15 text-amber-400" : isPermit ? "bg-sky-500/15 text-sky-400" : "bg-slate-500/15 text-slate-400"}`}>
+                          {isObligation ? t("dashboard.lead_type.obligation") : isPermit ? t("dashboard.lead_type.permit") : t("dashboard.lead_type.open")}
+                        </span>
+                      );
+                    })()}
                 </div>
                 <p className={`text-sm ${T.text2}`}>
                   {t("dashboard.reveal.authorize_prefix")} <span className="font-semibold">{t("dashboard.reveal.authorize_hours")}</span>{t("dashboard.reveal.authorize_suffix")}
@@ -2470,7 +2478,7 @@ if (dailyStats && dailyStats.remaining === 0) {
               </div>
             </div>
 
-            {/* ENDEREÇO + CATEGORIA */}
+            {/* ENDEREÃƒâ€¡O + CATEGORIA */}
             <div className="mt-4 p-3 rounded-xl border border-white/10 bg-white/5">
               <p className={`text-xs font-semibold ${T.text2}`}>
                 {revealTarget.address}, {revealTarget.city}
@@ -2480,7 +2488,7 @@ if (dailyStats && dailyStats.remaining === 0) {
               </p>
             </div>
 
-            {/* SECTION 1: Detalhes da Ocorrência */}
+            {/* SECTION 1: Detalhes da OcorrÃƒÂªncia */}
             {(revealTarget.department || revealTarget.case_status || revealTarget.descriptor || revealTarget.neighborhood || revealTarget.ward || revealTarget.precinct) && (
               <div className="mt-4 space-y-1.5">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
@@ -2512,7 +2520,7 @@ if (dailyStats && dailyStats.remaining === 0) {
                       <span className="font-medium truncate">
                         {[revealTarget.neighborhood, revealTarget.ward && revealTarget.ward.replace(/^\d+\s*/, ""), revealTarget.precinct && revealTarget.precinct.replace("Precinct ", "Pct ")]
                           .filter(Boolean)
-                          .join(", ") || "—"
+                          .join(", ") || "Ã¢â‚¬â€"
                       }
                       </span>
                     </div>
@@ -2581,7 +2589,7 @@ if (dailyStats && dailyStats.remaining === 0) {
               </div>
             )}
 
-            {/* SECTION 3: Histórico do Lead (eventos) */}
+            {/* SECTION 3: HistÃƒÂ³rico do Lead (eventos) */}
             {revealTarget._history && revealTarget._history.length > 0 && (
               <div className="mt-4 space-y-1.5">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
@@ -2594,7 +2602,7 @@ if (dailyStats && dailyStats.remaining === 0) {
                       <p className="text-sm text-slate-300">{event.detail || event.event_type}</p>
                       <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-1">
                         <span>{formatRelativeTime(event.created_at, t)}</span>
-                        {event.user_id && <span>· {t("dashboard.reveal.by_user")} #{event.user_id}</span>}
+                        {event.user_id && <span>Ã‚Â· {t("dashboard.reveal.by_user")} #{event.user_id}</span>}
                       </div>
                     </div>
                   ))}
@@ -2602,7 +2610,7 @@ if (dailyStats && dailyStats.remaining === 0) {
               </div>
             )}
 
-            {/* SECTION 4: Ocorrências do Imóvel (Parte B) */}
+            {/* SECTION 4: OcorrÃƒÂªncias do ImÃƒÂ³vel (Parte B) */}
             {revealTarget._occurrences && revealTarget._occurrences.length > 0 && (
               <div className="mt-4 space-y-1.5">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
@@ -2613,7 +2621,7 @@ if (dailyStats && dailyStats.remaining === 0) {
                   {revealTarget._occurrences.map((oc) => (
                     <div key={oc.id || oc.external_id || `${oc.case_title}-${oc.opened_at}`} className="p-2 rounded border border-white/5 bg-white/5">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs font-semibold text-slate-200">{oc.case_title || "Ocorrência"}</span>
+                        <span className="text-xs font-semibold text-slate-200">{oc.case_title || "OcorrÃƒÂªncia"}</span>
                         {oc.case_status && (
                           <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
                             oc.case_status.toLowerCase() === "closed" ? "bg-emerald-500/15 text-emerald-400"
@@ -2641,7 +2649,7 @@ if (dailyStats && dailyStats.remaining === 0) {
               </div>
             )}
 
-            {/* CONSENT CHECKBOX + BOTÕES */}
+            {/* CONSENT CHECKBOX + BOTÃƒâ€¢ES */}
             <div className="mt-4">
               <div className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3">
                 <label className={`flex items-start gap-2.5 text-sm cursor-pointer ${isDark ? "text-slate-200" : "text-slate-700"}`}>
@@ -2700,7 +2708,7 @@ if (dailyStats && dailyStats.remaining === 0) {
         onClose={() => setShowWelcomePopup(false)}
         isDark={isDark}
       />
-      {/* LOCK SCREEN: período (trial/plano) expirado */}
+      {/* LOCK SCREEN: perÃƒÂ­odo (trial/plano) expirado */}
       {subscription && !subscription.can_access && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center p-4" style={{ backgroundColor: isDark ? "rgba(11,13,18,0.85)" : "rgba(248,250,252,0.9)" }}>
           <div className={`w-full max-w-md rounded-2xl border p-8 text-center shadow-2xl ${isDark ? "bg-[#10121a] border-white/10" : "bg-white border-slate-200"}`}>
@@ -2734,7 +2742,7 @@ if (dailyStats && dailyStats.remaining === 0) {
         </div>
       )}
 
-      {/* Toast Notifications (fila empilhável) */}
+      {/* Toast Notifications (fila empilhÃƒÂ¡vel) */}
       {toasts.length > 0 && (
         <div className="fixed bottom-6 right-6 z-[90] flex flex-col gap-2 items-end">
           {toasts.map((t) => (

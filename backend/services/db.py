@@ -563,6 +563,7 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         "address_city": "TEXT",
         "address_state": "TEXT",
         "address_zip": "TEXT",
+        "bbl": "TEXT",
         "case_title": "TEXT",
         "subject": "TEXT",
         "reason": "TEXT",
@@ -605,6 +606,18 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
                 conn.execute(f"CREATE UNIQUE INDEX {idx_name} ON leads {idx_cols}")
             except sqlite3.OperationalError:
                 pass
+
+    # Indice (nao unico) pararico de imoveis em NYC. O BBL e o identificador
+    # canonico borough-block-lot e permite casar o lead com o proprietario de forma
+    # exacta, sem depender de parsing de morada.
+    _bbl_exists = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_leads_bbl'"
+    ).fetchone()
+    if not _bbl_exists:
+        try:
+            conn.execute("CREATE INDEX idx_leads_bbl ON leads(bbl)")
+        except sqlite3.OperationalError:
+            pass
 
     user_cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
     if user_cols and "score" not in user_cols:
@@ -728,9 +741,11 @@ class DatabaseService:
                   case_title, subject, reason, type, queue, department,
                   closure_reason, case_status, on_time, sla_target_dt, closed_dt,
                   submitted_photo, closed_photo, source, neighborhood, ward, precinct,
-                  descriptor, resolution_description, resolution_action_updated_date
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  descriptor, resolution_description, resolution_action_updated_date,
+                  bbl
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(address, city) DO UPDATE SET
+                  bbl=COALESCE(NULLIF(excluded.bbl, ''), leads.bbl),
                   external_id=excluded.external_id,
                   source_type=excluded.source_type,
                   state=excluded.state,
@@ -791,6 +806,7 @@ class DatabaseService:
                     lead.closure_reason, lead.case_status, lead.on_time, lead.sla_target_dt, lead.closed_dt,
                     lead.submitted_photo, lead.closed_photo, lead.source, lead.neighborhood, lead.ward, lead.precinct,
                     lead.descriptor, lead.resolution_description, lead.resolution_action_updated_date,
+                    getattr(lead, "bbl", None),
                 ),
             )
             conn.commit()
@@ -877,8 +893,16 @@ class DatabaseService:
             params = [city]
 
             if source_type:
-                sql += " AND source_type = ?"
-                params.append(source_type)
+                # Aceita lista para o filtro agrupado da UI (ex: "Obrigacao legal"
+                # = dob_violation + hpd_violation)
+                if isinstance(source_type, (list, tuple, set)):
+                    wanted = [str(s).strip() for s in source_type if str(s).strip()]
+                    if wanted:
+                        sql += " AND source_type IN (%s)" % ",".join("?" * len(wanted))
+                        params.extend(wanted)
+                else:
+                    sql += " AND source_type = ?"
+                    params.append(source_type)
             if category:
                 sql += " AND issue_category = ?"
                 params.append(category)

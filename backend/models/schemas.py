@@ -9,6 +9,7 @@ class SourceType(str, Enum):
     SERVICE_311 = "311"
     BUILDING_PERMIT = "permit"
     DOB_VIOLATION = "dob_violation"
+    HPD_VIOLATION = "hpd_violation"
     TAX_DELINQUENCY = "tax_delinquency"
 
 
@@ -50,6 +51,9 @@ class RawLead311(BaseModel):
     lng: Optional[float] = None
     issue_category: IssueCategory = IssueCategory.GRASS
     source_type: Optional[str] = None  # "311" | "permit" | "dob_violation" (None => 311)
+    # BBL (borough-block-lot) de NYC: identificador canonico de imovel, permite
+    # casar o lead com o proprietario de forma exacta
+    bbl: Optional[str] = None
 
     # Historical details from 311 systems (populated generically)
     case_title: Optional[str] = None
@@ -120,7 +124,10 @@ class EnrichedLead(BaseModel):
     descriptor: Optional[str] = None
     resolution_description: Optional[str] = None
     resolution_action_updated_date: Optional[str] = None
-
+    # BBL (borough-block-lot) de NYC: identificador canonico de imovel, permite
+    # casar o lead com o proprietario de forma exacta
+    bbl: Optional[str] = None
+  
     owner_name: Optional[str]
     owner_phone: Optional[str]
     owner_email: Optional[str]

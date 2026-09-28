@@ -230,8 +230,17 @@ def _trigger_where(alias: str = "") -> str:
     statuses = ", ".join(f"'{s}'" for s in _OPEN_STATUSES)
     return (
         f"(LOWER({prefix}case_status) IN ({statuses}) "
-        f"OR {prefix}source_type IN ('permit', 'dob_violation', 'tax_delinquency'))"
+        f"OR {prefix}source_type IN ('permit', 'dob_violation', 'hpd_violation', 'tax_delinquency'))"
     )
+
+
+# Datasets que nao sao 311 mas usam o mesmo scraper generico. Sem esta tabela
+# o source_type fica "311" e o lead nunca aparece no filtro de obrigacao legal.
+_SOURCE_TYPE_BY_ENTRY = {
+    "hpd_violations": "hpd_violation",
+    "dob_violations": "dob_violation",
+    "dob_permits": "permit",
+}
 
 
 def _qualified_where(alias: str = "") -> str:
@@ -437,10 +446,12 @@ async def get_leads(
 ):
     """Retorna leads da cidade especificada com filtros opcionais"""
     try:
+        # O filtro "Obrigacao legal" e um grupo: pode chegar "dob_violation,hpd_violation"
+        type_filter = [t.strip() for t in str(type).split(",") if t.strip()] if type else None
         leads = await db_service.get_leads_by_city(
             city,
             limit=per_page * page,
-            source_type=type,
+            source_type=type_filter,
             category=category
         )
 
@@ -1159,13 +1170,18 @@ async def _dlq_reprocess(run_id: str) -> int:
                     descriptor=raw_lead.get("descriptor"),
                     resolution_description=raw_lead.get("resolution_description"),
                     resolution_action_updated_date=raw_lead.get("resolution_action_updated_date"),
+                    bbl=raw_lead.get("bbl"),
                 )
                 new_lead = await db_service.insert_lead_new(enriched)
                 if new_lead:
                     inserted += 1
                     # Enriquecimento
                     try:
-                        enrich_result = await owner_enrichment.enrich(raw_lead.get("address", ""), raw_lead.get("city", ""))
+                        enrich_result = await owner_enrichment.enrich(
+                            raw_lead.get("address", ""),
+                            raw_lead.get("city", ""),
+                            bbl=raw_lead.get("bbl"),
+                        )
                         owner_name_val = (enrich_result or {}).get("owner_name")
                         if owner_name_val:
                             await db_service.update_owner(new_lead["id"], owner_name_val)
@@ -1298,8 +1314,8 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
 
         # 3. Define cidades-alvo (base + dinâmicas se max_cities permitir)
         base_cities = [
-            {"domain": "data.cityofnewyork.us", "dataset": "erm2-nwe9", "city": "NYC", "state": "NY", "hours": 96, "limit": 5000, "fields": ["unique_key", "created_date", "complaint_type", "incident_address", "incident_zip", "latitude", "longitude", "status"]},
-            {"domain": "data.cityofnewyork.us", "dataset": "wvxf-dwi5", "city": "NYC", "state": "NY", "hours": 120, "fields": ["violation_id", "inspection_date", "building_id", "address", "city", "state", "zip", "latitude", "longitude", "violation_type", "violation_status", "disposition_date"]},  # HPD Violations
+            {"domain": "data.cityofnewyork.us", "dataset": "erm2-nwe9", "city": "NYC", "state": "NY", "hours": 96, "limit": 5000, "fields": ["unique_key", "created_date", "closed_date", "due_date", "complaint_type", "descriptor", "incident_address", "street_name", "intersection_street_1", "cross_street_1", "incident_zip", "latitude", "longitude", "status", "agency_name", "borough", "bbl", "community_board", "council_district", "police_precinct", "resolution_description", "open_data_channel_type"]},
+            {"domain": "data.cityofnewyork.us", "dataset": "wvxf-dwi5", "city": "NYC", "state": "NY", "hours": 120, "type": "hpd_violations", "fields": ["violationid", "buildingid", "inspectiondate", "approveddate", "housenumber", "lowhousenumber", "highhousenumber", "streetname", "boro", "zip", "apartment", "latitude", "longitude", "novtype", "novdescription", "violationstatus", "currentstatus", "novissueddate", "communityboard", "councildistrict", "bbl", "block", "lot"]},  # HPD Housing Maintenance Code Violations
             {"domain": "data.cityofchicago.org", "dataset": "v6vf-nfxy", "city": "Chicago", "state": "IL", "hours": 48, "fields": ["service_request_number", "created_date", "sr_type", "street_address", "zip_code", "latitude", "longitude", "status"]},
             {"domain": "www.dallasopendata.com", "dataset": "d7e7-envw", "city": "Dallas", "state": "TX", "hours": 48, "fields": ["service_request_number", "created_date", "service_request_type", "address", "lat_location", "status"]},
         ]
@@ -1410,7 +1426,7 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                     try:
                         rows = await _s._fetch_soql(
                             domain=domain, dataset=dataset,
-                            select="job_filing_number, work_permit, house_no, street_name, borough, zip_code, latitude, longitude, approved_date, issued_date, job_description, work_type, job_type, permit_status, applicant_first_name, applicant_last_name, applicant_business_name, owner_name, owner_business_name, nta, council_district",
+                            select="job_filing_number, work_permit, house_no, street_name, borough, zip_code, latitude, longitude, approved_date, issued_date, job_description, work_type, permit_status, applicant_first_name, applicant_last_name, applicant_business_name, owner_name, owner_business_name, nta, council_district",
                             where=None, limit=5000, order="approved_date DESC",
                         )
                         logger.info(f"DOB Permits: got {len(rows)} raw rows from Socrata")
@@ -1550,9 +1566,13 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                     # Socrata 311 genérico (NYC, Chicago, Dallas, etc.)
                     fields = entry["fields"]
                     city_hours = entry["hours"]
+                    # Fonte que nao e 311 (ex: HPD violations) precisa de source_type
+                    # proprio, senao cai em "311" e some do filtro de obrigacao legal.
+                    src_type = _SOURCE_TYPE_BY_ENTRY.get(entry.get("type"))
                     leads = await socrata_scraper.fetch_from_dataset(
                         entry["domain"], entry["dataset"], entry["city"], entry["state"],
                         field_names=fields, hours=city_hours, limit=entry.get("limit", 2000),
+                        source_type=src_type,
                     )
 
                 # Boston (CKAN) - caso especial
@@ -1687,6 +1707,7 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                 descriptor=getattr(raw_lead, "descriptor", None),
                 resolution_description=getattr(raw_lead, "resolution_description", None),
                 resolution_action_updated_date=getattr(raw_lead, "resolution_action_updated_date", None),
+                bbl=getattr(raw_lead, "bbl", None),
             )
             new_lead = await db_service.insert_lead_new(enriched)
             if new_lead:
@@ -1694,7 +1715,9 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                 newly_added.append(new_lead)
                 # Enriquecimento automático APENAS em leads estritamente novos
                 try:
-                    enrich_result = await owner_enrichment.enrich(raw_lead.address, raw_lead.city)
+                    enrich_result = await owner_enrichment.enrich(
+                        raw_lead.address, raw_lead.city, bbl=getattr(raw_lead, "bbl", None)
+                    )
                     owner_name_val = (enrich_result or {}).get("owner_name")
                     if owner_name_val:
                         await db_service.update_owner(new_lead["id"], owner_name_val)
@@ -1919,7 +1942,9 @@ async def enrich_leads(city: str = "NYC", limit: int = 500, user: dict = Depends
         updated = 0
         found = 0
         for row in rows:
-            enrich_result = await owner_enrichment.enrich(row["address"], row["city"])
+            enrich_result = await owner_enrichment.enrich(
+                row["address"], row["city"], bbl=row["bbl"] if "bbl" in row.keys() else None
+            )
             if enrich_result and enrich_result.get("owner_name"):
                 await db_service.update_owner(row["id"], enrich_result["owner_name"])
                 found += 1
@@ -2189,7 +2214,9 @@ async def enrich_single_lead(lead_id: int, user: dict = Depends(_get_current_use
         lead = await db_service.get_lead_by_id(lead_id)
         if not lead:
             raise HTTPException(status_code=404, detail="Lead não encontrado")
-        owner = await owner_enrichment.enrich(lead["address"], lead["city"])
+        owner = await owner_enrichment.enrich(
+            lead["address"], lead["city"], bbl=lead.get("bbl") if hasattr(lead, "get") else None
+        )
         owner_name = owner.get("owner_name") if owner else None
         if owner_name:
             await db_service.update_owner(lead_id, owner_name)
@@ -2970,7 +2997,11 @@ async def reserve_lead(
 
             if needs_enrichment:
                 # Enriquecimento de nome + mailing address (Socrata/CKAN)
-                enrich_result = await owner_enrichment.enrich(lead.get("address", ""), lead.get("city", ""))
+                enrich_result = await owner_enrichment.enrich(
+                    lead.get("address", ""),
+                    lead.get("city", ""),
+                    bbl=lead.get("bbl") if hasattr(lead, "get") else None,
+                )
                 if enrich_result:
                     if not owner_name and enrich_result.get("owner_name"):
                         owner_name = enrich_result["owner_name"]

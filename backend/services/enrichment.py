@@ -25,6 +25,22 @@ ENRICHMENT_MAX_RETRIES = 3
 ENRICHMENT_BASE_BACKOFF = 1.0  # seconds
 ENRICHMENT_MAX_BACKOFF = 30.0  # seconds
 
+# Aliases de cidade -> chave em CITY_DATASETS. As 311 guardam a cidade como
+# "NYC", mas varias fontes e Reports usam o nome por extenso ou o borough.
+CITY_ALIASES: Dict[str, str] = {
+    "NEW YORK": "NYC",
+    "NYC": "NYC",
+    "MANHATTAN": "NYC",
+    "BROOKLYN": "NYC",
+    "QUEENS": "NYC",
+    "BRONX": "NYC",
+    "STATEN ISLAND": "NYC",
+    "CHICAGO": "CHICAGO",
+    "DALLAS": "DALLAS",
+    "BOSTON": "BOSTON",
+    "NORFOLK": "NORFOLK",
+}
+
 
 CITY_DATASETS: Dict[str, Dict] = {
     "NYC": {
@@ -40,6 +56,9 @@ CITY_DATASETS: Dict[str, Dict] = {
         "mailing_zip_col": None,
         "type": "socrata",
         "number_as_string": True,
+        # BBL (borough-block-lot) e o identificador canonico de imovel em NYC.
+        # Quando presente, o casamento e exacto e nao depende de parsing de morada.
+        "bbl_col": "bbl",
     },
     "DALLAS": {
         "domain": "www.dallasopendata.com",
@@ -137,6 +156,23 @@ def parse_address(address: str) -> Optional[tuple]:
     return p[0].strip(), p[1].strip()
 
 
+# Numero de casa aceite: digitos, com sufixo de letra (1684A), hifen (31-67)
+# ou ponto (100.5). Fracoes ("1/2") e palavras nao sao numeros de imovel.
+_HOUSE_NUMBER_RE = re.compile(r"^\d+[A-Za-z]?(-\d+[A-Za-z]?)*(\.\d+)?$")
+
+
+def is_house_number(num: str) -> bool:
+    """True se `num` parece mesmo um numero de imovel.
+
+    Enderecos como "INTERSECTION of Vassar St" ou "S Barry Ave" fazem
+    `parse_address` devolver "INTERSECTION" / "S" como numero. Sem esta
+    verificacao o casamento por nome de rua atribui o proprietario de um
+    imovel que nao e o do chamado.
+    """
+    candidate = re.sub(r"[^0-9A-Za-z./-]", "", (num or "").strip())
+    return bool(candidate) and bool(_HOUSE_NUMBER_RE.match(candidate))
+
+
 # Retry configuration for enrichment
 ENRICHMENT_MAX_RETRIES = 3
 ENRICHMENT_BASE_BACKOFF = 1.0  # seconds
@@ -178,41 +214,108 @@ class OwnerEnrichment:
         return headers
 
     def _config_for(self, city: str) -> Optional[Dict]:
+        if not city:
+            return None
         key = None
-        city_upper = city.upper()
-        for k in CITY_DATASETS:
-            if city_upper.startswith(k) or k in city_upper:
-                key = k
+        city_upper = city.upper().strip()
+        for alias, target in CITY_ALIASES.items():
+            if alias in city_upper:
+                key = target
                 break
+        if key is None:
+            for k in CITY_DATASETS:
+                if city_upper.startswith(k) or k in city_upper:
+                    key = k
+                    break
         return CITY_DATASETS.get(key)
 
-    async def enrich(self, address: str, city: str) -> Optional[Dict[str, Any]]:
+    async def enrich(
+        self, address: str, city: str, bbl: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
         cfg = self._config_for(city)
         if not cfg:
             return None
-        cache_key = f"{city}:{address}"
+        bbl_key = str(bbl).strip() if bbl else ""
+        cache_key = f"{city}:{address}" + (f":bbl={bbl_key}" if bbl_key else "")
         if cache_key in self._cache:
             return self._cache[cache_key]
         if not self._budget_available():
             logger.info(f"Enriquecimento: cota diária esgotada ({settings.ENRICHMENT_DAILY_BUDGET}/dia) — pulando {address}")
             return None
         self._consume_budget()
-        result = await self._lookup(address, cfg)
+        result = await self._lookup(address, cfg, bbl_key or None)
         if result is not None:
             self._cache[cache_key] = result
         return result
 
-    async def _lookup(self, address: str, cfg: Dict) -> Optional[Dict[str, Any]]:
+    async def _lookup(
+        self, address: str, cfg: Dict, bbl: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        # BBL primeiro: e o identificador canonico de imovel em NYC e da um
+        # casamento exacto, sem parsing de morada e sem risco de atribuir o
+        # proprietario do imovel vizinho.
+        if bbl and cfg.get("bbl_col"):
+            bbl_result = await self._lookup_by_bbl(bbl, cfg)
+            if bbl_result is not None:
+                return bbl_result
+
         parsed = parse_address(address)
         if not parsed:
             return None
         num, street = parsed
+
+        # Sem numero de imovel nao ha como provar a que propriedade o dono
+        # pertence. Enderecos de cruzamento ("INTERSECTION of A & B") e vias sem
+        # numero ("S Barry Ave") caem aqui e devolvem None de proposito.
+        if not is_house_number(num):
+            logger.debug(f"Sem numero de imovel em {address!r} — owner nao atribuido")
+            return None
 
         if cfg["type"] == "socrata":
             return await self._lookup_socrata(address, num, street, cfg)
         elif cfg["type"] == "ckan":
             return await self._lookup_ckan(address, num, street, cfg)
         return None
+
+    async def _lookup_by_bbl(self, bbl: str, cfg: Dict) -> Optional[Dict[str, Any]]:
+        """Casamento exacto de imovel via BBL (borough-block-lot) de NYC."""
+        bbl_col = cfg.get("bbl_col")
+        if not bbl_col:
+            return None
+        if not re.fullmatch(r"\d{9,10}", bbl):
+            logger.debug(f"BBL invalido, ignorado: {bbl!r}")
+            return None
+
+        domain, dset = cfg["domain"], cfg["dataset"]
+        select_cols = [cfg["owner_col"]]
+        for opt in ("address_col", "zip_col", "mailing_addr_col", "mailing_city_col", "mailing_zip_col"):
+            if cfg.get(opt):
+                select_cols.append(cfg[opt])
+        select_cols = list(dict.fromkeys(select_cols))
+
+        url = f"https://{domain}/resource/{dset}.json"
+        params = {
+            "$select": ",".join(select_cols),
+            "$where": f"{bbl_col} = {bbl}",
+            "$limit": "1",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=90) as client:
+                resp = await client.get(url, params=params, headers=self._headers())
+        except httpx.HTTPError as e:
+            logger.debug(f"Erro lookup BBL {bbl}: {e}")
+            return None
+        if resp.status_code != 200:
+            logger.debug(f"Lookup BBL {bbl} retornou {resp.status_code}")
+            return None
+        try:
+            data = resp.json()
+        except Exception:
+            return None
+        if not isinstance(data, list) or not data:
+            logger.debug(f"BBL {bbl} sem proprietario em {dset}")
+            return None
+        return self._build_result(data[0], cfg, f"BBL {bbl}")
 
     async def _lookup_socrata(self, original_address: str, num: str, street_norm: str, cfg: Dict) -> Optional[Dict[str, Any]]:
         domain = cfg["domain"]
@@ -326,7 +429,10 @@ class OwnerEnrichment:
                             row_num = str(row.get(num_col) or "").strip()
                             if row_num == num:
                                 return self._build_result(row, cfg, original_address)
-                        return self._build_result(data[0], cfg, original_address)
+                        # O $where ja filtrou pelo numero: se nao ha casamento exato,
+                        # a unica resposta segura e NAO ter proprietario.
+                        logger.debug(f"Sem match exato para numero {num!r} em {cfg.get('dataset')}")
+                        return None
                     else:
                         best = None
                         best_year = -1
@@ -343,8 +449,19 @@ class OwnerEnrichment:
                                     best = row
                         if best is not None:
                             return self._build_result(best, cfg, original_address)
-                        if data:
-                            return self._build_result(data[0], cfg, original_address)
+                        # Fallback seguro: so aceitar uma linha cujo numero de
+                        # imovel normalizado coincida com o pedido. Devolver
+                        # data[0] sem verificacao atribui o proprietario do
+                        # imóvel vizinho.
+                        for row in data:
+                            row_addr = str(row.get(address_col) or "")
+                            parsed = parse_address(row_addr)
+                            if parsed and normalize_number(parsed[0]) == normalize_number(num):
+                                return self._build_result(row, cfg, original_address)
+                        logger.debug(
+                            f"Sem match verificado para {original_address!r} em {cfg.get('dataset')}"
+                        )
+                        return None
         return None
 
     async def _lookup_ckan(self, original_address: str, num: str, street_norm: str, cfg: Dict) -> Optional[Dict[str, Any]]:
