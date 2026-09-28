@@ -4513,6 +4513,8 @@ class AsyncDatabaseService:
         address = reserved.get("address")
         city = reserved.get("city")
         state = reserved.get("state")
+        owner_name = reserved.get("owner_name")
+        zip_code = reserved.get("zip_code") or reserved.get("zip")
 
         # 2. Telefone e ENRIQUECIMENTO OPCIONAL.
         #    A reserva ja esta garantida neste ponto: uma falha do provedor de telefone
@@ -4521,7 +4523,7 @@ class AsyncDatabaseService:
         phone_result: Optional[PhoneLookupResult] = None
         if address and city and state:
             try:
-                phone_result = await searchbug_service.lookup_phone(address, city, state)
+                phone_result = await searchbug_service.lookup_phone(address, city, state, owner_name=owner_name, zip_code=zip_code)
             except Exception as exc:
                 logger.warning(f"Phone lookup erro inesperado no lead {lead_id}: {exc}")
                 phone_result = None

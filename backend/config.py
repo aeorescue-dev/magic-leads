@@ -35,8 +35,9 @@ class Settings(BaseSettings):
     TRUTHFINDER_API_KEY: str = ""  # Optional, para skip tracing
     GOOGLE_GEOCODER_API_KEY: str = ""  # Optional
     GEMINI_API_KEY: str = ""  # Optional para visão
-    SEARCHBUG_API_KEY: str = ""  # Optional, para busca de telefone (Searchbug)
-    SEARCHBUG_BASE_URL: str = "https://ws.searchbug.com"  # Optional, base URL da API Searchbug
+    SEARCHBUG_API_KEY: str = ""  # Optional, API Key / Password para Searchbug
+    SEARCHBUG_ACCOUNT_CODE: str = ""  # Optional, CO_CODE (Account Number) para Searchbug Contact Info API
+    SEARCHBUG_BASE_URL: str = "https://data.searchbug.com"  # Base URL da API Contact Info
 
     # Scraper Config
     SOCRATA_APP_TOKEN: str = ""  # App Token Socrata (pool dedicado, cota maior)

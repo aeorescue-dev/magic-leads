@@ -104,7 +104,7 @@ class PhoneLookupService:
             enabled.append("Searchbug")
         logger.info(f"PhoneLookup: LIVE MODE enabled. Providers: {', '.join(enabled)}")
 
-    async def lookup_phone(self, address: str, city: str, state: str) -> "PhoneLookupResult":
+    async def lookup_phone(self, address: str, city: str, state: str, owner_name: str | None = None, zip_code: str | None = None) -> "PhoneLookupResult":
         """Look up phone number for an address via fallback chain."""
 
         # Provider chain (ordered by reliability/cost)
@@ -130,22 +130,56 @@ class PhoneLookupService:
             provider="none"
         )
 
-    async def _lookup_searchbug(self, address: str, city: str, state: str) -> "PhoneLookupResult":
-        """Lookup via Searchbug API."""
-        if not self.searchbug_key:
-            return PhoneLookupResult(success=False, error="Searchbug key not configured", provider="Searchbug")
+    async def _lookup_searchbug(self, address: str, city: str, state: str, owner_name: str | None = None, zip_code: str | None = None) -> "PhoneLookupResult":
+        """Lookup via Searchbug Contact Info API (api_contact).
 
-        params = {
-            "key": self.searchbug_key,
-            "addr": address,
-            "city": city,
-            "state": state,
-            "format": "json",
+        Requer SEARCHBUG_ACCOUNT_CODE (CO_CODE) e SEARCHBUG_API_KEY (PASS).
+        Endpoint: POST https://data.searchbug.com/api/search.aspx
+        """
+        account_code = getattr(settings, "SEARCHBUG_ACCOUNT_CODE", None) or os.getenv("SEARCHBUG_ACCOUNT_CODE")
+        api_key = self.searchbug_key
+
+        if not account_code or not api_key:
+            return PhoneLookupResult(
+                success=False,
+                error="Searchbug CO_CODE (account number) or API key not configured",
+                provider="Searchbug"
+            )
+
+        # Extrai primeiro/último nome do owner_name se disponível
+        fname = lname = ""
+        if owner_name:
+            parts = owner_name.strip().split()
+            if parts:
+                fname = parts[0]
+                if len(parts) > 1:
+                    lname = " ".join(parts[1:])
+
+        # Form data para POST
+        form_data = {
+            "CO_CODE": account_code,
+            "PASS": api_key,
+            "TYPE": "api_contact",
+            "FORMAT": "JSON",
+            "ADDRESS": address,
+            "CITY": city,
+            "STATE": state,
         }
+        if fname:
+            form_data["FNAME"] = fname
+        if lname:
+            form_data["LNAME"] = lname
+        if zip_code:
+            form_data["ZIP"] = zip_code
 
         try:
-            async with httpx.AsyncClient(timeout=15.0, verify=False) as client:
-                response = await client.get("https://ws.searchbug.com/phone.php", params=params, timeout=15.0, follow_redirects=True)
+            async with httpx.AsyncClient(timeout=20.0, verify=False) as client:
+                response = await client.post(
+                    "https://data.searchbug.com/api/search.aspx",
+                    data=form_data,
+                    timeout=20.0,
+                    follow_redirects=True
+                )
 
                 if response.status_code != 200:
                     logger.error(f"Searchbug HTTP {response.status_code} for {address}, {city}, {state}: {response.text[:500]}")
@@ -153,37 +187,58 @@ class PhoneLookupService:
 
                 data = response.json()
 
-                error = data.get("error") or data.get("Error") or data.get("ErrorMessage")
-                if error:
+                # Resposta de erro da API
+                status = data.get("Status") or data.get("STATUS")
+                if status and status.upper() in ("ERROR", "NORESULTS"):
+                    error = data.get("ERROR") or data.get("Error") or "No results"
                     return PhoneLookupResult(success=False, error=str(error), provider="Searchbug", raw=data)
 
-                phone = data.get("phone") or data.get("Phone") or data.get("phone_number")
-                if not phone:
-                    return PhoneLookupResult(success=False, error="No phone found", provider="Searchbug", raw=data)
+                # Extrai telefone do formato novo: Data.RECORD[].PHONES.PHONE[]
+                data_obj = data.get("Data") or data.get("DATA")
+                if not data_obj:
+                    return PhoneLookupResult(success=False, error="Unexpected response format (no Data)", provider="Searchbug", raw=data)
 
-                return PhoneLookupResult(
-                    success=True,
-                    phone=normalize_us_phone(str(phone).strip()),
-                    phone_type=str(data.get("phone_type") or data.get("PhoneType") or data.get("type") or "").strip().lower() or None,
-                    carrier=str(data.get("carrier") or data.get("Carrier") or data.get("carrier_name") or "").strip() or None,
-                    is_connected=bool(data.get("is_connected") or data.get("IsConnected")) if data.get("is_connected") or data.get("IsConnected") else None,
-                    provider="Searchbug",
-                    raw=data
-                )
+                records = data_obj.get("RECORD") or data_obj.get("Record") or []
+                if isinstance(records, dict):
+                    records = [records]
+
+                for rec in records:
+                    phones_obj = rec.get("PHONES") or rec.get("Phones")
+                    if not phones_obj:
+                        continue
+                    phone_list = phones_obj.get("PHONE") or phones_obj.get("Phone") or []
+                    if isinstance(phone_list, str):
+                        phone_list = [phone_list]
+                    for phone in phone_list:
+                        if phone and str(phone).strip():
+                            return PhoneLookupResult(
+                                success=True,
+                                phone=normalize_us_phone(str(phone).strip()),
+                                phone_type=str(rec.get("PHONE_TYPE") or rec.get("PhoneType") or "").strip().lower() or None,
+                                carrier=str(rec.get("CARRIER") or rec.get("Carrier") or "").strip() or None,
+                                is_connected=bool(rec.get("IS_CONNECTED") or rec.get("IsConnected")) if rec.get("IS_CONNECTED") or rec.get("IsConnected") else None,
+                                provider="Searchbug",
+                                raw=data
+                            )
+
+                return PhoneLookupResult(success=False, error="No phone found in results", provider="Searchbug", raw=data)
 
         except Exception as e:
-            logger.warning(f"Searchbug error: {e}")
+            logger.warning(f"Searchbug Contact Info API error: {e}")
             return PhoneLookupResult(success=False, error=str(e), provider="Searchbug")
 
-    async def lookup_phone_batch(self, addresses: list[tuple[str, str, str]]) -> list["PhoneLookupResult"]:
-        """Look up multiple phones concurrently (respects rate limits)."""
+    async def lookup_phone_batch(self, addresses: list[tuple[str, str, str, str | None, str | None]]) -> list["PhoneLookupResult"]:
+        """Look up multiple phones concurrently (respects rate limits).
+
+        Each tuple: (address, city, state, owner_name, zip_code)
+        """
         semaphore = asyncio.Semaphore(2)
 
-        async def _lookup_with_sem(addr: str, city: str, state: str) -> "PhoneLookupResult":
+        async def _lookup_with_sem(addr: str, city: str, state: str, owner_name: str | None = None, zip_code: str | None = None) -> "PhoneLookupResult":
             async with semaphore:
-                return await self.lookup_phone(addr, city, state)
+                return await self.lookup_phone(addr, city, state, owner_name=owner_name, zip_code=zip_code)
 
-        tasks = [_lookup_with_sem(addr, city, state) for addr, city, state in addresses]
+        tasks = [_lookup_with_sem(addr, city, state, owner_name, zip_code) for addr, city, state, owner_name, zip_code in addresses]
         return await asyncio.gather(*tasks)
 
 
@@ -192,9 +247,9 @@ phone_lookup_service = PhoneLookupService()
 
 
 # Convenience function for backward compatibility
-async def searchbug_lookup_phone(address: str, city: str, state: str) -> "PhoneLookupResult":
+async def searchbug_lookup_phone(address: str, city: str, state: str, owner_name: str | None = None, zip_code: str | None = None) -> "PhoneLookupResult":
     """Convenience function for simple lookups (backward compat)."""
-    return await phone_lookup_service.lookup_phone(address, city, state)
+    return await phone_lookup_service.lookup_phone(address, city, state, owner_name=owner_name, zip_code=zip_code)
 
 
 # Aliases for backward compat

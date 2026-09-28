@@ -47,7 +47,13 @@ content = content.replace(
 
                 # Busca de telefone (Searchbug em prod, mock em dev)
                 if not owner_phone:
-                    phone_result = await searchbug_service.lookup_phone(lead.get("address", ""), lead.get("city", ""), lead.get("state", ""))
+                    phone_result = await searchbug_service.lookup_phone(
+                        lead.get("address", ""),
+                        lead.get("city", ""),
+                        lead.get("state", ""),
+                        owner_name=owner_name,
+                        zip_code=lead.get("zip_code") or lead.get("zip"),
+                    )
                     if phone_result.success:
                         owner_phone = phone_result.phone
                         await db_service.update_owner_phone(lead_id, owner_phone)
@@ -105,7 +111,13 @@ content = content.replace(
                     # Busca de telefone (Searchbug em prod, mock em dev)
                     if not owner_phone:
                         logger.info(f"[RESERVE] Calling searchbug_service.lookup_phone for lead_id={lead_id}")
-                        phone_result = await searchbug_service.lookup_phone(lead.get("address", ""), lead.get("city", ""), lead.get("state", ""))
+                        phone_result = await searchbug_service.lookup_phone(
+                            lead.get("address", ""),
+                            lead.get("city", ""),
+                            lead.get("state", ""),
+                            owner_name=owner_name,
+                            zip_code=lead.get("zip_code") or lead.get("zip"),
+                        )
                         logger.info(f"[RESERVE] searchbug_service result: success={phone_result.success} phone={phone_result.phone} error={phone_result.error}")
                         if phone_result.success:
                             owner_phone = phone_result.phone
