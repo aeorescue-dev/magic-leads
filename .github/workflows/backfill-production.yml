@@ -1,0 +1,92 @@
+name: Backfill Produção - NYC
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Correr em modo dry-run (sem gravar)'
+        type: boolean
+        default: false
+        required: false
+      environment:
+        description: 'Ambiente Railway (production, staging)'
+        type: string
+        default: 'production'
+        required: false
+
+  # Opcional: correr automaticamente após deploy bem-sucedido no Railway
+  # Requer que o Railway envie webhook para este repo (Railway → Settings → GitHub Integration)
+  # repository_dispatch:
+  #   types: [railway-deploy-success]
+
+jobs:
+  backfill-nyc:
+    name: Backfill NYC (produção)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Instalar Railway CLI
+        run: |
+          curl -fsSL https://railway.app/install.sh | bash
+          echo "$HOME/.railway/bin" >> $GITHUB_PATH
+
+      - name: Autenticar no Railway
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway login --token "$RAILWAY_TOKEN"
+
+      - name: Verificar projeto/serviço
+        env:
+          RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
+          RAILWAY_SERVICE: ${{ secrets.RAILWAY_SERVICE }}
+          RAILWAY_ENVIRONMENT: ${{ github.event.inputs.environment || 'production' }}
+        run: |
+          railway status --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" --service "$RAILWAY_SERVICE"
+
+      - name: Configurar Python e dependências
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Instalar dependências do backend
+        working-directory: ./backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio httpx fastapi uvicorn
+
+      - name: Correr backfill NYC (produção)
+        env:
+          RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
+          RAILWAY_SERVICE: ${{ secrets.RAILWAY_SERVICE }}
+          RAILWAY_ENVIRONMENT: ${{ github.event.inputs.environment || 'production' }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+        run: |
+          set -euo pipefail
+          cmd="python scripts/backfill_nyc_hpd.py"
+          if [ "$DRY_RUN" = "true" ]; then
+            cmd="$cmd --dry-run"
+          else
+            cmd="$cmd --apply"
+          fi
+          echo "A executar: $cmd"
+          railway run --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" --service "$RAILWAY_SERVICE" $cmd
+
+      - name: Resumo do backfill
+        if: always()
+        run: |
+          echo "## Backfill NYC - ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Ambiente**: ${{ github.event.inputs.environment || 'production' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Modo**: ${{ github.event.inputs.dry_run == 'true' && 'Dry-run' || 'Apply' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Workflow**: ${{ github.workflow }} #${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
