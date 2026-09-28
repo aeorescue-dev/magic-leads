@@ -3672,132 +3672,204 @@ class DatabaseService:
 
     # ===== REFUND / ANTI-FRAUD (Reserve 1 Hour) =====
 
-    REPORT_WINDOW_MIN = 5  # Janela de 5 minutos para reportar número inválido
-    MAX_REFUNDS_PER_DAY = 2  # Máximo 2 estornos por usuário por dia
+    REPORT_WINDOW_MIN = 5  # Janela de 5 minutos para reportar número inválido (Regra B)
+    MAX_REFUNDS_PER_DAY = 2  # Máximo 2 estornos por usuário por dia (Regra D)
 
-    def can_report_invalid_number(self, user_id: int, lead_id: int) -> dict:
-        """Verifica se o usuário pode reportar número inválido para este lead.
+    def validate_refund_safety(
+        self,
+        user_id: int,
+        lead_id: int,
+        *,
+        check_active_reveal: bool = True,
+        check_time_window: bool = True,
+        check_lead_status: bool = True,
+        check_refund_blocked: bool = True,
+        check_daily_limit: bool = True,
+    ) -> dict:
+        """Validação unificada de segurança para estornos (Regra A e Regra B).
 
-        Regras:
-        - Janela de 5 minutos após o reveal (REPORT_WINDOW_MIN)
-        - Lead não pode ter status "in_negotiation" ou "converted" (Regra C)
-        - Máximo 2 estornos por dia por usuário (Regra D)
-        - Lead não pode ter refund_blocked = 1
+        Args:
+            user_id: ID do usuário
+            lead_id: ID do lead
+            check_active_reveal: Verifica se há reveal ativo hoje (padrão: True)
+            check_time_window: Verifica janela de 5 min (Regra B). False para Regra A.
+            check_lead_status: Bloqueia se lead em negociação/convertido (Regra C)
+            check_refund_blocked: Bloqueia se lead já teve estorno (refund_blocked=1)
+            check_daily_limit: Aplica limite de 2 estornos/dia (Regra D)
 
-        Retorna dict com 'allowed': bool, 'reason': str, 'revealed_at': datetime|None
+        Retorna dict com 'allowed': bool, 'reason': str (error_code), 'revealed_at': datetime|None, 'params': dict
         """
         conn = get_connection()
         try:
             today = datetime.utcnow().date().isoformat()
 
             # 1. Busca o reveal ativo para este lead/usuário hoje
-            reveal = conn.execute(
-                """SELECT r.revealed_at, r.lead_id, r.user_id
-                   FROM lead_reveals r
-                   WHERE r.user_id = ? AND r.lead_id = ? AND r.revealed_date = ?
-                     AND r.returned_to_pool = 0
-                   ORDER BY r.id DESC LIMIT 1""",
-                (user_id, lead_id, today),
-            ).fetchone()
+            reveal = None
+            if check_active_reveal:
+                reveal = conn.execute(
+                    """SELECT r.revealed_at, r.lead_id, r.user_id
+                       FROM lead_reveals r
+                       WHERE r.user_id = ? AND r.lead_id = ? AND r.revealed_date = ?
+                         AND r.returned_to_pool = 0
+                       ORDER BY r.id DESC LIMIT 1""",
+                    (user_id, lead_id, today),
+                ).fetchone()
 
-            if not reveal:
-                return {"allowed": False, "reason": "no_active_reveal", "revealed_at": None}
+                if not reveal:
+                    return {"allowed": False, "reason": "no_active_reveal", "revealed_at": None, "params": {}}
 
-            # 2. Verifica janela de 5 minutos
-            try:
-                revealed_dt = datetime.fromisoformat(reveal["revealed_at"].replace("Z", "+00:00"))
-            except Exception:
-                return {"allowed": False, "reason": "invalid_revealed_at", "revealed_at": None}
+            # 2. Janela de 5 minutos (apenas se solicitado - Regra B)
+            if check_time_window and reveal:
+                try:
+                    revealed_dt = datetime.fromisoformat(reveal["revealed_at"].replace("Z", "+00:00"))
+                except Exception:
+                    return {"allowed": False, "reason": "invalid_revealed_at", "revealed_at": None, "params": {}}
 
-            elapsed_min = (datetime.utcnow() - revealed_dt).total_seconds() / 60.0
-            if elapsed_min > self.REPORT_WINDOW_MIN:
-                return {
-                    "allowed": False,
-                    "reason": "report_window_expired",
-                    "revealed_at": revealed_dt,
-                    "elapsed_min": round(elapsed_min, 1),
-                }
-
-            # 3. Verifica se lead tem status que bloqueia estorno (Regra C)
-            lead = conn.execute(
-                "SELECT lead_status, refund_blocked FROM leads WHERE id = ?", (lead_id,)
-            ).fetchone()
-            if lead:
-                if lead["lead_status"] in ("in_negotiation", "converted"):
+                elapsed_min = (datetime.utcnow() - revealed_dt).total_seconds() / 60.0
+                if elapsed_min > self.REPORT_WINDOW_MIN:
                     return {
                         "allowed": False,
-                        "reason": "lead_status_blocked",
-                        "lead_status": lead["lead_status"],
+                        "reason": "report_window_expired",
                         "revealed_at": reveal["revealed_at"],
-                    }
-                if lead["refund_blocked"]:
-                    return {
-                        "allowed": False,
-                        "reason": "refund_blocked",
-                        "revealed_at": reveal["revealed_at"],
+                        "params": {"elapsed_min": round(elapsed_min, 1), "window_min": self.REPORT_WINDOW_MIN},
                     }
 
-            # 4. Verifica limite de estornos por dia (Regra D)
-            refund_count = conn.execute(
-                """SELECT COUNT(*) as cnt FROM lead_reveals
-                   WHERE user_id = ? AND refunded = 1 AND revealed_date = ?""",
-                (user_id, today),
-            ).fetchone()
-            refund_count_today = refund_count["cnt"] if refund_count else 0
-            if refund_count_today >= self.MAX_REFUNDS_PER_DAY:
-                return {
-                    "allowed": False,
-                    "reason": "daily_refund_limit_exceeded",
-                    "refund_count_today": refund_count_today,
-                    "max_per_day": self.MAX_REFUNDS_PER_DAY,
-                    "revealed_at": reveal["revealed_at"],
-                }
+            # 3. Status do lead que bloqueia estorno (Regra C)
+            if check_lead_status:
+                lead = conn.execute(
+                    "SELECT lead_status, refund_blocked FROM leads WHERE id = ?", (lead_id,)
+                ).fetchone()
+                if lead:
+                    if lead["lead_status"] in ("in_negotiation", "converted"):
+                        return {
+                            "allowed": False,
+                            "reason": "lead_status_blocked",
+                            "revealed_at": reveal["revealed_at"] if reveal else None,
+                            "params": {"lead_status": lead["lead_status"]},
+                        }
+                    if check_refund_blocked and lead["refund_blocked"]:
+                        return {
+                            "allowed": False,
+                            "reason": "refund_blocked",
+                            "revealed_at": reveal["revealed_at"] if reveal else None,
+                            "params": {},
+                        }
 
-            # 4b. Verifica limite no users table (para consistência)
-            user_refund = conn.execute(
-                "SELECT refund_count_today, last_refund_date FROM users WHERE id = ?", (user_id,)
-            ).fetchone()
-            if user_refund:
-                user_last_date = user_refund["last_refund_date"]
-                user_count = user_refund["refund_count_today"] or 0
-                if user_last_date == today and user_count >= self.MAX_REFUNDS_PER_DAY:
+            # 4. Limite diário de estornos (Regra D) - SEMPRE verificado
+            if check_daily_limit:
+                today = datetime.utcnow().date().isoformat()
+                refund_count = conn.execute(
+                    """SELECT COUNT(*) as cnt FROM lead_reveals
+                       WHERE user_id = ? AND refunded = 1 AND revealed_date = ?""",
+                    (user_id, today),
+                ).fetchone()
+                refund_count_today = refund_count["cnt"] if refund_count else 0
+                if refund_count_today >= self.MAX_REFUNDS_PER_DAY:
                     return {
                         "allowed": False,
                         "reason": "daily_refund_limit_exceeded",
-                        "refund_count_today": user_count,
-                        "max_per_day": self.MAX_REFUNDS_PER_DAY,
-                        "revealed_at": reveal["revealed_at"],
+                        "revealed_at": reveal["revealed_at"] if reveal else None,
+                        "params": {"refund_count_today": refund_count_today, "max_per_day": self.MAX_REFUNDS_PER_DAY},
                     }
+
+                # 4b. Verifica também na tabela users (consistência)
+                user_refund = conn.execute(
+                    "SELECT refund_count_today, last_refund_date FROM users WHERE id = ?", (user_id,)
+                ).fetchone()
+                if user_refund:
+                    user_last_date = user_refund["last_refund_date"]
+                    user_count = user_refund["refund_count_today"] or 0
+                    if user_last_date == datetime.utcnow().date().isoformat() and user_count >= self.MAX_REFUNDS_PER_DAY:
+                        return {
+                            "allowed": False,
+                            "reason": "daily_refund_limit_exceeded",
+                            "revealed_at": reveal["revealed_at"] if reveal else None,
+                            "params": {"refund_count_today": user_count, "max_per_day": self.MAX_REFUNDS_PER_DAY},
+                        }
+
+            revealed_at_dt = None
+            if reveal:
+                try:
+                    revealed_at_dt = datetime.fromisoformat(reveal["revealed_at"].replace("Z", "+00:00"))
+                except Exception:
+                    pass
 
             return {
                 "allowed": True,
                 "reason": "ok",
-                "revealed_at": reveal["revealed_at"],
+                "revealed_at": revealed_at_dt,
+                "params": {},
             }
         finally:
             conn.close()
 
-    def process_refund(self, user_id: int, lead_id: int, reason: str = "invalid_number") -> dict:
-        """Processa estorno de cota diária por número inválido.
+    def can_report_invalid_number(self, user_id: int, lead_id: int) -> dict:
+        """Verifica se o usuário pode reportar número inválido para este lead (Regra B).
 
-        Regras aplicadas (já validadas em can_report_invalid_number):
-        - Janela de 5 minutos
-        - Lead não está em negociação/convertido
-        - Máximo 2 por dia
-        - Marca refund_blocked no lead e atualiza contadores
+        Mantém compatibilidade com a API existente.
+        """
+        result = self.validate_refund_safety(
+            user_id,
+            lead_id,
+            check_active_reveal=True,
+            check_time_window=True,     # Regra B: janela de 5 min
+            check_lead_status=True,     # Regra C
+            check_refund_blocked=True,
+            check_daily_limit=True,     # Regra D
+        )
+        # Mantém compatibilidade com formato antigo
+        return {
+            "allowed": result["allowed"],
+            "reason": result["reason"],
+            "revealed_at": result["revealed_at"],
+            **({"elapsed_min": result["params"].get("elapsed_min")} if "elapsed_min" in result["params"] else {}),
+        }
 
-        Retorna dict com 'success': bool, 'reason': str, 'remaining': int
+    def process_refund(
+        self,
+        user_id: int,
+        lead_id: int,
+        reason: str = "invalid_number",
+        *,
+        check_active_reveal: bool = True,
+        check_time_window: bool = True,
+        check_lead_status: bool = True,
+        check_refund_blocked: bool = True,
+        check_daily_limit: bool = True,
+    ) -> dict:
+        """Processa estorno de cota diária.
+
+        Args:
+            user_id: ID do usuário
+            lead_id: ID do lead
+            reason: Motivo do estorno ("invalid_number", "enrichment_failed", etc.)
+            check_active_reveal: Verifica reveal ativo
+            check_time_window: Verifica janela de 5 min (Regra B). False para Regra A.
+            check_lead_status: Bloqueia se lead em negociação/convertido
+            check_refund_blocked: Bloqueia se lead já estornado
+            check_daily_limit: Aplica limite 2/dia (Regra D)
+
+        Retorna dict com 'success', 'reason' (error_code), 'remaining', 'params'
         """
         conn = get_connection()
         try:
             today = datetime.utcnow().date().isoformat()
 
-            # Re-valida permissões (defesa em profundidade)
-            can_report = self.can_report_invalid_number(user_id, lead_id)
-            if not can_report["allowed"]:
+            # Re-valida permissões (defesa em profundidade) usando validação unificada
+            safety = self.validate_refund_safety(
+                user_id,
+                lead_id,
+                check_active_reveal=check_active_reveal,
+                check_time_window=check_time_window,
+                check_lead_status=check_lead_status,
+                check_refund_blocked=check_refund_blocked,
+                check_daily_limit=check_daily_limit,
+            )
+            if not safety["allowed"]:
                 return {
                     "success": False,
-                    "reason": can_report["reason"],
+                    "reason": safety["reason"],
+                    "params": safety["params"],
                     "remaining": 0,
                 }
 
@@ -3849,13 +3921,14 @@ class DatabaseService:
             return {
                 "success": True,
                 "reason": "ok",
+                "params": {},
                 "remaining": remaining,
                 "refund_count_today": new_refund_count["refund_count_today"] if new_refund_count else 1,
             }
         except Exception as e:
             conn.rollback()
             logger.error(f"Erro ao processar estorno: {e}")
-            return {"success": False, "reason": f"internal_error: {e}", "remaining": 0}
+            return {"success": False, "reason": "internal_error", "params": {"detail": str(e)}, "remaining": 0}
         finally:
             conn.close()
 
@@ -4649,8 +4722,51 @@ class AsyncDatabaseService:
     async def can_report_invalid_number(self, user_id: int, lead_id: int) -> dict:
         return await anyio.to_thread.run_sync(self._service.can_report_invalid_number, user_id, lead_id)
 
-    async def process_refund(self, user_id: int, lead_id: int, reason: str = "invalid_number") -> dict:
-        return await anyio.to_thread.run_sync(self._service.process_refund, user_id, lead_id, reason)
+    async def validate_refund_safety(
+        self,
+        user_id: int,
+        lead_id: int,
+        *,
+        check_active_reveal: bool = True,
+        check_time_window: bool = True,
+        check_lead_status: bool = True,
+        check_refund_blocked: bool = True,
+        check_daily_limit: bool = True,
+    ) -> dict:
+        return await anyio.to_thread.run_sync(
+            self._service.validate_refund_safety,
+            user_id,
+            lead_id,
+            check_active_reveal=check_active_reveal,
+            check_time_window=check_time_window,
+            check_lead_status=check_lead_status,
+            check_refund_blocked=check_refund_blocked,
+            check_daily_limit=check_daily_limit,
+        )
+
+    async def process_refund(
+        self,
+        user_id: int,
+        lead_id: int,
+        reason: str = "invalid_number",
+        *,
+        check_active_reveal: bool = True,
+        check_time_window: bool = True,
+        check_lead_status: bool = True,
+        check_refund_blocked: bool = True,
+        check_daily_limit: bool = True,
+    ) -> dict:
+        return await anyio.to_thread.run_sync(
+            self._service.process_refund,
+            user_id,
+            lead_id,
+            reason,
+            check_active_reveal=check_active_reveal,
+            check_time_window=check_time_window,
+            check_lead_status=check_lead_status,
+            check_refund_blocked=check_refund_blocked,
+            check_daily_limit=check_daily_limit,
+        )
 
     async def block_lead_refund(self, lead_id: int, reason: str = "status_changed") -> bool:
         return await anyio.to_thread.run_sync(self._service.block_lead_refund, lead_id, reason)

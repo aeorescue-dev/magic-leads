@@ -3038,11 +3038,21 @@ async def reserve_lead(
 
         # REGRA A: Se enriquecimento falhou ou dado ESSENCIAL (owner_name) vazio, não debita a cota diária
         # mailing_address e telefone são opcionais
+        # Validação de segurança unificada: limite 2/dia, refund_blocked, lead_status — SEM janela de 5 min (processo síncrono)
         if enrichment_failed or not lead.get("owner_name"):
             logger.info(f"Regra A aplicada: estorno de cota por owner_name vazio/falha no lead {lead_id}")
-            refund_result = await db_service.process_refund(user_id, lead_id, reason="enrichment_failed")
+            refund_result = await db_service.process_refund(
+                user_id,
+                lead_id,
+                reason="enrichment_failed",
+                check_active_reveal=True,
+                check_time_window=False,      # Regra A: sem janela de 5 min (síncrono)
+                check_lead_status=True,       # Regra C
+                check_refund_blocked=True,
+                check_daily_limit=True,       # Regra D: limite 2/dia
+            )
             if not refund_result.get("success"):
-                logger.warning(f"Falha ao processar estorno Regra A: {refund_result.get('reason')}")
+                logger.warning(f"Falha ao processar estorno Regra A: {refund_result.get('reason')} params={refund_result.get('params')}")
 
         # Registra interação
         await db_service.record_event(lead_id, "revealed")
@@ -3165,9 +3175,9 @@ async def contact_lead(
 
 @app.post("/api/leads/{lead_id}/report-invalid")
 async def report_invalid_number(lead_id: int, user: dict = Depends(_get_current_user)):
-    """Reporta número inválido/vazio para estorno de cota diária.
+    """Reporta número inválido/vazio para estorno de cota diária (Regra B).
 
-    Regras (Regra B, C, D):
+    Regras:
     - Janela de 5 minutos após reveal (Regra B)
     - Lead não pode estar em negociação/convertido (Regra C)
     - Máximo 2 estornos por usuário/dia (Regra D)
@@ -3175,30 +3185,40 @@ async def report_invalid_number(lead_id: int, user: dict = Depends(_get_current_
     """
     user_id = user["id"]
 
-    # Valida permissões
-    can_report = await db_service.can_report_invalid_number(user_id, lead_id)
-    if not can_report["allowed"]:
+    # Valida permissões usando validação unificada
+    safety = await db_service.validate_refund_safety(
+        user_id,
+        lead_id,
+        check_active_reveal=True,
+        check_time_window=True,      # Regra B: janela de 5 min
+        check_lead_status=True,      # Regra C
+        check_refund_blocked=True,
+        check_daily_limit=True,      # Regra D
+    )
+    if not safety["allowed"]:
         raise HTTPException(
             status_code=400,
             detail={
-                "error": can_report["reason"],
-                "message": {
-                    "report_window_expired": "Janela de 5 minutos para reportar expirou",
-                    "lead_status_blocked": "Lead em negociação ou convertido — estorno bloqueado",
-                    "refund_blocked": "Estorno já processado ou bloqueado para este lead",
-                    "daily_refund_limit_exceeded": f"Limite de {db_service.MAX_REFUNDS_PER_DAY} estornos por dia atingido",
-                    "no_active_reveal": "Nenhum reveal ativo para este lead",
-                    "invalid_revealed_at": "Dados de reveal inválidos",
-                }.get(can_report["reason"], "Não foi possível processar o estorno"),
-            }
+                "error": safety["reason"],
+                "params": safety["params"],
+            },
         )
 
-    # Processa estorno
-    refund_result = await db_service.process_refund(user_id, lead_id, reason="invalid_number")
+    # Processa estorno (re-valida internamente)
+    refund_result = await db_service.process_refund(
+        user_id,
+        lead_id,
+        reason="invalid_number",
+        check_active_reveal=True,
+        check_time_window=True,
+        check_lead_status=True,
+        check_refund_blocked=True,
+        check_daily_limit=True,
+    )
     if not refund_result["success"]:
         raise HTTPException(
             status_code=400,
-            detail={"error": refund_result["reason"], "message": "Falha ao processar estorno"}
+            detail={"error": refund_result["reason"], "params": refund_result.get("params", {})},
         )
 
     return {

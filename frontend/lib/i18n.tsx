@@ -1958,6 +1958,21 @@ const EN: Dict = {
   "dashboard.toast.refund_limit": "Daily limit of 2 refunds reached",
   "dashboard.toast.refund_window_expired": "5-minute report window expired",
   "dashboard.toast.refund_blocked": "Refund blocked: lead in negotiation or converted",
+  "dashboard.toast.refund_no_active_reveal": "No active reveal for this lead",
+  "dashboard.toast.refund_invalid_revealed_at": "Invalid reveal data",
+  "dashboard.toast.refund_lead_status_blocked": "Refund blocked: lead in negotiation or converted",
+  "dashboard.toast.refund_daily_limit_exceeded": "Daily limit of 2 refunds reached",
+  "dashboard.toast.refund_internal_error": "Internal error processing refund",
+
+  // Refund Error Codes
+  "dashboard.refund.errors.no_active_reveal": "No active reveal for this lead",
+  "dashboard.refund.errors.report_window_expired": "5-minute report window expired",
+  "dashboard.refund.errors.invalid_revealed_at": "Invalid reveal data",
+  "dashboard.refund.errors.lead_status_blocked": "Refund blocked: lead in negotiation or converted",
+  "dashboard.refund.errors.refund_blocked": "Refund already processed or blocked for this lead",
+  "dashboard.refund.errors.daily_refund_limit_exceeded": "Daily limit of {max_per_day} refunds reached ({refund_count_today} used)",
+  "dashboard.refund.errors.internal_error": "Internal error processing refund",
+  "dashboard.refund.errors.enrichment_failed": "Enrichment failed - quota refunded",
 
   // Welcome Popup (First login after payment)
   "dashboard.welcome.title": "Important Notice About Your Leads",
