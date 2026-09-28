@@ -127,7 +127,7 @@ class EnrichedLead(BaseModel):
     # BBL (borough-block-lot) de NYC: identificador canonico de imovel, permite
     # casar o lead com o proprietario de forma exacta
     bbl: Optional[str] = None
-  
+
     owner_name: Optional[str]
     owner_phone: Optional[str]
     owner_email: Optional[str]
