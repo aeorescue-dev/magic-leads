@@ -18,7 +18,7 @@ from .access import (
     normalize_status,
     parse_dt,
 )
-from .phone_lookup import PhoneResult, phone_lookup_service
+from .searchbug import PhoneLookupResult, searchbug_service
 
 
 def _not_junk_where(alias: str = "") -> str:
@@ -645,6 +645,32 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     notes_cols = {r["name"] for r in conn.execute("PRAGMA table_info(lead_notes)").fetchall()}
     if notes_cols and "user_id" not in notes_cols:
         conn.execute("ALTER TABLE lead_notes ADD COLUMN user_id INTEGER")
+
+    # lead_reveals: colunas de estorno/flags introduzidas depois do DEFAULT_SCHEMA original.
+    # Sem esta migracao, bancos criados por versoes antigas falham com
+    # "no such column: refunded" em process_refund (Regra A).
+    reveal_cols = {r["name"] for r in conn.execute("PRAGMA table_info(lead_reveals)").fetchall()}
+    if reveal_cols:
+        reveal_extra = {
+            "idempotency_key": "TEXT",
+            "contact_flagged": "INTEGER DEFAULT 0",
+            "notified_30": "INTEGER DEFAULT 0",
+            "notified_45": "INTEGER DEFAULT 0",
+            "returned_to_pool": "INTEGER DEFAULT 0",
+            "refunded": "INTEGER DEFAULT 0",
+            "refund_reason": "TEXT",
+            "refunded_at": "TEXT",
+        }
+        for name, ctype in reveal_extra.items():
+            if name not in reveal_cols:
+                conn.execute(f"ALTER TABLE lead_reveals ADD COLUMN {name} {ctype}")
+        try:
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_lead_reveals_idem "
+                "ON lead_reveals (idempotency_key) WHERE idempotency_key IS NOT NULL"
+            )
+        except sqlite3.OperationalError:
+            pass
 
 
 class _SmtpConnect(smtplib.SMTP):
@@ -3956,34 +3982,30 @@ class DatabaseService:
         Stripe, etc.):
           1. API HTTP (Resend) — exige EMAIL_API_KEY. Grátis (3.000 e-mails/mês).
           2. SMTP — exige SMTP_USER+SMTP_PASS (465 SSL ou 587 STARTTLS).
-          3. MODO LOGS (default) — link legível nos logs do Railway.
-        Se o canal ativo falhar, imprime diagnóstico detalhado e cai no modo logs.
+        O SMTP e tambem tentado como fallback se a API de e-mail falhar.
+        Se nenhum canal funcionar, o link NAO e exposto: o reset fica
+        indisponivel e a razao e registada (sem conteúdo do token).
         """
         reset_url = f"{settings.FRONTEND_URL.rstrip('/')}/reset-password?token={token}"
 
-        if settings.EMAIL_API_KEY:
-            if self._send_via_email_api(email, reset_url):
-                return True
-        elif settings.SMTP_USER and settings.SMTP_PASS:
-            if self._send_via_smtp(email, reset_url):
-                return True
-        else:
-            print(
-                "[PASSWORD-RESET] Nenhum canal de e-mail configurado "
-                "(EMAIL_API_KEY ou SMTP_USER/PASS vazios no Railway) — modo logs.",
-                flush=True,
-            )
-            logger.warning("[PASSWORD-RESET] Sem canal de e-mail configurado — modo logs")
+        if settings.EMAIL_API_KEY and self._send_via_email_api(email, reset_url):
+            return True
 
-        logger.info(
-            "============================================================\n"
-            " PASSWORD RESET — link de teste (modo logs, zero custo)\n"
-            "============================================================\n"
-            f" E-mail : {email}"
+        if settings.SMTP_USER and settings.SMTP_PASS and self._send_via_smtp(email, reset_url):
+            return True
+
+        # Sem canal de e-mail: o link NAO pode ser impresso em log.
+        # Log aggregation = exposicao do token = tomada de conta da conta.
+        # O reset fica indisponivel ate um canal ser configurado, o que e
+        # preferivel a vazar a credencial. O admin ve a razao; o utilizador
+        # recebe a resposta generica anti-enumeracao.
+        logger.error(
+            "[PASSWORD-RESET] Nenhum canal de e-mail configurado "
+            "(EMAIL_API_KEY ou SMTP_USER/SMTP_PASS). Link de redefinicao "
+            "NAO foi gerado. Configurar um canal de e-mail para ativar o "
+            "reset de senha. Nenhum token foi exposto em log."
         )
-        logger.info(f" Link   : {reset_url}")
-        logger.info("============================================================")
-        return True
+        return False
 
     def _send_via_email_api(self, email: str, reset_url: str) -> bool:
         """Envia via Resend HTTPS (:443, liberado no Railway). Retorna False em falha."""
@@ -4467,49 +4489,54 @@ class AsyncDatabaseService:
         address = reserved.get("address")
         city = reserved.get("city")
         state = reserved.get("state")
-        lead_id_reserved = reserved.get("id")
 
-        if not address or not city or not state:
-            # Sem dados de endereço para busca - libera a reserva e retorna erro
-            await self.release_lead(lead_id_reserved, user_id, reason="no_address_for_phone_lookup")
-            return {"error": "no_address", "message": "Lead sem endereço completo para busca de telefone"}
+        # 2. Telefone e ENRIQUECIMENTO OPCIONAL.
+        #    A reserva ja esta garantida neste ponto: uma falha do provedor de telefone
+        #    nao pode libertar o lead nem devolver a reserva ao pool. O lead fica com
+        #    owner_phone NULL e marcado como enriquecimento pendente.
+        phone_result: Optional[PhoneLookupResult] = None
+        if address and city and state:
+            try:
+                phone_result = await searchbug_service.lookup_phone(address, city, state)
+            except Exception as exc:
+                logger.warning(f"Phone lookup erro inesperado no lead {lead_id}: {exc}")
+                phone_result = None
 
-        # 2. Busca telefone do dono
-        phone_result: PhoneResult = await phone_lookup_service.lookup(address, city, state)
-
-        if not phone_result.success:
-            # Falha na busca - libera a reserva, não incrementa contador
-            await self.release_lead(lead_id, user_id, reason="phone_lookup_failed")
-            _error_msg = phone_result.error or "busca_falhou"
-            return {
-                "error": "phone_lookup_failed",
-                "message": f"Não foi possível obter telefone do proprietário: {phone_result.error or 'indisponível'}",
-                "phone_error": phone_result.error,
-                "credit_preserved": True
-            }
-
-        # 3. Sucesso - atualiza lead com telefone, incrementa contador diário
-        phone_updated = await anyio.to_thread.run_sync(
-            self._service.update_owner_phone, lead_id, phone_result.phone
+        phone_ok = bool(
+            phone_result is not None
+            and getattr(phone_result, "success", False)
+            and getattr(phone_result, "phone", None)
         )
-        if not phone_updated:
-            await self.release_lead(lead_id, user_id, reason="phone_update_failed")
-            return {"error": "phone_update_failed", "message": "Falha ao salvar telefone no lead"}
+        phone_error: Optional[str] = None
 
-        # Incrementa contador diário (respeita limite de 10/dia)
-        incremented = await self.increment_daily_leads(user_id)
-        if not incremented:
-            # Limite diário atingido - não deveria acontecer pois checamos antes, mas por segurança
-            await self.release_lead(lead_id, user_id, reason="daily_limit_exceeded")
-            return {"error": "daily_limit_exceeded", "message": "Limite diário de 10 leads atingido"}
+        if phone_ok:
+            await anyio.to_thread.run_sync(
+                self._service.update_owner_phone, lead_id, phone_result.phone
+            )
+        else:
+            phone_error = (
+                (getattr(phone_result, "error", None) or "indisponivel")
+                if phone_result is not None
+                else "endereco_incompleto"
+            )
+            logger.info(
+                f"Telefone indisponivel para lead {lead_id} ({phone_error}) — "
+                "reserva mantida, enriquecimento pendente"
+            )
 
-        # Busca lead atualizado para retornar
+        # 3. Lead atualizado para retornar
+        #    NOTA: o contador diario NAO e incrementado aqui. O caller
+        #    (main.py, ramo sem consentimento) ja o faz antes de reservar,
+        #    e incrementar aqui cobraria a cota duas vezes por reserva.
         lead_data = await self.get_lead_by_id(lead_id)
         if lead_data:
-            lead_data["owner_phone"] = phone_result.phone
+            if phone_ok:
+                lead_data["owner_phone"] = phone_result.phone
             lead_data["_phone_lookup"] = {
-                "provider": phone_result.provider,
-                "success": True
+                "provider": getattr(phone_result, "provider", None),
+                "success": phone_ok,
+                "error": phone_error,
+                "pending_enrichment": not phone_ok,
             }
         return lead_data
 

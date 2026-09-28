@@ -28,5 +28,8 @@ ENV DATA_DIR=/data
 # Expose port
 EXPOSE 8000
 
-# Run seed script then start the application
-CMD ["sh", "-c", "python seed_production_users.py && uvicorn backend.main:app --host 0.0.0.0 --port 8000"]
+# Run seed script then start the application.
+# ";" (not "&&"): o bootstrap de utilizadores de demonstração é uma
+# convenience. Se falhar, a aplicação DEVE arrancar na mesma — caso
+# contrário um seed quebrado deixa o serviço em crash-loop.
+CMD ["sh", "-c", "python seed_production_users.py; uvicorn backend.main:app --host 0.0.0.0 --port 8000"]

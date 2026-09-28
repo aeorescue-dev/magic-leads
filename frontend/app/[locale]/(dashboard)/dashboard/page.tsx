@@ -144,10 +144,13 @@ function formatRelativeTime(dateStr: string, t: (k: string) => string): string {
 }
 
 // Countdown "Xh Ym" a partir de um ISO/UTC de expiração (Phase 4.2)
+// Fallback = 60 min, que é a janela de reserva real do plano. NÃO usar "24h":
+// o hold tem 60 minutos e mostrar 24h seria uma promessa falsa ao utilizador.
+const HOLD_FALLBACK = "60m";
 function countdownLabel(expiresAt: string): string {
-  if (!expiresAt) return "24h";
+  if (!expiresAt) return HOLD_FALLBACK;
   const d = new Date(expiresAt.replace("Z", "+00:00").replace(" ", "T"));
-  if (isNaN(d.getTime())) return "24h";
+  if (isNaN(d.getTime())) return HOLD_FALLBACK;
   const diffMs = d.getTime() - Date.now();
   if (diffMs <= 0) return "expirado";
   const totalMin = Math.floor(diffMs / 60000);
@@ -1637,7 +1640,7 @@ const LEAD_TYPES = [
                     const CatIcon = cat.icon;
                     const badge =
                       lead.my_status === "reserved"
-                        ? { label: `Seu · ${lead.hold_expires_at ? countdownLabel(lead.hold_expires_at) : "24h"}`, cls: "bg-rose-500/15 text-rose-400", icon: <Lock className="h-3 w-3" /> }
+                        ? { label: `Seu · ${lead.hold_expires_at ? countdownLabel(lead.hold_expires_at) : HOLD_FALLBACK}`, cls: "bg-rose-500/15 text-rose-400", icon: <Lock className="h-3 w-3" /> }
                         : lead.my_status === "negotiating"
                           ? { label: t("dashboard.status.negotiation"), cls: "bg-amber-500/15 text-amber-400", icon: <MessageSquare className="h-3 w-3" /> }
                           : lead.my_status === "hold_expired"
@@ -1871,7 +1874,7 @@ const LEAD_TYPES = [
                             )}
                             {isMine && (
                               <span className="text-[10px] font-bold uppercase tracking-wider bg-rose-500/15 text-rose-400 px-2.5 py-1 rounded-full flex items-center gap-1">
-                                <Lock className="h-3 w-3" /> {t("dashboard.badge.yours").replace("{time}", reservedUntil ? countdownLabel(reservedUntil) : "24h")}
+                                <Lock className="h-3 w-3" /> {t("dashboard.badge.yours").replace("{time}", reservedUntil ? countdownLabel(reservedUntil) : HOLD_FALLBACK)}
                               </span>
                             )}
                             {vis === "reserved_by_other" && (

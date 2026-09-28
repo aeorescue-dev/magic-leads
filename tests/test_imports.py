@@ -7,14 +7,18 @@ import pytest
 
 def test_critical_imports():
     """Valida se todas as instâncias essenciais importam sem erro."""
+    from backend.main import app
     from backend.scrapers.socrata_311 import socrata_scraper
     from backend.services.db import db_service
-    from backend.services.push_service import push_service
-    from backend.services.notifier import notify_users_for_lead, fanout_new_lead_batch
     from backend.services.enrichment import owner_enrichment
+    from backend.services.notifier import fanout_new_lead_batch, notify_users_for_lead
     from backend.services.phone_lookup import phone_lookup_service
-    from backend.services.security import hash_password, verify_password, new_session_token
-    from backend.main import app
+    from backend.services.push_service import push_service
+    from backend.services.security import (
+        hash_password,
+        new_session_token,
+        verify_password,
+    )
 
     assert socrata_scraper is not None
     assert db_service is not None
@@ -31,8 +35,9 @@ def test_critical_imports():
 
 def test_fastapi_startup():
     """Valida se a aplicação FastAPI sobe e responde no /health."""
-    from backend.main import app
     from fastapi.testclient import TestClient
+
+    from backend.main import app
 
     client = TestClient(app)
     resp = client.get("/health")
@@ -44,8 +49,9 @@ def test_fastapi_startup():
 
 def test_scraper_status_endpoint():
     """Valida se o endpoint de status do scraper responde."""
-    from backend.main import app
     from fastapi.testclient import TestClient
+
+    from backend.main import app
 
     client = TestClient(app)
     resp = client.get("/api/scraper/status")
@@ -59,8 +65,9 @@ def test_scraper_status_endpoint():
 
 def test_leads_endpoint():
     """Valida se o endpoint de leads responde."""
-    from backend.main import app
     from fastapi.testclient import TestClient
+
+    from backend.main import app
 
     client = TestClient(app)
     resp = client.get("/api/leads?limit=1")

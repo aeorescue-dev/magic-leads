@@ -619,30 +619,12 @@ export interface CheckoutResponse {
   plan: CheckoutPlan;
 }
 
-export interface ActivateWeekResponse {
-  status: string;
-  mock: boolean;
-  plan?: string;
-  subscription_status?: string;
-  plan_until?: string;
-}
-
 export async function createCheckoutSession(locale?: string): Promise<CheckoutResponse> {
   return handle<CheckoutResponse>(
     await fetch(`${API_URL}/api/billing/checkout`, {
       method: "POST",
       credentials: "include",
       headers: { ...authHeaders(), "Accept-Language": locale || "" },
-    })
-  );
-}
-
-export async function activateWeekMock(): Promise<ActivateWeekResponse> {
-  return handle<ActivateWeekResponse>(
-    await fetch(`${API_URL}/api/billing/mock-activate`, {
-      method: "POST",
-      credentials: "include",
-      headers: { ...authHeaders() },
     })
   );
 }

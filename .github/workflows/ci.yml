@@ -30,11 +30,17 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-asyncio httpx fastapi uvicorn
 
-      - name: Run import & syntax checks
+      - name: Import checks
         env:
           PYTHONPATH: .
         run: |
           pytest tests/test_imports.py -v --tb=short
+
+      - name: Security regression tests
+        env:
+          PYTHONPATH: .
+        run: |
+          pytest tests/test_password_reset.py tests/test_billing_security.py -v --tb=short
 
       - name: Syntax check (ruff)
         working-directory: ./backend

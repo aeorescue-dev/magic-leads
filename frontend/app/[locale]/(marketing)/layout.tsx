@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   title: "Magic Leads - Obras reais com dono identificado",
-  description: "Capturamos oportunidades de reforma e correção (telhado, estrutura, encanamento, pintura) direto de registros públicos atualizados diariamente, com dono identificado e 24h de reserva exclusiva por $79/semana.",
+  description: "Capturamos oportunidades de reforma e correção (telhado, estrutura, encanamento, pintura) direto de registros públicos atualizados continuamente, com dono identificado e reserva exclusiva de 60 minutos por $79/semana. Sistema disponível 24/7.",
   manifest: "/manifest.json",
   themeColor: "#10b981",
   viewport: {

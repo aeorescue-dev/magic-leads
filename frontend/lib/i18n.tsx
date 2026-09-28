@@ -55,7 +55,7 @@ const PT: Dict = {
   "hero.live.just_now": "agora mesmo",
   "hero.title.1": "Obras reais com dono identificado.",
   "hero.title.2": "Você liga primeiro.",
-  "hero.sub": "Capturamos oportunidades de reforma e correção (telhado, estrutura, encanamento, pintura) direto de registros públicos atualizados diariamente. Validamos endereço e proprietário antes de você gastar um minuto. Plataformas tradicionais vendem o mesmo lead para 3 a 8 concorrentes — você recebe o endereço, o dono e 24h de reserva exclusiva.",
+  "hero.sub": "Capturamos oportunidades de reforma e correção (telhado, estrutura, encanamento, pintura) direto de registros públicos atualizados continuamente, com sistema disponível 24/7. Validamos endereço e proprietário antes de você gastar um minuto. Plataformas tradicionais vendem o mesmo lead para 3 a 8 concorrentes — você recebe o endereço, o dono e uma reserva exclusiva de 60 minutos.",
   "hero.trust.verified": "Endereço validado",
   "hero.trust.real_time": "Tempo real",
   "hero.trust.no_contract": "Sem contrato",
@@ -115,7 +115,7 @@ const PT: Dict = {
   "pricing.f2": "Endereço validado + dono identificado (nome + endereço de correspondência)",
   "pricing.f3": "Mensagem pronta para WhatsApp/SMS/E-mail com um toque",
   "pricing.f4": "Favoritos, notas e histórico de contato por lead",
-  "pricing.f5": "Hold/Reserva exclusiva de lead por 24h",
+  "pricing.f5": "Hold/Reserva exclusiva de lead por 60 minutos",
   "pricing.f6": "Ativação imediata após pagamento — sem espera",
   "pricing.f7": "Cancele quando quiser — sem multa",
   "pricing.f8": "Acesso a múltiplas cidades (NYC, Boston, Dallas, Norfolk)",
@@ -152,7 +152,7 @@ const PT: Dict = {
   "compare.roi_highlight": "Realista: 1 job/mês paga o ano todo",
   "compare.roi_note": "Baseado em $79/semana. 1 job médio de $2.500 por mês paga a plataforma o ano inteiro.",
   "compare.row.support": "Suporte",
-  "compare.summary": "Na mesma oportunidade: o Google entrega a 1 contratante, HomeAdvisor/Angi a 3 a 8 de uma vez (até 16 em telhado), Meta chega para quem não estava procurando você — e o Magic Leads entrega só para você, com 24h de reserva exclusiva.",
+  "compare.summary": "Na mesma oportunidade: o Google entrega a 1 contratante, HomeAdvisor/Angi a 3 a 8 de uma vez (até 16 em telhado), Meta chega para quem não estava procurando você — e o Magic Leads entrega só para você, sem venda a concorrentes, com reserva exclusiva de 60 minutos.",
 
   "compare.values.google.cost": "~$53 por lead (varia por ofício)*",
   "compare.values.homeadvisor.cost": "$15–100/lead + ~$300/ano",
@@ -161,7 +161,7 @@ const PT: Dict = {
   "compare.values.google.shared": "Você, por contato ganho",
   "compare.values.homeadvisor.shared": "3 a 8 concorrentes (até 16 em roofing)*",
   "compare.values.meta.shared": "Só você — mas público frio",
-  "compare.values.magic.shared": "Você, com reserva exclusiva de 24h",
+  "compare.values.magic.shared": "Só você, com reserva exclusiva de 60 minutos",
   "compare.values.google.roi": "43,9% viram agendamento*",
   "compare.values.homeadvisor.roi": "~20% fecham (compartilhado)*",
   "compare.values.meta.roi": "~5,2% viram contato*",
@@ -912,7 +912,7 @@ const PT: Dict = {
   "dashboard.trial.expiring_soon": "⚠ Falta {days} {days, plural, one {dia} other {dias}} para expirar — Renove agora",
   "dashboard.trial.expiring_body": "Continue recebendo as melhores oportunidades antes da concorrência. Renove por $79/semana.",
   "dashboard.trial.active": "Acesso Completo • Renovação em {days} {days, plural, one {dia} other {dias}}",
-  "dashboard.trial.active_body": "Sua assinatura renova automaticamente. $79/semana para oportunidades exclusivas 24h antes da concorrência.",
+  "dashboard.trial.active_body": "Sua assinatura renova automaticamente. $79/semana para acesso exclusivo ao lead — não é vendido a concorrentes — e sistema disponível 24/7.",
   "dashboard.trial.daily_limit": "Limite Diário: {used} de {limit} leads usados hoje",
   "dashboard.trial.daily_limit_exceeded": "Volte amanhã e abra seus 10+ potenciais clientes. · Reset em {reset_at}",
   "dashboard.trial.week_badge": "$79/sem",
@@ -949,7 +949,7 @@ const PT: Dict = {
 
   // Layout/SEO (for metadata)
   "layout.title": "Magic Leads - Obras reais com dono identificado",
-  "layout.description": "Capturamos oportunidades de reforma e correção (telhado, estrutura, encanamento, pintura) direto de registros públicos atualizados diariamente, com dono identificado e 24h de reserva exclusiva por $79/semana.",
+  "layout.description": "Capturamos oportunidades de reforma e correção (telhado, estrutura, encanamento, pintura) direto de registros públicos atualizados continuamente, com dono identificado e reserva exclusiva de 60 minutos por $79/semana. Sistema disponível 24/7.",
 
   // Release (liberaçao de lead) — ver RELEASE_REASONS em lib/api-client.ts
   "release.title": "Liberar oportunidade",
@@ -1093,7 +1093,7 @@ const EN: Dict = {
   "hero.trust.no_contract": "No contract",
   "hero.title.1": "Real works with owner identified.",
   "hero.title.2": "You call first.",
-  "hero.sub": "We capture remodeling and repair opportunities (roof, structure, plumbing, paint) straight from public records updated daily. We validate address and owner before you waste a minute. Traditional platforms sell the same lead to 3 to 8 competitors — you get the address, the owner and a 24h exclusive hold.",
+  "hero.sub": "We capture remodeling and repair opportunities (roof, structure, plumbing, paint) straight from public records updated continuously, with the system available 24/7. We validate address and owner before you waste a minute. Traditional platforms sell the same lead to 3 to 8 competitors — you get the address, the owner and a 60-minute exclusive reservation.",
   "hero.cta.demo": "I want leads this week",
   "hero.cta.price": "See transparent pricing",
   "hero.note": "$79/week. No monthly fee, no expiring credits. Cancel anytime.",
@@ -1150,7 +1150,7 @@ const EN: Dict = {
   "pricing.f2": "Validated address + owner identified (name + mailing address)",
   "pricing.f3": "Ready-to-send WhatsApp/SMS/Email with one tap",
   "pricing.f4": "Favorites, notes and contact history per lead",
-  "pricing.f5": "Hold/Exclusive lead reservation for 24h",
+  "pricing.f5": "Hold/Exclusive lead reservation for 60 minutes",
   "pricing.f6": "Immediate activation after payment — no waiting",
   "pricing.f7": "Cancel anytime — no penalty",
   "pricing.f8": "Access to multiple cities (NYC, Boston, Dallas, Norfolk)",
@@ -1186,7 +1186,7 @@ const EN: Dict = {
   "compare.roi_highlight": "Realistic: 1 job/month pays the whole year",
   "compare.roi_note": "Based on $79/week. 1 average job of $2,500 per month pays the platform for the whole year.",
   "compare.row.support": "Support",
-  "compare.summary": "For the same job: Google hands it to 1 contractor, HomeAdvisor/Angi to 3 to 8 at once (up to 16 in roofing), Meta reaches people who weren't looking for you — and Magic Leads hands it only to you, with a 24h exclusive hold.",
+  "compare.summary": "For the same job: Google hands it to 1 contractor, HomeAdvisor/Angi to 3 to 8 at once (up to 16 in roofing), Meta reaches people who weren't looking for you — and Magic Leads hands it only to you, never sold to competitors, with a 60-minute exclusive reservation.",
 
   "compare.values.google.cost": "~$53 per lead (varies by trade)*",
   "compare.values.homeadvisor.cost": "$15–100/lead + ~$300/yr",
@@ -1195,7 +1195,7 @@ const EN: Dict = {
   "compare.values.google.shared": "You, per won contact",
   "compare.values.homeadvisor.shared": "3 to 8 competitors (up to 16 roofing)*",
   "compare.values.meta.shared": "Only you — but cold audience",
-  "compare.values.magic.shared": "You, with a 24h exclusive hold",
+  "compare.values.magic.shared": "Only you, with a 60-minute exclusive reservation",
   "compare.values.google.roi": "43.9% become a booked job*",
   "compare.values.homeadvisor.roi": "~20% close (shared)*",
   "compare.values.meta.roi": "~5.2% become a contact*",
@@ -1939,7 +1939,7 @@ const EN: Dict = {
   "dashboard.trial.expiring_soon": "⚠ {days} {days, plural, one {day} other {days}} left to expire — Renew now",
   "dashboard.trial.expiring_body": "Keep getting the best opportunities before the competition. Renew for $79/week.",
   "dashboard.trial.active": "Full Access • Renewal in {days} {days, plural, one {day} other {days}}",
-  "dashboard.trial.active_body": "Your subscription renews automatically. $79/week for exclusive opportunities 24h before the competition.",
+  "dashboard.trial.active_body": "Your subscription renews automatically. $79/week for exclusive access to the lead — never sold to competitors — and a system available 24/7.",
   "dashboard.trial.daily_limit": "Daily Limit: {used} of {limit} leads used today",
   "dashboard.trial.daily_limit_exceeded": "Come back tomorrow for your 10+ potential clients. · Reset in {reset_at}",
   "dashboard.trial.week_badge": "$79/wk",
@@ -1976,7 +1976,7 @@ const EN: Dict = {
 
   // Layout/SEO
   "layout.title": "Magic Leads - Real works with owner identified",
-  "layout.description": "We capture remodeling and repair opportunities (roof, structure, plumbing, paint) straight from public records updated daily. We validate address and owner before you waste a minute. Traditional platforms sell the same lead to 3 to 8 competitors — you get the address, the owner and a 24h exclusive hold for $79/week.",
+  "layout.description": "We capture remodeling and repair opportunities (roof, structure, plumbing, paint) straight from public records updated continuously, with the owner identified and a 60-minute exclusive reservation for $79/week. System available 24/7.",
 
   // Release (lead) — reasons as dynamic keys
   "release.title": "Release opportunity",
@@ -2131,7 +2131,7 @@ const ES: Dict = {
   "hero.live.just_now": "hace un momento",
   "hero.title.1": "Obras reales con dueño identificado.",
   "hero.title.2": "Tú llamas primero.",
-  "hero.sub": "Capturamos oportunidades de reforma y corrección (techo, estructura, plomería, pintura) directamente de registros públicos actualizados a diario. Validamos dirección y propietario antes de que pierdas un minuto. Las plataformas tradicionales venden el mismo lead a 3 a 8 competidores — tú recibes la dirección, el dueño y 24h de reserva exclusiva.",
+  "hero.sub": "Capturamos oportunidades de reforma y corrección (techo, estructura, plomería, pintura) directamente de registros públicos actualizados continuamente, con el sistema disponible 24/7. Validamos dirección y propietario antes de que pierdas un minuto. Las plataformas tradicionales venden el mismo lead a 3 a 8 competidores — tú recibes la dirección, el dueño y una reserva exclusiva de 60 minutos.",
   "hero.trust.verified": "Dirección verificada",
   "hero.trust.real_time": "Tiempo real",
   "hero.trust.no_contract": "Sin contrato",
@@ -2185,7 +2185,7 @@ const ES: Dict = {
   "pricing.f2": "Dirección validada + dueño identificado (nombre + dirección postal)",
   "pricing.f3": "Mensaje listo para WhatsApp/SMS/Correo con un toque",
   "pricing.f4": "Favoritos, notas e historial de contacto por prospecto",
-  "pricing.f5": "Hold/Reserva exclusiva de prospecto por 24h",
+  "pricing.f5": "Hold/Reserva exclusiva de prospecto por 60 minutos",
   "pricing.f6": "Activación inmediata después del pago — sin espera",
   "pricing.f7": "Cancela cuando quieras — sin multa",
   "pricing.f8": "Acceso a múltiples ciudades (NYC, Boston, Dallas, Norfolk)",
@@ -2221,7 +2221,7 @@ const ES: Dict = {
   "compare.roi_highlight": "Realista: 1 trabajo/mes paga el año entero",
   "compare.roi_note": "Basado en $79/semana. 1 trabajo promedio de $2.500 al mes paga la plataforma todo el año.",
   "compare.row.support": "Soporte",
-  "compare.summary": "Para el mismo trabajo: Google lo entrega a 1 contratista, HomeAdvisor/Angi a de 3 a 8 a la vez (hasta 16 en techos), Meta llega a personas que no te buscaban — y Magic Leads lo entrega solo a ti, con 24h de reserva exclusiva.",
+  "compare.summary": "Para el mismo trabajo: Google lo entrega a 1 contratista, HomeAdvisor/Angi a de 3 a 8 a la vez (hasta 16 en techos), Meta llega a personas que no te buscaban — y Magic Leads lo entrega solo a ti, sin venderlo a competidores, con una reserva exclusiva de 60 minutos.",
 
   "compare.values.google.cost": "~$53 por lead (varía según el oficio)*",
   "compare.values.homeadvisor.cost": "$15–100/lead + ~$300/año",
@@ -2230,7 +2230,7 @@ const ES: Dict = {
   "compare.values.google.shared": "Tú, por contacto ganado",
   "compare.values.homeadvisor.shared": "De 3 a 8 competidores (hasta 16 en roofing)*",
   "compare.values.meta.shared": "Solo tú — pero público frío",
-  "compare.values.magic.shared": "Tú, con 24h de reserva exclusiva",
+  "compare.values.magic.shared": "Solo tú, con reserva exclusiva de 60 minutos",
   "compare.values.google.roi": "43,9% se vuelven agendamiento*",
   "compare.values.homeadvisor.roi": "~20% cierran (compartido)*",
   "compare.values.meta.roi": "~5,2% se vuelven contacto*",
@@ -2974,7 +2974,7 @@ const ES: Dict = {
   "dashboard.trial.expiring_soon": "⚠ Falta {days} {days, plural, one {día} other {días}} para expirar — Renueva ahora",
   "dashboard.trial.expiring_body": "Sigue recibiendo las mejores oportunidades antes de la competencia. Renueva por $79/semana.",
   "dashboard.trial.active": "Acceso Completo • Renovación en {days} {days, plural, one {día} other {días}}",
-  "dashboard.trial.active_body": "Tu suscripción renueva automáticamente. $79/semana para oportunidades exclusivas 24h antes de la competencia.",
+  "dashboard.trial.active_body": "Tu suscripción renueva automáticamente. $79/semana para acceso exclusivo al prospecto —sin venderlo a competidores— y sistema disponible 24/7.",
   "dashboard.trial.daily_limit": "Límite Diario: {used} de {limit} leads usados hoy",
   "dashboard.trial.daily_limit_exceeded": "Vuelve mañana y abre tus 10+ clientes potenciales. · Reset en {reset_at}",
   "dashboard.trial.week_badge": "$79/sem",
@@ -3139,7 +3139,7 @@ const ES: Dict = {
   "checkout.back_home": "Volver al inicio",
 
   "layout.title": "Magic Leads - Obras reales con dueño identificado",
-  "layout.description": "Capturamos oportunidades de reforma y corrección (techo, estructura, fontanería, pintura) directo de registros públicos actualizados diariamente, con dueño identificado y 24h de reserva exclusiva por $79/semana.",
+  "layout.description": "Capturamos oportunidades de reforma y corrección (techo, estructura, fontanería, pintura) directo de registros públicos actualizados continuamente, con dueño identificado y reserva exclusiva de 60 minutos por $79/semana. Sistema disponible 24/7.",
 };
 
 export const DICTS: Record<Lang, Dict> = { pt: PT, en: EN, es: ES };

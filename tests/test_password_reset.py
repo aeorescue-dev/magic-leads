@@ -28,7 +28,13 @@ def _capture_reset_log(logger_name="garimpador"):
     return captured, handler
 
 
-def test_forgot_password_full_flow():
+def test_forgot_password_full_flow(monkeypatch):
+    """Fluxo completo: cria token -> valida -> consome -> login com a nova senha.
+
+    O transporte de e-mail é interceptado para capturar o token. Isolar o envio
+    mantém este teste focado no ciclo de vida do token (o transporte tem os seus
+    próprios testes) e não depende de existir canal de e-mail configurado.
+    """
     client = TestClient(app)
 
     # Registra usuário real
@@ -42,23 +48,24 @@ def test_forgot_password_full_flow():
     r = client.post("/api/auth/forgot-password", json={"email": "ghost@magicleads.app"})
     assert r.status_code == 200, r.text
 
-    # Extrai o link impresso nos logs (modo logs, zero custo)
-    captured, handler = _capture_reset_log()
-    try:
-        r = client.post("/api/auth/forgot-password", json={"email": TEST_EMAIL})
-        assert r.status_code == 200, r.text
-        assert r.json().get("status") == "ok"
-    finally:
-        logging.getLogger("garimpador").removeHandler(handler)
+    # Intercepta o envio para capturar o token (o endpoint ignora o retorno,
+    # preservando a resposta anti-enumeracao)
+    sent = {}
 
-    token = None
-    for line in captured:
-        if "reset-password?token=" in line:
-            token = line.split("reset-password?token=")[1].strip()
-            break
-    assert token, "token não encontrado no link impresso nos logs"
-    # O link impresso deve ser legível e conter o token extraído
-    assert any("Link   :" in line and token in line for line in captured), "linha 'Link:' ausente/ilegível"
+    async def _capture(email, token):
+        sent["email"] = email
+        sent["token"] = token
+        return True
+
+    monkeypatch.setattr("backend.main.db_service.send_password_reset_email", _capture)
+
+    r = client.post("/api/auth/forgot-password", json={"email": TEST_EMAIL})
+    assert r.status_code == 200, r.text
+    assert r.json().get("status") == "ok"
+
+    token = sent.get("token")
+    assert token, "token não foi enviado"
+    assert sent["email"] == TEST_EMAIL
 
     # Redefine a senha com o mesmo payload do frontend
     r = client.post(
@@ -123,8 +130,13 @@ def test_reset_password_empty_payload_422():
     assert r.status_code == 422, r.text
 
 
-def test_logs_mode_prints_readable_link(monkeypatch):
-    """Sem canal de e-mail configurado, o link de reset é impresso de forma legível nos logs."""
+def test_no_email_channel_does_not_leak_token(monkeypatch):
+    """Sem canal de e-mail, o token NÃO pode aparecer em log (fail-closed).
+
+    Regressão de segurança: o "modo logs" imprimia o link de reset em claro.
+    Em produção os logs são agregados e legíveis por qualquer pessoa com acesso
+    ao Railway, o que transformava cada reset num takeover de conta.
+    """
     monkeypatch.setattr("backend.services.db.settings", type("S", (), {
         "FRONTEND_URL": "https://app.magicleads.com",
         "EMAIL_API_KEY": "",
@@ -138,24 +150,21 @@ def test_logs_mode_prints_readable_link(monkeypatch):
     captured, handler = _capture_reset_log()
     try:
         ok = DatabaseService().send_password_reset_email("logs-test@magicleads.app", "tok123")
-        assert ok is True
     finally:
         logging.getLogger("garimpador").removeHandler(handler)
 
     joined = "\n".join(captured)
-    assert "PASSWORD RESET" in joined
-    assert "logs-test@magicleads.app" in joined
-    assert "https://app.magicleads.com/reset-password?token=tok123" in joined
-
-    # O link é um record próprio (linha única), copiável sem fricção
-    link_lines = [line for line in captured if line.strip().startswith("Link") and "reset-password?token=tok123" in line]
-    assert link_lines, "link não encontrado em linha própria"
-    assert len(link_lines) == 1
-    assert link_lines[0].endswith("reset-password?token=tok123"), "token deve ser o fim da linha"
+    assert ok is False, "sem canal de e-mail o envio deve falhar, não fingir sucesso"
+    # O token e o link NUNCA podem estar em log
+    assert "tok123" not in joined, "TOKEN VAZADO EM LOG"
+    assert "reset-password?token=" not in joined, "LINK DE RESET VAZADO EM LOG"
+    # O operador vê a causa, sem conteúdo do token
+    assert "Nenhum canal de e-mail configurado" in joined
+    assert "NAO foi gerado" in joined
 
 
 def test_smtp_auth_failure_logs_detailed_error(monkeypatch, capsys):
-    """Falha de autenticação SMTP deve imprimir tipo + código exato (535) e cair para modo logs."""
+    """Falha de autenticação SMTP: log detalhado com código 535, SEM vazar o token."""
     import smtplib
 
     class FakeAuthError(smtplib.SMTPAuthenticationError):
@@ -180,21 +189,22 @@ def test_smtp_auth_failure_logs_detailed_error(monkeypatch, capsys):
     captured, handler = _capture_reset_log()
     try:
         ok = DatabaseService().send_password_reset_email("authfail@magicleads.app", "authtok")
-        assert ok is True
     finally:
         logging.getLogger("garimpador").removeHandler(handler)
 
     joined = "\n".join(captured) + "\n" + capsys.readouterr().out
+    # Diagnóstico útil ao operador preservado
     assert "FALHA DE AUTENTICAÇÃO SMTP" in joined
     assert "535" in joined
     assert "App Password inválida" in joined
-    # ainda cai em modo logs
-    assert "PASSWORD RESET" in joined
-    assert "reset-password?token=authtok" in joined
+    # Mas o token não pode vazar
+    assert ok is False
+    assert "authtok" not in joined, "TOKEN VAZADO EM LOG"
+    assert "reset-password?token=authtok" not in joined
 
 
-def test_smtp_failure_falls_back_to_logs(monkeypatch):
-    """Se SMTP_HOST estiver configurado mas falhar, a função cai para modo logs e não levanta exceção."""
+def test_smtp_failure_does_not_leak_token(monkeypatch):
+    """SMTP configurado mas aligação falha: log da causa, sem token em log."""
     monkeypatch.setattr("backend.services.db.settings", type("S", (), {
         "FRONTEND_URL": "https://app.magicleads.com",
         "EMAIL_API_KEY": "",
@@ -208,14 +218,13 @@ def test_smtp_failure_falls_back_to_logs(monkeypatch):
     captured, handler = _capture_reset_log()
     try:
         ok = DatabaseService().send_password_reset_email("fallback@magicleads.app", "fallbacktok")
-        assert ok is True
     finally:
         logging.getLogger("garimpador").removeHandler(handler)
 
     joined = "\n".join(captured)
-    assert "PASSWORD RESET" in joined
-    assert "fallback@magicleads.app" in joined
-    assert any("reset-password?token=fallbacktok" in line for line in captured)
+    assert ok is False
+    assert "fallbacktok" not in joined, "TOKEN VAZADO EM LOG"
+    assert "reset-password?token=fallbacktok" not in joined
 
 
 class FakeResendResponse:
@@ -336,8 +345,8 @@ def test_resend_api_success_sends_email(monkeypatch, capsys):
     assert "link de teste" not in out
 
 
-def test_resend_api_rejection_falls_back_to_logs(monkeypatch, capsys):
-    """Se a Resend recusar (ex.: domínio não verificado), imprime o corpo do erro e cai em logs."""
+def test_resend_api_rejection_does_not_leak_token(monkeypatch, capsys):
+    """Se a Resend recusar (ex.: domínio não verificado), diagnostica mas NÃO expõe o token."""
     monkeypatch.setattr("backend.services.db.settings", _resend_settings(EMAIL_API_KEY="re_bad"))
 
     def fake_post(url, headers=None, json=None, timeout=None):
@@ -348,14 +357,16 @@ def test_resend_api_rejection_falls_back_to_logs(monkeypatch, capsys):
     captured, handler = _capture_reset_log()
     try:
         ok = DatabaseService().send_password_reset_email("user@example.com", "tokrej")
-        assert ok is True
     finally:
         logging.getLogger("garimpador").removeHandler(handler)
 
     out = "\n".join(captured) + "\n" + capsys.readouterr().out
+    # Diagnóstico preservado
     assert "ERRO EMAIL DETALHADO" in out
     assert "403" in out
     assert "domain not verified" in out
-    # caiu em modo logs, mantendo o fluxo de reset utilizável
-    assert "link de teste" in out
-    assert "reset-password?token=tokrej" in out
+    # Sem fuga de credencial
+    assert ok is False
+    assert "tokrej" not in out, "TOKEN VAZADO EM LOG"
+    assert "reset-password?token=tokrej" not in out
+    assert "link de teste" not in out

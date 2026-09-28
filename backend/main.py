@@ -257,10 +257,23 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 # CORS
+# Allowlist EXPLICITA de origens. Nao reintroduzir allow_origin_regex com
+# curingas tipo "https://.*.vercel.app": com allow_credentials=True isso daria
+# acesso autenticado a API a qualquer dominio Vercel registavel por terceiros.
+# Para suportar preview deployments, enumerar os dominios em ALLOWED_ORIGINS
+# (env) em vez de abrir um padrao.
+_ALLOWED_ORIGINS = settings.allowed_origins_list
+if not _ALLOWED_ORIGINS:
+    logger.error(
+        "ALLOWED_ORIGINS vazio — nenhuma origem sera aceite. "
+        "Definir ALLOWED_ORIGINS no ambiente antes de expor a API."
+    )
+else:
+    logger.info(f"CORS allowlist ativa ({len(_ALLOWED_ORIGINS)} origens)")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.allowed_origins_list,
-    allow_origin_regex=r"https://.*\.vercel\.app",
+    allow_origins=_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"],
@@ -2591,8 +2604,13 @@ async def create_checkout(request: Request, user: dict = Depends(_get_current_us
     """Cria sessão de checkout do acesso de 7 dias ($79, pagamento avulso).
 
     Se STRIPE_API_KEY + STRIPE_PRICE_ID_PRO estiverem configurados, cria uma
-    sessão real no Stripe (hosted). Caso contrário retorna mock para o fluxo
-    local (sem gateway ainda) — o frontend chama /api/billing/mock-activate.
+    sessão real no Stripe (hosted) e o acesso é libertado pelo webhook
+    (checkout.session.completed).
+
+    Se o Stripe NÃO estiver configurado, devolve mock=True / checkout_url=None.
+    Isso é intencionalmente fail-closed: o frontend mostra erro de pagamento e
+    NENHUM acesso é concedido. A ativação de plano ocorre exclusivamente via
+    webhook Stripe verificado — nunca via um endpoint de mock.
     """
     full = await db_service.get_user_by_id(user["id"])
     if not full:
@@ -2660,22 +2678,22 @@ async def stripe_create_checkout(request: Request, user: dict = Depends(_get_cur
     }
 
 
-@app.post("/api/billing/mock-activate")
-async def mock_activate(user: dict = Depends(_get_current_user)):
-    """Mock de confirmação de pagamento: libera +1 semana ($79)."""
-    renewed = await db_service.activate_week(
-        user["id"], plan=settings.PLAN_NAME.lower(),
-        subscription_status="active", days=7,
+@app.post("/api/billing/mock-activate", include_in_schema=False)
+async def mock_activate_disabled(user: dict = Depends(_get_current_user)):
+    """Rota DESATIVADA.
+
+    Existia para ambiente de desenvolvimento e concedia +1 semana de plano Pro
+    sem qualquer verificacao de pagamento no Stripe. Qualquer utilizador
+    autenticado podia auto-assinar. Removida em favor do webhook Stripe, que
+    valida a assinatura e e a unica via de ativacao de plano.
+    """
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "Endpoint desativado. A subscricao e ativada exclusivamente via "
+            "Stripe (webhook checkout.session.completed)."
+        ),
     )
-    if not renewed:
-        raise HTTPException(status_code=404, detail="Usuário não encontrado")
-    return {
-        "status": "ok",
-        "mock": True,
-        "plan": renewed.get("plan"),
-        "subscription_status": renewed.get("subscription_status"),
-        "plan_until": renewed.get("plan_until"),
-    }
 
 
 @app.post("/api/stripe/webhook")

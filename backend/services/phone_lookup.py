@@ -1,11 +1,22 @@
 """Phone Lookup Service - Interface e implementações para busca de telefone do dono.
 
 Arquitetura baseada em providers (Strategy Pattern) para permitir:
-- MockProvider (dev/test sem credenciais)
-- SearchbugProvider (produção quando credenciais chegarem)
+- SearchbugProvider (produção, via backend/services/searchbug.py)
 - FallbackProvider (futuro provedor secundário)
 
-Quando credenciais Searchbug chegarem: trocar MockPhoneProvider por SearchbugProvider.
+AVISO - INTEGRIDADE DE DADOS
+-----------------------------
+O antigo MockPhoneProvider foi REMOVIDO de propósito. Ele fabricava números
+de telefone brasileiros (+55) com 70% de "sucesso" e escrevia esses números
+inventados em leads de mercado americano, que eram apresentados a contratantes
+como contato real do proprietário.
+
+Este serviço agora arranca em modo fail-closed, sem nenhum provider: qualquer
+lookup devolve `all_providers_failed` e o `owner_phone` permanece NULL. Telefone
+é enriquecimento opcional e NUNCA deve ser inventado.
+
+Para ligar um provider real use `set_providers([...])`, ou use
+`backend.services.searchbug.searchbug_service`, que é o caminho de produção.
 """
 
 import asyncio
@@ -52,47 +63,10 @@ class PhoneLookupProvider(ABC):
         pass
 
 
-class MockPhoneProvider(PhoneLookupProvider):
-    """Provider mock para desenvolvimento/teste sem credenciais reais.
-
-    Simula taxa de sucesso ~70% para testar fluxo completo.
-    Remove quando credenciais Searchbug chegarem.
-    """
-
-    name = "mock"
-
-    def __init__(self, success_rate: float = 0.7):
-        self.success_rate = success_rate
-
-    async def lookup(self, address: str, city: str, state: str) -> PhoneResult:
-        """Simula busca com latência variável e taxa de sucesso configurável."""
-        # Simula latência de rede (50-300ms)
-        await asyncio.sleep(random.uniform(0.05, 0.3))
-
-        # Determina sucesso/falha
-        if random.random() <= self.success_rate:
-            # Gera telefone brasileiro válido formato E.164
-            ddd = random.choice(["11", "21", "31", "41", "51", "61", "71", "81", "85"])
-            numero = f"9{random.randint(1000, 9999)}{random.randint(1000, 9999)}"
-            phone = f"+55{ddd}{numero}"
-
-            logger.info(f"MockPhoneProvider: sucesso para {address}, {city} - {phone}")
-            return PhoneResult(
-                success=True,
-                phone=phone,
-                provider=self.name,
-                raw_data={"address": address, "city": city, "state": state, "mock": True}
-            )
-        else:
-            errors = ["not_found", "rate_limited", "invalid_address", "timeout"]
-            error = random.choice(errors)
-            logger.warning(f"MockPhoneProvider: falha ({error}) para {address}, {city}")
-            return PhoneResult(
-                success=False,
-                error=error,
-                provider=self.name,
-                raw_data={"address": address, "city": city, "state": state, "mock": True}
-            )
+# NOTA: MockPhoneProvider foi removido deliberadamente (ver docstring do módulo).
+# Ele fabricava telefones brasileiros (+55) e escrevia-os em leads de mercado
+# americano como se fossem contato real. Não reintroduzir. Telefone é
+# enriquecimento opcional: sem provider real, o resultado é phone=None.
 
 
 class PhoneLookupService:
@@ -112,9 +86,15 @@ class PhoneLookupService:
         self._max_retries = 2
         self._base_delay = 0.5  # segundos
 
-        # Inicializa com mock provider (substituir por SearchbugProvider quando credenciais chegarem)
-        self._providers = [MockPhoneProvider(success_rate=0.7)]
-        logger.info(f"PhoneLookupService iniciado com providers: {[p.name for p in self._providers]}")
+        # Fail-closed proposital: sem provedor de fabricacao.
+        # Numeros de telefone inventados sao proibidos - usar set_providers()
+        # com um provedor real (ver backend/services/searchbug.py).
+        self._providers = []
+        logger.warning(
+            "PhoneLookupService iniciado SEM providers (fail-closed). "
+            "Telefone real deve vir de backend/services/searchbug.py. "
+            "Nunca reintroduza um provider que fabrique numeros."
+        )
 
     def set_providers(self, providers: list[PhoneLookupProvider]) -> None:
         """Substitui lista de provedores (chamado ao configurar Searchbug real)."""

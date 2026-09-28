@@ -1,5 +1,5 @@
 import { useI18n } from "@/lib/i18n";
-import { activateWeekMock, createCheckoutSession } from "@/lib/api-client";
+import { createCheckoutSession } from "@/lib/api-client";
 
 export const SUBSCRIPTION_PLAN = {
   name: "Pro",
@@ -22,6 +22,6 @@ export function useStartCheckout() {
   };
 }
 
-export async function confirmMockWeek() {
-  return activateWeekMock();
-}
+// NOTA: confirmMockWeek / activateWeekMock foram removidos.
+// Chamavam /api/billing/mock-activate, que concedia plano Pro sem verificar
+// pagamento no Stripe. A unica via de ativacao e o webhook Stripe.
