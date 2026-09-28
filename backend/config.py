@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     # Frontend
     FRONTEND_URL: str = "http://localhost:3000"
     ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:3005,https://magicleads-oficial.vercel.app,https://magic-leads-frontend-final.vercel.app"
+    # Vercel preview deployment patterns (git branch preview URLs)
+    # Format: comma-separated base domains (without git branch suffix)
+    # e.g., "magicleads-oficial.vercel.app,magic-leads-frontend-final.vercel.app"
+    VERCEL_PREVIEW_BASE_DOMAINS: str = "magicleads-oficial.vercel.app,magic-leads-frontend-final.vercel.app"
 
     # E-mail de recuperação de senha — Gmail SMTP (100% gratuito).
     # Defaults prontos para Gmail. Para ATIVAR o envio real basta definir no Railway:
@@ -122,6 +126,13 @@ class Settings(BaseSettings):
                     return [str(o).strip() for o in parsed if str(o).strip()]
             except Exception:
                 pass
+            return [o.strip() for o in v.split(",") if o.strip()]
+        return v
+
+    @property
+    def vercel_preview_base_domains_list(self) -> List[str]:
+        v = self.VERCEL_PREVIEW_BASE_DOMAINS
+        if isinstance(v, str):
             return [o.strip() for o in v.split(",") if o.strip()]
         return v
 

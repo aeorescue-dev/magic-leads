@@ -11,12 +11,13 @@ from datetime import datetime, timedelta
 import httpx
 import stripe
 from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Request, Response
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response as StarletteResponse
 
 from .config import settings
 from .models.schemas import (
@@ -269,24 +270,103 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # Allowlist EXPLICITA de origens. Nao reintroduzir allow_origin_regex com
 # curingas tipo "https://.*.vercel.app": com allow_credentials=True isso daria
 # acesso autenticado a API a qualquer dominio Vercel registavel por terceiros.
-# Para suportar preview deployments, enumerar os dominios em ALLOWED_ORIGINS
-# (env) em vez de abrir um padrao.
+# Para suportar preview deployments, usamos middleware customizado que valida
+# tanto origens estaticas quanto padroes de preview do Vercel (git branch URLs).
 _ALLOWED_ORIGINS = settings.allowed_origins_list
+_VERCEL_PREVIEW_BASE_DOMAINS = settings.vercel_preview_base_domains_list
 if not _ALLOWED_ORIGINS:
     logger.error(
         "ALLOWED_ORIGINS vazio — nenhuma origem sera aceite. "
         "Definir ALLOWED_ORIGINS no ambiente antes de expor a API."
     )
 else:
-    logger.info(f"CORS allowlist ativa ({len(_ALLOWED_ORIGINS)} origens)")
+    logger.info(f"CORS allowlist ativa ({len(_ALLOWED_ORIGINS)} origens estaticas)")
+    if _VERCEL_PREVIEW_BASE_DOMAINS:
+        logger.info(f"Vercel preview base domains: {_VERCEL_PREVIEW_BASE_DOMAINS}")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_ALLOWED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"],
-)
+# Custom CORS middleware que suporta Vercel preview deployments
+# Verifica Origin header contra origens estaticas + padroes de preview Vercel
+
+class VercelAwareCORSMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, allowed_origins: list[str], vercel_preview_base_domains: list[str]):
+        super().__init__(app)
+        self.allowed_origins = set(allowed_origins)
+        self.vercel_preview_base_domains = vercel_preview_base_domains
+
+    def _is_origin_allowed(self, origin: str) -> bool:
+        """Verifica se a origem e permitida (estatica ou preview Vercel)."""
+        if origin in self.allowed_origins:
+            return True
+
+        # Verifica se e um preview deployment do Vercel
+        # Formato: https://<project>-git-<branch>-<user>.vercel.app
+        # ou https://<project>-git-<branch>.vercel.app
+        # ou https://<project>-<user>.vercel.app (preview antigo)
+        if not origin.startswith("https://") or not origin.endswith(".vercel.app"):
+            return False
+
+        # Remove https:// e .vercel.app para obter o prefixo do projeto
+        prefix = origin.removeprefix("https://").removesuffix(".vercel.app")
+        if not prefix:
+            return False
+
+        # Verifica se o prefixo corresponde a um projeto permitido
+        # Formatos validos:
+        # - <projeto>
+        # - <projeto>-git-<branch>-<user>
+        # - <projeto>-git-<branch>
+        # - <projeto>-<user>
+        # Onde <projeto> deve estar na lista de base domains permitidos
+        for base_domain in self.vercel_preview_base_domains:
+            # base_domain e o dominio base do projeto (ex: "magicleads-oficial.vercel.app")
+            # mas no Vercel preview, o formato e <projeto>.vercel.app ou <projeto>-git-... .vercel.app
+            # Entao o projeto base e o dominio sem .vercel.app
+            project_base = base_domain.removesuffix(".vercel.app")
+
+            # Verifica se o prefixo comeca com o nome do projeto
+            if prefix == project_base:
+                return True
+            if prefix.startswith(f"{project_base}-git-"):
+                return True
+            if prefix.startswith(f"{project_base}-"):
+                # Formato antigo: <projeto>-<user>
+                # Validar que so ha um hifen apos o projeto
+                rest = prefix[len(project_base)+1:]
+                if rest and all(p.isalnum() or p in "-_" for p in rest.split("-")):
+                    return True
+
+        return False
+
+    async def dispatch(self, request: Request, call_next):
+        origin = request.headers.get("origin")
+
+        # Preflight (OPTIONS) - sempre responde com headers CORS se origin permitido
+        if request.method == "OPTIONS":
+            if origin and self._is_origin_allowed(origin):
+                return StarletteResponse(
+                    status_code=200,
+                    headers={
+                        "Access-Control-Allow-Origin": origin,
+                        "Access-Control-Allow-Credentials": "true",
+                        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+                        "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept, Origin, X-Requested-With",
+                        "Access-Control-Max-Age": "86400",
+                    }
+                )
+            return StarletteResponse(status_code=400, content="Origin not allowed")
+
+        # Requisição normal
+        response = await call_next(request)
+
+        # Adiciona headers CORS se origin permitido
+        if origin and self._is_origin_allowed(origin):
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Vary"] = "Origin"
+
+        return response
+
+app.add_middleware(VercelAwareCORSMiddleware, allowed_origins=_ALLOWED_ORIGINS, vercel_preview_base_domains=_VERCEL_PREVIEW_BASE_DOMAINS)
 
 
 # ------------------------------------------------------------------
