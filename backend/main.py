@@ -500,6 +500,33 @@ async def _annotate_visibility(leads: list, user: dict | None) -> None:
             lead["hours_remaining"] = 0
 
 
+async def _mark_revealed(leads: list, user: dict | None) -> None:
+    """Marca `_revealed` para que _to_lead_response exponha os dados do proprietário.
+
+    _to_lead_response mascara owner_name/owner_phone/owner_email quando
+    `_revealed` é falsy (gate de consentimento em main.py:111). Esse flag é
+    preenchido por _annotate_visibility, que só é chamada nos endpoints de
+    listagem de leads. "Meus Leads" (/api/me/history e /api/me/taken-leads)
+    serializava as linhas direto, sem o flag — logo o utilizador via os campos
+    do proprietário mascarados ("sem dados") apesar de o reveal estar ativo e o
+    crédito já debitado, enquanto o modal mostrava os dados porque vinha da
+    resposta do POST /reserve (lead já enriquecido em memória).
+
+    Usa exatamente o mesmo predicado de get_revealed_ids, para que a máscara
+    seja consistente entre a listagem e "Meus Leads".
+    """
+    user_id = user["id"] if user else None
+    if not user_id or not leads:
+        return
+    try:
+        revealed_ids = await db_service.get_revealed_ids(user_id, [ld.get("id") for ld in leads])
+    except Exception:
+        logger.exception("Falha ao calcular reveals ativos para _mark_revealed")
+        revealed_ids = set()
+    for lead in leads:
+        lead["_revealed"] = lead.get("id") in revealed_ids
+
+
 @app.get("/")
 async def root():
     return {
@@ -3470,6 +3497,7 @@ async def my_taken_leads(limit: int = 100, user: dict = Depends(_get_current_use
         or r.get("converted_by") == user["id"]
         or r.get("lead_status") in ("contacted", "in_negotiation", "converted")
     ]
+    await _mark_revealed(mine, user)
     return LeadsListResponse(
         total=len(mine), page=1, per_page=limit, leads=[_to_lead_response(m) for m in mine]
     )
@@ -3498,6 +3526,7 @@ async def my_leads_history(
             limit=limit,
         )
         leads = []
+        await _mark_revealed(rows, user)
         for r in rows:
             r["is_mine"] = True
             base = _to_lead_response(r).model_dump()
