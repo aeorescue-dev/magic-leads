@@ -3041,60 +3041,62 @@ async def reserve_lead(
     minutes = payload.minutes or 60
 
     # 2. COM CONSENTIMENTO => REVEAL (reserva 60min + conta 1/10 com idempotência)
+    #
+    # ORDEM CRÍTICA (fail closed): o crédito NUNCA é debitado antes de os dados
+    # essenciais (owner_name + owner_phone) estarem confirmados. Por isso o fluxo é:
+    #   2.1 pré-validação sem débito  -> 2.2 enriquecimento  -> 2.3 validação
+    #   -> 2.4 reveal_lead (único ponto que debita)
+    # Se faltar nome ou telefone, responde 422 sem debitar e sem reservar.
     if payload.consent:
         key = payload.idempotency or f"{user_id}:{lead_id}"
-        logger.info(f"[RESERVE] Calling reveal_lead user_id={user_id} lead_id={lead_id} key={key} minutes={minutes}")
-        try:
-            result = await db_service.reveal_lead(user_id, lead_id, key, minutes=minutes)
-            logger.info(f"[RESERVE] reveal_lead result: {result}")
-        except Exception as e:
-            logger.exception(f"[RESERVE] EXCEPTION in reveal_lead user_id={user_id} lead_id={lead_id}: {e}")
-            raise HTTPException(status_code=500, detail=f"Erro ao processar reserva: {e}")
 
-        if not result:
+        # 2.1 PRÉ-VALIDAÇÃO SEM EFEITO COLATERAL (não debita, não reserva)
+        pre = await db_service.precheck_reveal(user_id, lead_id)
+        pre_status = pre.get("status")
+        pre_lead = pre.get("lead") or {}
+
+        if pre_status == "not_found":
             raise HTTPException(status_code=404, detail="Lead não encontrado")
-        if result.get("error") == "not_found":
-            raise HTTPException(status_code=404, detail="Lead não encontrado")
-        if result.get("error") == "already_reserved":
+
+        if pre_status == "already_reserved":
             # Return lead data even when already reserved, so frontend can update UI
-            lead = result.get("lead") or {}
             return JSONResponse(
                 status_code=409,
                 content={
                     "error": "already_reserved",
                     "detail": "Lead já reservado por você",
                     "lead": {
-                        "id": lead.get("id"),
-                        "owner_name": lead.get("owner_name"),
-                        "owner_phone": lead.get("owner_phone"),
-                        "owner_email": lead.get("owner_email"),
-                        "mailing_address": lead.get("mailing_address"),
+                        "id": pre_lead.get("id"),
+                        "owner_name": pre_lead.get("owner_name"),
+                        "owner_phone": pre_lead.get("owner_phone"),
+                        "owner_email": pre_lead.get("owner_email"),
+                        "mailing_address": pre_lead.get("mailing_address"),
                         "my_status": "reserved",
                         "status": "reserved",
                         "visibility_status": "reserved_by_me",
-                        "reserved_by_me": { "expires_at": lead.get("reserved_until") },
+                        "reserved_by_me": { "expires_at": pre_lead.get("reserved_until") },
                     }
                 }
             )
-        if result.get("error") == "limit_reached":
+
+        if pre_status == "limit_reached":
             raise HTTPException(
                 status_code=429,
                 detail="Limite de 10 leads/dia atingido. Volte amanhã e abra seus 10+ potenciais clientes."
             )
 
-        lead = result.get("lead") or {}
+        # already_revealed=True => re-clique no mesmo lead com reveal ativo hoje.
+        # Nesse caso NENHUM crédito novo é debitado, então não bloqueamos por dados.
+        already_revealed = bool(pre.get("already_revealed"))
+        lead = dict(pre_lead)
 
-        # ENRIQUECIMENTO ON-DEMAND: se dados do dono faltam, busca nas APIs externas
-        try:
-            owner_name = lead.get("owner_name")
-            owner_phone = lead.get("owner_phone")
-            mailing_address = lead.get("mailing_address")
+        # 2.2 ENRIQUECIMENTO ON-DEMAND — ANTES de qualquer débito
+        owner_name = lead.get("owner_name")
+        owner_phone = lead.get("owner_phone")
+        mailing_address = lead.get("mailing_address")
 
-            needs_enrichment = not owner_name or not owner_phone or not mailing_address
-
-            enrichment_failed = False
-
-            if needs_enrichment:
+        if not owner_name or not owner_phone or not mailing_address:
+            try:
                 # Enriquecimento de nome + mailing address (Socrata/CKAN)
                 enrich_result = await owner_enrichment.enrich(
                     lead.get("address", ""),
@@ -3108,10 +3110,8 @@ async def reserve_lead(
                     if not mailing_address and enrich_result.get("mailing_address"):
                         mailing_address = enrich_result["mailing_address"]
                         await db_service.update_mailing_address(lead_id, mailing_address)
-                else:
-                    enrichment_failed = True
 
-                # Busca de telefone (Searchbug em prod, mock em dev) — opcional, não falha o enriquecimento
+                # Busca de telefone (Searchbug em prod, mock em dev)
                 if not owner_phone:
                     phone_result = await searchbug_service.lookup_phone(
                         lead.get("address", ""),
@@ -3120,40 +3120,90 @@ async def reserve_lead(
                         owner_name=owner_name,
                         zip_code=lead.get("zip_code") or lead.get("zip"),
                     )
-                    if phone_result.success:
+                    if phone_result.success and phone_result.phone:
                         owner_phone = phone_result.phone
                         await db_service.update_owner_phone(lead_id, owner_phone)
                     else:
-                        logger.info(f"Searchbug phone lookup falhou para lead {lead_id}: {phone_result.error} — continuando sem telefone")
+                        logger.info(
+                            f"Searchbug phone lookup sem resultado para lead {lead_id}: "
+                            f"{phone_result.error} — lead não será cobrado"
+                        )
+            except Exception as e:
+                logger.warning(f"Enriquecimento on-demand falhou para lead {lead_id}: {e}")
 
-                # Recarrega lead com dados enriquecidos
-                enriched_lead = await db_service.get_lead_by_id(lead_id)
-                if enriched_lead:
-                    lead = dict(enriched_lead)
+            # Recarrega lead com os dados enriquecidos já persistidos
+            enriched_lead = await db_service.get_lead_by_id(lead_id)
+            if enriched_lead:
+                lead = dict(enriched_lead)
 
-        except Exception as e:
-            logger.warning(f"Enriquecimento on-demand falhou para lead {lead_id}: {e}")
-            enrichment_failed = True
-
-        # REGRA A: Se enriquecimento falhou ou dado ESSENCIAL (owner_name) vazio, não debita a cota diária
-        # mailing_address e telefone são opcionais
-        # Validação de segurança unificada: limite 2/dia, refund_blocked, lead_status — SEM janela de 5 min (processo síncrono)
-        if enrichment_failed or not lead.get("owner_name"):
-            logger.info(f"Regra A aplicada: estorno de cota por owner_name vazio/falha no lead {lead_id}")
-            refund_result = await db_service.process_refund(
-                user_id,
-                lead_id,
-                reason="enrichment_failed",
-                check_active_reveal=True,
-                check_time_window=False,      # Regra A: sem janela de 5 min (síncrono)
-                check_lead_status=True,       # Regra C
-                check_refund_blocked=True,
-                check_daily_limit=True,       # Regra D: limite 2/dia
+        # 2.3 REGRA A (fail closed): sem owner_name OU sem owner_phone => NÃO debita.
+        # Só se aplica quando um novo crédito seria consumido (re-clique é isento).
+        missing = [f for f in ("owner_name", "owner_phone") if not lead.get(f)]
+        if missing and not already_revealed:
+            logger.info(
+                f"[RESERVE] Regra A: sem débito para lead {lead_id} — missing={missing}"
             )
-            if not refund_result.get("success"):
-                logger.warning(f"Falha ao processar estorno Regra A: {refund_result.get('reason')} params={refund_result.get('params')}")
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "incomplete_lead_data",
+                    "error_code": "reveal_incomplete_data",
+                    "params": {"missing": missing},
+                    "detail": (
+                        "Não foi possível confirmar o nome e o telefone do proprietário. "
+                        "Nenhum crédito foi descontado e o lead não foi reservado."
+                    ),
+                    "reserved": False,
+                    "revealed": False,
+                    "charged": False,
+                },
+            )
 
-        # Registra interação
+        # 2.4 ÚNICO PONTO QUE DEBITA CRÉDITO (dados essenciais já confirmados)
+        logger.info(f"[RESERVE] Calling reveal_lead user_id={user_id} lead_id={lead_id} key={key} minutes={minutes}")
+        try:
+            result = await db_service.reveal_lead(user_id, lead_id, key, minutes=minutes)
+            logger.info(f"[RESERVE] reveal_lead result: {result}")
+        except Exception as e:
+            logger.exception(f"[RESERVE] EXCEPTION in reveal_lead user_id={user_id} lead_id={lead_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"Erro ao processar reserva: {e}")
+
+        if not result:
+            raise HTTPException(status_code=404, detail="Lead não encontrado")
+        if result.get("error") == "not_found":
+            raise HTTPException(status_code=404, detail="Lead não encontrado")
+        if result.get("error") == "already_reserved":
+            # Corrida: outro usuário reservou entre o precheck e o reveal.
+            lost = result.get("lead") or {}
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": "already_reserved",
+                    "detail": "Lead já reservado por você",
+                    "lead": {
+                        "id": lost.get("id"),
+                        "owner_name": lost.get("owner_name"),
+                        "owner_phone": lost.get("owner_phone"),
+                        "owner_email": lost.get("owner_email"),
+                        "mailing_address": lost.get("mailing_address"),
+                        "my_status": "reserved",
+                        "status": "reserved",
+                        "visibility_status": "reserved_by_me",
+                        "reserved_by_me": { "expires_at": lost.get("reserved_until") },
+                    }
+                }
+            )
+        if result.get("error") == "limit_reached":
+            raise HTTPException(
+                status_code=429,
+                detail="Limite de 10 leads/dia atingido. Volte amanhã e abra seus 10+ potenciais clientes."
+            )
+
+        revealed_lead = result.get("lead") or {}
+        if revealed_lead:
+            lead = dict(revealed_lead)
+
+        # Registra interação (o crédito já foi debitado dentro de reveal_lead)
         await db_service.record_event(lead_id, "revealed")
 
         return JSONResponse(

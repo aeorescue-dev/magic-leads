@@ -3422,6 +3422,66 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def precheck_reveal(self, user_id: int, lead_id: int) -> dict:
+        """Checagens de elegibilidade SEM qualquer efeito colateral.
+
+        Usado pelo endpoint de reserva para validar ANTES de enriquecer o lead,
+        para que o crédito só seja debitado depois que os dados essenciais
+        (owner_name + owner_phone) estiverem confirmados.
+
+        Nunca cria reveal, nunca incrementa `user_daily_stats` e nunca reserva.
+        Retorna dict com 'status' em ('ok' | 'not_found' | 'already_reserved' |
+        'limit_reached'), o 'lead' atual e 'already_revealed' (re-click no mesmo
+        lead, que NÃO consome um novo crédito).
+        """
+        conn = get_connection()
+        try:
+            # 1. Expira holds vencidos para o cálculo de disponibilidade ser correto
+            #    (não debita nada; apenas marca holds antigos como expirados).
+            self._expire_lead_holds(conn)
+
+            lead = conn.execute("SELECT * FROM leads WHERE id = ?", (lead_id,)).fetchone()
+            if not lead:
+                return {"status": "not_found", "lead": None, "already_revealed": False}
+
+            # 2. Reservado por outro usuário?
+            if lead["lead_status"] == "reserved" and lead["reserved_by"] != user_id:
+                return {"status": "already_reserved", "lead": dict(lead), "already_revealed": False}
+
+            today = datetime.utcnow().date().isoformat()
+
+            # 3. Re-clique no mesmo lead com reveal ativo hoje => sem novo débito.
+            active = conn.execute(
+                """SELECT id FROM lead_reveals
+                   WHERE user_id = ? AND lead_id = ?
+                     AND revealed_date = ? AND returned_to_pool = 0
+                   ORDER BY id DESC LIMIT 1""",
+                (user_id, lead_id, today),
+            ).fetchone()
+            if active:
+                return {"status": "ok", "lead": dict(lead), "already_revealed": True}
+
+            # 4. Limite diário (espelha a checagem de reveal_lead, sem debitar).
+            stat = conn.execute(
+                "SELECT leads_used, leads_limit FROM user_daily_stats WHERE user_id = ? AND date = ?",
+                (user_id, today),
+            ).fetchone()
+            used = stat["leads_used"] if stat else 0
+            limit = (stat["leads_limit"] if stat and stat["leads_limit"] else 10) or 10
+            if used >= limit:
+                return {
+                    "status": "limit_reached",
+                    "lead": dict(lead),
+                    "already_revealed": False,
+                    "used": used,
+                    "limit": limit,
+                    "reset_at": self._utc_tomorrow_midnight().isoformat(),
+                }
+
+            return {"status": "ok", "lead": dict(lead), "already_revealed": False}
+        finally:
+            conn.close()
+
     def reveal_lead(
         self,
         user_id: int,
@@ -4709,6 +4769,9 @@ class AsyncDatabaseService:
 
     async def increment_daily_leads(self, user_id: int) -> bool:
         return await anyio.to_thread.run_sync(self._service.increment_daily_leads, user_id)
+
+    async def precheck_reveal(self, user_id: int, lead_id: int) -> dict:
+        return await anyio.to_thread.run_sync(self._service.precheck_reveal, user_id, lead_id)
 
     async def reveal_lead(self, user_id: int, lead_id: int, idempotency_key: Optional[str] = None, minutes: int = DatabaseService.REVEAL_HOLD_MINUTES) -> Optional[dict]:
         return await anyio.to_thread.run_sync(self._service.reveal_lead, user_id, lead_id, idempotency_key, minutes)

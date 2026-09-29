@@ -651,6 +651,17 @@ const URGENCIES = ["all", "high", "medium", "low"];
     }
   }, [currentPage, hasMoreLeads, loadingMore, selectedCity, selectedType]);
 
+  // O lead já está em "Meus Leads" (revelado por mim: reservado, em negociação,
+  // convertido, liberado ou com hold expirado). Nesse estado o botão
+  // "Reservar (1 hora)" não deve aparecer — o lead já foi adquirido e
+  // não pode ser "comprado" de novo pela mesma via.
+  const leadAlreadyMine = (lead: LeadResponse | null): boolean => {
+    if (!lead) return false;
+    if (lead.visibility_status === "reserved_by_me") return true;
+    if (lead.revealed) return true;
+    return !!lead.my_status && lead.my_status !== "available";
+  };
+
   // Open Lead Detail
   const openLeadDetail = async (lead: LeadResponse) => {
     setSelectedLead(lead);
@@ -854,6 +865,13 @@ const URGENCIES = ["all", "high", "medium", "low"];
           } catch { }
           showToast("Lead já reservado por você", "warning");
         }
+      } else if (e?.status === 422 || e?.responseBody?.error === "incomplete_lead_data") {
+        // Backend falhou closed: nenhum crédito foi descontado e nada foi reservado.
+        // Não marcar o lead como revelado — ele continua disponível para o pool.
+        showToast(
+          t("dashboard.toast.reveal_incomplete"),
+          "warning"
+        );
       } else {
         showToast(e?.message || "Erro ao revelar lead", "error");
       }
@@ -2431,28 +2449,30 @@ const URGENCIES = ["all", "high", "medium", "low"];
                 {t("dashboard.detail.routing")}
               </h4>
               <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={() => {
-                    // Check subscription first
-                    if (subscription && !subscription.can_access) {
-                      showToast(subscription.message || "Acesso negado", "error");
-                      return;
-                    }
-                    // Check daily limit
-if (dailyStats && dailyStats.remaining === 0) {
-      showToast(t("dashboard.toast.daily_limit"), "warning");
-      return;
-                    }
-                    // Consentimento antes de revelar os dados do proprietário
-                    setRevealTarget(selectedLead);
-                  }}
-                  disabled={busyAction || (subscription && !subscription.can_access) || (dailyStats?.remaining === 0)}
-                  className={`flex items-center gap-1.5 text-xs font-bold bg-indigo-500 hover:bg-indigo-400 text-white px-3.5 py-2 rounded-xl transition shadow-sm disabled:opacity-50 ${
-                    (subscription && !subscription.can_access) || (dailyStats && dailyStats.remaining === 0) ? "opacity-30 cursor-not-allowed" : ""
-                  }`}
-                >
-                  <Lock className="h-3.5 w-3.5" /> {t("dashboard.action.reserve")} (1 hora)
-                </button>
+                {!leadAlreadyMine(selectedLead) && (
+                  <button
+                    onClick={() => {
+                      // Check subscription first
+                      if (subscription && !subscription.can_access) {
+                        showToast(subscription.message || "Acesso negado", "error");
+                        return;
+                      }
+                      // Check daily limit
+                      if (dailyStats && dailyStats.remaining === 0) {
+                        showToast(t("dashboard.toast.daily_limit"), "warning");
+                        return;
+                      }
+                      // Consentimento antes de revelar os dados do proprietário
+                      setRevealTarget(selectedLead);
+                    }}
+                    disabled={busyAction || (subscription && !subscription.can_access) || (dailyStats?.remaining === 0)}
+                    className={`flex items-center gap-1.5 text-xs font-bold bg-indigo-500 hover:bg-indigo-400 text-white px-3.5 py-2 rounded-xl transition shadow-sm disabled:opacity-50 ${
+                      (subscription && !subscription.can_access) || (dailyStats && dailyStats.remaining === 0) ? "opacity-30 cursor-not-allowed" : ""
+                    }`}
+                  >
+                    <Lock className="h-3.5 w-3.5" /> {t("dashboard.action.reserve")} (1 hora)
+                  </button>
+                )}
                 <button
                   onClick={() => handleLeadAction(() => contactLead(selectedLead.id, "sms"), t("dashboard.action.contact_ok"))}
                   disabled={busyAction}
