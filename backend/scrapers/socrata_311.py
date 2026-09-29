@@ -11,6 +11,16 @@ from ..models.schemas import IssueCategory, RawLead311, UrgencyLevel
 from ..utils.logger import logger
 
 
+class SocrataFetchError(RuntimeError):
+    """Falha ao obter dados de uma fonte Socrata.
+
+    Antes, _fetch_soql devolvia [] em qualquer erro e a cidade continuava a ser
+    registada como sucesso em city_health. Um 400 do portal (coluna inexistente,
+    SoQL invalido) ficava invisivel: a cidade passava a run com 0 leads e verde.
+    Agora o erro propaga ate ao _scrape_worker, que marca a cidade como falha.
+    """
+
+
 class Socrata311Scraper:
     """
     Scrapa dados de 311 Service Requests via Socrata API.
@@ -59,8 +69,13 @@ class Socrata311Scraper:
                     data = response.json()
                     if isinstance(data, dict):  # erro retornado como dict
                         logger.error(f"Erro Socrata: {data}")
-                        return []
+                        raise SocrataFetchError(
+                            f"Socrata {domain}/{dataset} devolveu erro: "
+                            f"{data.get('message') or data.get('errorCode') or data}"
+                        )
                     return data or []
+            except SocrataFetchError:
+                raise
             except httpx.HTTPError as e:
                 # Se não é a última tentativa, espera com backoff exponencial
                 if attempt < self.MAX_RETRIES:
@@ -69,11 +84,16 @@ class Socrata311Scraper:
                     await asyncio.sleep(wait_time)
                     continue
                 logger.error(f"Erro ao conectar {domain} após {self.MAX_RETRIES + 1} tentativas: {e}")
-                return []
+                raise SocrataFetchError(
+                    f"Socrata {domain}/{dataset} falhou apos "
+                    f"{self.MAX_RETRIES + 1} tentativas: {e}"
+                ) from e
             except Exception as e:
                 # Erros não-HTTP não fazem retry
                 logger.error(f"Erro inesperado ao conectar {domain}: {e}")
-                return []
+                raise SocrataFetchError(
+                    f"Erro inesperado em {domain}/{dataset}: {e}"
+                ) from e
 
     async def fetch_nyc_311(self) -> List[RawLead311]:
         """Fetch NYC 311 Service Requests (últimas 48h)"""
@@ -404,8 +424,16 @@ class Socrata311Scraper:
         """
         cols = self._guess_columns(field_names)
         if not cols["_has_date"] or not cols["_has_desc"]:
-            logger.warning(f"{city}: dataset sem colunas de data/descrição detectadas — pulando")
-            return []
+            # Antes devolvia [] e a cidade era marcada como sucesso. Um dataset
+            # cujas colunas mudaram de nome e' uma falha de schema, nao "sem dados".
+            logger.error(
+                f"{city}: dataset {domain}/{dataset_id} sem colunas de data/descricao "
+                f"detectadas em {field_names}"
+            )
+            raise SocrataFetchError(
+                f"{city}: nao foi possivel detectar colunas de data/descricao em "
+                f"{domain}/{dataset_id}. Campos pedidos: {list(field_names or [])}"
+            )
 
         # seleciona campos detectados (+ endereço + histórico)
         select_fields = [c for c in [cols["date"], cols["desc"], cols["lat"], cols["lng"], cols["ext"], cols["addr"], cols["zip"]] if c]

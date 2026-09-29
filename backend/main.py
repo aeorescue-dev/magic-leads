@@ -656,8 +656,16 @@ async def leads_today(limit: int = 60, page: int = 1, city: str = None, type: st
                 sql += " AND city = ?"
                 params.append(city)
             if type:
-                sql += " AND source_type = ?"
-                params.append(type)
+                # O filtro "Obrigacao legal" da UI e um grupo e envia uma lista
+                # separada por virgulas ("dob_violation,hpd_violation").
+                # Comparar a string inteira com "=" nunca casava com nenhuma linha
+                # e devolvia 0 resultados com HTTP 200 — falha silenciosa que
+                # deixava a aba Oportunidades vazia. O mesmo agrupamento ja e
+                # tratado em services/db.py (aceita lista); aqui fazemos o split.
+                wanted = [t.strip() for t in str(type).split(",") if t.strip()]
+                if wanted:
+                    sql += " AND source_type IN (%s)" % ",".join("?" * len(wanted))
+                    params.extend(wanted)
             if not include_incomplete:
                 sql += f" AND {_qualified_where()}"
 
@@ -1423,7 +1431,7 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
         base_cities = [
             {"domain": "data.cityofnewyork.us", "dataset": "erm2-nwe9", "city": "NYC", "state": "NY", "hours": 96, "limit": 5000, "fields": ["unique_key", "created_date", "closed_date", "due_date", "complaint_type", "descriptor", "incident_address", "street_name", "intersection_street_1", "cross_street_1", "incident_zip", "latitude", "longitude", "status", "agency_name", "borough", "bbl", "community_board", "council_district", "police_precinct", "resolution_description", "open_data_channel_type"]},
             {"domain": "data.cityofnewyork.us", "dataset": "wvxf-dwi5", "city": "NYC", "state": "NY", "hours": 120, "type": "hpd_violations", "fields": ["violationid", "buildingid", "inspectiondate", "approveddate", "housenumber", "lowhousenumber", "highhousenumber", "streetname", "boro", "zip", "apartment", "latitude", "longitude", "novtype", "novdescription", "violationstatus", "currentstatus", "novissueddate", "communityboard", "councildistrict", "bbl", "block", "lot"]},  # HPD Housing Maintenance Code Violations
-            {"domain": "data.cityofchicago.org", "dataset": "v6vf-nfxy", "city": "Chicago", "state": "IL", "hours": 48, "fields": ["service_request_number", "created_date", "sr_type", "street_address", "zip_code", "latitude", "longitude", "status"]},
+            {"domain": "data.cityofchicago.org", "dataset": "v6vf-nfxy", "city": "Chicago", "state": "IL", "hours": 48, "fields": ["sr_number", "created_date", "sr_type", "street_address", "zip_code", "latitude", "longitude", "status"]},  # id= sr_number; service_request_number nao existe neste dataset (400)
             {"domain": "www.dallasopendata.com", "dataset": "d7e7-envw", "city": "Dallas", "state": "TX", "hours": 48, "fields": ["service_request_number", "created_date", "service_request_type", "address", "lat_location", "status"]},
         ]
 
@@ -1446,6 +1454,8 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
         # 4. Executa fetch por cidade com Circuit Breaker isolado
         all_raw = []
         city_results = {}  # {city: {"leads": [...], "error": None/str, "skipped": bool}}
+        city_ok: dict[str, int] = {}   # fontes que responderam por cidade
+        city_err: dict[str, list] = {} # fontes que falharam por cidade
 
         for entry in all_entries:
             city = entry["city"]
@@ -1456,7 +1466,13 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
             # Circuit Breaker: pula cidade se circuit breaker aberto
             if circuit_open_until and datetime.utcnow().isoformat() < circuit_open_until:
                 logger.warning(f"Circuit Breaker ATIVO para {city} até {circuit_open_until} — pulando")
-                city_results[city] = {"leads": [], "error": "circuit_breaker_open", "skipped": True}
+                # Nao sobrescrever leads ja obtidos por outra fonte da cidade.
+                _slot = city_results.setdefault(
+                    city, {"leads": [], "error": None, "skipped": False}
+                )
+                if not _slot["leads"]:
+                    _slot["skipped"] = True
+                    _slot["error"] = "circuit_breaker_open"
                 continue
 
             try:
@@ -1539,7 +1555,9 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                         logger.info(f"DOB Permits: got {len(rows)} raw rows from Socrata")
                     except Exception as e:
                         logger.error(f"DOB Permits: fetch failed: {e}")
-                        rows = []
+                        # Propagar: engolir aqui registava NYC como sucesso com 0
+                        # leads de DOB, mascarando a fonte como morta.
+                        raise
 
                     def _norm(s):
                         return "".join((s or "").lower().split())
@@ -1752,20 +1770,48 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                                 leads = out
                     except Exception as e:
                         logger.warning(f"Boston CKAN fetch error: {e}")
-                        leads = []
+                        # Propagar: antes Boston ficava verde no city_health
+                        # mesmo com a fonte CKAN em baixo.
+                        raise
 
-                # Sucesso: registra city health
-                await db_service.record_city_success(city)
-                await db_service.reset_anomaly_counter(city)
-                city_results[city] = {"leads": leads, "error": None, "skipped": False}
+                # Sucesso desta fonte. A saúde da cidade e' decidida no fim do
+                # loop: uma cidade tem varias entradas (NYC tem 4) e o erro de
+                # uma nao pode apagar o resultado das outras nem marcar a cidade
+                # como morta quando ela continua a devolver leads.
+                _slot = city_results.setdefault(
+                    city, {"leads": [], "error": None, "skipped": False}
+                )
+                _slot["leads"].extend(leads)
+                _slot["skipped"] = False
+                city_ok[city] = city_ok.get(city, 0) + 1
                 all_raw.extend(leads)
                 logger.info(f"{city}: {len(leads)} leads obtidos")
 
             except Exception as e:
-                # Falha isolada: registra failure, não derruba outras cidades
+                # Falha isolada: não derruba outras cidades
                 logger.error(f"Erro ao buscar {city}: {e}", exc_info=True)
-                _failure_info = await db_service.record_city_failure(city, str(e))
-                city_results[city] = {"leads": [], "error": str(e), "skipped": False}
+                _slot = city_results.setdefault(
+                    city, {"leads": [], "error": None, "skipped": False}
+                )
+                _src = entry.get("type") or entry.get("dataset") or "fonte"
+                city_err.setdefault(city, []).append(f"{_src}: {e}")
+                city_ok[city] = city_ok.get(city, 0)
+
+        # Saúde por cidade: so fica verde se pelo menos uma fonte respondeu.
+        # Antes cada entrada marcava success/failure isoladamente, e um fetch que
+        # devolvia [] por erro HTTP deixava a cidade verde com 0 leads.
+        for city, _n_ok in city_ok.items():
+            _errors = city_err.get(city)
+            if _n_ok == 0 and _errors:
+                await db_service.record_city_failure(city, _errors[0])
+                city_results[city]["error"] = " | ".join(_errors)
+            else:
+                await db_service.record_city_success(city)
+                await db_service.reset_anomaly_counter(city)
+                if _errors:
+                    # Respondeu em parte: verde, mas o erro viaja no webhook.
+                    city_results[city]["error"] = "PARCIAL — " + " | ".join(_errors)
+                    logger.warning(f"{city}: sucesso parcial, fontes com erro: {_errors}")
 
         logger.info(f"Total bruto 311 (todas cidades): {len(all_raw)}")
 
