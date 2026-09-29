@@ -25,9 +25,9 @@ class Settings(BaseSettings):
     # Plano semanal (fonte da verdade do checkout)
     PLAN_NAME: str = "Pro"
     PLAN_INTERVAL: str = "week"
-    PLAN_AMOUNT_CENTS: int = 7900      # $79.00 em centavos (Stripe)
-    PLAN_AMOUNT_USD: float = 79.0
-    PLAN_ANNUAL_USD: float = 4108.0    # 79 x 52 semanas
+    PLAN_AMOUNT_CENTS: int = 12000      # $120.00 em centavos (Stripe)
+    PLAN_AMOUNT_USD: float = 120.0
+    PLAN_ANNUAL_USD: float = 6240.0    # 120 x 52 semanas
     TRIAL_DAYS: int = 7
     RESERVATION_MINUTES: int = 15      # Lead reservation hold time
 

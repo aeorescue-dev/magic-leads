@@ -5,7 +5,7 @@ import { useI18n } from "@/lib/i18n";
 import { useStats } from "@/lib/hooks/useStats";
 import { useState } from "react";
 
-const ANNUAL_COST = 4108;
+const ANNUAL_COST = 6240;
 
 export function HowItWorks() {
   const { t } = useI18n();
@@ -68,7 +68,7 @@ export function HowItWorks() {
     { icon: Users, label: t("roi.leads_week"), value: fmt(getLeadsWeek()) !== "…" ? `${fmt(getLeadsWeek())}+` : "…", desc: t("roi.leads_week_desc"), color: "text-blue-400" },
     { icon: SlidersHorizontal, label: t("roi.conversion"), value: `${conversionRate}%`, desc: t("roi.conversion_desc"), color: "text-violet-400" },
     { icon: BarChart3, label: t("roi.responses_week"), value: fmt(getResponsesWeek()) !== "…" ? `${fmt(getResponsesWeek())}+` : "…", desc: t("roi.responses_week_desc"), color: "text-emerald-400" },
-    { icon: DollarSign, label: t("roi.cost_annual"), value: "$79/semana", desc: t("roi.cost_annual_desc"), color: "text-amber-400" },
+    { icon: DollarSign, label: t("roi.cost_annual"), value: "$120/semana", desc: t("roi.cost_annual_desc"), color: "text-amber-400" },
     { icon: TrendingUp, label: t("roi.roi"), value: getROI(), desc: t("roi.roi_desc"), color: "text-emerald-400" },
   ];
 
@@ -189,7 +189,7 @@ export function HowItWorks() {
               </div>
               <div className="border-l border-slate-700/50 mx-4 my-2 hidden md:block" />
               <div>
-                <div className="text-3xl font-extrabold text-amber-400">$4.108/ano</div>
+                <div className="text-3xl font-extrabold text-amber-400">$6.240/ano</div>
                 <div className="text-xs text-slate-400">{t("roi.cost_annual")}</div>
               </div>
               <div className="border-l border-slate-700/50 mx-4 my-2 hidden md:block" />

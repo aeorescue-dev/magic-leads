@@ -3234,7 +3234,7 @@ class DatabaseService:
                     "can_access": False,
                     "days_remaining": 0,
                     "expires_at": (plan_until.isoformat() if plan_until else None),
-                    "message": "Trial expirou. Pague $79/semana para continuar",
+                    "message": "Trial expirou. Pague $120/semana para continuar",
                     "action": "REDIRECT_TO_CHECKOUT",
                 }
 
@@ -3257,7 +3257,7 @@ class DatabaseService:
                     "can_access": False,
                     "days_remaining": 0,
                     "expires_at": (plan_until.isoformat() if plan_until else None),
-                    "message": "Plano expirou. Renove por $79/semana",
+                    "message": "Plano expirou. Renove por $120/semana",
                     "action": "REDIRECT_TO_CHECKOUT",
                 }
 
@@ -3268,7 +3268,7 @@ class DatabaseService:
                 "can_access": False,
                 "days_remaining": 0,
                 "expires_at": (plan_until.isoformat() if plan_until else None),
-                "message": "Assinatura necessária. Pague $79/semana para liberar o acesso",
+                "message": "Assinatura necessária. Pague $120/semana para liberar o acesso",
                 "action": "REDIRECT_TO_CHECKOUT",
             }
         finally:
@@ -3290,7 +3290,7 @@ class DatabaseService:
             conn.close()
 
     def activate_subscription(self, user_id: int, stripe_customer_id: str, stripe_subscription_id: str) -> bool:
-        """Ativa subscription paga de 1 semana ($79) (UTC, usa coluna plan_until)."""
+        """Ativa subscription paga de 1 semana ($120) (UTC, usa coluna plan_until)."""
         conn = get_connection()
         try:
             now = datetime.utcnow()

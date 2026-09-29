@@ -92,7 +92,7 @@ def test_new_user_checkout_returns_functional_stripe_url():
 
     plan = checkout.get("plan") or {}
     assert isinstance(plan, dict)
-    assert plan.get("amount_cents") == 7900 or plan.get("amount_usd") == 79, plan
+    assert plan.get("amount_cents") == 12000 or plan.get("amount_usd") == 120, plan
 
     page_status = _get_ok(url)
     assert page_status == 200, f"pagina do Stripe respondeu HTTP {page_status}"

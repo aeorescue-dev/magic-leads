@@ -24,7 +24,7 @@ export function PricingSection() {
               {t("pricing.badge")}
             </div>
             <div className="text-6xl md:text-7xl font-extrabold text-primary">
-              $79<span className="text-xl font-normal text-muted-foreground">{t("pricing.week")}</span>
+              $120<span className="text-xl font-normal text-muted-foreground">{t("pricing.week")}</span>
             </div>
             <p className="text-muted-foreground mt-2">{t("pricing.all_included")}</p>
           </div>

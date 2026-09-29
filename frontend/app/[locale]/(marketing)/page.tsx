@@ -518,7 +518,7 @@ export default function LandingPage() {
             <div className="rounded-[1.6rem] bg-[#0b1220] p-8 text-white sm:p-10">
               <span className="rounded-full bg-[#10b981]/15 px-3 py-1 text-[11px] font-black text-[#34e0a1]">{t("landing.planTag")}</span>
               <div className="mt-5 flex items-end gap-2">
-                <span className="font-display text-7xl font-black">$79</span>
+                <span className="font-display text-7xl font-black">$120</span>
                 <span className="mb-3 text-[#9aa7ba]">{t("landing.week")}<br /><span className="text-sm">{t("landing.month")}</span></span>
               </div>
               <p className="mt-3 text-sm text-[#9aa7ba]">{t("landing.planSub")}</p>
@@ -603,7 +603,7 @@ export default function LandingPage() {
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[#eef1f6] bg-white/95 px-4 py-3 backdrop-blur-xl sm:hidden">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className="font-display text-lg font-black leading-none">$79<span className="text-xs font-bold text-[#94a3b8]">{t("landing.week")}</span></p>
+            <p className="font-display text-lg font-black leading-none">$120<span className="text-xs font-bold text-[#94a3b8]">{t("landing.week")}</span></p>
             <p className="text-[11px] font-bold text-[#10b981]">{t("landing.stickyArea")}</p>
           </div>
           <button onClick={openModal} className="btn-mint flex-1 py-3 text-sm">{t("landing.stickyNow")}</button>

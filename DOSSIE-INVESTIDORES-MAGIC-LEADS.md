@@ -20,7 +20,7 @@ Três consequências, e apenas estas três sustentam o negócio:
 | | Modelo tradicional (auction) | Modelo reverso (Magic Leads) |
 |---|---|---|
 | **Exclusividade** | O mesmo lead é vendido a vários ao mesmo tempo | Uma reserva por propriedade, garantida pelo esquema |
-| **Custo** | CPC + custo de oportunidade, variável e imprevisível | Assinatura fixa de **$79/semana** |
+| **Custo** | CPC + custo de oportunidade, variável e imprevisível | Assinatura fixa de **$120/semana** |
 | **Momento** | O prestador procura; o cliente já decidiu | O problema está a acontecer **agora** e é registado num documento público |
 
 A conversão não está nesta tabela de propósito. Ver secção 9.
@@ -77,11 +77,11 @@ Um prestador que gaste $1.200/mês em Meta Ads não sabe se recebe 4 leads ou 40
 
 O Magic Leads troca variância por um preço fixo conhecido:
 
-- **$79/semana**, sem custo por clique, sem auction, sem a variância do lance.
+- **$120/semana**, sem custo por clique, sem auction, sem a variância do lance.
 - Cota diária definida, para o prestador saber o que recebe.
 - Exclusividade: não se gasta para merecer o acesso — o acesso vem incluído.
 
-**Este é o argumento mais forte e mais defensável do dossier, porque não depende de nenhuma métrica de conversão.** Funciona mesmo que o prestador feche zero vendas no primeiro mês: o risco passou de "quanto vou gastar" para "vale $79 por semana testar um canal previsível".
+**Este é o argumento mais forte e mais defensável do dossier, porque não depende de nenhuma métrica de conversão.** Funciona mesmo que o prestador feche zero vendas no primeiro mês: o risco passou de "quanto vou gastar" para "vale $120 por semana testar um canal previsível".
 
 É uma proposição de risco radicalmente diferente da que o mercado oferece hoje, e é verificável apenas pelo preço — não precisa de curva de retenção para ser acreditada.
 
@@ -264,7 +264,7 @@ Não é pelo número de imóveis indexados — qualquer um pode fazer scraping. 
 
 2. **A evidência é verificável pelo comprador.** Cada lead é um imóvel com histórico público documentado. A confiança não depende de nós, depende do registo público — que é uma posição defensável num mercado onde a confiança é sempre um custo.
 
-3. **Preço previsível é uma proposição de risco, não de promessa.** Não precisa de dados de conversão para ser acreditada. Um prestador entende $79/semana sem precisar que lhe provemos que converte.
+3. **Preço previsível é uma proposição de risco, não de promessa.** Não precisa de dados de conversão para ser acreditada. Um prestador entende $120/semana sem precisar que lhe provemos que converte.
 
 O que falta é a execução de dados da secção 7, que é trabalho de engenharia e dados conhecido, com prazo definido. Não é uma questão de visão de produto.
 

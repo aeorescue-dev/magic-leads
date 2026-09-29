@@ -4,9 +4,9 @@ import { createCheckoutSession } from "@/lib/api-client";
 export const SUBSCRIPTION_PLAN = {
   name: "Pro",
   interval: "weekly",
-  amount: 79,
-  amountCents: 7900,
-  annual: 4108,
+  amount: 120,
+  amountCents: 12000,
+  annual: 6240,
 } as const;
 
 export interface CheckoutResult {
