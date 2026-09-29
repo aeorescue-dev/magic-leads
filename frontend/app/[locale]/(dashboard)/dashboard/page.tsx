@@ -217,8 +217,8 @@ const URGENCIES = ["all", "high", "medium", "low"];
 
   const buildMsgs = (lead: LeadResponse) =>
     buildOutreachMessage({
-      owner: lead.owner_name || "—",
-      company: user?.company_name || "—",
+      owner: lead.owner_name || "",
+      company: user?.company_name || "",
       city: lead.city || "",
       category: lead.issue_category || "Other",
     });

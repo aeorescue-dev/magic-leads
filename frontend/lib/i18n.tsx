@@ -1704,7 +1704,7 @@ const EN: Dict = {
   "outreach.wa.Mold": "We treat moisture and mold in the area — free assessment.",
   "outreach.wa.Lead": "We help owners with safe repainting of older homes.",
   "outreach.wa.Unsanitary": "We help tidy up lots and backyards in the area.",
-  "outreach.wa.Door_Window": "We're in the area with doors, windows and frames services.",
+  "outreach.wa.Door_Window": "We're in the area with door, window and frame services.",
   "outreach.wa.Debris": "We do debris removal and cleanup in the area.",
   "outreach.wa.Other": "We're in your area with home repair and maintenance services.",
   "outreach.sms.Roof": "Roof and gutter services",
@@ -1738,7 +1738,7 @@ const EN: Dict = {
   "outreach.email.Mold": "and we treat moisture and mold, with a free assessment.",
   "outreach.email.Lead": "and we help owners repaint older homes safely.",
   "outreach.email.Unsanitary": "and we help bring lots and yards back in order in the area.",
-  "outreach.email.Door_Window": "and we're in the area providing doors, windows and frames services.",
+  "outreach.email.Door_Window": "and we're in the area providing door, window and frame services.",
   "outreach.email.Debris": "and we perform debris removal and cleanup in the area.",
   "outreach.email.Other": "and we offer home repair and maintenance services.",
 

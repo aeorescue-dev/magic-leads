@@ -22,8 +22,8 @@ export function ContactModal({ lead, onClose, onContacted }: ContactModalProps) 
   const [sent, setSent] = useState(false);
 
   const msgs = buildOutreachMessage({
-    owner: lead.owner_name || "—",
-    company: user?.company_name || "—",
+    owner: lead.owner_name || "",
+    company: user?.company_name || "",
     city: lead.city || "",
     category: lead.issue_category || "Other",
   });
