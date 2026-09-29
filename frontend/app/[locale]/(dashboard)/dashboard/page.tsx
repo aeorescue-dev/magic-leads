@@ -826,15 +826,34 @@ const URGENCIES = ["all", "high", "medium", "low"];
     } catch (e: any) {
       // Handle already-reserved case gracefully
       if (e?.error === "already_reserved" || e?.status === 409) {
-        showToast("Lead já reservado por você", "warning");
-        // Refresh lead data to show correct state
-        try {
-          const fresh = await fetchLeadById(revealTarget.id);
-          if (fresh) {
-            setLeads((prev) => prev.map((l) => (l.id === revealTarget.id ? { ...l, ...fresh } : l)));
-            setSelectedLead((prev) => prev && prev.id === revealTarget.id ? { ...prev, ...fresh } : prev);
-          }
-        } catch { }
+        // Use lead data from the 409 response body if available
+        const leadData = e?.responseBody?.lead;
+        if (leadData) {
+          const revealedFields = {
+            owner_name: leadData.owner_name,
+            owner_phone: leadData.owner_phone,
+            owner_email: leadData.owner_email,
+            mailing_address: leadData.mailing_address,
+            my_status: "reserved" as const,
+            status: "reserved",
+            visibility_status: "reserved_by_me" as const,
+            reserved_by_me: { expires_at: leadData.reserved_by_me?.expires_at },
+            revealed: true,
+          };
+          setLeads((prev) => prev.map((l) => (l.id === revealTarget.id ? { ...l, ...revealedFields } : l)));
+          setSelectedLead((prev) => prev && prev.id === revealTarget.id ? { ...prev, ...revealedFields } : prev);
+          showToast("Lead já reservado por você", "warning");
+        } else {
+          // Fallback: fetch fresh data if not in response
+          try {
+            const fresh = await fetchLeadById(revealTarget.id);
+            if (fresh) {
+              setLeads((prev) => prev.map((l) => (l.id === revealTarget.id ? { ...l, ...fresh } : l)));
+              setSelectedLead((prev) => prev && prev.id === revealTarget.id ? { ...prev, ...fresh } : prev);
+            }
+          } catch { }
+          showToast("Lead já reservado por você", "warning");
+        }
       } else {
         showToast(e?.message || "Erro ao revelar lead", "error");
       }

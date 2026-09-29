@@ -151,9 +151,11 @@ function toErrorMessage(detail: any): string {
 async function handle<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let detail: any = "";
+    let responseBody: any = null;
     try {
       const j = await res.json();
       detail = j?.detail ?? j;
+      responseBody = j;
     } catch {
       detail = await res.text();
     }
@@ -162,7 +164,10 @@ async function handle<T>(res: Response): Promise<T> {
       handleSessionExpired();
       throw new Error(toErrorMessage(detail));
     }
-    throw new Error(toErrorMessage(detail));
+    const error = new Error(toErrorMessage(detail)) as Error & { responseBody?: any; status?: number };
+    error.responseBody = responseBody;
+    error.status = res.status;
+    throw error;
   }
   return res.json() as Promise<T>;
 }
