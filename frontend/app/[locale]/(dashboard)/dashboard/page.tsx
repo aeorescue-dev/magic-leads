@@ -940,6 +940,26 @@ const URGENCIES = ["all", "high", "medium", "low"];
         }
       }
 
+      // EXCLUDE RESERVED LEADS FROM GENERAL OPPORTUNITIES
+      // Leads reserved by me or others should not appear in general opportunities
+      if (lead.my_status === "reserved" || 
+          lead.visibility_status === "reserved_by_me" || 
+          lead.visibility_status === "reserved_by_other") {
+        return false;
+      }
+
+      // Search query
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const matchesAddress = (lead.address || "").toLowerCase().includes(q);
+        const matchesOwner = (lead.owner_name || "").toLowerCase().includes(q);
+        const matchesDesc = (lead.issue_description || "").toLowerCase().includes(q);
+        const matchesCat = (lead.issue_category || "").toLowerCase().includes(q);
+        if (!matchesAddress && !matchesOwner && !matchesDesc && !matchesCat) {
+          return false;
+        }
+      }
+
       return true;
     });
   }, [leads, activeTab, selectedCity, selectedCategory, selectedUrgency, selectedType, interests, searchQuery]);
