@@ -1923,19 +1923,68 @@ const URGENCIES = ["all", "high", "medium", "low"];
                             )}
 
                             {vis === "available" && (
-                              <span className="text-[10px] font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-400 px-2.5 py-1 rounded-full flex items-center gap-1">
-                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" /> {t("dashboard.status.available")}
-                              </span>
+                              <>
+                                <span className="text-[10px] font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-400 px-2.5 py-1 rounded-full flex items-center gap-1">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" /> {t("dashboard.status.available")}
+                                </span>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleQuickReserve(lead); }}
+                                  disabled={busyAction || (subscription && !subscription.can_access) || (dailyStats?.remaining === 0)}
+                                  className="flex items-center gap-1.5 text-[11px] font-bold bg-indigo-500 hover:bg-indigo-400 text-white px-3 py-1.5 rounded-lg transition shadow-sm disabled:opacity-50"
+                                >
+                                  <Lock className="h-3 w-3" /> {t("dashboard.action.reserve_1h")}
+                                </button>
+                              </>
                             )}
                             {isMine && (
-                              <span className="text-[10px] font-bold uppercase tracking-wider bg-rose-500/15 text-rose-400 px-2.5 py-1 rounded-full flex items-center gap-1">
-                                <Lock className="h-3 w-3" /> {t("dashboard.badge.yours").replace("{time}", reservedUntil ? countdownLabel(reservedUntil) : HOLD_FALLBACK)}
-                              </span>
-                            )}
-                            {vis === "reserved_by_other" && (
-                              <span className="text-[10px] font-bold uppercase tracking-wider bg-slate-500/15 text-slate-400 px-2.5 py-1 rounded-full flex items-center gap-1">
-                                <Lock className="h-3 w-3" /> {t("dashboard.status.reserved")}
-                              </span>
+                              <>
+                                <span className="text-[10px] font-bold uppercase tracking-wider bg-rose-500/15 text-rose-400 px-2.5 py-1 rounded-full flex items-center gap-1">
+                                  <Lock className="h-3 w-3" /> {t("dashboard.badge.yours").replace("{time}", reservedUntil ? countdownLabel(reservedUntil) : HOLD_FALLBACK)}
+                                </span>
+                                <div className="flex items-center gap-2 mt-2 flex-wrap">
+                                  {lead.owner_phone && (
+                                    <a
+                                      href={waHref(lead.owner_phone, buildMsgs(lead))}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="flex items-center gap-1.5 text-[11px] font-semibold bg-emerald-500/15 text-emerald-400 px-3 py-1.5 rounded-lg hover:bg-emerald-500/25 transition"
+                                    >
+                                      <MessageSquare className="h-3.5 w-3.5" /> {t("dashboard.detail.whatsapp")}
+                                    </a>
+                                  )}
+                                  {lead.owner_phone && (
+                                    <a
+                                      href={smsHref(lead.owner_phone, buildMsgs(lead))}
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="flex items-center gap-1.5 text-[11px] font-semibold bg-green-500/15 text-green-400 px-3 py-1.5 rounded-lg hover:bg-green-500/25 transition"
+                                    >
+                                      <MessageSquare className="h-3.5 w-3.5" /> {t("dashboard.detail.sms")}
+                                    </a>
+                                  )}
+                                  {lead.owner_email && (
+                                    <a
+                                      href={`mailto:${lead.owner_email}?subject=${encodeURIComponent(buildMsgs(lead).emailSubject)}&body=${encodeURIComponent(buildMsgs(lead).emailBody)}`}
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="flex items-center gap-1.5 text-[11px] font-semibold bg-blue-500/15 text-blue-400 px-3 py-1.5 rounded-lg hover:bg-blue-500/25 transition"
+                                    >
+                                      <Mail className="h-3.5 w-3.5" /> {t("dashboard.detail.email")}
+                                    </a>
+                                  )}
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); openMaps(lead.address); }}
+                                    className="flex items-center gap-1.5 text-[11px] font-semibold bg-slate-500/15 text-slate-300 px-3 py-1.5 rounded-lg hover:bg-slate-500/25 transition"
+                                  >
+                                    <Navigation className="h-3.5 w-3.5" /> {t("dashboard.action.map")}
+                                  </button>
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); copyToClipboard(lead.owner_phone || '', 'phone'); }}
+                                    className="flex items-center gap-1.5 text-[11px] font-semibold bg-slate-500/15 text-slate-300 px-3 py-1.5 rounded-lg hover:bg-slate-500/25 transition"
+                                  >
+                                    <Copy className="h-3.5 w-3.5" /> {t("dashboard.detail.copy_phone")}
+                                  </button>
+                                </div>
+                              </>
                             )}
 
                             <span className={`ml-auto text-xs flex items-center gap-1 font-medium capitalize ${T.text2}`}>
