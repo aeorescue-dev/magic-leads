@@ -158,7 +158,7 @@ export default function LandingPage() {
   const estimatedVisits = Math.round(validatedPhones * 0.25);
   const closedJobs = Math.max(1, Math.round(estimatedVisits * (conversionRate / 20)));
   const monthlyRevenue = closedJobs * ticketValue;
-  const monthsPaid = (ticketValue / 520).toFixed(1);
+  const monthsPaid = (ticketValue / 480).toFixed(1);
 
   const copyTpl = (text: string) => {
     navigator.clipboard?.writeText(text).catch(() => {});
@@ -474,8 +474,8 @@ export default function LandingPage() {
                 <p className="mt-3 text-sm font-bold">{L.aboutJobs(closedJobs, ticketValue.toLocaleString("en-US"))}</p>
               </div>
               <div className="my-6 space-y-3 border-y border-white/20 py-5 text-sm font-semibold">
-                <div className="flex justify-between"><span className="text-white/80">{t("landing.invest")}</span><span>$520{t("landing.perMo")}</span></div>
-                <div className="flex justify-between"><span className="text-white/80">{t("landing.costDelivered")}</span><span>~$2.48</span></div>
+                <div className="flex justify-between"><span className="text-white/80">{t("landing.invest")}</span><span>$480{t("landing.perMo")}</span></div>
+                <div className="flex justify-between"><span className="text-white/80">{t("landing.costDelivered")}</span><span>~$2.29</span></div>
                 <div className="flex justify-between text-base"><span>{t("landing.onePays")}</span><span className="rounded-lg bg-[#04231a] px-2.5 py-0.5 text-[#34e0a1]">{monthsPaid} {t("landing.months")}</span></div>
               </div>
               <button onClick={openModal} className="w-full rounded-xl bg-white py-4 text-sm font-black uppercase tracking-wider text-[#0a8f65]">{t("landing.calcCta")}</button>
