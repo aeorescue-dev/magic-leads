@@ -191,6 +191,16 @@ class Socrata311Scraper:
           - endereco completo    -> usado tal e qual, sem duplicar a rua
           - so rua               -> "MAIN ST"
           - so cruzamento        -> "5TH AVE AND 34TH ST"
+
+        A rua cruzada NAO pode ser combinada com um numero de casa isolado.
+        Quando street_name vem vazio e incident_address e so o numero
+        ("1843" + cross_street_1 "WEST 61"), o numero pertence a uma rua que
+        NAO esta registada e a rua cruzada e outra. Juntar as duas produziria
+        "1843 WEST 61", um endereco que resolve para o imovel errado, e o
+        cliente pagaria por um dono que nao e o dono do imovel real.
+        Nesse caso devolvemos apenas o numero: parse_address exige numero E
+        rua, logo o lead fica sem enriquecimento em vez de ser atribuido ao
+        proprietario errado.
         """
         inc = str(incident_address or "").strip()
         st = str(street_name or "").strip()
@@ -228,7 +238,7 @@ class Socrata311Scraper:
             # qualquer enriquecimento posterior.
             street = self._compose_address_parts(
                 row.get("incident_address"), row.get("street_name"),
-                row.get("intersection"),
+                row.get("cross_street_1") or row.get("intersection_street_1"),
             )
             zip_code = row.get("incident_zip") or None
             address = f"{street}, NYC, NY" if street else "NYC, NY"
