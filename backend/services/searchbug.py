@@ -89,6 +89,63 @@ class PhoneLookupResult:
         return self.success and self.phone is not None
 
 
+_TRACKING_JUNK = re.compile(r"[,;|/\\]+")
+
+# Placeholders que aparecem em datasets publicos no lugar de um nome.
+_PLACEHOLDERS = {
+    "N A", "NA", "N A N", "NONE", "NULL", "NIL", "UNKNOWN", "UNKOWN",
+    "DESCONHECIDO", "SEM DADOS", "SEM NOME", "NO NAME", "NOT APPLICABLE",
+    "PRIVATE", "REDACTED", "WITHHELD", "UNKNOWN OWNER", "PRIVATE OWNER",
+}
+
+
+def _clean_owner_name(owner_name: str | None) -> tuple[str | None, str | None]:
+    """Normaliza o owner_name e decide se serve para uma consulta paga.
+
+    O enriquecimento devolve valores crus de datasets publicos. Observacoes
+    reais: "BIG BEAR," ( virgula final), "  JOEL DE LA CRUZ  ".
+
+    Regras deliberadamente conservadoras. Nao rejeitamos nomes de
+    empresa/LLC: o proprietario registado de um imovel e muitas vezes uma
+    society e o contacto e valido. Rejeitamos so o que nao e um nome.
+
+    Devolve (nome_limpo, None) ou (None, motivo).
+    """
+    if owner_name is None:
+        return None, "owner_name_ausente"
+
+    cleaned = _TRACKING_JUNK.sub(" ", str(owner_name))
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .-,")
+
+    if not cleaned:
+        return None, "owner_name_vazio"
+
+    # Sem letras nao ha nome: "21033", "---", "N/A".
+    if not re.search(r"[A-Za-z]", cleaned):
+        return None, "owner_name_sem_letras"
+
+    # Placeholders como "N/A", "DESCONHECIDO", "PRIVATE": nao ha nome atras.
+    if cleaned.upper() in _PLACEHOLDERS:
+        return None, "owner_name_placeholder"
+
+    if len(cleaned) < 3:
+        return None, "owner_name_curto_demais"
+
+    return cleaned, None
+
+
+def _address_is_resolvable(address: str) -> bool:
+    """Um endereco so com o numero ("9630") nunca vai resolver para um dono.
+
+    parse_address exige numero E rua, logo estes leads nao tm enriquecimento
+    possivel. Recusar aqui evita pagar por uma consulta garantidamente inuttil.
+    """
+    if not address:
+        return False
+    parts = str(address).split(",")[0].strip()
+    return len(parts.split()) >= 2
+
+
 class PhoneLookupService:
     """Multi-provider phone lookup with fallback chain."""
 
@@ -105,7 +162,27 @@ class PhoneLookupService:
         logger.info(f"PhoneLookup: LIVE MODE enabled. Providers: {', '.join(enabled)}")
 
     async def lookup_phone(self, address: str, city: str, state: str, owner_name: str | None = None, zip_code: str | None = None) -> "PhoneLookupResult":
-        """Look up phone number for an address via fallback chain."""
+        """Look up phone number for an address via fallback chain.
+
+        Regra de custo: esta e a etapa FINAL e PAGA, chamada apenas depois do
+        enriquecimento gratuito. Sem um owner_name utilizavel, a consulta seria
+        cega (so por endereco) e devolveria quase sempre "No results" a pagar.
+        Por isso recusa-se ANTES de qualquer chamada ao provider.
+        """
+        if not _address_is_resolvable(address):
+            return PhoneLookupResult(
+                success=False,
+                error="address_incompleta",
+                provider="none",
+            )
+
+        clean_name, name_error = _clean_owner_name(owner_name)
+        if name_error:
+            return PhoneLookupResult(
+                success=False,
+                error=name_error,
+                provider="none",
+            )
 
         # Provider chain (ordered by reliability/cost)
         providers = [
@@ -118,7 +195,7 @@ class PhoneLookupService:
                     address,
                     city,
                     state,
-                    owner_name=owner_name,
+                    owner_name=clean_name,
                     zip_code=zip_code,
                 )
                 if result.success and result.phone:
