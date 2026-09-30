@@ -197,11 +197,17 @@ async def scrape_city(city_config: dict):
         # Convert and insert
         inserted = 0
         for lead in leads:
-            enriched = _raw_to_enriched(lead)
+            enriched = _raw_to_enriched(lead, _source_type_for(city_config))
             if await db_service.insert_lead(enriched):
                 inserted += 1
-        
-        logger.info(f"{city_config['city']}: inserted {inserted} new leads")
+
+        # insert_lead faz upsert: devolve True tanto numa insercao nova como
+        # numa atualizacao de lead existente. Dizer "inserted N new leads"
+        # contava atualizacoes como se fossem leads novos.
+        logger.info(
+            f"{city_config['city']}: {inserted} leads gravados "
+            f"(inseridos ou atualizados)"
+        )
         return inserted
     except Exception as e:
         logger.error(f"Error scraping {city_config['city']}: {e}")
@@ -278,7 +284,7 @@ async def backfill_historical():
                     lead = socrata_scraper._parse_generic_row(row, cols, city, state)
                     if not lead:
                         continue
-                    enriched = _raw_to_enriched(lead)
+                    enriched = _raw_to_enriched(lead, _source_type_for(cfg))
                     if await db_service.update_lead_historical(lead.external_id, city, enriched):
                         updated += 1
             logger.info(f"{city} backfill: {updated}/{len(existing_ids)} leads atualizados")
@@ -289,11 +295,31 @@ async def backfill_historical():
     logger.info(f"Backfill histórico: total={total} leads atualizados")
     return total
 
-def _raw_to_enriched(lead) -> EnrichedLead:
-    """Converte um RawLead311 (com campos históricos) em EnrichedLead."""
+def _source_type_for(city_config: dict) -> SourceType:
+    """Mapeia o dataset de origem para o source_type que a UI e os filtros usam.
+
+    Espelha _SOURCE_TYPE_BY_ENTRY do main.py. Sem isto, os datasets que nao
+    sao 311 (violacoes HPD/DOB, permisos) entram como "311" e nunca satisfazem
+    o gatilho de obrigacao legal em _trigger_where.
+    """
+    dataset = str(city_config.get("dataset") or "")
+    return {
+        "wvxf-dwi5": SourceType.HPD_VIOLATION,
+        "erf2-qw8t": SourceType.DOB_VIOLATION,
+    }.get(dataset, SourceType.SERVICE_311)
+
+
+def _raw_to_enriched(lead, source_type: SourceType = SourceType.SERVICE_311) -> EnrichedLead:
+    """Converte um RawLead311 (com campos históricos) em EnrichedLead.
+
+    source_type tem de refletir o dataset de origem. Hardcodear SERVICE_311
+    gravava as violacoes do HPD como chamados 311 genericos: sem
+    case_status e sem o gatilho de obrigacao legal, _trigger_where descartava
+   -os e as 461 leads nunca apareciam na dashboard.
+    """
     return EnrichedLead(
         external_id=lead.external_id,
-        source_type=SourceType.SERVICE_311,
+        source_type=source_type,
         address=lead.address,
         city=lead.city,
         state=lead.state,
