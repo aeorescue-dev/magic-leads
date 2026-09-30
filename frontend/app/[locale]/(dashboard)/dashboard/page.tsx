@@ -780,9 +780,13 @@ const URGENCIES = ["all", "high", "medium", "low"];
         _history: HistoryEvent[];
         _occurrences: LeadOccurrence[];
       };
+      // O consentimento e a UNICA coisa que o utilizador deve ver ao reservar.
+      // Fechar o modal analitico impede mapa/Contactar/Negociar/Liberar por baixo.
+      setSelectedLead(null);
       setRevealTarget(enrichedLead);
     } catch (e) {
       console.error("Erro ao buscar detalhes do lead:", e);
+      setSelectedLead(null);
       setRevealTarget(lead); // fallback para o lead original
     } finally {
       setBusyAction(false);
@@ -2451,26 +2455,13 @@ const URGENCIES = ["all", "high", "medium", "low"];
               <div className="flex flex-wrap gap-2">
                 {!leadAlreadyMine(selectedLead) && (
                   <button
-                    onClick={() => {
-                      // Check subscription first
-                      if (subscription && !subscription.can_access) {
-                        showToast(subscription.message || "Acesso negado", "error");
-                        return;
-                      }
-                      // Check daily limit
-                      if (dailyStats && dailyStats.remaining === 0) {
-                        showToast(t("dashboard.toast.daily_limit"), "warning");
-                        return;
-                      }
-                      // Consentimento antes de revelar os dados do proprietário
-                      setRevealTarget(selectedLead);
-                    }}
+                    onClick={() => handleQuickReserve(selectedLead)}
                     disabled={busyAction || (subscription && !subscription.can_access) || (dailyStats?.remaining === 0)}
                     className={`flex items-center gap-1.5 text-xs font-bold bg-indigo-500 hover:bg-indigo-400 text-white px-3.5 py-2 rounded-xl transition shadow-sm disabled:opacity-50 ${
                       (subscription && !subscription.can_access) || (dailyStats && dailyStats.remaining === 0) ? "opacity-30 cursor-not-allowed" : ""
                     }`}
                   >
-                    <Lock className="h-3.5 w-3.5" /> {t("dashboard.action.reserve")} (1 hora)
+                    <Lock className="h-3.5 w-3.5" /> {t("dashboard.action.reserve_1h")}
                   </button>
                 )}
                 <button
