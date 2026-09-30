@@ -1922,11 +1922,46 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
         # 8. Envia webhook de alerta consolidado
         await _send_scraper_webhook(run_id, city_results, dlq_reprocessed, inserted, len(all_raw), hours_override, notified=notified_total)
 
-        logger.info(f"Scraper completo [run {run_id}]: {inserted} leads inseridos")
+        # Uma cidade que falhou por completo nao conta como coberta. O run
+        # anterior reportava status="success" e cities_covered=4 com Chicago
+        # morta ha ~29h: o verde do run escondia uma cidade que nao produzia
+        # nada, e o verde chegava ate ao gate do GitHub Actions que so olha
+        # para o status global. Passamos a contar so cidades que responderam
+        # de facto, e a rebaixar o run quando alguma falha por completo.
+        cities_ok = [
+            c for c, r in city_results.items()
+            if not r["skipped"] and not r["error"] and len(r["leads"]) > 0
+        ]
+        cities_degraded = [
+            c for c, r in city_results.items()
+            if r["error"] and not r["error"].startswith("PARCIAL")
+        ]
+        cities_skipped = [c for c, r in city_results.items() if r["skipped"]]
+        cities_bad = sorted(set(cities_degraded) | set(cities_skipped))
+
+        if cities_bad:
+            logger.error(
+                f"Scraper [run {run_id}] DEGRADADO: {len(cities_bad)}/{len(city_results)} "
+                f"cidade(s) sem producao neste run: {', '.join(cities_bad)}. "
+                f"O run e marcado 'partial', nao 'success'."
+            )
+            run_status = "partial"
+            _nota = (
+                f"311 multi-cidade com Circuit Breaker + DLQ + City Health + Webhook | "
+                f"DEGRADADO: {', '.join(cities_bad)}"
+            )
+        else:
+            run_status = "success"
+            _nota = "311 multi-cidade com Circuit Breaker + DLQ + City Health + Webhook"
+
+        logger.info(
+            f"Scraper completo [run {run_id}]: {inserted} leads inseridos "
+            f"({len(cities_ok)}/{len(city_results)} cidade(s) com producao)"
+        )
         state.update(
-            status="success", inserted=inserted,
-            total_raw=len(all_raw), cities_covered=len([c for c in city_results if not city_results[c]["skipped"]]),
-            note="311 multi-cidade com Circuit Breaker + DLQ + City Health + Webhook",
+            status=run_status, inserted=inserted,
+            total_raw=len(all_raw), cities_covered=len(cities_ok),
+            note=_nota,
             running=False, finished_at=datetime.utcnow().isoformat(),
         )
         await db_service.record_scrape_run(state)
