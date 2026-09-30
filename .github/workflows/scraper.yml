@@ -61,12 +61,14 @@ jobs:
               lstatus=$(echo "$st" | jq -r '.last_run.status // "unknown"')
               if [ "$lstatus" = "success" ]; then
                 echo "Status final do run: success"
-              else
-                echo "Aviso: status final do run = $lstatus (inspecionar logs)"
+                exit 0
               fi
-              exit 0
+              echo "ERRO: o run do scraper terminou com status '$lstatus'."
+              echo "O workflow e marcado como falhado para nao mascarar a falha."
+              exit 1
             fi
             echo "Aguardando conclusao (iteracao $i/55)..."
           done
-          echo "Ainda ativo apos 55min — run continua em background (job sai sem erro)"
+          echo "AVISO: ainda ativo apos 55min. O run continua em background no Railway."
+          echo "Este caso e timeout do poll, nao falha do scraper: nao marca o workflow como falhado."
           exit 0
