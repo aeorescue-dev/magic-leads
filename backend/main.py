@@ -2781,7 +2781,7 @@ def _create_stripe_checkout_session(user_id: int, locale: str = "auto") -> tuple
 
 @app.post("/api/billing/checkout")
 async def create_checkout(request: Request, user: dict = Depends(_get_current_user)):
-    """Cria sessão de checkout do acesso de 7 dias ($79, pagamento avulso).
+    """Cria sessão de checkout do acesso de 7 dias ($120, pagamento avulso).
 
     Se STRIPE_API_KEY + STRIPE_PRICE_ID_PRO estiverem configurados, cria uma
     sessão real no Stripe (hosted) e o acesso é libertado pelo webhook
