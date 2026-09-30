@@ -17,7 +17,7 @@ import {
   AlertCircle, Tag, Loader2, BarChart3, History,
   Flame, Zap, Forklift, Droplets, Bug, Droplet, AlertTriangle,
   DoorOpen, AppWindow, Package, Wind,
-  TrendingUp, Navigation, Smartphone, FolderOpen,
+  TrendingUp, Navigation, Smartphone, FolderOpen, Archive,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
@@ -184,6 +184,12 @@ function DashboardPageInner() {
   const [interests, setInterests] = useState<Set<string>>(new Set(["Roof", "Structure", "Plumbing", "Grass", "Paint", "Permit_Rejected", "Heating", "Electrical", "Elevator", "Gas", "Rodent", "Mold", "Lead", "Unsanitary", "Door_Window", "Debris"]));
   const [dailyStats, setDailyStats] = useState<{ used: number; limit: number; remaining: number; reset_at: string } | null>(null);
 
+  // Historico de casos encerrados. Desligado por omissao: o pool principal e
+  // so de leads qualificados (obrigacao legal OU chamado aberto). Ligar este
+  // interruptor traz tambem os nao-qualificados, para analise do historico da
+  // regiao, sem tocar nos KPIs nem na fileira de oportunidades.
+  const [includeClosed, setIncludeClosed] = useState(false);
+
   // Filter states
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [selectedUrgency, setSelectedUrgency] = useState<string>("all");
@@ -196,6 +202,18 @@ function DashboardPageInner() {
   const CITIES = ["all", "NYC", "Chicago", "Dallas", "Boston"];
   const CATEGORIES_FILTER = ["all", ...CATEGORIES.map(c => c.key)];
 const URGENCIES = ["all", "high", "medium", "low"];
+
+  // Estados que significam que o chamado ja terminou. Espelham a lista usada
+  // pelo backend em /api/leads/services. Um lead nestas condicoes aparece
+  // apenas quando o utilizador liga "Incluir encerrados", para consultar o
+  // historico da regiao: nao e uma oportunidade e nao deve ser reservado.
+  const CLOSED_STATUSES = [
+    "closed", "resolved", "solved", "archived", "duplicated",
+    "completed", "complete", "canceled", "cancelled", "rejected",
+  ];
+  const isClosedCase = (status?: string | null) =>
+    !!status && CLOSED_STATUSES.includes(status.trim().toLowerCase());
+
   const LEAD_TYPES = [
     { value: "all", labelKey: "dashboard.filter.all_types" },
     // "Obrigacao legal" e um grupo: violacoes do DOB e do HPD sao a mesma categoria
@@ -439,7 +457,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
         const [statsData, citiesData, leadsData, summaryData, scraperData, publicMetricsData] = await Promise.all([
           fetchStats().catch(() => null),
           fetchCitiesWithCounts().catch(() => []),
-          fetchTodayLeads(50, selectedCity === "all" ? undefined : selectedCity, false, 1, selectedType === "all" ? undefined : selectedType).catch(() => ({ leads: [], total: 0, page: 1, per_page: 50 })),
+          fetchTodayLeads(50, selectedCity === "all" ? undefined : selectedCity, includeClosed, 1, selectedType === "all" ? undefined : selectedType).catch(() => ({ leads: [], total: 0, page: 1, per_page: 50 })),
           fetchDashboardSummary().catch(() => null),
           fetchScraperStatus().catch(() => null),
           fetchPublicMetrics().catch(() => null),
@@ -464,12 +482,12 @@ const URGENCIES = ["all", "high", "medium", "low"];
     return () => {
       active = false;
     };
-  }, [selectedCity, selectedType]);
+  }, [selectedCity, selectedType, includeClosed]);
 
   // Real-time polling: refresh leads + KPIs every 30 seconds
   useEffect(() => {
     const interval = setInterval(() => {
-      fetchTodayLeads(50, selectedCity === "all" ? undefined : selectedCity, false, 1, selectedType === "all" ? undefined : selectedType)
+      fetchTodayLeads(50, selectedCity === "all" ? undefined : selectedCity, includeClosed, 1, selectedType === "all" ? undefined : selectedType)
         .then((data) => {
           setLeads(data.leads || []);
           setCurrentPage(1);
@@ -483,7 +501,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
       fetchPublicMetrics().then(setPublicMetrics).catch(() => {});
     }, 30000);
     return () => clearInterval(interval);
-  }, [selectedCity]);
+  }, [selectedCity, includeClosed]);
 
   // Fetch daily stats (limit 10/day)
   useEffect(() => {
@@ -636,7 +654,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
     setLoadingMore(true);
     try {
       const nextPage = currentPage + 1;
-      const data = await fetchTodayLeads(50, selectedCity === "all" ? undefined : selectedCity, false, nextPage, selectedType === "all" ? undefined : selectedType);
+      const data = await fetchTodayLeads(50, selectedCity === "all" ? undefined : selectedCity, includeClosed, nextPage, selectedType === "all" ? undefined : selectedType);
       if (data.leads && data.leads.length > 0) {
         setLeads((prev) => [...prev, ...data.leads]);
         setCurrentPage(nextPage);
@@ -1390,6 +1408,20 @@ const URGENCIES = ["all", "high", "medium", "low"];
                 {LEAD_TYPES.map((lt) => <option key={lt.value} value={lt.value}>{t(lt.labelKey)}</option>)}
               </select>
             </div>
+            <button
+              onClick={() => setIncludeClosed((v) => !v)}
+              aria-pressed={includeClosed}
+              title={t("dashboard.badge.closed_hint")}
+              className={`flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border transition ${
+                includeClosed
+                  ? "bg-slate-500/20 border-slate-400/40 text-slate-200"
+                  : theme === "dark"
+                    ? "bg-transparent border-white/10 text-slate-400 hover:text-slate-200"
+                    : "bg-white border-slate-200 text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              <Archive className="h-3.5 w-3.5" /> {t("dashboard.filter.include_closed")}
+            </button>
             <div className="flex-1" />
             <div className="flex items-center gap-2 text-xs" style={{ color: theme === "dark" ? "#94a3b8" : "#64748b" }}>
               <span>{filteredLeads.length} {t("dashboard.filter.showing") || "oportunidades"}</span>
@@ -1937,6 +1969,15 @@ const URGENCIES = ["all", "high", "medium", "low"];
                               if (st === "permit") return <span className="text-[10px] font-semibold uppercase tracking-wider bg-sky-500/15 text-sky-400 px-2.5 py-1 rounded-full flex items-center gap-1"><HardHat className="h-3 w-3" /> {t("dashboard.lead_type.permit")}</span>;
                               return <span className="text-[10px] font-semibold uppercase tracking-wider bg-slate-500/15 text-slate-400 px-2.5 py-1 rounded-full flex items-center gap-1"><FolderOpen className="h-3 w-3" /> {t("dashboard.lead_type.open")}</span>;
                             })())}
+
+                            {isClosedCase(lead.case_status) && (
+                              <span
+                                className="text-[10px] font-semibold uppercase tracking-wider bg-slate-500/20 text-slate-300 px-2.5 py-1 rounded-full flex items-center gap-1"
+                                title={t("dashboard.badge.closed_hint")}
+                              >
+                                <Archive className="h-3 w-3" /> {t("dashboard.badge.closed")}
+                              </span>
+                            )}
 
                             {lead.owner_name && (
                               <span className="text-[10px] font-semibold uppercase bg-emerald-500/15 text-emerald-400 px-2.5 py-1 rounded-full flex items-center gap-1">
