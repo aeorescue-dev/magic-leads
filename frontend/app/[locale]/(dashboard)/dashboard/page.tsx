@@ -682,6 +682,14 @@ const URGENCIES = ["all", "high", "medium", "low"];
 
   // Open Lead Detail
   const openLeadDetail = async (lead: LeadResponse) => {
+    // CORREÇÃO CRÍTICA: antes de abrir o modal analítico com dados vazios,
+    // verifica se o utilizador já possui acesso ao lead. Se não possui,
+    // o clique DEVE abrir apenas o consentimento (handleQuickReserve), nunca
+    // a tela analítica preliminar com "sem dados".
+    if (!leadAlreadyMine(lead)) {
+      await handleQuickReserve(lead);
+      return;
+    }
     setSelectedLead(lead);
     setActionSuccess(null);
     setNoteDraft("");
@@ -851,9 +859,15 @@ const URGENCIES = ["all", "high", "medium", "low"];
       setLeads((prev) =>
         prev.map((l) => (l.id === revealTarget.id ? { ...l, ...revealedFields } : l))
       );
-      setSelectedLead((prev) =>
-        prev && prev.id === revealTarget.id ? { ...prev, ...revealedFields } : prev
-      );
+      // Só agora, com a reserva confirmada, se abre o modal analítico.
+      // Antes este era um no-op: selectedLead estava a null (o consentimento
+      // fechou-o), portanto "prev && ..." avaliava sempre para null e o
+      // utilizador ficava sem ecra apos reservar. Constroi-se a partir do
+      // revealTarget, que ja traz _history/_occurrences.
+      setSelectedLead({
+        ...revealTarget,
+        ...revealedFields,
+      } as LeadResponse);
       if (userId) refreshNotifications();
       refreshHistory();
     } catch (e: any) {
@@ -874,7 +888,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
             revealed: true,
           };
           setLeads((prev) => prev.map((l) => (l.id === revealTarget.id ? { ...l, ...revealedFields } : l)));
-          setSelectedLead((prev) => prev && prev.id === revealTarget.id ? { ...prev, ...revealedFields } : prev);
+          setSelectedLead({ ...revealTarget, ...revealedFields } as LeadResponse);
           showToast("Lead já reservado por você", "warning");
         } else {
           // Fallback: fetch fresh data if not in response
@@ -882,7 +896,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
             const fresh = await fetchLeadById(revealTarget.id);
             if (fresh) {
               setLeads((prev) => prev.map((l) => (l.id === revealTarget.id ? { ...l, ...fresh } : l)));
-              setSelectedLead((prev) => prev && prev.id === revealTarget.id ? { ...prev, ...fresh } : prev);
+              setSelectedLead({ ...revealTarget, ...fresh } as LeadResponse);
             }
           } catch { }
           showToast("Lead já reservado por você", "warning");
