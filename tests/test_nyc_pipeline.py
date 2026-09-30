@@ -16,7 +16,6 @@ Causam cobertas por estes testes:
 """
 import os
 import sys
-import tempfile
 
 import pytest
 
@@ -47,8 +46,19 @@ class TestComposeAddressParts:
     def test_so_rua(self):
         assert socrata_scraper._compose_address_parts(None, "MAIN STREET") == "MAIN STREET"
 
-    def test_so_numero(self):
-        assert socrata_scraper._compose_address_parts("1200", None) == "1200"
+    def test_so_numero_e_descartado(self):
+        """So o numero, sem rua: nao ha dono possivel, o lead e descartado.
+
+        Antes devolvia "1200" e gravava um lead clicavel que so podia falhar
+        na reserva, gastando enriquecimento e creditos pagos sem hipotese de
+        sucesso. parse_address exige numero E rua.
+        """
+        assert socrata_scraper._compose_address_parts("1200", None) == ""
+        assert socrata_scraper._compose_address_parts("9630", "") == ""
+        assert socrata_scraper._compose_address_parts("1843", None, "WEST 61") == ""
+
+    def test_numero_com_rua_mantem_se(self):
+        assert socrata_scraper._compose_address_parts("1200", "MAIN STREET") == "1200 MAIN STREET"
 
     def test_so_intersecao(self):
         got = socrata_scraper._compose_address_parts(None, None, "5TH AVE AND 34TH ST")

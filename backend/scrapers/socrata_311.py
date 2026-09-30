@@ -38,6 +38,8 @@ class Socrata311Scraper:
     def __init__(self):
         self.keywords = settings.SCRAPER_KEYWORDS
         self.timeout = 30
+        # Leads descartados por nao terem rua utilizavel no endereco.
+        self._discarded_unresolvable = 0
 
     async def _fetch_soql(
         self, domain: str, dataset: str, select: str, where: str,
@@ -222,7 +224,12 @@ class Socrata311Scraper:
             return f"{inc} {st}"
 
         if inc:
-            return inc
+            # So o numero, sem rua ("9630", "1843"): o numero pertence a uma
+            # rua que o 311 nao registou. parse_address exige numero E rua,
+            # portanto este lead nunca tera dono. Devolve vazio para o
+            # chamador o descartar, em vez de gravar um lead clicavel que so
+            # pode falhar na reserva.
+            return ""
 
         if st:
             return st
@@ -241,9 +248,19 @@ class Socrata311Scraper:
                 row.get("cross_street_1") or row.get("intersection_street_1"),
             )
             zip_code = row.get("incident_zip") or None
-            address = f"{street}, NYC, NY" if street else "NYC, NY"
+
+            # Endereco sem rua utilizavel (so o numero, ou vazio): nao ha
+            # dono possivel para este lead. Descartar aqui evita por um lado
+            # poluir a dashboard com leads que so podem falhar, e por outro
+            # gastar enriquecimento e creditos pagos em buscas garantidamente
+            # inuteis.
+            if not street:
+                self._discarded_unresolvable += 1
+                return None
+
+            address = f"{street}, NYC, NY"
             if zip_code:
-                address = f"{street}, NY {zip_code}" if street else f"NYC, NY {zip_code}"
+                address = f"{street}, NY {zip_code}"
 
             # created_date vem como ISO (ex: 2026-09-02T00:00:00.000)
             created = row.get("created_date")
