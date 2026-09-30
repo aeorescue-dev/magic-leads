@@ -534,7 +534,23 @@ class OwnerEnrichment:
                         return self._build_result(row, cfg, original_address)
                 return self._build_result(row, cfg, original_address)
 
-        return self._build_result(records[0], cfg, original_address)
+        # Nenhum registo casou com a rua nem com o numero. Antes devolvia
+        # records[0] sem condicao: se a consulta trouxesse imoveis de outra
+        # rua, o dono errado era atribuido a este imovel e o cliente pagava
+        # por essa pessoa. So se aceita sem correspondencia quando existe um
+        # unico candidato, em que ele e de facto a resposta da consulta.
+        if len(records) == 1:
+            logger.warning(
+                f"CKAN {cfg['dataset']}: a unica resposta para {original_address!r} "
+                f"nao casou com a rua; atribuido por unico candidato"
+            )
+            return self._build_result(records[0], cfg, original_address)
+
+        logger.warning(
+            f"CKAN {cfg['dataset']}: {len(records)} respostas para "
+            f"{original_address!r} e nenhuma casou com a rua; owner nao atribuido"
+        )
+        return None
 
     def _build_result(self, row: Dict, cfg: Dict, original_address: str) -> Dict[str, Any]:
         owner = str(row.get(cfg["owner_col"]) or "").strip()
