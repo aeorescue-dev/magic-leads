@@ -114,7 +114,13 @@ class PhoneLookupService:
 
         for name, func in providers:
             try:
-                result = await func(address, city, state)
+                result = await func(
+                    address,
+                    city,
+                    state,
+                    owner_name=owner_name,
+                    zip_code=zip_code,
+                )
                 if result.success and result.phone:
                     logger.info(f"Phone lookup successful via {name} for {address}, {city}, {state}")
                     return result
