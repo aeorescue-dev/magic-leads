@@ -303,17 +303,17 @@ class OwnerEnrichment:
             async with httpx.AsyncClient(timeout=90) as client:
                 resp = await client.get(url, params=params, headers=self._headers())
         except httpx.HTTPError as e:
-            logger.debug(f"Erro lookup BBL {bbl}: {e}")
+            logger.warning(f"Erro lookup BBL {bbl}: {e}")
             return None
         if resp.status_code != 200:
-            logger.debug(f"Lookup BBL {bbl} retornou {resp.status_code}")
+            logger.warning(f"Lookup BBL {bbl} retornou {resp.status_code}")
             return None
         try:
             data = resp.json()
         except Exception:
             return None
         if not isinstance(data, list) or not data:
-            logger.debug(f"BBL {bbl} sem proprietario em {dset}")
+            logger.warning(f"BBL {bbl} sem proprietario em {dset}")
             return None
         return self._build_result(data[0], cfg, f"BBL {bbl}")
 
@@ -414,10 +414,10 @@ class OwnerEnrichment:
                             logger.warning(f"Erro enrichment {domain} (tentativa {attempt + 1}/{ENRICHMENT_MAX_RETRIES + 1}): {e}. Retry em {wait_time:.1f}s")
                             await asyncio.sleep(wait_time)
                             continue
-                        logger.debug(f"Erro enrichment {domain}: {e}")
+                        logger.warning(f"Erro enrichment {domain}: {e}")
                         break
                     except Exception as e:
-                        logger.debug(f"Erro inesperado enrichment {domain}: {e}")
+                        logger.warning(f"Erro inesperado enrichment {domain}: {e}")
                         break
 
                 if 'data' not in locals() or not data:
@@ -509,10 +509,10 @@ class OwnerEnrichment:
                     logger.warning(f"Erro enrichment CKAN {domain} (tentativa {attempt + 1}/{ENRICHMENT_MAX_RETRIES + 1}): {e}. Retry em {wait_time:.1f}s")
                     await asyncio.sleep(wait_time)
                     continue
-                logger.debug(f"Erro enrichment CKAN {domain}: {e}")
+                logger.warning(f"Erro enrichment CKAN {domain}: {e}")
                 return None
             except Exception:
-                logger.debug(f"Erro inesperado enrichment CKAN {domain}")
+                logger.warning(f"Erro inesperado enrichment CKAN {domain}")
                 return None
         else:
             return None
