@@ -21,6 +21,7 @@ Nao pode ser uma consulta cega por endereco.
 
 import pytest
 
+import backend.services.searchbug as sb
 from backend.services.searchbug import PhoneLookupResult, PhoneLookupService
 
 
@@ -240,3 +241,95 @@ async def test_corporate_owner_is_allowed(monkeypatch):
 
     assert result.success is True
     assert captured["owner_name"] == "TEXAS UTILITIES ELEC CO"
+
+
+# ---------------------------------------------------------------------------
+# Cache: cliques repetidos nao podem voltar a pagar
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_second_call_is_served_from_cache(monkeypatch):
+    """Duas reservas do mesmo imivel: uma so chamada paga."""
+    chamadas = []
+
+    async def _provider(address, city, state, owner_name=None, zip_code=None):
+        chamadas.append(address)
+        return _ok_result()
+
+    service = PhoneLookupService()
+    monkeypatch.setattr(service, "_lookup_searchbug", _provider, raising=False)
+
+    a = await service.lookup_phone("101 WEST 104 STREET", "NEW YORK", "NY", owner_name="MARIA SANTOS")
+    b = await service.lookup_phone("101 WEST 104 STREET", "NEW YORK", "NY", owner_name="MARIA SANTOS")
+
+    assert len(chamadas) == 1, f"pagou {len(chamadas)} vezes pelo mesmo imivel"
+    assert a.phone == b.phone == "(718) 555-0142"
+    assert b.provider == "cache"
+
+
+@pytest.mark.asyncio
+async def test_negative_result_is_cached_too(monkeypatch):
+    """Um 'No results' tambem fica em cache: clicar outra vez nao re-paga."""
+    chamadas = []
+
+    async def _provider(address, city, state, owner_name=None, zip_code=None):
+        chamadas.append(address)
+        return PhoneLookupResult(success=False, error="No results", provider="Searchbug")
+
+    service = PhoneLookupService()
+    monkeypatch.setattr(service, "_lookup_searchbug", _provider, raising=False)
+
+    await service.lookup_phone("101 WEST 104 STREET", "NEW YORK", "NY", owner_name="MARIA SANTOS")
+    segundo = await service.lookup_phone("101 WEST 104 STREET", "NEW YORK", "NY", owner_name="MARIA SANTOS")
+
+    assert len(chamadas) == 1, "um 'No results' foi re-cobrado"
+    assert segundo.success is False
+    assert segundo.error == "cache_sem_resultado"
+
+
+@pytest.mark.asyncio
+async def test_negative_cache_expires_so_lead_can_retry(monkeypatch):
+    """Passado o TTL negativo, o lead volta a ser tentado.
+
+    Sem isto, um lead que falhou uma vez nunca mais seria tentado, mesmo
+    depois de o enriquecimento gratuito melhorar.
+    """
+    chamadas = []
+
+    async def _provider(address, city, state, owner_name=None, zip_code=None):
+        chamadas.append(address)
+        return PhoneLookupResult(success=False, error="No results", provider="Searchbug")
+
+    service = PhoneLookupService()
+    monkeypatch.setattr(service, "_lookup_searchbug", _provider, raising=False)
+
+    await service.lookup_phone("101 WEST 104 STREET", "NEW YORK", "NY", owner_name="MARIA SANTOS")
+    # avanca o relogio para alem do TTL negativo
+    monkeypatch.setattr(sb.time, "monotonic", lambda: 0.0)
+    monkeypatch.setitem(
+        service._phone_cache,
+        "|".join(["101 WEST 104 STREET", "NEW YORK", "NY", "MARIA SANTOS"]),
+        (-sb._PHONE_CACHE_TTL_FAIL - 1, None),
+    )
+
+    await service.lookup_phone("101 WEST 104 STREET", "NEW YORK", "NY", owner_name="MARIA SANTOS")
+    assert len(chamadas) == 2, "o TTL negativo nunca expira: o lead ficava preso"
+
+
+@pytest.mark.asyncio
+async def test_cache_key_separates_different_properties(monkeypatch):
+    """Imoveis diferentes nao partilham cache."""
+    chamadas = []
+
+    async def _provider(address, city, state, owner_name=None, zip_code=None):
+        chamadas.append(address)
+        return _ok_result()
+
+    service = PhoneLookupService()
+    monkeypatch.setattr(service, "_lookup_searchbug", _provider, raising=False)
+
+    await service.lookup_phone("101 WEST 104 STREET", "NEW YORK", "NY", owner_name="MARIA SANTOS")
+    await service.lookup_phone("2800 MICHIGAN AVE", "CHICAGO", "IL", owner_name="JOSE LIMA")
+
+    assert len(chamadas) == 2

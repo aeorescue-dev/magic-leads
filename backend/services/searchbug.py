@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -137,13 +138,22 @@ def _clean_owner_name(owner_name: str | None) -> tuple[str | None, str | None]:
 def _address_is_resolvable(address: str) -> bool:
     """Um endereco so com o numero ("9630") nunca vai resolver para um dono.
 
-    parse_address exige numero E rua, logo estes leads nao tm enriquecimento
-    possivel. Recusar aqui evita pagar por uma consulta garantidamente inuttil.
+    parse_address exige numero E rua, logo estes leads nao tem enriquecimento
+    possivel. Recusar aqui evita pagar por uma consulta garantidamente inutil.
     """
     if not address:
         return False
     parts = str(address).split(",")[0].strip()
     return len(parts.split()) >= 2
+
+
+# Um telefone nao muda de dia para dia: 30 dias e seguro e evita re-pagar.
+_PHONE_CACHE_TTL_OK = 30 * 24 * 3600
+# Um "nao achou" pode mudar quando o enriquecimento gratuito melhora ou quando
+# o Searchbug carrega novos registos. TTL curto para nao fechar a porta para
+# sempre a um lead que hoje nao resolve.
+_PHONE_CACHE_TTL_FAIL = 24 * 3600
+_PHONE_CACHE_MAX = 5000
 
 
 class PhoneLookupService:
@@ -155,6 +165,8 @@ class PhoneLookupService:
 
         self.timeout = httpx.Timeout(20.0, connect=10.0)
         self._mock_mode = False  # Always try real providers first
+        # telefone -> (timestamp_monotonic, telefone ou None para "sem resultado")
+        self._phone_cache: dict[str, tuple[float, Optional[str]]] = {}
 
         enabled = []
         if self.searchbug_key:
@@ -184,6 +196,30 @@ class PhoneLookupService:
                 provider="none",
             )
 
+        cache_key = "|".join(
+            [
+                address.strip().upper(),
+                city.strip().upper(),
+                state.strip().upper(),
+                (clean_name or "").upper(),
+            ]
+        )
+        cached = self._phone_cache_get(cache_key)
+        if cached is not None:
+            phone, was_hit, was_negative = cached
+            if not was_negative:
+                return PhoneLookupResult(
+                    success=True,
+                    phone=phone,
+                    provider="cache",
+                )
+            # "sem resultado" dentro do TTL: nao voltar a pagar por isto hoje
+            return PhoneLookupResult(
+                success=False,
+                error="cache_sem_resultado",
+                provider="cache",
+            )
+
         # Provider chain (ordered by reliability/cost)
         providers = [
             ("Searchbug", self._lookup_searchbug),
@@ -200,11 +236,14 @@ class PhoneLookupService:
                 )
                 if result.success and result.phone:
                     logger.info(f"Phone lookup successful via {name} for {address}, {city}, {state}")
+                    self._phone_cache_put(cache_key, result.phone)
                     return result
                 else:
                     logger.warning(f"Provider {name} failed for {address}: {result.error}")
+                    self._phone_cache_put(cache_key, None)
             except Exception as e:
                 logger.warning(f"Provider {name} exception for {address}: {e}")
+                self._phone_cache_put(cache_key, None)
 
         # All providers failed
         return PhoneLookupResult(
@@ -212,6 +251,24 @@ class PhoneLookupService:
             error="All phone lookup providers failed",
             provider="none"
         )
+
+    def _phone_cache_get(self, key: str) -> tuple[Optional[str], bool, bool] | None:
+        """Devolve (telefone, foi_acertado, foi_negativo) ou None em cache miss."""
+        entry = self._phone_cache.get(key)
+        if entry is None:
+            return None
+        stored_at, phone = entry
+        ttl = _PHONE_CACHE_TTL_OK if phone else _PHONE_CACHE_TTL_FAIL
+        if time.monotonic() - stored_at > ttl:
+            self._phone_cache.pop(key, None)
+            return None
+        return phone, True, phone is None
+
+    def _phone_cache_put(self, key: str, phone: Optional[str]) -> None:
+        if len(self._phone_cache) >= _PHONE_CACHE_MAX:
+            # dicionario-ordered: remove a entrada mais antiga
+            self._phone_cache.pop(next(iter(self._phone_cache)), None)
+        self._phone_cache[key] = (time.monotonic(), phone)
 
     async def _lookup_searchbug(self, address: str, city: str, state: str, owner_name: str | None = None, zip_code: str | None = None) -> "PhoneLookupResult":
         """Lookup via Searchbug Contact Info API (api_contact).
