@@ -1053,6 +1053,91 @@ const URGENCIES = ["all", "high", "medium", "low"];
   const T = theme === "dark" ? DARK : LIGHT;
   const isDark = theme === "dark";
 
+  // Modal action buttons for corporate vs regular leads
+  const getModalActionButtons = () => {
+    if (!selectedLead) return null;
+    if (!selectedLead.owner_phone && selectedLead.owner_name && selectedLead.mailing_address) {
+      // Corporate lead: no phone, show badge and limited actions
+      return (
+        <div className="flex flex-wrap gap-2 pt-2">
+          <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-500/15 text-purple-400 text-xs font-semibold">
+            <Building2 className="h-3.5 w-3.5" /> {t("dashboard.badge.corporate")}
+          </span>
+          {selectedLead.owner_email && (
+            <a
+              href={`mailto:${selectedLead.owner_email}?subject=${encodeURIComponent(
+                buildMsgs(selectedLead).emailSubject
+              )}&body=${encodeURIComponent(buildMsgs(selectedLead).emailBody)}`}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-bold hover:bg-blue-500 transition"
+            >
+              <Mail className="h-3.5 w-3.5" /> E-mail
+            </a>
+          )}
+          <a
+            href={`https://maps.google.com/?q=${encodeURIComponent(selectedLead.address + ", " + selectedLead.city)}`}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 text-slate-950 text-xs font-bold hover:bg-amber-400 transition"
+          >
+            <MapPin className="h-3.5 w-3.5" /> {t("dashboard.action.map")}
+          </a>
+        </div>
+      );
+    }
+    // Regular lead with phone
+    return (
+      <div className="flex flex-wrap gap-2 pt-2">
+        <a
+          href={waHref(selectedLead.owner_phone!, buildMsgs(selectedLead))}
+          target="_blank"
+          rel="noreferrer"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 text-xs font-bold hover:bg-emerald-400 transition"
+        >
+          <MessageSquare className="h-3.5 w-3.5" /> WhatsApp
+        </a>
+        <a
+          href={`tel:${selectedLead.owner_phone!}`}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-500 text-white text-xs font-bold hover:bg-sky-400 transition"
+        >
+          <Phone className="h-3.5 w-3.5" /> Ligar
+        </a>
+        <a
+          href={smsHref(selectedLead.owner_phone!, buildMsgs(selectedLead))}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600 text-white text-xs font-bold hover:bg-green-500 transition"
+        >
+          <MessageSquare className="h-3.5 w-3.5" /> SMS
+        </a>
+        {selectedLead.owner_email && (
+          <a
+            href={`mailto:${selectedLead.owner_email}?subject=${encodeURIComponent(
+              buildMsgs(selectedLead).emailSubject
+            )}&body=${encodeURIComponent(buildMsgs(selectedLead).emailBody)}`}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-bold hover:bg-blue-500 transition"
+          >
+            <Mail className="h-3.5 w-3.5" /> E-mail
+          </a>
+        )}
+        <a
+          href={`https://maps.google.com/?q=${encodeURIComponent(selectedLead.address + ", " + selectedLead.city)}`}
+          target="_blank"
+          rel="noreferrer"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 text-slate-950 text-xs font-bold hover:bg-amber-400 transition"
+        >
+<MapPin className="h-3.5 w-3.5" /> {t("dashboard.action.map")}
+          </a>
+          <button
+            onClick={() => copyToClipboard(selectedLead.owner_phone!, "phone")}
+          className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-white/10 text-xs text-slate-300 hover:bg-white/5 transition"
+        >
+          {copiedField === "phone" ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+          Copiar telefone
+        </button>
+      </div>
+    );
+  };
+
+  const modalActionButtons = selectedLead ? getModalActionButtons() : null;
+
   return (
     <div className="flex min-h-screen transition-colors duration-200" style={{ backgroundColor: T.bg, color: isDark ? "#f8fafc" : "#0f172a" }}>
       {sidebarOpen && (
@@ -2290,55 +2375,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
               </div>
 
               {/* Action Contact Links */}
-              {selectedLead.owner_phone && (
-                <div className="flex flex-wrap gap-2 pt-2">
-                  <a
-                    href={waHref(selectedLead.owner_phone, buildMsgs(selectedLead))}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 text-xs font-bold hover:bg-emerald-400 transition"
-                  >
-                    <MessageSquare className="h-3.5 w-3.5" /> WhatsApp
-                  </a>
-                  <a
-                    href={`tel:${selectedLead.owner_phone}`}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-500 text-white text-xs font-bold hover:bg-sky-400 transition"
-                  >
-                    <Phone className="h-3.5 w-3.5" /> Ligar
-                  </a>
-                  <a
-                    href={smsHref(selectedLead.owner_phone, buildMsgs(selectedLead))}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600 text-white text-xs font-bold hover:bg-green-500 transition"
-                  >
-                    <MessageSquare className="h-3.5 w-3.5" /> SMS
-                  </a>
-                  {selectedLead.owner_email && (
-                    <a
-                      href={`mailto:${selectedLead.owner_email}?subject=${encodeURIComponent(
-                        buildMsgs(selectedLead).emailSubject
-                      )}&body=${encodeURIComponent(buildMsgs(selectedLead).emailBody)}`}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-bold hover:bg-blue-500 transition"
-                    >
-                      <Mail className="h-3.5 w-3.5" /> E-mail
-                    </a>
-                  )}
-                  <a
-                    href={`https://maps.google.com/?q=${encodeURIComponent(selectedLead.address + ", " + selectedLead.city)}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 text-slate-950 text-xs font-bold hover:bg-amber-400 transition"
-                  >
-                    <MapPin className="h-3.5 w-3.5" /> {t("dashboard.action.map") || "Abrir Mapa"}
-                  </a>
-                  <button
-                    onClick={() => copyToClipboard(selectedLead.owner_phone!, "phone")}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-white/10 text-xs text-slate-300 hover:bg-white/5 transition"
-                  >
-                    {copiedField === "phone" ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
-                    Copiar telefone
-                  </button>
-                </div>
-              )}
+              {modalActionButtons}
 
               {/* Embedded map + navigation buttons */}
               {selectedLead.address && (

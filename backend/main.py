@@ -3273,21 +3273,30 @@ async def reserve_lead(
             if enriched_lead:
                 lead = dict(enriched_lead)
 
-        # 2.3 REGRA A (fail closed): sem owner_name OU sem owner_phone => NÃO debita.
+        # 2.3 REGRA A AJUSTADA (fail closed): owner_name é sempre obrigatório.
+        # Perfis de reserva válidos:
+        #   1) Lead padrão     -> owner_name + owner_phone            -> debita crédito
+        #   2) Lead corporativo-> owner_name + mailing_address, sem phone -> 0 créditos
         # Só se aplica quando um novo crédito seria consumido (re-clique é isento).
-        missing = [f for f in ("owner_name", "owner_phone") if not lead.get(f)]
-        if missing and not already_revealed:
+        missing_critical = []
+        if not lead.get("owner_name"):
+            missing_critical.append("owner_name")
+        if not lead.get("owner_phone") and not lead.get("mailing_address"):
+            missing_critical.append("owner_phone_or_mailing_address")
+
+        if missing_critical and not already_revealed:
             logger.info(
-                f"[RESERVE] Regra A: sem débito para lead {lead_id} — missing={missing}"
+                f"[RESERVE] Regra A: sem débito para lead {lead_id} — missing={missing_critical}"
             )
             return JSONResponse(
                 status_code=422,
                 content={
                     "error": "incomplete_lead_data",
                     "error_code": "reveal_incomplete_data",
-                    "params": {"missing": missing},
+                    "params": {"missing": missing_critical},
                     "detail": (
-                        "Não foi possível confirmar o nome e o telefone do proprietário. "
+                        "Não foi possível confirmar o nome do proprietário e "
+                        "(telefone OU morada de correspondência). "
                         "Nenhum crédito foi descontado e o lead não foi reservado."
                     ),
                     "reserved": False,
@@ -3296,10 +3305,20 @@ async def reserve_lead(
                 },
             )
 
+        # Lead corporativo = tem owner_name + mailing_address, mas SEM owner_phone.
+        # Só então a reserva é gratuita (não conta para a cota diária do utilizador).
+        is_corporate = bool(not lead.get("owner_phone") and lead.get("mailing_address"))
+        charge_credit = not is_corporate
+
         # 2.4 ÚNICO PONTO QUE DEBITA CRÉDITO (dados essenciais já confirmados)
-        logger.info(f"[RESERVE] Calling reveal_lead user_id={user_id} lead_id={lead_id} key={key} minutes={minutes}")
+        logger.info(
+            f"[RESERVE] Calling reveal_lead user_id={user_id} lead_id={lead_id} "
+            f"key={key} minutes={minutes} corporate={is_corporate}"
+        )
         try:
-            result = await db_service.reveal_lead(user_id, lead_id, key, minutes=minutes)
+            result = await db_service.reveal_lead(
+                user_id, lead_id, key, minutes=minutes, charge_credit=charge_credit
+            )
             logger.info(f"[RESERVE] reveal_lead result: {result}")
         except Exception as e:
             logger.exception(f"[RESERVE] EXCEPTION in reveal_lead user_id={user_id} lead_id={lead_id}: {e}")
@@ -3356,6 +3375,7 @@ async def reserve_lead(
                 "limit": result.get("limit"),
                 "remaining": result.get("remaining"),
                 "reset_at": result.get("reset_at"),
+                "corporate": is_corporate,
                 "owner": {
                     "name": lead.get("owner_name"),
                     "phone": lead.get("owner_phone"),

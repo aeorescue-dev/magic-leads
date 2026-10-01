@@ -3488,11 +3488,15 @@ class DatabaseService:
         lead_id: int,
         idempotency_key: Optional[str] = None,
         minutes: int = REVEAL_HOLD_MINUTES,
+        charge_credit: bool = True,
     ) -> Optional[dict]:
         """Revela dados do proprietário: reserva + contabiliza (idempotente).
 
         Retorna dict com 'lead' completo + 'used'/'limit'/'remaining'/'reset_at',
         ou dict de erro ('error': 'limit_reached' | 'already_reserved' | 'not_found').
+
+        Se charge_credit=False (lead corporativo sem telefone), a reserva é criada
+        mas NÃO consome a cota diária do utilizador.
         """
         conn = get_connection()
         try:
@@ -3539,15 +3543,21 @@ class DatabaseService:
                     "idempotent": True,
                 }
 
-            # 4. Checa limite diário ANTES de criar novo reveal.
-            stat = conn.execute(
-                "SELECT leads_used, leads_limit FROM user_daily_stats WHERE user_id = ? AND date = ?",
-                (user_id, today),
-            ).fetchone()
-            used = stat["leads_used"] if stat else 0
-            limit = (stat["leads_limit"] if stat and stat["leads_limit"] else 10) or 10
-            if used >= limit:
-                return {"error": "limit_reached"}
+            # 4. Limite diário só é aplicado a reservas que consomem crédito.
+            #    Lead corporativo (charge_credit=False) fica isento da cota do dia.
+            stat = None
+            used = 0
+            limit = 0
+            reset_at = None
+            if charge_credit:
+                stat = conn.execute(
+                    "SELECT leads_used, leads_limit FROM user_daily_stats WHERE user_id = ? AND date = ?",
+                    (user_id, today),
+                ).fetchone()
+                used = stat["leads_used"] if stat else 0
+                limit = (stat["leads_limit"] if stat and stat["leads_limit"] else 10) or 10
+                if used >= limit:
+                    return {"error": "limit_reached"}
 
             # 5. Cria o reveal (idempotency_key único protege contra submit duplo).
             key = idempotency_key or f"{user_id}:{lead_id}:{today}"
@@ -3576,19 +3586,20 @@ class DatabaseService:
                     return {"lead": result, "revealed": True, "counted_again": False, "idempotent": True}
                 raise
 
-            # 6. Incrementa daily stats do dia (reserva de consumo do usário).
-            reset_at = self._utc_tomorrow_midnight().isoformat()
-            if stat:
-                conn.execute(
-                    "UPDATE user_daily_stats SET leads_used = leads_used + 1 WHERE user_id = ? AND date = ?",
-                    (user_id, today),
-                )
-            else:
-                conn.execute(
-                    """INSERT INTO user_daily_stats (user_id, date, leads_used, leads_limit, reset_at)
-                       VALUES (?, ?, 1, 10, ?)""",
-                    (user_id, today, reset_at),
-                )
+            # 6. Incrementa daily stats do dia (só quando a reserva consome crédito).
+            if charge_credit:
+                reset_at = self._utc_tomorrow_midnight().isoformat()
+                if stat:
+                    conn.execute(
+                        "UPDATE user_daily_stats SET leads_used = leads_used + 1 WHERE user_id = ? AND date = ?",
+                        (user_id, today),
+                    )
+                else:
+                    conn.execute(
+                        """INSERT INTO user_daily_stats (user_id, date, leads_used, leads_limit, reset_at)
+                           VALUES (?, ?, 1, 10, ?)""",
+                        (user_id, today, reset_at),
+                    )
 
             # 7. Reserva o lead por 60 minutos.
             conn.execute(
@@ -3606,15 +3617,30 @@ class DatabaseService:
             conn.commit()
 
             result = dict(conn.execute("SELECT * FROM leads WHERE id = ?", (lead_id,)).fetchone())
-            new_used = used + 1
+            if charge_credit:
+                new_used = used + 1
+                remaining = max(0, limit - new_used)
+            else:
+                # Reserva corporativa: cota do dia permanece intacta.
+                current = conn.execute(
+                    "SELECT leads_used, leads_limit FROM user_daily_stats WHERE user_id = ? AND date = ?",
+                    (user_id, today),
+                ).fetchone()
+                new_used = current["leads_used"] if current else 0
+                remaining = max(
+                    0,
+                    ((current["leads_limit"] if current and current["leads_limit"] else 10) or 10)
+                    - new_used,
+                )
             return {
                 "lead": result,
                 "revealed": True,
-                "counted_again": True,
+                "counted_again": charge_credit,
                 "idempotent": False,
+                "corporate": not charge_credit,
                 "used": new_used,
-                "limit": limit,
-                "remaining": max(0, limit - new_used),
+                "limit": limit or 10,
+                "remaining": remaining,
                 "reset_at": reset_at,
             }
         finally:
@@ -4773,8 +4799,8 @@ class AsyncDatabaseService:
     async def precheck_reveal(self, user_id: int, lead_id: int) -> dict:
         return await anyio.to_thread.run_sync(self._service.precheck_reveal, user_id, lead_id)
 
-    async def reveal_lead(self, user_id: int, lead_id: int, idempotency_key: Optional[str] = None, minutes: int = DatabaseService.REVEAL_HOLD_MINUTES) -> Optional[dict]:
-        return await anyio.to_thread.run_sync(self._service.reveal_lead, user_id, lead_id, idempotency_key, minutes)
+    async def reveal_lead(self, user_id: int, lead_id: int, idempotency_key: Optional[str] = None, minutes: int = DatabaseService.REVEAL_HOLD_MINUTES, charge_credit: bool = True) -> Optional[dict]:
+        return await anyio.to_thread.run_sync(self._service.reveal_lead, user_id, lead_id, idempotency_key, minutes, charge_credit)
 
     async def get_revealed_ids(self, user_id: int, lead_ids: List[int]) -> set:
         return await anyio.to_thread.run_sync(self._service.get_revealed_ids, user_id, lead_ids)
