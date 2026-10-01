@@ -3221,7 +3221,6 @@ async def reserve_lead(
                 )
                 logger.info(f"[RESERVE] owner_enrichment result: {enrich_result}")
                 if not enrich_result:
-                    enrichment_failed = True
                     logger.warning(f"[RESERVE] owner_enrichment returned None/empty for lead_id={lead_id}")
                 if enrich_result:
                     if not owner_name and enrich_result.get("owner_name"):
