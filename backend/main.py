@@ -3307,7 +3307,15 @@ async def reserve_lead(
 
         # Lead corporativo = tem owner_name + mailing_address, mas SEM owner_phone.
         # Só então a reserva é gratuita (não conta para a cota diária do utilizador).
-        is_corporate = bool(not lead.get("owner_phone") and lead.get("mailing_address"))
+        # owner_name é obrigatório por definição: sem ele o lead não é corporativo,
+        # é apenas incompleto, e a Regra A acima devolve 422. Exigir o mesmo campo
+        # nos dois sitios impede que a UI prometa "0 créditos" para algo que o
+        # backend vai rejeitar.
+        is_corporate = bool(
+            lead.get("owner_name")
+            and not lead.get("owner_phone")
+            and lead.get("mailing_address")
+        )
         charge_credit = not is_corporate
 
         # 2.4 ÚNICO PONTO QUE DEBITA CRÉDITO (dados essenciais já confirmados)
