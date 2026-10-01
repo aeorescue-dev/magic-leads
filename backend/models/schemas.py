@@ -137,6 +137,9 @@ class EnrichedLead(BaseModel):
     image_url: Optional[str]
     source_url: Optional[str]
 
+    # Owner mailing address
+    mailing_address: Optional[str] = None
+
 
 # API Response
 class LeadResponse(BaseModel):

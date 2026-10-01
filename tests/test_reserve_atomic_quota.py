@@ -42,7 +42,7 @@ EMAIL = "pytest-reserve-atomic@magicleads.app"
 _EXT = {"n": 0}
 
 
-def _make_lead(owner_name=None, owner_phone=None) -> int:
+def _make_lead(owner_name=None, owner_phone=None, mailing_address="123 TEST AVE, BROOKLYN, NY 11201") -> int:
     """Insere um lead 311 minimalista e devolve o id."""
     _EXT["n"] += 1
     payload = EnrichedLead(
@@ -61,6 +61,7 @@ def _make_lead(owner_name=None, owner_phone=None) -> int:
         owner_name=owner_name,
         owner_phone=owner_phone,
         owner_email=None,
+        mailing_address=mailing_address,
         date_reported=datetime(2026, 1, 15, 12, 0, 0),
         image_url=None,
         source_url=None,
@@ -141,9 +142,9 @@ def test_precheck_reveal_has_no_side_effects(user_and_client, no_external_data):
 
 
 def test_no_credit_debited_when_owner_data_incomplete(user_and_client, no_external_data):
-    """Sem nome OU sem telefone => 422 e ZERO créditos consumidos."""
+    """Sem nome e sem telefone/morada => 422 e ZERO créditos consumidos."""
     client, headers, user_id = user_and_client
-    lead_id = _make_lead(owner_name=None, owner_phone=None)
+    lead_id = _make_lead(owner_name=None, owner_phone=None, mailing_address=None)
 
     before_used = _used(user_id)
 
@@ -158,7 +159,8 @@ def test_no_credit_debited_when_owner_data_incomplete(user_and_client, no_extern
     assert body["error"] == "incomplete_lead_data", body
     assert body["charged"] is False, body
     assert body["reserved"] is False, body
-    assert set(body["params"]["missing"]) == {"owner_name", "owner_phone"}, body
+    # Regra A exige owner_name E (owner_phone OU mailing_address)
+    assert set(body["params"]["missing"]) == {"owner_name", "owner_phone_or_mailing_address"}, body
 
     assert _used(user_id) == before_used, (
         f"BUG: crédito foi debitado apesar do 422 "
@@ -170,25 +172,64 @@ def test_no_credit_debited_when_owner_data_incomplete(user_and_client, no_extern
     assert lead["reserved_until"] is None, "lead foi reservado apesar do 422"
 
 
-def test_no_credit_debited_when_only_phone_missing(user_and_client, no_external_data):
-    """Nome presente mas telefone ausente também NÃO pode ser cobrado."""
+def test_no_credit_debited_when_name_missing_but_mailing_present(user_and_client, no_external_data):
+    """Morada presente mas nome ausente => 422 e ZERO créditos consumidos."""
     client, headers, user_id = user_and_client
-    lead_id = _make_lead(owner_name="JOHN DOE", owner_phone=None)
+    lead_id = _make_lead(owner_name=None, owner_phone=None, mailing_address="123 CORP AVE")
 
     before_used = _used(user_id)
 
     r = client.post(
         f"/api/leads/{lead_id}/reserve",
         headers=headers,
-        json={"minutes": 60, "consent": True, "idempotency": f"pytest-422b-{lead_id}"},
+        json={"minutes": 60, "consent": True, "idempotency": f"pytest-422c-{lead_id}"},
     )
 
     assert r.status_code == 422, f"devolveu {r.status_code}: {r.text}"
     body = r.json()
-    assert body["params"]["missing"] == ["owner_phone"], body
-    assert _used(user_id) == before_used, "BUG: telefone vazio foi cobrado"
+    assert body["error"] == "incomplete_lead_data", body
+    assert body["charged"] is False, body
+    assert body["reserved"] is False, body
+    # Apenas owner_name está em falta (mailing_address está presente)
+    assert set(body["params"]["missing"]) == {"owner_name"}, body
+
+    assert _used(user_id) == before_used, (
+        f"BUG: crédito foi debitado apesar do 422 "
+        f"({before_used} -> {_used(user_id)})"
+    )
+
     lead = db_service._service.get_lead_by_id(lead_id)
-    assert lead["lead_status"] == "available"
+    assert lead["lead_status"] == "available", "lead foi reservado apesar do 422"
+    assert lead["reserved_until"] is None, "lead foi reservado apesar do 422"
+
+
+def test_corporate_lead_without_phone_is_allowed(user_and_client, no_external_data):
+    """Lead corporativo (nome + morada, sem telefone) => 200, reserva grátis (0 créditos)."""
+    client, headers, user_id = user_and_client
+    lead_id = _make_lead(owner_name="JOHN DOE", owner_phone=None, mailing_address="123 CORP AVE")
+
+    before_used = _used(user_id)
+
+    r = client.post(
+        f"/api/leads/{lead_id}/reserve",
+        headers=headers,
+        json={"minutes": 60, "consent": True, "idempotency": f"pytest-corp-{lead_id}"},
+    )
+
+    assert r.status_code == 200, f"devolveu {r.status_code}: {r.text}"
+    body = r.json()
+    assert body["revealed"] is True, body
+    assert body["owner"]["name"] == "JOHN DOE", body
+    assert body.get("corporate") is True, body
+    assert body["used"] == 0, body
+    assert body["limit"] == 10
+    assert body["remaining"] == 10
+
+    assert _used(user_id) == before_used, "BUG: crédito foi debitado em lead corporativo"
+    lead = db_service._service.get_lead_by_id(lead_id)
+    assert lead["lead_status"] == "reserved"
+    assert lead["owner_name"] == "JOHN DOE"
+    assert lead["owner_phone"] is None
 
 
 def test_credit_debited_once_when_data_complete(user_and_client, no_external_data):

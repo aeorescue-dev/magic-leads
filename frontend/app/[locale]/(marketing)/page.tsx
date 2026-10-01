@@ -5,6 +5,7 @@ import { useI18n } from "@/lib/i18n";
 import { fetchPublicMetrics, EMPTY_PUBLIC_METRICS } from "@/lib/api-client";
 import type { PublicMetrics } from "@/lib/api-client";
 import { FoldWave, useLandingShell } from "@/components/landing/LandingShell";
+import { Building2, Phone, ShieldCheck } from "lucide-react";
 
 // ------------------------------------------------------------------
 // Tipos e dados ilustrativos do "painel amostra"
@@ -137,13 +138,16 @@ export default function LandingPage() {
       if (TRADE_KEYS.includes(k)) templates[k] = { whatsapp: f[1], sms: f[2], email: f[3] };
     });
     const trust = [t("landing.trust1"), t("landing.trust2"), t("landing.trust3")];
+    const coverageItems = blocks(t("landing.coverageItems")).map((f) => ({
+      icon: f[0] ?? "", title: f[1] ?? "", desc: f[2] ?? "", color: f[3] || "#10b981",
+    }));
 
     const waMsg = (name: string, cat: string, addr: string) =>
       t("landing.waMsg").replace("{name}", name).replace("{cat}", cat).replace("{addr}", addr);
     const aboutJobs = (n: number, ticket: string) =>
       t("landing.aboutJobs").replace("{n}", String(n)).replace("{ticket}", ticket);
 
-    return { categories, tradesLabel, signals, problems, comparisons, quotes, planFeatures, neverItems, faqs, templates, trust, waMsg, aboutJobs };
+    return { categories, tradesLabel, signals, problems, comparisons, quotes, planFeatures, neverItems, faqs, templates, trust, waMsg, aboutJobs, coverageItems };
   }, [t]);
 
   // ------------------------------------------------ derivados (métricas públicas)
@@ -224,6 +228,45 @@ export default function LandingPage() {
             {[...L.categories, ...L.categories].map((c, i) => (
               <span key={`${c}-${i}`} className="flex shrink-0 items-center gap-8">{c}<span className="h-1.5 w-1.5 rounded-full bg-[#10b981]" /></span>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* COBERTURA COMPLETA */}
+      <section className="bg-white py-20 md:py-28">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6">
+          <Kicker color="#10b981">{t("landing.coverageKicker")}</Kicker>
+          <h2 className="font-display mt-5 max-w-4xl text-[2.4rem] font-black leading-[0.98] sm:text-5xl md:text-6xl">
+            {t("landing.coverageTitle")} <span className="hl">{t("landing.coverageHl")}</span>
+          </h2>
+          <p className="mt-6 max-w-2xl text-lg leading-relaxed text-[#54617a]">{t("landing.coverageSub")}</p>
+
+          <div className="mt-14 grid gap-6 md:grid-cols-3">
+            {L.coverageItems.map((item) => (
+              <article key={item.title} className="card card-hover flex flex-col p-8">
+                <span
+                  className="flex h-14 w-14 items-center justify-center rounded-2xl"
+                  style={{ background: `${item.color}1a`, color: item.color }}
+                >
+                  {item.icon === "phone" && <Phone className="h-7 w-7" />}
+                  {item.icon === "building" && <Building2 className="h-7 w-7" />}
+                  {item.icon === "shield" && <ShieldCheck className="h-7 w-7" />}
+                </span>
+                <h3 className="font-display mt-6 text-xl font-black">{item.title}</h3>
+                <p className="mt-4 flex-1 text-[15px] leading-relaxed text-[#54617a]">{item.desc}</p>
+              </article>
+            ))}
+          </div>
+
+          <div className="mt-10 overflow-hidden rounded-[1.6rem] bg-[#0b1220] p-8 md:p-10">
+            <div className="flex flex-col items-start gap-6 md:flex-row md:items-center">
+              <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-[#10b981] text-white">
+                <ShieldCheck className="h-7 w-7" />
+              </span>
+              <p className="flex-1 text-xl font-bold leading-snug text-white sm:text-2xl">
+                {t("landing.coverageTrust")}
+              </p>
+            </div>
           </div>
         </div>
       </section>
