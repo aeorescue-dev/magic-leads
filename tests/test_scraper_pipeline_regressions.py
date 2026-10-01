@@ -227,7 +227,6 @@ def test_fetch_soql_raises_instead_of_returning_empty(monkeypatch):
 
 def test_city_health_marks_failure_when_all_sources_fail(monkeypatch):
     """Cidade com 0 fontes respondidas tem de ser registada como FALHA."""
-    svc = db_service._service
     called = {"failure": [], "success": []}
 
     async def _fail(city, error=None):

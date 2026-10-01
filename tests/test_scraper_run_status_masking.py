@@ -7,9 +7,6 @@ circuit aberto). cities_covered contava qualquer cidade nao-skip, incluindo as
 que falharam por completo, e o verde do run chegava ao gate do GitHub Actions,
 que so olha para o status global.
 """
-import pytest
-
-
 def _classify(city_results):
     """Replica exacta do fecho do run em main.py."""
     cities_ok = [

@@ -1874,8 +1874,12 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                     owner_name_val = (enrich_result or {}).get("owner_name")
                     if owner_name_val:
                         await db_service.update_owner(new_lead["id"], owner_name_val)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(
+                        f"[INGEST] Falha ao enriquecer owner do lead {new_lead.get('id')} "
+                        f"(address={raw_lead.address!r}, city={raw_lead.city!r}, "
+                        f"has_bbl={bool(getattr(raw_lead, 'bbl', None))}): {e}"
+                    )
 
         # 6. Fan-out + Anomalia detection por categoria
         notified_total = 0
@@ -3232,10 +3236,26 @@ async def reserve_lead(
                         owner_phone = phone_result.phone
                         await db_service.update_owner_phone(lead_id, owner_phone)
                     else:
-                        logger.info(
-                            f"Searchbug phone lookup sem resultado para lead {lead_id}: "
-                            f"{phone_result.error} — lead não será cobrado"
-                        )
+                        # Distinguir quem consultou o provider (custo real) de quem o
+                        # guard impediu (custo zero). Antes dizia "Searchbug phone
+                        # lookup sem resultado" nos dois casos, o que levava um
+                        # operador a concluir que tinha havido chamada paga.
+                        _err = str(phone_result.error or "")
+                        if _err.startswith("guard_skipped:"):
+                            logger.info(
+                                f"[PHONE][guard_skipped] lead {lead_id}: {_err} — "
+                                f"Searchbug NAO foi consultado, custo zero"
+                            )
+                        elif phone_result.provider == "cache":
+                            logger.info(
+                                f"[PHONE][cache_hit] lead {lead_id}: {_err} — "
+                                f"servido do cache, sem nova chamada"
+                            )
+                        else:
+                            logger.warning(
+                                f"[PHONE][provider_no_results] lead {lead_id}: {_err} — "
+                                f"Searchbug foi consultado e nao devolveu telefone"
+                            )
             except Exception as e:
                 logger.warning(f"Enriquecimento on-demand falhou para lead {lead_id}: {e}")
 

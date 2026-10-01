@@ -186,17 +186,17 @@ async def test_searchbug_builds_fname_lname_zip_from_owner(monkeypatch):
 @pytest.mark.parametrize(
     "owner_name,address,esperado",
     [
-        (None, "101 WEST 104 STREET", "owner_name_ausente"),
-        ("", "101 WEST 104 STREET", "owner_name_vazio"),
-        ("   ", "101 WEST 104 STREET", "owner_name_vazio"),
-        ("21033", "101 WEST 104 STREET", "owner_name_sem_letras"),
-        ("N/A", "101 WEST 104 STREET", "owner_name_placeholder"),
-        ("DESCONHECIDO", "101 WEST 104 STREET", "owner_name_placeholder"),
-        ("PRIVATE", "101 WEST 104 STREET", "owner_name_placeholder"),
-        ("UNKNOWN", "101 WEST 104 STREET", "owner_name_placeholder"),
-        ("AB", "101 WEST 104 STREET", "owner_name_curto_demais"),
-        ("MARIA SANTOS", "9630", "address_incompleta"),
-        ("MARIA SANTOS", "", "address_incompleta"),
+        (None, "101 WEST 104 STREET", "guard_skipped:owner_name_ausente"),
+        ("", "101 WEST 104 STREET", "guard_skipped:owner_name_vazio"),
+        ("   ", "101 WEST 104 STREET", "guard_skipped:owner_name_vazio"),
+        ("21033", "101 WEST 104 STREET", "guard_skipped:owner_name_sem_letras"),
+        ("N/A", "101 WEST 104 STREET", "guard_skipped:owner_name_placeholder"),
+        ("DESCONHECIDO", "101 WEST 104 STREET", "guard_skipped:owner_name_placeholder"),
+        ("PRIVATE", "101 WEST 104 STREET", "guard_skipped:owner_name_placeholder"),
+        ("UNKNOWN", "101 WEST 104 STREET", "guard_skipped:owner_name_placeholder"),
+        ("AB", "101 WEST 104 STREET", "guard_skipped:owner_name_curto_demais"),
+        ("MARIA SANTOS", "9630", "guard_skipped:address_incompleta"),
+        ("MARIA SANTOS", "", "guard_skipped:address_incompleta"),
     ],
 )
 async def test_no_paid_call_without_usable_input(monkeypatch, owner_name, address, esperado):

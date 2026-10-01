@@ -182,17 +182,28 @@ class PhoneLookupService:
         Por isso recusa-se ANTES de qualquer chamada ao provider.
         """
         if not _address_is_resolvable(address):
+            # GUARD_SKIPPED: nós não consultámos o Searchbug. Registado com
+            # prefixo proprio para nunca se confundir com o provider respondeu
+            # "No results", que implicaria uma chamada PAGA.
+            logger.info(
+                f"[PHONE][guard_skipped] address_incompleta para {address!r} — "
+                f"provider NAO foi consultado (custo zero)"
+            )
             return PhoneLookupResult(
                 success=False,
-                error="address_incompleta",
+                error="guard_skipped:address_incompleta",
                 provider="none",
             )
 
         clean_name, name_error = _clean_owner_name(owner_name)
         if name_error:
+            logger.info(
+                f"[PHONE][guard_skipped] {name_error} para address={address!r} — "
+                f"provider NAO foi consultado (custo zero)"
+            )
             return PhoneLookupResult(
                 success=False,
-                error=name_error,
+                error=f"guard_skipped:{name_error}",
                 provider="none",
             )
 
@@ -239,10 +250,17 @@ class PhoneLookupService:
                     self._phone_cache_put(cache_key, result.phone)
                     return result
                 else:
-                    logger.warning(f"Provider {name} failed for {address}: {result.error}")
+                    logger.warning(
+                        f"[PHONE][provider_no_results] {name} consultou e nao "
+                        f"devolveu telefone para {address!r}, {city} ({result.error}) — "
+                        f"chamada PAGA"
+                    )
                     self._phone_cache_put(cache_key, None)
             except Exception as e:
-                logger.warning(f"Provider {name} exception for {address}: {e}")
+                logger.warning(
+                    f"[PHONE][provider_error] {name} deu excepcao para "
+                    f"{address!r}, {city}: {e} — resultado guardado como negativo"
+                )
                 self._phone_cache_put(cache_key, None)
 
         # All providers failed
