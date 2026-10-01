@@ -94,6 +94,8 @@ export interface LeadResponse {
   resolution_action_updated_date?: string;
   // Owner mailing address
   mailing_address?: string;
+  // Lead corporativo: nome + morada, sem telefone (reserva não consome crédito)
+  corporate?: boolean;
   // Visibility (Phase 4.2)
   visibility_status?: "available" | "reserved_by_me" | "reserved_by_other";
   reserved_by_me?: { created_at?: string; expires_at?: string; hours_remaining?: number };
@@ -827,6 +829,7 @@ export interface HoldResult {
   message?: string;
   revealed?: boolean;
   counted_again?: boolean;
+  corporate?: boolean;
   used?: number;
   limit?: number;
   remaining?: number;

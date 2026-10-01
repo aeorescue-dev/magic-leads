@@ -214,6 +214,15 @@ const URGENCIES = ["all", "high", "medium", "low"];
   const isClosedCase = (status?: string | null) =>
     !!status && CLOSED_STATUSES.includes(status.trim().toLowerCase());
 
+  // Lead corporativo: tem morada de correspondencia mas nenhum telefone publico.
+  // Regra espelhada do backend (main.py): corporate = !owner_phone && mailing_address.
+  // A reserva corporativa nao consome credito, por isso nao deve ser bloqueada
+  // quando o utilizador ja gastou os creditos normais do dia.
+  const isCorporateLead = (lead?: {
+    owner_phone?: string | null;
+    mailing_address?: string | null;
+  }) => !!lead && !lead.owner_phone && !!lead.mailing_address;
+
   const LEAD_TYPES = [
     { value: "all", labelKey: "dashboard.filter.all_types" },
     // "Obrigacao legal" e um grupo: violacoes do DOB e do HPD sao a mesma categoria
@@ -570,7 +579,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
 
   const handleHistoryReserve = async (lead: MyLeadHistoryItem) => {
     if (busyAction || (subscription && !subscription.can_access)) return;
-    if (dailyStats && dailyStats.remaining === 0) {
+    if (!isCorporateLead(lead) && dailyStats && dailyStats.remaining === 0) {
       showToast(t("dashboard.toast.daily_limit"), "warning");
       return;
     }
@@ -786,7 +795,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
   };
   const handleQuickReserve = async (lead: LeadResponse) => {
     if (busyAction || (subscription && !subscription.can_access)) return;
-    if (dailyStats && dailyStats.remaining === 0) {
+    if (!isCorporateLead(lead) && dailyStats && dailyStats.remaining === 0) {
       showToast(t("dashboard.toast.daily_limit"), "warning");
       return;
     }
@@ -828,7 +837,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
       showToast(subscription.message || "Acesso negado", "error");
       return;
     }
-    if (dailyStats && dailyStats.remaining === 0) {
+    if (!isCorporateLead(revealTarget) && dailyStats && dailyStats.remaining === 0) {
       showToast(t("dashboard.toast.daily_limit"), "warning");
       return;
     }
@@ -836,7 +845,12 @@ const URGENCIES = ["all", "high", "medium", "low"];
     try {
       const idKey = `u${userId}:l${revealTarget.id}:${new Date().toISOString().slice(0, 10)}`;
       const res = await reserveLead(revealTarget.id, 60, { consent: true, idempotency: idKey });
-      showToast(res?.message || "Dados revelados — reserva de 1 hora ativa", "success");
+      showToast(
+        res?.corporate
+          ? t("dashboard.toast.corporate_reserved")
+          : res?.message || "Dados revelados — reserva de 1 hora ativa",
+        "success"
+      );
       if (dailyStats) {
         try {
           const stats = await fetchUserDailyStats(userId!);
@@ -1056,7 +1070,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
   // Modal action buttons for corporate vs regular leads
   const getModalActionButtons = () => {
     if (!selectedLead) return null;
-    if (!selectedLead.owner_phone && selectedLead.owner_name && selectedLead.mailing_address) {
+    if (isCorporateLead(selectedLead)) {
       // Corporate lead: no phone, show badge and limited actions
       return (
         <div className="flex flex-wrap gap-2 pt-2">
@@ -1461,6 +1475,9 @@ const URGENCIES = ["all", "high", "medium", "low"];
             {dailyStats && dailyStats.remaining === 0 && (
               <div className="text-xs text-red-400 font-medium">
                 {t("dashboard.trial.daily_limit_exceeded").replace("{reset_at}", dailyStats.reset_at ? formatRelativeTime(dailyStats.reset_at, t) : "breve")}
+                <div className="text-slate-400 font-normal mt-0.5">
+                  {t("dashboard.trial.corporate_still_free")}
+                </div>
               </div>
             )}
           </div>
@@ -1937,7 +1954,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
                             {(lead.my_status === "hold_expired" || lead.my_status === "released" || lead.my_status === "available") && (
                               <button
                                 onClick={(e) => { e.stopPropagation(); handleHistoryReserve(lead); }}
-                                disabled={busyAction || (subscription && !subscription.can_access) || (dailyStats?.remaining === 0)}
+                                disabled={busyAction || (subscription && !subscription.can_access) || (!isCorporateLead(lead) && dailyStats?.remaining === 0)}
                                 className="inline-flex items-center gap-1.5 text-[11px] font-bold bg-indigo-500 hover:bg-indigo-400 text-white px-3 py-1.5 rounded-lg transition disabled:opacity-50"
                               >
                                 <Lock className="h-3 w-3" /> {t("dashboard.action.rereserve")}
@@ -2078,7 +2095,11 @@ const URGENCIES = ["all", "high", "medium", "low"];
                               </span>
                             )}
 
-                            {lead.owner_name && (
+                            {isCorporateLead(lead) ? (
+                              <span className="text-[10px] font-semibold uppercase bg-purple-500/15 text-purple-400 px-2.5 py-1 rounded-full flex items-center gap-1">
+                                <Building2 className="h-3 w-3" /> {t("dashboard.badge.corporate")}
+                              </span>
+                            ) : lead.owner_name && (
                               <span className="text-[10px] font-semibold uppercase bg-emerald-500/15 text-emerald-400 px-2.5 py-1 rounded-full flex items-center gap-1">
                                 <CheckCircle2 className="h-3 w-3" /> {t("dashboard.badge.owner_identified")}
                               </span>
@@ -2091,10 +2112,10 @@ const URGENCIES = ["all", "high", "medium", "low"];
                                 </span>
                                 <button
                                   onClick={(e) => { e.stopPropagation(); handleQuickReserve(lead); }}
-                                  disabled={busyAction || (subscription && !subscription.can_access) || (dailyStats?.remaining === 0)}
+                                  disabled={busyAction || (subscription && !subscription.can_access) || (!isCorporateLead(lead) && dailyStats?.remaining === 0)}
                                   className="flex items-center gap-1.5 text-[11px] font-bold bg-indigo-500 hover:bg-indigo-400 text-white px-3 py-1.5 rounded-lg transition shadow-sm disabled:opacity-50"
                                 >
-                                  <Lock className="h-3 w-3" /> {t("dashboard.action.reserve_1h")}
+                                  <Lock className="h-3 w-3" /> {isCorporateLead(lead) ? t("dashboard.action.reserve_corporate") : t("dashboard.action.reserve_1h")}
                                 </button>
                               </>
                             )}
@@ -2185,12 +2206,12 @@ const URGENCIES = ["all", "high", "medium", "low"];
                                 <div className="flex items-center gap-2 mt-3 flex-wrap">
                                   <button
                                     onClick={(e) => { e.stopPropagation(); handleQuickReserve(lead); }}
-                                    disabled={busyAction || (subscription && !subscription.can_access) || (dailyStats?.remaining === 0)}
+                                    disabled={busyAction || (subscription && !subscription.can_access) || (!isCorporateLead(lead) && dailyStats?.remaining === 0)}
                                     className={`flex items-center gap-1.5 text-[11px] font-bold bg-indigo-500 hover:bg-indigo-400 text-white px-3 py-1.5 rounded-lg transition shadow-sm disabled:opacity-50 ${
-                                      (subscription && !subscription.can_access) || (dailyStats && dailyStats.remaining === 0) ? "opacity-30 cursor-not-allowed" : ""
+                                      (subscription && !subscription.can_access) || (!isCorporateLead(lead) && dailyStats && dailyStats.remaining === 0) ? "opacity-30 cursor-not-allowed" : ""
                                     }`}
                                   >
-                                    <Lock className="h-3 w-3" /> {t("dashboard.action.reserve_1h")}
+                                    <Lock className="h-3 w-3" /> {isCorporateLead(lead) ? t("dashboard.action.reserve_corporate") : t("dashboard.action.reserve_1h")}
                                   </button>
                                   <span className="text-[10px] text-slate-500 flex items-center gap-1">
                                     <ShieldCheck className="h-3 w-3" /> {t("dashboard.data_protected")}
@@ -2368,7 +2389,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
                 )}
                 {selectedLead.mailing_address && (
                   <div className="sm:col-span-2">
-                    <span className="text-xs text-slate-400 block">{t("dashboard.field.mailing_address") || "Endereço de correspondência"}</span>
+                    <span className="text-xs text-slate-400 block">{t("dashboard.field.mailing_address")}</span>
                     <span className="font-semibold">📬 {selectedLead.mailing_address}</span>
                   </div>
                 )}
@@ -2548,12 +2569,12 @@ const URGENCIES = ["all", "high", "medium", "low"];
                 {!leadAlreadyMine(selectedLead) && (
                   <button
                     onClick={() => handleQuickReserve(selectedLead)}
-                    disabled={busyAction || (subscription && !subscription.can_access) || (dailyStats?.remaining === 0)}
+                    disabled={busyAction || (subscription && !subscription.can_access) || (!isCorporateLead(selectedLead) && dailyStats?.remaining === 0)}
                     className={`flex items-center gap-1.5 text-xs font-bold bg-indigo-500 hover:bg-indigo-400 text-white px-3.5 py-2 rounded-xl transition shadow-sm disabled:opacity-50 ${
-                      (subscription && !subscription.can_access) || (dailyStats && dailyStats.remaining === 0) ? "opacity-30 cursor-not-allowed" : ""
+                      (subscription && !subscription.can_access) || (!isCorporateLead(selectedLead) && dailyStats && dailyStats.remaining === 0) ? "opacity-30 cursor-not-allowed" : ""
                     }`}
                   >
-                    <Lock className="h-3.5 w-3.5" /> {t("dashboard.action.reserve_1h")}
+                    <Lock className="h-3.5 w-3.5" /> {isCorporateLead(selectedLead) ? t("dashboard.action.reserve_corporate") : t("dashboard.action.reserve_1h")}
                   </button>
                 )}
                 <button
@@ -2864,7 +2885,9 @@ const URGENCIES = ["all", "high", "medium", "low"];
                     className="mt-0.5 h-4 w-4 accent-indigo-500"
                   />
 <span>
-                    <span className="font-semibold">{t("dashboard.reveal.consent", { used: dailyStats?.used ?? 1, limit: dailyStats?.limit ?? 10 })}</span>
+                    <span className="font-semibold">{isCorporateLead(revealTarget)
+                      ? t("dashboard.reveal.consent_corporate")
+                      : t("dashboard.reveal.consent", { used: dailyStats?.used ?? 1, limit: dailyStats?.limit ?? 10 })}</span>
                     <span className={`block text-xs mt-1 ${T.text2}`}>
                       {t("dashboard.reveal.timeout", { title: t("dashboard.opportunities.title") })}
                     </span>
@@ -2876,11 +2899,11 @@ const URGENCIES = ["all", "high", "medium", "low"];
             <div className="mt-5 flex gap-2">
               <button
                 onClick={confirmReveal}
-                disabled={busyAction || (subscription && !subscription.can_access) || (dailyStats?.remaining === 0)}
+                disabled={busyAction || (subscription && !subscription.can_access) || (!isCorporateLead(revealTarget) && dailyStats?.remaining === 0)}
                 className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-white text-sm font-bold transition disabled:opacity-50"
               >
                 {busyAction ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lock className="h-4 w-4" />}
-                {t("dashboard.reveal.confirm")}
+                {isCorporateLead(revealTarget) ? t("dashboard.reveal.confirm_corporate") : t("dashboard.reveal.confirm")}
               </button>
               <button
                 onClick={closeRevealModal}
