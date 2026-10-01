@@ -3207,14 +3207,22 @@ async def reserve_lead(
         owner_phone = lead.get("owner_phone")
         mailing_address = lead.get("mailing_address")
 
-        if not owner_name or not owner_phone or not mailing_address:
+        needs_enrichment = not owner_name or not owner_phone or not mailing_address
+        logger.info(f"[RESERVE] Enrichment check: needs_enrichment={needs_enrichment} owner_name={bool(owner_name)} owner_phone={bool(owner_phone)} mailing_address={bool(mailing_address)}")
+
+        if needs_enrichment:
             try:
                 # Enriquecimento de nome + mailing address (Socrata/CKAN)
+                logger.info(f"[RESERVE] Calling owner_enrichment.enrich for lead_id={lead_id}")
                 enrich_result = await owner_enrichment.enrich(
                     lead.get("address", ""),
                     lead.get("city", ""),
                     bbl=lead.get("bbl") if hasattr(lead, "get") else None,
                 )
+                logger.info(f"[RESERVE] owner_enrichment result: {enrich_result}")
+                if not enrich_result:
+                    enrichment_failed = True
+                    logger.warning(f"[RESERVE] owner_enrichment returned None/empty for lead_id={lead_id}")
                 if enrich_result:
                     if not owner_name and enrich_result.get("owner_name"):
                         owner_name = enrich_result["owner_name"]
@@ -3225,6 +3233,7 @@ async def reserve_lead(
 
                 # Busca de telefone (Searchbug em prod, mock em dev)
                 if not owner_phone:
+                    logger.info(f"[RESERVE] Calling searchbug_service.lookup_phone for lead_id={lead_id}")
                     phone_result = await searchbug_service.lookup_phone(
                         lead.get("address", ""),
                         lead.get("city", ""),
@@ -3232,6 +3241,7 @@ async def reserve_lead(
                         owner_name=owner_name,
                         zip_code=lead.get("zip_code") or lead.get("zip"),
                     )
+                    logger.info(f"[RESERVE] searchbug_service result: success={phone_result.success} phone={phone_result.phone} error={phone_result.error}")
                     if phone_result.success and phone_result.phone:
                         owner_phone = phone_result.phone
                         await db_service.update_owner_phone(lead_id, owner_phone)
