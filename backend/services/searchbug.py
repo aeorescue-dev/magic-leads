@@ -29,6 +29,7 @@ import httpx
 
 from ..config import settings
 from ..utils.logger import logger
+from .lead_rules import address_is_resolvable
 
 
 def normalize_us_phone(phone: str) -> str:
@@ -135,18 +136,6 @@ def _clean_owner_name(owner_name: str | None) -> tuple[str | None, str | None]:
     return cleaned, None
 
 
-def _address_is_resolvable(address: str) -> bool:
-    """Um endereco so com o numero ("9630") nunca vai resolver para um dono.
-
-    parse_address exige numero E rua, logo estes leads nao tem enriquecimento
-    possivel. Recusar aqui evita pagar por uma consulta garantidamente inutil.
-    """
-    if not address:
-        return False
-    parts = str(address).split(",")[0].strip()
-    return len(parts.split()) >= 2
-
-
 # Um telefone nao muda de dia para dia: 30 dias e seguro e evita re-pagar.
 _PHONE_CACHE_TTL_OK = 30 * 24 * 3600
 # Um "nao achou" pode mudar quando o enriquecimento gratuito melhora ou quando
@@ -181,7 +170,7 @@ class PhoneLookupService:
         cega (so por endereco) e devolveria quase sempre "No results" a pagar.
         Por isso recusa-se ANTES de qualquer chamada ao provider.
         """
-        if not _address_is_resolvable(address):
+        if not address_is_resolvable(address):
             # GUARD_SKIPPED: nós não consultámos o Searchbug. Registado com
             # prefixo proprio para nunca se confundir com o provider respondeu
             # "No results", que implicaria uma chamada PAGA.

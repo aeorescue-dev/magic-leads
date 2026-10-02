@@ -214,41 +214,17 @@ const URGENCIES = ["all", "high", "medium", "low"];
   const isClosedCase = (status?: string | null) =>
     !!status && CLOSED_STATUSES.includes(status.trim().toLowerCase());
 
-  // Lead corporativo: tem nome E morada de correspondencia, mas nenhum telefone.
-  // Espelha o backend (main.py): corporate = owner_name && !owner_phone && mailing_address.
-  // owner_name e obrigatorio nos dois lados. Sem ele o lead e so "incompleto" e a
-  // Regra A devolve 422, portanto a UI nao pode prometer 0 creditos para algo que
-  // o backend vai rejeitar.
-  const isCorporateLead = (lead?: {
-    owner_name?: string | null;
-    owner_phone?: string | null;
-    mailing_address?: string | null;
-  }) => !!lead?.owner_name && !lead.owner_phone && !!lead.mailing_address;
-
-  // Espelha _address_is_resolvable em backend/services/searchbug.py: um endereco
-  // so com o numero ("473", "2424") nunca resolve para um dono, porque parse_address
-  // exige numero E rua. O guard do Searchbug recusa antes de qualquer chamada paga
-  // e o enrich tambem devolve None, logo estes leads nunca dao owner_name nem
-  // owner_phone. Nao ha nada a revelar.
-  const isResolvableAddress = (address?: string | null) => {
-    const part = String(address || "").split(",")[0].trim();
-    return part.length > 0 && part.split(/\s+/).length >= 2;
-  };
+  // Regra A, resolucao de endereco e qualidade do lead: calculadas pelo backend em
+  // backend/services/lead_rules.py e expostas em cada lead como `corporate`,
+  // `address_resolvable` e `unresolvable`. Sao lidas diretamente, sem recalcular
+  // aqui: qualquer divergencia entre o que a UI promete e o que a reserva cobra
+  // passa a ser impossivel, porque e a mesma avaliacao dos dois lados.
+  const isCorporateLead = (lead?: { corporate?: boolean } | null) => !!lead?.corporate;
 
   // Lead sem qualquer dado de contacto E com um endereco que nunca vai resolver.
   // Reservar falha sempre com 422 e sem debito, por isso mostramos o motivo em vez
   // de deixar o utilizador gastar um clique num beco sem saida.
-  const isUnresolvableLead = (lead?: {
-    owner_name?: string | null;
-    owner_phone?: string | null;
-    mailing_address?: string | null;
-    address?: string | null;
-  }) =>
-    !!lead &&
-    !lead.owner_name &&
-    !lead.owner_phone &&
-    !lead.mailing_address &&
-    !isResolvableAddress(lead.address);
+  const isUnresolvableLead = (lead?: { unresolvable?: boolean } | null) => !!lead?.unresolvable;
 
   const LEAD_TYPES = [
     { value: "all", labelKey: "dashboard.filter.all_types" },

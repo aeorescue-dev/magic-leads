@@ -94,8 +94,11 @@ export interface LeadResponse {
   resolution_action_updated_date?: string;
   // Owner mailing address
   mailing_address?: string;
-  // Lead corporativo: nome + morada, sem telefone (reserva não consome crédito)
+  // Regra A resolvida no backend (backend/services/lead_rules.py). Lidos
+  // diretamente pela UI, sem recalcular: a regra só existe num sítio.
   corporate?: boolean;
+  address_resolvable?: boolean;
+  unresolvable?: boolean;
   // Visibility (Phase 4.2)
   visibility_status?: "available" | "reserved_by_me" | "reserved_by_other";
   reserved_by_me?: { created_at?: string; expires_at?: string; hours_remaining?: number };

@@ -54,6 +54,7 @@ from .scrapers.socrata_discovery import socrata_discovery
 from .services import notifier, security
 from .services.db import db_service
 from .services.enrichment import owner_enrichment
+from .services.lead_rules import charges_credit, classify, missing_critical_fields
 from .services.push_service import push_service
 from .services.searchbug import searchbug_service
 from .utils.logger import logger
@@ -110,6 +111,13 @@ def _to_lead_response(lead: dict) -> LeadResponse:
     # Sem reveal, os campos vêm mascarados (None) na response.
     show_owner = bool(lead.get("_revealed", False))
 
+    # Regra A avaliada sobre os dados GUARDADOS, nao sobre os mascarados acima:
+    # e o que a reserva vai efetivamente cobrar. Avaliar sobre os mascarados daria
+    # corporate=false em todos os leads por revelar, e a UI mostraria "1 credito"
+    # (e bloquearia a reserva com a cota diaria esgotada) num lead cuja reserva e
+    # gratuita. Nao expoe dados do proprietario, so o veredito.
+    rules = classify(lead)
+
     return LeadResponse(
         id=str(lead["id"]),
         external_id=lead["external_id"],
@@ -161,6 +169,9 @@ def _to_lead_response(lead: dict) -> LeadResponse:
         reserved_by_me=reserved_by_me,
         reserved_by_other=reserved_by_other,
         revealed=show_owner,
+        corporate=rules["corporate"],
+        address_resolvable=rules["address_resolvable"],
+        unresolvable=rules["unresolvable"],
         # Freshness fields (WS1 dual labels)
         first_seen=lead.get("date_first_seen") or lead.get("created_at"),
         last_synced=lead.get("updated_at") or lead.get("created_at"),
@@ -3278,11 +3289,7 @@ async def reserve_lead(
         #   1) Lead padrão     -> owner_name + owner_phone            -> debita crédito
         #   2) Lead corporativo-> owner_name + mailing_address, sem phone -> 0 créditos
         # Só se aplica quando um novo crédito seria consumido (re-clique é isento).
-        missing_critical = []
-        if not lead.get("owner_name"):
-            missing_critical.append("owner_name")
-        if not lead.get("owner_phone") and not lead.get("mailing_address"):
-            missing_critical.append("owner_phone_or_mailing_address")
+        missing_critical = missing_critical_fields(lead)
 
         if missing_critical and not already_revealed:
             logger.info(
@@ -3307,16 +3314,10 @@ async def reserve_lead(
 
         # Lead corporativo = tem owner_name + mailing_address, mas SEM owner_phone.
         # Só então a reserva é gratuita (não conta para a cota diária do utilizador).
-        # owner_name é obrigatório por definição: sem ele o lead não é corporativo,
-        # é apenas incompleto, e a Regra A acima devolve 422. Exigir o mesmo campo
-        # nos dois sitios impede que a UI prometa "0 créditos" para algo que o
-        # backend vai rejeitar.
-        is_corporate = bool(
-            lead.get("owner_name")
-            and not lead.get("owner_phone")
-            and lead.get("mailing_address")
-        )
-        charge_credit = not is_corporate
+        # Mesma função que alimenta os flags `corporate`/`unresolvable` do feed, para
+        # que o que a UI promete e o que aqui se cobra não possam divergir.
+        charge_credit = charges_credit(lead)
+        is_corporate = not charge_credit
 
         # 2.4 ÚNICO PONTO QUE DEBITA CRÉDITO (dados essenciais já confirmados)
         logger.info(

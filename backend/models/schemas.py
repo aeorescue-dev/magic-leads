@@ -200,6 +200,13 @@ class LeadResponse(BaseModel):
     # Reveal (consentimento): true = dados do proprietário visíveis para o usuário
     revealed: bool = False
 
+    # Regra A resolvida no backend (backend/services/lead_rules.py). O frontend
+    # consome estes flags em vez de reimplementar a regra em TypeScript, para não
+    # poder divergir do que a reserva vai realmente fazer.
+    corporate: bool = False
+    address_resolvable: bool = True
+    unresolvable: bool = False
+
     # Freshness fields (WS1 dual labels)
     first_seen: Optional[str] = None
     last_synced: Optional[str] = None
