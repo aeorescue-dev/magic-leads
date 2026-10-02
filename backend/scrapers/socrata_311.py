@@ -8,6 +8,7 @@ import httpx
 
 from ..config import settings
 from ..models.schemas import IssueCategory, RawLead311, UrgencyLevel
+from ..services.lead_rules import normalize_street
 from ..utils.logger import logger
 
 
@@ -19,6 +20,28 @@ class SocrataFetchError(RuntimeError):
     SoQL invalido) ficava invisivel: a cidade passava a run com 0 leads e verde.
     Agora o erro propaga ate ao _scrape_worker, que marca a cidade como falha.
     """
+
+
+_STREET_TYPE_TOKENS = {
+    "ST", "STR", "STREET", "AVE", "AVENUE", "RD", "ROAD", "BLVD", "BOULEVARD",
+    "DR", "DRIVE", "LN", "LANE", "PL", "PLACE", "CT", "COURT", "SQ", "SQUARE",
+    "PKWY", "PARKWAY", "TER", "TERR", "TERRACE", "CIR", "CIRCLE", "HWY",
+    "HIGHWAY", "WAY", "TRL", "TRAIL", "EXPY", "EXPRESSWAY", "TPKE", "TURNPIKE",
+    "PLZ", "PLAZA", "CRES", "CRESCENT", "GDNS", "GARDENS", "LOOP", "ROW",
+}
+
+
+def _ends_with_street_type(value: str) -> bool:
+    """True se a ultima palavra e um tipo de via ("1684A EAST 87 STREET").
+
+    Usado para decidir se `incident_address` ja traz a rua. Um teste por numero
+    de palavras seria enganador: o `housenumber` do HPD ("22 FRONT") tem duas
+    palavras e nao tem rua nenhuma.
+    """
+    tokens = normalize_street(value).replace(",", " ").split()
+    if not tokens:
+        return False
+    return tokens[-1].strip(".") in _STREET_TYPE_TOKENS
 
 
 class Socrata311Scraper:
@@ -216,8 +239,11 @@ class Socrata311Scraper:
         if inc and st and st.upper() in inc.upper():
             return inc
 
-        # incident_address ja tem varias palavras e nao e so o numero
-        if inc and len(inc.split()) > 1:
+        # incident_address ja traz a rua se a ultima palavra e um tipo de via.
+        # A alternativa era "tem varias palavras", que partia ao meio o
+        # housenumber do HPD ("22 FRONT" + "STAGG STREET") e devolvia
+        # "22 FRONT" — lead sem rua, insoluvel e sem dono possivel.
+        if inc and _ends_with_street_type(inc):
             return inc
 
         if inc and st:
@@ -367,7 +393,7 @@ class Socrata311Scraper:
 
         # cidade/estado (se existir) para montar o endereço
         city_col = find("city", "requested_zip_city", "municipality")
-        zip_col = find("zip_code", "incident_zip", "zip", "postal_code")
+        zip_col = find("zip_code", "incident_zip", "zip", "zipcode", "postal_code", "zip_cd")
 
         # Campos históricos (heurística genérica cobrindo NYC, Dallas, Chicago etc.)
         hist = {
@@ -463,7 +489,22 @@ class Socrata311Scraper:
             )
 
         # seleciona campos detectados (+ endereço + histórico)
-        select_fields = [c for c in [cols["date"], cols["desc"], cols["lat"], cols["lng"], cols["ext"], cols["addr"], cols["zip"]] if c]
+        # addr_num/addr_street têm de entrar no SELECT: em datasets que os expõem
+        # separados (HPD: housenumber + streetname) o addr_col sozinho devolve só o
+        # número e a rua nunca chega ao _parse_generic_row. O resultado eram leads
+        # com "2424, NYC, NY" — sem rua, insolúveis e sem zip, porque o streetname
+        # nunca era pedido. b_col tinha o mesmo problema: era detetado e nunca
+        # selecionado, apesar de tornar o enriquecimento de proprietário exacto.
+        # Deduplicar preservando a ordem: `addr` e `addr_num` podem ser a mesma
+        # coluna (no HPD ambas resolvem para `housenumber`) e o SoQL recusa
+        # campos repetidos com HTTP 400.
+        select_fields = list(dict.fromkeys(
+            c for c in [
+                cols["date"], cols["desc"], cols["lat"], cols["lng"], cols["ext"],
+                cols["addr"], cols.get("addr_num"), cols.get("addr_street"),
+                cols["zip"], cols.get("bbl"),
+            ] if c
+        ))
         for col in cols["hist"].values():
             if col and col not in select_fields:
                 select_fields.append(col)
@@ -592,13 +633,22 @@ class Socrata311Scraper:
             # Preferir o par numero+rua quando o dataset o expoe separado
             _num_col = cols.get("addr_num")
             _st_col = cols.get("addr_street")
+            # O par e autoritativo quando existe: _compose_address_parts decide, e um ""
+            # e uma rejeicao deliberada (numero sem rua nao tem dono). Sem este flag o
+            # `if not addr` seguinte anulava a rejeicao e voltava a gravar o numero
+            # isolado, produzindo "2424, NYC, NY" — leads insoluveis que nunca enriquecem.
+            addr_rejected = False
             if _num_col and _st_col:
                 addr = self._compose_address_parts(
                     row.get(_num_col),
                     row.get(_st_col),
                 )
-            if not addr and cols["addr"]:
+                addr_rejected = not addr
+            if not addr and not addr_rejected and cols["addr"]:
                 addr = str(row.get(cols["addr"]) or "").strip()
+            if addr_rejected:
+                return None
+            addr = normalize_street(addr)
             zipc = row.get(cols["zip"]) if cols["zip"] else None
 
             lat, lng = None, None
@@ -629,9 +679,17 @@ class Socrata311Scraper:
                 if re.search(r"\b[A-Z]{2}\b[, ]*\d{5}", addr_up) or re.search(r",\s*[A-Z]{2}\s*$", addr_up):
                     full_addr = addr
                 else:
-                    full_addr = f"{addr}, {city}, {state}"
+                    # Só acrescentar cidade/estado que ainda não estejam no endereço.
+                    # Sem esta guarda um "BROOKLYN, NY" no street virava
+                    # "X ST, BROOKLYN, NY, NYC, NY".
+                    tail = []
+                    for part in (city, state):
+                        p = str(part or "").strip()
+                        if p and not re.search(rf"\b{re.escape(p.upper())}\b", addr_up):
+                            tail.append(p.upper())
+                    full_addr = ", ".join([addr] + tail) if tail else addr
             else:
-                full_addr = f"{city}, {state}"
+                full_addr = ", ".join(str(p).upper() for p in (city, state) if p)
 
             # Parse address components
             addr_components = self._parse_address_components(full_addr, city, state, str(zipc) if zipc else None)

@@ -8,6 +8,7 @@ regra em TypeScript. Divergencia entre as duas linguagens passa a ser
 estruturalmente impossivel.
 """
 
+import re
 from typing import Any, Mapping, Optional
 
 # Nomes de campo usados nos logs e no payload 422 de "incomplete_lead_data".
@@ -39,6 +40,24 @@ def address_is_resolvable(address: Optional[str]) -> bool:
         return False
     parts = str(address).split(",")[0].strip()
     return len(parts.split()) >= 2
+
+
+def normalize_street(street: Optional[str]) -> str:
+    """Limpa a parte de rua de um endereco vindo de datasets abertos.
+
+    Os datasets traem a mesma rua com espacos duplicados, virgulas a mais e
+    caixa inconsistente ("  22  FRONT stagg  street, "). `parse_address` e
+    `address_is_resolvable` so precisam de "numero + rua" legivel, portanto
+    normalizar aqui evita que o resto do pipeline tenha de lidar com lixo.
+    Nao inventa conteudo: se nao houver texto, devolve string vazia.
+    """
+    if not street:
+        return ""
+    cleaned = re.sub(r"\s+", " ", str(street)).strip()
+    cleaned = re.sub(r"\s*,\s*", ", ", cleaned)
+    cleaned = re.sub(r"(?:,\s*)+$", "", cleaned).strip()
+    cleaned = re.sub(r"^(?:,\s*)+", "", cleaned).strip()
+    return cleaned.upper()
 
 
 def is_corporate(lead: Mapping[str, Any]) -> bool:
