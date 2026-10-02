@@ -1,17 +1,28 @@
 """Regras de dominio de um lead (Regra A e qualidade de endereco).
 
 Fonte unica de verdade. Estas funcoes determinam se um lead e corporativo,
-se o endereco e resolvivel e o que falta para poder revelar dados do
-proprietario. O backend usa-as na reserva e na serializacao; o frontend
-consome o resultado ja calculado pelo backend, em vez de reimplementar a
-regra em TypeScript. Divergencia entre as duas linguagens passa a ser
-estruturalmente impossivel.
+se o endereco e resolvivel e se a reserva consome credito. O backend usa-as na
+reserva e na serializacao; o frontend consome o resultado ja calculado pelo
+backend, em vez de reimplementar a regra em TypeScript. Divergencia entre as
+duas linguagens passa a ser estruturalmente impossivel.
+
+REGRA DE NEGOCIO (inviolavel)
+-----------------------------
+Entrega e cobranca sao dissociadas:
+
+  * O lead e SEMPRE entregue e mostrado ao utilizador, mesmo incompleto,
+    para que possa usar nome + local em carta ou visita presencial.
+  * O credito so e debitado, e a cota diaria so e consumida, em sucesso
+    TOTAL de dados (owner_name + owner_phone).
+  * Leads corporativos e incompletos sao sempre de graca.
+
+Por isso `charges_credit` significa "cobramos", nunca "entregamos".
 """
 
 import re
 from typing import Any, Mapping, Optional
 
-# Nomes de campo usados nos logs e no payload 422 de "incomplete_lead_data".
+# Nomes de campo usados nos logs e no payload de entrega incompleta.
 MISSING_OWNER_NAME = "owner_name"
 MISSING_CONTACT = "owner_phone_or_mailing_address"
 
@@ -63,10 +74,9 @@ def normalize_street(street: Optional[str]) -> str:
 def is_corporate(lead: Mapping[str, Any]) -> bool:
     """Lead corporativo = tem owner_name + mailing_address, mas SEM owner_phone.
 
-    owner_name e obrigatorio por definicao: sem ele o lead nao e corporativo, e
-    apenas incompleto, e a Regra A devolve 422. Exigir o mesmo campo nos dois
-    sitios impede que a UI prometa "0 creditos" para algo que o backend vai
-    rejeitar.
+    owner_name e obrigatorio por definicao: sem ele o lead nao e corporativo.
+    Exigir o mesmo campo nos dois sitios impede que a UI prometa "0 creditos"
+    para algo que nem sequer tem nome de proprietario.
     """
     return bool(
         _present(lead.get("owner_name"))
@@ -75,12 +85,24 @@ def is_corporate(lead: Mapping[str, Any]) -> bool:
     )
 
 
-def missing_critical_fields(lead: Mapping[str, Any]) -> list[str]:
-    """Campos sem os quais a Regra A nao permite revelar (fail closed).
+def is_complete_delivery(lead: Mapping[str, Any]) -> bool:
+    """Entrega com sucesso TOTAL de dados: owner_name E owner_phone.
 
-    Perfis de reserva validos:
-      1) Lead padrao      -> owner_name + owner_phone            -> debita credito
+    E o unico perfil que justifica debito de credito e consumo de cota.
+    """
+    return bool(_present(lead.get("owner_name")) and _present(lead.get("owner_phone")))
+
+
+def missing_critical_fields(lead: Mapping[str, Any]) -> list[str]:
+    """Campos em falta para o lead contar como entrega completa.
+
+    Perfis de reserva (os tres sao entregues):
+      1) Lead padrao      -> owner_name + owner_phone               -> debita credito
       2) Lead corporativo -> owner_name + mailing_address, sem phone -> 0 creditos
+      3) Lead incompleto  -> sem owner_phone e sem mailing_address   -> 0 creditos
+
+    A partir deste valor ja nao se decide SE o lead e entregue (e sempre), mas
+    SIM o aviso a mostrar e se ha cobranca.
     """
     missing = []
     if not _present(lead.get("owner_name")):
@@ -90,12 +112,22 @@ def missing_critical_fields(lead: Mapping[str, Any]) -> list[str]:
     return missing
 
 
+def is_incomplete_delivery(lead: Mapping[str, Any]) -> bool:
+    """Lead entregue sem sucesso total de dados, logo sem debito e sem cota.
+
+    Nao e corporativo (falta-lhe a morada) e nao e completo (falta-lhe o
+    telefone). A UI usa este sinal para mostrar um aviso discreto em vez de
+    esconder a oportunidade.
+    """
+    return bool(missing_critical_fields(lead))
+
+
 def is_unresolvable(lead: Mapping[str, Any]) -> bool:
     """Lead sem qualquer dado de contacto E com um endereco que nunca resolve.
 
-    Reservar falha sempre com 422 e sem debito, por isso o backend sinaliza
-    logo no feed para a UI poder desativar a accao e explicar o motivo, em vez
-    de deixar o utilizador gastar um clique num beco sem saida.
+    NAO bloqueia a entrega: o lead e entregue como qualquer outro incompleto,
+    sem debito e sem consumir cota. O sinal existe para a UI mostrar o aviso
+    certo ("dados protegidos") em vez do aviso generico de telefone em falta.
     """
     return bool(
         not _present(lead.get("owner_name"))
@@ -106,8 +138,19 @@ def is_unresolvable(lead: Mapping[str, Any]) -> bool:
 
 
 def charges_credit(lead: Mapping[str, Any]) -> bool:
-    """Unico ponto de decisao sobre debito de credito na reserva."""
-    return not is_corporate(lead)
+    """Unico ponto de decisao sobre debito de credito na reserva.
+
+    REGRA INVIOLAVEL: so se debita e so se consome cota em sucesso TOTAL de
+    dados (owner_name + owner_phone). Todo o resto e entregue de graca:
+
+      - corporativo (nome + morada, sem telefone) -> 0 creditos, 0 cota
+      - incompleto  (nome, sem telefone nem morada) -> 0 creditos, 0 cota
+
+    Entrega e cobranca sao coisas separadas: o lead e SEMPRE entregue ao
+    utilizador (para carta ou visita); o credito so e cobrado quando ha
+    telefone verificado para cobrar.
+    """
+    return is_complete_delivery(lead)
 
 
 def classify(lead: Mapping[str, Any]) -> dict[str, Any]:
@@ -116,4 +159,7 @@ def classify(lead: Mapping[str, Any]) -> dict[str, Any]:
         "corporate": is_corporate(lead),
         "address_resolvable": address_is_resolvable(lead.get("address")),
         "unresolvable": is_unresolvable(lead),
+        "complete_delivery": is_complete_delivery(lead),
+        "incomplete_delivery": is_incomplete_delivery(lead),
+        "charged": charges_credit(lead),
     }

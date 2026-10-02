@@ -11,13 +11,15 @@ enriquecimento falhava. Duas consequências graves:
    com o crédito perdido para sempre e ainda assim via um 200 com o lead marcado
    como reservado.
 
-Invariantes fixados aqui (fail closed, "debit last"):
-1. Sem `owner_name` OU sem `owner_phone` => HTTP 422, `leads_used` inalterado e
-   o lead continua `available` (nada foi reservado).
-2. Com `owner_name` E `owner_phone` => HTTP 200, `leads_used` +1 e lead reservado.
-3. `precheck_reveal()` é uma pré-validação SEM efeito colateral: não consome cota
-   e não altera o status do lead.
-4. O re-clique (reveal ativo no mesmo dia) não consome um segundo crédito.
+Invariantes fixados aqui (entrega sempre, cobrar só em sucesso total):
+1. Lead incompleto => HTTP 200, lead ENTREGUE (reservado), `charged: false` e
+   `leads_used` inalterado. Nunca 422: bloquear escondia a oportunidade e
+   negava a "reserva grátis" prometida na landing page.
+2. Lead corporativo (nome + morada, sem telefone) => HTTP 200, 0 créditos.
+3. Com `owner_name` E `owner_phone` => HTTP 200, `leads_used` +1 e lead reservado.
+4. `precheck_reveal()` é uma pré-validação SEM efeito colateral e NÃO aplica a
+   cota diária (senão fechava leads grátis quando o limite está esgotado).
+5. O re-clique (reveal ativo no mesmo dia) não consome um segundo crédito.
 """
 from __future__ import annotations
 
@@ -34,7 +36,7 @@ from backend.models.schemas import (
     SourceType,
     UrgencyLevel,
 )
-from backend.services.db import db_service
+from backend.services.db import db_service, get_connection
 
 EMAIL = "pytest-reserve-atomic@magicleads.app"
 
@@ -141,66 +143,8 @@ def test_precheck_reveal_has_no_side_effects(user_and_client, no_external_data):
     assert after["reserved_until"] == before["reserved_until"], "precheck_reveal reservou o lead"
 
 
-def test_no_credit_debited_when_owner_data_incomplete(user_and_client, no_external_data):
-    """Sem nome e sem telefone/morada => 422 e ZERO créditos consumidos."""
-    client, headers, user_id = user_and_client
-    lead_id = _make_lead(owner_name=None, owner_phone=None, mailing_address=None)
-
-    before_used = _used(user_id)
-
-    r = client.post(
-        f"/api/leads/{lead_id}/reserve",
-        headers=headers,
-        json={"minutes": 60, "consent": True, "idempotency": f"pytest-422-{lead_id}"},
-    )
-
-    assert r.status_code == 422, f"devolveu {r.status_code}: {r.text}"
-    body = r.json()
-    assert body["error"] == "incomplete_lead_data", body
-    assert body["charged"] is False, body
-    assert body["reserved"] is False, body
-    # Regra A exige owner_name E (owner_phone OU mailing_address)
-    assert set(body["params"]["missing"]) == {"owner_name", "owner_phone_or_mailing_address"}, body
-
-    assert _used(user_id) == before_used, (
-        f"BUG: crédito foi debitado apesar do 422 "
-        f"({before_used} -> {_used(user_id)})"
-    )
-
-    lead = db_service._service.get_lead_by_id(lead_id)
-    assert lead["lead_status"] == "available", "lead foi reservado apesar do 422"
-    assert lead["reserved_until"] is None, "lead foi reservado apesar do 422"
 
 
-def test_no_credit_debited_when_name_missing_but_mailing_present(user_and_client, no_external_data):
-    """Morada presente mas nome ausente => 422 e ZERO créditos consumidos."""
-    client, headers, user_id = user_and_client
-    lead_id = _make_lead(owner_name=None, owner_phone=None, mailing_address="123 CORP AVE")
-
-    before_used = _used(user_id)
-
-    r = client.post(
-        f"/api/leads/{lead_id}/reserve",
-        headers=headers,
-        json={"minutes": 60, "consent": True, "idempotency": f"pytest-422c-{lead_id}"},
-    )
-
-    assert r.status_code == 422, f"devolveu {r.status_code}: {r.text}"
-    body = r.json()
-    assert body["error"] == "incomplete_lead_data", body
-    assert body["charged"] is False, body
-    assert body["reserved"] is False, body
-    # Apenas owner_name está em falta (mailing_address está presente)
-    assert set(body["params"]["missing"]) == {"owner_name"}, body
-
-    assert _used(user_id) == before_used, (
-        f"BUG: crédito foi debitado apesar do 422 "
-        f"({before_used} -> {_used(user_id)})"
-    )
-
-    lead = db_service._service.get_lead_by_id(lead_id)
-    assert lead["lead_status"] == "available", "lead foi reservado apesar do 422"
-    assert lead["reserved_until"] is None, "lead foi reservado apesar do 422"
 
 
 def test_corporate_lead_without_phone_is_allowed(user_and_client, no_external_data):
@@ -281,26 +225,178 @@ def test_reclick_does_not_debit_twice(user_and_client, no_external_data):
     assert _used(user_id) == after_first, "re-clique consumiu um segundo crédito"
 
 
-def test_failed_reserve_does_not_consume_daily_quota(user_and_client, no_external_data):
-    """Um 422 não pode 'gastar' a cota: o contador de créditos fica intacto."""
-    client, headers, user_id = user_and_client
-    lead_id = _make_lead(owner_name=None, owner_phone=None)
+def test_incomplete_lead_is_delivered_free_without_charging(user_and_client, no_external_data):
+    """REGRA DE NEGOCIO: lead incompleto e ENTREGUE, nunca bloqueado com 422.
 
-    before = db_service._service.get_daily_leads_used(user_id)
-    before_used = int(before.get("used") or 0)
-    before_remaining = int(before.get("remaining") or 0)
+    Sem nome, sem telefone e sem morada: o lead entra na mesma na conta do
+    utilizador, para carta/visita, e nao consome credito nem cota diaria.
+    """
+    client, headers, user_id = user_and_client
+    lead_id = _make_lead(owner_name=None, owner_phone=None, mailing_address=None)
+
+    before_used = _used(user_id)
 
     r = client.post(
         f"/api/leads/{lead_id}/reserve",
         headers=headers,
-        json={"minutes": 60, "consent": True, "idempotency": f"pytest-quota-{lead_id}"},
+        json={"minutes": 60, "consent": True, "idempotency": f"pytest-free-{lead_id}"},
     )
-    assert r.status_code == 422, r.text
 
-    after = db_service._service.get_daily_leads_used(user_id)
-    assert int(after.get("used") or 0) == before_used, (
-        f"BUG: 422 consumiu cota: {before} -> {after}"
+    assert r.status_code == 200, f"lead incompleto foi bloqueado: {r.status_code} {r.text}"
+    body = r.json()
+    assert body["reserved"] is True, body
+    assert body["revealed"] is True, body
+    assert body["charged"] is False, f"lead incompleto foi cobrado: {body}"
+    assert body["incomplete_delivery"] is True, body
+    assert body["corporate"] is False, body
+    assert set(body["missing"]) == {"owner_name", "owner_phone_or_mailing_address"}, body
+
+    # O dado que existe (endereco do imovel) segue para carta/visita.
+    assert body["owner"]["address"], body
+
+    assert _used(user_id) == before_used, (
+        f"BUG: lead incompleto consumiu cota ({before_used} -> {_used(user_id)})"
     )
-    assert int(after.get("remaining") or 0) == before_remaining, (
-        f"BUG: 422 reduziu o saldo de créditos: {before} -> {after}"
+
+    lead = db_service._service.get_lead_by_id(lead_id)
+    assert lead["lead_status"] == "reserved", "lead incompleto nao foi entregue"
+    assert lead["reserved_by"] == user_id
+
+
+def test_named_lead_without_phone_is_delivered_free(user_and_client, no_external_data):
+    """Nome + local, sem telefone: "reserva gratis" da landing page."""
+    client, headers, user_id = user_and_client
+    lead_id = _make_lead(owner_name="65 MS LLC", owner_phone=None, mailing_address=None)
+
+    before_used = _used(user_id)
+
+    r = client.post(
+        f"/api/leads/{lead_id}/reserve",
+        headers=headers,
+        json={"minutes": 60, "consent": True, "idempotency": f"pytest-llc-{lead_id}"},
     )
+
+    assert r.status_code == 200, f"devolveu {r.status_code}: {r.text}"
+    body = r.json()
+    assert body["owner"]["name"] == "65 MS LLC", body
+    assert body["charged"] is False, body
+    assert body["incomplete_delivery"] is True, body
+    assert _used(user_id) == before_used, "lead incompleto consumiu cota"
+
+    lead = db_service._service.get_lead_by_id(lead_id)
+    assert lead["lead_status"] == "reserved"
+
+
+def test_free_lead_is_allowed_when_daily_quota_is_exhausted(user_and_client, no_external_data):
+    """Cota esgotada nao pode fechar a "reserva gratis": so fecha leads pagos."""
+    client, headers, user_id = user_and_client
+
+    svc = db_service._service
+    today = datetime.utcnow().date().isoformat()
+    original_used = _used(user_id)
+    conn = get_connection()
+    try:
+        conn.execute(
+            """INSERT OR REPLACE INTO user_daily_stats
+               (user_id, date, leads_used, leads_limit, reset_at)
+               VALUES (?, ?, 10, 10, ?)""",
+            (user_id, today, svc._utc_tomorrow_midnight().isoformat()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    assert _used(user_id) == 10, "nao consegui esgotar a cota de teste"
+
+    # O utilizador e partilhado por todo o modulo (fixture module-scoped), entao
+    # esgotar a cota e DEVE ser revertido: caso contrario os testes seguintes
+    # herdam um 10/10 fantasma e falham por motivos sem relacao com o seu
+    # objetivo. Por isso os testes que mexem na cota usam try/finally.
+    try:
+        free_lead = _make_lead(owner_name="75 PARK LLC", owner_phone=None, mailing_address=None)
+        r_free = client.post(
+            f"/api/leads/{free_lead}/reserve",
+            headers=headers,
+            json={"minutes": 60, "consent": True, "idempotency": f"pytest-free-q-{free_lead}"},
+        )
+        assert r_free.status_code == 200, f"lead gratis bloqueado com cota esgotada: {r_free.text}"
+        assert r_free.json()["charged"] is False, r_free.text
+        assert _used(user_id) == 10, "lead gratis consumiu cota com o limite esgotado"
+
+        # Um lead completo, esse sim, tem de ser recusado pela cota esgotada.
+        paid_lead = _make_lead(owner_name="JOE PAID", owner_phone="(718) 555-0300")
+        r_paid = client.post(
+            f"/api/leads/{paid_lead}/reserve",
+            headers=headers,
+            json={"minutes": 60, "consent": True, "idempotency": f"pytest-paid-q-{paid_lead}"},
+        )
+        assert r_paid.status_code == 429, (
+            f"lead pago devia respeitar a cota esgotada: {r_paid.status_code} {r_paid.text}"
+        )
+        assert _used(user_id) == 10, "cota foi consumida por um lead recusado"
+
+        paid = db_service._service.get_lead_by_id(paid_lead)
+        assert paid["lead_status"] == "available", "lead pago foi reservado apesar da cota"
+    finally:
+        conn = get_connection()
+        try:
+            conn.execute(
+                """INSERT OR REPLACE INTO user_daily_stats
+                   (user_id, date, leads_used, leads_limit, reset_at)
+                   VALUES (?, ?, ?, 10, ?)""",
+                (user_id, today, original_used, svc._utc_tomorrow_midnight().isoformat()),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        assert _used(user_id) == original_used, "a cota de teste nao foi restaurada"
+
+
+# ---------------------------------------------------------------------------
+# Regra de separacao dos dois fluxos do endpoint
+# ---------------------------------------------------------------------------
+def test_reserve_without_consent_uses_the_hold_flow(user_and_client, no_external_data):
+    """consent=False tem de continuar a ser a reserva simples, sem reveal.
+
+    Este teste existe porque o endpoint tem DOIS fluxos num `if payload.consent`
+    e o resto da suite so exercita `consent=True`. Uma edicao de indentacao que
+    empurre o fluxo de reveal para fora desse `if` deixa o consent=False a correr
+    `reveal_lead()` com variaveis nao definidas (NameError -> 500) e torna o
+    fluxo de reserva simples codigo morto. Nao se detecta so com testes de reveal.
+    """
+    client, headers, user_id = user_and_client
+    before = _used(user_id)
+    lead_id = _make_lead(owner_name="NO CONSENT", owner_phone="(718) 555-0400")
+
+    r = client.post(
+        f"/api/leads/{lead_id}/reserve",
+        headers=headers,
+        json={"minutes": 60, "consent": False},
+    )
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["reserved"] is True
+    # Sem consentimento NAO se revelam dados do proprietario.
+    assert not body.get("revealed"), "revelou dados sem consentimento"
+    assert not body.get("owner"), "devolveu dados do dono sem consentimento"
+    # E nao e o payload do fluxo de reveal.
+    assert "charged" not in body, "reserva simples devolveu o payload do reveal"
+    assert "counted_again" not in body, "reserva simples devolveu o payload do reveal"
+    # A reserva simples continua a contar para a cota diaria.
+    assert _used(user_id) == before + 1, "reserva simples nao consumiu cota"
+
+
+def test_reserve_without_consent_never_charges(user_and_client, no_external_data):
+    """Consentir e o que consome cota; sem consentir, so a reserva simples."""
+    client, headers, user_id = user_and_client
+    before = _used(user_id)
+    lead_id = _make_lead(owner_name="NO CONSENT 2", owner_phone=None, mailing_address=None)
+
+    r = client.post(
+        f"/api/leads/{lead_id}/reserve",
+        headers=headers,
+        json={"minutes": 60, "consent": False},
+    )
+
+    assert r.status_code == 200, r.text
+    assert _used(user_id) == before + 1

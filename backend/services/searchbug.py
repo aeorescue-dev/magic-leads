@@ -136,6 +136,112 @@ def _clean_owner_name(owner_name: str | None) -> tuple[str | None, str | None]:
     return cleaned, None
 
 
+# Sufixos que denunciam uma empresa/sociedade em vez de uma pessoa.
+# O proprietario registado de um imovel em NYC e muitas vezes uma society, e
+# esse nome e VALIDO como consulta. O problema nunca foi o nome corporativo em
+# si: foi parti-lo em FNAME/LNAME como se fosse uma pessoa ("65 MS LLC" ->
+# FNAME="65", LNAME="MS LLC"), o que degrada o match e ainda custa dinheiro.
+_CORPORATE_SUFFIXES = frozenset({
+    "LLC", "INC", "INCORPORATED", "CORP", "CORPORATION", "CO", "COMPANY",
+    "LTD", "LIMITED", "LP", "LLP", "PLLC", "PC", "PA", "TRUST", "HOLDING",
+    "HOLDINGS", "REALTY", "PROPERTY", "PROPERTIES", "ASSOC", "ASSOCIATES",
+    "ASSOCIATION", "PARTNERS", "PARTNERSHIP", "ENTERPRISE", "ENTERPRISES",
+    "BANK", "FINANCIAL", "MGMT", "MANAGEMENT", "SERVICES", "SERVICE",
+    "SOLUTIONS", "DEVELOPMENT", "INVESTMENTS", "CAPITAL", "CONSTRUCTION",
+    "MAINTENANCE", "ESTATE", "ESTATES", "FUND", "FUNDING", "GROUP",
+})
+
+# Sufixos de pessoa que pertencem ao ULTIMO nome, nao ao primeiro.
+_PERSON_SUFFIXES = frozenset({
+    "JR", "SR", "II", "III", "IV", "V", "MD", "DDS", "PHD", "ESQ",
+})
+
+_ZIP_RE = re.compile(r"\d{5}(-\d{4})?$")
+
+
+def is_corporate_name(name: str | None) -> bool:
+    """True se `name` e uma empresa/sociedade e nao o nome de uma pessoa."""
+    if not name:
+        return False
+    upper = name.upper()
+    for token in re.findall(r"[A-Z0-9]+", upper):
+        if token in _CORPORATE_SUFFIXES:
+            return True
+    # Sufixo colado ao resto: "65 MSLLC", "ACMEINC", "PARKSLTD".
+    compact = re.sub(r"[^A-Z]", "", upper)
+    for suffix in _CORPORATE_SUFFIXES:
+        if len(suffix) > 2 and compact.endswith(suffix):
+            return True
+    return False
+
+
+def split_person_name(name: str) -> tuple[str, str]:
+    """Parte um NOME DE PESSOA em (primeiro, ultimo).
+
+    Nomes corporativos NUNCA chegam aqui: `_lookup_searchbug` omite FNAME/LNAME
+    quando `is_corporate_name()` e True. O corte e por ultimo token, nao por
+    palavras-chave, para nao partir "VAN DER BERG" nem "MARIA DE OLIVEIRA".
+    """
+    tokens = [t for t in re.split(r"\s+", (name or "").strip()) if t]
+    if not tokens:
+        return "", ""
+
+    suffixes: list[str] = []
+    while len(tokens) > 2 and tokens[-1].upper().strip(".") in _PERSON_SUFFIXES:
+        suffixes.insert(0, tokens.pop())
+
+    if len(tokens) == 1:
+        return tokens[0], " ".join(suffixes)
+    return tokens[0], " ".join(tokens[1:] + suffixes)
+
+
+def normalize_provider_address(address: str | None, city: str | None, state: str | None) -> str:
+    """Remove de ADDRESS os segmentos que ja vao nos campos CITY/STATE/ZIP.
+
+    Payloads a montante podem chegar como "123 MAIN ST, BROOKLYN, NY". O
+    provider receberia entao a cidade dentro de ADDRESS e outra vez em CITY, o
+    que piora o match de uma chamada PAGA. So se cortam segmentos finais que
+    duplicam EXATAMENTE a city/state/zip fornecidos -- nunca outros, para nao
+    mutilar um endereco legitimo.
+    """
+    addr = (address or "").strip()
+    if not addr:
+        return ""
+
+    parts = [p.strip() for p in addr.split(",") if p.strip()]
+    c = (city or "").strip().upper()
+    s = (state or "").strip().upper()
+
+    def _is_noise(token: str) -> bool:
+        return bool(
+            (c and token == c)
+            or (s and token == s)
+            or _ZIP_RE.fullmatch(token)
+        )
+
+    # Um segmento final pode colar varias peças: "NY 11201", "BROOKLYN NY 11201".
+    # Por isso o corte e por TOKEN dentro do ultimo segmento, e so depois se
+    # remove o segmento que ficou vazio. Repete ate estabilizar porque remover
+    # "NY 11201" pode revelar um "BROOKLYN" que tambem e ruido.
+    changed = True
+    while changed and len(parts) > 1:
+        changed = False
+        tokens = parts[-1].split()
+        kept = [t for t in tokens if not _is_noise(t.upper())]
+        if len(kept) != len(tokens):
+            changed = True
+            if kept:
+                parts[-1] = " ".join(kept)
+            else:
+                parts.pop()
+                continue
+        if len(parts) > 1 and _is_noise(parts[-1].upper()):
+            parts.pop()
+            changed = True
+
+    return ", ".join(parts)
+
+
 # Um telefone nao muda de dia para dia: 30 dias e seguro e evita re-pagar.
 _PHONE_CACHE_TTL_OK = 30 * 24 * 3600
 # Um "nao achou" pode mudar quando o enriquecimento gratuito melhora ou quando
@@ -196,14 +302,7 @@ class PhoneLookupService:
                 provider="none",
             )
 
-        cache_key = "|".join(
-            [
-                address.strip().upper(),
-                city.strip().upper(),
-                state.strip().upper(),
-                (clean_name or "").upper(),
-            ]
-        )
+        cache_key = self._cache_key(address, city, state, zip_code, clean_name)
         cached = self._phone_cache_get(cache_key)
         if cached is not None:
             phone, was_hit, was_negative = cached
@@ -259,6 +358,33 @@ class PhoneLookupService:
             provider="none"
         )
 
+    def _cache_key(
+        self,
+        address: str,
+        city: str,
+        state: str,
+        zip_code: str | None,
+        clean_name: str | None,
+    ) -> str:
+        """Chave de cache do telefone.
+
+        Inclui o ZIP: o mesmo address/city/state com ZIP diferente e outro
+        imovel. Sem ele, um "nao achou" em Park Ave contaminava o 11201.
+
+        E um METODO, e nao uma expressao inline, para que os testes nunca
+        voltem a duplicar o formato da chave a mao -- foi exatamente isso que
+        partiu quando o ZIP foi acrescentado.
+        """
+        return "|".join(
+            [
+                (address or "").strip().upper(),
+                (city or "").strip().upper(),
+                (state or "").strip().upper(),
+                (zip_code or "").strip().upper(),
+                (clean_name or "").upper(),
+            ]
+        )
+
     def _phone_cache_get(self, key: str) -> tuple[Optional[str], bool, bool] | None:
         """Devolve (telefone, foi_acertado, foi_negativo) ou None em cache miss."""
         entry = self._phone_cache.get(key)
@@ -293,14 +419,15 @@ class PhoneLookupService:
                 provider="Searchbug"
             )
 
-        # Extrai primeiro/último nome do owner_name se disponível
+        # FNAME/LNAME so quando o owner_name e mesmo uma PESSOA. Um nome
+        # corporativo nao tem primeiro/ultimo nome: envia-lo partido ("65" /
+        # "MS LLC") estraga o match e custa uma chamada paga. Sem estes campos
+        # a consulta continua a funcionar pela morada, que e a chave real.
         fname = lname = ""
-        if owner_name:
-            parts = owner_name.strip().split()
-            if parts:
-                fname = parts[0]
-                if len(parts) > 1:
-                    lname = " ".join(parts[1:])
+        if owner_name and not is_corporate_name(owner_name):
+            fname, lname = split_person_name(owner_name)
+
+        clean_address = normalize_provider_address(address, city, state)
 
         # Form data para POST
         form_data = {
@@ -308,7 +435,7 @@ class PhoneLookupService:
             "PASS": api_key,
             "TYPE": "api_contact",
             "FORMAT": "JSON",
-            "ADDRESS": address,
+            "ADDRESS": clean_address,
             "CITY": city,
             "STATE": state,
         }
@@ -320,7 +447,9 @@ class PhoneLookupService:
             form_data["ZIP"] = zip_code
 
         try:
-            async with httpx.AsyncClient(timeout=20.0, verify=False) as client:
+            # verify=True: verificacao de TLS activa. Com verify=False a
+            # credencial da conta via em claro para quem estiver no meio.
+            async with httpx.AsyncClient(timeout=20.0, verify=True) as client:
                 response = await client.post(
                     "https://data.searchbug.com/api/search.aspx",
                     data=form_data,

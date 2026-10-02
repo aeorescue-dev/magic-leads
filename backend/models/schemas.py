@@ -207,6 +207,15 @@ class LeadResponse(BaseModel):
     address_resolvable: bool = True
     unresolvable: bool = False
 
+    # Verdito de entrega da Regra A. `charged` e a autoridade final sobre o
+    # preço no card: o frontend tem de usar estes campos e NUNCA inferir o preço
+    # a partir de `corporate`, porque um lead incompleto nao e corporativo e
+    # mesmo assim e entregue de graca. Sem `charged` no payload o browser
+    # voltaria a bloquear leads gratuitos quando a cota diaria esta esgotada.
+    complete_delivery: bool = False
+    incomplete_delivery: bool = False
+    charged: bool = False
+
     # Freshness fields (WS1 dual labels)
     first_seen: Optional[str] = None
     last_synced: Optional[str] = None

@@ -21,6 +21,12 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
+import {
+  isBlockedByQuota,
+  isFreeLead,
+  isUnresolvableLead,
+  shouldShowIncompleteBadge,
+} from "@/lib/lead-delivery";
 import { buildOutreachMessage } from "@/lib/outreach";
 import CheckoutModal from "@/components/CheckoutModal";
 import ReleaseModal from "@/components/ReleaseModal";
@@ -220,11 +226,6 @@ const URGENCIES = ["all", "high", "medium", "low"];
   // aqui: qualquer divergencia entre o que a UI promete e o que a reserva cobra
   // passa a ser impossivel, porque e a mesma avaliacao dos dois lados.
   const isCorporateLead = (lead?: { corporate?: boolean } | null) => !!lead?.corporate;
-
-  // Lead sem qualquer dado de contacto E com um endereco que nunca vai resolver.
-  // Reservar falha sempre com 422 e sem debito, por isso mostramos o motivo em vez
-  // de deixar o utilizador gastar um clique num beco sem saida.
-  const isUnresolvableLead = (lead?: { unresolvable?: boolean } | null) => !!lead?.unresolvable;
 
   const LEAD_TYPES = [
     { value: "all", labelKey: "dashboard.filter.all_types" },
@@ -582,11 +583,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
 
   const handleHistoryReserve = async (lead: MyLeadHistoryItem) => {
     if (busyAction || (subscription && !subscription.can_access)) return;
-    if (isUnresolvableLead(lead)) {
-      showToast(t("dashboard.toast.reveal_no_address"), "warning");
-      return;
-    }
-    if (!isCorporateLead(lead) && dailyStats && dailyStats.remaining === 0) {
+    if (isBlockedByQuota(lead, dailyStats?.remaining)) {
       showToast(t("dashboard.toast.daily_limit"), "warning");
       return;
     }
@@ -802,11 +799,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
   };
   const handleQuickReserve = async (lead: LeadResponse) => {
     if (busyAction || (subscription && !subscription.can_access)) return;
-    if (isUnresolvableLead(lead)) {
-      showToast(t("dashboard.toast.reveal_no_address"), "warning");
-      return;
-    }
-    if (!isCorporateLead(lead) && dailyStats && dailyStats.remaining === 0) {
+    if (isBlockedByQuota(lead, dailyStats?.remaining)) {
       showToast(t("dashboard.toast.daily_limit"), "warning");
       return;
     }
@@ -848,7 +841,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
       showToast(subscription.message || "Acesso negado", "error");
       return;
     }
-    if (!isCorporateLead(revealTarget) && dailyStats && dailyStats.remaining === 0) {
+    if (isBlockedByQuota(revealTarget, dailyStats?.remaining)) {
       showToast(t("dashboard.toast.daily_limit"), "warning");
       return;
     }
@@ -857,9 +850,11 @@ const URGENCIES = ["all", "high", "medium", "low"];
       const idKey = `u${userId}:l${revealTarget.id}:${new Date().toISOString().slice(0, 10)}`;
       const res = await reserveLead(revealTarget.id, 60, { consent: true, idempotency: idKey });
       showToast(
-        res?.corporate
-          ? t("dashboard.toast.corporate_reserved")
-          : res?.message || "Dados revelados — reserva de 1 hora ativa",
+        res?.incomplete_delivery
+          ? t("dashboard.toast.free_reserved_incomplete")
+          : res?.corporate
+            ? t("dashboard.toast.corporate_reserved")
+            : res?.message || "Dados revelados — reserva de 1 hora ativa",
         "success"
       );
       if (dailyStats) {
@@ -1970,7 +1965,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
                             {(lead.my_status === "hold_expired" || lead.my_status === "released" || lead.my_status === "available") && (
                               <button
                                 onClick={(e) => { e.stopPropagation(); handleHistoryReserve(lead); }}
-                                disabled={busyAction || (subscription && !subscription.can_access) || isUnresolvableLead(lead) || (!isCorporateLead(lead) && dailyStats?.remaining === 0)}
+                                disabled={busyAction || (subscription && !subscription.can_access) || isBlockedByQuota(lead, dailyStats?.remaining)}
                                 className="inline-flex items-center gap-1.5 text-[11px] font-bold bg-indigo-500 hover:bg-indigo-400 text-white px-3 py-1.5 rounded-lg transition disabled:opacity-50"
                               >
                                 <Lock className="h-3 w-3" /> {t("dashboard.action.rereserve")}
@@ -2084,6 +2079,8 @@ const URGENCIES = ["all", "high", "medium", "low"];
                       return (
                         <div
                           key={lead.id}
+                          data-testid="lead-card"
+                          data-lead-id={lead.id}
                           onClick={() => openLeadDetail(lead)}
                           className={`px-5 py-4 cursor-pointer transition ${T.navHover} group ${vis === "reserved_by_other" ? "opacity-60" : ""}`}
                         >
@@ -2128,12 +2125,12 @@ const URGENCIES = ["all", "high", "medium", "low"];
                                 </span>
                                 <button
                                   onClick={(e) => { e.stopPropagation(); handleQuickReserve(lead); }}
-                                  disabled={busyAction || (subscription && !subscription.can_access) || isUnresolvableLead(lead) || (!isCorporateLead(lead) && dailyStats?.remaining === 0)}
+                                  disabled={busyAction || (subscription && !subscription.can_access) || isBlockedByQuota(lead, dailyStats?.remaining)}
                                   className="flex items-center gap-1.5 text-[11px] font-bold bg-indigo-500 hover:bg-indigo-400 text-white px-3 py-1.5 rounded-lg transition shadow-sm disabled:opacity-50"
                                 >
-                                  <Lock className="h-3 w-3" /> {isCorporateLead(lead) ? t("dashboard.action.reserve_corporate") : t("dashboard.action.reserve_1h")}
+                                  <Lock className="h-3 w-3" /> {isFreeLead(lead) ? t("dashboard.action.reserve_corporate") : t("dashboard.action.reserve_1h")}
                                 </button>
-                                {isUnresolvableLead(lead) && (
+                                {shouldShowIncompleteBadge(lead) && (
                                   <span className="text-[10px] text-amber-500/90 flex items-center gap-1">
                                     <AlertTriangle className="h-3 w-3" /> {t("dashboard.badge.no_owner_data")}
                                   </span>
@@ -2227,17 +2224,17 @@ const URGENCIES = ["all", "high", "medium", "low"];
                                 <div className="flex items-center gap-2 mt-3 flex-wrap">
                                   <button
                                     onClick={(e) => { e.stopPropagation(); handleQuickReserve(lead); }}
-                                    disabled={busyAction || (subscription && !subscription.can_access) || isUnresolvableLead(lead) || (!isCorporateLead(lead) && dailyStats?.remaining === 0)}
+                                    disabled={busyAction || (subscription && !subscription.can_access) || isBlockedByQuota(lead, dailyStats?.remaining)}
                                     className={`flex items-center gap-1.5 text-[11px] font-bold bg-indigo-500 hover:bg-indigo-400 text-white px-3 py-1.5 rounded-lg transition shadow-sm disabled:opacity-50 ${
-                                      (subscription && !subscription.can_access) || isUnresolvableLead(lead) || (!isCorporateLead(lead) && dailyStats && dailyStats.remaining === 0) ? "opacity-30 cursor-not-allowed" : ""
+                                      (subscription && !subscription.can_access) || isBlockedByQuota(lead, dailyStats?.remaining) ? "opacity-30 cursor-not-allowed" : ""
                                     }`}
                                   >
-                                    <Lock className="h-3 w-3" /> {isCorporateLead(lead) ? t("dashboard.action.reserve_corporate") : t("dashboard.action.reserve_1h")}
+                                    <Lock className="h-3 w-3" /> {isFreeLead(lead) ? t("dashboard.action.reserve_corporate") : t("dashboard.action.reserve_1h")}
                                   </button>
                                   <span className="text-[10px] text-slate-500 flex items-center gap-1">
                                     <ShieldCheck className="h-3 w-3" /> {t("dashboard.data_protected")}
                                   </span>
-                                  {isUnresolvableLead(lead) && (
+                                  {shouldShowIncompleteBadge(lead) && (
                                     <span className="text-[10px] text-amber-500/90 flex items-center gap-1">
                                       <AlertTriangle className="h-3 w-3" /> {t("dashboard.badge.no_owner_data")}
                                     </span>
@@ -2595,12 +2592,12 @@ const URGENCIES = ["all", "high", "medium", "low"];
                 {!leadAlreadyMine(selectedLead) && (
                   <button
                     onClick={() => handleQuickReserve(selectedLead)}
-                    disabled={busyAction || (subscription && !subscription.can_access) || isUnresolvableLead(selectedLead) || (!isCorporateLead(selectedLead) && dailyStats?.remaining === 0)}
+                    disabled={busyAction || (subscription && !subscription.can_access) || (!isFreeLead(selectedLead) && dailyStats?.remaining === 0)}
                     className={`flex items-center gap-1.5 text-xs font-bold bg-indigo-500 hover:bg-indigo-400 text-white px-3.5 py-2 rounded-xl transition shadow-sm disabled:opacity-50 ${
-                      (subscription && !subscription.can_access) || isUnresolvableLead(selectedLead) || (!isCorporateLead(selectedLead) && dailyStats && dailyStats.remaining === 0) ? "opacity-30 cursor-not-allowed" : ""
+                      (subscription && !subscription.can_access) || isBlockedByQuota(selectedLead, dailyStats?.remaining) ? "opacity-30 cursor-not-allowed" : ""
                     }`}
                   >
-                    <Lock className="h-3.5 w-3.5" /> {isCorporateLead(selectedLead) ? t("dashboard.action.reserve_corporate") : t("dashboard.action.reserve_1h")}
+                    <Lock className="h-3.5 w-3.5" /> {isFreeLead(selectedLead) ? t("dashboard.action.reserve_corporate") : t("dashboard.action.reserve_1h")}
                   </button>
                 )}
                 <button
@@ -2925,7 +2922,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
             <div className="mt-5 flex gap-2">
               <button
                 onClick={confirmReveal}
-                disabled={busyAction || (subscription && !subscription.can_access) || (!isCorporateLead(revealTarget) && dailyStats?.remaining === 0)}
+                disabled={busyAction || (subscription && !subscription.can_access) || isBlockedByQuota(revealTarget, dailyStats?.remaining)}
                 className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-white text-sm font-bold transition disabled:opacity-50"
               >
                 {busyAction ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lock className="h-4 w-4" />}

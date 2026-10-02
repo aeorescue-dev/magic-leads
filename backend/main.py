@@ -54,7 +54,12 @@ from .scrapers.socrata_discovery import socrata_discovery
 from .services import notifier, security
 from .services.db import db_service
 from .services.enrichment import owner_enrichment
-from .services.lead_rules import charges_credit, classify, missing_critical_fields
+from .services.lead_rules import (
+    charges_credit,
+    classify,
+    is_corporate as is_corporate_lead,
+    missing_critical_fields,
+)
 from .services.push_service import push_service
 from .services.searchbug import searchbug_service
 from .utils.logger import logger
@@ -172,6 +177,9 @@ def _to_lead_response(lead: dict) -> LeadResponse:
         corporate=rules["corporate"],
         address_resolvable=rules["address_resolvable"],
         unresolvable=rules["unresolvable"],
+        complete_delivery=rules["complete_delivery"],
+        incomplete_delivery=rules["incomplete_delivery"],
+        charged=rules["charged"],
         # Freshness fields (WS1 dual labels)
         first_seen=lead.get("date_first_seen") or lead.get("created_at"),
         last_synced=lead.get("updated_at") or lead.get("created_at"),
@@ -3165,11 +3173,12 @@ async def reserve_lead(
 
     # 2. COM CONSENTIMENTO => REVEAL (reserva 60min + conta 1/10 com idempotência)
     #
-    # ORDEM CRÍTICA (fail closed): o crédito NUNCA é debitado antes de os dados
-    # essenciais (owner_name + owner_phone) estarem confirmados. Por isso o fluxo é:
-    #   2.1 pré-validação sem débito  -> 2.2 enriquecimento  -> 2.3 validação
+    # ORDEM CRÍTICA: o crédito NUNCA é debitado antes de os dados essenciais
+    # (owner_name + owner_phone) estarem confirmados. O fluxo é:
+    #   2.1 pré-validação sem débito  -> 2.2 enriquecimento  -> 2.3 regra A
     #   -> 2.4 reveal_lead (único ponto que debita)
-    # Se faltar nome ou telefone, responde 422 sem debitar e sem reservar.
+    # Se os dados essenciais faltarem, o lead é ENTREGUE na mesma mas sem débito
+    # e sem consumir cota. Nunca devolvemos 422 por isso.
     if payload.consent:
         key = payload.idempotency or f"{user_id}:{lead_id}"
 
@@ -3208,9 +3217,16 @@ async def reserve_lead(
                 detail="Limite de 10 leads/dia atingido. Volte amanhã e abra seus 10+ potenciais clientes."
             )
 
-        # already_revealed=True => re-clique no mesmo lead com reveal ativo hoje.
-        # Nesse caso NENHUM crédito novo é debitado, então não bloqueamos por dados.
-        already_revealed = bool(pre.get("already_revealed"))
+        # 2.1 ENRIQUECIMENTO / ENTREGA
+        # Regra A: o lead e SEMPRE entregue. Nao existe mais bloqueio por dados
+        # (o antigo 422 escondia a oportunidade e negava a "reserva gratis"
+        # prometida na landing page). O que decide o preco e apenas
+        # `charges_credit()` mais abaixo: so sucesso total (nome + telefone) e
+        # cobrado; qualquer outro perfil e entregue com 0 creditos.
+        #
+        # Nota: o re-clique no mesmo lead com reveal ativo hoje nao consome um
+        # segundo credito, e esse comportamento continua a ser tratado dentro de
+        # `reveal_lead(charge_credit=...)`.
         lead = dict(pre_lead)
 
         # 2.2 ENRIQUECIMENTO ON-DEMAND — ANTES de qualquer débito
@@ -3284,42 +3300,32 @@ async def reserve_lead(
             if enriched_lead:
                 lead = dict(enriched_lead)
 
-        # 2.3 REGRA A AJUSTADA (fail closed): owner_name é sempre obrigatório.
-        # Perfis de reserva válidos:
-        #   1) Lead padrão     -> owner_name + owner_phone            -> debita crédito
-        #   2) Lead corporativo-> owner_name + mailing_address, sem phone -> 0 créditos
-        # Só se aplica quando um novo crédito seria consumido (re-clique é isento).
+        # 2.3 REGRA A: ENTREGA E COBRANCA DESACOPLADAS.
+        #
+        # O lead e SEMPRE entregue. O que muda com a qualidade dos dados e so se
+        # ha cobranca e consumo de cota:
+        #   1) Lead padrao      -> owner_name + owner_phone               -> debita credito
+        #   2) Lead corporativo -> owner_name + mailing_address, sem phone -> de graca
+        #   3) Lead incompleto  -> sem phone e sem morada                  -> de graca,
+        #                           entregue com aviso de "dados protegidos"
+        #
+        # Nao devolvemos 422 por dados incompletos: isso escondia o lead do
+        # utilizador e negava a "reserva gratis" prometida na landing page. A
+        # qualidade dos dados nunca bloqueia a entrega -- decide o preco e o aviso.
         missing_critical = missing_critical_fields(lead)
-
-        if missing_critical and not already_revealed:
-            logger.info(
-                f"[RESERVE] Regra A: sem débito para lead {lead_id} — missing={missing_critical}"
-            )
-            return JSONResponse(
-                status_code=422,
-                content={
-                    "error": "incomplete_lead_data",
-                    "error_code": "reveal_incomplete_data",
-                    "params": {"missing": missing_critical},
-                    "detail": (
-                        "Não foi possível confirmar o nome do proprietário e "
-                        "(telefone OU morada de correspondência). "
-                        "Nenhum crédito foi descontado e o lead não foi reservado."
-                    ),
-                    "reserved": False,
-                    "revealed": False,
-                    "charged": False,
-                },
-            )
-
-        # Lead corporativo = tem owner_name + mailing_address, mas SEM owner_phone.
-        # Só então a reserva é gratuita (não conta para a cota diária do utilizador).
-        # Mesma função que alimenta os flags `corporate`/`unresolvable` do feed, para
-        # que o que a UI promete e o que aqui se cobra não possam divergir.
         charge_credit = charges_credit(lead)
-        is_corporate = not charge_credit
+        is_corporate = is_corporate_lead(lead)
+        incomplete_delivery = bool(missing_critical)
 
-        # 2.4 ÚNICO PONTO QUE DEBITA CRÉDITO (dados essenciais já confirmados)
+        if incomplete_delivery:
+            logger.info(
+                f"[RESERVE] Lead {lead_id} ENTREGUE DE GRACA - "
+                f"missing={missing_critical} corporate={is_corporate}"
+            )
+
+        # 2.4 UNICO PONTO QUE DEBITA CREDITO -- so quando charge_credit=True.
+        # Com charge_credit=False a reserva e criada e o lead e devolvido, mas
+        # sem tocar em `user_daily_stats` (nem cota, nem credito).
         logger.info(
             f"[RESERVE] Calling reveal_lead user_id={user_id} lead_id={lead_id} "
             f"key={key} minutes={minutes} corporate={is_corporate}"
@@ -3368,32 +3374,39 @@ async def reserve_lead(
         if revealed_lead:
             lead = dict(revealed_lead)
 
-        # Registra interação (o crédito já foi debitado dentro de reveal_lead)
+        # Registra interação (o crédito, quando devido, já foi debitado em reveal_lead)
         await db_service.record_event(lead_id, "revealed")
 
         return JSONResponse(
-            status_code=200,
-            content={
-                "reserved": True,
-                "revealed": True,
-                "status": lead.get("lead_status", "reserved"),
-                "expires_at": lead.get("reserved_until"),
-                "message": "Dados revelados — reserva de 1 hora ativa",
-                "counted_again": result.get("counted_again", True),
-                "used": result.get("used"),
-                "limit": result.get("limit"),
-                "remaining": result.get("remaining"),
-                "reset_at": result.get("reset_at"),
-                "corporate": is_corporate,
-                "owner": {
-                    "name": lead.get("owner_name"),
-                    "phone": lead.get("owner_phone"),
-                    "email": lead.get("owner_email"),
-                    "mailing_address": lead.get("mailing_address"),
-                    "address": lead.get("address"),
-                    "city": lead.get("city"),
-                },
+        status_code=200,
+        content={
+            "reserved": True,
+            "revealed": True,
+            "status": lead.get("lead_status", "reserved"),
+            "expires_at": lead.get("reserved_until"),
+            "message": (
+                "Dados revelados — reserva de 1 hora ativa"
+                if charge_credit
+                else "Dados revelados sem custo — reserva de 1 hora ativa"
+            ),
+            "counted_again": result.get("counted_again", True),
+            "used": result.get("used"),
+            "limit": result.get("limit"),
+            "remaining": result.get("remaining"),
+            "reset_at": result.get("reset_at"),
+            "corporate": is_corporate,
+            "charged": charge_credit,
+            "incomplete_delivery": incomplete_delivery,
+            "missing": missing_critical,
+            "owner": {
+                "name": lead.get("owner_name"),
+                "phone": lead.get("owner_phone"),
+                "email": lead.get("owner_email"),
+                "mailing_address": lead.get("mailing_address"),
+                "address": lead.get("address"),
+                "city": lead.get("city"),
             },
+        },
         )
 
     # 3. SEM CONSENTIMENTO: fluxo antigo (reserva simples, contando no limite)

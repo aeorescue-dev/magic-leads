@@ -3427,12 +3427,16 @@ class DatabaseService:
 
         Usado pelo endpoint de reserva para validar ANTES de enriquecer o lead,
         para que o crédito só seja debitado depois que os dados essenciais
-        (owner_name + owner_phone) estiverem confirmados.
+        estiverem confirmados.
+
+        NÃO verifica a cota diária: essa checagem aqui bloqueia leads que vão
+        ser entregues de graça (corporativos e incompletos). O limite é
+        autoritativo em `reveal_lead`, e só quando `charge_credit=True`.
 
         Nunca cria reveal, nunca incrementa `user_daily_stats` e nunca reserva.
-        Retorna dict com 'status' em ('ok' | 'not_found' | 'already_reserved' |
-        'limit_reached'), o 'lead' atual e 'already_revealed' (re-click no mesmo
-        lead, que NÃO consome um novo crédito).
+        Retorna dict com 'status' em ('ok' | 'not_found' | 'already_reserved'),
+        o 'lead' atual e 'already_revealed' (re-click no mesmo lead, que NÃO
+        consome um novo crédito).
         """
         conn = get_connection()
         try:
@@ -3461,23 +3465,10 @@ class DatabaseService:
             if active:
                 return {"status": "ok", "lead": dict(lead), "already_revealed": True}
 
-            # 4. Limite diário (espelha a checagem de reveal_lead, sem debitar).
-            stat = conn.execute(
-                "SELECT leads_used, leads_limit FROM user_daily_stats WHERE user_id = ? AND date = ?",
-                (user_id, today),
-            ).fetchone()
-            used = stat["leads_used"] if stat else 0
-            limit = (stat["leads_limit"] if stat and stat["leads_limit"] else 10) or 10
-            if used >= limit:
-                return {
-                    "status": "limit_reached",
-                    "lead": dict(lead),
-                    "already_revealed": False,
-                    "used": used,
-                    "limit": limit,
-                    "reset_at": self._utc_tomorrow_midnight().isoformat(),
-                }
-
+            # 4. Sem checagem de cota aqui. Um lead incompleto ou corporativo é
+            #    entregue de graça e não consome a cota diária; aplicar o limite
+            #    aqui bloquearia a "reserva grátis". `reveal_lead` é a autoridade
+            #    e só o aplica quando charge_credit=True.
             return {"status": "ok", "lead": dict(lead), "already_revealed": False}
         finally:
             conn.close()
@@ -3495,8 +3486,9 @@ class DatabaseService:
         Retorna dict com 'lead' completo + 'used'/'limit'/'remaining'/'reset_at',
         ou dict de erro ('error': 'limit_reached' | 'already_reserved' | 'not_found').
 
-        Se charge_credit=False (lead corporativo sem telefone), a reserva é criada
-        mas NÃO consome a cota diária do utilizador.
+        Se charge_credit=False (lead corporativo OU lead incompleto), a reserva é
+        criada e o lead é entregue, mas NÃO consome a cota diária do
+        utilizador. É a "reserva grátis" da landing page.
         """
         conn = get_connection()
         try:
@@ -3637,7 +3629,11 @@ class DatabaseService:
                 "revealed": True,
                 "counted_again": charge_credit,
                 "idempotent": False,
-                "corporate": not charge_credit,
+                # NÃO é "corporate": charge_credit=False cobre tanto o lead
+                # corporativo como o incompleto. Rotular o incompleto de
+                # corporativo mentiria para o cliente. A distinção correcta é
+                # feita por lead_rules.classify() no endpoint.
+                "charged": charge_credit,
                 "used": new_used,
                 "limit": limit or 10,
                 "remaining": remaining,

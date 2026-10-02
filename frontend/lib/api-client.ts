@@ -99,6 +99,13 @@ export interface LeadResponse {
   corporate?: boolean;
   address_resolvable?: boolean;
   unresolvable?: boolean;
+  // `charged` é a autoridade sobre o custo, calculada no backend sobre os
+  // dados reais (os campos do dono continuam mascarados no feed). Só é true
+  // em sucesso total de dados. Leads corporativos e incompletos são
+  // entregues sem custo e sem consumir a cota diária.
+  charged?: boolean;
+  complete_delivery?: boolean;
+  incomplete_delivery?: boolean;
   // Visibility (Phase 4.2)
   visibility_status?: "available" | "reserved_by_me" | "reserved_by_other";
   reserved_by_me?: { created_at?: string; expires_at?: string; hours_remaining?: number };
@@ -833,6 +840,9 @@ export interface HoldResult {
   revealed?: boolean;
   counted_again?: boolean;
   corporate?: boolean;
+  charged?: boolean;
+  incomplete_delivery?: boolean;
+  missing?: string[];
   used?: number;
   limit?: number;
   remaining?: number;

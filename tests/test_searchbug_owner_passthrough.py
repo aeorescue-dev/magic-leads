@@ -307,9 +307,11 @@ async def test_negative_cache_expires_so_lead_can_retry(monkeypatch):
     await service.lookup_phone("101 WEST 104 STREET", "NEW YORK", "NY", owner_name="MARIA SANTOS")
     # avanca o relogio para alem do TTL negativo
     monkeypatch.setattr(sb.time, "monotonic", lambda: 0.0)
+    # Usa o metodo do servico: reconstruir a chave a mao aqui foi o que
+    # partiu quando o ZIP foi acrescentado ao formato.
     monkeypatch.setitem(
         service._phone_cache,
-        "|".join(["101 WEST 104 STREET", "NEW YORK", "NY", "MARIA SANTOS"]),
+        service._cache_key("101 WEST 104 STREET", "NEW YORK", "NY", None, "MARIA SANTOS"),
         (-sb._PHONE_CACHE_TTL_FAIL - 1, None),
     )
 

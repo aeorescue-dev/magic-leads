@@ -11,6 +11,8 @@ from backend.services.lead_rules import (
     charges_credit,
     classify,
     is_corporate,
+    is_complete_delivery,
+    is_incomplete_delivery,
     is_unresolvable,
     missing_critical_fields,
 )
@@ -62,8 +64,9 @@ def test_whitespace_lead_is_never_corporate_and_never_charges():
     como corporativo (0 creditos) sem ter nada para revelar."""
     sample = lead(owner_name="  ", mailing_address="  ")
     assert is_corporate(sample) is False
-    # e nao pode cair no outro extremo: cobrar por um lead sem nada
-    assert charges_credit(sample) is True
+    # Regra nova: sem sucesso total de dados nunca se cobra.
+    assert charges_credit(sample) is False
+    assert is_incomplete_delivery(sample) is True
     assert missing_critical_fields(sample) == ["owner_name", "owner_phone_or_mailing_address"]
 
 
@@ -151,19 +154,40 @@ def test_corporate_lead_always_passes_regra_a():
 @pytest.mark.parametrize(
     "overrides,expected",
     [
-        ({"owner_name": "ACME LLC", "mailing_address": "PO BOX 9"}, False),
+        # Sucesso total (nome + telefone): unico perfil que debita.
         ({"owner_name": "JOHN", "owner_phone": "5551234"}, True),
-        ({}, True),
+        # everything else e entregue de graca.
+        ({"owner_name": "ACME LLC", "mailing_address": "PO BOX 9"}, False),
+        ({"owner_name": "65 MS LLC"}, False),
+        ({"owner_phone": "5551234"}, False),
+        ({"mailing_address": "PO BOX 9"}, False),
+        ({}, False),
     ],
 )
 def test_charges_credit(overrides, expected):
     assert charges_credit(lead(**overrides)) is expected
 
 
-def test_charges_credit_is_always_inverse_of_corporate():
+def test_charges_credit_requires_total_success():
+    """REGRA DE NEGOCIO: so se cobra com owner_name E owner_phone.
+
+    Nao e a negacao de `is_corporate`: um lead incompleto nao e corporativo e
+    mesmo assim nao pode ser cobrado, porque seria vendido um lead que o
+    cliente nao pode contactar por telefone.
+    """
     for overrides in ({}, {"owner_name": "A"}, {"owner_name": "A", "owner_phone": "1"}, {"owner_name": "A", "mailing_address": "B"}):
         sample = lead(**overrides)
-        assert charges_credit(sample) is not is_corporate(sample)
+        assert charges_credit(sample) is is_complete_delivery(sample)
+        # corporate e incompleto nunca podem ser cobrados
+        if is_corporate(sample) or is_incomplete_delivery(sample):
+            assert charges_credit(sample) is False
+
+
+def test_incomplete_delivery_is_always_free_and_corporate_is_always_free():
+    for overrides in ({}, {"owner_name": "A"}, {"owner_name": "A", "owner_phone": "1"}, {"owner_name": "A", "mailing_address": "B"}):
+        sample = lead(**overrides)
+        if is_corporate(sample) or is_incomplete_delivery(sample):
+            assert charges_credit(sample) is False, overrides
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +199,9 @@ def test_classify_broken_lead():
         "corporate": False,
         "address_resolvable": False,
         "unresolvable": True,
+        "complete_delivery": False,
+        "incomplete_delivery": True,
+        "charged": False,
     }
 
 
@@ -183,6 +210,9 @@ def test_classify_corporate_lead():
         "corporate": True,
         "address_resolvable": True,
         "unresolvable": False,
+        "complete_delivery": False,
+        "incomplete_delivery": False,
+        "charged": False,
     }
 
 
@@ -193,3 +223,6 @@ def test_classify_is_consistent_with_the_predicates():
         assert verdict["corporate"] == is_corporate(sample)
         assert verdict["address_resolvable"] == address_is_resolvable(sample["address"])
         assert verdict["unresolvable"] == is_unresolvable(sample)
+        assert verdict["complete_delivery"] == is_complete_delivery(sample)
+        assert verdict["incomplete_delivery"] == is_incomplete_delivery(sample)
+        assert verdict["charged"] == charges_credit(sample)
