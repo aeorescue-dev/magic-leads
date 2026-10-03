@@ -1854,8 +1854,42 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def user_has_lead_history_access(self, user_id: int, lead_id: int) -> bool:
+        """O utilizador pode ver o histórico/ocorrências deste lead?
+
+        Sinais de posse (qualquer um basta):
+          1. tem um `lead_holds` para o lead  -> reservou/revelou em algum momento
+          2. tem um `lead_reveals` para o lead -> pagou para revelar
+          3. `leads.converted_by` == utilizador -> já entrou na pipeline
+
+        `lead_holds` mantém a linha depois de expirar/liberar (muda só o
+        `status`), por isso continua a ser um sinal de posse válido.
+
+        Autorização é por POSSE, não por autenticação: exigir apenas "ter
+        login" permitia que qualquer assinante lesse o histórico de qualquer
+        imóvel, o que inclui Addresses que ele nunca viu.
+        """
+        if not user_id or not lead_id:
+            return False
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                """SELECT 1 FROM leads l
+                   WHERE l.id = ? AND (
+                         l.converted_by = ?
+                      OR EXISTS (SELECT 1 FROM lead_holds h
+                                  WHERE h.lead_id = l.id AND h.user_id = ?)
+                      OR EXISTS (SELECT 1 FROM lead_reveals r
+                                  WHERE r.lead_id = l.id AND r.user_id = ?)
+                   ) LIMIT 1""",
+                (lead_id, user_id, user_id, user_id),
+            ).fetchone()
+            return row is not None
+        finally:
+            conn.close()
+
     # ---------------------------------------------------------------
-    # ADMIN — Painel interno (/admin)
+    # ADMIN (painel /admin)
     #
     # Leitura apenas. Nenhum destes métodos escreve em leads/users exceto
     # set_user_admin(), usado por script local para promover um admin
@@ -4754,6 +4788,11 @@ class AsyncDatabaseService:
     async def admin_get_recent_reveals(self, limit: int = 50, returned_only: bool = False) -> List[dict]:
         return await anyio.to_thread.run_sync(
             self._service.admin_get_recent_reveals, limit, returned_only
+        )
+
+    async def user_has_lead_history_access(self, user_id: int, lead_id: int) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.user_has_lead_history_access, user_id, lead_id
         )
 
     # User Sessions

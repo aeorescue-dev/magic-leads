@@ -48,7 +48,17 @@ def test_fastapi_startup():
 
 
 def test_scraper_status_endpoint():
-    """Valida se o endpoint de status do scraper responde."""
+    """Valida se o endpoint de status do scraper responde.
+
+    O endpoint é público (a landing page chama-o), por isso devolve APENAS o
+    mínimo: `active` + `last_run.finished_at`. Antes expunha `city_health`
+    (falhas por cidade e circuit breaker) e o dict `running` com erros, o que
+    dava a qualquer visitante o diagnóstico da operação interna. O detalhe
+    completo passou para `/api/admin/sources` (sessão + is_admin) e para
+    admins autenticados neste mesmo endpoint.
+
+    Ver `tests/test_security_ownership_guards.py` para as invariantes completas.
+    """
     from fastapi.testclient import TestClient
 
     from backend.main import app
@@ -58,9 +68,10 @@ def test_scraper_status_endpoint():
     assert resp.status_code == 200
     data = resp.json()
     assert "active" in data
-    assert "running" in data
     assert "last_run" in data
-    assert "city_health" in data
+    # Nada de diagnóstico interno para callers anónimos.
+    assert "city_health" not in data
+    assert "running" not in data
 
 
 def test_leads_endpoint():

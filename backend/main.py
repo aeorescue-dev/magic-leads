@@ -474,6 +474,34 @@ def _require_admin(x_admin_secret: str | None = Header(None)) -> bool:
     return True
 
 
+async def _get_optional_admin_user(
+    authorization: str | None = Header(None),
+    garimpador_token: str | None = Cookie(None),
+) -> dict | None:
+    """Resolve a sessão e devolve o user só se for admin. NUNCA levanta.
+
+    Para endpoints que são públicos mas que devem dar mais detalhe a quem
+    tem legitimately o papel de admin (sem fechar o acesso público).
+    """
+    token = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization[len("Bearer "):].strip()
+    elif garimpador_token:
+        token = garimpador_token
+    if not token:
+        return None
+    try:
+        user_id = await _get_user_id_from_token(token)
+        if not user_id:
+            return None
+        user = await db_service.get_user_by_id(user_id)
+        if not user or not user.get("is_admin"):
+            return None
+        return {"id": user["id"], "email": user.get("email")}
+    except Exception:
+        return None
+
+
 async def _require_admin_user(
     authorization: str | None = Header(None),
     garimpador_token: str | None = Cookie(None),
@@ -1220,8 +1248,19 @@ async def run_scraper(
 
 
 @app.get("/api/scraper/status")
-async def scraper_status():
-    """Progresso/último resultado do scraper em background."""
+async def scraper_status(_admin: dict | None = Depends(_get_optional_admin_user)):
+    """Última atualização dos dados para o feed (usado na landing e no dashboard).
+
+    PÚBLICO E MINIMALISTA por decisão de segurança: este endpoint é chamado
+    por páginas públicas (HeroSection) e não pode revelar a operação interna.
+    Antes devolvia `city_health` (failure_count, circuit_open_until,
+    anomaly_counter por cidade) e o dict `running` com erros — ou seja,
+    qualquer visitante via saber exatamente que scrapers estao a falhar e
+    que cidades estao com o circuit breaker aberto. Isso foi removido.
+
+    Quem precisa do diagnóstico completo usa `/api/admin/sources`
+    (sessão + is_admin), que devolve city_health e o last_run inteiro.
+    """
     active = {rid: r for rid, r in _scrape_runs.items() if r.get("running")}
     last = None
     for r in reversed(list(_scrape_runs.values())):
@@ -1232,9 +1271,34 @@ async def scraper_status():
         persisted = await db_service.get_last_scrape_run()
         if persisted:
             last = persisted
-    # Inclui city_health no status
-    city_health = await db_service.get_city_health_for_scraper_status()
-    return {"active": bool(active), "running": active, "last_run": last, "city_health": city_health}
+
+    # Só o mínimo para o "Dados atualizados" da landing/dashboard.
+    public_last = None
+    if last:
+        public_last = {
+            "finished_at": last.get("finished_at"),
+            "status": last.get("status"),
+        }
+
+    payload = {"active": bool(active), "last_run": public_last}
+
+    # Admin autenticado recebe o detalhe sem precisar de outro endpoint.
+    if _admin:
+        payload["running"] = active
+        payload["city_health"] = await db_service.get_city_health_for_scraper_status()
+        if last:
+            payload["last_run"] = {
+                "run_id": last.get("run_id"),
+                "started_at": last.get("started_at"),
+                "finished_at": last.get("finished_at"),
+                "status": last.get("status"),
+                "inserted": last.get("inserted"),
+                "total_raw": last.get("total_raw"),
+                "cities_covered": last.get("cities_covered"),
+                "error": last.get("error"),
+                "note": last.get("note"),
+            }
+    return payload
 
 
 @app.get("/api/system/alerts")
@@ -3705,8 +3769,29 @@ async def reject_lead(
     return {"status": "ok", "lead_status": result.get("lead_status")}
 
 
+async def _require_lead_possession(user: dict, lead_id: int) -> None:
+    """Autorização por POSSE para os endpoints de histórico de um lead.
+
+    Antes bastava ter qualquer sessão válida: um assinante que soubesse
+    (ou adivinhasse) um `lead_id` lia o histórico e as ocorrências de
+    qualquer imóvel da plataforma, incluindo moradas de clientes de outros
+    contratores. Agora exige que o utilizador tenha reservas/reveals/conversão
+    desse lead — ou seja, que tenha pago para o ver.
+
+    Resposta 404 (não 403) quando não tem posse: confirmar "existe mas não é
+    seu" já seria um oráculo de existência/enumeração de IDs.
+    """
+    probe = await db_service.get_user_by_id(user["id"])
+    if probe and probe.get("is_admin"):
+        return
+    if await db_service.user_has_lead_history_access(user["id"], lead_id):
+        return
+    raise HTTPException(status_code=404, detail="Lead não encontrado")
+
+
 @app.get("/api/leads/{lead_id}/history", response_model=list[HistoryEvent])
 async def lead_history(lead_id: int, user: dict = Depends(_get_current_user)):
+    await _require_lead_possession(user, lead_id)
     rows = await db_service.get_lead_history(lead_id)
     return [
         HistoryEvent(
@@ -3724,7 +3809,12 @@ async def lead_history(lead_id: int, user: dict = Depends(_get_current_user)):
 @app.get("/api/leads/{lead_id}/occurrences")
 async def lead_occurrences(lead_id: int, user: dict = Depends(_get_current_user)):
     """Timeline de ocorrências do imóvel (histórico de chamados no 311).
-    Capturado pelo scraper (lead_case_history)."""
+    Capturado pelo scraper (lead_case_history).
+
+    Mesmo gate de posse de `/history`: sem ele, qualquer assinante lia a
+    timeline de qualquer imóvel enumerando IDs.
+    """
+    await _require_lead_possession(user, lead_id)
     rows = await db_service.get_lead_case_history(lead_id)
     return rows
 
