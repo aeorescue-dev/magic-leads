@@ -57,8 +57,10 @@ from .services.enrichment import owner_enrichment
 from .services.lead_rules import (
     charges_credit,
     classify,
-    is_corporate as is_corporate_lead,
     missing_critical_fields,
+)
+from .services.lead_rules import (
+    is_corporate as is_corporate_lead,
 )
 from .services.push_service import push_service
 from .services.searchbug import searchbug_service
