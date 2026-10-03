@@ -1,4 +1,4 @@
-﻿"""Fase 2: telemetria de custo da Searchbug.
+"""Fase 2: telemetria de custo da Searchbug.
 
 Invariantes fixados aqui:
 
@@ -24,7 +24,11 @@ import asyncio
 import pytest
 
 from backend.services.db import get_connection
-from backend.services.metrics import MetricsBuffer, searchbug_metrics
+from backend.services.metrics import (
+    _SEARCHBUG_COLUMNS,
+    MetricsBuffer,
+    searchbug_metrics,
+)
 from backend.services.searchbug import (
     PhoneLookupService,
     classify_searchbug_outcome,
@@ -84,7 +88,7 @@ def test_classify_outcome(success, error, expected):
 # ------------------------------------------------- 3. record() nunca falha
 
 def test_record_never_raises_with_garbage():
-    buf = MetricsBuffer("searchbug_calls")
+    buf = MetricsBuffer("searchbug_calls", _SEARCHBUG_COLUMNS)
     # Tipos absurdos, chaves desconhecidas, latÃªncia como texto.
     buf.record(outcome="success", billed=True, latency_ms="abc", city=object())
     buf.record(chave_desconhecida="ignorado")
@@ -93,7 +97,7 @@ def test_record_never_raises_with_garbage():
 
 
 def test_record_drops_oldest_when_full():
-    buf = MetricsBuffer("searchbug_calls")
+    buf = MetricsBuffer("searchbug_calls", _SEARCHBUG_COLUMNS)
     from backend.services import metrics as metrics_module
 
     original_max = metrics_module._MAX_BUFFER
@@ -111,7 +115,7 @@ def test_record_drops_oldest_when_full():
 # ------------------------------------------------- 4/5. flush tolerante
 
 def test_flush_once_writes_rows():
-    buf = MetricsBuffer("searchbug_calls")
+    buf = MetricsBuffer("searchbug_calls", _SEARCHBUG_COLUMNS)
     buf.record(outcome="success", billed=True, latency_ms=120, city="New York")
     buf.record(outcome="no_results", billed=True, latency_ms=340, city="Miami")
 
@@ -128,13 +132,13 @@ def test_flush_once_writes_rows():
 
 
 def test_flush_once_on_empty_buffer_is_noop():
-    buf = MetricsBuffer("searchbug_calls")
+    buf = MetricsBuffer("searchbug_calls", _SEARCHBUG_COLUMNS)
     assert asyncio.run(buf.flush_once()) == 0
 
 
 def test_flush_failure_returns_rows_to_buffer():
     """Uma BD em falha nÃ£o pode engolir telemetria em silÃªncio."""
-    buf = MetricsBuffer("searchbug_calls")
+    buf = MetricsBuffer("searchbug_calls", _SEARCHBUG_COLUMNS)
     buf.record(outcome="success", billed=True)
 
     def _boom(_rows):
@@ -151,7 +155,7 @@ def test_flush_failure_returns_rows_to_buffer():
 
 def test_error_field_is_truncated():
     """Mensagens de provider podem trazer payloads inteiros."""
-    buf = MetricsBuffer("searchbug_calls")
+    buf = MetricsBuffer("searchbug_calls", _SEARCHBUG_COLUMNS)
     buf.record(outcome="error", billed=True, error="X" * 5000)
     asyncio.run(buf.flush_once())
     row = _rows()[0]
@@ -160,7 +164,7 @@ def test_error_field_is_truncated():
 
 def test_ignored_columns_are_dropped():
     """SÃ³ as colunas conhecidas entram; nada de SQL injection via kwargs."""
-    buf = MetricsBuffer("searchbug_calls")
+    buf = MetricsBuffer("searchbug_calls", _SEARCHBUG_COLUMNS)
     buf.record(outcome="; DROP TABLE searchbug_calls; --", billed=True)
     asyncio.run(buf.flush_once())
     assert _rows()[0]["outcome"] == "; DROP TABLE searchbug_calls; --"

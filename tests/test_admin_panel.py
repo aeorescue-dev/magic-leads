@@ -241,6 +241,7 @@ def _clean_telemetry():
     conn = get_connection()
     try:
         conn.execute("DELETE FROM searchbug_calls")
+        conn.execute("DELETE FROM push_deliveries")
         conn.commit()
     finally:
         conn.close()
@@ -348,3 +349,97 @@ def test_admin_searchbug_window_excludes_old_rows(admin_client):
 
     month = client.get("/api/admin/searchbug?days=90", headers=headers).json()
     assert month["totals"]["billed_calls"] == 2
+
+
+# ------------------------------------------------- Fase 2: push
+
+def _seed_push(rows) -> None:
+    """Insere telemetria de push com timestamps relativos."""
+    conn = get_connection()
+    try:
+        now = datetime.now(timezone.utc)
+        for outcome, attempts, hours_ago, latency, kind in rows:
+            sent_at = (now - timedelta(hours=hours_ago)).strftime("%Y-%m-%d %H:%M:%S")
+            conn.execute(
+                "INSERT INTO push_deliveries "
+                "(sent_at, outcome, attempts, latency_ms, kind, http_status, user_id, error) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (sent_at, outcome, attempts, latency, kind,
+                 410 if outcome == "expired" else None, 7, "seed"),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_admin_push_requires_admin_role(admin_client, nonadmin_client):
+    client, _, _ = admin_client
+    _, nonadmin_headers = nonadmin_client
+    assert client.get("/api/admin/push").status_code == 401
+    assert client.get("/api/admin/push", headers=nonadmin_headers).status_code == 403
+
+
+def test_admin_push_counts_outcomes(admin_client):
+    client, headers, _ = admin_client
+    _seed_push([
+        ("accepted", 1, 1, 150, "lead_alert"),
+        ("accepted", 2, 2, 300, "status_change"),
+        ("expired", 1, 3, 200, "lead_alert"),
+        ("expired", 1, 4, 190, "lead_alert"),
+        ("rejected", 3, 5, 500, "broadcast"),
+        ("rate_limited", 1, 6, 800, "broadcast"),
+        ("timeout", 3, 7, 20000, "lead_alert"),
+        ("not_configured", 0, 8, None, "broadcast"),
+    ])
+
+    data = client.get("/api/admin/push?days=7", headers=headers).json()
+    totals = data["totals"]
+    assert totals["deliveries"] == 8
+    assert totals["accepted"] == 2
+    assert totals["expired"] == 2, "subscricoes mortas a limpar"
+    assert totals["rejected"] == 1
+    assert totals["rate_limited"] == 1
+    assert totals["timeouts"] == 1
+    assert totals["not_configured"] == 1
+    assert totals["retried"] == 3, "1 aceite com retry + rejected + rate_limited"
+    assert data["accepted_rate"] == 0.25
+
+    # A latencia so mede entregas aceites: um 404 nao tem tempo de entrega.
+    lat = data["latency"]
+    assert lat["samples"] == 2
+    assert lat["p50_ms"] == 150
+    assert lat["max_ms"] == 300
+
+    kinds = {r["kind"]: r for r in data["by_kind"]}
+    assert kinds["lead_alert"]["n"] == 4
+    assert kinds["lead_alert"]["accepted"] == 1
+    assert kinds["lead_alert"]["expired"] == 2
+
+
+def test_admin_push_empty_is_not_an_error(admin_client):
+    client, headers, _ = admin_client
+    data = client.get("/api/admin/push", headers=headers).json()
+    assert data["totals"]["deliveries"] == 0
+    assert data["accepted_rate"] is None
+    assert data["latency"]["samples"] == 0
+    assert data["recent"] == []
+
+
+def test_admin_push_exposes_buffer_health(admin_client):
+    client, headers, _ = admin_client
+    data = client.get("/api/admin/push", headers=headers).json()
+    assert set(data["buffer"]) == {"buffered", "flushed", "dropped", "flush_errors"}
+
+
+def test_admin_push_window_excludes_old_rows(admin_client):
+    client, headers, _ = admin_client
+    _seed_push([
+        ("accepted", 1, 1, 100, "lead_alert"),
+        ("expired", 1, 24 * 40, 100, "lead_alert"),
+    ])
+
+    week = client.get("/api/admin/push?days=7", headers=headers).json()
+    assert week["totals"]["deliveries"] == 1
+
+    month = client.get("/api/admin/push?days=90", headers=headers).json()
+    assert month["totals"]["deliveries"] == 2

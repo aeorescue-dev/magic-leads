@@ -444,6 +444,35 @@ CREATE TABLE IF NOT EXISTS searchbug_calls (
 CREATE INDEX IF NOT EXISTS idx_searchbug_calls_at ON searchbug_calls (called_at);
 CREATE INDEX IF NOT EXISTS idx_searchbug_calls_outcome ON searchbug_calls (outcome);
 CREATE INDEX IF NOT EXISTS idx_searchbug_calls_billed ON searchbug_calls (billed, called_at);
+
+-- Fase 2: telemetria das entregas de push notification.
+--
+-- outcome: accepted | rejected | expired | rate_limited | timeout | error |
+--          not_configured
+--
+-- NOTA IMPORTANTE sobre o que 'accepted' significa: e o servico de push a
+-- aceitar a mensagem para entrega. NAO e prova de que o utilizador a viu.
+-- Confirmar entrega exigiria um service worker com telemetria de entrega,
+-- que fica fora desta fase.
+--
+-- 'expired' (HTTP 404/410) e o outcome operacionalmente mais importante: e
+-- uma subscricao morta que o servico remove a seguir. Medir a sua
+-- frequencia diz quantas notificacoes estavam a ir para o vazio.
+CREATE TABLE IF NOT EXISTS push_deliveries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sent_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  outcome TEXT NOT NULL,
+  attempts INTEGER DEFAULT 1,
+  latency_ms INTEGER,
+  http_status INTEGER,
+  user_id INTEGER,
+  kind TEXT,
+  error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_push_deliveries_sent ON push_deliveries (sent_at);
+CREATE INDEX IF NOT EXISTS idx_push_deliveries_outcome ON push_deliveries (outcome);
+CREATE INDEX IF NOT EXISTS idx_push_deliveries_expired ON push_deliveries (outcome, sent_at);
 """
 
 
@@ -2209,6 +2238,146 @@ class DatabaseService:
                 "latency": {"avg_ms": None, "p50_ms": None, "p95_ms": None, "max_ms": None, "samples": 0},
                 "by_outcome": [],
                 "by_city": [],
+                "recent": [],
+            }
+        finally:
+            conn.close()
+
+    def admin_get_push_metrics(self, days: int = 7, recent_limit: int = 50) -> dict:
+        """Saúde das entregas de push notification.
+
+        `expired` é o número que importa: subscrições mortas (HTTP 404/410)
+        que o serviço remove a seguir. Uma alta contagem significa que uma
+        parte do que enviamos estava a ir para o vazio.
+
+        `accepted` NÃO é entrega: é o serviço de push a aceitar a mensagem.
+        Confirmar entrega exigiria telemetria do service worker, fora do
+        âmbito desta fase.
+        """
+        days = max(1, min(int(days), 90))
+        recent_limit = max(1, min(int(recent_limit), 200))
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(days=days)
+        ).strftime("%Y-%m-%d %H:%M:%S")
+
+        conn = get_connection()
+        try:
+            totals = conn.execute(
+                """
+                SELECT
+                  COUNT(*) AS deliveries,
+                  SUM(CASE WHEN outcome = 'accepted' THEN 1 ELSE 0 END) AS accepted,
+                  SUM(CASE WHEN outcome = 'expired' THEN 1 ELSE 0 END) AS expired,
+                  SUM(CASE WHEN outcome = 'rejected' THEN 1 ELSE 0 END) AS rejected,
+                  SUM(CASE WHEN outcome = 'rate_limited' THEN 1 ELSE 0 END) AS rate_limited,
+                  SUM(CASE WHEN outcome = 'timeout' THEN 1 ELSE 0 END) AS timeouts,
+                  SUM(CASE WHEN outcome = 'error' THEN 1 ELSE 0 END) AS errors,
+                  SUM(CASE WHEN outcome = 'not_configured' THEN 1 ELSE 0 END) AS not_configured,
+                  SUM(CASE WHEN attempts > 1 THEN 1 ELSE 0 END) AS retried
+                FROM push_deliveries WHERE sent_at >= ?
+                """,
+                (cutoff,),
+            ).fetchone()
+
+            by_outcome = conn.execute(
+                """
+                SELECT outcome, COUNT(*) AS n FROM push_deliveries
+                WHERE sent_at >= ? GROUP BY outcome ORDER BY n DESC
+                """,
+                (cutoff,),
+            ).fetchall()
+
+            by_kind = conn.execute(
+                """
+                SELECT COALESCE(kind, '(desconhecido)') AS kind,
+                       COUNT(*) AS n,
+                       SUM(CASE WHEN outcome = 'accepted' THEN 1 ELSE 0 END) AS accepted,
+                       SUM(CASE WHEN outcome = 'expired' THEN 1 ELSE 0 END) AS expired
+                FROM push_deliveries WHERE sent_at >= ?
+                GROUP BY kind ORDER BY n DESC LIMIT 15
+                """,
+                (cutoff,),
+            ).fetchall()
+
+            latencies = [
+                r[0]
+                for r in conn.execute(
+                    """
+                    SELECT latency_ms FROM push_deliveries
+                    WHERE sent_at >= ? AND outcome = 'accepted' AND latency_ms IS NOT NULL
+                    ORDER BY id DESC LIMIT 2000
+                    """,
+                    (cutoff,),
+                ).fetchall()
+                if r[0] is not None
+            ]
+
+            today = conn.execute(
+                """
+                SELECT
+                  COUNT(*) AS deliveries,
+                  SUM(CASE WHEN outcome = 'accepted' THEN 1 ELSE 0 END) AS accepted,
+                  SUM(CASE WHEN outcome = 'expired' THEN 1 ELSE 0 END) AS expired
+                FROM push_deliveries WHERE sent_at >= ?
+                """,
+                (datetime.now(timezone.utc).strftime("%Y-%m-%d 00:00:00"),),
+            ).fetchone()
+
+            # Subscrições vivas vs. mortas: o denominador real do problema.
+            live_subs = conn.execute(
+                "SELECT COUNT(*) FROM push_subscriptions"
+            ).fetchone()[0]
+
+            recent = conn.execute(
+                """
+                SELECT id, sent_at, outcome, attempts, latency_ms, http_status, user_id, kind, error
+                FROM push_deliveries ORDER BY id DESC LIMIT ?
+                """,
+                (recent_limit,),
+            ).fetchall()
+
+            latencies.sort()
+            return {
+                "days": days,
+                "today": {
+                    "deliveries": today["deliveries"] or 0,
+                    "accepted": today["accepted"] or 0,
+                    "expired": today["expired"] or 0,
+                },
+                "totals": {
+                    "deliveries": totals["deliveries"] or 0,
+                    "accepted": totals["accepted"] or 0,
+                    "expired": totals["expired"] or 0,
+                    "rejected": totals["rejected"] or 0,
+                    "rate_limited": totals["rate_limited"] or 0,
+                    "timeouts": totals["timeouts"] or 0,
+                    "errors": totals["errors"] or 0,
+                    "not_configured": totals["not_configured"] or 0,
+                    "retried": totals["retried"] or 0,
+                },
+                "accepted_rate": _ratio(totals["accepted"], totals["deliveries"]),
+                "live_subscriptions": live_subs,
+                "latency": _percentiles(latencies),
+                "by_outcome": [dict(r) for r in by_outcome],
+                "by_kind": [dict(r) for r in by_kind],
+                "recent": [dict(r) for r in recent],
+            }
+        except sqlite3.OperationalError as exc:
+            if "push_deliveries" not in str(exc):
+                raise
+            return {
+                "days": days,
+                "today": {"deliveries": 0, "accepted": 0, "expired": 0},
+                "totals": {
+                    "deliveries": 0, "accepted": 0, "expired": 0, "rejected": 0,
+                    "rate_limited": 0, "timeouts": 0, "errors": 0,
+                    "not_configured": 0, "retried": 0,
+                },
+                "accepted_rate": None,
+                "live_subscriptions": 0,
+                "latency": {"avg_ms": None, "p50_ms": None, "p95_ms": None, "max_ms": None, "samples": 0},
+                "by_outcome": [],
+                "by_kind": [],
                 "recent": [],
             }
         finally:
@@ -4975,6 +5144,11 @@ class AsyncDatabaseService:
     async def admin_get_searchbug_metrics(self, days: int = 7, recent_limit: int = 50) -> dict:
         return await anyio.to_thread.run_sync(
             self._service.admin_get_searchbug_metrics, days, recent_limit
+        )
+
+    async def admin_get_push_metrics(self, days: int = 7, recent_limit: int = 50) -> dict:
+        return await anyio.to_thread.run_sync(
+            self._service.admin_get_push_metrics, days, recent_limit
         )
 
     async def user_has_lead_history_access(self, user_id: int, lead_id: int) -> bool:

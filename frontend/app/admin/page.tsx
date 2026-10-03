@@ -5,6 +5,7 @@ import {
   Activity,
   AlertTriangle,
   Ban,
+  BellRing,
   CheckCircle2,
   Database,
   Loader2,
@@ -18,12 +19,14 @@ import {
   AdminAlert,
   AdminApiError,
   AdminOverview,
+  AdminPushMetrics,
   AdminReveal,
   AdminScraperRun,
   AdminSearchbugMetrics,
   AdminSources,
   fetchAdminAlerts,
   fetchAdminOverview,
+  fetchAdminPush,
   fetchAdminReveals,
   fetchAdminScraperRuns,
   fetchAdminSearchbug,
@@ -133,6 +136,7 @@ export default function AdminPage() {
   const [reveals, setReveals] = useState<AdminReveal[]>([]);
   const [alerts, setAlerts] = useState<AdminAlert[]>([]);
   const [searchbug, setSearchbug] = useState<AdminSearchbugMetrics | null>(null);
+  const [push, setPush] = useState<AdminPushMetrics | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -141,13 +145,15 @@ export default function AdminPage() {
       // searchbug falha isoladamente: a telemetria é secundária e não deve
       // apagar o resto do painel.
       const sb = fetchAdminSearchbug(7, 25).catch(() => null);
-      const [ov, src, rn, rv, al, sbm] = await Promise.all([
+      const pu = fetchAdminPush(7, 25).catch(() => null);
+      const [ov, src, rn, rv, al, sbm, pum] = await Promise.all([
         fetchAdminOverview(),
         fetchAdminSources(),
         fetchAdminScraperRuns(15),
         fetchAdminReveals(50, true),
         fetchAdminAlerts(20),
         sb,
+        pu,
       ]);
       setOverview(ov);
       setSources(src);
@@ -155,6 +161,7 @@ export default function AdminPage() {
       setReveals(rv.reveals);
       setAlerts(al.alerts);
       setSearchbug(sbm);
+      setPush(pum);
       setGate("ok");
     } catch (e) {
       if (e instanceof AdminApiError) {
@@ -449,6 +456,163 @@ export default function AdminPage() {
         )}
       </Card>
 
+      {/* ------------------------------------------------------ push */}
+      <Card
+        title="Saúde das push notifications"
+        icon={<BellRing className="h-4 w-4" />}
+        hint={push ? `últimos ${push.days} dias` : undefined}
+      >
+        {!push ? (
+          <p className="text-xs text-slate-500">
+            Sem telemetria de push. O buffer só escreve quando há uma subscrição para notificar.
+          </p>
+        ) : (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <Kpi
+                label=" subscrições mortas"
+                value={push.totals.expired}
+                sub={`hoje: ${push.today.expired} · ${push.live_subscriptions} vivas`}
+              />
+              <Kpi
+                label="Aceites (não entregues)"
+                value={push.totals.accepted}
+                sub={`hoje: ${push.today.accepted}`}
+              />
+              <Kpi
+                label="Com retry"
+                value={push.totals.retried}
+                sub={`${push.totals.deliveries} tentativas totais`}
+              />
+              <Kpi
+                label="Latência p95"
+                value={push.latency.p95_ms === null ? "?" : `${push.latency.p95_ms} ms`}
+                sub={`${push.latency.samples} aceites`}
+              />
+            </div>
+
+            {push.totals.not_configured > 0 ? (
+              <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300">
+                {push.totals.not_configured} tentativa(s) com o push desligado (sem VAPID). Nada
+                foi enviado e nada apareceu nos logs do utilizador.
+              </p>
+            ) : null}
+
+            {push.buffer.dropped > 0 || push.buffer.flush_errors > 0 ? (
+              <p className="rounded-lg bg-rose-500/10 px-3 py-2 text-[11px] text-rose-300">
+                Telemetria perdida: {push.buffer.dropped} evento(s) descartado(s) e{" "}
+                {push.buffer.flush_errors} falha(s) de escrita.
+              </p>
+            ) : null}
+
+            {push.by_outcome.length > 0 ? (
+              <div className="space-y-1">
+                <h3 className="text-[10px] uppercase tracking-wider text-slate-500">Por resultado</h3>
+                {push.by_outcome.map((o) => (
+                  <div key={o.outcome} className="flex items-center gap-2 text-xs">
+                    <span
+                      className={`w-28 shrink-0 font-mono ${
+                        o.outcome === "accepted"
+                          ? "text-emerald-400"
+                          : o.outcome === "expired"
+                            ? "text-amber-400"
+                            : "text-slate-400"
+                      }`}
+                    >
+                      {o.outcome}
+                    </span>
+                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/5">
+                      <div
+                        className="h-full rounded-full bg-indigo-500/70"
+                        style={{ width: `${(o.n / push.totals.deliveries) * 100}%` }}
+                      />
+                    </div>
+                    <span className="w-8 shrink-0 text-right text-slate-500">{o.n}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {push.by_kind.length > 0 ? (
+              <details className="rounded-lg border border-white/5">
+                <summary className="cursor-pointer px-3 py-2 text-xs text-slate-400">
+                  Por tipo de envio ({push.by_kind.length})
+                </summary>
+                <div className="overflow-x-auto px-3 pb-3">
+                  <table className="w-full text-left text-xs">
+                    <thead className="text-[10px] uppercase tracking-wider text-slate-500">
+                      <tr>
+                        <th className="py-1">Tipo</th>
+                        <th className="py-1">Total</th>
+                        <th className="py-1">Aceites</th>
+                        <th className="py-1">Mortas</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                      {push.by_kind.map((k) => (
+                        <tr key={k.kind}>
+                          <td className="py-1 font-mono text-slate-300">{k.kind}</td>
+                          <td className="py-1 text-slate-400">{k.n}</td>
+                          <td className="py-1 text-emerald-400">{k.accepted}</td>
+                          <td className="py-1 text-amber-400">{k.expired}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            ) : null}
+
+            {push.recent.length > 0 ? (
+              <details className="rounded-lg border border-white/5">
+                <summary className="cursor-pointer px-3 py-2 text-xs text-slate-400">
+                  Últimas {push.recent.length} tentativas
+                </summary>
+                <div className="overflow-x-auto px-3 pb-3">
+                  <table className="w-full text-left text-xs">
+                    <thead className="text-[10px] uppercase tracking-wider text-slate-500">
+                      <tr>
+                        <th className="py-1">Quando</th>
+                        <th className="py-1">Resultado</th>
+                        <th className="py-1">Tipo</th>
+                        <th className="py-1">Tentativas</th>
+                        <th className="py-1">Erro</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                      {push.recent.map((r) => (
+                        <tr key={r.id}>
+                          <td className="py-1 text-slate-500">{fmtDt(r.sent_at)}</td>
+                          <td
+                            className={`py-1 font-mono ${
+                              r.outcome === "accepted"
+                                ? "text-emerald-400"
+                                : r.outcome === "expired"
+                                  ? "text-amber-400"
+                                  : "text-slate-400"
+                            }`}
+                          >
+                            {r.outcome}
+                          </td>
+                          <td className="py-1 text-slate-400">{r.kind ?? "—"}</td>
+                          <td className="py-1 text-slate-400">
+                            {r.attempts}
+                            {r.http_status !== null ? ` · ${r.http_status}` : ""}
+                          </td>
+                          <td className="max-w-[220px] truncate py-1 text-slate-600">
+                            {r.error ?? "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            ) : null}
+          </div>
+        )}
+      </Card>
+
       {/* ---------------------------------------------------------- fila */}
       <Card
         title="Fila de recuperação (revelos que voltaram ao pool)"
@@ -575,8 +739,9 @@ export default function AdminPage() {
 
       <footer className="flex items-center gap-2 pt-2 text-[11px] text-slate-600">
         <Users className="h-3 w-3" />
-        Métricas de push e Searchbug entram na Fase 2. Sem elas, esta página mostra apenas o que já é
-        persistido.
+        Push e Searchbug medem custo e entrega através de buffer próprio: uma falha de escrita
+        nunca affecta um pedido de utilizador. As duas métricas entram no painel sem transacção
+        no caminho crítico.
       </footer>
     </div>
   );

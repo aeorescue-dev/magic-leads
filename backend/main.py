@@ -62,7 +62,7 @@ from .services.lead_rules import (
 from .services.lead_rules import (
     is_corporate as is_corporate_lead,
 )
-from .services.metrics import searchbug_metrics
+from .services.metrics import push_metrics, searchbug_metrics
 from .services.push_service import push_service
 from .services.searchbug import searchbug_service
 from .utils.logger import logger
@@ -1384,6 +1384,23 @@ async def admin_searchbug(
     return data
 
 
+@app.get("/api/admin/push")
+async def admin_push(
+    days: int = 7,
+    recent_limit: int = 50,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Fase 2: saúde das entregas de push notification.
+
+    `accepted` é o serviço de push a aceitar a mensagem, NÃO prova de
+    entrega ao utilizador. `expired` (404/410) são subscrições mortas que
+    foram removidas — é a métrica que diz quanto foi para o vazio.
+    """
+    data = await db_service.admin_get_push_metrics(days, recent_limit)
+    data["buffer"] = push_metrics.stats()
+    return data
+
+
 @app.get("/api/admin/alerts")
 async def admin_alerts(limit: int = 50, _admin: dict = Depends(_require_admin_user)):
     """Alertas de auditoria (Dead Man's Switch), incluindo reconhecidos."""
@@ -2223,6 +2240,7 @@ async def _lifespan(app):
     # buffer acumula em memoria ate limite e perde eventos sem nunca
     # persistir nada.
     await searchbug_metrics.start()
+    await push_metrics.start()
 
     # Validação de VAPID keys no startup
     if not settings.VAPID_PUBLIC_KEY or not settings.VAPID_PRIVATE_KEY:
@@ -2275,12 +2293,14 @@ async def _lifespan(app):
     if _scheduler_task:
         _scheduler_task.cancel()
     # Flush final: escreve o que ficou em memoria antes de o processo
-    # morrer. Se falhar, o buffer e descartado - telemetria nunca pode
-    # impedir o shutdown.
-    try:
-        await searchbug_metrics.stop()
-    except Exception as e:
-        logger.warning(f"Erro no flush final de telemetria: {e}")
+    # morrer. Cada buffer tem o seu proprio try: se o flush da Searchbug
+    # levantar, o da Push ainda tem de correr. Se falhar, o buffer e
+    # descartado - telemetria nunca pode impedir o shutdown.
+    for name, buf in (("searchbug", searchbug_metrics), ("push", push_metrics)):
+        try:
+            await buf.stop()
+        except Exception as e:
+            logger.warning(f"Erro no flush final de telemetria ({name}): {e}")
 
 
 async def _scheduler_loop():

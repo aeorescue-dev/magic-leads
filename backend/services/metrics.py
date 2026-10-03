@@ -51,22 +51,30 @@ _FLUSH_INTERVAL_S = 20.0
 # pequena e mantem o flush fora do caminho critico mesmo sob contencao.
 _METRICS_BUSY_TIMEOUT_MS = 1500
 
-_INSERT_COLUMNS = (
-    "called_at",
-    "outcome",
-    "billed",
-    "latency_ms",
-    "http_status",
-    "city",
-    "error",
-)
+# Colunas por tabela. O timestamp NAO entra: cada tabela define-o com
+# `DEFAULT CURRENT_TIMESTAMP` e omite-lo do INSERT e o que faz o default
+# aplicar-se (inserir NULL aqui sobrescreveria o default com NULL).
+#
+# Cada buffer declara o seu proprio esquema. Uma lista global de colunas
+# foi o que primeiro deu problema: `push_deliveries` tem `sent_at`,
+# `attempts`, `user_id` e `kind`, e nao tem `called_at` nem `billed`.
+_SEARCHBUG_COLUMNS = ("outcome", "billed", "latency_ms", "http_status", "city", "error")
+_PUSH_COLUMNS = ("outcome", "attempts", "latency_ms", "http_status", "user_id", "kind", "error")
+
+# Coercao por nome de coluna, partilhada pelas tabelas. `record()` e
+# chamado com dados de codigo que nao controla (excecoes de bibliotecas),
+# por isso normalizar aqui e mais barato do que validar em cada caller.
+_INT_COLUMNS = frozenset({"billed", "attempts", "latency_ms", "http_status", "user_id"})
+_STR_COLUMNS = frozenset({"outcome", "city", "kind"})
+_MAX_ERROR_LEN = 300
 
 
 class MetricsBuffer:
     """Fila de eventos de telemetria com flush de fundo."""
 
-    def __init__(self, table: str, enabled: bool = True):
+    def __init__(self, table: str, columns: tuple, enabled: bool = True):
         self._table = table
+        self._columns = tuple(columns)
         self._enabled = enabled
         self._buf: Deque[Dict[str, Any]] = deque()
         self._lock = threading.Lock()
@@ -178,35 +186,36 @@ class MetricsBuffer:
     def _normalize(self, fields: Dict[str, Any]) -> Dict[str, Any]:
         """Garante so as colunas conhecidas e tipos aceitos pelo SQLite.
 
-        `error` e truncado: mensagens de provider podem traer payloads
-        inteiros e nao queremos inchar a tabela.
+        `error` e truncado: mensagens de provider/exception podem trazer
+        payloads inteiros e nao queremos inchar a tabela.
         """
-        row: Dict[str, Any] = {c: None for c in _INSERT_COLUMNS}
-        row["billed"] = 0
-        row["latency_ms"] = None
-        row["http_status"] = None
+        row: Dict[str, Any] = {c: None for c in self._columns}
 
         for key, value in fields.items():
             if key not in row:
                 continue
-            if key == "error" and isinstance(value, str):
-                row[key] = value[:300]
+            if value is None:
+                row[key] = None
             elif key == "billed":
                 row[key] = 1 if value else 0
-            elif key == "latency_ms":
-                row[key] = int(value) if isinstance(value, (int, float)) else None
-            elif key == "http_status":
-                row[key] = int(value) if isinstance(value, (int, float)) else None
-            elif key == "city":
-                row[key] = str(value)[:120] if value is not None else None
+            elif key == "error":
+                row[key] = str(value)[:_MAX_ERROR_LEN]
+            elif key in _INT_COLUMNS:
+                # `bool` e subclasse de `int`: True passaria a 1 sem isto.
+                row[key] = int(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+            elif key in _STR_COLUMNS:
+                row[key] = str(value)[:120]
             else:
                 row[key] = value
         return row
 
     def _insert(self, rows: List[Dict[str, Any]]) -> None:
         """Insert em transaccao propria, com conn propria e timeouts curtos."""
-        placeholders = ", ".join(f":{c}" for c in _INSERT_COLUMNS)
-        sql = f"INSERT INTO {self._table} ({', '.join(_INSERT_COLUMNS)}) VALUES ({placeholders})"
+        placeholders = ", ".join(f":{c}" for c in self._columns)
+        sql = (
+            f"INSERT INTO {self._table} ({', '.join(self._columns)}) "
+            f"VALUES ({placeholders})"
+        )
         conn = _metrics_connection()
         try:
             conn.execute("BEGIN")
@@ -258,5 +267,5 @@ def _metrics_connection() -> sqlite3.Connection:
 
 # Instancias por tabela. `record()` e o unico metodo usado no caminho
 # critico; o resto e para o lifespan e para o painel.
-searchbug_metrics = MetricsBuffer("searchbug_calls")
-push_metrics = MetricsBuffer("push_deliveries")
+searchbug_metrics = MetricsBuffer("searchbug_calls", _SEARCHBUG_COLUMNS)
+push_metrics = MetricsBuffer("push_deliveries", _PUSH_COLUMNS)

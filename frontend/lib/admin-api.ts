@@ -160,6 +160,50 @@ export interface AdminSearchbugMetrics {
   buffer: { buffered: number; flushed: number; dropped: number; flush_errors: number };
 }
 
+// Fase 2 — saúde das entregas de push notification.
+//
+// `accepted` NÃO é entrega: é o serviço de push a aceitar a mensagem.
+// `expired` (404/410) é o número que importa, porque uma alta contagem
+// significa que parte do que enviamos estava a ir para o vazio.
+export interface AdminPushMetrics {
+  days: number;
+  today: { deliveries: number; accepted: number; expired: number };
+  totals: {
+    deliveries: number;
+    accepted: number;
+    expired: number;
+    rejected: number;
+    rate_limited: number;
+    timeouts: number;
+    errors: number;
+    not_configured: number;
+    retried: number;
+  };
+  accepted_rate: number | null;
+  live_subscriptions: number;
+  latency: {
+    avg_ms: number | null;
+    p50_ms: number | null;
+    p95_ms: number | null;
+    max_ms: number | null;
+    samples: number;
+  };
+  by_outcome: { outcome: string; n: number }[];
+  by_kind: { kind: string; n: number; accepted: number; expired: number }[];
+  recent: {
+    id: number;
+    sent_at: string;
+    outcome: string;
+    attempts: number;
+    latency_ms: number | null;
+    http_status: number | null;
+    kind: string | null;
+    user_id: number | null;
+    error: string | null;
+  }[];
+  buffer: { buffered: number; flushed: number; dropped: number; flush_errors: number };
+}
+
 // --------------------------------------------------------------- calls
 
 export function fetchAdminOverview(): Promise<AdminOverview> {
@@ -188,4 +232,8 @@ export function fetchAdminAlerts(limit = 50): Promise<{ alerts: AdminAlert[]; co
 
 export function fetchAdminSearchbug(days = 7, recentLimit = 50): Promise<AdminSearchbugMetrics> {
   return adminFetch(`/searchbug?days=${days}&recent_limit=${recentLimit}`);
+}
+
+export function fetchAdminPush(days = 7, recentLimit = 50): Promise<AdminPushMetrics> {
+  return adminFetch(`/push?days=${days}&recent_limit=${recentLimit}`);
 }
