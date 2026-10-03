@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
 
-// Painel interno: PT-only, sem prefixo de locale (/admin, não /pt/admin).
+// Painel interno: PT-only, sem prefixo de locale (/admin, nÃ�o /pt/admin).
+// Importa o CSS global (Tailwind base + componentes) para que o painel tenha estilos em produAA�o.
+import "../globals.css";
+
 export const metadata: Metadata = {
-  title: "Admin · Magic Leads",
+  title: "Admin A� Magic Leads",
   robots: { index: false, follow: false },
 };
 
