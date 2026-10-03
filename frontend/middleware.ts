@@ -23,14 +23,16 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Admin panel: rota interna PT-only, SEM prefixo de locale.
-  // Tem de ser servida tal e qual: o bloco de locale abaixo redirecionaria
-  // /admin -> /{locale}/admin e o painel deixaria de funcionar.
-  // A autorização NÃO é feita aqui (o cookie garimpador_auth é forjável);
-  // é feita no backend por users.is_admin em cada /api/admin/*.
-  if (pathname === "/admin" || pathname.startsWith("/admin/")) {
+// Admin panel: rota interna PT-only, SEM prefixo de locale.
+// Tem de ser servida tal e qual: o bloco de locale abaixo redirecionaria
+// /admin -> /{locale}/admin e o painel deixaria de funcionar.
+// A autoriza��o N�O � feita aqui (o cookie garimpador_auth � forj�vel);
+// � feita no backend por users.is_admin em cada /api/admin/*.
+// IMPORTANTE: admins N�O s�o bloqueados por subscri��o expirada (can_access=false).
+// O backend valida apenas users.is_admin = 1 nas rotas /api/admin/*.
+if (pathname === "/admin" || pathname.startsWith("/admin/")) {
     return NextResponse.next();
-  }
+}
 
   // Check if pathname already has locale prefix
   const pathnameHasLocale = LOCALES.some(
