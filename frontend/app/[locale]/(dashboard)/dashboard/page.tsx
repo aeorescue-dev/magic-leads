@@ -255,18 +255,18 @@ const URGENCIES = ["all", "high", "medium", "low"];
     });
 
   const waHref = (phone: string, m: ReturnType<typeof buildOutreachMessage>) =>
-    `https://wa.me/${phone.replace(/\D/g, "")}?text=${encodeURIComponent(m.whatsapp)}`;
+    `https://wa.me/${(phone || "").replace(/\D/g, "")}?text=${encodeURIComponent(m.whatsapp)}`;
 
   const smsHref = (phone: string, m: ReturnType<typeof buildOutreachMessage>) =>
-    `sms:${phone.replace(/\D/g, "")}?body=${encodeURIComponent(m.sms)}`;
+    `sms:${(phone || "").replace(/\D/g, "")}?body=${encodeURIComponent(m.sms)}`;
 
   const openSMS = (phone: string) => {
-    const clean = phone.replace(/\D/g, "");
+    const clean = (phone || "").replace(/\D/g, "");
     window.open(`sms:${clean}`, "_self");
   };
 
   const openWhatsApp = (phone: string) => {
-    const clean = phone.replace(/\D/g, "");
+    const clean = (phone || "").replace(/\D/g, "");
     window.open(`https://wa.me/${clean}`, "_blank", "noopener,noreferrer");
   };
 
@@ -1109,7 +1109,41 @@ const URGENCIES = ["all", "high", "medium", "low"];
         </div>
       );
     }
-    // Regular lead with phone
+    // Lead NAO corporativo SEM telefone (owner_phone = null).
+    // O `!` do TypeScript e apagado em runtime: quando o reveal expira
+    // (reveal_timeout / virada do dia UTC) a API volta a mascarar
+    // owner_phone para null e `waHref(null)` rebentava com
+    // "Cannot read properties of null (reading 'replace')".
+    // Decidir pelo campo real, nunca pela presuncao de que "regular => tem telefone".
+    if (!selectedLead.owner_phone) {
+      return (
+        <div className="flex flex-wrap gap-2 pt-2 items-center">
+          <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/15 text-amber-400 text-xs font-semibold">
+            <Phone className="h-3.5 w-3.5" /> {t("dashboard.detail.no_phone")}
+          </span>
+          {selectedLead.owner_email && (
+            <a
+              href={`mailto:${selectedLead.owner_email}?subject=${encodeURIComponent(
+                buildMsgs(selectedLead).emailSubject
+              )}&body=${encodeURIComponent(buildMsgs(selectedLead).emailBody)}`}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-bold hover:bg-blue-500 transition"
+            >
+              <Mail className="h-3.5 w-3.5" /> {t("dashboard.detail.email")}
+            </a>
+          )}
+          <a
+            href={`https://maps.google.com/?q=${encodeURIComponent(selectedLead.address + ", " + selectedLead.city)}`}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 text-slate-950 text-xs font-bold hover:bg-amber-400 transition"
+          >
+            <MapPin className="h-3.5 w-3.5" /> {t("dashboard.action.map")}
+          </a>
+        </div>
+      );
+    }
+
+    // Regular lead WITH phone (owner_phone verificado acima)
     return (
       <div className="flex flex-wrap gap-2 pt-2">
         <a
