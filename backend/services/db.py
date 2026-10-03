@@ -2,7 +2,7 @@ import os
 import smtplib
 import socket
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 import anyio
@@ -423,6 +423,27 @@ CREATE TABLE IF NOT EXISTS system_alerts (
 
 CREATE INDEX IF NOT EXISTS idx_system_alerts_created ON system_alerts (created_at);
 CREATE INDEX IF NOT EXISTS idx_system_alerts_code ON system_alerts (code);
+
+-- Fase 2: telemetria das consultas ao Searchbug (custo por consulta).
+-- billed=1 marca as consultas que chegaram mesmo ao provider, ou seja as
+-- que custaram dinheiro. billed=1 com outcome!=success sao "cobrancas
+-- fantasma": pagas e sem telefone utilizavel.
+-- outcome: success | no_results | timeout | http_error | bad_response |
+--          not_configured | error
+CREATE TABLE IF NOT EXISTS searchbug_calls (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  called_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  outcome TEXT NOT NULL,
+  billed INTEGER DEFAULT 0,
+  latency_ms INTEGER,
+  http_status INTEGER,
+  city TEXT,
+  error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_searchbug_calls_at ON searchbug_calls (called_at);
+CREATE INDEX IF NOT EXISTS idx_searchbug_calls_outcome ON searchbug_calls (outcome);
+CREATE INDEX IF NOT EXISTS idx_searchbug_calls_billed ON searchbug_calls (billed, called_at);
 """
 
 
@@ -438,6 +459,37 @@ def get_connection() -> sqlite3.Connection:
     except sqlite3.OperationalError:
         pass  # fs read-only (serverless) — segue com leitura
     return conn
+
+
+def _ratio(numerator: Optional[int], denominator: Optional[int]) -> Optional[float]:
+    """Divisao que devolve None em vez de ZeroDivisionError (0 chamadas)."""
+    if not numerator or not denominator:
+        return None
+    return round(numerator / denominator, 4)
+
+
+def _percentiles(sorted_values: List[int]) -> dict:
+    """Resumo de latencia a partir de uma lista JA ordenada.
+
+    `samples` exposto porque uma p95 calculada sobre 3 chamadas e ruido: o
+    painel mostra o numero de amostras ao lado do valor.
+    """
+    if not sorted_values:
+        return {"avg_ms": None, "p50_ms": None, "p95_ms": None, "max_ms": None, "samples": 0}
+
+    n = len(sorted_values)
+
+    def _at(pct: float) -> int:
+        idx = min(n - 1, max(0, int(round((pct / 100.0) * (n - 1)))))
+        return sorted_values[idx]
+
+    return {
+        "avg_ms": int(round(sum(sorted_values) / n)),
+        "p50_ms": _at(50),
+        "p95_ms": _at(95),
+        "max_ms": sorted_values[-1],
+        "samples": n,
+    }
 
 
 def _seed_from_bundle(conn: sqlite3.Connection, force: bool = False) -> bool:
@@ -2029,6 +2081,136 @@ class DatabaseService:
             params.append(limit)
             rows = conn.execute(sql, tuple(params)).fetchall()
             return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def admin_get_searchbug_metrics(self, days: int = 7, recent_limit: int = 50) -> dict:
+        """Custo e fiabilidade das consultas pagas a Searchbug.
+
+        A metrica que interessa ao dono do negocio e `ghost_charges`: consultas
+        que chegaram ao provider (billed=1) e nao devolveram telefone. Sao
+        dinheiro gasto sem resultado e so se descobre olhando para o erro
+        "No results" nos logs.
+
+        Os percentis sao calculados em Python sobre uma janela limitada
+        (latencies ja ordenadas no SQL com LIMIT): evita fazer o SQLite
+        calcular percentis e mantem a memoria do servidor previsivel.
+        """
+        days = max(1, min(int(days), 90))
+        recent_limit = max(1, min(int(recent_limit), 200))
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(days=days)
+        ).strftime("%Y-%m-%d %H:%M:%S")
+
+        conn = get_connection()
+        try:
+            totals = conn.execute(
+                """
+                SELECT
+                  COUNT(*) AS calls,
+                  SUM(CASE WHEN billed = 1 THEN 1 ELSE 0 END) AS billed_calls,
+                  SUM(CASE WHEN billed = 1 AND outcome != 'success' THEN 1 ELSE 0 END) AS ghost_charges,
+                  SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) AS successes,
+                  SUM(CASE WHEN outcome IN ('guard_skipped', 'cache_hit', 'cache_negative') THEN 1 ELSE 0 END) AS saved_calls,
+                  SUM(CASE WHEN billed = 1 AND outcome = 'timeout' THEN 1 ELSE 0 END) AS timeouts
+                FROM searchbug_calls WHERE called_at >= ?
+                """,
+                (cutoff,),
+            ).fetchone()
+
+            by_outcome = conn.execute(
+                """
+                SELECT outcome, COUNT(*) AS n, SUM(CASE WHEN billed = 1 THEN 1 ELSE 0 END) AS billed_n
+                FROM searchbug_calls WHERE called_at >= ?
+                GROUP BY outcome ORDER BY n DESC
+                """,
+                (cutoff,),
+            ).fetchall()
+
+            latencies = [
+                r[0]
+                for r in conn.execute(
+                    """
+                    SELECT latency_ms FROM searchbug_calls
+                    WHERE called_at >= ? AND billed = 1 AND latency_ms IS NOT NULL
+                    ORDER BY id DESC LIMIT 2000
+                    """,
+                    (cutoff,),
+                ).fetchall()
+                if r[0] is not None
+            ]
+
+            today = conn.execute(
+                """
+                SELECT
+                  COUNT(*) AS calls,
+                  SUM(CASE WHEN billed = 1 THEN 1 ELSE 0 END) AS billed_calls,
+                  SUM(CASE WHEN billed = 1 AND outcome != 'success' THEN 1 ELSE 0 END) AS ghost_charges
+                FROM searchbug_calls WHERE called_at >= ?
+                """,
+                (datetime.now(timezone.utc).strftime("%Y-%m-%d 00:00:00"),),
+            ).fetchone()
+
+            recent = conn.execute(
+                """
+                SELECT id, called_at, outcome, billed, latency_ms, http_status, city, error
+                FROM searchbug_calls ORDER BY id DESC LIMIT ?
+                """,
+                (recent_limit,),
+            ).fetchall()
+
+            by_city = conn.execute(
+                """
+                SELECT COALESCE(city, '(desconhecida)') AS city,
+                       COUNT(*) AS calls,
+                       SUM(CASE WHEN billed = 1 THEN 1 ELSE 0 END) AS billed_calls,
+                       SUM(CASE WHEN billed = 1 AND outcome != 'success' THEN 1 ELSE 0 END) AS ghost_charges
+                FROM searchbug_calls WHERE called_at >= ? AND billed = 1
+                GROUP BY city ORDER BY billed_calls DESC LIMIT 15
+                """,
+                (cutoff,),
+            ).fetchall()
+
+            latencies.sort()
+            return {
+                "days": days,
+                "today": {
+                    "calls": today["calls"] or 0,
+                    "billed_calls": today["billed_calls"] or 0,
+                    "ghost_charges": today["ghost_charges"] or 0,
+                },
+                "totals": {
+                    "calls": totals["calls"] or 0,
+                    "billed_calls": totals["billed_calls"] or 0,
+                    "successes": totals["successes"] or 0,
+                    "ghost_charges": totals["ghost_charges"] or 0,
+                    "timeouts": totals["timeouts"] or 0,
+                    "saved_calls": totals["saved_calls"] or 0,
+                },
+                "success_rate": _ratio(totals["successes"], totals["billed_calls"]),
+                "latency": _percentiles(latencies),
+                "by_outcome": [dict(r) for r in by_outcome],
+                "by_city": [dict(r) for r in by_city],
+                "recent": [dict(r) for r in recent],
+            }
+        except sqlite3.OperationalError as exc:
+            # Tabela ausente numa BD anterior a Fase 2: o painel degrada em vez
+            # de dar 500.
+            if "searchbug_calls" not in str(exc):
+                raise
+            return {
+                "days": days,
+                "today": {"calls": 0, "billed_calls": 0, "ghost_charges": 0},
+                "totals": {
+                    "calls": 0, "billed_calls": 0, "successes": 0,
+                    "ghost_charges": 0, "timeouts": 0, "saved_calls": 0,
+                },
+                "success_rate": None,
+                "latency": {"avg_ms": None, "p50_ms": None, "p95_ms": None, "max_ms": None, "samples": 0},
+                "by_outcome": [],
+                "by_city": [],
+                "recent": [],
+            }
         finally:
             conn.close()
 
@@ -4788,6 +4970,11 @@ class AsyncDatabaseService:
     async def admin_get_recent_reveals(self, limit: int = 50, returned_only: bool = False) -> List[dict]:
         return await anyio.to_thread.run_sync(
             self._service.admin_get_recent_reveals, limit, returned_only
+        )
+
+    async def admin_get_searchbug_metrics(self, days: int = 7, recent_limit: int = 50) -> dict:
+        return await anyio.to_thread.run_sync(
+            self._service.admin_get_searchbug_metrics, days, recent_limit
         )
 
     async def user_has_lead_history_access(self, user_id: int, lead_id: int) -> bool:

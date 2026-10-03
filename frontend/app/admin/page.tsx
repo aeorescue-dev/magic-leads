@@ -9,6 +9,7 @@ import {
   Database,
   Loader2,
   RefreshCcw,
+  Search,
   Users,
   Wallet,
 } from "lucide-react";
@@ -19,11 +20,13 @@ import {
   AdminOverview,
   AdminReveal,
   AdminScraperRun,
+  AdminSearchbugMetrics,
   AdminSources,
   fetchAdminAlerts,
   fetchAdminOverview,
   fetchAdminReveals,
   fetchAdminScraperRuns,
+  fetchAdminSearchbug,
   fetchAdminSources,
 } from "@/lib/admin-api";
 
@@ -129,23 +132,29 @@ export default function AdminPage() {
   const [runs, setRuns] = useState<AdminScraperRun[]>([]);
   const [reveals, setReveals] = useState<AdminReveal[]>([]);
   const [alerts, setAlerts] = useState<AdminAlert[]>([]);
+  const [searchbug, setSearchbug] = useState<AdminSearchbugMetrics | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     setBusy(true);
     try {
-      const [ov, src, rn, rv, al] = await Promise.all([
+      // searchbug falha isoladamente: a telemetria é secundária e não deve
+      // apagar o resto do painel.
+      const sb = fetchAdminSearchbug(7, 25).catch(() => null);
+      const [ov, src, rn, rv, al, sbm] = await Promise.all([
         fetchAdminOverview(),
         fetchAdminSources(),
         fetchAdminScraperRuns(15),
         fetchAdminReveals(50, true),
         fetchAdminAlerts(20),
+        sb,
       ]);
       setOverview(ov);
       setSources(src);
       setRuns(rn.runs);
       setReveals(rv.reveals);
       setAlerts(al.alerts);
+      setSearchbug(sbm);
       setGate("ok");
     } catch (e) {
       if (e instanceof AdminApiError) {
@@ -266,6 +275,179 @@ export default function AdminPage() {
           </p>
         </Card>
       </div>
+
+      {/* ---------------------------------------------------------- fila */}
+      <Card
+        title="Custo das consultas Searchbug"
+        icon={<Search className="h-4 w-4" />}
+        hint="últimos 7 dias"
+      >
+        {!searchbug ? (
+          <p className="text-xs text-slate-500">
+            Telemetria indisponível. A recolha de métricas corre em background e nunca
+            afeta a entrega — se falhar, volta a tentar.
+          </p>
+        ) : (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+              <Kpi
+                label="Consultas pagas"
+                value={searchbug.totals.billed_calls}
+                sub={`hoje: ${searchbug.today.billed_calls}`}
+              />
+              <Kpi
+                label="Cobranças fantasma"
+                value={
+                  <span
+                    className={
+                      searchbug.totals.ghost_charges > 0 ? "text-amber-400" : "text-emerald-400"
+                    }
+                  >
+                    {searchbug.totals.ghost_charges}
+                  </span>
+                }
+                sub="pagas, sem telefone"
+              />
+              <Kpi
+                label="Taxa de sucesso"
+                value={
+                  searchbug.success_rate === null
+                    ? "—"
+                    : `${Math.round(searchbug.success_rate * 100)}%`
+                }
+                sub={`${searchbug.totals.successes} com telefone`}
+              />
+              <Kpi
+                label="Latência p95"
+                value={searchbug.latency.p95_ms === null ? "—" : `${searchbug.latency.p95_ms} ms`}
+                sub={`${searchbug.latency.samples} amostras`}
+              />
+              <Kpi
+                label="Poupadas"
+                value={searchbug.totals.saved_calls}
+                sub="por guard/cache"
+              />
+            </div>
+
+            {searchbug.buffer.dropped > 0 || searchbug.buffer.flush_errors > 0 ? (
+              <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-300">
+                Telemetria perdida: {searchbug.buffer.dropped} evento(s) descartado(s) e{" "}
+                {searchbug.buffer.flush_errors} falha(s) de escrita. Os números acima
+                estão subestimados.
+              </p>
+            ) : null}
+
+            {searchbug.by_outcome.length > 0 ? (
+              <div>
+                <h3 className="mb-1.5 text-[10px] uppercase tracking-wider text-slate-500">
+                  Resultado das consultas
+                </h3>
+                <div className="flex flex-wrap gap-1.5">
+                  {searchbug.by_outcome.map((o) => (
+                    <span
+                      key={o.outcome}
+                      className={`rounded-md border px-2 py-1 font-mono text-[11px] ${
+                        o.outcome === "success"
+                          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                          : o.billed_n > 0
+                            ? "border-amber-500/30 bg-amber-500/10 text-amber-400"
+                            : "border-white/10 bg-white/[0.02] text-slate-500"
+                      }`}
+                    >
+                      {o.outcome} <span className="opacity-70">{o.n}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {searchbug.by_city.length > 0 ? (
+              <div>
+                <h3 className="mb-1.5 text-[10px] uppercase tracking-wider text-slate-500">
+                  Cidades que mais custam
+                </h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="text-[10px] uppercase tracking-wider text-slate-500">
+                      <tr>
+                        <th className="py-1">Cidade</th>
+                        <th className="py-1">Pagas</th>
+                        <th className="py-1">Sem telefone</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                      {searchbug.by_city.map((c) => (
+                        <tr key={c.city}>
+                          <td className="py-1.5 text-slate-300">{c.city}</td>
+                          <td className="py-1.5 text-slate-400">{c.billed_calls}</td>
+                          <td
+                            className={
+                              c.ghost_charges > 0 ? "py-1.5 text-amber-400" : "py-1.5 text-slate-500"
+                            }
+                          >
+                            {c.ghost_charges}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
+
+            {searchbug.recent.length === 0 ? (
+              <p className="text-xs text-slate-500">
+                Sem consultas registadas. A recolha de métricas só entra em vigor depois
+                do deploy desta versão.
+              </p>
+            ) : (
+              <details className="rounded-lg border border-white/10 p-2">
+                <summary className="cursor-pointer text-xs font-semibold text-slate-400">
+                  Últimas {searchbug.recent.length} consultas
+                </summary>
+                <div className="mt-2 overflow-x-auto">
+                  <table className="w-full text-left text-[11px]">
+                    <thead className="text-[10px] uppercase tracking-wider text-slate-500">
+                      <tr>
+                        <th className="py-1">Quando</th>
+                        <th className="py-1">Resultado</th>
+                        <th className="py-1">Cidade</th>
+                        <th className="py-1">Latência</th>
+                        <th className="py-1">Erro</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                      {searchbug.recent.map((r) => (
+                        <tr key={r.id}>
+                          <td className="py-1 text-slate-500">{fmtDt(r.called_at)}</td>
+                          <td
+                            className={`py-1 font-mono ${
+                              r.outcome === "success"
+                                ? "text-emerald-400"
+                                : r.billed === 1
+                                  ? "text-amber-400"
+                                  : "text-slate-500"
+                            }`}
+                          >
+                            {r.outcome}
+                          </td>
+                          <td className="py-1 text-slate-400">{r.city ?? "—"}</td>
+                          <td className="py-1 text-slate-400">
+                            {r.latency_ms === null ? "—" : `${r.latency_ms} ms`}
+                          </td>
+                          <td className="max-w-[220px] truncate py-1 text-slate-600">
+                            {r.error ?? "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            )}
+          </div>
+        )}
+      </Card>
 
       {/* ---------------------------------------------------------- fila */}
       <Card

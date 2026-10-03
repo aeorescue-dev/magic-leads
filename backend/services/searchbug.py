@@ -30,6 +30,7 @@ import httpx
 from ..config import settings
 from ..utils.logger import logger
 from .lead_rules import address_is_resolvable
+from .metrics import searchbug_metrics
 
 
 def normalize_us_phone(phone: str) -> str:
@@ -251,6 +252,56 @@ _PHONE_CACHE_TTL_FAIL = 24 * 3600
 _PHONE_CACHE_MAX = 5000
 
 
+# --------------------------------------------------------------- Fase 2
+# Classificacao de resultado da chamada PAGA. Funcao pura e testavel: e o
+# unico sitio onde se decide o que um outcome significa, para o painel e
+# para os testes partilharem exactamente a mesma regra.
+#
+# A distincao que interessa ao dono do negocio e billed vs nao-billed, e nao
+# success vs erro: uma chamada que sai com `no_results` foi consultada e
+# COBRADA. Sao essas que appearcem como "cobrancas fantasma" no /admin.
+
+_TIMEOUT_MARKERS = (
+    "timeout",
+    "timed out",
+    "etimedout",
+    "read timeout",
+    "connect timeout",
+)
+
+
+def classify_searchbug_outcome(success: bool, error: Optional[str] = None) -> str:
+    """Normaliza o resultado de uma consulta Searchbug num outcome estavel."""
+    if success:
+        return "success"
+
+    err = (error or "").strip().lower()
+    if not err:
+        return "error"
+    if any(marker in err for marker in _TIMEOUT_MARKERS):
+        return "timeout"
+    if err.startswith("http "):
+        return "http_error"
+    if "not configured" in err or "co_code" in err:
+        return "not_configured"
+    if "noresults" in err or "no results" in err or "no phone found" in err:
+        return "no_results"
+    if "unexpected response format" in err or "no data" in err:
+        return "bad_response"
+    return "error"
+
+
+def _http_status_from_error(error: Optional[str]) -> Optional[int]:
+    """Extrai o codigo de um erro 'HTTP 503: ...' para telemetria."""
+    if not error:
+        return None
+    head = error.strip()[:12]
+    if not head.lower().startswith("http "):
+        return None
+    digits = head[5:].strip().split(":")[0].strip()
+    return int(digits) if digits.isdigit() else None
+
+
 class PhoneLookupService:
     """Multi-provider phone lookup with fallback chain."""
 
@@ -284,6 +335,9 @@ class PhoneLookupService:
                 f"[PHONE][guard_skipped] address_incompleta para {address!r} — "
                 f"provider NAO foi consultado (custo zero)"
             )
+            searchbug_metrics.record(
+                outcome="guard_skipped", billed=False, city=city, error="address_incompleta"
+            )
             return PhoneLookupResult(
                 success=False,
                 error="guard_skipped:address_incompleta",
@@ -296,6 +350,9 @@ class PhoneLookupService:
                 f"[PHONE][guard_skipped] {name_error} para address={address!r} — "
                 f"provider NAO foi consultado (custo zero)"
             )
+            searchbug_metrics.record(
+                outcome="guard_skipped", billed=False, city=city, error=name_error
+            )
             return PhoneLookupResult(
                 success=False,
                 error=f"guard_skipped:{name_error}",
@@ -307,12 +364,18 @@ class PhoneLookupService:
         if cached is not None:
             phone, was_hit, was_negative = cached
             if not was_negative:
+                searchbug_metrics.record(
+                    outcome="cache_hit", billed=False, city=city, error=None
+                )
                 return PhoneLookupResult(
                     success=True,
                     phone=phone,
                     provider="cache",
                 )
             # "sem resultado" dentro do TTL: nao voltar a pagar por isto hoje
+            searchbug_metrics.record(
+                outcome="cache_negative", billed=False, city=city, error=None
+            )
             return PhoneLookupResult(
                 success=False,
                 error="cache_sem_resultado",
@@ -412,11 +475,36 @@ class PhoneLookupService:
         account_code = getattr(settings, "SEARCHBUG_ACCOUNT_CODE", None) or os.getenv("SEARCHBUG_ACCOUNT_CODE")
         api_key = self.searchbug_key
 
+        # Fase 2: medicao de custo. `_record` e chamado em TODOS os returns
+        # abaixo e nunca levanta: e a unica forma de o preco por consulta
+        # ser auditavel. `billed` distingue o que custou dinheiro do que foi
+        # cortado antes da rede.
+        started = time.monotonic()
+
+        def _record(result: "PhoneLookupResult", *, billed: bool, http_status: Optional[int] = None) -> "PhoneLookupResult":
+            try:
+                searchbug_metrics.record(
+                    outcome=classify_searchbug_outcome(result.success, result.error),
+                    billed=1 if billed else 0,
+                    latency_ms=int((time.monotonic() - started) * 1000),
+                    http_status=http_status,
+                    city=city,
+                    error=result.error,
+                )
+            except Exception:  # pragma: no cover - telemetria nunca quebra o fluxo
+                logger.debug("Falha ao registar telemetria Searchbug", exc_info=True)
+            return result
+
         if not account_code or not api_key:
-            return PhoneLookupResult(
-                success=False,
-                error="Searchbug CO_CODE (account number) or API key not configured",
-                provider="Searchbug"
+            # Nao ha rede: custo zero, e saber que faltam credenciais e o
+            # principal sinal de "a Searchbug nao esta configurada".
+            return _record(
+                PhoneLookupResult(
+                    success=False,
+                    error="Searchbug CO_CODE (account number) or API key not configured",
+                    provider="Searchbug"
+                ),
+                billed=False,
             )
 
         # FNAME/LNAME so quando o owner_name e mesmo uma PESSOA. Um nome
@@ -459,7 +547,11 @@ class PhoneLookupService:
 
                 if response.status_code != 200:
                     logger.error(f"Searchbug HTTP {response.status_code} for {address}, {city}, {state}: {response.text[:500]}")
-                    return PhoneLookupResult(success=False, error=f"HTTP {response.status_code}: {response.text[:200]}", provider="Searchbug")
+                    return _record(
+                        PhoneLookupResult(success=False, error=f"HTTP {response.status_code}: {response.text[:200]}", provider="Searchbug"),
+                        billed=True,
+                        http_status=response.status_code,
+                    )
 
                 data = response.json()
 
@@ -467,12 +559,20 @@ class PhoneLookupService:
                 status = data.get("Status") or data.get("STATUS")
                 if status and status.upper() in ("ERROR", "NORESULTS"):
                     error = data.get("ERROR") or data.get("Error") or "No results"
-                    return PhoneLookupResult(success=False, error=str(error), provider="Searchbug", raw=data)
+                    return _record(
+                        PhoneLookupResult(success=False, error=str(error), provider="Searchbug", raw=data),
+                        billed=True,
+                        http_status=200,
+                    )
 
                 # Extrai telefone do formato novo: Data.RECORD[].PHONES.PHONE[]
                 data_obj = data.get("Data") or data.get("DATA")
                 if not data_obj:
-                    return PhoneLookupResult(success=False, error="Unexpected response format (no Data)", provider="Searchbug", raw=data)
+                    return _record(
+                        PhoneLookupResult(success=False, error="Unexpected response format (no Data)", provider="Searchbug", raw=data),
+                        billed=True,
+                        http_status=200,
+                    )
 
                 records = data_obj.get("RECORD") or data_obj.get("Record") or []
                 if isinstance(records, dict):
@@ -487,21 +587,32 @@ class PhoneLookupService:
                         phone_list = [phone_list]
                     for phone in phone_list:
                         if phone and str(phone).strip():
-                            return PhoneLookupResult(
-                                success=True,
-                                phone=normalize_us_phone(str(phone).strip()),
-                                phone_type=str(rec.get("PHONE_TYPE") or rec.get("PhoneType") or "").strip().lower() or None,
-                                carrier=str(rec.get("CARRIER") or rec.get("Carrier") or "").strip() or None,
-                                is_connected=bool(rec.get("IS_CONNECTED") or rec.get("IsConnected")) if rec.get("IS_CONNECTED") or rec.get("IsConnected") else None,
-                                provider="Searchbug",
-                                raw=data
+                            return _record(
+                                PhoneLookupResult(
+                                    success=True,
+                                    phone=normalize_us_phone(str(phone).strip()),
+                                    phone_type=str(rec.get("PHONE_TYPE") or rec.get("PhoneType") or "").strip().lower() or None,
+                                    carrier=str(rec.get("CARRIER") or rec.get("Carrier") or "").strip() or None,
+                                    is_connected=bool(rec.get("IS_CONNECTED") or rec.get("IsConnected")) if rec.get("IS_CONNECTED") or rec.get("IsConnected") else None,
+                                    provider="Searchbug",
+                                    raw=data
+                                ),
+                                billed=True,
+                                http_status=200,
                             )
 
-                return PhoneLookupResult(success=False, error="No phone found in results", provider="Searchbug", raw=data)
+                return _record(
+                    PhoneLookupResult(success=False, error="No phone found in results", provider="Searchbug", raw=data),
+                    billed=True,
+                    http_status=200,
+                )
 
         except Exception as e:
             logger.warning(f"Searchbug Contact Info API error: {e}")
-            return PhoneLookupResult(success=False, error=str(e), provider="Searchbug")
+            return _record(
+                PhoneLookupResult(success=False, error=str(e), provider="Searchbug"),
+                billed=True,
+            )
 
     async def lookup_phone_batch(self, addresses: list[tuple[str, str, str, str | None, str | None]]) -> list["PhoneLookupResult"]:
         """Look up multiple phones concurrently (respects rate limits).

@@ -1,0 +1,262 @@
+"""
+Fase 2 — buffer de telemetria em memoria com flush assincrono.
+
+PORQUE ISTO EXISTE
+------------------
+Uma consulta a Searchbug custa dinheiro. Sem registo, nao ha forma de
+responder "quanto pagamos hoje?", "quantas chamadas foram cobradas e
+nao devolveram telefone?" ou "esta consulta demorou 4s ou 400ms?". O
+incidente do `reveal_timeout` mostrou que essa visibilidade faz falta.
+
+PORQUE UM BUFFER E NAO UM INSERT POR CHAMADA
+---------------------------------------------
+`get_connection()` abre o SQLite com `busy_timeout=10000`. O scraper, a
+API e os webhooks partilham o mesmo ficheiro. Um `INSERT` sincrono por
+consulta paga adicionaria latencia ao caminho do utilizador e voltaria a
+reproduzir a classe de bug que estamos a eliminar. Aqui:
+
+1. `record()` e sincrono, nao levanta excecao e nao toca na BD.
+2. O flush corre numa task de fundo, fora do request.
+3. O write usa `busy_timeout` curto e `synchronous=OFF`: telemetria e
+   descartavel, nao vale a pena esperar por um lock.
+
+CONTRATO (inviolavel)
+---------------------
+Perdemos telemetria, nunca o pedido do utilizador. `record()` engole
+excepcoes; uma falha no flush devolve o lote ao buffer e segue.
+
+Perdas nao ficam silenciosas: `stats()["dropped"]` e `stats()["flush_errors"]`
+sao expostos no painel /admin, para que telemetria perdida apareca como
+numero e nao como "zero eventos" enganador.
+"""
+
+import asyncio
+import logging
+import sqlite3
+import threading
+from collections import deque
+from typing import Any, Deque, Dict, List, Optional
+
+import anyio.to_thread
+
+logger = logging.getLogger("magic.metrics")
+
+# Bounded buffers. Um vazamento de telemetria nunca pode consumir a memoria
+# do processo, entao o buffer e um deque com teto: em excesso descarta o
+# mais ANTIGO e conta o descarte.
+_MAX_BUFFER = 5000
+_BATCH_SIZE = 200
+_FLUSH_INTERVAL_S = 20.0
+# Metrics sao descartaveis: 1.5s e suficiente para escrever uma tabela
+# pequena e mantem o flush fora do caminho critico mesmo sob contencao.
+_METRICS_BUSY_TIMEOUT_MS = 1500
+
+_INSERT_COLUMNS = (
+    "called_at",
+    "outcome",
+    "billed",
+    "latency_ms",
+    "http_status",
+    "city",
+    "error",
+)
+
+
+class MetricsBuffer:
+    """Fila de eventos de telemetria com flush de fundo."""
+
+    def __init__(self, table: str, enabled: bool = True):
+        self._table = table
+        self._enabled = enabled
+        self._buf: Deque[Dict[str, Any]] = deque()
+        self._lock = threading.Lock()
+        self._task: Optional[asyncio.Task] = None
+
+        self._flushed = 0
+        self._dropped = 0
+        self._flush_errors = 0
+
+    # ---------------------------------------------------------------- API
+
+    def record(self, **fields: Any) -> None:
+        """Enfileira um evento. NUNCA levanta excecao, NUNCA bloqueia.
+
+        Chamado no caminho critico (logo apos uma chamada paga), portanto
+        qualquer erro aqui e fatal para a resposta do utilizador.
+        """
+        if not self._enabled:
+            return
+        try:
+            row = self._normalize(fields)
+            with self._lock:
+                if len(self._buf) >= _MAX_BUFFER:
+                    self._buf.popleft()
+                    self._dropped += 1
+                self._buf.append(row)
+        except Exception:  # pragma: no cover - rede de seguranca
+            # Contagem deliberadamente sem lock para nao poder falhar.
+            try:
+                self._dropped += 1
+            except Exception:
+                pass
+            logger.debug("metrics.record falhou (evento perdido)", exc_info=True)
+
+    def stats(self) -> Dict[str, int]:
+        with self._lock:
+            return {
+                "buffered": len(self._buf),
+                "flushed": self._flushed,
+                "dropped": self._dropped,
+                "flush_errors": self._flush_errors,
+            }
+
+    # ------------------------------------------------------- ciclo de vida
+
+    async def start(self) -> None:
+        if not self._enabled or self._task is not None:
+            return
+        self._task = asyncio.create_task(self._run())
+        logger.info("Buffer de telemetria '%s' iniciado", self._table)
+
+    async def stop(self) -> None:
+        """Cancela o loop e tenta um ultimo flush do que sobrou."""
+        if self._task is not None:
+            self._task.cancel()
+            try:
+                await self._task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._task = None
+        with self._lock:
+            pending = len(self._buf)
+        if pending:
+            logger.info("Flush final de %d evento(s) de '%s'", pending, self._table)
+            await self.flush_once()
+
+    # ---------------------------------------------------------------- loop
+
+    async def _run(self) -> None:
+        try:
+            while True:
+                await asyncio.sleep(_FLUSH_INTERVAL_S)
+                await self.flush_once()
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # pragma: no cover - o loop nunca pode morrer
+            logger.error("Loop de telemetria '%s' morreu", self._table, exc_info=True)
+
+    async def flush_once(self) -> int:
+        """Escreve um lote. Devolve o numero de linhas escritas (0 se nada)."""
+        with self._lock:
+            if not self._buf:
+                return 0
+            n = min(len(self._buf), _BATCH_SIZE)
+            batch = [self._buf.popleft() for _ in range(n)]
+
+        try:
+            await anyio.to_thread.run_sync(self._insert, batch)
+        except Exception as exc:
+            # Falhou: devolve o lote ao inicio do buffer, a nao ser que ja
+            # tenha sido truncado por eventos posteriores.
+            with self._lock:
+                self._flush_errors += 1
+                room = max(0, _MAX_BUFFER - len(self._buf))
+                if room < len(batch):
+                    self._dropped += len(batch) - room
+                if room:
+                    for row in reversed(batch[:room]):
+                        self._buf.appendleft(row)
+            logger.warning("Flush de '%s' falhou (%d linhas): %s", self._table, len(batch), exc)
+            return 0
+
+        with self._lock:
+            self._flushed += len(batch)
+        return len(batch)
+
+    # ----------------------------------------------------------------- BD
+
+    def _normalize(self, fields: Dict[str, Any]) -> Dict[str, Any]:
+        """Garante so as colunas conhecidas e tipos aceitos pelo SQLite.
+
+        `error` e truncado: mensagens de provider podem traer payloads
+        inteiros e nao queremos inchar a tabela.
+        """
+        row: Dict[str, Any] = {c: None for c in _INSERT_COLUMNS}
+        row["billed"] = 0
+        row["latency_ms"] = None
+        row["http_status"] = None
+
+        for key, value in fields.items():
+            if key not in row:
+                continue
+            if key == "error" and isinstance(value, str):
+                row[key] = value[:300]
+            elif key == "billed":
+                row[key] = 1 if value else 0
+            elif key == "latency_ms":
+                row[key] = int(value) if isinstance(value, (int, float)) else None
+            elif key == "http_status":
+                row[key] = int(value) if isinstance(value, (int, float)) else None
+            elif key == "city":
+                row[key] = str(value)[:120] if value is not None else None
+            else:
+                row[key] = value
+        return row
+
+    def _insert(self, rows: List[Dict[str, Any]]) -> None:
+        """Insert em transaccao propria, com conn propria e timeouts curtos."""
+        placeholders = ", ".join(f":{c}" for c in _INSERT_COLUMNS)
+        sql = f"INSERT INTO {self._table} ({', '.join(_INSERT_COLUMNS)}) VALUES ({placeholders})"
+        conn = _metrics_connection()
+        try:
+            conn.execute("BEGIN")
+            conn.executemany(sql, rows)
+            conn.commit()
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    # ----------------------------------------------------------------- API interna
+
+    def _drain_for_test(self) -> List[Dict[str, Any]]:  # pragma: no cover
+        with self._lock:
+            out = list(self._buf)
+            self._buf.clear()
+            return out
+
+
+def _metrics_connection() -> sqlite3.Connection:
+    """Conexao dedicada a telemetria: busy_timeout curto, synchronous=OFF.
+
+    `DB_PATH` e importado dentro da funcao, e no topo do modulo, para partir
+    o ciclo db -> searchbug -> metrics -> db. Alem disso resolve o path no
+    momento da escrita, que e o que os testes manipulam via LEADS_DB_PATH.
+    """
+    import os
+
+    from backend.services.db import DB_PATH
+
+    os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
+    conn = sqlite3.connect(DB_PATH, timeout=_METRICS_BUSY_TIMEOUT_MS / 1000.0)
+    try:
+        conn.execute(f"PRAGMA busy_timeout={_METRICS_BUSY_TIMEOUT_MS};")
+        # Telemetria e descartavel: sem fsync por evento. Nao vale esperar
+        # por um lock do WAL por causa de uma metrica.
+        conn.execute("PRAGMA synchronous=OFF;")
+    except sqlite3.OperationalError:
+        pass
+    return conn
+
+
+# Instancias por tabela. `record()` e o unico metodo usado no caminho
+# critico; o resto e para o lifespan e para o painel.
+searchbug_metrics = MetricsBuffer("searchbug_calls")
+push_metrics = MetricsBuffer("push_deliveries")

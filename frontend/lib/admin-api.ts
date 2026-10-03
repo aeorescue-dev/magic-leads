@@ -121,6 +121,45 @@ export interface AdminAlert {
   created_at: string;
 }
 
+// Fase 2 — custo das consultas pagas a Searchbug.
+//
+// `ghost_charges` é a métrica de dinheiro: consultas que chegaram ao
+// provider e NÃO devolveram telefone. `saved_calls` são as que não
+// custaram nada por terem sido cortadas por guard ou cache.
+export interface AdminSearchbugMetrics {
+  days: number;
+  today: { calls: number; billed_calls: number; ghost_charges: number };
+  totals: {
+    calls: number;
+    billed_calls: number;
+    successes: number;
+    ghost_charges: number;
+    timeouts: number;
+    saved_calls: number;
+  };
+  success_rate: number | null;
+  latency: {
+    avg_ms: number | null;
+    p50_ms: number | null;
+    p95_ms: number | null;
+    max_ms: number | null;
+    samples: number;
+  };
+  by_outcome: { outcome: string; n: number; billed_n: number }[];
+  by_city: { city: string; calls: number; billed_calls: number; ghost_charges: number }[];
+  recent: {
+    id: number;
+    called_at: string;
+    outcome: string;
+    billed: number;
+    latency_ms: number | null;
+    http_status: number | null;
+    city: string | null;
+    error: string | null;
+  }[];
+  buffer: { buffered: number; flushed: number; dropped: number; flush_errors: number };
+}
+
 // --------------------------------------------------------------- calls
 
 export function fetchAdminOverview(): Promise<AdminOverview> {
@@ -145,4 +184,8 @@ export function fetchAdminReveals(
 
 export function fetchAdminAlerts(limit = 50): Promise<{ alerts: AdminAlert[]; count: number }> {
   return adminFetch(`/alerts?limit=${limit}`);
+}
+
+export function fetchAdminSearchbug(days = 7, recentLimit = 50): Promise<AdminSearchbugMetrics> {
+  return adminFetch(`/searchbug?days=${days}&recent_limit=${recentLimit}`);
 }

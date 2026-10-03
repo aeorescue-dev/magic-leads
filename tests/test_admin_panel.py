@@ -17,7 +17,7 @@ Invariantes fixados aqui:
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -225,3 +225,126 @@ def test_is_admin_migration_defaults_to_zero(admin_client):
     # Um utilizador nunca promovido tem de continuar a 0.
     other = db_service._service.get_user_by_email(NONADMIN_EMAIL)
     assert other["is_admin"] == 0
+
+
+# ------------------------------------------------- Fase 2: telemetria
+
+@pytest.fixture(autouse=True)
+def _clean_telemetry():
+    """Zera a telemetria antes de cada teste.
+
+    A tabela e partilhada com os testes de instrumentacao da Searchbug e com
+    qualquer endpoint que dispare uma consulta real: sem este reset os
+    totais do painel acumulam entre testes e as comparacoes ficam
+    dependentes da ordem de execucao.
+    """
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM searchbug_calls")
+        conn.commit()
+    finally:
+        conn.close()
+    yield
+
+
+def _seed_searchbug_calls(rows: list[tuple]) -> None:
+    """Insere telemetria com timestamps relativos, para testar as janelas."""
+    conn = get_connection()
+    try:
+        now = datetime.now(timezone.utc)
+        for outcome, billed, hours_ago, latency, city in rows:
+            called_at = (now - timedelta(hours=hours_ago)).strftime("%Y-%m-%d %H:%M:%S")
+            conn.execute(
+                "INSERT INTO searchbug_calls (called_at, outcome, billed, latency_ms, city, error, http_status) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (called_at, outcome, billed, latency, city, "seed", 200 if billed else None),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_admin_searchbug_requires_admin_role(admin_client, nonadmin_client):
+    """O painel de custo tambem exige role: nao e leitura publica."""
+    anon_client, _, _ = admin_client
+    assert anon_client.get("/api/admin/searchbug").status_code == 401
+
+    _, nonadmin_headers = nonadmin_client
+    assert anon_client.get("/api/admin/searchbug", headers=nonadmin_headers).status_code == 403
+
+
+def test_admin_searchbug_separates_billed_from_free(admin_client):
+    """A metrica de dinheiro: ghost_charges so conta o que foi pago."""
+    client, headers, _ = admin_client
+    _seed_searchbug_calls([
+        ("success", 1, 1, 120, "New York"),
+        ("no_results", 1, 2, 300, "Miami"),
+        ("timeout", 1, 3, 20000, "Miami"),
+        ("http_error", 1, 4, 500, "Boston"),
+        ("not_configured", 0, 5, None, None),
+        ("guard_skipped", 0, 6, None, "Miami"),
+        ("cache_hit", 0, 7, None, "Boston"),
+        ("cache_negative", 0, 8, None, "Boston"),
+    ])
+
+    resp = client.get("/api/admin/searchbug?days=7", headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+
+    totals = data["totals"]
+    assert totals["billed_calls"] == 4, "as 4 que chegaram ao provider"
+    assert totals["successes"] == 1
+    assert totals["ghost_charges"] == 3, "3 pagas sem telefone"
+    assert totals["timeouts"] == 1
+    assert totals["saved_calls"] == 3, "3 evitadas por guard/cache"
+    assert totals["calls"] == 8
+    # 4 pagas + 4 sem custo (3 evitadas + not_configured)
+    assert totals["billed_calls"] + totals["saved_calls"] + 1 == totals["calls"]
+
+    # 1 sucesso em 4 chamadas cobradas
+    assert data["success_rate"] == 0.25
+
+    outcomes = {r["outcome"]: r["n"] for r in data["by_outcome"]}
+    assert outcomes["cache_hit"] == 1
+    assert outcomes["guard_skipped"] == 1
+
+    # Latencia so das chamadas cobradas, e o numero de amostras e exposto
+    lat = data["latency"]
+    assert lat["samples"] == 4
+    assert lat["p50_ms"] >= 120
+    assert lat["max_ms"] == 20000
+
+
+def test_admin_searchbug_empty_is_not_an_error(admin_client):
+    """Sem dados: zeros e nulls, nunca 500 nem NaN."""
+    client, headers, _ = admin_client
+    resp = client.get("/api/admin/searchbug", headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["totals"]["billed_calls"] == 0
+    assert data["success_rate"] is None
+    assert data["latency"]["p50_ms"] is None
+    assert data["latency"]["samples"] == 0
+    assert data["recent"] == []
+
+
+def test_admin_searchbug_exposes_buffer_health(admin_client):
+    """Telemetria perdida tem de aparecer como numero, nao como zero."""
+    client, headers, _ = admin_client
+    data = client.get("/api/admin/searchbug", headers=headers).json()
+    assert set(data["buffer"]) == {"buffered", "flushed", "dropped", "flush_errors"}
+
+
+def test_admin_searchbug_window_excludes_old_rows(admin_client):
+    """A janela `days` tem de filtrar: custo antigo nao infla o total."""
+    client, headers, _ = admin_client
+    _seed_searchbug_calls([
+        ("success", 1, 1, 100, "New York"),
+        ("success", 1, 24 * 40, 100, "New York"),  # fora da janela de 7 dias
+    ])
+
+    week = client.get("/api/admin/searchbug?days=7", headers=headers).json()
+    assert week["totals"]["billed_calls"] == 1
+
+    month = client.get("/api/admin/searchbug?days=90", headers=headers).json()
+    assert month["totals"]["billed_calls"] == 2

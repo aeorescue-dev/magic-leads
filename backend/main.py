@@ -62,6 +62,7 @@ from .services.lead_rules import (
 from .services.lead_rules import (
     is_corporate as is_corporate_lead,
 )
+from .services.metrics import searchbug_metrics
 from .services.push_service import push_service
 from .services.searchbug import searchbug_service
 from .utils.logger import logger
@@ -1366,6 +1367,23 @@ async def admin_reveals(
     return {"reveals": rows, "count": len(rows)}
 
 
+@app.get("/api/admin/searchbug")
+async def admin_searchbug(
+    days: int = 7,
+    recent_limit: int = 50,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Fase 2: custo e fiabilidade das consultas pagas a Searchbug.
+
+    `ghost_charges` e a metrica de dinheiro: consultas que chegaram ao
+    provider e nao devolveram telefoneutilizavel. `buffer` expoe o estado
+    do writer assincrono para que telemetria perdida apareca como numero.
+    """
+    data = await db_service.admin_get_searchbug_metrics(days, recent_limit)
+    data["buffer"] = searchbug_metrics.stats()
+    return data
+
+
 @app.get("/api/admin/alerts")
 async def admin_alerts(limit: int = 50, _admin: dict = Depends(_require_admin_user)):
     """Alertas de auditoria (Dead Man's Switch), incluindo reconhecidos."""
@@ -2201,6 +2219,11 @@ async def _scheduler_loop():
 async def _lifespan(app):
     _scheduler_task = None
 
+    # Fase 2: o writer de telemetria arranca com o processo. Sem isto o
+    # buffer acumula em memoria ate limite e perde eventos sem nunca
+    # persistir nada.
+    await searchbug_metrics.start()
+
     # Validação de VAPID keys no startup
     if not settings.VAPID_PUBLIC_KEY or not settings.VAPID_PRIVATE_KEY:
         logger.critical("❌ VAPID keys NÃO CONFIGURADAS — Push notifications DESABILITADAS!")
@@ -2251,6 +2274,13 @@ async def _lifespan(app):
     yield
     if _scheduler_task:
         _scheduler_task.cancel()
+    # Flush final: escreve o que ficou em memoria antes de o processo
+    # morrer. Se falhar, o buffer e descartado - telemetria nunca pode
+    # impedir o shutdown.
+    try:
+        await searchbug_metrics.stop()
+    except Exception as e:
+        logger.warning(f"Erro no flush final de telemetria: {e}")
 
 
 async def _scheduler_loop():
