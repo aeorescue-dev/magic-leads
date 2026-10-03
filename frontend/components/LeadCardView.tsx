@@ -96,7 +96,7 @@ export function LeadCardView({ leads, onLeadUpdated }: Props) {
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Landmark className="h-3 w-3 shrink-0" />
                 <span className="truncate">
-                  {[lead.neighborhood, lead.ward && lead.ward.replace(/^\d+\s*/, ""), lead.precinct && lead.precinct.replace("Precinct ", "Pct ")]
+                  {[lead.neighborhood, lead.ward?.replace(/^\d+\s*/, ""), lead.precinct?.replace("Precinct ", "Pct ")]
                     .filter(Boolean)
                     .join(" · ")}
                 </span>
