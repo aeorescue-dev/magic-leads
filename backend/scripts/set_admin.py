@@ -9,9 +9,13 @@ uso (local ou Railway shell, com LEADS_DB_PATH a apontar para a BD certa):
 Nao existe endpoint HTTP para isto de proposito: promocao de privilegios
 feita pela propria API permitiria escalacao (basta ter a propria conta).
 """
+from __future__ import annotations
+
 import argparse
 import os
 import sys
+
+import anyio
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -26,7 +30,8 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.list:
-        admins = [u for u in db_service.get_all_users() if u.get("is_admin")]
+        users = anyio.run(db_service.get_all_users)
+        admins = [u for u in users if u.get("is_admin")]
         if not admins:
             print("Nenhum administrador definido.")
             return 0
@@ -37,7 +42,9 @@ def main() -> int:
     if not args.email:
         parser.error("email obrigatorio (ou use --list)")
 
-    ok = db_service.set_user_admin(args.email, not args.revoke)
+    # `db_service` e a AsyncDatabaseService: sem `anyio.run` isto devolvia uma
+    # corrotina (sempre truthy) e o script imprimia "OK" sem promover ninguem.
+    ok = anyio.run(db_service.set_user_admin, args.email, not args.revoke)
     if not ok:
         print(f"Utilizador nao encontrado: {args.email}")
         return 1
