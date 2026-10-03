@@ -62,7 +62,7 @@ PREFIXES = {
     "status_change": "🔄 [STATUS]",
     "digest": "📋 [RESUMO]",
     "system_alert": "🚨 [ALERTA SISTEMA]",
-    "anomaly": "⚠️ [ANOMALIA]",
+    "anomaly": "[AVISO]️ [ANOMALIA]",
     "circuit_breaker": "🔴 [CIRCUIT BREAKER]",
     "test": "🧪 [TESTE]",
 }

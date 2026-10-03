@@ -1599,10 +1599,10 @@ async def _send_scraper_webhook(run_id: str, city_results: dict, dlq_reprocessed
             city_lines.append(f"  {city}: ⏭️ PULADO (circuit breaker aberto até {result.get('error', 'N/A')})")
             circuit_breakers.append(city)
         elif result.get("error"):
-            city_lines.append(f"  {city}: ❌ ERRO — {result['error'][:100]}")
+            city_lines.append(f"  {city}: [ERRO] ERRO — {result['error'][:100]}")
         else:
             count = len(result.get("leads", []))
-            city_lines.append(f"  {city}: {count} leads {'✅' if count > 0 else '🔴 ZERADO'}")
+            city_lines.append(f"  {city}: {count} leads {'[OK]' if count > 0 else '🔴 ZERADO'}")
             if count == 0:
                 anomalies.append(city)
 
@@ -1612,7 +1612,7 @@ async def _send_scraper_webhook(run_id: str, city_results: dict, dlq_reprocessed
         health = await db_service.get_city_health(city)
         anomaly_count = health.get("anomaly_counter", 0)
         if anomaly_count >= 2:
-            anomaly_lines.append(f"⚠️ **ANOMALIA**: {city} zerou {anomaly_count} execuções consecutivas!")
+            anomaly_lines.append(f"[AVISO]️ **ANOMALIA**: {city} zerou {anomaly_count} execuções consecutivas!")
         elif anomaly_count == 1:
             anomaly_lines.append(f"⚡ Atenção: {city} zerou 1 execução (monitorando)")
 
@@ -1633,7 +1633,7 @@ async def _send_scraper_webhook(run_id: str, city_results: dict, dlq_reprocessed
         f"📊 **Scraper Run `{run_id}`** {hours_info}",
         f"🕐 {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC | Trigger: {trigger}",
         "",
-        f"📥 **Total bruto**: {total_raw} | ✅ **Inseridos**: {inserted} | 🔄 **DLQ reprocessado**: {dlq_reprocessed}",
+        f"📥 **Total bruto**: {total_raw} | [OK] **Inseridos**: {inserted} | 🔄 **DLQ reprocessado**: {dlq_reprocessed}",
     ]
     if notified is not None:
         lines.append(f"🔔 **Notificações criadas**: {notified}")
@@ -2301,7 +2301,7 @@ async def _lifespan(app):
 
     # Validação de VAPID keys no startup
     if not settings.VAPID_PUBLIC_KEY or not settings.VAPID_PRIVATE_KEY:
-        logger.critical("❌ VAPID keys NÃO CONFIGURADAS — Push notifications DESABILITADAS!")
+        logger.critical("[ERRO] VAPID keys NÃO CONFIGURADAS — Push notifications DESABILITADAS!")
         if settings.SCRAPER_WEBHOOK_URL:
             try:
                 async with httpx.AsyncClient(timeout=10) as client:
@@ -2312,7 +2312,7 @@ async def _lifespan(app):
             except Exception as e:
                 logger.error(f"Falha ao enviar alerta de VAPID keys ausentes: {e}")
     else:
-        logger.info("✅ VAPID keys configuradas — Push notifications ATIVAS")
+        logger.info("[OK] VAPID keys configuradas — Push notifications ATIVAS")
 
     if settings.SCRAPER_SELF_SCHEDULED:
         _scheduler_task = asyncio.create_task(_scheduler_loop())
@@ -2338,14 +2338,14 @@ async def _lifespan(app):
     # Validação Stripe no startup
     if settings.STRIPE_API_KEY and settings.STRIPE_PRICE_ID_PRO and settings.STRIPE_WEBHOOK_SECRET:
         if settings.STRIPE_API_KEY.startswith("sk_live_"):
-            logger.info("✅ Stripe LIVE configurado — pagamentos em PRODUÇÃO")
+            logger.info("[OK] Stripe LIVE configurado — pagamentos em PRODUÇÃO")
         elif settings.STRIPE_API_KEY.startswith("sk_test_"):
-            logger.warning("⚠️ Stripe TEST configurado — pagamentos em MODO TESTE (não use em produção)")
+            logger.warning("[AVISO]️ Stripe TEST configurado — pagamentos em MODO TESTE (não use em produção)")
         else:
-            logger.warning(f"⚠️ Stripe key prefixo desconhecido: {settings.STRIPE_API_KEY[:12]}...")
-        logger.info(f"✅ Stripe PRICE_ID: {settings.STRIPE_PRICE_ID_PRO}")
+            logger.warning(f"[AVISO]️ Stripe key prefixo desconhecido: {settings.STRIPE_API_KEY[:12]}...")
+        logger.info(f"[OK] Stripe PRICE_ID: {settings.STRIPE_PRICE_ID_PRO}")
     else:
-        logger.warning("⚠️ Stripe NÃO configurado completamente — checkout usará mock")
+        logger.warning("[AVISO]️ Stripe NÃO configurado completamente — checkout usará mock")
     yield
     if _scheduler_task:
         _scheduler_task.cancel()
