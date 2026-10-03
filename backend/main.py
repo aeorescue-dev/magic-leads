@@ -474,6 +474,39 @@ def _require_admin(x_admin_secret: str | None = Header(None)) -> bool:
     return True
 
 
+async def _require_admin_user(
+    authorization: str | None = Header(None),
+    garimpador_token: str | None = Cookie(None),
+) -> dict:
+    """Gate de role-based para o painel /admin.
+
+    Diferente de `_require_admin` (secret partilhado, só para cron/scripts),
+    aqui exigimos uma sessão REAL de utilizador E `users.is_admin = 1`. É o
+    que permite "login e senha de admin" em vez de um segredo global.
+
+    Fail-closed em todos os ramos: sem token -> 401; token inválido -> 401;
+    utilizador inexistente ou sem is_admin -> 403.
+    """
+    token = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization[len("Bearer "):].strip()
+    elif garimpador_token:
+        token = garimpador_token
+    if not token:
+        raise HTTPException(status_code=401, detail="Não autorizado: autenticação necessária")
+
+    user_id = await _get_user_id_from_token(token)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Não autorizado: sessão inválida ou expirada")
+
+    user = await db_service.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=401, detail="Não autorizado: sessão inválida ou expirada")
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Acesso restrito a administradores")
+    return {"id": user["id"], "email": user.get("email")}
+
+
 def _check_cron_secret(x_cron_secret: str | None) -> None:
     """Valida o header X-Cron-Secret. Fail-closed (antes aceitava requisições sem secret)."""
     expected = settings.CRON_SECRET
@@ -1219,6 +1252,61 @@ async def acknowledge_system_alert(alert_id: int, _admin: bool = Depends(_requir
     if not alert:
         raise HTTPException(status_code=404, detail="Alerta não encontrado")
     return {"ok": True, "alert": alert}
+
+
+# ============================================================
+# ADMIN PANEL (/admin) — Torre de controlo interna
+#
+# Gate: _require_admin_user (sessão real + users.is_admin). Não usar
+# _require_admin (secret global) aqui: o painel é login+password.
+# ============================================================
+
+@app.get("/api/admin/overview")
+async def admin_overview(_admin: dict = Depends(_require_admin_user)):
+    """KPIs de topo: leads, utilizadores, reveals, créditos e alertas."""
+    return await db_service.admin_get_overview()
+
+
+@app.get("/api/admin/sources")
+async def admin_sources(_admin: dict = Depends(_require_admin_user)):
+    """Saúde das fontes de dados: circuit breaker por cidade + último run.
+
+    Lê `city_health`/`scraper_runs` (persistidos) em vez do dict em memória
+    `_scrape_runs`, que se perde a cada restart da Railway.
+    """
+    city_health = await db_service.get_city_health_for_scraper_status()
+    last_run = await db_service.get_last_scrape_run()
+    return {"city_health": city_health, "last_run": last_run}
+
+
+@app.get("/api/admin/scraper/runs")
+async def admin_scraper_runs(limit: int = 50, _admin: dict = Depends(_require_admin_user)):
+    """Histórico de runs do scraper (sobrevive a restart/deploy)."""
+    runs = await db_service.admin_get_recent_scraper_runs(limit)
+    return {"runs": runs, "count": len(runs)}
+
+
+@app.get("/api/admin/reveals")
+async def admin_reveals(
+    limit: int = 50,
+    returned_only: bool = False,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Auditoria de reveals: sucesso vs. retorno ao pool vs. estorno.
+
+    `returned_only=true` devolve a fila de trabalho para recuperação de
+    acesso e eventual estorno (reincidência do incidente 'dados pagos
+    ficaram invisíveis').
+    """
+    rows = await db_service.admin_get_recent_reveals(limit, returned_only)
+    return {"reveals": rows, "count": len(rows)}
+
+
+@app.get("/api/admin/alerts")
+async def admin_alerts(limit: int = 50, _admin: dict = Depends(_require_admin_user)):
+    """Alertas de auditoria (Dead Man's Switch), incluindo reconhecidos."""
+    alerts = await db_service.get_recent_system_alerts(limit)
+    return {"alerts": alerts, "count": len(alerts)}
 
 
 # ============================================================

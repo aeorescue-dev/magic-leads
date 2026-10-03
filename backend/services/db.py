@@ -132,6 +132,7 @@ CREATE TABLE IF NOT EXISTS users (
   welcome_popup_shown INTEGER DEFAULT 0,
   refund_count_today INTEGER DEFAULT 0,
   last_refund_date TEXT,
+  is_admin INTEGER DEFAULT 0,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -636,6 +637,10 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN refund_count_today INTEGER DEFAULT 0")
     if user_cols and "last_refund_date" not in user_cols:
         conn.execute("ALTER TABLE users ADD COLUMN last_refund_date TEXT")
+    if user_cols and "is_admin" not in user_cols:
+        # migrating existing rows default to 0 (fail-closed: nobody becomes admin
+        # by accident). Promotion happens explicitly via set_user_admin().
+        conn.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0")
 
     event_cols = {r["name"] for r in conn.execute("PRAGMA table_info(lead_events)").fetchall()}
     if event_cols:
@@ -1845,6 +1850,150 @@ class DatabaseService:
         conn = get_connection()
         try:
             rows = conn.execute("SELECT * FROM users ORDER BY created_at DESC").fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    # ---------------------------------------------------------------
+    # ADMIN — Painel interno (/admin)
+    #
+    # Leitura apenas. Nenhum destes métodos escreve em leads/users exceto
+    # set_user_admin(), usado por script local para promover um admin
+    # (não exposto por HTTP, para não haver escalação de privilégio).
+    # ---------------------------------------------------------------
+    def set_user_admin(self, email: str, is_admin: bool = True) -> bool:
+        """Promove/revoga is_admin por email. Usar apenas via script local."""
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE users SET is_admin = ? WHERE email = ?",
+                (1 if is_admin else 0, (email or "").strip().lower()),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def admin_get_recent_scraper_runs(self, limit: int = 50) -> List[dict]:
+        """Histórico de runs do scraper.
+
+        A fonte de verdade é a tabela `scraper_runs`, NÃO o dict em memória
+        `_scrape_runs` (que se perde a cada restart/redeploy da Railway).
+        """
+        limit = max(1, min(int(limit), 500))
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                """SELECT run_id, trigger, started_at, finished_at, status,
+                          inserted, total_raw, cities_covered, error, note
+                   FROM scraper_runs ORDER BY id DESC LIMIT ?""",
+                (limit,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def admin_get_overview(self) -> dict:
+        """Números de topo para o painel admin (tudo em UTC, hoje = UTC)."""
+        conn = get_connection()
+        try:
+            today = datetime.utcnow().date().isoformat()
+
+            def scalar(sql: str, params: tuple = ()) -> int:
+                row = conn.execute(sql, params).fetchone()
+                if not row:
+                    return 0
+                val = row[0]
+                return int(val) if isinstance(val, (int, float)) else 0
+
+            total_leads = scalar("SELECT COUNT(*) FROM leads")
+            leads_today = scalar(
+                "SELECT COUNT(*) FROM leads WHERE date(date_reported) = ?", (today,)
+            )
+            leads_24h = scalar(
+                """SELECT COUNT(*) FROM leads
+                   WHERE created_at >= datetime('now', '-1 day')"""
+            )
+            total_users = scalar("SELECT COUNT(*) FROM users")
+            users_today = scalar(
+                """SELECT COUNT(*) FROM users
+                   WHERE date(created_at) = ?""",
+                (today,),
+            )
+            reveals_today = scalar(
+                "SELECT COUNT(*) FROM lead_reveals WHERE revealed_date = ?", (today,)
+            )
+            # Reveals que ainda não voltaram ao pool (= acesso ainda ativo).
+            reveals_active = scalar(
+                "SELECT COUNT(*) FROM lead_reveals WHERE returned_to_pool = 0"
+            )
+            reveals_returned = scalar(
+                "SELECT COUNT(*) FROM lead_reveals WHERE returned_to_pool = 1"
+            )
+            refunded_today = scalar(
+                """SELECT COUNT(*) FROM lead_reveals
+                   WHERE refunded = 1 AND date(refunded_at) = ?""",
+                (today,),
+            )
+            credits_used_today = scalar(
+                """SELECT COALESCE(SUM(leads_used), 0) FROM user_daily_stats
+                   WHERE date = ?""",
+                (today,),
+            )
+            alerts_unacked = scalar(
+                "SELECT COUNT(*) FROM system_alerts WHERE acknowledged = 0"
+            )
+            last_run = conn.execute(
+                """SELECT run_id, started_at, finished_at, status, inserted,
+                          cities_covered, error
+                   FROM scraper_runs ORDER BY id DESC LIMIT 1"""
+            ).fetchone()
+
+            return {
+                "generated_at": datetime.utcnow().isoformat(),
+                "today": today,
+                "leads": {
+                    "total": total_leads,
+                    "today": leads_today,
+                    "last_24h": leads_24h,
+                },
+                "users": {"total": total_users, "today": users_today},
+                "reveals": {
+                    "today": reveals_today,
+                    "active": reveals_active,
+                    "returned_to_pool": reveals_returned,
+                },
+                "credits": {"used_today": credits_used_today, "refunded_today": refunded_today},
+                "alerts": {"unacknowledged": alerts_unacked},
+                "last_scraper_run": dict(last_run) if last_run else None,
+            }
+        finally:
+            conn.close()
+
+    def admin_get_recent_reveals(self, limit: int = 50, returned_only: bool = False) -> List[dict]:
+        """Auditoria de reveals recentes (sucesso vs. regressões/estornos).
+
+    `returned_only=True` devolve apenas os que voltaram ao pool sem contato —
+    é a fila de trabalho para recuperação de acesso e eventual estorno.
+    """
+        limit = max(1, min(int(limit), 500))
+        conn = get_connection()
+        try:
+            sql = """SELECT r.id, r.lead_id, r.user_id, r.revealed_at, r.revealed_date,
+                            r.returned_to_pool, r.contact_flagged, r.refunded,
+                            r.refund_reason, r.refunded_at,
+                            l.address, l.city, l.owner_name,
+                            (SELECT COUNT(*) FROM leads WHERE id = r.lead_id
+                             AND owner_phone IS NOT NULL AND owner_phone != '') AS has_phone
+                     FROM lead_reveals r
+                     LEFT JOIN leads l ON l.id = r.lead_id
+                     WHERE 1=1"""
+            params: list = []
+            if returned_only:
+                sql += " AND r.returned_to_pool = 1 AND r.refunded = 0"
+            sql += " ORDER BY r.id DESC LIMIT ?"
+            params.append(limit)
+            rows = conn.execute(sql, tuple(params)).fetchall()
             return [dict(r) for r in rows]
         finally:
             conn.close()
@@ -4591,6 +4740,21 @@ class AsyncDatabaseService:
 
     async def is_push_enabled(self, user_id: int) -> bool:
         return await anyio.to_thread.run_sync(self._service.is_push_enabled, user_id)
+
+    # ===== ADMIN (painel /admin) =====
+    async def set_user_admin(self, email: str, is_admin: bool = True) -> bool:
+        return await anyio.to_thread.run_sync(self._service.set_user_admin, email, is_admin)
+
+    async def admin_get_recent_scraper_runs(self, limit: int = 50) -> List[dict]:
+        return await anyio.to_thread.run_sync(self._service.admin_get_recent_scraper_runs, limit)
+
+    async def admin_get_overview(self) -> dict:
+        return await anyio.to_thread.run_sync(self._service.admin_get_overview)
+
+    async def admin_get_recent_reveals(self, limit: int = 50, returned_only: bool = False) -> List[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.admin_get_recent_reveals, limit, returned_only
+        )
 
     # User Sessions
     async def create_user_session(
