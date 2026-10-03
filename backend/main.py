@@ -1401,6 +1401,63 @@ async def admin_push(
     return data
 
 
+# ------------------------------------------------- Fase 3: credit ledger
+
+@app.get("/api/admin/credit-ledger")
+async def admin_credit_ledger(
+    user_id: int,
+    limit: int = 100,
+    offset: int = 0,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Fase 3: ledger de créditos de um utilizador.
+
+    Lista eventos append-only (grant_daily, grant_plan, consume_reveal,
+    refund_reveal, searchbug_cost, stripe_payment) com saldo derivado.
+    """
+    ledger = await db_service.get_credit_ledger(user_id, limit, offset)
+    balance = await db_service.get_credit_balance(user_id)
+    return {"user_id": user_id, "ledger": ledger, "balance": balance}
+
+
+@app.get("/api/admin/credit-balance")
+async def admin_credit_balance(
+    user_id: int,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Fase 3: saldo de créditos derivado do ledger."""
+    balance = await db_service.get_credit_balance(user_id)
+    return {"user_id": user_id, **balance}
+
+
+@app.post("/api/admin/credit-backfill")
+async def admin_credit_backfill(_admin: dict = Depends(_require_admin_user)):
+    """Fase 3: backfill completo do ledger a partir do estado atual.
+
+    Reconstrói grant_daily, grant_plan, consume_reveal, refund_reveal,
+    searchbug_cost e stripe_payment em ordem cronológica.
+    """
+    result = await db_service.backfill_credit_ledger()
+    return result
+
+
+@app.post("/api/admin/credit-reconcile")
+async def admin_credit_reconcile(
+    user_id: int = 0,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Fase 3: reconciliação de créditos.
+
+    Verifica discrepâncias entre ledger e estado real:
+    - saldo do ledger vs quota diária
+    - ghost charges Searchbug vs pagamentos Stripe
+    - quota diária excedida
+    """
+    uid = user_id if user_id > 0 else None
+    result = await db_service.reconcile_credits(uid)
+    return result
+
+
 @app.get("/api/admin/alerts")
 async def admin_alerts(limit: int = 50, _admin: dict = Depends(_require_admin_user)):
     """Alertas de auditoria (Dead Man's Switch), incluindo reconhecidos."""

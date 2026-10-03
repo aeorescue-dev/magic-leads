@@ -24,6 +24,11 @@ import {
   AdminScraperRun,
   AdminSearchbugMetrics,
   AdminSources,
+    AdminCreditBackfillResponse,
+    AdminCreditBalance,
+    AdminCreditLedgerEvent,
+    AdminCreditLedgerResponse,
+    AdminCreditReconcileResponse,
   fetchAdminAlerts,
   fetchAdminOverview,
   fetchAdminPush,
@@ -31,6 +36,10 @@ import {
   fetchAdminScraperRuns,
   fetchAdminSearchbug,
   fetchAdminSources,
+    fetchAdminCreditBalance,
+    fetchAdminCreditBackfill,
+    fetchAdminCreditLedger,
+    fetchAdminCreditReconcile,
 } from "@/lib/admin-api";
 
 type Gate = "loading" | "unauthenticated" | "forbidden" | "ok" | "error";
@@ -137,6 +146,8 @@ export default function AdminPage() {
   const [alerts, setAlerts] = useState<AdminAlert[]>([]);
   const [searchbug, setSearchbug] = useState<AdminSearchbugMetrics | null>(null);
   const [push, setPush] = useState<AdminPushMetrics | null>(null);
+  const [creditLedger, setCreditLedger] = useState<AdminCreditLedgerResponse | null>(null);
+  const [creditBalance, setCreditBalance] = useState<AdminCreditBalance | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -146,7 +157,9 @@ export default function AdminPage() {
       // apagar o resto do painel.
       const sb = fetchAdminSearchbug(7, 25).catch(() => null);
       const pu = fetchAdminPush(7, 25).catch(() => null);
-      const [ov, src, rn, rv, al, sbm, pum] = await Promise.all([
+      const cl = fetchAdminCreditLedger(1, 50).catch(() => null);
+      const cb = fetchAdminCreditBalance(1).catch(() => null);
+      const [ov, src, rn, rv, al, sbm, pum, clm, cbm] = await Promise.all([
         fetchAdminOverview(),
         fetchAdminSources(),
         fetchAdminScraperRuns(15),
@@ -154,6 +167,8 @@ export default function AdminPage() {
         fetchAdminAlerts(20),
         sb,
         pu,
+        cl,
+        cb,
       ]);
       setOverview(ov);
       setSources(src);
@@ -162,6 +177,8 @@ export default function AdminPage() {
       setAlerts(al.alerts);
       setSearchbug(sbm);
       setPush(pum);
+      setCreditLedger(clm);
+      setCreditBalance(cbm);
       setGate("ok");
     } catch (e) {
       if (e instanceof AdminApiError) {

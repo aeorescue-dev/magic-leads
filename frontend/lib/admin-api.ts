@@ -27,11 +27,12 @@ function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-async function adminFetch<T>(path: string): Promise<T> {
+async function adminFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}/api/admin${path}`, {
     credentials: "include",
     headers: { ...authHeaders() },
     cache: "no-store",
+    ...options,
   });
   if (!res.ok) {
     let detail = res.statusText;
@@ -204,6 +205,57 @@ export interface AdminPushMetrics {
   buffer: { buffered: number; flushed: number; dropped: number; flush_errors: number };
 }
 
+// Fase 3 — ledger append-only de créditos.
+//
+// event_type:
+//   grant_daily       quota diária concedida (amount = +leads_limit)
+//   grant_plan        acesso via Stripe concedeu dias (amount = +dias*limit)
+//   consume_reveal    reveal com charge_credit=True (amount = -1)
+//   refund_reveal     estorno devolve crédito (amount = +1)
+//   searchbug_cost    chamada billed (amount = 0, metadata: custo)
+//   stripe_payment    pagamento Stripe concedeu dias (amount = 0, metadata: dias)
+//
+// balance_after: saldo corrente derivado (soma de amounts até este evento)
+// reference_id + reference_type: idempotência por evento origem
+export interface AdminCreditLedgerEvent {
+  id: number;
+  created_at: string;
+  user_id: number;
+  event_type: "grant_daily" | "grant_plan" | "consume_reveal" | "refund_reveal" | "searchbug_cost" | "stripe_payment";
+  amount: number;
+  balance_after: number;
+  reference_id: number | null;
+  reference_type: string | null;
+  metadata: Record<string, unknown> | null;
+}
+
+export interface AdminCreditBalance {
+  balance: number;
+  by_type: Record<string, { count: number; total_amount: number }>;
+}
+
+export interface AdminCreditLedgerResponse {
+  user_id: number;
+  ledger: AdminCreditLedgerEvent[];
+  balance: AdminCreditBalance;
+}
+
+export interface AdminCreditReconcileResponse {
+  discrepancies: Array<{
+    user_id: number;
+    type: string;
+    detail: string;
+    severity: "warning" | "error";
+  }>;
+  checked_users: number;
+}
+
+export interface AdminCreditBackfillResponse {
+  status: "ok" | "error";
+  counts?: Record<string, number>;
+  detail?: string;
+}
+
 // --------------------------------------------------------------- calls
 
 export function fetchAdminOverview(): Promise<AdminOverview> {
@@ -236,4 +288,25 @@ export function fetchAdminSearchbug(days = 7, recentLimit = 50): Promise<AdminSe
 
 export function fetchAdminPush(days = 7, recentLimit = 50): Promise<AdminPushMetrics> {
   return adminFetch(`/push?days=${days}&recent_limit=${recentLimit}`);
+}
+
+export function fetchAdminCreditLedger(
+  userId: number,
+  limit = 100,
+  offset = 0
+): Promise<AdminCreditLedgerResponse> {
+  return adminFetch(`/credit-ledger?user_id=${userId}&limit=${limit}&offset=${offset}`);
+}
+
+export function fetchAdminCreditBalance(userId: number): Promise<AdminCreditBalance> {
+  return adminFetch(`/credit-balance?user_id=${userId}`);
+}
+
+export function fetchAdminCreditBackfill(): Promise<AdminCreditBackfillResponse> {
+  return adminFetch(`/credit-backfill`, { method: "POST" });
+}
+
+export function fetchAdminCreditReconcile(userId = 0): Promise<AdminCreditReconcileResponse> {
+  const q = userId > 0 ? `?user_id=${userId}` : "";
+  return adminFetch(`/credit-reconcile${q}`, { method: "POST" });
 }

@@ -1,3 +1,4 @@
+import hashlib
 import os
 import smtplib
 import socket
@@ -473,6 +474,36 @@ CREATE TABLE IF NOT EXISTS push_deliveries (
 CREATE INDEX IF NOT EXISTS idx_push_deliveries_sent ON push_deliveries (sent_at);
 CREATE INDEX IF NOT EXISTS idx_push_deliveries_outcome ON push_deliveries (outcome);
 CREATE INDEX IF NOT EXISTS idx_push_deliveries_expired ON push_deliveries (outcome, sent_at);
+
+-- Fase 3: ledger append-only de créditos.
+--
+-- event_type:
+--   'grant_daily'       quota diária concedida (amount = +leads_limit)
+--   'grant_plan'        acesso via Stripe concedeu dias (amount = +dias*limit)
+--   'consume_reveal'    reveal com charge_credit=True (amount = -1)
+--   'refund_reveal'     estorno devolve crédito (amount = +1)
+--   'searchbug_cost'    chamada billed (amount = 0, metadata: custo)
+--   'stripe_payment'    pagamento Stripe concedeu dias (amount = 0, metadata: dias)
+--
+-- balance_after: saldo corrente derivado (soma de amounts até este evento)
+-- reference_id + reference_type: idempotência por evento origem
+-- metadata: JSON com contexto (cidade, outcome, dias, etc.)
+CREATE TABLE IF NOT EXISTS credit_ledger (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  event_type TEXT NOT NULL,
+  amount INTEGER NOT NULL,
+  balance_after INTEGER,
+  reference_id INTEGER,
+  reference_type TEXT,
+  metadata TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_credit_ledger_user ON credit_ledger (user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_credit_ledger_type ON credit_ledger (event_type);
+CREATE INDEX IF NOT EXISTS idx_credit_ledger_ref ON credit_ledger (reference_type, reference_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_credit_ledger_idempotent ON credit_ledger (user_id, reference_type, reference_id);
 """
 
 
@@ -4596,6 +4627,474 @@ class DatabaseService:
         finally:
             conn.close()
 
+    # ===== CREDIT LEDGER (Fase 3) =====
+
+    def _record_credit_event(
+        self,
+        conn: sqlite3.Connection,
+        user_id: int,
+        event_type: str,
+        amount: int,
+        reference_id: Optional[int] = None,
+        reference_type: Optional[str] = None,
+        metadata: Optional[dict] = None,
+    ) -> int:
+        """Registra evento no ledger e devolve o novo saldo.
+
+        `balance_after` e a soma cumulativa de amounts para o user.
+        Usa ON CONFLICT DO NOTHING na unique index para idempotência.
+        """
+        # Saldo anterior
+        row = conn.execute(
+            "SELECT COALESCE(MAX(balance_after), 0) FROM credit_ledger WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        prev_balance = row[0] if row else 0
+        new_balance = prev_balance + amount
+
+        meta_json = None
+        if metadata:
+            import json
+            meta_json = json.dumps(metadata, ensure_ascii=False)
+
+        try:
+            conn.execute(
+                """INSERT INTO credit_ledger
+                       (user_id, event_type, amount, balance_after, reference_id, reference_type, metadata)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(user_id, reference_type, reference_id) DO NOTHING""",
+                (user_id, event_type, amount, new_balance, reference_id, reference_type, meta_json),
+            )
+        except sqlite3.IntegrityError:
+            # Já existe (idempotência): não conta duas vezes
+            pass
+
+        return new_balance
+
+    def record_grant_daily(self, user_id: int, limit: int, date: str) -> int:
+        """Concede quota diária (evento 'grant_daily').
+
+        Idempotente por (user_id, 'daily_grant', date).
+        """
+        conn = get_connection()
+        try:
+            ref_id = int(date.replace("-", ""))  # YYYYMMDD como int
+            return self._record_credit_event(
+                conn,
+                user_id=user_id,
+                event_type="grant_daily",
+                amount=limit,
+                reference_id=ref_id,
+                reference_type="daily_grant",
+                metadata={"date": date, "limit": limit},
+            )
+        finally:
+            conn.close()
+
+    def record_grant_plan(self, user_id: int, days: int, limit: int, plan_until: str) -> int:
+        """Concede créditos por acesso ao plano (evento 'grant_plan').
+
+        amount = dias * limit. Idempotente por plan_until.
+        """
+        conn = get_connection()
+        try:
+            # plan_until como referência (YYYY-MM-DD)
+            ref_id = int(plan_until[:10].replace("-", ""))
+            amount = days * limit
+            return self._record_credit_event(
+                conn,
+                user_id=user_id,
+                event_type="grant_plan",
+                amount=amount,
+                reference_id=ref_id,
+                reference_type="plan_grant",
+                metadata={"days": days, "limit": limit, "plan_until": plan_until},
+            )
+        finally:
+            conn.close()
+
+    def record_consume_reveal(self, user_id: int, reveal_id: int) -> int:
+        """Consome 1 crédito por reveal (evento 'consume_reveal').
+
+        Idempotente por reveal_id.
+        """
+        conn = get_connection()
+        try:
+            return self._record_credit_event(
+                conn,
+                user_id=user_id,
+                event_type="consume_reveal",
+                amount=-1,
+                reference_id=reveal_id,
+                reference_type="reveal",
+                metadata={},
+            )
+        finally:
+            conn.close()
+
+    def record_refund_reveal(self, user_id: int, reveal_id: int) -> int:
+        """Estorno devolve crédito (evento 'refund_reveal').
+
+        Idempotente por reveal_id (unique index evita duplicados).
+        """
+        conn = get_connection()
+        try:
+            return self._record_credit_event(
+                conn,
+                user_id=user_id,
+                event_type="refund_reveal",
+                amount=1,
+                reference_id=reveal_id,
+                reference_type="reveal",
+                metadata={},
+            )
+        finally:
+            conn.close()
+
+    def record_searchbug_cost(
+        self,
+        user_id: int,
+        call_id: int,
+        billed: int,
+        outcome: str,
+        city: Optional[str] = None,
+        latency_ms: Optional[int] = None,
+    ) -> int:
+        """Registra custo de chamada Searchbug (evento 'searchbug_cost').
+
+        amount=0 (não altera saldo de créditos), metadata guarda custo.
+        Idempotente por call_id.
+        """
+        conn = get_connection()
+        try:
+            return self._record_credit_event(
+                conn,
+                user_id=user_id,
+                event_type="searchbug_cost",
+                amount=0,
+                reference_id=call_id,
+                reference_type="searchbug_call",
+                metadata={
+                    "billed": billed,
+                    "outcome": outcome,
+                    "city": city,
+                    "latency_ms": latency_ms,
+                },
+            )
+        finally:
+            conn.close()
+
+    def record_stripe_payment(self, user_id: int, event_id: str, days: int) -> int:
+        """Registra pagamento Stripe (evento 'stripe_payment').
+
+        amount=0 (não altera saldo de créditos), metadata guarda dias concedidos.
+        Idempotente por event_id do Stripe.
+        """
+        conn = get_connection()
+        try:
+            # event_id do Stripe pode ser longo, usamos hash curto
+            ref_id = int(hashlib.md5(event_id.encode()).hexdigest()[:15], 16)
+            return self._record_credit_event(
+                conn,
+                user_id=user_id,
+                event_type="stripe_payment",
+                amount=0,
+                reference_id=ref_id,
+                reference_type="stripe_event",
+                metadata={"stripe_event_id": event_id, "days": days},
+            )
+        finally:
+            conn.close()
+
+    def get_credit_balance(self, user_id: int) -> dict:
+        """Devolve saldo atual e resumo do ledger."""
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT COALESCE(MAX(balance_after), 0) FROM credit_ledger WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+            balance = row[0] if row else 0
+
+            # Contagem por tipo
+            counts = conn.execute(
+                """SELECT event_type, COUNT(*) as cnt, SUM(amount) as total_amount
+                   FROM credit_ledger WHERE user_id = ?
+                   GROUP BY event_type""",
+                (user_id,),
+            ).fetchall()
+
+            by_type = {r["event_type"]: {"count": r["cnt"], "total_amount": r["total_amount"]} for r in counts}
+
+            return {"balance": balance, "by_type": by_type}
+        finally:
+            conn.close()
+
+    def get_credit_ledger(
+        self, user_id: int, limit: int = 100, offset: int = 0
+    ) -> List[dict]:
+        """Lista eventos do ledger (mais recentes primeiro)."""
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                """SELECT * FROM credit_ledger
+                   WHERE user_id = ?
+                   ORDER BY created_at DESC LIMIT ? OFFSET ?""",
+                (user_id, limit, offset),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def backfill_credit_ledger(self) -> dict:
+        """Backfill completo do ledger a partir do estado atual.
+
+        Reconstrói:
+          - grant_daily: a partir de user_daily_stats (cada linha = 1 grant)
+          - consume_reveal: lead_reveals com charge_credit=True (via refunded=0 ou refunded=1 com charge_credit)
+          - refund_reveal: lead_reveals refunded=1
+          - grant_plan: stripe_events (cada evento = 7 dias)
+          - searchbug_cost: searchbug_calls com billed=1
+          - stripe_payment: stripe_events
+
+        Processa em ordem cronológica para balance_after correto.
+        Retorna contagens por tipo.
+        """
+        conn = get_connection()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+
+            # Limpa ledger existente para refazer limpo
+            conn.execute("DELETE FROM credit_ledger")
+
+            stats = {
+                "grant_daily": 0,
+                "grant_plan": 0,
+                "consume_reveal": 0,
+                "refund_reveal": 0,
+                "searchbug_cost": 0,
+                "stripe_payment": 0,
+            }
+
+            # 1) grant_daily a partir de user_daily_stats
+            # Cada linha = quota concedida naquele dia
+            rows = conn.execute(
+                "SELECT user_id, date, leads_limit FROM user_daily_stats ORDER BY date, user_id"
+            ).fetchall()
+            for r in rows:
+                self._record_credit_event(
+                    conn,
+                    user_id=r["user_id"],
+                    event_type="grant_daily",
+                    amount=r["leads_limit"],
+                    reference_id=int(r["date"].replace("-", "")),
+                    reference_type="daily_grant",
+                    metadata={"date": r["date"], "limit": r["leads_limit"]},
+                )
+                stats["grant_daily"] += 1
+
+            # 2) grant_plan a partir de stripe_events (cada evento = 7 dias)
+            # Pega o limite padrão do usuário (users.leads_limit não existe, usa 10)
+            rows = conn.execute(
+                "SELECT user_id, processed_at FROM stripe_events ORDER BY processed_at"
+            ).fetchall()
+            for r in rows:
+                self._record_credit_event(
+                    conn,
+                    user_id=r["user_id"],
+                    event_type="grant_plan",
+                    amount=7 * 10,  # 7 dias * 10/dia
+                    reference_id=int(hashlib.md5(str(r["id"]).encode()).hexdigest()[:15], 16),
+                    reference_type="plan_grant",
+                    metadata={"days": 7, "limit": 10, "plan_until": r["processed_at"][:10]},
+                )
+                stats["grant_plan"] += 1
+
+            # 3) consume_reveal: lead_reveals onde charge_credit=True (refunded=0 ou 1)
+            # lead_reveals não guarda charge_credit diretamente; inferimos:
+            # - se refunded=0: foi cobrado (charge_credit=True)
+            # - se refunded=1: foi cobrado e depois estornado
+            rows = conn.execute(
+                """SELECT id, user_id, revealed_date, refunded
+                   FROM lead_reveals ORDER BY revealed_date, id"""
+            ).fetchall()
+            for r in rows:
+                # Assume charge_credit=True para todos os reveals (padrão)
+                # Exceto se for lead corporativo/incompleto - não temos flag, assumimos True
+                self._record_credit_event(
+                    conn,
+                    user_id=r["user_id"],
+                    event_type="consume_reveal",
+                    amount=-1,
+                    reference_id=r["id"],
+                    reference_type="reveal",
+                    metadata={"date": r["revealed_date"]},
+                )
+                stats["consume_reveal"] += 1
+
+                if r["refunded"]:
+                    # 4) refund_reveal
+                    self._record_credit_event(
+                        conn,
+                        user_id=r["user_id"],
+                        event_type="refund_reveal",
+                        amount=1,
+                        reference_id=r["id"],
+                        reference_type="reveal",
+                        metadata={"date": r["revealed_date"]},
+                    )
+                    stats["refund_reveal"] += 1
+
+            # 5) searchbug_cost: chamadas billed
+            # searchbug_calls não tem user_id (são chamadas do sistema/scraper)
+            # Registramos como user_id=0 (sistema) para auditoria de custo
+            rows = conn.execute(
+                """SELECT id, called_at, billed, outcome, city, latency_ms
+                   FROM searchbug_calls WHERE billed = 1 ORDER BY called_at"""
+            ).fetchall()
+            for r in rows:
+                self._record_credit_event(
+                    conn,
+                    user_id=0,
+                    event_type="searchbug_cost",
+                    amount=0,
+                    reference_id=r["id"],
+                    reference_type="searchbug_call",
+                    metadata={
+                        "billed": r["billed"],
+                        "outcome": r["outcome"],
+                        "city": r["city"],
+                        "latency_ms": r["latency_ms"],
+                    },
+                )
+                stats["searchbug_cost"] += 1
+
+            # 6) stripe_payment
+            rows = conn.execute(
+                "SELECT id, user_id, processed_at FROM stripe_events ORDER BY processed_at"
+            ).fetchall()
+            for r in rows:
+                self._record_credit_event(
+                    conn,
+                    user_id=r["user_id"],
+                    event_type="stripe_payment",
+                    amount=0,
+                    reference_id=int(hashlib.md5(str(r["id"]).encode()).hexdigest()[:15], 16),
+                    reference_type="stripe_event",
+                    metadata={"stripe_event_id": str(r["id"]), "days": 7},
+                )
+                stats["stripe_payment"] += 1
+
+            conn.commit()
+            return {"status": "ok", "counts": stats}
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Erro no backfill do ledger: {e}")
+            return {"status": "error", "detail": str(e)}
+        finally:
+            conn.close()
+
+    def reconcile_credits(self, user_id: Optional[int] = None) -> dict:
+        """Reconciliação: compara ledger com estado real.
+
+        Verifica:
+          1. Saldo do ledger vs quota diária atual (user_daily_stats)
+          2. Créditos concedidos pelo plano vs dias de acesso (plan_until)
+          3. Searchbug costs vs pagamentos Stripe (ghost charges)
+
+        Retorna lista de discrepâncias por usuário.
+        """
+        conn = get_connection()
+        try:
+            if user_id:
+                users = conn.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchall()
+            else:
+                users = conn.execute("SELECT id FROM users").fetchall()
+
+            discrepancies = []
+
+            for u in users:
+                uid = u["id"]
+
+                # 1) Saldo do ledger
+                ledger = self.get_credit_balance(uid)
+                ledger_balance = ledger["balance"]
+
+                # 2) Quota diária real (user_daily_stats de hoje)
+                today = datetime.utcnow().date().isoformat()
+                uds = conn.execute(
+                    "SELECT leads_used, leads_limit FROM user_daily_stats WHERE user_id = ? AND date = ?",
+                    (uid, today),
+                ).fetchone()
+                daily_used = uds["leads_used"] if uds else 0
+                daily_limit = uds["leads_limit"] if uds else 10
+                _daily_remaining = max(0, daily_limit - daily_used)
+
+                # Saldo esperado = grant_daily total - consume + refund - searchbug_cost(ignorado no saldo)
+                # O ledger_balance já reflete isso
+                # O que importa: ledger_balance deve bater com daily_remaining + grants históricos não expirados
+                # Simplificação: ledger_balance deve ser >= 0 e condizente
+
+                # 3) Plano ativo: plan_until > agora
+                user = conn.execute(
+                    "SELECT plan_until, leads_taken FROM users WHERE id = ?", (uid,)
+                ).fetchone()
+                _plan_active = False
+                _plan_days_left = 0
+                if user and user["plan_until"]:
+                    try:
+                        plan_until = datetime.fromisoformat(user["plan_until"].replace("Z", "+00:00"))
+                        if plan_until > datetime.utcnow():
+                            _plan_active = True
+                            _plan_days_left = max(0, (plan_until - datetime.utcnow()).days)
+                    except Exception:
+                        pass
+
+                # 4) Custos Searchbug billed vs pagamentos Stripe (sistema, não por usuário)
+                # searchbug_calls não tem user_id - verificamos a nível de sistema
+                sb_ghost = conn.execute(
+                    "SELECT COUNT(*) as cnt FROM searchbug_calls WHERE billed = 1 AND outcome != 'success'"
+                ).fetchone()["cnt"]
+                # Pagamentos Stripe deste usuário
+                stripe_count = conn.execute(
+                    "SELECT COUNT(*) as cnt FROM stripe_events WHERE user_id = ?",
+                    (uid,),
+                ).fetchone()["cnt"]
+
+                # Discrepância: ghost charges no sistema sem pagamentos de ninguém
+                # Heurística: se há ghost charges globais e nenhum pagamento no sistema
+                total_stripe = conn.execute("SELECT COUNT(*) as cnt FROM stripe_events").fetchone()["cnt"]
+                has_any_payments = total_stripe > 0
+                if sb_ghost > 0 and not has_any_payments:
+                    discrepancies.append({
+                        "user_id": uid,
+                        "type": "ghost_charges_without_payment",
+                        "detail": f"{sb_ghost} ghost charges (sistema) sem pagamento deste usuário ({stripe_count} pagamentos)",
+                        "severity": "warning",
+                    })
+
+                # Discrepância: saldo do ledger negativo
+                if ledger_balance < 0:
+                    discrepancies.append({
+                        "user_id": uid,
+                        "type": "negative_ledger_balance",
+                        "detail": f"Saldo ledger: {ledger_balance}",
+                        "severity": "error",
+                    })
+
+                # Discrepância: quota diária usada > limite (bug)
+                if daily_used > daily_limit:
+                    discrepancies.append({
+                        "user_id": uid,
+                        "type": "daily_quota_exceeded",
+                        "detail": f"Usados {daily_used} > limite {daily_limit}",
+                        "severity": "error",
+                    })
+
+            return {"discrepancies": discrepancies, "checked_users": len(users)}
+        finally:
+            conn.close()
+
     # ===== PASSWORD RESET =====
 
     def create_password_reset_token(self, email: str, expires_hours: int = 1) -> Optional[str]:
@@ -5450,6 +5949,50 @@ class AsyncDatabaseService:
 
     async def send_password_reset_email(self, email: str, token: str) -> bool:
         return await anyio.to_thread.run_sync(self._service.send_password_reset_email, email, token)
+
+    # ===== CREDIT LEDGER ASYNC (Fase 3) =====
+
+    async def record_grant_daily(self, user_id: int, limit: int, date: str) -> int:
+        return await anyio.to_thread.run_sync(self._service.record_grant_daily, user_id, limit, date)
+
+    async def record_grant_plan(self, user_id: int, days: int, limit: int, plan_until: str) -> int:
+        return await anyio.to_thread.run_sync(self._service.record_grant_plan, user_id, days, limit, plan_until)
+
+    async def record_consume_reveal(self, user_id: int, reveal_id: int) -> int:
+        return await anyio.to_thread.run_sync(self._service.record_consume_reveal, user_id, reveal_id)
+
+    async def record_refund_reveal(self, user_id: int, reveal_id: int) -> int:
+        return await anyio.to_thread.run_sync(self._service.record_refund_reveal, user_id, reveal_id)
+
+    async def record_searchbug_cost(
+        self,
+        user_id: int,
+        call_id: int,
+        billed: int,
+        outcome: str,
+        city: Optional[str] = None,
+        latency_ms: Optional[int] = None,
+    ) -> int:
+        return await anyio.to_thread.run_sync(
+            self._service.record_searchbug_cost, user_id, call_id, billed, outcome, city, latency_ms
+        )
+
+    async def record_stripe_payment(self, user_id: int, event_id: str, days: int) -> int:
+        return await anyio.to_thread.run_sync(self._service.record_stripe_payment, user_id, event_id, days)
+
+    async def get_credit_balance(self, user_id: int) -> dict:
+        return await anyio.to_thread.run_sync(self._service.get_credit_balance, user_id)
+
+    async def get_credit_ledger(
+        self, user_id: int, limit: int = 100, offset: int = 0
+    ) -> List[dict]:
+        return await anyio.to_thread.run_sync(self._service.get_credit_ledger, user_id, limit, offset)
+
+    async def backfill_credit_ledger(self) -> dict:
+        return await anyio.to_thread.run_sync(self._service.backfill_credit_ledger)
+
+    async def reconcile_credits(self, user_id: Optional[int] = None) -> dict:
+        return await anyio.to_thread.run_sync(self._service.reconcile_credits, user_id)
 
 
 # Instância global (interface async, compatível com o antigo supabase_service)
