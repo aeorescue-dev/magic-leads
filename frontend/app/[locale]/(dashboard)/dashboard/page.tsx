@@ -47,7 +47,7 @@ import {
   LeadOccurrence, fetchLeadOccurrences,
   fetchDashboardSummary, DashboardSummary,
   fetchScraperStatus, ScraperRunState,
-  fetchPublicMetrics, PublicMetrics, EMPTY_PUBLIC_METRICS
+  fetchPublicMetrics, PublicMetrics, EMPTY_PUBLIC_METRICS, RELEASE_REASONS
 } from "@/lib/api-client";
 
 // Tipo enriquecido para o modal de revelação (com histórico e ocorrências)
@@ -1078,6 +1078,17 @@ const URGENCIES = ["all", "high", "medium", "low"];
   const T = theme === "dark" ? DARK : LIGHT;
   const isDark = theme === "dark";
 
+  // Motivo de liberação legível. `reveal_timeout` é gerado pelo watchdog
+  // (não escolhido pelo utilizador) e aparecia CRU em "Meus Leads" — foi
+  // assim que um cliente leu um código técnico como se fosse um erro do
+  // sistema. Motivos desconhecidos continuam visíveis em vez de sumirem.
+  const releaseReasonLabel = (reason: string) => {
+    const known = RELEASE_REASONS.find((r) => r.value === reason);
+    if (known) return t(known.key) || known.label;
+    if (reason === "reveal_timeout") return t("release.reason.reveal_timeout");
+    return reason;
+  };
+
   // Modal action buttons for corporate vs regular leads
   const getModalActionButtons = () => {
     if (!selectedLead) return null;
@@ -1972,7 +1983,8 @@ const URGENCIES = ["all", "high", "medium", "low"];
                             </div>
                             {lead.release_reason && (
                               <div className="text-[11px] mt-1 text-slate-500">
-                                {t("dashboard.field.reason")}: {lead.release_reason}
+                                {t("dashboard.field.reason")}:{" "}
+                                {releaseReasonLabel(lead.release_reason)}
                               </div>
                             )}
                           </div>
