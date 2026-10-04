@@ -168,19 +168,49 @@ def collision_key(row: sqlite3.Row) -> tuple[str, str]:
     return (addr.upper(), (row["city"] or "").upper())
 
 
+def _has_value(value) -> bool:
+    """O campo tem conteúdo, seja INTEGER, TEXT ou None.
+
+    `reserved_by`/`converted_by` são INTEGER (REFERENCES users(id)) no schema
+    real, não TEXT. Chamar `.strip()` em cima de um int rebenta — e rebentou em
+    produção (HTTP 500) só depois de a migração estar deployada. E 0 conta como
+    vazio: os ids de utilizador começam em 1, portanto 0 é o estado "sem dono".
+    """
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (int, float)):
+        return value != 0
+    return True
+
+
 def is_pristine(row: sqlite3.Row) -> bool:
     """A linha nunca foi tocada por um utilizador nem por uma venda?"""
-    if (row["reserved_by"] or "").strip():
+    # Um schema mais antigo pode não ter todas estas colunas; em vez de rebentar,
+    # uma coluna ausente conta como "sem actividade".
+    keys = set(row.keys())
+
+    def g(name, default=None):
+        return row[name] if name in keys else default
+
+    if _has_value(g("reserved_by")):
         return False
-    if (row["converted_by"] or "").strip() or row["converted_at"]:
+    if _has_value(g("converted_by")) or _has_value(g("converted_at")):
         return False
-    if row["revealed_at"]:
+    if _has_value(g("revealed_at")):
         return False
-    if (row["contact_count"] or 0) > 0:
+    if (g("contact_count", 0) or 0) > 0:
         return False
-    if (row["lead_status"] or "").strip().lower() not in PRISTINE_STATUSES:
+    if str(g("lead_status") or "").strip().lower() not in PRISTINE_STATUSES:
         return False
     return True
+
+
+def available_enrichment_fields(row: sqlite3.Row) -> tuple[str, ...]:
+    """Só os campos de enriquecimento que existem mesmo nesta tabela."""
+    keys = set(row.keys())
+    return tuple(f for f in ENRICHMENT_FIELDS if f in keys)
 
 
 def merge_rank(row: sqlite3.Row) -> tuple:
@@ -191,7 +221,7 @@ def merge_rank(row: sqlite3.Row) -> tuple:
         1 if row["owner_email"] else 0,
         1 if row["mailing_address"] else 0,
         1 if row["lat"] is not None else 0,
-        sum(1 for f in ENRICHMENT_FIELDS if row[f] not in (None, "")),
+        sum(1 for f in available_enrichment_fields(row) if row[f] not in (None, "")),
         str(row["date_reported"] or ""),
         int(row["id"]),
     )
@@ -227,10 +257,12 @@ def plan_merges(groups: dict[tuple[str, str], list[sqlite3.Row]]) -> tuple[list[
             continue
         ordered = sorted(rows, key=merge_rank, reverse=True)
         winner, losers = ordered[0], ordered[1:]
-        # Não apagar nada que o vencedor não consiga substituir.
+        # Não apagar nada que o vencedor não consiga substituir. Só se
+        # consideram campos que existam na tabela.
+        fields = available_enrichment_fields(winner)
         absorbed = {}
         for loser in losers:
-            for f in ENRICHMENT_FIELDS:
+            for f in fields:
                 if winner[f] in (None, "") and loser[f] not in (None, ""):
                     absorbed[f] = loser[f]
         mergeable.append(

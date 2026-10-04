@@ -36,8 +36,8 @@ def client(monkeypatch, tmp_path):
             state TEXT, zip_code TEXT, owner_name TEXT, owner_phone TEXT,
             owner_email TEXT, owner_status TEXT, mailing_address TEXT, lat REAL,
             lng REAL, bbl TEXT, address_unit TEXT, image_url TEXT, source_url TEXT,
-            county TEXT, date_reported TEXT, lead_status TEXT, reserved_by TEXT,
-            reserved_until TEXT, contact_count INTEGER, converted_by TEXT,
+            county TEXT, date_reported TEXT, lead_status TEXT, reserved_by INTEGER,
+            reserved_until TEXT, contact_count INTEGER, converted_by INTEGER,
             converted_at TEXT, revealed_at TEXT
         );
         INSERT INTO leads VALUES

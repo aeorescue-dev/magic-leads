@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from backend.scripts.normalize_addresses import (  # noqa: E402
     ENRICHMENT_FIELDS,
+    available_enrichment_fields,
     find_collision_groups,
     is_pristine,
     merge_rank,
@@ -25,7 +26,10 @@ from backend.scripts.normalize_addresses import (  # noqa: E402
     plan_normalisation,
 )
 
-INT_COLUMNS = ("id", "contact_count")
+# Tipos REAIS de `leads` (ver backend/services/db.py). reserved_by/converted_by
+# são INTEGER (REFERENCES users(id)) —_declará-los TEXT aqui escondeu um bug que
+# só apareceu em produção (HTTP 500 em is_pristine).
+INT_COLUMNS = ("id", "contact_count", "reserved_by", "converted_by")
 
 COLUMNS = [
     "id", "external_id", "source_type", "address", "city", "state", "zip_code",
@@ -158,6 +162,50 @@ def test_rows_with_user_or_commercial_activity_are_never_merged(signal):
 def test_is_pristine_accepts_the_normal_unused_row():
     assert is_pristine(make_row(id=1, address="X", lead_status="available"))
     assert is_pristine(make_row(id=1, address="X", lead_status=None))
+
+
+@pytest.mark.parametrize("col", ["reserved_by", "converted_by"])
+def test_is_pristine_handles_integer_user_ids(col):
+    """Regressão de produção: estas colunas são INTEGER, não TEXT.
+
+    Com TEXT, `(row[col] or "").strip()` funcionava. Com INTEGER rebentava com
+    AttributeError e a rota devolvia HTTP 500 em produção.
+    """
+    blocked = is_pristine(make_row(id=1, address="X", **{col: 42}))
+    assert blocked is False, f"{col}=42 tem de contar como actividade"
+
+
+def test_is_pristine_with_zero_integer_ids_is_still_pristine():
+    """0 e o valor vazio de uma coluna INTEGER: nao e actividade."""
+    assert is_pristine(make_row(id=1, address="X", reserved_by=0, converted_by=0))
+
+
+def test_merge_with_integer_columns_survives():
+    """O caminho completo da fusao tem de funcionar com o schema real."""
+    rows = load_rows([
+        {"id": 1, "address": "441 BROOKLYN AVENUE, NYC, NY 11225", "owner_name": "LLC",
+         "reserved_by": 0, "converted_by": 0, "contact_count": 0},
+        {"id": 2, "address": "441 BROOKLYN AVENUE, NYC, NY", "owner_phone": "5551234",
+         "reserved_by": 0, "converted_by": 0, "contact_count": 0},
+    ])
+    mergeable, blocked = plan_merges(find_collision_groups(rows))
+    assert not blocked
+    assert len(mergeable) == 1
+    assert mergeable[0]["absorbed"] == {"owner_phone": "5551234"}
+
+
+def test_available_enrichment_fields_ignores_missing_columns():
+    """Uma base mais antiga, sem `county`, nao pode rebentar a migracao."""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE leads (id INTEGER, address TEXT, owner_name TEXT)")
+    conn.execute("INSERT INTO leads VALUES (1, 'X', 'LLC')")
+    conn.commit()
+    row = conn.execute("SELECT * FROM leads").fetchone()
+    fields = available_enrichment_fields(row)
+    assert "owner_name" in fields
+    assert "county" not in fields
+    conn.close()
 
 
 def test_merge_rank_prefers_more_enriched_then_newer():
