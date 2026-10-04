@@ -340,16 +340,27 @@ def _verify(conn: sqlite3.Connection) -> dict:
             "SELECT COUNT(*) FROM leads WHERE address IS NULL OR TRIM(address) = ''"
         )
     if "address" in cols and "city" in cols:
-        out["rows_with_city_in_address"] = q(
-            "SELECT COUNT(*) FROM leads WHERE address IS NOT NULL AND city IS NOT NULL"
-            " AND TRIM(city) <> ''"
-            " AND UPPER(address) LIKE '%' || UPPER(TRIM(city)) || '%'"
-        )
-        out["duplicate_address_city_groups"] = q(
-            "SELECT COUNT(*) FROM (SELECT address, city FROM leads"
-            " WHERE address IS NOT NULL AND TRIM(address) <> ''"
-            " GROUP BY address, city HAVING COUNT(*) > 1)"
-        )
+            # Substring: apanha tambem nomes de rua legitimos como
+            # "NEW YORK AVE" numa cidade chamada NEW YORK. Util para ver a
+            # ordem de grandeza, nao para acusar ninguem.
+            out["rows_with_city_in_address"] = q(
+                "SELECT COUNT(*) FROM leads WHERE address IS NOT NULL AND city IS NOT NULL"
+                " AND TRIM(city) <> ''"
+                " AND UPPER(address) LIKE '%' || UPPER(TRIM(city)) || '%'"
+            )
+            # A assinatura real do bug: a cidade no FIM do address
+            # ("123 MAIN ST, AUSTIN" / "123 MAIN ST AUSTIN"). Esta e a
+            # contagem accionavel; a de cima e so contexto.
+            out["rows_ending_with_city"] = q(
+                "SELECT COUNT(*) FROM leads WHERE address IS NOT NULL AND city IS NOT NULL"
+                " AND TRIM(city) <> ''"
+                " AND UPPER(TRIM(address)) LIKE '%' || UPPER(TRIM(city))"
+            )
+            out["duplicate_address_city_groups"] = q(
+                "SELECT COUNT(*) FROM (SELECT address, city FROM leads"
+                " WHERE address IS NOT NULL AND TRIM(address) <> ''"
+                " GROUP BY address, city HAVING COUNT(*) > 1)"
+            )
     for table, key in ((BACKUP_TABLE, "address_backup_rows"),
                        (MERGE_BACKUP_TABLE, "merge_backup_rows")):
         if _table_exists(conn, table):

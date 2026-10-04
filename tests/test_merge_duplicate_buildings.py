@@ -226,25 +226,33 @@ def test_verify_counters_report_the_two_regressions_we_care_about():
 
     db = build_db([])
     with db:
+        # Bug real: cidade no fim do address.
         db.execute(
             "INSERT INTO leads (id, external_id, source_type, address, city)"
             " VALUES (1, 'a', 's', '123 MAIN ST, AUSTIN', 'Austin')"
         )
+        # Rua que se chama como a cidade: legitimo, nao e bug.
         db.execute(
             "INSERT INTO leads (id, external_id, source_type, address, city)"
-            " VALUES (2, 'b', 's', '', 'Austin')"
+            " VALUES (2, 'b', 's', 'NEW YORK AVE', 'New York')"
         )
         db.execute(
             "INSERT INTO leads (id, external_id, source_type, address, city)"
-            " VALUES (3, 'c', 's', '77 OAK AVE', 'Austin')"
+            " VALUES (3, 'c', 's', '', 'Austin')"
         )
         db.execute(
             "INSERT INTO leads (id, external_id, source_type, address, city)"
             " VALUES (4, 'd', 's', '77 OAK AVE', 'Austin')"
         )
+        db.execute(
+            "INSERT INTO leads (id, external_id, source_type, address, city)"
+            " VALUES (5, 'e', 's', '77 OAK AVE', 'Austin')"
+        )
         out = _verify(db)
     assert out["empty_addresses"] == 1
-    assert out["rows_with_city_in_address"] == 1
+    # 'NEW YORK AVE' contem a cidade mas nao termina nela: so conta no substring.
+    assert out["rows_with_city_in_address"] == 2
+    assert out["rows_ending_with_city"] == 1
     assert out["duplicate_address_city_groups"] == 1
 
 
