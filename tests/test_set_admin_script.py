@@ -10,11 +10,17 @@ from __future__ import annotations
 import os
 import sqlite3
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-PY = str(ROOT / "backend" / "venv" / "Scripts" / "python.exe")
+# O interpretador que corre os testes, nao um path de venv hardcoded. O path
+# anterior (backend/venv/Scripts/python.exe) so existe em Windows, portanto em
+# Linux o subprocesso levantava FileNotFoundError e este ficheiro inteiro
+# falhava no CI. sys.executable funciona em qualquer plataforma e garante que o
+# script e testado com o mesmo Python que corre a suite.
+PY = sys.executable
 
 
 def _seed(db_path: str) -> None:
