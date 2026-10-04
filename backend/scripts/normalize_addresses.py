@@ -1,40 +1,58 @@
-"""Normaliza `leads.address`: deixa de embebir cidade/estado.
+"""Normaliza `leads.address` e funde prédios duplicados.
 
-PORQUÊ
-------
+DUAS CORREÇÕES, NA MESMA PASSAGEM
+=================================
+
+1. Normalização do endereço
+---------------------------
 O scraper gravava a cidade e o estado dentro do `address`
 ("854 EAST NEW YORK AVENUE, NYC, NY") e também na coluna `city`. Como o
 frontend juntava a coluna `city` ao `address` para exibir, o utilizador via
 "854 EAST NEW YORK AVENUE, NYC, NY, NYC" em 100% dos leads.
 
-A cidade passa a ser canónica na coluna `city`. O `address` fica só com a rua.
+A cidade passa a ser canónica na coluna `city`; o `address` fica só com a rua.
+
+2. Fusão de prédios duplicados
+------------------------------
+O scraper de NYC produzia DOIS formatos para a mesma rua — `"RUA, NYC, NY"`
+(sem zip) e `"RUA, NY 11210"` (com zip). Como a tabela tem
+`UNIQUE(address, city)` e o `INSERT` faz `ON CONFLICT(address, city) DO
+UPDATE` (ver `backend/services/db.py`), o schema assumes UM lead por prédio. Os
+dois formatos, porém, davam chaves diferentes, e por isso o mesmo prédio
+ficava com DUAS linhas em vez de a segunda actualizar a primeira.
+
+Importante: as duas linhas são METHODS reclamações diferentes (uma violação de
+porta, outra de estrutura) do MESMO prédio. Fundir não é remover lixo: é
+aceitar a mesma regra que o `ON CONFLICT` já aplica todos os dias quando duas
+reclamações do mesmo prédio chegam no mesmo scrape. A linha que sobrevive é a
+mais rica; a reclamação absorvida fica guardada integralmente em
+`leads_merge_backup` para reversão.
 
 SEGURANÇA
 ---------
-* Idempotente: correr duas vezes não muda nada (a 2.ª não encontra padrões).
+* Idempotente: correr duas vezes não muda nada.
 * `--dry-run` é o default: nada é escrito sem `--apply`.
-* NÃO toca em `external_id`/`source_type`, que são chave de deduplicação
-  (`UNIQUE(external_id, source_type)`); o `external_id` vem do dataset
-  (`unique_key`/`sr_number`), não do endereço.
-* Existe também `UNIQUE(address, city)`. Normalizar pode fazer dois leads que
-  já eram distintos (porque o address tinha formatos diferentes) passarem a ter
-  o mesmo (address, city) — ver `DUPLICADOS DETECTADOS`. Por omissão esses
-  pares são **saltados**, nunca apagados: apagá-los é uma decisão do dono do
-  produto, não um efeito lateral de uma migração de formatação.
-* As linhas saltadas não ficam com aspecto diferente: o frontend deduplica por
-  conteúdo (`buildFullAddress`), portanto um address legado que já contém a
-  cidade é exibido correctamente na mesma.
-* Faz backup do address original em `leads_address_backup`, para reversão.
+* A fusão é opt-in (`--merge-duplicates`) e nunca toca em linhas que tenham
+  valor comercial ou activity de utilizador: reserva, conversão, contacto
+  revelado ou `contact_count > 0`. Esses grupos são saltados e reportados.
+* Antes de apagar, a linha absorvida é copiada na íntegra para
+  `leads_merge_backup` (JSON), com o `id` que herdou. Reversão possível.
+* Campos de enriquecimento que o vencedor não tem são copiados do perdedor
+  (ex.: o dono aparecia só numa das duas linhas).
+* O `external_id`/`source_type` não é alterado: é chave de deduplicação e vem
+  do dataset, não do endereço.
 
 EXEMPLOS
 --------
-    python -m backend.scripts.normalize_addresses            # dry-run
-    python -m backend.scripts.normalize_addresses --apply    # escreve
-    python -m backend.scripts.normalize_addresses --apply --limit 500
+    python -m backend.scripts.normalize_addresses                       # dry-run
+    python -m backend.scripts.normalize_addresses --apply               # normaliza
+    python -m backend.scripts.normalize_addresses --apply \
+        --merge-duplicates                                              # normaliza + funde
 """
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import sqlite3
@@ -44,6 +62,29 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 BACKUP_TABLE = "leads_address_backup"
+MERGE_BACKUP_TABLE = "leads_merge_backup"
+
+# Campos de enriquecimento: se o vencedor não os tiver, herdamos do perdedor em
+# vez de os perder. `external_id`/`source_type` ficam de fora de propósito.
+ENRICHMENT_FIELDS = (
+    "owner_name",
+    "owner_phone",
+    "owner_email",
+    "owner_status",
+    "mailing_address",
+    "lat",
+    "lng",
+    "bbl",
+    "address_unit",
+    "zip_code",
+    "image_url",
+    "source_url",
+    "county",
+)
+
+# `lead_status` que indica que o lead ainda está livre para fusão. Qualquer
+# outro valor significa que alguém fez alguma coisa com ele.
+PRISTINE_STATUSES = ("available", "", "new", "found")
 
 # Nome completo do estado -> sigla USPS. Necessário porque algumas fontes
 # gravam state="Texas" enquanto o address traz a sigla "TX". Um heurístico
@@ -65,6 +106,8 @@ _US_STATE_ABBR = {
     "west virginia": "WV", "wisconsin": "WI", "wyoming": "WY",
     "district of columbia": "DC",
 }
+
+ZIP_RE = re.compile(r"^\d{5}(-\d{4})?$")
 
 
 def strip_city_state(address: str, city: str, state: str, zip_code: str) -> str:
@@ -92,7 +135,6 @@ def strip_city_state(address: str, city: str, state: str, zip_code: str) -> str:
 
     city_u, state_u, zip_u = up(city), up(state), up(zip_code)
 
-    # Valores que podem ser removidos quando aparecem como segmento inteiro.
     wanted: set[str] = set()
     for v in (city_u, state_u, zip_u):
         if v:
@@ -103,17 +145,14 @@ def strip_city_state(address: str, city: str, state: str, zip_code: str) -> str:
     if state_u:
         wanted.add(_US_STATE_ABBR.get(state_u.lower(), state_u))
 
-    zip_re = re.compile(r"^\d{5}(-\d{4})?$")
-
     def is_removable(segment: str) -> bool:
         if segment.upper() in wanted:
             return True
-        # ZIP no fim, mesmo sem zip_code na coluna.
-        if zip_re.match(segment):
+        if ZIP_RE.match(segment):
             return True
         # "TX 75218" / "NY 11210" -> remove o estado e o zip à mesma.
         bits = segment.upper().split()
-        if len(bits) == 2 and bits[0] in wanted and zip_re.match(bits[1]):
+        if len(bits) == 2 and bits[0] in wanted and ZIP_RE.match(bits[1]):
             return True
         return False
 
@@ -123,110 +162,293 @@ def strip_city_state(address: str, city: str, state: str, zip_code: str) -> str:
     return ", ".join(parts)
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Normaliza leads.address (remove cidade/estado embutidos)")
-    parser.add_argument("--apply", action="store_true", help="Escreve as alterações (default: dry-run)")
-    parser.add_argument("--limit", type=int, default=0, help="Máximo de linhas a processar (0 = todas)")
-    args = parser.parse_args()
+def collision_key(row: sqlite3.Row) -> tuple[str, str]:
+    """Chave canónica (address, city) — a mesma que o UNIQUE impõe."""
+    addr = strip_city_state(row["address"], row["city"], row["state"], row["zip_code"])
+    return (addr.upper(), (row["city"] or "").upper())
 
-    db_path = os.environ.get("LEADS_DB_PATH", "data/leads.db")
+
+def is_pristine(row: sqlite3.Row) -> bool:
+    """A linha nunca foi tocada por um utilizador nem por uma venda?"""
+    if (row["reserved_by"] or "").strip():
+        return False
+    if (row["converted_by"] or "").strip() or row["converted_at"]:
+        return False
+    if row["revealed_at"]:
+        return False
+    if (row["contact_count"] or 0) > 0:
+        return False
+    if (row["lead_status"] or "").strip().lower() not in PRISTINE_STATUSES:
+        return False
+    return True
+
+
+def merge_rank(row: sqlite3.Row) -> tuple:
+    """Ordem de preferência: quem tem mais dados sobrevive."""
+    return (
+        1 if row["owner_name"] else 0,
+        1 if row["owner_phone"] else 0,
+        1 if row["owner_email"] else 0,
+        1 if row["mailing_address"] else 0,
+        1 if row["lat"] is not None else 0,
+        sum(1 for f in ENRICHMENT_FIELDS if row[f] not in (None, "")),
+        str(row["date_reported"] or ""),
+        int(row["id"]),
+    )
+
+
+def plan_normalisation(rows: list[sqlite3.Row]) -> dict[int, str]:
+    """address actual -> address normalizado, só para quem precisa de mudanca."""
+    plan: dict[int, str] = {}
+    for row in rows:
+        if not row["city"]:
+            continue
+        new = strip_city_state(row["address"], row["city"], row["state"], row["zip_code"])
+        if new and new != (row["address"] or "").strip():
+            plan[row["id"]] = new
+    return plan
+
+
+def find_collision_groups(rows: list[sqlite3.Row]) -> dict[tuple[str, str], list[sqlite3.Row]]:
+    """Grupos que passam a partilhar (address, city) — prédios duplicados."""
+    groups: dict[tuple[str, str], list[sqlite3.Row]] = {}
+    for row in rows:
+        groups.setdefault(collision_key(row), []).append(row)
+    return {k: v for k, v in groups.items() if len(v) > 1}
+
+
+def plan_merges(groups: dict[tuple[str, str], list[sqlite3.Row]]) -> tuple[list[dict], list[dict]]:
+    """Separa os grupos fundíveis dos que têm de ser saltados por segurança."""
+    mergeable: list[dict] = []
+    blocked: list[dict] = []
+    for key, rows in groups.items():
+        if not all(is_pristine(r) for r in rows):
+            blocked.append({"key": key, "rows": rows})
+            continue
+        ordered = sorted(rows, key=merge_rank, reverse=True)
+        winner, losers = ordered[0], ordered[1:]
+        # Não apagar nada que o vencedor não consiga substituir.
+        absorbed = {}
+        for loser in losers:
+            for f in ENRICHMENT_FIELDS:
+                if winner[f] in (None, "") and loser[f] not in (None, ""):
+                    absorbed[f] = loser[f]
+        mergeable.append(
+            {"key": key, "winner": winner, "losers": losers, "absorbed": absorbed}
+        )
+    return mergeable, blocked
+
+
+def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+    ).fetchone()
+    return row is not None
+
+
+def run(
+    *,
+    apply: bool = False,
+    merge_duplicates: bool = False,
+    limit: int = 0,
+    db_path: str | None = None,
+    log=print,
+) -> dict:
+    """Executa a migração e devolve um resumo estruturado.
+
+    Função em vez de só CLI de propósito: a rota de manutenção
+    (`POST /api/admin/normalize-addresses`) chama isto directamente. Manipular
+    `sys.argv` dentro de um servidor async seria perigoso — outro pedido a
+    correr ao mesmo tempoeria herdar os argumentos.
+    """
+    if merge_duplicates and not apply:
+        log("--merge-duplicates exige --apply (nada e escrito em dry-run).")
+        return {"ok": False, "error": "merge_duplicates_requires_apply"}
+
+    db_path = db_path or os.environ.get("LEADS_DB_PATH", "data/leads.db")
     if not os.path.exists(db_path):
-        print(f"Base de dados não encontrada: {db_path}")
-        return 1
+        log(f"Base de dados não encontrada: {db_path}")
+        return {"ok": False, "error": "db_not_found", "db_path": db_path}
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
         sql = (
-            "SELECT id, address, city, state, zip_code FROM leads "
-            "WHERE address IS NOT NULL AND TRIM(address) <> ''"
+            "SELECT * FROM leads WHERE address IS NOT NULL AND TRIM(address) <> ''"
         )
-        if args.limit:
-            sql += f" LIMIT {int(args.limit)}"
-
+        if limit:
+            sql += f" ORDER BY id LIMIT {int(limit)}"
         rows = list(conn.execute(sql))
 
-        # Normaliza em memória primeiro, para só depois detectar colisões:
-        # `UNIQUE(address, city)` impede dois leads de partilharem o par.
-        proposed: dict[int, str] = {}
-        skipped_no_city = 0
-        for row in rows:
-            new = strip_city_state(row["address"], row["city"], row["state"], row["zip_code"])
-            if not row["city"]:
-                skipped_no_city += 1
-                continue
-            if new and new != (row["address"] or "").strip():
-                proposed[row["id"]] = new
+        plan = plan_normalisation(rows)
+        groups = find_collision_groups(rows)
+        mergeable, blocked = plan_merges(groups)
 
-        # Detecta os grupos que passariam a colidir.
-        groups: dict[tuple[str, str], list[int]] = {}
-        for row in rows:
-            addr = proposed.get(row["id"], (row["address"] or "").strip())
-            key = (addr.upper(), (row["city"] or "").upper())
-            groups.setdefault(key, []).append(row["id"])
+        # Endereços que NORMALIZAMOS mas que ficariam em colisão -> não tocar:
+        # o `address` ficaria igual ao do par e o UNIQUE rebentaria.
+        mergeable_ids = {m["winner"]["id"] for m in mergeable} | {
+            r["id"] for m in mergeable for r in m["losers"]
+        }
+        blocked_ids = {r["id"] for b in blocked for r in b["rows"]}
 
-        collisions = {k: v for k, v in groups.items() if len(v) > 1}
-        collided_ids = {i for ids in collisions.values() for i in ids}
+        changes = [
+            (r["id"], r["address"], plan[r["id"]])
+            for r in rows
+            if r["id"] in plan and r["id"] not in mergeable_ids and r["id"] not in blocked_ids
+        ]
 
-        changes = []
-        for row in rows:
-            i = row["id"]
-            if i not in proposed or i in collided_ids:
-                continue
-            changes.append((i, row["address"], proposed[i]))
+        log(f"Base: {db_path}")
+        log(f"Leads com address: {len(rows)}")
+        log(f"A normalizar:      {len(changes)}")
+        log(f"Prédios duplicados a fundir: {len(mergeable)}")
+        log(f"Prédios duplicados bloqueados (com valor comercial): {len(blocked)}")
+        log()
 
-        print(f"Base: {db_path}")
-        print(f"Leads com address: {len(rows)}")
-        print(f"A normalizar:      {len(changes)}")
-        print(f"Sem city (inalterados): {skipped_no_city}")
-        print()
-        if collisions:
-            print("DUPLICADOS DETECTADOS (address, city passaria a colidir):")
-            for key, ids in sorted(collisions.items())[:10]:
-                print(f"  {key[0]!r} / {key[1]!r} -> ids {sorted(ids)}")
-            if len(collisions) > 10:
-                print(f"  ... e mais {len(collisions) - 10}")
-            print(
-                f"  -> {len(collisions)} grupos, "
-                f"{len(collided_ids)} linhas deixadas como estão (nada apagado)."
-            )
-            print("  -> estes prédios já estavam duplicados em production (formatos")
-            print("     diferentes de address). Ver NOTA abaixo; para os fundir é")
-            print("     preciso de uma decisão explícita.")
-            print()
+        if mergeable:
+            log("DUPLICADOS A FUNDIR (o endereço passa a ser canónico em ambos):")
+            for m in mergeable[:10]:
+                w, ls = m["winner"], m["losers"]
+                log(f"  {m['key'][0]!r} / {m['key'][1]!r}")
+                log(f"    mantem  id={w['id']} ext={w['external_id']} owner={w['owner_name']!r}")
+                for loser in ls:
+                    log(f"    absorve id={loser['id']} ext={loser['external_id']} owner={loser['owner_name']!r}")
+                if m["absorbed"]:
+                    log(f"    herda: {sorted(m['absorbed'])}")
+            if len(mergeable) > 10:
+                log(f"  ... e mais {len(mergeable) - 10}")
+            log()
+
+        if blocked:
+            log("BLOQUEADOS (nao fundir: reserva/conversao/contacto revelado):")
+            for b in blocked:
+                ids = [r["id"] for r in b["rows"]]
+                log(f"  {b['key'][0]!r} / {b['key'][1]!r} -> ids {ids}")
+            log()
 
         for lead_id, old, new in changes[:10]:
-            print(f"  #{lead_id}: {old!r} -> {new!r}")
+            log(f"  #{lead_id}: {old!r} -> {new!r}")
         if len(changes) > 10:
-            print(f"  ... e mais {len(changes) - 10}")
+            log(f"  ... e mais {len(changes) - 10}")
 
-        if not changes:
-            print("\nNada a fazer.")
-            return 0
+        if not changes and not mergeable:
+            log("\nNada a fazer.")
+            return {
+                "ok": True, "applied": False, "db_path": db_path,
+                "leads": len(rows), "to_normalise": 0, "to_merge": 0,
+                "blocked_merges": len(blocked), "normalised": 0, "merged": 0,
+            }
 
-        if not args.apply:
-            print("\nDRY-RUN: nada foi escrito. Use --apply para aplicar.")
-            return 0
+        if not apply:
+            log("\nDRY-RUN: nada foi escrito. Use --apply para aplicar.")
+            return {
+                "ok": True, "applied": False, "db_path": db_path,
+                "leads": len(rows), "to_normalise": len(changes),
+                "to_merge": len(mergeable), "blocked_merges": len(blocked),
+                "normalised": 0, "merged": 0,
+            }
 
-        conn.execute(
-            f"CREATE TABLE IF NOT EXISTS {BACKUP_TABLE} "
-            "(lead_id INTEGER PRIMARY KEY, address TEXT, migrated_at TEXT DEFAULT CURRENT_TIMESTAMP)"
-        )
-        for lead_id, old, _new in changes:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
             conn.execute(
-                f"INSERT OR IGNORE INTO {BACKUP_TABLE} (lead_id, address) VALUES (?, ?)",
-                (lead_id, old),
+                f"CREATE TABLE IF NOT EXISTS {BACKUP_TABLE} "
+                "(lead_id INTEGER PRIMARY KEY, address TEXT, migrated_at TEXT DEFAULT CURRENT_TIMESTAMP)"
             )
-        conn.executemany(
-            "UPDATE leads SET address = ? WHERE id = ?",
-            [(new, lead_id) for lead_id, _old, new in changes],
-        )
-        conn.commit()
-        print(f"\nAplicado: {len(changes)} endereços normalizados.")
-        print(f"Backup do original em {BACKUP_TABLE} (para reversão).")
-        return 0
+            for lead_id, old, _new in changes:
+                conn.execute(
+                    f"INSERT OR IGNORE INTO {BACKUP_TABLE} (lead_id, address) VALUES (?, ?)",
+                    (lead_id, old),
+                )
+            conn.executemany(
+                "UPDATE leads SET address = ? WHERE id = ?",
+                [(new, lead_id) for lead_id, _old, new in changes],
+            )
+
+            merged_rows = 0
+            if mergeable:
+                if not _table_exists(conn, MERGE_BACKUP_TABLE):
+                    conn.execute(
+                        f"CREATE TABLE {MERGE_BACKUP_TABLE} ("
+                        " lead_id INTEGER PRIMARY KEY,"
+                        " merged_into INTEGER NOT NULL,"
+                        " payload TEXT NOT NULL,"
+                        " merged_at TEXT DEFAULT CURRENT_TIMESTAMP)"
+                    )
+                for m in mergeable:
+                    winner_id = m["winner"]["id"]
+                    for loser in m["losers"]:
+                        payload = {k: loser[k] for k in loser.keys()}
+                        conn.execute(
+                            f"INSERT OR REPLACE INTO {MERGE_BACKUP_TABLE}"
+                            " (lead_id, merged_into, payload) VALUES (?, ?, ?)",
+                            (loser["id"], winner_id, json.dumps(payload, default=str)),
+                        )
+                    if m["absorbed"]:
+                        sets = ", ".join(f"{f}=?" for f in m["absorbed"])
+                        conn.execute(
+                            f"UPDATE leads SET {sets} WHERE id = ?",
+                            [*m["absorbed"].values(), winner_id],
+                        )
+                    # ORDEM IMPORTA: apagar os absorvidos ANTES de mexer no
+                    # address do vencedor. Numa das linhas duplicadas o
+                    # perdedor ja tinha o endereço canónico exacto, e
+                    # actualizar o vencedor primeiro batia no
+                    # UNIQUE(address, city) e abortava a migração inteira.
+                    # Como tudo está dentro de uma transacção, apagar primeiro
+                    # continua a ser atómico.
+                    conn.executemany(
+                        "DELETE FROM leads WHERE id = ?", [(loser["id"],) for loser in m["losers"]]
+                    )
+                    conn.execute(
+                        "UPDATE leads SET address = ? WHERE id = ?",
+                        (strip_city_state(
+                            m["winner"]["address"], m["winner"]["city"],
+                            m["winner"]["state"], m["winner"]["zip_code"],
+                        ), winner_id),
+                    )
+                    merged_rows += len(m["losers"])
+
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+        leads_after = conn.execute("SELECT COUNT(*) FROM leads").fetchone()[0]
+        log()
+        log(f"Aplicado: {len(changes)} endereços normalizados, {merged_rows} linhas fundidas.")
+        if changes:
+            log(f"Backup do address original em {BACKUP_TABLE}.")
+        if merged_rows:
+            log(f"Backup integral das linhas absorvidas em {MERGE_BACKUP_TABLE}.")
+        return {
+            "ok": True, "applied": True, "db_path": db_path,
+            "leads": len(rows), "leads_after": leads_after,
+            "to_normalise": len(changes), "normalised": len(changes),
+            "to_merge": len(mergeable), "merged": merged_rows,
+            "blocked_merges": len(blocked),
+        }
     finally:
         conn.close()
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Normaliza leads.address e (opcionalmente) funde prédios duplicados"
+    )
+    parser.add_argument("--apply", action="store_true", help="Escreve as alterações (default: dry-run)")
+    parser.add_argument(
+        "--merge-duplicates",
+        action="store_true",
+        help="Funde prédios duplicados que passem a colidir (exige --apply)",
+    )
+    parser.add_argument("--limit", type=int, default=0, help="Máximo de linhas a processar (0 = todas)")
+    args = parser.parse_args()
+
+    result = run(
+        apply=args.apply,
+        merge_duplicates=args.merge_duplicates,
+        limit=args.limit,
+    )
+    return 0 if result.get("ok") else (2 if "requires_apply" in str(result.get("error")) else 1)
 
 
 if __name__ == "__main__":

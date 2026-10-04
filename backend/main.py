@@ -1458,6 +1458,37 @@ async def admin_credit_reconcile(
     return result
 
 
+@app.post("/api/admin/normalize-addresses")
+def admin_normalize_addresses(
+    apply: bool = False,
+    merge_duplicates: bool = False,
+    limit: int = 0,
+    _ok: bool = Depends(_require_admin),
+):
+    """Normaliza `leads.address` e funde prédios duplicados.
+
+    Só faz sentido correr DENTRO do servidor: a base de produção é um ficheiro
+    SQLite num volume do Railway, e a migração tem de operar sobre esse
+    ficheiro — corrê-la a partir de uma máquina externa não a tocaria.
+
+    `apply` é false por omissão: o default é dry-run, que só relata o que faria.
+    `apply=true` escreve (irreversível sem o backup) e `merge_duplicates=true`
+    apaga linhas, exigindo `apply=true`.
+    """
+    from backend.scripts import normalize_addresses as mig
+
+    summary = mig.run(
+        apply=apply,
+        merge_duplicates=merge_duplicates,
+        limit=limit,
+        log=lambda *a, **k: logger.info("normalize_addresses: %s", " ".join(str(x) for x in a)),
+    )
+    if not summary.get("ok"):
+        # dry-run sem --apply é um erro de uso, não uma falha do servidor.
+        raise HTTPException(status_code=400, detail=summary.get("error", "migration_failed"))
+    return summary
+
+
 @app.get("/api/admin/alerts")
 async def admin_alerts(limit: int = 50, _admin: dict = Depends(_require_admin_user)):
     """Alertas de auditoria (Dead Man's Switch), incluindo reconhecidos."""
