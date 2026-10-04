@@ -1249,14 +1249,18 @@ class DatabaseService:
         conn = get_connection()
         try:
             like = f"%{query}%"
+            # city/state entram na pesquisa porque o `address` passou a guardar
+            # só a rua (a cidade tem coluna própria, canónica). Sem estas
+            # colunas, pesquisar "Chicago" deixava de encontrar os seus leads.
             rows = conn.execute(
                 """
                 SELECT * FROM leads
-                WHERE address LIKE ? OR owner_name LIKE ? OR owner_phone LIKE ?
+                WHERE address LIKE ? OR city LIKE ? OR state LIKE ?
+                   OR owner_name LIKE ? OR owner_phone LIKE ?
                 ORDER BY date_reported DESC
                 LIMIT ?
                 """,
-                (like, like, like, limit),
+                (like, like, like, like, like, limit),
             ).fetchall()
             return [dict(r) for r in rows]
         finally:

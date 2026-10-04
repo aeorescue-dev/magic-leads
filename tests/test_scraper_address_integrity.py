@@ -152,18 +152,42 @@ def test_normalize_keeps_address_resolvable_intact():
     assert address_is_resolvable(normalize_street("  2424   CRUGER   AVENUE "))
 
 
+def test_address_holds_only_the_street():
+    """Contrato canonico: `address` guarda SO a rua.
+
+    A cidade, o estado e o zip vivem em colunas proprias. Embebidos no address
+    davam "X ST, NYC, NY" e, como o frontend juntava outra vez a coluna city,
+    o utilizador via "X ST, NYC, NY, NYC". A garantia de "nao duplicar" e agora
+    trivial: a cidade nao entra no address.
+    """
+    lead = parse(hpd_row())
+    assert lead.address == "22 FRONT STAGG STREET"
+    assert lead.city == "NYC"
+    assert lead.state == "NY"
+
+
 def test_city_and_state_not_duplicated():
-    """A cidade e o estado já vivem em colunas próprias. A guarda evita repetir
-    quando a rua já os traz, o que daria "X ST, BROOKLYN, NY, NYC, NY"."""
+    """Regressao: o scraper nao pode acrescentar cidade/estado ao address.
+
+    Nota: "BROOKLYN" vem da propria coluna `streetname` da fonte e tem de
+    permanecer -- o nome da rua e dado. O que nao pode acontecer e o scraper
+    juntar a sua propria cidade/estado a um address que ja os menciona, o que
+    daria "X ST BROOKLYN, BROOKLYN, NY, NYC, NY".
+    """
     lead = parse(hpd_row(housenumber="22", streetname="STAGG STREET BROOKLYN"))
     assert lead.address.count("BROOKLYN") == 1, lead.address
-    assert lead.address.count("NYC") == 1, lead.address
+    assert "NYC" not in lead.address.upper(), lead.address
     assert "NY, NY" not in lead.address, lead.address
+    assert lead.address == "22 STAGG STREET BROOKLYN", lead.address
 
 
-def test_city_and_state_appended_once_when_street_lacks_them():
-    lead = parse(hpd_row())
-    assert lead.address == "22 FRONT STAGG STREET, NYC, NY"
+def test_city_and_state_come_from_their_own_columns():
+    """Onde quer que a rua ja traga a cidade, as colunas continuam a ser a
+    fonte da verdade (sao elas que a pesquisa e a migracao usam)."""
+    lead = parse(hpd_row(housenumber="22", streetname="STAGG STREET BROOKLYN"))
+    assert lead.city == "NYC"
+    assert lead.state == "NY"
+    assert lead.zip_code == "11206"
 
 
 def test_address_keeps_first_comma_segment_as_the_street():

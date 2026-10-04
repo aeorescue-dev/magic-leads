@@ -6,6 +6,8 @@ import {
   isIncompleteLead,
   isUnresolvableLead,
   shouldShowIncompleteBadge,
+  shouldShowAddressWarning,
+  countLeadsWithoutContact,
   type LeadDeliveryFlags,
 } from "./lead-delivery";
 
@@ -124,6 +126,50 @@ describe("shouldShowIncompleteBadge (o aviso discreto)", () => {
 
   it("NAO mostra para corporativo (tem nome e morada, so falta telefone)", () => {
     expect(shouldShowIncompleteBadge(PAYLOADS.corporativo)).toBe(false);
+  });
+});
+
+describe("shouldShowAddressWarning (badge por cartao)", () => {
+  // O aviso por cartao e so para o endereco irresolvivel. Um aviso em 100% dos
+  // cartoes (que era o que acontecia em producao) nao informa nada.
+  it("mostra para beco sem saida", () => {
+    expect(shouldShowAddressWarning(PAYLOADS.becoSemSaida)).toBe(true);
+  });
+
+  it("NAO mostra para lead so incompleto (falta telefone, nao o endereco)", () => {
+    expect(shouldShowAddressWarning(PAYLOADS.incompleto)).toBe(false);
+  });
+
+  it("NAO mostra para corporativo nem completo", () => {
+    expect(shouldShowAddressWarning(PAYLOADS.corporativo)).toBe(false);
+    expect(shouldShowAddressWarning(PAYLOADS.completo)).toBe(false);
+  });
+
+  it("nao rebenta com null/undefined", () => {
+    expect(shouldShowAddressWarning(null)).toBe(false);
+    expect(shouldShowAddressWarning(undefined)).toBe(false);
+  });
+});
+
+describe("countLeadsWithoutContact (resumo agregado)", () => {
+  it("conta os leads sem contacto na lista", () => {
+    expect(
+      countLeadsWithoutContact([PAYLOADS.incompleto, PAYLOADS.becoSemSaida, PAYLOADS.completo]),
+    ).toBe(2);
+  });
+
+  it("conta um payload corporativo como sem contacto (nao tem telefone)", () => {
+    expect(countLeadsWithoutContact([PAYLOADS.corporativo])).toBe(1);
+  });
+
+  it("devolve 0 para lista vazia ou ausente (para nao mostrar o banner)", () => {
+    expect(countLeadsWithoutContact([])).toBe(0);
+    expect(countLeadsWithoutContact(null)).toBe(0);
+    expect(countLeadsWithoutContact(undefined)).toBe(0);
+  });
+
+  it("devolve 0 quando todos tem contacto", () => {
+    expect(countLeadsWithoutContact([PAYLOADS.completo])).toBe(0);
   });
 });
 

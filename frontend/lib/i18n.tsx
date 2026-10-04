@@ -262,7 +262,9 @@ const PT: Dict = {
   "live.cat.grass": "Mato & Entulho",
   "live.cat.structure": "Estrutura",
   "live.cat.paint": "Pintura",
-  "live.cat.other": "Lead",
+  // Só aparece quando o lead não traz `issue_category`. "Lead" era
+  // enganador: parecia o ofício chumbo, e escondia que o dado falta.
+  "live.cat.other": "Sem categoria",
   "urgency.high": "URGENTE",
   "urgency.medium": "ALTA",
   "urgency.low": "NORMAL",
@@ -1043,6 +1045,13 @@ const PT: Dict = {
   "dashboard.action.revealed": "Revelado",
   "dashboard.action.drop": "Largar",
   "dashboard.data_protected": "Dados do dono protegidos",
+  // O aviso antigo ("Endereço incompleto — sem dados de contacto") acusava o
+  // endereço, mas a condição que o disparava é a ausência de contacto: 93,4%
+  // destes leads tem endereço resolvível. O texto passa a dizer o que falta.
+  "dashboard.badge.no_contact_data": "Sem telefone",
+  "dashboard.badge.address_unresolvable": "Endereço incompleto — sem contacto",
+  "dashboard.badge.contact_summary":
+    "{count} de {total} oportunidades sem telefone. Sem contacto, só é possível escrever por carta ou visita presencial.",
   "dashboard.badge.owner_identified": "Dono identificado",
   "dashboard.badge.no_owner_data": "Endereço incompleto — sem dados de contacto",
   "dashboard.badge.closed": "Encerrado",
@@ -1314,7 +1323,7 @@ const EN: Dict = {
   "live.cat.grass": "Grass & Debris",
   "live.cat.structure": "Structure",
   "live.cat.paint": "Painting",
-  "live.cat.other": "Lead",
+  "live.cat.other": "Uncategorised",
   "urgency.high": "URGENT",
   "urgency.medium": "HIGH",
   "urgency.low": "NORMAL",
@@ -2114,6 +2123,10 @@ const EN: Dict = {
   "dashboard.action.revealed": "Revealed",
   "dashboard.action.drop": "Drop",
   "dashboard.data_protected": "Owner data protected",
+  "dashboard.badge.no_contact_data": "No phone",
+  "dashboard.badge.address_unresolvable": "Incomplete address — no contact",
+  "dashboard.badge.contact_summary":
+    "{count} of {total} opportunities have no phone number. Without contact details, you can only reach these by mail or in person.",
   "dashboard.badge.owner_identified": "Owner identified",
   "dashboard.badge.no_owner_data": "Incomplete address — no contact data",
   "dashboard.badge.corporate": "Corporate Lead",
@@ -2385,7 +2398,7 @@ const ES: Dict = {
   "live.cat.grass": "Maleza & Escombros",
   "live.cat.structure": "Estructura",
   "live.cat.paint": "Pintura",
-  "live.cat.other": "Prospecto",
+  "live.cat.other": "Sin categoría",
   "urgency.high": "URGENTE",
   "urgency.medium": "ALTA",
   "urgency.low": "NORMAL",
@@ -3152,6 +3165,10 @@ const ES: Dict = {
   "dashboard.action.revealed": "Revelado",
   "dashboard.action.drop": "Soltar",
   "dashboard.data_protected": "Datos del dueño protegidos",
+  "dashboard.badge.no_contact_data": "Sin teléfono",
+  "dashboard.badge.address_unresolvable": "Dirección incompleta — sin contacto",
+  "dashboard.badge.contact_summary":
+    "{count} de {total} oportunidades no tienen teléfono. Sin contacto, solo se puede escribir por correo o visita.",
   "dashboard.badge.owner_identified": "Dueño identificado",
   "dashboard.badge.no_owner_data": "Dirección incompleta — sin datos de contacto",
   "dashboard.badge.corporate": "Lead Corporativo",

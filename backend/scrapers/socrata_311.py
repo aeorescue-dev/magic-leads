@@ -284,9 +284,14 @@ class Socrata311Scraper:
                 self._discarded_unresolvable += 1
                 return None
 
-            address = f"{street}, NYC, NY"
-            if zip_code:
-                address = f"{street}, NY {zip_code}"
+            # O `address` guarda SO a rua. A cidade, o estado e o zip têm
+            # colunas próprias (city/state/zip_code) e é lá que são canónicos.
+            # Embebir a cidade no address fazia o address conter "RUA, CIDADE,
+            # ESTADO" e, como o frontend juntava outra vez a coluna city, o
+            # utilizador via "NYC, NY, NYC". A busca de Contact Info e
+            # normalize_provider_address já enviam cidade/estado em campos
+            # dedicados, portanto nada perde com o address só com a rua.
+            address = street
 
             # created_date vem como ISO (ex: 2026-09-02T00:00:00.000)
             created = row.get("created_date")
@@ -324,7 +329,7 @@ class Socrata311Scraper:
 
             return RawLead311(
                 external_id=str(row.get("sr_number")),
-                address=f"{row.get('street_address') or ''}, Chicago, IL",
+                address=(row.get("street_address") or "").strip(),
                 city="Chicago",
                 state="IL",
                 zip_code=row.get("zip_code") or None,
@@ -715,7 +720,10 @@ class Socrata311Scraper:
 
             return RawLead311(
                 external_id=ext,
-                address=full_addr,
+                # Só a rua: cidade/estado/zip vivem em colunas próprias. O
+                # `full_addr` continua a ser usado acima para extrair
+                # componentes, mas não é o que se persiste no `address`.
+                address=(addr or "").strip(),
                 city=city,
                 state=state,
                 zip_code=str(zipc) if zipc else None,

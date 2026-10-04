@@ -42,7 +42,37 @@ const getOwnerStatus = (lead: LeadResponse) => {
 
 const categoryIcons: Record<string, any> = { roof: Home, plumbing: Wrench, grass: Trees, structure: Building2, paint: PaintBucket };
 const defaultCategoryIcon = Sparkles;
-const categoryKeys: Record<string, string> = { roof: "live.cat.roof", plumbing: "live.cat.plumbing", grass: "live.cat.grass", structure: "live.cat.structure", paint: "live.cat.paint" };
+// As 16 categorias de ofício do backend (backend/services/db.py::_TRADE_CATEGORIES).
+// Este mapa tem de cobrir as 16: quando uma categoria não estava mapeada, o
+// rótulo caía em `live.cat.other`, que em PT é a string "Lead" — 33,8% dos
+// leads (Debris, Rodent, Lead, Door_Window, Heating, ...) aparecia com um
+// rótulo genérico, e o ofício real "Lead" (chumbo) ficava indistinguível dele.
+// Reutiliza as chaves `dashboard.cat.*`, que já existem em pt/en/es.
+const categoryKeys: Record<string, string> = {
+  roof: "dashboard.cat.telhado",
+  structure: "dashboard.cat.estrutura",
+  plumbing: "dashboard.cat.encanamento",
+  grass: "dashboard.cat.mato",
+  paint: "dashboard.cat.pintura",
+  permit_rejected: "dashboard.cat.obras",
+  heating: "dashboard.cat.heating",
+  electrical: "dashboard.cat.electrical",
+  elevator: "dashboard.cat.elevator",
+  gas: "dashboard.cat.gas",
+  rodent: "dashboard.cat.rodent",
+  mold: "dashboard.cat.mold",
+  lead: "dashboard.cat.lead",
+  unsanitary: "dashboard.cat.unsanitary",
+  door_window: "dashboard.cat.door_window",
+  debris: "dashboard.cat.debris",
+};
+
+// Rótulo para uma categoria que não está no mapa acima. Deixa de ser a string
+// "Lead": passa a dizer exatamente o que está em falta, que é informação útil
+// para diagnosticar (categoria ausente no payload, não um rótulo inventado).
+export function categoryLabel(catKey: string): string | null {
+  return categoryKeys[catKey] ?? null;
+}
 
 export function LiveLeadsSection() {
   const { t } = useI18n();
@@ -142,7 +172,10 @@ export function LiveLeadsSection() {
             const locationTag = getLocationTag(lead.city);
             const catKey = (lead.issue_category || "").toLowerCase();
             const CategoryIcon = categoryIcons[catKey] || defaultCategoryIcon;
-            const catLabel = t(categoryKeys[catKey] || "live.cat.other");
+            const catKeyI18n = categoryLabel(catKey);
+            // Sem categoria no payload: assume-se "Other", que tem copy
+            // própria. Antes caía em `live.cat.other` = "Lead".
+            const catLabel = catKeyI18n ? t(catKeyI18n) : t("live.cat.other");
             const UrgencyIcon = urgency.icon;
 
             return (

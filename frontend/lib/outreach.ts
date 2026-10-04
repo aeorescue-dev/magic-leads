@@ -18,6 +18,13 @@ export interface OutreachMessage {
 export const OUTREACH_DEFAULT_LANG: Lang = "en";
 const FALLBACK_CATEGORY = "Other";
 
+/**
+ * Reexportado por compatibilidade: a formatacao de endereco vive em
+ * `@/lib/address` (modulo sem dependencias, usado tambem por componentes que
+ * nao precisam do dicionario de i18n).
+ */
+export { buildFullAddress } from "./address";
+
 /** Substituto de {nome} quando o nome do proprietário não é conhecido. */
 const GREETING_FALLBACK: Record<Lang, string> = { en: "there", pt: "", es: "" };
 

@@ -2,6 +2,8 @@
 
 import { MapPin, Navigation2 } from "lucide-react";
 
+import { buildFullAddress } from "@/lib/address";
+
 interface LeadLocationMapProps {
   address: string;
   city?: string;
@@ -10,11 +12,6 @@ interface LeadLocationMapProps {
   mapLabel?: string;
   googleLabel?: string;
   appleLabel?: string;
-}
-
-function buildFullAddress(address: string, city?: string): string {
-  const parts = [address, city].filter(Boolean);
-  return parts.join(", ");
 }
 
 function mapsGoogleEmbedUrl(addr: string): string {

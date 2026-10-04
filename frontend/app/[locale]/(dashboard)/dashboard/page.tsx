@@ -25,9 +25,11 @@ import {
   isBlockedByQuota,
   isFreeLead,
   isUnresolvableLead,
-  shouldShowIncompleteBadge,
+  countLeadsWithoutContact,
+  shouldShowAddressWarning,
 } from "@/lib/lead-delivery";
 import { buildOutreachMessage } from "@/lib/outreach";
+import { buildFullAddress } from "@/lib/address";
 import CheckoutModal from "@/components/CheckoutModal";
 import ReleaseModal from "@/components/ReleaseModal";
 import WelcomePopup from "@/components/WelcomePopup";
@@ -1110,7 +1112,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
             </a>
           )}
           <a
-            href={`https://maps.google.com/?q=${encodeURIComponent(selectedLead.address + ", " + selectedLead.city)}`}
+            href={`https://maps.google.com/?q=${encodeURIComponent(buildFullAddress(selectedLead.address, selectedLead.city))}`}
             target="_blank"
             rel="noreferrer"
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 text-slate-950 text-xs font-bold hover:bg-amber-400 transition"
@@ -1143,7 +1145,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
             </a>
           )}
           <a
-            href={`https://maps.google.com/?q=${encodeURIComponent(selectedLead.address + ", " + selectedLead.city)}`}
+            href={`https://maps.google.com/?q=${encodeURIComponent(buildFullAddress(selectedLead.address, selectedLead.city))}`}
             target="_blank"
             rel="noreferrer"
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 text-slate-950 text-xs font-bold hover:bg-amber-400 transition"
@@ -1188,7 +1190,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
           </a>
         )}
         <a
-          href={`https://maps.google.com/?q=${encodeURIComponent(selectedLead.address + ", " + selectedLead.city)}`}
+          href={`https://maps.google.com/?q=${encodeURIComponent(buildFullAddress(selectedLead.address, selectedLead.city))}`}
           target="_blank"
           rel="noreferrer"
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 text-slate-950 text-xs font-bold hover:bg-amber-400 transition"
@@ -2116,6 +2118,20 @@ const URGENCIES = ["all", "high", "medium", "low"];
                   </div>
                 ) : (
                   <>
+                    {/* Resumo agregado do contacto. Substitui o aviso repetido em
+                        cada cartao: em producao essentially todos os leads sao
+                        "incomplete_delivery", e um aviso em 100% dos cartoes
+                        informava zero. Aqui diz quantos e o que isso permite. */}
+                    {countLeadsWithoutContact(filteredLeads) > 0 && (
+                      <div className="flex items-start gap-2 px-5 py-2.5 bg-amber-500/5 border-b border-amber-500/20">
+                        <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0 text-amber-500/80" />
+                        <span className="text-[11px] text-amber-500/90 leading-snug">
+                          {t("dashboard.badge.contact_summary")
+                            .replace("{count}", String(countLeadsWithoutContact(filteredLeads)))
+                            .replace("{total}", String(filteredLeads.length))}
+                        </span>
+                      </div>
+                    )}
                     {filteredLeads.map((lead) => {
                       const cat = catOfLead(lead);
                       const CatIcon = cat.icon;
@@ -2176,9 +2192,9 @@ const URGENCIES = ["all", "high", "medium", "low"];
                                 >
                                   <Lock className="h-3 w-3" /> {isFreeLead(lead) ? t("dashboard.action.reserve_corporate") : t("dashboard.action.reserve_1h")}
                                 </button>
-                                {shouldShowIncompleteBadge(lead) && (
+                                {shouldShowAddressWarning(lead) && (
                                   <span className="text-[10px] text-amber-500/90 flex items-center gap-1">
-                                    <AlertTriangle className="h-3 w-3" /> {t("dashboard.badge.no_owner_data")}
+                                    <AlertTriangle className="h-3 w-3" /> {t("dashboard.badge.address_unresolvable")}
                                   </span>
                                 )}
                               </>
@@ -2280,9 +2296,9 @@ const URGENCIES = ["all", "high", "medium", "low"];
                                   <span className="text-[10px] text-slate-500 flex items-center gap-1">
                                     <ShieldCheck className="h-3 w-3" /> {t("dashboard.data_protected")}
                                   </span>
-                                  {shouldShowIncompleteBadge(lead) && (
+                                  {shouldShowAddressWarning(lead) && (
                                     <span className="text-[10px] text-amber-500/90 flex items-center gap-1">
-                                      <AlertTriangle className="h-3 w-3" /> {t("dashboard.badge.no_owner_data")}
+                                      <AlertTriangle className="h-3 w-3" /> {t("dashboard.badge.address_unresolvable")}
                                     </span>
                                   )}
                                 </div>
@@ -2776,7 +2792,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
             {/* ENDEREÇO + CATEGORIA */}
             <div className="mt-4 p-3 rounded-xl border border-white/10 bg-white/5">
               <p className={`text-xs font-semibold ${T.text2}`}>
-                {revealTarget.address}, {revealTarget.city}
+                {buildFullAddress(revealTarget.address, revealTarget.city)}
               </p>
               <p className={`text-xs mt-0.5 ${T.text2}`}>
                 {revealTarget.issue_category || revealTarget.issue_description}
