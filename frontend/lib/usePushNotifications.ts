@@ -92,6 +92,67 @@ function toUrlBase64(base64: string): string {
   return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+// Garante que a subscricao local foi criada com a chave VAPID que o backend
+// tem hoje. Quando a chave e rodada, a subscricao antiga aponta para uma
+// applicationServerKey que ja nao temos e o push passa a falhar em silencio.
+async function ensureSubscriptionMatchesVapidKey(
+  registration: ServiceWorkerRegistration,
+  publicKey: string
+): Promise<{
+  subscription: PushSubscription;
+  resubscribed: boolean;
+  staleEndpoint: string | null;
+}> {
+  const applicationServerKey = urlBase64ToUint8Array(publicKey);
+  const existing = await registration.pushManager.getSubscription();
+
+  if (existing) {
+    const existingKey = existing.options.applicationServerKey;
+    if (existingKey && toUrlBase64(arrayBufferToBase64(existingKey)) === publicKey) {
+      return { subscription: existing, resubscribed: false, staleEndpoint: null };
+    }
+    const staleEndpoint = existing.endpoint;
+    await existing.unsubscribe();
+    const subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: applicationServerKey as any,
+    });
+    return { subscription, resubscribed: true, staleEndpoint };
+  }
+
+  const subscription = await registration.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: applicationServerKey as any,
+  });
+  return { subscription, resubscribed: false, staleEndpoint: null };
+}
+
+async function registerSubscriptionWithBackend(
+  subscription: PushSubscription,
+  staleEndpoint: string | null
+) {
+  const subData = {
+    endpoint: subscription.endpoint,
+    p256dh: arrayBufferToBase64(subscription.getKey("p256dh")),
+    auth: arrayBufferToBase64(subscription.getKey("auth")),
+  };
+  if (!subData.p256dh || !subData.auth) throw new Error("Browser keys unavailable");
+
+  const res = await apiFetch("/api/push/subscribe", {
+    method: "POST",
+    body: JSON.stringify(subData),
+  });
+  if (!res.ok) throw new Error("Push registration failed");
+
+  // A inscricao antiga ja foi cancelada no browser; limpa o endpoint morto.
+  if (staleEndpoint) {
+    await apiFetch("/api/push/unsubscribe", {
+      method: "POST",
+      body: JSON.stringify({ endpoint: staleEndpoint }),
+    }).catch(() => {});
+  }
+}
+
 // Acesso seguro ao container de Service Worker: em iframes/WebKit restritos
 // no iOS, o próprio getter navigator.serviceWorker pode lançar SecurityError.
 function getSWContainer(): { register(path: string): Promise<ServiceWorkerRegistration>; ready: Promise<ServiceWorkerRegistration> } | null {
@@ -215,6 +276,58 @@ export function usePushNotifications() {
     };
   }, [user?.id, pushEnabling, user?.push_enabled]);
 
+  // Reparo silencioso da inscricao. A logica de resubscribe so correva quando
+  // o utilizador carregava no botao; depois de uma rotacao da chave VAPID o
+  // push deixava de funcionar em silencio para quem nunca voltasse a carregar.
+  useEffect(() => {
+    if (!user?.id || !mounted || !getToken()) return;
+    if (!("PushManager" in window)) return;
+    let permissionGranted = false;
+    try {
+      permissionGranted =
+        typeof Notification !== "undefined" && Notification.permission === "granted";
+    } catch (e) {
+      console.warn("[push] Leitura de Notification ignorada:", e);
+      return;
+    }
+    if (!permissionGranted) return;
+    const sw = getSWContainer();
+    if (!sw) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const keyRes = await apiFetch("/api/push/vapid-public-key");
+        if (!keyRes.ok || cancelled) return;
+        const { public_key: publicKey } = await keyRes.json();
+        if (!publicKey || cancelled) return;
+
+        const registration = await sw.register("/sw.js");
+        await sw.ready;
+        if (cancelled) return;
+
+        const existing = await registration.pushManager.getSubscription();
+        if (!existing) return;
+        const existingKey = existing.options.applicationServerKey;
+        if (existingKey && toUrlBase64(arrayBufferToBase64(existingKey)) === publicKey) {
+          return;
+        }
+
+        const synced = await ensureSubscriptionMatchesVapidKey(registration, publicKey);
+        if (cancelled) return;
+        await registerSubscriptionWithBackend(synced.subscription, synced.staleEndpoint);
+        if (cancelled) return;
+        setSubscribed(true);
+        console.log("[push] Subscricao refeita apos rotacao da chave VAPID");
+      } catch (e) {
+        console.warn("[push] Reparo da subscricao ignorado:", e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, mounted]);
+
   const subscribe = useCallback(async (): Promise<boolean> => {
     if (!user?.id || !supported || loading) return false;
     setLoading(true);
@@ -273,33 +386,13 @@ export function usePushNotifications() {
       }
       console.log("[push] VAPID public key obtida:", publicKey.length, "chars");
 
-      const existingSubscription = await registration.pushManager.getSubscription();
-      const applicationServerKey = urlBase64ToUint8Array(publicKey);
-
       let subscription: PushSubscription;
+      let staleEndpoint: string | null = null;
       try {
-        if (existingSubscription) {
-          // Re-subscribe if the application server key changed.
-          const existingKey = existingSubscription.options.applicationServerKey;
-          if (existingKey && toUrlBase64(arrayBufferToBase64(existingKey)) === publicKey) {
-            console.log("[push] Reusando subscription existente");
-            subscription = existingSubscription;
-          } else {
-            console.log("[push] Chave VAPID mudou — resubscribe");
-            await existingSubscription.unsubscribe();
-            subscription = await registration.pushManager.subscribe({
-              userVisibleOnly: true,
-              applicationServerKey: applicationServerKey as any,
-            });
-          }
-        } else {
-          console.log("[push] Criando nova PushSubscription...");
-          subscription = await registration.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey: applicationServerKey as any,
-          });
-        }
-        console.log("[push] PushSubscription criada:", subscription.endpoint);
+        const synced = await ensureSubscriptionMatchesVapidKey(registration, publicKey);
+        subscription = synced.subscription;
+        staleEndpoint = synced.staleEndpoint;
+        console.log("[push] PushSubscription pronta:", subscription.endpoint);
       } catch (subscribeErr) {
         console.error("[push] FALHA em pushManager.subscribe():", subscribeErr);
         setError(
@@ -323,18 +416,7 @@ export function usePushNotifications() {
 
       // Envio assintrono ao backend com tratamento de erro isolado.
       try {
-        const subRes = await apiFetch("/api/push/subscribe", {
-          method: "POST",
-          body: JSON.stringify(subData),
-        });
-
-        if (!subRes.ok) {
-          const detail = await subRes.json().catch(() => null);
-          console.error("[push] Backend rejeitou subscription:", subRes.status, detail);
-          setError(detail?.detail || "Push registration failed");
-          return false;
-        }
-
+        await registerSubscriptionWithBackend(subscription, staleEndpoint);
         console.log("[push] Subscription registrada no backend");
       } catch (backendErr) {
         console.error("[push] Erro ao salvar subscription no backend:", backendErr);
