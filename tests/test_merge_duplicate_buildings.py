@@ -194,6 +194,60 @@ def test_merge_with_integer_columns_survives():
     assert mergeable[0]["absorbed"] == {"owner_phone": "5551234"}
 
 
+def test_blocked_reasons_name_every_guard_that_fired():
+    """Um `blocked: 1` sem explicação não serve para nada."""
+    rows = load_rows([
+        {"id": 1, "address": "441 BROOKLYN AVENUE, NYC, NY 11225", "reserved_by": 7},
+        {"id": 2, "address": "441 BROOKLYN AVENUE, NYC, NY", "contact_count": 2},
+    ])
+    groups = find_collision_groups(rows)
+    mergeable, blocked = plan_merges(groups)
+    assert not mergeable
+    assert len(blocked) == 1
+    assert set(blocked[0]["reasons"]) == {"reserved_by", "contact_count"}
+    assert blocked[0]["ids"] == [1, 2]
+    assert len(blocked[0]["addresses"]) == 2
+
+
+def test_blocked_reasons_flag_non_available_status():
+    rows = load_rows([
+        {"id": 1, "address": "441 BROOKLYN AVENUE, NYC, NY 11225",
+         "lead_status": "converted"},
+        {"id": 2, "address": "441 BROOKLYN AVENUE, NYC, NY",
+         "lead_status": "available"},
+    ])
+    mergeable, blocked = plan_merges(find_collision_groups(rows))
+    assert not mergeable
+    assert blocked[0]["reasons"] == ["lead_status=converted"]
+
+
+def test_verify_counters_report_the_two_regressions_we_care_about():
+    from backend.scripts.normalize_addresses import _verify
+
+    db = build_db([])
+    with db:
+        db.execute(
+            "INSERT INTO leads (id, external_id, source_type, address, city)"
+            " VALUES (1, 'a', 's', '123 MAIN ST, AUSTIN', 'Austin')"
+        )
+        db.execute(
+            "INSERT INTO leads (id, external_id, source_type, address, city)"
+            " VALUES (2, 'b', 's', '', 'Austin')"
+        )
+        db.execute(
+            "INSERT INTO leads (id, external_id, source_type, address, city)"
+            " VALUES (3, 'c', 's', '77 OAK AVE', 'Austin')"
+        )
+        db.execute(
+            "INSERT INTO leads (id, external_id, source_type, address, city)"
+            " VALUES (4, 'd', 's', '77 OAK AVE', 'Austin')"
+        )
+        out = _verify(db)
+    assert out["empty_addresses"] == 1
+    assert out["rows_with_city_in_address"] == 1
+    assert out["duplicate_address_city_groups"] == 1
+
+
 def test_available_enrichment_fields_ignores_missing_columns():
     """Uma base mais antiga, sem `county`, nao pode rebentar a migracao."""
     conn = sqlite3.connect(":memory:")

@@ -247,13 +247,43 @@ def find_collision_groups(rows: list[sqlite3.Row]) -> dict[tuple[str, str], list
     return {k: v for k, v in groups.items() if len(v) > 1}
 
 
+def blocking_reasons(rows: list[sqlite3.Row]) -> list[str]:
+    """Porque é que um grupo não pode ser fundido — para o relatório."""
+    reasons: list[str] = []
+    if any(_has_value(r["reserved_by"]) for r in rows):
+        reasons.append("reserved_by")
+    if any(_has_value(r["converted_by"]) or _has_value(r["converted_at"]) for r in rows):
+        reasons.append("converted")
+    if any(_has_value(r["revealed_at"]) for r in rows):
+        reasons.append("revealed")
+    if any((r["contact_count"] or 0) > 0 for r in rows):
+        reasons.append("contact_count")
+    statuses = sorted(
+        {str(r["lead_status"] or "").strip().lower() for r in rows}
+        - set(PRISTINE_STATUSES)
+    )
+    if statuses:
+        reasons.append("lead_status=" + ",".join(s for s in statuses if s))
+    return reasons
+
+
 def plan_merges(groups: dict[tuple[str, str], list[sqlite3.Row]]) -> tuple[list[dict], list[dict]]:
     """Separa os grupos fundíveis dos que têm de ser saltados por segurança."""
     mergeable: list[dict] = []
     blocked: list[dict] = []
     for key, rows in groups.items():
         if not all(is_pristine(r) for r in rows):
-            blocked.append({"key": key, "rows": rows})
+            # Guardamos o porquê e os endereços para o relatório: sem isto, um
+            # `blocked_merges: 1` não diz ao operador o que fazer a seguir.
+            blocked.append(
+                {
+                    "key": key,
+                    "rows": rows,
+                    "reasons": blocking_reasons(rows),
+                    "ids": sorted(int(r["id"]) for r in rows),
+                    "addresses": sorted({str(r["address"] or "") for r in rows}),
+                }
+            )
             continue
         ordered = sorted(rows, key=merge_rank, reverse=True)
         winner, losers = ordered[0], ordered[1:]
@@ -276,6 +306,55 @@ def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
     ).fetchone()
     return row is not None
+
+
+def _blocked_summary(blocked: list[dict]) -> list[dict]:
+    """Os grupos bloqueados, de forma JSON-serializável e sem payloads."""
+    return [
+        {
+            "ids": b["ids"],
+            "reasons": b["reasons"],
+            "addresses": b["addresses"],
+            "city": b["key"][1],
+        }
+        for b in blocked
+    ]
+
+
+def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _verify(conn: sqlite3.Connection) -> dict:
+    """Contadores de prova, para o operador não ter de confiar no log.
+
+    `empty_addresses` e `rows_with_city_in_address` são as duas regressões que
+    esta migração existe para eliminar; se voltarem a subir, algo escreveste.
+    Uma base mais antiga sem estas colunas dá 0 em vez de rebentar.
+    """
+    cols = _columns(conn, "leads") if _table_exists(conn, "leads") else set()
+    q = lambda sql: conn.execute(sql).fetchone()[0]  # noqa: E731
+    out: dict = {}
+    if "address" in cols:
+        out["empty_addresses"] = q(
+            "SELECT COUNT(*) FROM leads WHERE address IS NULL OR TRIM(address) = ''"
+        )
+    if "address" in cols and "city" in cols:
+        out["rows_with_city_in_address"] = q(
+            "SELECT COUNT(*) FROM leads WHERE address IS NOT NULL AND city IS NOT NULL"
+            " AND TRIM(city) <> ''"
+            " AND UPPER(address) LIKE '%' || UPPER(TRIM(city)) || '%'"
+        )
+        out["duplicate_address_city_groups"] = q(
+            "SELECT COUNT(*) FROM (SELECT address, city FROM leads"
+            " WHERE address IS NOT NULL AND TRIM(address) <> ''"
+            " GROUP BY address, city HAVING COUNT(*) > 1)"
+        )
+    for table, key in ((BACKUP_TABLE, "address_backup_rows"),
+                       (MERGE_BACKUP_TABLE, "merge_backup_rows")):
+        if _table_exists(conn, table):
+            out[key] = q(f"SELECT COUNT(*) FROM {table}")
+    return out
 
 
 def run(
@@ -353,8 +432,10 @@ def run(
         if blocked:
             log("BLOQUEADOS (nao fundir: reserva/conversao/contacto revelado):")
             for b in blocked:
-                ids = [r["id"] for r in b["rows"]]
-                log(f"  {b['key'][0]!r} / {b['key'][1]!r} -> ids {ids}")
+                log(
+                    f"  {b['key'][0]!r} / {b['key'][1]!r}"
+                    f" -> ids {b['ids']} porque {b['reasons']}"
+                )
             log()
 
         for lead_id, old, new in changes[:10]:
@@ -368,6 +449,8 @@ def run(
                 "ok": True, "applied": False, "db_path": db_path,
                 "leads": len(rows), "to_normalise": 0, "to_merge": 0,
                 "blocked_merges": len(blocked), "normalised": 0, "merged": 0,
+                "blocked": _blocked_summary(blocked),
+                **_verify(conn),
             }
 
         if not apply:
@@ -377,6 +460,8 @@ def run(
                 "leads": len(rows), "to_normalise": len(changes),
                 "to_merge": len(mergeable), "blocked_merges": len(blocked),
                 "normalised": 0, "merged": 0,
+                "blocked": _blocked_summary(blocked),
+                **_verify(conn),
             }
 
         conn.execute("BEGIN IMMEDIATE")
@@ -451,13 +536,15 @@ def run(
             log(f"Backup do address original em {BACKUP_TABLE}.")
         if merged_rows:
             log(f"Backup integral das linhas absorvidas em {MERGE_BACKUP_TABLE}.")
-        return {
-            "ok": True, "applied": True, "db_path": db_path,
-            "leads": len(rows), "leads_after": leads_after,
-            "to_normalise": len(changes), "normalised": len(changes),
-            "to_merge": len(mergeable), "merged": merged_rows,
-            "blocked_merges": len(blocked),
-        }
+            return {
+                "ok": True, "applied": True, "db_path": db_path,
+                "leads": len(rows), "leads_after": leads_after,
+                "to_normalise": len(changes), "normalised": len(changes),
+                "to_merge": len(mergeable), "merged": merged_rows,
+                "blocked_merges": len(blocked),
+                "blocked": _blocked_summary(blocked),
+                **_verify(conn),
+            }
     finally:
         conn.close()
 
