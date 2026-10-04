@@ -1,0 +1,52 @@
+name: Expire Holds
+
+# Sem este cron, o watchdog de reveals so corre quando um utilizador abre o
+# dashboard (GET /api/users/{id}/daily-stats) ou quando o endpoint e chamado a mao.
+# Em trafego baixo os reveals ficavam reserved_to_pool=0 muito alem do limite de
+# 60 min. Este workflow garante a varredura independentemente do trafego.
+on:
+  schedule:
+    # A cada 15 minutos, fora do pico (:00/:30) para nao competir com o scraper.
+    - cron: '7,22,37,52 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: expire-holds
+  cancel-in-progress: false
+
+jobs:
+  expire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Disparar watchdog de reveals em producao (Railway)
+        run: |
+          # A rota esta registada como @app.get (ver main.py). Usar POST aqui
+          # devolveria 405 e o watchdog nunca correria.
+          code=$(curl --retry 2 --retry-delay 10 --retry-all-errors \
+            -sS -o /tmp/expire.json -w "%{http_code}" -m 60 \
+            -H "X-Cron-Secret: ${{ secrets.CRON_SECRET }}" \
+            "https://magic-leads-production.up.railway.app/api/cron/expire-holds") || true
+
+          body=$(cat /tmp/expire.json 2>/dev/null || echo '{}')
+          echo "http_code: $code"
+          echo "resposta: $body"
+
+          # 401 = CRON_SECRET ausente/divergente. Falha o workflow para ficar
+          # visivel em vez de se degrader em silencio.
+          if [ "$code" = "401" ]; then
+            echo "ERRO: CRON_SECRET invalido ou ausente no GitHub/Railway."
+            exit 1
+          fi
+          if [ "$code" != "200" ]; then
+            echo "ERRO: o watchdog de reveals respondeu http $code."
+            exit 1
+          fi
+
+          reveals=$(echo "$body" | jq -r '.reveals_processed // 0')
+          expired=$(echo "$body" | jq -r '.expired_holds // 0')
+          echo "expired_holds: $expired"
+          echo "reveals_processed: $reveals"

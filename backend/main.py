@@ -2358,6 +2358,11 @@ async def _lifespan(app):
             await buf.stop()
         except Exception as e:
             logger.warning(f"Erro no flush final de telemetria ({name}): {e}")
+    # Fecha o client httpx partilhado do phone lookup (keep-alive abertos).
+    try:
+        await searchbug_service.aclose()
+    except Exception as e:
+        logger.warning(f"Erro ao fechar client HTTP do phone lookup: {e}")
 
 
 async def _scheduler_loop():

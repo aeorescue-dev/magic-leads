@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     SEARCHBUG_API_KEY: str = ""  # Optional, API Key / Password para Searchbug
     SEARCHBUG_ACCOUNT_CODE: str = ""  # Optional, CO_CODE (Account Number) para Searchbug Contact Info API
     SEARCHBUG_BASE_URL: str = "https://data.searchbug.com"  # Base URL da API Contact Info
+    # Timeout por tentativa ao Searchbug. 10s cobre o p95 observado (~3.1s) com
+    # margem ampla. NAO aumentar sem medir: o Searchbug e a etapa PAGA e um
+    # timeout curto demais pode abortar requests que a API ja contabilizou.
+    SEARCHBUG_TIMEOUT_SECONDS: float = 10.0
+    # Timeout de ligacao (TCP+TLS). Fixo e baixo porque o host e sempre o mesmo.
+    SEARCHBUG_CONNECT_TIMEOUT_SECONDS: float = 5.0
 
     # Scraper Config
     SOCRATA_APP_TOKEN: str = ""  # App Token Socrata (pool dedicado, cota maior)

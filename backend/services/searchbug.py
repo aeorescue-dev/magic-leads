@@ -309,15 +309,53 @@ class PhoneLookupService:
         # Provider configs (env vars)
         self.searchbug_key = getattr(settings, "SEARCHBUG_API_KEY", None) or os.getenv("SEARCHBUG_API_KEY")
 
-        self.timeout = httpx.Timeout(20.0, connect=10.0)
+        self.timeout = httpx.Timeout(
+            getattr(settings, "SEARCHBUG_TIMEOUT_SECONDS", 10.0),
+            connect=getattr(settings, "SEARCHBUG_CONNECT_TIMEOUT_SECONDS", 5.0),
+        )
         self._mock_mode = False  # Always try real providers first
         # telefone -> (timestamp_monotonic, telefone ou None para "sem resultado")
         self._phone_cache: dict[str, tuple[float, Optional[str]]] = {}
+        # Client partilhado. Sem isto cada chamada pagava DNS + TCP + TLS
+        # (3 RTT) contra o mesmo host, o que dominava a latencia observada.
+        self._client: Optional[httpx.AsyncClient] = None
+        self._client_lock = asyncio.Lock()
 
         enabled = []
         if self.searchbug_key:
             enabled.append("Searchbug")
         logger.info(f"PhoneLookup: LIVE MODE enabled. Providers: {', '.join(enabled)}")
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Cliente httpx partilhado, criado uma vez e reutilizado.
+
+        verify=True: a credencial da conta trafega em claro no body; desligar a
+        verificacao TLS expoe-la a qualquer MITM.
+        """
+        if self._client is None:
+            async with self._client_lock:
+                if self._client is None:
+                    self._client = httpx.AsyncClient(
+                        timeout=self.timeout,
+                        verify=True,
+                        follow_redirects=True,
+                        limits=httpx.Limits(
+                            max_connections=10,
+                            max_keepalive_connections=5,
+                            keepalive_expiry=30.0,
+                        ),
+                    )
+        return self._client
+
+    async def aclose(self) -> None:
+        """Fecha o client partilhado (chamado no shutdown da app)."""
+        client = self._client
+        self._client = None
+        if client is not None:
+            try:
+                await client.aclose()
+            except Exception as e:
+                logger.warning(f"Falha ao fechar client HTTP do phone lookup: {e}")
 
     async def lookup_phone(self, address: str, city: str, state: str, owner_name: str | None = None, zip_code: str | None = None) -> "PhoneLookupResult":
         """Look up phone number for an address via fallback chain.
@@ -535,77 +573,73 @@ class PhoneLookupService:
             form_data["ZIP"] = zip_code
 
         try:
-            # verify=True: verificacao de TLS activa. Com verify=False a
-            # credencial da conta via em claro para quem estiver no meio.
-            async with httpx.AsyncClient(timeout=20.0, verify=True) as client:
-                response = await client.post(
-                    "https://data.searchbug.com/api/search.aspx",
-                    data=form_data,
-                    timeout=20.0,
-                    follow_redirects=True
+            client = await self._get_client()
+            response = await client.post(
+                "https://data.searchbug.com/api/search.aspx",
+                data=form_data,
+            )
+
+            if response.status_code != 200:
+                logger.error(f"Searchbug HTTP {response.status_code} for {address}, {city}, {state}: {response.text[:500]}")
+                return _record(
+                    PhoneLookupResult(success=False, error=f"HTTP {response.status_code}: {response.text[:200]}", provider="Searchbug"),
+                    billed=True,
+                    http_status=response.status_code,
                 )
 
-                if response.status_code != 200:
-                    logger.error(f"Searchbug HTTP {response.status_code} for {address}, {city}, {state}: {response.text[:500]}")
-                    return _record(
-                        PhoneLookupResult(success=False, error=f"HTTP {response.status_code}: {response.text[:200]}", provider="Searchbug"),
-                        billed=True,
-                        http_status=response.status_code,
-                    )
+            data = response.json()
 
-                data = response.json()
-
-                # Resposta de erro da API
-                status = data.get("Status") or data.get("STATUS")
-                if status and status.upper() in ("ERROR", "NORESULTS"):
-                    error = data.get("ERROR") or data.get("Error") or "No results"
-                    return _record(
-                        PhoneLookupResult(success=False, error=str(error), provider="Searchbug", raw=data),
-                        billed=True,
-                        http_status=200,
-                    )
-
-                # Extrai telefone do formato novo: Data.RECORD[].PHONES.PHONE[]
-                data_obj = data.get("Data") or data.get("DATA")
-                if not data_obj:
-                    return _record(
-                        PhoneLookupResult(success=False, error="Unexpected response format (no Data)", provider="Searchbug", raw=data),
-                        billed=True,
-                        http_status=200,
-                    )
-
-                records = data_obj.get("RECORD") or data_obj.get("Record") or []
-                if isinstance(records, dict):
-                    records = [records]
-
-                for rec in records:
-                    phones_obj = rec.get("PHONES") or rec.get("Phones")
-                    if not phones_obj:
-                        continue
-                    phone_list = phones_obj.get("PHONE") or phones_obj.get("Phone") or []
-                    if isinstance(phone_list, str):
-                        phone_list = [phone_list]
-                    for phone in phone_list:
-                        if phone and str(phone).strip():
-                            return _record(
-                                PhoneLookupResult(
-                                    success=True,
-                                    phone=normalize_us_phone(str(phone).strip()),
-                                    phone_type=str(rec.get("PHONE_TYPE") or rec.get("PhoneType") or "").strip().lower() or None,
-                                    carrier=str(rec.get("CARRIER") or rec.get("Carrier") or "").strip() or None,
-                                    is_connected=bool(rec.get("IS_CONNECTED") or rec.get("IsConnected")) if rec.get("IS_CONNECTED") or rec.get("IsConnected") else None,
-                                    provider="Searchbug",
-                                    raw=data
-                                ),
-                                billed=True,
-                                http_status=200,
-                            )
-
+            # Resposta de erro da API
+            status = data.get("Status") or data.get("STATUS")
+            if status and status.upper() in ("ERROR", "NORESULTS"):
+                error = data.get("ERROR") or data.get("Error") or "No results"
                 return _record(
-                    PhoneLookupResult(success=False, error="No phone found in results", provider="Searchbug", raw=data),
+                    PhoneLookupResult(success=False, error=str(error), provider="Searchbug", raw=data),
                     billed=True,
                     http_status=200,
                 )
+
+            # Extrai telefone do formato novo: Data.RECORD[].PHONES.PHONE[]
+            data_obj = data.get("Data") or data.get("DATA")
+            if not data_obj:
+                return _record(
+                    PhoneLookupResult(success=False, error="Unexpected response format (no Data)", provider="Searchbug", raw=data),
+                    billed=True,
+                    http_status=200,
+                )
+
+            records = data_obj.get("RECORD") or data_obj.get("Record") or []
+            if isinstance(records, dict):
+                records = [records]
+
+            for rec in records:
+                phones_obj = rec.get("PHONES") or rec.get("Phones")
+                if not phones_obj:
+                    continue
+                phone_list = phones_obj.get("PHONE") or phones_obj.get("Phone") or []
+                if isinstance(phone_list, str):
+                    phone_list = [phone_list]
+                for phone in phone_list:
+                    if phone and str(phone).strip():
+                        return _record(
+                            PhoneLookupResult(
+                                success=True,
+                                phone=normalize_us_phone(str(phone).strip()),
+                                phone_type=str(rec.get("PHONE_TYPE") or rec.get("PhoneType") or "").strip().lower() or None,
+                                carrier=str(rec.get("CARRIER") or rec.get("Carrier") or "").strip() or None,
+                                is_connected=bool(rec.get("IS_CONNECTED") or rec.get("IsConnected")) if rec.get("IS_CONNECTED") or rec.get("IsConnected") else None,
+                                provider="Searchbug",
+                                raw=data
+                            ),
+                            billed=True,
+                            http_status=200,
+                        )
+
+            return _record(
+                PhoneLookupResult(success=False, error="No phone found in results", provider="Searchbug", raw=data),
+                billed=True,
+                http_status=200,
+            )
 
         except Exception as e:
             logger.warning(f"Searchbug Contact Info API error: {e}")
