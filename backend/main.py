@@ -1499,6 +1499,41 @@ def admin_normalize_addresses(
     return summary
 
 
+@app.post("/api/admin/purge-city")
+def admin_purge_city(
+    city: str,
+    apply: bool = False,
+    _ok: bool = Depends(_require_admin),
+):
+    """Apaga os leads de uma cidade que deixou de ser servida (Norfolk).
+
+    A fonte de Norfolk e um cadastro fiscal de predios: nunca passou o filtro de
+    qualidade, mas as linhas ficaram na base e `/api/metrics/public` anunciava
+    `cities_count: 5`. A rota da acesso ao volume do Railway, que uma execucao
+    remota nao alcancaria.
+
+    Dry-run por omissao. So apaga uma cidade da allow-list do script e nunca toca
+    em linhas com valor comercial (reserva/conversao/reveal), que ficam intactas.
+    """
+    from backend.scripts import purge_city as purge
+
+    try:
+        summary = purge.run(
+            city,
+            apply=apply,
+            log=lambda *a, **k: logger.info("purge_city: %s", " ".join(str(x) for x in a)),
+        )
+    except ValueError as e:
+        # cidade fora da allow-list: erro de uso, nao falha do servidor.
+        raise HTTPException(status_code=400, detail=str(e))
+    if summary is None:
+        logger.error("purge_city: run() devolveu None; a limpeza pode ter aplicado.")
+        raise HTTPException(status_code=500, detail="purge_returned_no_summary")
+    if not summary.get("ok"):
+        raise HTTPException(status_code=400, detail=summary.get("error", "purge_failed"))
+    return summary
+
+
 @app.get("/api/admin/alerts")
 async def admin_alerts(limit: int = 50, _admin: dict = Depends(_require_admin_user)):
     """Alertas de auditoria (Dead Man's Switch), incluindo reconhecidos."""
@@ -2333,6 +2368,7 @@ async def _scheduler_loop():
 @contextlib.asynccontextmanager
 async def _lifespan(app):
     _scheduler_task = None
+    _watchdog_task = None
 
     # Fase 2: o writer de telemetria arranca com o processo. Sem isto o
     # buffer acumula em memoria ate limite e perde eventos sem nunca
@@ -2358,6 +2394,11 @@ async def _lifespan(app):
     if settings.SCRAPER_SELF_SCHEDULED:
         _scheduler_task = asyncio.create_task(_scheduler_loop())
         logger.info(f"Scheduler interno ativo (a cada {settings.SCRAPER_INTERVAL_HOURS}h)")
+
+    # Sweep de holds/reveals no proprio processo. O cron do GitHub Actions esta a
+    # falhar de forma sistematica (cancelado antes de correr um passo), portanto
+    # esta e agora a cobertura garantida, independente de trafego e de terceiros.
+    _watchdog_task = asyncio.create_task(_hold_watchdog_loop())
 
     # Diagnóstico de e-mail no startup
     if settings.EMAIL_API_KEY:
@@ -2388,8 +2429,15 @@ async def _lifespan(app):
     else:
         logger.warning("[AVISO]️ Stripe NÃO configurado completamente — checkout usará mock")
     yield
-    if _scheduler_task:
-        _scheduler_task.cancel()
+    for name, task in (("scheduler", _scheduler_task), ("watchdog", _watchdog_task)):
+        if task:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.warning(f"Erro ao parar a task {name}: {e}")
     # Flush final: escreve o que ficou em memoria antes de o processo
     # morrer. Cada buffer tem o seu proprio try: se o flush da Searchbug
     # levantar, o da Push ainda tem de correr. Se falhar, o buffer e
@@ -2406,15 +2454,39 @@ async def _lifespan(app):
         logger.warning(f"Erro ao fechar client HTTP do phone lookup: {e}")
 
 
-async def _scheduler_loop():
-    """Loop do scheduler interno: espera o intervalo e dispara a varredura."""
-    interval_seconds = max(300, settings.SCRAPER_INTERVAL_HOURS * 3600)
+async def _hold_watchdog_loop():
+    """Sweep de holds/reveals dentro do processo, a cada HOLD_WATCHDOG_INTERVAL_MIN.
+
+    Substitui a dependencia de `/api/cron/expire-holds` ser chamado de fora: o
+    GitHub Actions falhou 6 vezes seguidas (cancelado na fila, 0 passos) e a
+    unica cobertura que restava era o sweep inline em `daily-stats`, que so
+    corre com trafego de utilizadores. Este loop nao depende de nenhum dos dois.
+
+    Chama `db_service` directamente em vez de um HTTP request a localhost: nao ha
+    rota de saida nem CORS no caminho, e o resultado fica nos logs do container.
+    """
+    interval_s = max(60, settings.HOLD_WATCHDOG_INTERVAL_MIN * 60)
+    logger.info(
+        "Watchdog de holds ativo (a cada %ss) — independente do GitHub Actions",
+        interval_s,
+    )
     while True:
-        await asyncio.sleep(interval_seconds)
         try:
-            _scheduled_scrape(max_cities=8)
+            await asyncio.sleep(interval_s)
+            expired = await db_service.expire_holds()
+            reveals = await db_service.check_reveal_watchdogs()
+            if expired or reveals:
+                logger.info(
+                    "Watchdog de holds: %s hold(s) expirado(s), %s reveal(s) processado(s)",
+                    expired, reveals,
+                )
+            else:
+                logger.debug("Watchdog de holds: nada a expirar")
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
-            logger.error(f"Erro no scheduler interno: {e}", exc_info=True)
+            # Uma falha aqui nao pode matar o loop: o proximo ciclo volta a tentar.
+            logger.error(f"Erro no watchdog de holds: {e}", exc_info=True)
 
 
 app.router.lifespan_context = _lifespan

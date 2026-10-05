@@ -14,7 +14,6 @@ function getLocationTag(city: string): string {
   if (normalized === "nyc" || normalized === "new york" || normalized === "new york city") return "NEW YORK, NY";
   if (normalized === "boston") return "BOSTON, MA";
   if (normalized === "dallas" || normalized === "dallasopendata") return "DALLAS, TX";
-  if (normalized === "norfolk") return "NORFOLK, VA";
   return city.toUpperCase();
 }
 

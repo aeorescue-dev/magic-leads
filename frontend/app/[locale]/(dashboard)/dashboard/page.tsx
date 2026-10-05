@@ -981,7 +981,6 @@ const URGENCIES = ["all", "high", "medium", "low"];
     if (normalized === "nyc" || normalized === "new york" || normalized === "new york city") return "nyc";
     if (normalized === "boston") return "boston";
     if (normalized === "dallas") return "dallas";
-    if (normalized === "norfolk") return "norfolk";
     return normalized;
   };
 

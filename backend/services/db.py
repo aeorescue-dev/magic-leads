@@ -507,6 +507,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_credit_ledger_idempotent ON credit_ledger (
 """
 
 
+# Cidades que o produto anuncia e scrapeia de facto. Norfolk foi retirada: a
+# fonte `data.norfolk.gov/qva7-tzrf` e um cadastro fiscal de predios, sem
+# categoria de obra nem estado de chamado, logo nunca passa `_qualified_where`.
+# Mantemos a lista explicita para a copy, a landing page e `/api/metrics/public`
+# nunca voltarem a prometer uma cidade que nao servimos.
+SERVED_CITIES: tuple[str, ...] = ("NYC", "CHICAGO", "DALLAS", "BOSTON")
+
+
 def get_connection() -> sqlite3.Connection:
     os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=10.0)
@@ -3301,10 +3309,19 @@ class DatabaseService:
             with_owner = conn.execute(
                 "SELECT COUNT(*) AS c FROM leads WHERE owner_name IS NOT NULL AND owner_name != ''"
             ).fetchone()["c"]
+            # Só as cidades que o produto realmente serve. Um `SELECT DISTINCT`
+            # sem filtro anunciava Norfolk na landing page (cities_count: 5)
+            # mesmo depois de a fonte ter sido removida de `enrichment.py`.
+            #(fontes fora desta lista nao passam `_qualified_where`; se ficar
+            # alguma linha orfa, nao deve virar promessa comercial.)
+            qs = ",".join("?" * len(SERVED_CITIES))
             cities = [
                 r["city"]
                 for r in conn.execute(
-                    "SELECT DISTINCT city FROM leads WHERE city IS NOT NULL AND city != '' ORDER BY city"
+                    f"SELECT DISTINCT city FROM leads "
+                    f"WHERE city IS NOT NULL AND TRIM(city) != '' "
+                    f"AND UPPER(TRIM(city)) IN ({qs}) ORDER BY city",
+                    [c.upper() for c in SERVED_CITIES],
                 ).fetchall()
             ]
             # Leads efetivamente inseridos nas últimas 24h

@@ -68,10 +68,13 @@ class Settings(BaseSettings):
     # Scheduler interno (independente do GH Actions — redundância no Railway)
     SCRAPER_SELF_SCHEDULED: bool = True   # True = scheduler interno roda a cada N horas
     SCRAPER_INTERVAL_HOURS: int = 6       # Intervalo em horas entre varreduras agendadas
+    # Sweep de holds/reveals dentro do processo. Independe do GitHub Actions, que
+    # falhou 6 execucoes seguidas (canceladas na fila, 0 passos).
+    HOLD_WATCHDOG_INTERVAL_MIN: int = 15
 
     # Frontend
     FRONTEND_URL: str = "http://localhost:3000"
-    ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:3005,https://magicleads-oficial.vercel.app,https://magic-leads-frontend-final.vercel.app"
+    ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:3005,https://magicleads.app,https://www.magicleads.app,https://magicleads-oficial.vercel.app,https://magic-leads-frontend-final.vercel.app"
     # Vercel preview deployment patterns (git branch preview URLs)
     # Format: comma-separated base domains (without git branch suffix)
     # e.g., "magicleads-oficial.vercel.app,magic-leads-frontend-final.vercel.app"

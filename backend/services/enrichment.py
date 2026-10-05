@@ -38,7 +38,10 @@ CITY_ALIASES: Dict[str, str] = {
     "CHICAGO": "CHICAGO",
     "DALLAS": "DALLAS",
     "BOSTON": "BOSTON",
-    "NORFOLK": "NORFOLK",
+    # NORFOLK removido de proposito: data.norfolk.gov/qva7-tzrf e um cadastro
+    # fiscal de predios (parcel tax roll), sem categoria de obra nem estado de
+    # chamado. Nao passa _qualified_where (endereco + 16 oficios + gatilho), e
+    # forca-lo a passar mostraria donos sem defeito verificado como lead de obra.
 }
 
 
@@ -70,19 +73,6 @@ CITY_DATASETS: Dict[str, Dict] = {
         "mailing_addr_col": "ownaddr2",
         "mailing_city_col": "ownercity",
         "mailing_zip_col": "ownerzip",
-        "type": "socrata",
-        "number_as_string": True,
-    },
-    "NORFOLK": {
-        "domain": "data.norfolk.gov",
-        "dataset": "qva7-tzrf",
-        "owner_col": "owner",
-        "num_col": "property_street_number",
-        "street_col": "property_street_name",
-        "zip_col": "property_zip",
-        "mailing_addr_col": None,
-        "mailing_city_col": None,
-        "mailing_zip_col": None,
         "type": "socrata",
         "number_as_string": True,
     },

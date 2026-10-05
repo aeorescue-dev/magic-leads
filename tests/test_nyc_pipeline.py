@@ -193,10 +193,33 @@ class TestCityAliases:
 
     def test_cidades_existentes_continuam_a_resolver(self):
         oe = OwnerEnrichment()
-        for key in ("CHICAGO", "DALLAS", "BOSTON", "NORFOLK"):
+        # Norfolk removido: a fonte (data.norfolk.gov/qva7-tzrf) e um cadastro
+        # fiscal de predios, sem categoria de obra nem estado de chamado, logo
+        # nunca passa o filtro de qualidade. Ver o comentario em
+        # backend/services/enrichment.py.
+        for key in ("CHICAGO", "DALLAS", "BOSTON"):
             cfg = oe._config_for(key)
             assert cfg is not None, f"cidade {key!r} regrediu"
             assert cfg["dataset"] == CITY_DATASETS[key]["dataset"]
+
+    def test_norfolk_nao_e_anunciado_nem_enriquecido(self):
+        """Norfolk nao pode reaparecer: nem na config, nem como alias orfao."""
+        assert "NORFOLK" not in CITY_DATASETS, "Norfolk nao deve voltar a CITY_DATASETS"
+        assert "NORFOLK" not in CITY_ALIASES, "alias NORFOLK ficaria orfao"
+        oe = OwnerEnrichment()
+        assert oe._config_for("NORFOLK") is None
+
+    def test_metrics_public_nao_anuncia_cidades_nao_servidas(self):
+        """A landing page nao pode prometer uma cidade fora de SERVED_CITIES.
+
+        `/api/metrics/public` fazia `SELECT DISTINCT city` sem filtro e anunciava
+        Norfolk (cities_count: 5) mesmo depois de a fonte ter sido retirada.
+        Uma linha orfa que sobre na base nao pode voltar a virar promessa.
+        """
+        from backend.services.db import SERVED_CITIES
+
+        assert "NORFOLK" not in SERVED_CITIES
+        assert set(SERVED_CITIES) == {"NYC", "CHICAGO", "DALLAS", "BOSTON"}
 
     def test_todo_alias_aponta_para_uma_cidade_existente(self):
         for alias, target in CITY_ALIASES.items():
