@@ -541,16 +541,22 @@ def run(
             log(f"Backup do address original em {BACKUP_TABLE}.")
         if merged_rows:
             log(f"Backup integral das linhas absorvidas em {MERGE_BACKUP_TABLE}.")
-            return {
-                "ok": True, "applied": True, "db_path": db_path,
-                "leads": len(rows), "leads_after": leads_after,
-                "to_normalise": len(changes), "normalised": len(changes),
-                "to_merge": len(mergeable), "merged": merged_rows,
-                "blocked_merges": len(blocked),
-                "preserved_groups": len(preserved),
-                "blocked": _blocked_summary(blocked),
-                **_verify(conn),
-            }
+
+        # O return do apply nao pode depender de `merged_rows`: sem fusoes
+        # (o caso normal, ja que `--merge-duplicates` e opt-in) caiava fora do
+        # `try` e devolvia None, e a rota fazia summary.get("ok") -> 500 com a
+        # migracao ja aplicada. Erro de reporting, nao de dados, mas reportava
+        # um apply bem-sucedido como falha.
+        return {
+            "ok": True, "applied": True, "db_path": db_path,
+            "leads": len(rows), "leads_after": leads_after,
+            "to_normalise": len(changes), "normalised": len(changes),
+            "to_merge": len(mergeable), "merged": merged_rows,
+            "blocked_merges": len(blocked),
+            "preserved_groups": len(preserved),
+            "blocked": _blocked_summary(blocked),
+            **_verify(conn),
+        }
     finally:
         conn.close()
 

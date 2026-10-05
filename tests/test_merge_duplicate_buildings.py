@@ -583,3 +583,43 @@ def test_preserved_groups_are_reported():
         "441 BROOKLYN AVENUE, NYC, NY",
         "441 BROOKLYN AVENUE, NYC, NY 11225",
     ]
+
+
+def test_apply_sem_fusoes_devolve_relatorio(tmp_path, monkeypatch):
+    """`--apply` sem `--merge-duplicates` tem de devolver um relatorio.
+
+    Regressao: em producao, `run()` so tinha `return` dentro de
+    `if merged_rows:`. Sem fusoes o `return` nao existia e a funcao devolvia
+    None, pelo que a rota admin fazia `summary.get("ok")` -> HTTP 500 -- depois
+    de a migracao ter aplicado e commitado. O apply nao falhava, so o
+    relatorio. Este teste usa `--apply` sem `--merge-duplicates`, que e o caso
+    que rebentou.
+    """
+    mod = importlib.import_module("backend.scripts.normalize_addresses")
+    db = tmp_path / "leads.db"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        f"CREATE TABLE leads ({', '.join(c + ' INTEGER' if c in INT_COLUMNS else c + ' TEXT' for c in COLUMNS)})"
+    )
+    conn.execute(
+        "INSERT INTO leads (id, external_id, source_type, address, city, state) "
+        "VALUES (1, 'SR1', '311', '20 Rev Richard A Burke St South Boston MA 02127, Boston, MA', 'BOSTON', 'MA')"
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setenv("LEADS_DB_PATH", str(db))
+    summary = mod.run(apply=True, merge_duplicates=False, limit=0)
+
+    assert summary is not None, "run() devolveu None: a rota admin rebentaria com 500"
+    assert summary["ok"] is True
+    assert summary["applied"] is True
+    assert summary["normalised"] == 1
+    assert summary["merged"] == 0
+    assert summary["leads_after"] == 1
+
+    conn = sqlite3.connect(db)
+    addr = conn.execute("SELECT address FROM leads WHERE id = 1").fetchone()[0]
+    conn.close()
+    # A migracao preserva a caixa/espacamento originais: so remove o sufixo.
+    assert addr == "20 Rev Richard A Burke St South Boston MA 02127"

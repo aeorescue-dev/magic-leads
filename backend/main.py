@@ -1483,6 +1483,16 @@ def admin_normalize_addresses(
         limit=limit,
         log=lambda *a, **k: logger.info("normalize_addresses: %s", " ".join(str(x) for x in a)),
     )
+    # `run()` ja nao devolve None (ver o return do apply em normalize_addresses),
+    # mas a rota nao deve rebentar com 500 se isso voltar a acontecer: a
+    # migracao ja pode ter aplicado e commitado quando este ponto e alcancado,
+    # e um 500 faz o cliente (e o operador) achar que a escrita falhou.
+    if summary is None:
+        logger.error("normalize_addresses: run() devolveu None; a migração pode ter aplicado.")
+        raise HTTPException(
+            status_code=500,
+            detail="migration_returned_no_summary",
+        )
     if not summary.get("ok"):
         # dry-run sem --apply é um erro de uso, não uma falha do servidor.
         raise HTTPException(status_code=400, detail=summary.get("error", "migration_failed"))
