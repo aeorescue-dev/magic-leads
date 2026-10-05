@@ -64,7 +64,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 # usem exatamente a mesma. Divergir entre as duas fazia a migração limpar o que
 # o scraper voltava a sujar no mesmo dia.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from backend.services.lead_rules import strip_city_state as _strip_city_state  # noqa: E402
+from backend.services.lead_rules import (  # noqa: E402
+    strip_city_state as _strip_city_state,
+)
 
 BACKUP_TABLE = "leads_address_backup"
 MERGE_BACKUP_TABLE = "leads_merge_backup"
