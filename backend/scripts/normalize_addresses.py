@@ -54,12 +54,17 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import sqlite3
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+# A regra de stripping vive em `lead_rules` para que a migração e a ingestão
+# usem exatamente a mesma. Divergir entre as duas fazia a migração limpar o que
+# o scraper voltava a sujar no mesmo dia.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from backend.services.lead_rules import strip_city_state as _strip_city_state  # noqa: E402
 
 BACKUP_TABLE = "leads_address_backup"
 MERGE_BACKUP_TABLE = "leads_merge_backup"
@@ -86,80 +91,9 @@ ENRICHMENT_FIELDS = (
 # outro valor significa que alguém fez alguma coisa com ele.
 PRISTINE_STATUSES = ("available", "", "new", "found")
 
-# Nome completo do estado -> sigla USPS. Necessário porque algumas fontes
-# gravam state="Texas" enquanto o address traz a sigla "TX". Um heurístico
-# (primeiras duas letras) daria "TE" e não casaria.
-_US_STATE_ABBR = {
-    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR",
-    "california": "CA", "colorado": "CO", "connecticut": "CT", "delaware": "DE",
-    "florida": "FL", "georgia": "GA", "hawaii": "HI", "idaho": "ID",
-    "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",
-    "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD",
-    "massachusetts": "MA", "michigan": "MI", "minnesota": "MN",
-    "mississippi": "MS", "missouri": "MO", "montana": "MT", "nebraska": "NE",
-    "nevada": "NV", "new hampshire": "NH", "new jersey": "NJ",
-    "new mexico": "NM", "new york": "NY", "north carolina": "NC",
-    "north dakota": "ND", "ohio": "OH", "oklahoma": "OK", "oregon": "OR",
-    "pennsylvania": "PA", "rhode island": "RI", "south carolina": "SC",
-    "south dakota": "SD", "tennessee": "TN", "texas": "TX", "utah": "UT",
-    "vermont": "VT", "virginia": "VA", "washington": "WA",
-    "west virginia": "WV", "wisconsin": "WI", "wyoming": "WY",
-    "district of columbia": "DC",
-}
-
-ZIP_RE = re.compile(r"^\d{5}(-\d{4})?$")
-
-
 def strip_city_state(address: str, city: str, state: str, zip_code: str) -> str:
-    """Remove os segmentos finais que já existem em city/state/zip.
-
-    Só remove segmentos INTEIROS que casem com a cidade/estado/zip, e nunca
-    mais do que um segmento de cada. Não faz stripping parcial nem por palavras
-    soltas: "EAST NEW YORK AVENUE" tem de sobreviver intacto, mesmo quando a
-    cidade é "New York" / "NYC".
-
-    Além dos valores exactos das colunas, reconhece o FORMATO do segmento:
-    um ZIP dos EUA (12345 / 12345-6789) é removido mesmo quando a coluna
-    `zip_code` está NULL, e um código de 2 letras é removido quando casa com o
-    `state` da linha. Sem isto, "847 BROOKHURST DR, DALLAS, TX, 75218" com
-    `zip_code` NULL não era normalizado, porque o segmento final não casava com
-    nenhuma coluna.
-    """
-    parts = [p.strip() for p in str(address or "").split(",")]
-    parts = [p for p in parts if p]
-    if not parts:
-        return ""
-
-    def up(v) -> str:
-        return str(v or "").strip().upper()
-
-    city_u, state_u, zip_u = up(city), up(state), up(zip_code)
-
-    wanted: set[str] = set()
-    for v in (city_u, state_u, zip_u):
-        if v:
-            wanted.add(v)
-    # "New York" -> "NEW YORK"; e o inverso, state="Texas" cobre o segmento "TX".
-    if city_u:
-        wanted.add(city_u.split()[0])
-    if state_u:
-        wanted.add(_US_STATE_ABBR.get(state_u.lower(), state_u))
-
-    def is_removable(segment: str) -> bool:
-        if segment.upper() in wanted:
-            return True
-        if ZIP_RE.match(segment):
-            return True
-        # "TX 75218" / "NY 11210" -> remove o estado e o zip à mesma.
-        bits = segment.upper().split()
-        if len(bits) == 2 and bits[0] in wanted and ZIP_RE.match(bits[1]):
-            return True
-        return False
-
-    while len(parts) > 1 and is_removable(parts[-1]):
-        parts.pop()
-
-    return ", ".join(parts)
+    """Reexporta `lead_rules.strip_city_state` (mesma regra, fonte única)."""
+    return _strip_city_state(address, city, state, zip_code)
 
 
 def collision_key(row: sqlite3.Row) -> tuple[str, str]:
@@ -267,10 +201,24 @@ def blocking_reasons(rows: list[sqlite3.Row]) -> list[str]:
     return reasons
 
 
-def plan_merges(groups: dict[tuple[str, str], list[sqlite3.Row]]) -> tuple[list[dict], list[dict]]:
-    """Separa os grupos fundíveis dos que têm de ser saltados por segurança."""
+def plan_merges(groups: dict[tuple[str, str], list[sqlite3.Row]]) -> tuple[list[dict], list[dict], list[dict]]:
+    """Separa os grupos fundiveis dos que tem de ser saltados por seguranca.
+
+    Devolve (mergeable, blocked, preserved).
+
+    `preserved` e o caso que motivou a politica: dois registos do MESMO predio
+    vindos de fontes/ocorrencias diferentes (`SR30309JR` e `SR30305JR`, dois
+    eventos 311 distintos no mesmo endereco). Colidir no `UNIQUE(address, city)`
+    nao e motivo para os fundir: fundir apaga o `external_id`, a categoria e a
+    data do segundo, e o cliente perde um contacto real. Preferimos manter as
+    linhas separadas e nao as normalizar, para naoirem de colidir.
+
+    So se funde quando as linhas partilham o mesmo `external_id`, ou seja, o
+    mesmo registo de origem ingerido duas vezes. Aí não há nada a perder.
+    """
     mergeable: list[dict] = []
     blocked: list[dict] = []
+    preserved: list[dict] = []
     for key, rows in groups.items():
         if not all(is_pristine(r) for r in rows):
             # Guardamos o porquê e os endereços para o relatório: sem isto, um
@@ -285,6 +233,24 @@ def plan_merges(groups: dict[tuple[str, str], list[sqlite3.Row]]) -> tuple[list[
                 }
             )
             continue
+
+        # Mesmo `external_id` = mesmo registo de origem duas vezes: fundir é
+        # seguro. `external_id` diferente = eventos diferentes no mesmo prédio:
+        # preservar, e é o caminho normal em datasets 311.
+        ext_ids = {str(r["external_id"] or "").strip() for r in rows}
+        if len(ext_ids) > 1:
+            preserved.append(
+                {
+                    "key": key,
+                    "rows": rows,
+                    "reasons": ["distinct_external_id"],
+                    "ids": sorted(int(r["id"]) for r in rows),
+                    "external_ids": sorted(e for e in ext_ids if e),
+                    "addresses": sorted({str(r["address"] or "") for r in rows}),
+                }
+            )
+            continue
+
         ordered = sorted(rows, key=merge_rank, reverse=True)
         winner, losers = ordered[0], ordered[1:]
         # Não apagar nada que o vencedor não consiga substituir. Só se
@@ -298,7 +264,7 @@ def plan_merges(groups: dict[tuple[str, str], list[sqlite3.Row]]) -> tuple[list[
         mergeable.append(
             {"key": key, "winner": winner, "losers": losers, "absorbed": absorbed}
         )
-    return mergeable, blocked
+    return mergeable, blocked, preserved
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
@@ -404,7 +370,7 @@ def run(
 
         plan = plan_normalisation(rows)
         groups = find_collision_groups(rows)
-        mergeable, blocked = plan_merges(groups)
+        mergeable, blocked, preserved = plan_merges(groups)
 
         # Endereços que NORMALIZAMOS mas que ficariam em colisão -> não tocar:
         # o `address` ficaria igual ao do par e o UNIQUE rebentaria.
@@ -412,11 +378,17 @@ def run(
             r["id"] for m in mergeable for r in m["losers"]
         }
         blocked_ids = {r["id"] for b in blocked for r in b["rows"]}
+        # Mesma regra para os preservados: ficam com o endereço como está, que é
+        # o que os mantém distintos e dentro do UNIQUE(address, city).
+        preserved_ids = {r["id"] for p in preserved for r in p["rows"]}
 
         changes = [
             (r["id"], r["address"], plan[r["id"]])
             for r in rows
-            if r["id"] in plan and r["id"] not in mergeable_ids and r["id"] not in blocked_ids
+            if r["id"] in plan
+            and r["id"] not in mergeable_ids
+            and r["id"] not in blocked_ids
+            and r["id"] not in preserved_ids
         ]
 
         log(f"Base: {db_path}")
@@ -424,6 +396,7 @@ def run(
         log(f"A normalizar:      {len(changes)}")
         log(f"Prédios duplicados a fundir: {len(mergeable)}")
         log(f"Prédios duplicados bloqueados (com valor comercial): {len(blocked)}")
+        log(f"Prédios preservados (mesmo prédio, eventos diferentes): {len(preserved)}")
         log()
 
         if mergeable:
@@ -449,6 +422,18 @@ def run(
                 )
             log()
 
+        if preserved:
+            log(
+                "PRESERVADOS (mesmo prédio, `external_id` diferentes: fundir apagaria "
+                "um contacto real; ficam separados e sem normalizar):"
+            )
+            for p in preserved[:10]:
+                log(f"  {p['key'][0]!r} / {p['key'][1]!r}")
+                log(f"    ids {p['ids']} ext={p['external_ids']}")
+            if len(preserved) > 10:
+                log(f"  ... e mais {len(preserved) - 10}")
+            log()
+
         for lead_id, old, new in changes[:10]:
             log(f"  #{lead_id}: {old!r} -> {new!r}")
         if len(changes) > 10:
@@ -459,7 +444,8 @@ def run(
             return {
                 "ok": True, "applied": False, "db_path": db_path,
                 "leads": len(rows), "to_normalise": 0, "to_merge": 0,
-                "blocked_merges": len(blocked), "normalised": 0, "merged": 0,
+                "blocked_merges": len(blocked), "preserved_groups": len(preserved),
+                "normalised": 0, "merged": 0,
                 "blocked": _blocked_summary(blocked),
                 **_verify(conn),
             }
@@ -470,6 +456,7 @@ def run(
                 "ok": True, "applied": False, "db_path": db_path,
                 "leads": len(rows), "to_normalise": len(changes),
                 "to_merge": len(mergeable), "blocked_merges": len(blocked),
+                "preserved_groups": len(preserved),
                 "normalised": 0, "merged": 0,
                 "blocked": _blocked_summary(blocked),
                 **_verify(conn),
@@ -543,6 +530,11 @@ def run(
         leads_after = conn.execute("SELECT COUNT(*) FROM leads").fetchone()[0]
         log()
         log(f"Aplicado: {len(changes)} endereços normalizados, {merged_rows} linhas fundidas.")
+        if preserved:
+            log(
+                f"{len(preserved)} grupos preservados sem fusão "
+                f"({len(preserved_ids)} linhas): mesmo prédio, `external_id` diferentes."
+            )
         if changes:
             log(f"Backup do address original em {BACKUP_TABLE}.")
         if merged_rows:
@@ -553,6 +545,7 @@ def run(
                 "to_normalise": len(changes), "normalised": len(changes),
                 "to_merge": len(mergeable), "merged": merged_rows,
                 "blocked_merges": len(blocked),
+                "preserved_groups": len(preserved),
                 "blocked": _blocked_summary(blocked),
                 **_verify(conn),
             }

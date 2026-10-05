@@ -119,7 +119,7 @@ def test_winner_is_the_row_with_contact_data():
         {"id": 2, "address": "441 BROOKLYN AVENUE, NYC, NY 11225", "owner_name": "BROOKLYN441 LLC"},
     ])
     groups = find_collision_groups(rows)
-    mergeable, blocked = plan_merges(groups)
+    mergeable, blocked, preserved = plan_merges(groups)
     assert not blocked
     assert len(mergeable) == 1
     assert mergeable[0]["winner"]["id"] == 2
@@ -131,7 +131,7 @@ def test_enrichment_is_inherited_not_lost():
         {"id": 1, "address": "441 BROOKLYN AVENUE, NYC, NY", "owner_name": "OWNER LLC"},
         {"id": 2, "address": "441 BROOKLYN AVENUE, NYC, NY 11225", "owner_phone": "5551234"},
     ])
-    mergeable, _ = plan_merges(find_collision_groups(rows))
+    mergeable, _, preserved = plan_merges(find_collision_groups(rows))
     m = mergeable[0]
     assert m["winner"]["id"] == 1  # tem nome
     assert m["absorbed"] == {"owner_phone": "5551234"}
@@ -154,7 +154,7 @@ def test_rows_with_user_or_commercial_activity_are_never_merged(signal):
         {"id": 1, "address": "441 BROOKLYN AVENUE, NYC, NY", **signal},
         {"id": 2, "address": "441 BROOKLYN AVENUE, NYC, NY 11225"},
     ])
-    mergeable, blocked = plan_merges(find_collision_groups(rows))
+    mergeable, blocked, preserved = plan_merges(find_collision_groups(rows))
     assert not mergeable, "nao devia fundir um lead com actividade"
     assert len(blocked) == 1
 
@@ -188,7 +188,7 @@ def test_merge_with_integer_columns_survives():
         {"id": 2, "address": "441 BROOKLYN AVENUE, NYC, NY", "owner_phone": "5551234",
          "reserved_by": 0, "converted_by": 0, "contact_count": 0},
     ])
-    mergeable, blocked = plan_merges(find_collision_groups(rows))
+    mergeable, blocked, preserved = plan_merges(find_collision_groups(rows))
     assert not blocked
     assert len(mergeable) == 1
     assert mergeable[0]["absorbed"] == {"owner_phone": "5551234"}
@@ -201,7 +201,7 @@ def test_blocked_reasons_name_every_guard_that_fired():
         {"id": 2, "address": "441 BROOKLYN AVENUE, NYC, NY", "contact_count": 2},
     ])
     groups = find_collision_groups(rows)
-    mergeable, blocked = plan_merges(groups)
+    mergeable, blocked, preserved = plan_merges(groups)
     assert not mergeable
     assert len(blocked) == 1
     assert set(blocked[0]["reasons"]) == {"reserved_by", "contact_count"}
@@ -216,7 +216,7 @@ def test_blocked_reasons_flag_non_available_status():
         {"id": 2, "address": "441 BROOKLYN AVENUE, NYC, NY",
          "lead_status": "available"},
     ])
-    mergeable, blocked = plan_merges(find_collision_groups(rows))
+    mergeable, blocked, preserved = plan_merges(find_collision_groups(rows))
     assert not mergeable
     assert blocked[0]["reasons"] == ["lead_status=converted"]
 
@@ -318,7 +318,7 @@ def test_end_to_end_merge_and_rollback_possible(tmp_path):
                 None, None, 0, None, None, None,
             ],
             [
-                2, "ext-2", "socrata_311", "441 BROOKLYN AVENUE, NYC, NY",
+                2, "ext-1", "socrata_311", "441 BROOKLYN AVENUE, NYC, NY",
                 "NYC", "NY", None, None, None, None, None, "5551234", None, None,
                 None, None, None, None, None, "2026-10-01", "available", None, None,
                 0, None, None, None,
@@ -356,7 +356,7 @@ def test_end_to_end_merge_and_rollback_possible(tmp_path):
     assert len(backup) == 1
     assert backup[0]["lead_id"] == 2
     assert backup[0]["merged_into"] == 1
-    assert "ext-2" in backup[0]["payload"], "a linha absorvida tem de ser recuperável"
+    assert "ext-1" in backup[0]["payload"], "a linha absorvida tem de ser recuperável"
     conn.close()
 
 
@@ -387,8 +387,10 @@ def test_merge_when_loser_already_holds_the_canonical_address(tmp_path):
         [
             # vencedor: tem dono, address ainda com zip
             row(842, "132-45 MAPLE AVENUE, NYC, NY 11355", "MAPLE VENTURES LLC", "ext-a"),
-            # perdedor: mesmo predio, address JA canonico
-            row(268310, "132-45 MAPLE AVENUE", None, "ext-b"),
+            # perdedor: mesmo predio, address JA canonico.
+            # Partilha o external_id: e o mesmo registo de origem duas vezes,
+            # logo fundir não perde nada (ver test_distinct_external_ids_...).
+            row(268310, "132-45 MAPLE AVENUE", None, "ext-a"),
         ],
     )
     conn.commit()
@@ -428,10 +430,12 @@ def test_merge_is_idempotent(tmp_path):
     conn.executemany(
         f"INSERT INTO leads VALUES ({','.join('?' for _ in COLUMNS)})",
         [
+            # Mesmo external_id nos dois lados: e o mesmo registo de origem
+            # ingerido duas vezes, unico caso em que fundir nao perde nada.
             [1, "e1", "s", "441 BROOKLYN AVENUE, NYC, NY 11225", "NYC", "NY", "11225",
              None, None, None, "LLC", None, None, None, None, None, None, None, None,
              "2026-09-23", "available", None, None, 0, None, None, None],
-            [2, "e2", "s", "441 BROOKLYN AVENUE, NYC, NY", "NYC", "NY", None,
+            [2, "e1", "s", "441 BROOKLYN AVENUE, NYC, NY", "NYC", "NY", None,
              None, None, None, None, None, None, None, None, None, None, None, None,
              "2026-10-01", "available", None, None, 0, None, None, None],
         ],
@@ -464,3 +468,118 @@ def test_merge_duplicates_requires_apply():
         assert mod.main() == 2, "--merge-duplicates sem --apply tem de ser recusado"
     finally:
         sys.argv = argv
+
+
+# ---------------------------------------------------------------------------
+# Política: prédios com `external_id` diferentes são PRESERVADOS, não fundidos.
+#
+# Em datasets 311 o mesmo prédio gera vários eventos legítimos
+# (SR30309JR e SR30305JR são duas queixas distintas no mesmo edifício). Fundir
+# apagava o external_id, a categoria e a data do segundo: o cliente perdia um
+# contacto real. Colidir no UNIQUE(address, city) não é motivo para destruir
+# dados — basta não normalizar essas linhas.
+# ---------------------------------------------------------------------------
+
+
+def test_distinct_external_ids_are_preserved_not_merged():
+    # Mesma rua, mesmo prédio, com sufixo escrito de forma diferente
+    # (", NY" vs ", NY 11225"). Depois de normalizar as duas colidem.
+    rows = load_rows([
+        {"id": 1, "address": "441 BROOKLYN AVENUE, NYC, NY", "external_id": "SR30309JR"},
+        {"id": 2, "address": "441 BROOKLYN AVENUE, NYC, NY 11225", "external_id": "SR30305JR"},
+    ])
+    mergeable, blocked, preserved = plan_merges(find_collision_groups(rows))
+    assert not mergeable, "prédios com eventos diferentes nunca são fundidos"
+    assert not blocked
+    assert len(preserved) == 1
+    assert preserved[0]["ids"] == [1, 2]
+    assert preserved[0]["reasons"] == ["distinct_external_id"]
+    assert preserved[0]["external_ids"] == ["SR30305JR", "SR30309JR"]
+
+
+def test_same_external_id_is_still_merged():
+    # Mesma ocorrência ingerida duas vezes: aqui fundir não perde nada.
+    rows = load_rows([
+        {"id": 1, "address": "441 BROOKLYN AVENUE, NYC, NY", "external_id": "SR1"},
+        {"id": 2, "address": "441 BROOKLYN AVENUE, NYC, NY 11225", "external_id": "SR1"},
+    ])
+    mergeable, _, preserved = plan_merges(find_collision_groups(rows))
+    assert not preserved
+    assert len(mergeable) == 1
+
+
+def test_preserved_rows_are_not_normalised():
+    """A linha que colide fica com o endereço intacto.
+
+    Normalizar as duas fazia-as ficarem com `address` idêntico, e o
+    UNIQUE(address, city) abortava a migração inteira.
+    """
+    rows = load_rows([
+        {"id": 1, "address": "441 BROOKLYN AVENUE, NYC, NY", "external_id": "SR30309JR"},
+        {"id": 2, "address": "441 BROOKLYN AVENUE, NYC, NY 11225", "external_id": "SR30305JR"},
+    ])
+    groups = find_collision_groups(rows)
+    mergeable, blocked, preserved = plan_merges(groups)
+    preserved_ids = {r["id"] for p in preserved for r in p["rows"]}
+    assert preserved_ids == {1, 2}
+
+    plan = plan_normalisation(rows)
+    changes = [
+        (r["id"], r["address"], plan[r["id"]])
+        for r in rows
+        if r["id"] in plan and r["id"] not in preserved_ids
+    ]
+    assert changes == [], "linhas preservadas não podem entrar no plano de normalização"
+
+
+def test_preserved_group_keeps_both_rows_in_apply(tmp_path):
+    """End-to-end: com --apply as duas linhas sobrevivem, intocadas."""
+    import importlib
+
+    mod = importlib.import_module("backend.scripts.normalize_addresses")
+    db = tmp_path / "leads.db"
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    ddl = ",".join(f"{c} {'INTEGER' if c in INT_COLUMNS else 'TEXT'}" for c in COLUMNS)
+    conn.execute(f"CREATE TABLE leads ({ddl})")
+    payload = []
+    for r in [
+        {"id": 1, "address": "441 BROOKLYN AVENUE, NYC, NY", "external_id": "SR30309JR"},
+        {"id": 2, "address": "441 BROOKLYN AVENUE, NYC, NY 11225", "external_id": "SR30305JR"},
+    ]:
+        data = dict(DEFAULTS)
+        data.update(r)
+        payload.append([data[c] for c in COLUMNS])
+    conn.executemany(f"INSERT INTO leads VALUES ({','.join('?' for _ in COLUMNS)})", payload)
+    conn.commit()
+    conn.close()
+
+    os.environ["LEADS_DB_PATH"] = str(db)
+    argv = sys.argv
+    sys.argv = ["normalize_addresses", "--apply", "--merge-duplicates"]
+    try:
+        assert mod.main() == 0
+    finally:
+        sys.argv = argv
+
+    conn = sqlite3.connect(db)
+    rows = conn.execute("SELECT id, address, external_id FROM leads ORDER BY id").fetchall()
+    assert len(rows) == 2, "as duas linhas têm de sobreviver"
+    assert rows[0][1] == "441 BROOKLYN AVENUE, NYC, NY", "address não pode ser reescrito"
+    assert rows[1][1] == "441 BROOKLYN AVENUE, NYC, NY 11225"
+    conn.close()
+
+
+def test_preserved_groups_are_reported():
+    rows = load_rows([
+        {"id": 1, "address": "441 BROOKLYN AVENUE, NYC, NY", "external_id": "FEU10301XC"},
+        {"id": 2, "address": "441 BROOKLYN AVENUE, NYC, NY 11225", "external_id": "26-02094"},
+    ])
+    _, _, preserved = plan_merges(find_collision_groups(rows))
+    assert len(preserved) == 1
+    p = preserved[0]
+    assert set(p["external_ids"]) == {"FEU10301XC", "26-02094"}
+    assert p["addresses"] == [
+        "441 BROOKLYN AVENUE, NYC, NY",
+        "441 BROOKLYN AVENUE, NYC, NY 11225",
+    ]

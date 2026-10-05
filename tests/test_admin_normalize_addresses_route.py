@@ -44,7 +44,7 @@ def client(monkeypatch, tmp_path):
             (1,'e1','s','441 BROOKLYN AVENUE, NYC, NY 11225','NYC','NY','11225',
              'OWNER LLC',NULL,NULL,NULL,NULL,40.6,-73.9,'b',NULL,NULL,NULL,NULL,
              '2026-09-23','available',NULL,NULL,0,NULL,NULL,NULL),
-            (2,'e2','s','441 BROOKLYN AVENUE, NYC, NY','NYC','NY',NULL,
+            (2,'e1','s','441 BROOKLYN AVENUE, NYC, NY','NYC','NY',NULL,
              NULL,'5551234',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,
              '2026-10-01','available',NULL,NULL,0,NULL,NULL,NULL);
         """

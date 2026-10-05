@@ -53,7 +53,87 @@ def address_is_resolvable(address: Optional[str]) -> bool:
     return len(parts.split()) >= 2
 
 
-def normalize_street(street: Optional[str]) -> str:
+US_STATE_ABBR = {
+    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR",
+    "california": "CA", "colorado": "CO", "connecticut": "CT", "delaware": "DE",
+    "florida": "FL", "georgia": "GA", "hawaii": "HI", "idaho": "ID",
+    "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",
+    "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD",
+    "massachusetts": "MA", "michigan": "MI", "minnesota": "MN",
+    "mississippi": "MS", "missouri": "MO", "montana": "MT", "nebraska": "NE",
+    "nevada": "NV", "new hampshire": "NH", "new jersey": "NJ",
+    "new mexico": "NM", "new york": "NY", "north carolina": "NC",
+    "north dakota": "ND", "ohio": "OH", "oklahoma": "OK", "oregon": "OR",
+    "pennsylvania": "PA", "rhode island": "RI", "south carolina": "SC",
+    "south dakota": "SD", "tennessee": "TN", "texas": "TX", "utah": "UT",
+    "vermont": "VT", "virginia": "VA", "washington": "WA",
+    "west virginia": "WV", "wisconsin": "WI", "wyoming": "WY",
+    "district of columbia": "DC",
+}
+
+_ZIP_RE = re.compile(r"^\d{5}(?:-\d{4})?$")
+
+
+def strip_city_state(
+    address: Optional[str],
+    city: Optional[str] = None,
+    state: Optional[str] = None,
+    zip_code: Optional[str] = None,
+) -> str:
+    """Remove os segmentos finais que ja existem nas colunas city/state/zip.
+
+    So remove segmentos INTEIROS que casem com a cidade/estado/zip, e nunca mais
+    do que um segmento de cada. Nao faz stripping parcial nem por palavras
+    soltas: "EAST NEW YORK AVENUE" tem de sobreviver intacto, mesmo quando a
+    cidade e "New York" / "NYC".
+
+    Alem dos valores exactos das colunas, reconhece o FORMATO do segmento: um
+    ZIP dos EUA (12345 / 12345-6789) e removido mesmo quando `zip_code` esta
+    vazio, e um codigo de 2 letras e removido quando casa com o `state` da linha.
+
+    Funcao partilhada com o script de migracao (que a importa) para que a regra
+    que limpa a base e a que limpa os dados novos nao divirjam.
+    """
+    parts = [p.strip() for p in str(address or "").split(",")]
+    parts = [p for p in parts if p]
+    if not parts:
+        return ""
+
+    def up(v: Any) -> str:
+        return str(v or "").strip().upper()
+
+    city_u, state_u, zip_u = up(city), up(state), up(zip_code)
+
+    wanted: set[str] = {v for v in (city_u, state_u, zip_u) if v}
+    # "New York" -> "NEW YORK"; e o inverso, state="Texas" cobre o segmento "TX".
+    if city_u:
+        wanted.add(city_u.split()[0])
+    if state_u:
+        wanted.add(US_STATE_ABBR.get(state_u.lower(), state_u))
+
+    def is_removable(segment: str) -> bool:
+        if segment.upper() in wanted:
+            return True
+        if _ZIP_RE.match(segment):
+            return True
+        # "TX 75218" / "NY 11210" -> remove o estado e o zip a mesma.
+        bits = segment.upper().split()
+        if len(bits) == 2 and bits[0] in wanted and _ZIP_RE.match(bits[1]):
+            return True
+        return False
+
+    while len(parts) > 1 and is_removable(parts[-1]):
+        parts.pop()
+
+    return ", ".join(parts)
+
+
+def normalize_street(
+    street: Optional[str],
+    city: Optional[str] = None,
+    state: Optional[str] = None,
+    zip_code: Optional[str] = None,
+) -> str:
     """Limpa a parte de rua de um endereco vindo de datasets abertos.
 
     Os datasets traem a mesma rua com espacos duplicados, virgulas a mais e
@@ -61,6 +141,13 @@ def normalize_street(street: Optional[str]) -> str:
     `address_is_resolvable` so precisam de "numero + rua" legivel, portanto
     normalizar aqui evita que o resto do pipeline tenha de lidar com lixo.
     Nao inventa conteudo: se nao houver texto, devolve string vazia.
+
+    city/state/zip sao OPCIONAIS e tem de ser passados quando a fonte sabe
+    deles. Sem isso o dataset de Boston, cuja `full_address` vem como
+    "257-259 Cambridge St  Allston  MA  02134, Boston, MA", gravava o sufixo
+    ", Boston, MA" dentro de `address`; e como a coluna `city` voltava a ser
+    juntada no frontend, o utilizador via "..., BOSTON, MA, BOSTON, MA".
+    `address` guarda SO a rua: cidade/estado/zip vivem em colunas proprias.
     """
     if not street:
         return ""
@@ -68,7 +155,12 @@ def normalize_street(street: Optional[str]) -> str:
     cleaned = re.sub(r"\s*,\s*", ", ", cleaned)
     cleaned = re.sub(r"(?:,\s*)+$", "", cleaned).strip()
     cleaned = re.sub(r"^(?:,\s*)+", "", cleaned).strip()
-    return cleaned.upper()
+    cleaned = cleaned.upper()
+    # Só com city/state/zip é que se sabe o que é sufixo; sem eles o
+    # endereço fica como veio, para não inventar nem perder rua.
+    if city or state or zip_code:
+        cleaned = strip_city_state(cleaned, city, state, zip_code)
+    return cleaned
 
 
 def is_corporate(lead: Mapping[str, Any]) -> bool:

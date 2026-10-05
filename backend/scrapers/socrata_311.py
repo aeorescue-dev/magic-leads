@@ -653,8 +653,8 @@ class Socrata311Scraper:
                 addr = str(row.get(cols["addr"]) or "").strip()
             if addr_rejected:
                 return None
-            addr = normalize_street(addr)
             zipc = row.get(cols["zip"]) if cols["zip"] else None
+            addr = normalize_street(addr, city=city, state=state, zip_code=str(zipc) if zipc else None)
 
             lat, lng = None, None
             if cols["lat"] and row.get(cols["lat"]) is not None:
