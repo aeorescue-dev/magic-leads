@@ -3045,7 +3045,8 @@ async def logout_user(authorization: str | None = Header(None), response: Respon
 
 
 @app.post("/api/auth/demo", response_model=AuthResponse)
-async def demo_login(response: Response = None):
+@limiter.limit("10/hour")
+async def demo_login(request: Request, response: Response = None):
     import os
     demo_email = os.getenv("DEMO_EMAIL", "demo@magicleads.app")
     demo_password = os.getenv("DEMO_PASSWORD", "Demo2026#Magic")
@@ -3118,7 +3119,8 @@ class ResetPasswordRequest(BaseModel):
     confirm_password: str
 
 @app.post("/api/auth/forgot-password")
-async def forgot_password(payload: ForgotPasswordRequest):
+@limiter.limit("10/hour")
+async def forgot_password(request: Request, payload: ForgotPasswordRequest):
     """Solicita reset de senha - envia token por email (mock)."""
     try:
         token = await db_service.create_password_reset_token(payload.email, expires_hours=1)
@@ -3131,7 +3133,8 @@ async def forgot_password(payload: ForgotPasswordRequest):
         raise HTTPException(status_code=500, detail="Erro ao processar solicitação")
 
 @app.post("/api/auth/reset-password")
-async def reset_password(payload: ResetPasswordRequest):
+@limiter.limit("10/hour")
+async def reset_password(request: Request, payload: ResetPasswordRequest):
     """Valida token e define nova senha."""
     try:
         if payload.new_password != payload.confirm_password:

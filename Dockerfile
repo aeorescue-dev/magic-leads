@@ -32,4 +32,9 @@ EXPOSE 8000
 # ";" (not "&&"): o bootstrap de utilizadores de demonstração é uma
 # convenience. Se falhar, a aplicação DEVE arrancar na mesma — caso
 # contrário um seed quebrado deixa o serviço em crash-loop.
-CMD ["sh", "-c", "python seed_production_users.py; uvicorn backend.main:app --host 0.0.0.0 --port 8000"]
+# "--forwarded-allow-ips='*'": O edge do Railway faz strip+rebuild do
+# X-Forwarded-For (leftmost = IP real do cliente, staff Railway confirmado) e o
+# contentor so e alcancavel pelo edge. Sem isto o uvicorn so confia em XFF de
+# 127.0.0.1, vê o pool 100.64.0.x rotativo como "cliente" e o rate limit por IP
+# (slowapi/get_remote_address) nunca dispara em producao.
+CMD ["sh", "-c", "python seed_production_users.py; uvicorn backend.main:app --host 0.0.0.0 --port 8000 --forwarded-allow-ips='*'"]

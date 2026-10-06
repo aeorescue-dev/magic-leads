@@ -24,12 +24,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 
 @pytest.fixture
-def client(monkeypatch, tmp_path):
+def client(monkeypatch):
     from backend import config
     from backend import main as main_mod
 
-    db = tmp_path / "leads.db"
-    monkeypatch.setenv("LEADS_DB_PATH", str(db))
+    # NOTA: LEADS_DB_PATH é definido pelo conftest ANTES do import do backend;
+    # setenv aqui não teria efeito (settings já cacheado).
     monkeypatch.setattr(config.settings, "ADMIN_SECRET", "segredo-de-teste", raising=False)
     monkeypatch.setattr(main_mod.settings, "ADMIN_SECRET", "segredo-de-teste", raising=False)
     monkeypatch.setattr(main_mod.settings, "DEBUG", False, raising=False)
