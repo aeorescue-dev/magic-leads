@@ -279,7 +279,13 @@ def _qualified_where(alias: str = "") -> str:
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
-    debug=settings.DEBUG
+    debug=settings.DEBUG,
+    # Documentacao desativada em producao: /openapi.json listava as 89 rotas
+    # por completo (incluindo as 22 de admin/cron/scraper) — um mapa da API
+    # publico para concorrentes e atacantes. Em dev (DEBUG=True) mantem-se.
+    docs_url="/docs" if settings.DEBUG else None,
+    redoc_url="/redoc" if settings.DEBUG else None,
+    openapi_url="/openapi.json" if settings.DEBUG else None,
 )
 
 # Rate Limiter
@@ -1101,18 +1107,10 @@ async def mark_all_notifications_read(user: dict = Depends(_get_current_user)):
 @app.get("/api/push/vapid-public-key")
 async def get_vapid_public_key():
     """Retorna a chave pública VAPID para o frontend se inscrever."""
-    print(f"DEBUG: push_service._vapid_public_key = {push_service._vapid_public_key[:50] if push_service._vapid_public_key else 'NOT SET'}")
-    print(f"DEBUG: push_service.is_configured() = {push_service.is_configured()}")
     public_key = push_service._vapid_public_key
     if not public_key:
         raise HTTPException(status_code=503, detail="Push notifications not configured")
     return {"public_key": public_key}
-
-
-@app.get("/api/push/test-endpoint")
-async def test_endpoint():
-    """Test endpoint to debug 503 issues."""
-    return {"status": "ok", "message": "Test endpoint working"}
 
 
 @app.post("/api/push/subscribe")
@@ -2494,8 +2492,14 @@ app.router.lifespan_context = _lifespan
 
 # Lista o que o framework nacional descobriu (estados/mercados cobertos)
 @app.get("/api/scraper/discover")
-async def discover_available():
-    """Retorna os datasets/mercados descobertos nacionalmente (311, permits, tax)."""
+async def discover_available(_admin: bool = Depends(_require_admin)):
+    """Retorna os datasets/mercados descobertos nacionalmente (311, permits, tax).
+
+    ADMIN-ONLY: a resposta mapeia os 847 datasets (dominio + id + nome) que a
+    ferramenta de expansao cobre — exatamente o segredo de negocio de que
+    fontes o scraper leria. Publica, qualquer concorrente baixava o catalogo
+    inteiro num unico GET. O frontend nao consome esta rota (so /api/scraper/status).
+    """
     try:
         data = await socrata_discovery.discover_all()
         # Resumo por tema
@@ -2508,7 +2512,9 @@ async def discover_available():
         return {"catalog": summary}
     except Exception as e:
         logger.error(f"Erro no discovery: {e}")
-        raise HTTPException(status_code=500, detail=f"Erro: {e!s}")
+        # Generico: nao devolver texto de excecao a quem chama (mesmo admin),
+        # detalhe fica nos logs do servidor.
+        raise HTTPException(status_code=500, detail="Erro no discovery")
 
 
 # Enriquecimento em lote: preenche owner_name = nome do proprietário (registro público)
@@ -2555,7 +2561,7 @@ async def enrich_leads(city: str = "NYC", limit: int = 500, user: dict = Depends
         }
     except Exception as e:
         logger.error(f"Erro no enriquecimento: {e}")
-        raise HTTPException(status_code=500, detail=f"Erro: {e!s}")
+        raise HTTPException(status_code=500, detail="Erro interno. Detalhe registado nos logs do servidor.")
 
 
 # Enriquecimento completo em lote: owner_name + mailing_address + skip_trace (phone/email)
@@ -2688,7 +2694,7 @@ async def enrich_all_leads(request: Request, limit_per_city: int = 200, _admin: 
         }
     except Exception as e:
         logger.error(f"Erro no enriquecimento completo: {e}")
-        raise HTTPException(status_code=500, detail=f"Erro: {e!s}")
+        raise HTTPException(status_code=500, detail="Erro interno. Detalhe registado nos logs do servidor.")
 
 
 # Reclassificação dos leads existentes para o novo modelo (16 ofícios + gatilhos preditivos)
@@ -2793,7 +2799,7 @@ async def admin_requalify_leads(request: Request, _admin: bool = Depends(_requir
         }
     except Exception as e:
         logger.error(f"Erro na reclassificação: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Erro: {e!s}")
+        raise HTTPException(status_code=500, detail="Erro interno. Detalhe registado nos logs do servidor.")
 
 
 # Enriquecimento/consulta do dono de um único lead
@@ -2815,7 +2821,7 @@ async def enrich_single_lead(lead_id: int, user: dict = Depends(_get_current_use
         raise
     except Exception as e:
         logger.error(f"Erro ao enriquecer lead {lead_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Erro: {e!s}")
+        raise HTTPException(status_code=500, detail="Erro interno. Detalhe registado nos logs do servidor.")
 
 
 # ------------------------------------------------------------------
@@ -3716,7 +3722,7 @@ async def reserve_lead(
             logger.info(f"[RESERVE] reveal_lead result: {result}")
         except Exception as e:
             logger.exception(f"[RESERVE] EXCEPTION in reveal_lead user_id={user_id} lead_id={lead_id}: {e}")
-            raise HTTPException(status_code=500, detail=f"Erro ao processar reserva: {e}")
+            raise HTTPException(status_code=500, detail="Erro interno. Detalhe registado nos logs do servidor.")
 
         if not result:
             raise HTTPException(status_code=404, detail="Lead não encontrado")
