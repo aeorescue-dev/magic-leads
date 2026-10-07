@@ -44,7 +44,12 @@ data/scraper_cron.log
 # Temp files
 frontend/temp.b64
 
-# Verificaï¿½ï¿½o de deploy
+# Playwright E2E (artefactos efemeros: regenerados por seed/webServer)
+frontend/e2e/e2e.db
+frontend/test-results/
+frontend/playwright-report/
+
+# Verificação de deploy
 scripts/.shots/
 watch-deploy.log*
 .vercel

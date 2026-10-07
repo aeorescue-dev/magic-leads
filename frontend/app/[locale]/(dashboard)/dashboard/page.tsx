@@ -36,6 +36,9 @@ import WelcomePopup from "@/components/WelcomePopup";
 import { PushNotificationButton } from "@/components/PushNotificationButton";
 import PushOnboardingBanner from "@/components/PushOnboardingBanner";
 import { LeadLocationMap } from "@/components/LeadLocationMap";
+import { StageBadge } from "@/components/ui/StageBadge";
+import { StageGuidePanel } from "@/components/ui/StageGuidePanel";
+import { ReserveGuideModal } from "@/components/ui/ReserveGuideModal";
 import {
   LeadResponse, LeadStats, CityCount, Notification, Note, HistoryEvent,
   ContractorMetrics,
@@ -56,6 +59,13 @@ import {
 type EnrichedLead = LeadResponse & {
   _history?: HistoryEvent[];
   _occurrences?: LeadOccurrence[];
+};
+
+// Modal automático do ciclo de vida (abre logo após reservar)
+type GuideLead = EnrichedLead & {
+  stage?: "reserved" | "contacted" | "in_negotiation" | "converted";
+  stage_expires_at?: string;
+  server_now?: string;
 };
 
 type Theme = "dark" | "light";
@@ -305,6 +315,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [releaseTarget, setReleaseTarget] = useState<LeadResponse | null>(null);
   const [revealTarget, setRevealTarget] = useState<EnrichedLead | null>(null);
+  const [guideLead, setGuideLead] = useState<GuideLead | null>(null);
   const [contractorMetrics, setContractorMetrics] = useState<ContractorMetrics | null>(null);
   
   // Toast notifications (fila empilhável + auto-dismiss 4s)
@@ -732,14 +743,16 @@ const URGENCIES = ["all", "high", "medium", "low"];
     try {
       await fn();
       setActionSuccess(successText);
-      const [updatedStatus, updatedHistory] = await Promise.all([
-        fetchLeadStatus(selectedLead.id).catch(() => null),
+      // Refresca o lead completo (stage/stage_expires_at/server_now atualizados
+      // pelo backend) para o painel do ciclo de vida e os badges reagirem já.
+      const [updated, updatedHistory] = await Promise.all([
+        fetchLeadById(selectedLead.id).catch(() => null),
         fetchLeadHistory(selectedLead.id).catch(() => []),
       ]);
-      if (updatedStatus?.lead_status) {
-        setLeadStatus(updatedStatus.lead_status);
+      if (updated) {
+        setSelectedLead((prev) => (prev ? { ...prev, ...updated } : prev));
         setLeads((prev) =>
-          prev.map((l) => (l.id === selectedLead.id ? { ...l, status: updatedStatus.lead_status! } : l))
+          prev.map((l) => (l.id === selectedLead.id ? { ...l, ...updated } : l))
         );
       }
       setLeadHistory(updatedHistory || []);
@@ -837,6 +850,11 @@ const URGENCIES = ["all", "high", "medium", "low"];
     if (busyAction) return;
     setRevealTarget(null);
   };
+  const closeGuide = (openAnalytic: boolean) => {
+    const l = guideLead;
+    setGuideLead(null);
+    if (openAnalytic && l) setSelectedLead(l as LeadResponse);
+  };
   const confirmReveal = async () => {
     if (!revealTarget || busyAction) return;
     if (subscription && !subscription.can_access) {
@@ -877,19 +895,23 @@ const URGENCIES = ["all", "high", "medium", "low"];
         visibility_status: "reserved_by_me" as const,
         reserved_by_me: { expires_at: res?.expires_at },
         revealed: true,
+        stage: "reserved",
+        stage_expires_at: res?.stage_expires_at ?? res?.expires_at,
+        server_now: res?.server_now,
       };
       setLeads((prev) =>
         prev.map((l) => (l.id === revealTarget.id ? { ...l, ...revealedFields } : l))
       );
-      // Só agora, com a reserva confirmada, se abre o modal analítico.
-      // Antes este era um no-op: selectedLead estava a null (o consentimento
-      // fechou-o), portanto "prev && ..." avaliava sempre para null e o
-      // utilizador ficava sem ecra apos reservar. Constroi-se a partir do
-      // revealTarget, que ja traz _history/_occurrences.
-      setSelectedLead({
+      // Só agora, com a reserva confirmada, se abre o modal do ciclo de vida.
+      // O guia fecha-se com "Ver pipeline completo" -> abre o modal analítico
+      // (selectedLead). Antes este era um no-op: selectedLead estava a null (o
+      // consentimento fechou-o), portanto "prev && ..." avaliava sempre para
+      // null e o utilizador ficava sem ecra apos reservar. Constroi-se a partir
+      // do revealTarget, que ja traz _history/_occurrences.
+      setGuideLead({
         ...revealTarget,
         ...revealedFields,
-      } as LeadResponse);
+      } as GuideLead);
       if (userId) refreshNotifications();
       refreshHistory();
     } catch (e: any) {
@@ -1935,6 +1957,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
                     return (
                       <div
                         key={lead.id}
+                        data-testid="history-row"
                         onClick={() => openLeadDetail(lead)}
                         className={`px-5 py-4 cursor-pointer transition ${T.navHover}`}
                       >
@@ -1967,8 +1990,8 @@ const URGENCIES = ["all", "high", "medium", "low"];
                                 <Clock className="h-3 w-3" />
                                 {t("dashboard.history.reserved_on")} {lead.held_at ? formatRelativeTime(lead.held_at, t) : "—"}
                               </span>
-                              {lead.my_status === "reserved" && lead.hold_expires_at && (
-                                <span className="text-rose-400 font-semibold">{t("dashboard.history.expires_in")} {countdownLabel(lead.hold_expires_at)}</span>
+                              {lead.stage && lead.stage !== "converted" && (
+                                <StageBadge stage={lead.stage} stageExpiresAt={lead.stage_expires_at} serverNow={lead.server_now} />
                               )}
                               {lead.hold_released_at && (
                                 <span>{t("dashboard.history.released_on")} {formatRelativeTime(lead.hold_released_at, t)}</span>
@@ -2203,6 +2226,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
                                 <span className="text-[10px] font-bold uppercase tracking-wider bg-rose-500/15 text-rose-400 px-2.5 py-1 rounded-full flex items-center gap-1">
                                   <Lock className="h-3 w-3" /> {t("dashboard.badge.yours").replace("{time}", reservedUntil ? countdownLabel(reservedUntil) : HOLD_FALLBACK)}
                                 </span>
+                                <StageBadge stage={lead.stage} stageExpiresAt={lead.stage_expires_at} serverNow={lead.server_now} />
                                 <div className="flex items-center gap-2 mt-2 flex-wrap">
                                   {lead.owner_phone && (
                                     <a
@@ -2438,6 +2462,16 @@ const URGENCIES = ["all", "high", "medium", "low"];
                 <X className="h-5 w-5" />
               </button>
             </div>
+
+            {/* Painel sticky do ciclo de vida (fases 1h/48h/48h) */}
+            {selectedLead.stage && selectedLead.visibility_status === "reserved_by_me" && (
+              <StageGuidePanel
+                stage={selectedLead.stage}
+                stageExpiresAt={selectedLead.stage_expires_at}
+                serverNow={selectedLead.server_now}
+                isDark={isDark}
+              />
+            )}
 
             {/* Owner Connection Info */}
             <div className={`p-4 rounded-xl border ${isDark ? "bg-white/5 border-white/10" : "bg-slate-50 border-slate-200"} space-y-3`}>
@@ -2745,15 +2779,20 @@ const URGENCIES = ["all", "high", "medium", "low"];
        )}
 
       {/* RELEASE MODAL (Phase 4.2) */}
-      <ReleaseModal
-        open={!!releaseTarget}
-        lead={releaseTarget}
-        busy={busyAction}
-        isDark={isDark}
-        suspiciousCount={contractorMetrics?.suspicious_releases || 0}
-        onClose={closeReleaseModal}
-        onRelease={confirmRelease}
-      />
+<ReleaseModal
+         open={!!releaseTarget}
+         lead={releaseTarget}
+         busy={busyAction}
+         isDark={isDark}
+         suspiciousCount={contractorMetrics?.suspicious_releases || 0}
+         onClose={closeReleaseModal}
+         onRelease={confirmRelease}
+       />
+
+       {/* CICLO DE VIDA — guia automático após reservar (fases 1h/48h/48h) */}
+       {guideLead && (
+         <ReserveGuideModal lead={guideLead} isDark={isDark} onClose={closeGuide} />
+       )}
 
       {/* REVEAL CONSENT MODAL (dados do proprietário protegidos) */}
       {revealTarget && (

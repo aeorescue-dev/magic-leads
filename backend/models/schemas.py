@@ -197,6 +197,16 @@ class LeadResponse(BaseModel):
     reserved_by_me: Optional[dict] = None  # {created_at, expires_at, hours_remaining}
     reserved_by_other: Optional[dict] = None  # {contractor_id, contractor_name, expires_at}
 
+    # Ciclo de vida do lead para o PROPRIETÁRIO (fases 1h/48h/48h):
+    # - my_status: "reserved" | "negotiating" | "converted" | None (não é seu)
+    # - stage: "reserved" | "contacted" | "in_negotiation" | "converted" | None
+    # - stage_expires_at: prazo da fase atual (UTC); None em converted/não-seu.
+    # - server_now: relógio do servidor (UTC) para corrigir clock-skew no countdown.
+    my_status: Optional[str] = None
+    stage: Optional[str] = None
+    stage_expires_at: Optional[str] = None
+    server_now: Optional[str] = None
+
     # Reveal (consentimento): true = dados do proprietário visíveis para o usuário
     revealed: bool = False
 
@@ -373,6 +383,7 @@ class LeadStatusResponse(BaseModel):
     lead_status: Optional[str] = None
     reserved_by: Optional[int] = None
     reserved_until: Optional[str] = None
+    stage_expires_at: Optional[str] = None
     contact_count: int = 0
     converted_by: Optional[int] = None
     converted_at: Optional[str] = None

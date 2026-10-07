@@ -114,6 +114,10 @@ export interface LeadResponse {
   revealed?: boolean;
   // My status (para UI)
   my_status?: "available" | "reserved" | "negotiating" | "converted" | "released" | "hold_expired";
+  // Ciclo de vida (fases 1h/48h/48h): stage = fase atual, prazo em UTC.
+  stage?: "reserved" | "contacted" | "in_negotiation" | "converted" | undefined;
+  stage_expires_at?: string;
+  server_now?: string;
 }
 
 export interface LeadsListResponse {
@@ -826,6 +830,7 @@ export interface LeadStatusInfo {
   lead_status?: string;
   reserved_by?: number;
   reserved_until?: string;
+  stage_expires_at?: string;
   contact_count: number;
   converted_by?: number;
   converted_at?: string;
@@ -836,6 +841,10 @@ export interface HoldResult {
   reserved: boolean;
   status: string;
   expires_at?: string;
+  my_status?: string;
+  stage?: string;
+  stage_expires_at?: string;
+  server_now?: string;
   message?: string;
   revealed?: boolean;
   counted_again?: boolean;

@@ -86,6 +86,21 @@ def _map_category(complaint_type: str) -> IssueCategory:
     return IssueCategory.STRUCTURE  # fallback razoável para contractors
 
 
+def _to_iso_utc(value):
+    """Normaliza datetimes guardados como "YYYY-MM-DD HH:MM:SS" (UTC) para ISO UTC.
+
+    O SQLite guarda o prazo das fases sem fuso; emitido tal-qual, o JS do cliente
+    faz Date.parse("2026-10-07 13:31:57") como hora LOCAL e o countdown do ciclo
+    de vida fica errado por todo o desvio de fuso entre o browser e o servidor.
+    """
+    if not value:
+        return value
+    raw = str(value)
+    if len(raw) == 19 and raw[10] == " ":
+        return f"{raw[0:10]}T{raw[11:19]}Z"
+    return raw
+
+
 def _to_lead_response(lead: dict) -> LeadResponse:
     """Converte linha do SQLite (id int) para LeadResponse (id str)."""
     # Build visibility fields
@@ -93,17 +108,22 @@ def _to_lead_response(lead: dict) -> LeadResponse:
     reserved_by = lead.get("reserved_by")
     reserved_until = lead.get("reserved_until")
     reserved_by_name = lead.get("reserved_by_name")
+    stage_expires_at = _to_iso_utc(lead.get("stage_expires_at") or reserved_until)
+    owns = bool(lead.get("_owns") or lead.get("is_mine"))
+    engaged = lead_status in ("reserved", "contacted", "in_negotiation")
 
     visibility_status = "available"
     reserved_by_me = None
     reserved_by_other = None
 
-    if lead_status == "reserved" and reserved_by:
-        if lead.get("is_mine"):  # This will be set by the caller based on user_id
+    if engaged and reserved_by:
+        # Posse (não lead_status=='reserved'): um lead contactado/em negociação
+        # do PRÓPRIO utilizador é "reserved_by_me" — nunca "available".
+        if owns:
             visibility_status = "reserved_by_me"
             reserved_by_me = {
                 "created_at": lead.get("reserved_created_at"),
-                "expires_at": reserved_until,
+                "expires_at": stage_expires_at,
                 "hours_remaining": lead.get("hours_remaining")
             }
         else:
@@ -111,8 +131,17 @@ def _to_lead_response(lead: dict) -> LeadResponse:
             reserved_by_other = {
                 "contractor_id": reserved_by,
                 "contractor_name": reserved_by_name,
-                "expires_at": reserved_until
+                "expires_at": stage_expires_at
             }
+    elif lead_status == "converted" and owns:
+        # Conversão é terminal: o lead sai do feed de descoberta pública e fica
+        # guardado nos "Meus Leads" (ainda aparece como "reserved_by_me").
+        visibility_status = "reserved_by_me"
+        reserved_by_me = {
+            "created_at": lead.get("reserved_created_at") or lead.get("converted_at"),
+            "expires_at": None,
+            "hours_remaining": None
+        }
 
     # Proteção de dados do proprietário: só usuários com reveal ativo
     # (consentimento) veem owner_name/owner_phone/owner_email/mailing_address.
@@ -177,6 +206,10 @@ def _to_lead_response(lead: dict) -> LeadResponse:
         reserved_by_me=reserved_by_me,
         reserved_by_other=reserved_by_other,
         revealed=show_owner,
+        my_status=lead.get("_my_status"),
+        stage=lead_status if (owns and (engaged or lead_status == "converted")) else None,
+        stage_expires_at=stage_expires_at if (owns and engaged) else None,
+        server_now=datetime.utcnow().isoformat() + "Z",
         corporate=rules["corporate"],
         address_resolvable=rules["address_resolvable"],
         unresolvable=rules["unresolvable"],
@@ -549,6 +582,40 @@ def _check_cron_secret(x_cron_secret: str | None) -> None:
         raise HTTPException(status_code=401, detail="Não autorizado: CRON_SECRET inválido")
 
 
+def _my_status_for(lead_status: str, owns: bool) -> str | None:
+    """Status de pipeline do próprio utilizador (feed/badges), baseado em posse."""
+    if not owns:
+        return None
+    if lead_status == "reserved":
+        return "reserved"
+    if lead_status in ("contacted", "in_negotiation"):
+        return "negotiating"
+    if lead_status == "converted":
+        return "converted"
+    return None
+
+
+def _filter_public_leads(leads: list, user: dict | None) -> list:
+    """Feed de descoberta = só o que NÃO está ocupado por terceiros.
+
+    - Convertido: sai do feed para TODOS (fica nos "Meus Leads" do dono).
+    - Engajado (reserved/contacted/in_negotiation) por OUTRO: oculto.
+    - O próprio utilizador continua vendo os leads que tem em andamento.
+    """
+    user_id = user["id"] if (user and user.get("id")) else None
+    out = []
+    for lead in leads:
+        ls = lead.get("lead_status", "available")
+        if ls == "converted":
+            continue
+        if ls == "available":
+            out.append(lead)
+            continue
+        if user_id and lead.get("reserved_by") == user_id:
+            out.append(lead)
+    return out
+
+
 async def _annotate_visibility(leads: list, user: dict | None) -> None:
     """Marca is_mine/hours_remaining/favorited/_revealed nos leads para o _to_lead_response."""
     user_id = user["id"] if user else None
@@ -570,15 +637,22 @@ async def _annotate_visibility(leads: list, user: dict | None) -> None:
             pass
 
     for lead in leads:
-        lead["is_mine"] = bool(user_id) and lead.get("reserved_by") == user_id
+        reserved_by = lead.get("reserved_by")
+        converted_by = lead.get("converted_by")
+        owns = bool(user_id) and (reserved_by == user_id or converted_by == user_id)
+        lead["is_mine"] = owns
+        lead["_owns"] = owns
         # Per-user favorite status
         lead["favorited"] = 1 if lead.get("id") in user_fav_ids else 0
         # Dados do proprietário só para quem revelou o lead (consentimento)
         revealed_ids = revealed_ids or set()
         lead["_revealed"] = bool(user_id) and lead.get("id") in revealed_ids
-        if lead.get("reserved_until") and lead.get("lead_status") == "reserved":
+        lead_status = lead.get("lead_status", "available")
+        stage_expires_at = lead.get("stage_expires_at") or lead.get("reserved_until")
+        lead["_my_status"] = _my_status_for(lead_status, owns)
+        if stage_expires_at and owns and lead_status in ("reserved", "contacted", "in_negotiation"):
             try:
-                expires = datetime.fromisoformat(lead["reserved_until"].replace("Z", "+00:00"))
+                expires = datetime.fromisoformat(str(stage_expires_at).replace("Z", "+00:00"))
                 if expires.tzinfo is not None:
                     expires = expires.replace(tzinfo=None)
                 hours_left = int((expires - datetime.utcnow()).total_seconds() / 3600)
@@ -651,6 +725,7 @@ async def get_leads(
             category=category
         )
 
+        leads = _filter_public_leads(leads, user)
         await _annotate_visibility(leads, user)
 
         return LeadsListResponse(
@@ -672,6 +747,7 @@ async def search_leads(q: str = "", per_page: int = 50, user: dict | None = Depe
     try:
         results = await db_service.search_leads(q, limit=per_page)
 
+        results = _filter_public_leads(results, user)
         await _annotate_visibility(results, user)
 
         return LeadsListResponse(
@@ -771,6 +847,7 @@ async def leads_today(limit: int = 60, page: int = 1, city: str = None, type: st
             conn.close()
         results = [dict(r) for r in results]
 
+        results = _filter_public_leads(results, user)
         await _annotate_visibility(results, user)
 
         return LeadsListResponse(
@@ -997,9 +1074,12 @@ async def update_lead(lead_id: int, payload: LeadUpdate, user: dict = Depends(_g
                 f"A oportunidade em {lead.get('address') or 'endereço não informado'}, {lead.get('city') or ''} agora está '{payload.status}' (categoria {lead.get('issue_category') or 'N/I'})",
                 lead_id=lead_id,
             )
+        await _annotate_visibility([lead], user)
+        return _to_lead_response(lead)
     if payload.owner_phone is not None:
         await db_service.update_owner_phone(lead_id, payload.owner_phone)
     lead = await db_service.get_lead_by_id(lead_id)
+    await _annotate_visibility([lead], user)
     return _to_lead_response(lead)
 
 
@@ -1012,6 +1092,7 @@ async def toggle_favorite(lead_id: int, user: dict = Depends(_get_current_user))
     lead = await db_service.get_lead_by_id(lead_id)
     lead_dict = dict(lead) if lead else {}
     lead_dict["favorited"] = 1 if result else 0
+    await _annotate_visibility([lead_dict], user)
     return _to_lead_response(lead_dict)
 
 
@@ -3527,7 +3608,8 @@ async def lead_status(lead_id: int, user: dict = Depends(_get_current_user)):
         issue_category=lead.get("issue_category"),
         lead_status=lead.get("lead_status"),
         reserved_by=lead.get("reserved_by"),
-        reserved_until=lead.get("reserved_until"),
+        reserved_until=_to_iso_utc(lead.get("reserved_until")),
+        stage_expires_at=_to_iso_utc(lead.get("stage_expires_at") or lead.get("reserved_until")),
         contact_count=lead.get("contact_count") or 0,
         converted_by=lead.get("converted_by"),
         converted_at=lead.get("converted_at"),
@@ -3771,7 +3853,11 @@ async def reserve_lead(
             "reserved": True,
             "revealed": True,
             "status": lead.get("lead_status", "reserved"),
-            "expires_at": lead.get("reserved_until"),
+            "expires_at": _to_iso_utc(lead.get("reserved_until")),
+            "my_status": "reserved",
+            "stage": lead.get("lead_status", "reserved"),
+            "stage_expires_at": _to_iso_utc(lead.get("stage_expires_at") or lead.get("reserved_until")),
+            "server_now": datetime.utcnow().isoformat() + "Z",
             "message": (
                 "Dados revelados — reserva de 1 hora ativa"
                 if charge_credit

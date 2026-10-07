@@ -18,9 +18,6 @@ import path from "node:path";
 const BACKEND_PORT = Number(process.env.E2E_BACKEND_PORT || 8799);
 const FRONTEND_PORT = Number(process.env.E2E_FRONTEND_PORT || 3899);
 const REPO_ROOT = path.resolve(__dirname, "..");
-// Caminho absoluto: o `cwd` do webServer ja e a raiz do repo, logo um caminho
-// relativo a partir dai apontaria para fora da arvore.
-const PYTHON = path.join(REPO_ROOT, "backend", "venv", "Scripts", "python.exe");
 
 export default defineConfig({
   testDir: "./e2e",
@@ -37,8 +34,10 @@ export default defineConfig({
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: [
     {
-      // Backend local com a BD semeada.
-      command: `"${PYTHON}" -m uvicorn backend.main:app --host 127.0.0.1 --port ${BACKEND_PORT}`,
+      // Backend local com a BD SEMEADA DE RAIO (start-backend regenera
+      // `e2e.db` a cada arranque: cenários com estados terminais voltam a
+      // ser reproduzíveis entre corridas).
+      command: `node frontend/e2e/start-backend.mjs "${path.resolve(__dirname, "e2e", "e2e.db")}" ${BACKEND_PORT}`,
       cwd: REPO_ROOT,
       env: {
         LEADS_DB_PATH: path.resolve(__dirname, "e2e", "e2e.db"),

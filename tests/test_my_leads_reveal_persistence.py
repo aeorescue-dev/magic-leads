@@ -166,6 +166,31 @@ def test_masking_still_applies_without_active_reveal():
     assert masked.owner_email is None
 
 
+def test_reserve_response_stage_expires_is_iso_utc(user_and_client):
+    """O POST /reserve alimenta o guideLead → o prazo vem já em ISO/UTC."""
+    client, headers, user_id = user_and_client
+    lead_id = _make_lead()
+
+    r = client.post(
+        f"/api/leads/{lead_id}/reserve",
+        headers=headers,
+        json={"minutes": 60, "consent": True, "idempotency": f"pytest-iso-{lead_id}"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["stage"] == "reserved"
+    assert body["stage_expires_at"], "reserva precisa devolver o prazo da fase"
+    assert "T" in body["stage_expires_at"] and body["stage_expires_at"].endswith("Z"), (
+        f"reserve.stage_expires_at deve ser ISO UTC, veio {body['stage_expires_at']!r}"
+    )
+    assert body["server_now"], body.get("server_now")
+    # O prazo fica ~60min à frente do relógio do servidor (janela da fase 1h).
+    expires = datetime.fromisoformat(body["stage_expires_at"].replace("Z", "+00:00"))
+    server = datetime.fromisoformat(body["server_now"].replace("Z", "+00:00"))
+    delta = (expires - server).total_seconds()
+    assert 55 * 60 <= delta <= 65 * 60, f"janela da fase deve ser ~1h, veio {delta}s"
+
+
 def test_mark_revealed_marks_only_active_reveals(user_and_client):
     """_mark_revealed usa o mesmo predicado de get_revealed_ids (dia + não devolvido)."""
     _, _, user_id = user_and_client
@@ -194,3 +219,47 @@ def test_mark_revealed_marks_only_active_reveals(user_and_client):
     rows3, _ = svc.get_user_leads_history(user_id, limit=200)
     asyncio.run(main_module._mark_revealed(rows3, {"id": other["id"]}))
     assert all(r.get("_revealed") is False for r in rows3)
+
+
+def test_my_leads_includes_lifecycle_fields(user_and_client):
+    """A aba 'Meus Leads' devolve stage/stage_expires_at/server_now (UI countdown)."""
+    client, headers, user_id = user_and_client
+    lead_id = _make_lead()
+
+    res = db_service._service.reveal_lead(user_id, lead_id, f"pytest-cycle-{lead_id}")
+    assert res and not res.get("error"), res
+
+    entry = _history_entry(client, headers, lead_id)
+    assert entry
+    assert entry["stage"] == "reserved", entry.get("stage")
+    assert entry["stage_expires_at"], "fase reservada precisa de fim de prazo"
+    assert entry["server_now"], "relogio do servidor precisa de estar presente"
+    assert entry["visibility_status"] == "reserved_by_me"
+
+    # O prazo tem de ser ISO/UTC inequívoco: "2026-10-07 13:31:57" (space, sem
+    # fuso) faz o Date.parse do cliente assumir hora LOCAL e o countdown das
+    # fases fica errado por todo o desvio de fuso entre browser e servidor.
+    assert "T" in entry["stage_expires_at"] and entry["stage_expires_at"].endswith("Z"), (
+        f"stage_expires_at deve ser ISO UTC (T...Z), veio {entry['stage_expires_at']!r}"
+    )
+
+    # Notificação: re-clique não estica o prazo (anti-reclick) — o prazo mantém-se.
+    prazo = entry["stage_expires_at"]
+    res2 = db_service._service.reveal_lead(user_id, lead_id, f"pytest-cycle2-{lead_id}")
+    assert res2 and not res2.get("error"), res2
+    entry2 = _history_entry(client, headers, lead_id)
+    assert entry2["stage_expires_at"] == prazo, "re-clique na mesma fase não pode esticar o prazo"
+
+    # Transição para negotiated: stage muda e recebe novas 48h.
+    contact = db_service._service.record_contact(lead_id, user_id, "sms")
+    assert contact and not contact.get("error"), contact
+    entry3 = _history_entry(client, headers, lead_id)
+    assert entry3["stage"] == "contacted", entry3.get("stage")
+    assert entry3["stage_expires_at"], entry3.get("stage_expires_at")
+
+    # Conversão é terminal: stage fica 'converted' e stage_expires_at é limpo.
+    conv = db_service._service.convert_lead(lead_id, user_id)
+    assert conv and not conv.get("error"), conv
+    entry4 = _history_entry(client, headers, lead_id)
+    assert entry4["stage"] == "converted", entry4.get("stage")
+    assert entry4["stage_expires_at"] is None, entry4.get("stage_expires_at")

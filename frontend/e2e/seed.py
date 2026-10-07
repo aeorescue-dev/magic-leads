@@ -55,6 +55,14 @@ def build(db_path: str) -> str:
         user_id = user["id"]
         svc.create_user_session(user_id, _hash_token(TOKEN), "E2E", None)
         svc.extend_access(user_id, days=7)
+        # O WelcomePopup (overlay z-[90]) abre para users com welcome_popup_shown=0
+        # e intercepta cliques no dashboard — no E2E tiramos essa variável de vez.
+        conn0 = get_connection()
+        try:
+            conn0.execute("UPDATE users SET welcome_popup_shown = 1 WHERE id = ?", (user_id,))
+            conn0.commit()
+        finally:
+            conn0.close()
 
         # Cota esgotada: e a condicao que mantinha a "reserva gratis" bloqueada.
         conn = get_connection()
@@ -100,7 +108,75 @@ def build(db_path: str) -> str:
             )
             svc.insert_lead_new(payload)
 
+    async def setup_lifecycle() -> None:
+        """Utilizador do ciclo de vida (1h/48h/48h) com cota fresca."""
+        TOKEN = "e2e-token-ciclo"
+        EMAIL = "e2e-ciclo@magicleads.app"
+        user = svc.get_user_by_email(EMAIL)
+        if not user:
+            user = svc.create_user(
+                EMAIL, "hash-nao-usado", "E2E Ciclo Vida", plan="pro",
+                subscription_status="active",
+            )
+        user_id = user["id"]
+        svc.create_user_session(user_id, _hash_token(TOKEN), "E2E", None)
+        svc.extend_access(user_id, days=7)
+        conn0 = get_connection()
+        try:
+            conn0.execute("UPDATE users SET welcome_popup_shown = 1 WHERE id = ?", (user_id,))
+            conn0.commit()
+        finally:
+            conn0.close()
+        # Cota zera (0/10): o utilizador do ciclo tem créditos para reservar.
+        conn = get_connection()
+        try:
+            today = datetime.now(timezone.utc).date().isoformat()
+            conn.execute(
+                "DELETE FROM user_daily_stats WHERE user_id = ?", (user_id,)
+            )
+            conn.execute(
+                """INSERT OR REPLACE INTO user_daily_stats
+                   (user_id, date, leads_used, leads_limit, reset_at)
+                   VALUES (?, ?, 0, 10, ?)""",
+                (user_id, today, svc._utc_tomorrow_midnight().isoformat()),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        now = datetime.now(timezone.utc)
+        for external_id, name, phone, mailing, address in [
+            ("E2E-CICLO", "Carlos Ciclo", "(718) 555-0201", None, "9 CYCLE AVE"),
+            ("E2E-TIMER", "Tina Timer", "(718) 555-0202", None, "10 TIMER ST"),
+        ]:
+            # Mesma fonte/categoria dos leads "visíveis" (dob_violation/ROOF):
+            # são os que passam na regra de qualificação e entram no feed por
+            # omissão. SERVICE_311/PLUMBING ficavam de fora do `today`.
+            payload = EnrichedLead(
+                external_id=external_id,
+                source_type=SourceType.DOB_VIOLATION,
+                address=address,
+                city="NYC",
+                state="NY",
+                zip_code="10001",
+                lat=None,
+                lng=None,
+                county="KINGS",
+                issue_category=IssueCategory.ROOF,
+                issue_description=f"Lead E2E {external_id}",
+                urgency_level=UrgencyLevel.HIGH,
+                owner_name=name,
+                owner_phone=phone,
+                owner_email=None,
+                mailing_address=mailing,
+                date_reported=now,
+                image_url=None,
+                source_url=None,
+            )
+            svc.insert_lead_new(payload)
+
     asyncio.run(setup())
+    asyncio.run(setup_lifecycle())
     return TOKEN
 
 

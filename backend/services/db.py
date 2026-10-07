@@ -197,6 +197,7 @@ CREATE TABLE IF NOT EXISTS leads (
   lead_status TEXT DEFAULT 'available',
   reserved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
   reserved_until TEXT,
+  stage_expires_at TEXT,
   contact_count INTEGER DEFAULT 0,
   converted_by INTEGER,
   converted_at TEXT,
@@ -325,6 +326,8 @@ CREATE TABLE IF NOT EXISTS lead_reveals (
   contact_flagged INTEGER DEFAULT 0,
   notified_30 INTEGER DEFAULT 0,
   notified_45 INTEGER DEFAULT 0,
+  notified_48h_24 INTEGER DEFAULT 0,
+  notified_48h_2 INTEGER DEFAULT 0,
   returned_to_pool INTEGER DEFAULT 0,
   refunded INTEGER DEFAULT 0,
   refund_reason TEXT,
@@ -671,6 +674,8 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE leads ADD COLUMN converted_by INTEGER")
     if "converted_at" not in cols:
         conn.execute("ALTER TABLE leads ADD COLUMN converted_at TEXT")
+    if "stage_expires_at" not in cols:
+        conn.execute("ALTER TABLE leads ADD COLUMN stage_expires_at TEXT")
     if "mailing_address" not in cols:
         conn.execute("ALTER TABLE leads ADD COLUMN mailing_address TEXT")
     if "revealed_at" not in cols:
@@ -794,6 +799,8 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
             "contact_flagged": "INTEGER DEFAULT 0",
             "notified_30": "INTEGER DEFAULT 0",
             "notified_45": "INTEGER DEFAULT 0",
+            "notified_48h_24": "INTEGER DEFAULT 0",
+            "notified_48h_2": "INTEGER DEFAULT 0",
             "returned_to_pool": "INTEGER DEFAULT 0",
             "refunded": "INTEGER DEFAULT 0",
             "refund_reason": "TEXT",
@@ -2813,7 +2820,7 @@ class DatabaseService:
                     (reason, note, prev["id"]),
                 )
             conn.execute(
-                "UPDATE leads SET lead_status = 'available', reserved_by = NULL, reserved_until = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                "UPDATE leads SET lead_status = 'available', reserved_by = NULL, reserved_until = NULL, stage_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (lead_id,),
             )
             conn.execute(
@@ -2826,6 +2833,15 @@ class DatabaseService:
                   last_released_at = CURRENT_TIMESTAMP
                 """,
                 (user_id, lead_id, reason, reason),
+            )
+            # Liberar DEVOLVE o lead ao pool: sem isto, `returned_to_pool` ficava 0
+            # para sempre e um re-reserve do MESMO utilizador caía no ramo "no-op"
+            # de reveal_lead (devolvia o lead available, sem criar hold nem contar).
+            conn.execute(
+                """UPDATE lead_reveals
+                   SET returned_to_pool = 1, idempotency_key = NULL
+                   WHERE user_id = ? AND lead_id = ? AND returned_to_pool = 0""",
+                (user_id, lead_id),
             )
             self._event(conn, lead_id, user_id, "released", f"Liberado: {reason or 'sem motivo'}")
             penalty = self._apply_release_penalty(conn, user_id, reason)
@@ -3127,7 +3143,7 @@ class DatabaseService:
                     (row["lead_id"], row["user_id"]),
                 )
                 conn.execute(
-                    "UPDATE leads SET lead_status = 'available', reserved_by = NULL, reserved_until = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND lead_status = 'reserved'",
+                    "UPDATE leads SET lead_status = 'available', reserved_by = NULL, reserved_until = NULL, stage_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND lead_status = 'reserved'",
                     (row["lead_id"],),
                 )
                 self._event(conn, row["lead_id"], row["user_id"], "auto_expired", "Hold expirou (24h)")
@@ -3146,24 +3162,64 @@ class DatabaseService:
                 return None
             if lead["lead_status"] == "reserved" and lead["reserved_by"] != user_id:
                 return {"error": "already_reserved", "lead": dict(lead)}
-            conn.execute(
-                "UPDATE leads SET contact_count = contact_count + 1, lead_status = 'contacted', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (lead_id,),
-            )
+
+            already_engaged = lead["lead_status"] in ("contacted", "in_negotiation", "converted")
+            if already_engaged:
+                # Anti-abuso: re-clicar em Contactar não estica o prazo nem
+                # reabre a fase. Mantém o estado atual e só registra o contato.
+                conn.execute(
+                    "UPDATE leads SET contact_count = contact_count + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (lead_id,),
+                )
+            else:
+                conn.execute(
+                    """UPDATE leads SET contact_count = contact_count + 1,
+                       lead_status = 'contacted',
+                       stage_expires_at = datetime('now', '+48 hours'),
+                       updated_at = CURRENT_TIMESTAMP
+                       WHERE id = ?""",
+                    (lead_id,),
+                )
+                self._reset_stage_notify_flags(conn, lead_id, user_id)
             self._event(conn, lead_id, user_id, "contact", f"Contato via {channel}")
             conn.commit()
             return dict(conn.execute("SELECT * FROM leads WHERE id = ?", (lead_id,)).fetchone())
         finally:
             conn.close()
 
+    def _reset_stage_notify_flags(self, conn: sqlite3.Connection, lead_id: int, user_id: int) -> None:
+        """Zera os avisos (24h/2h) da janela de 48h quando uma fase recomeça."""
+        conn.execute(
+            """UPDATE lead_reveals SET notified_48h_24 = 0, notified_48h_2 = 0
+               WHERE lead_id = ? AND user_id = ? AND returned_to_pool = 0""",
+            (lead_id, user_id),
+        )
+
     def mark_negotiation(self, lead_id: int, user_id: int) -> Optional[dict]:
         conn = get_connection()
         try:
-            _leads = conn.execute("UPDATE leads SET lead_status = 'in_negotiation', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND (reserved_by = ? OR reserved_by IS NULL)", (lead_id, user_id))
+            lead = conn.execute("SELECT * FROM leads WHERE id = ?", (lead_id,)).fetchone()
+            if not lead:
+                return None
+            if lead["reserved_by"] and lead["reserved_by"] != user_id:
+                return {"error": "not_owner", "lead": dict(lead)}
+            if lead["lead_status"] in ("in_negotiation", "converted"):
+                # Anti-abuso: re-clicar em Negociar não reinicia o prazo.
+                self._event(conn, lead_id, user_id, "negotiation", "Cliente respondeu (re-clique)")
+                conn.commit()
+                return dict(conn.execute("SELECT * FROM leads WHERE id = ?", (lead_id,)).fetchone())
+            conn.execute(
+                """UPDATE leads SET lead_status = 'in_negotiation',
+                   stage_expires_at = datetime('now', '+48 hours'), updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ?""",
+                (lead_id,),
+            )
             conn.execute(
                 "UPDATE leads SET reserved_by = COALESCE(reserved_by, ?) WHERE id = ?",
                 (user_id, lead_id),
             )
+            if lead["reserved_by"] == user_id:
+                self._reset_stage_notify_flags(conn, lead_id, user_id)
             self._event(conn, lead_id, user_id, "negotiation", "Cliente respondeu")
             conn.commit()
             return dict(conn.execute("SELECT * FROM leads WHERE id = ?", (lead_id,)).fetchone())
@@ -3176,8 +3232,13 @@ class DatabaseService:
             lead = conn.execute("SELECT * FROM leads WHERE id = ?", (lead_id,)).fetchone()
             if not lead:
                 return None
+            if lead["lead_status"] == "converted":
+                # Já convertido: conversão é terminal e idempotente.
+                return dict(lead)
             conn.execute(
-                "UPDATE leads SET lead_status = 'converted', converted_by = ?, converted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                """UPDATE leads SET lead_status = 'converted', converted_by = ?,
+                   converted_at = CURRENT_TIMESTAMP, stage_expires_at = NULL,
+                   updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
                 (user_id, lead_id),
             )
             conn.execute(
@@ -4000,8 +4061,8 @@ class DatabaseService:
                 rows = conn.execute(
                     f"""SELECT DISTINCT lead_id FROM lead_reveals
                         WHERE user_id = ? AND lead_id IN ({placeholders})
-                          AND revealed_date = ? AND returned_to_pool = 0""",
-                    (user_id, *chunk, datetime.utcnow().date().isoformat()),
+                          AND returned_to_pool = 0""",
+                    (user_id, *chunk),
                 ).fetchall()
                 marks.extend(r["lead_id"] for r in rows)
             return set(marks)
@@ -4038,15 +4099,13 @@ class DatabaseService:
             if lead["lead_status"] == "reserved" and lead["reserved_by"] != user_id:
                 return {"status": "already_reserved", "lead": dict(lead), "already_revealed": False}
 
-            today = datetime.utcnow().date().isoformat()
-
-            # 3. Re-clique no mesmo lead com reveal ativo hoje => sem novo débito.
+            # 3. Re-clique no mesmo lead com reveal ativo (qualquer dia) => sem novo débito.
             active = conn.execute(
                 """SELECT id FROM lead_reveals
                    WHERE user_id = ? AND lead_id = ?
-                     AND revealed_date = ? AND returned_to_pool = 0
+                     AND returned_to_pool = 0
                    ORDER BY id DESC LIMIT 1""",
-                (user_id, lead_id, today),
+                (user_id, lead_id),
             ).fetchone()
             if active:
                 return {"status": "ok", "lead": dict(lead), "already_revealed": True}
@@ -4090,29 +4149,20 @@ class DatabaseService:
             if lead["lead_status"] == "reserved" and lead["reserved_by"] != user_id:
                 return {"error": "already_reserved", "lead": dict(lead)}
 
-            # 3. Idempotência: reveal ativo hoje para este (user, lead)?
+            # 3. Idempotência: reveal ativo (não devolvido) para este (user, lead)?
+            #    Um reveal engajado (contacted/in_negotiation/converted) também é
+            #    "ativo": re-clicar NÃO pode reverter o estado nem criar novo hold.
             active = conn.execute(
                 """SELECT * FROM lead_reveals
                    WHERE user_id = ? AND lead_id = ?
-                     AND revealed_date = ? AND returned_to_pool = 0
+                     AND returned_to_pool = 0
                    ORDER BY id DESC LIMIT 1""",
-                (user_id, lead_id, today),
+                (user_id, lead_id),
             ).fetchone()
 
             if active:
-                # Re-clique no mesmo lead com reveal ativo: renova reserva, NÃO conta 2x.
-                conn.execute(
-                    """UPDATE leads SET lead_status = 'reserved', reserved_by = ?,
-                       reserved_until = datetime('now', ?), updated_at = CURRENT_TIMESTAMP
-                       WHERE id = ?""",
-                    (user_id, f"+{int(minutes)} minutes", lead_id),
-                )
-                conn.execute(
-                    """INSERT INTO lead_holds (lead_id, user_id, expires_at, status)
-                       VALUES (?, ?, datetime('now', ?), 'active')""",
-                    (lead_id, user_id, f"+{int(minutes)} minutes"),
-                )
-                conn.commit()
+                # Re-clique no mesmo lead com reveal ativo: no-op de estado,
+                # NÃO conta 2x, NÃO estica o prazo (anti-abuso).
                 result = dict(conn.execute("SELECT * FROM leads WHERE id = ?", (lead_id,)).fetchone())
                 return {
                     "lead": result,
@@ -4179,12 +4229,13 @@ class DatabaseService:
                         (user_id, today, reset_at),
                     )
 
-            # 7. Reserva o lead por 60 minutos.
+            # 7. Reserva o lead por 60 minutos (padrão). stage_expires_at = prazo da fase.
             conn.execute(
                 """UPDATE leads SET lead_status = 'reserved', reserved_by = ?,
-                   reserved_until = datetime('now', ?), updated_at = CURRENT_TIMESTAMP
-                   WHERE id = ?""",
-                (user_id, f"+{int(minutes)} minutes", lead_id),
+                   reserved_until = datetime('now', ?), stage_expires_at = datetime('now', ?),
+                   updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ? AND lead_status IN ('available', 'reserved')""",
+                (user_id, f"+{int(minutes)} minutes", f"+{int(minutes)} minutes", lead_id),
             )
             conn.execute(
                 """INSERT INTO lead_holds (lead_id, user_id, expires_at, status)
@@ -4255,8 +4306,9 @@ class DatabaseService:
             rows = conn.execute(
                 """SELECT r.*, l.address, l.issue_category, l.owner_name
                    FROM lead_reveals r
-                   LEFT JOIN leads l ON l.id = r.lead_id
+                   JOIN leads l ON l.id = r.lead_id
                    WHERE r.returned_to_pool = 0 AND r.contact_flagged = 0
+                     AND l.lead_status = 'reserved' AND l.reserved_by = r.user_id
                      AND (r.notified_30 = 0 OR r.notified_45 = 0 OR r.revealed_at IS NOT NULL)"""
             ).fetchall()
 
@@ -4281,7 +4333,8 @@ class DatabaseService:
                     )
                     conn.execute(
                         """UPDATE leads SET lead_status = 'available', reserved_by = NULL,
-                           reserved_until = NULL WHERE id = ? AND reserved_by = ?""",
+                           reserved_until = NULL, stage_expires_at = NULL
+                           WHERE id = ? AND reserved_by = ? AND lead_status = 'reserved'""",
                         (r["lead_id"], r["user_id"]),
                     )
                     conn.execute(
@@ -4330,6 +4383,88 @@ class DatabaseService:
                             f"Faltam 30 min para {subject} ({category}) voltar ao pool. Registre o contato ou ligue agora.",
                             r["lead_id"],
                         ),
+                    )
+                    processed += 1
+
+            # ---- Janelas de 48h (Contactar / Negociar) ----
+            # 1) Estagnação: prazo vencido => lead volta ao pool geral, sem estorno.
+            stagnant = conn.execute(
+                """SELECT l.*, r.id AS reveal_id
+                   FROM leads l
+                   LEFT JOIN lead_reveals r ON r.lead_id = l.id AND r.returned_to_pool = 0
+                   WHERE l.lead_status IN ('contacted', 'in_negotiation')
+                     AND l.stage_expires_at IS NOT NULL
+                     AND l.stage_expires_at < datetime('now')"""
+            ).fetchall()
+            for row in stagnant:
+                owner_id = row["reserved_by"] or 0
+                which = "Contactar" if row["lead_status"] == "contacted" else "Negociar"
+                conn.execute(
+                    """UPDATE leads SET lead_status = 'available', reserved_by = NULL,
+                       reserved_until = NULL, stage_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
+                       WHERE id = ?""",
+                    (row["id"],),
+                )
+                conn.execute(
+                    """UPDATE lead_reveals SET returned_to_pool = 1
+                       WHERE lead_id = ? AND returned_to_pool = 0""",
+                    (row["id"],),
+                )
+                conn.execute(
+                    """UPDATE lead_holds SET status = 'expired', release_reason = 'stage_timeout',
+                       released_at = CURRENT_TIMESTAMP
+                       WHERE lead_id = ? AND status = 'active'""",
+                    (row["id"],),
+                )
+                reason = "contact_stagnated" if row["lead_status"] == "contacted" else "negotiation_stagnated"
+                address = row["address"] or ("lead #" + str(row["id"]))
+                msg = (
+                    f"A fase {which} do lead {address} expirou sem avanço em 48h. "
+                    "O lead voltou ao pool e os dados do proprietário foram bloqueados. Sem estorno."
+                )
+                if row["reveal_id"] and owner_id:
+                    conn.execute(
+                        """INSERT INTO notifications (user_id, type, title, message, lead_id)
+                           VALUES (?, 'returned_after_48h', ?, ?, ?)""",
+                        (owner_id, "Lead voltou ao pool (48h sem avanço)", msg, row["id"]),
+                    )
+                self._event(conn, row["id"], owner_id or None, reason, msg)
+                processed += 1
+
+            # 2) Avisos de proximidade: 24h e 2h antes do fim da fase de 48h.
+            pending = conn.execute(
+                """SELECT l.*, r.id AS reveal_id, r.notified_48h_24 AS n24, r.notified_48h_2 AS n2
+                   FROM leads l
+                   JOIN lead_reveals r ON r.lead_id = l.id
+                     AND r.returned_to_pool = 0 AND r.user_id = l.reserved_by
+                   WHERE l.lead_status IN ('contacted', 'in_negotiation')
+                     AND l.stage_expires_at IS NOT NULL
+                     AND l.stage_expires_at >= datetime('now')
+                     AND l.stage_expires_at <= datetime('now', '+24 hours')"""
+            ).fetchall()
+            for row in pending:
+                expires_dt = self._parse_dt(row["stage_expires_at"]) or (now + timedelta(hours=24))
+                remaining_h = (expires_dt - now).total_seconds() / 3600.0
+                which = "Contactar" if row["lead_status"] == "contacted" else "Negociar"
+                address = row["address"] or ("lead #" + str(row["id"]))
+                if remaining_h <= 2 and not row["n2"]:
+                    conn.execute(
+                        "UPDATE lead_reveals SET notified_48h_2 = 1 WHERE id = ?", (row["reveal_id"],)
+                    )
+                    conn.execute(
+                        """INSERT INTO notifications (user_id, type, title, message, lead_id)
+                           VALUES (?, 'stage_urgent', ?, ?, ?)""",
+                        (row["reserved_by"], "Últimas 2 horas!", f"A fase {which} do lead {address} expira em 2h.", row["id"]),
+                    )
+                    processed += 1
+                elif remaining_h <= 24 and not row["n24"]:
+                    conn.execute(
+                        "UPDATE lead_reveals SET notified_48h_24 = 1 WHERE id = ?", (row["reveal_id"],)
+                    )
+                    conn.execute(
+                        """INSERT INTO notifications (user_id, type, title, message, lead_id)
+                           VALUES (?, 'stage_warning', ?, ?, ?)""",
+                        (row["reserved_by"], "Faltam 24 horas", f"A fase {which} do lead {address} expira em 24h.", row["id"]),
                     )
                     processed += 1
 
