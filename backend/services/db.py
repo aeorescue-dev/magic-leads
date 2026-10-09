@@ -852,6 +852,50 @@ class _SmtpConnect(smtplib.SMTP):
         raise last_err
 
 
+def _record_credit_event_connection(
+    conn: sqlite3.Connection,
+    user_id: int,
+    event_type: str,
+    amount: int,
+    reference_id: Optional[int] = None,
+    reference_type: Optional[str] = None,
+    metadata: Optional[dict] = None,
+) -> int:
+    """Core partilhado de registo de eventos no credit_ledger.
+
+    Usado pelo metodo `DatabaseService._record_credit_event` e diretamente
+    pelo flush de telemetria (metrics.py), para que o evento vivo e o
+    `backfill_credit_ledger` produzam linhas identicas. Idempotente pela
+    unique index (user_id, reference_type, reference_id).
+    """
+    # Saldo anterior
+    row = conn.execute(
+        "SELECT COALESCE(MAX(balance_after), 0) FROM credit_ledger WHERE user_id = ?",
+        (user_id,),
+    ).fetchone()
+    prev_balance = row[0] if row else 0
+    new_balance = prev_balance + amount
+
+    meta_json = None
+    if metadata:
+        import json
+        meta_json = json.dumps(metadata, ensure_ascii=False)
+
+    try:
+        conn.execute(
+            """INSERT INTO credit_ledger
+                   (user_id, event_type, amount, balance_after, reference_id, reference_type, metadata)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(user_id, reference_type, reference_id) DO NOTHING""",
+            (user_id, event_type, amount, new_balance, reference_id, reference_type, meta_json),
+        )
+    except sqlite3.IntegrityError:
+        # Já existe (idempotência): não conta duas vezes
+        pass
+
+    return new_balance
+
+
 class DatabaseService:
     """Interface type-safe sobre o SQLite (espelha o antigo SupabaseService)."""
 
@@ -4799,33 +4843,19 @@ class DatabaseService:
 
         `balance_after` e a soma cumulativa de amounts para o user.
         Usa ON CONFLICT DO NOTHING na unique index para idempotência.
+
+        Delega para o core partilhado `_record_credit_event_connection`
+        (usado tambem pelo flush de telemetria da Searchbug).
         """
-        # Saldo anterior
-        row = conn.execute(
-            "SELECT COALESCE(MAX(balance_after), 0) FROM credit_ledger WHERE user_id = ?",
-            (user_id,),
-        ).fetchone()
-        prev_balance = row[0] if row else 0
-        new_balance = prev_balance + amount
-
-        meta_json = None
-        if metadata:
-            import json
-            meta_json = json.dumps(metadata, ensure_ascii=False)
-
-        try:
-            conn.execute(
-                """INSERT INTO credit_ledger
-                       (user_id, event_type, amount, balance_after, reference_id, reference_type, metadata)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(user_id, reference_type, reference_id) DO NOTHING""",
-                (user_id, event_type, amount, new_balance, reference_id, reference_type, meta_json),
-            )
-        except sqlite3.IntegrityError:
-            # Já existe (idempotência): não conta duas vezes
-            pass
-
-        return new_balance
+        return _record_credit_event_connection(
+            conn,
+            user_id,
+            event_type,
+            amount,
+            reference_id,
+            reference_type,
+            metadata,
+        )
 
     def record_grant_daily(self, user_id: int, limit: int, date: str) -> int:
         """Concede quota diária (evento 'grant_daily').
@@ -4835,7 +4865,7 @@ class DatabaseService:
         conn = get_connection()
         try:
             ref_id = int(date.replace("-", ""))  # YYYYMMDD como int
-            return self._record_credit_event(
+            result = self._record_credit_event(
                 conn,
                 user_id=user_id,
                 event_type="grant_daily",
@@ -4844,6 +4874,8 @@ class DatabaseService:
                 reference_type="daily_grant",
                 metadata={"date": date, "limit": limit},
             )
+            conn.commit()
+            return result
         finally:
             conn.close()
 
@@ -4857,7 +4889,7 @@ class DatabaseService:
             # plan_until como referência (YYYY-MM-DD)
             ref_id = int(plan_until[:10].replace("-", ""))
             amount = days * limit
-            return self._record_credit_event(
+            result = self._record_credit_event(
                 conn,
                 user_id=user_id,
                 event_type="grant_plan",
@@ -4866,6 +4898,8 @@ class DatabaseService:
                 reference_type="plan_grant",
                 metadata={"days": days, "limit": limit, "plan_until": plan_until},
             )
+            conn.commit()
+            return result
         finally:
             conn.close()
 
@@ -4876,7 +4910,7 @@ class DatabaseService:
         """
         conn = get_connection()
         try:
-            return self._record_credit_event(
+            result = self._record_credit_event(
                 conn,
                 user_id=user_id,
                 event_type="consume_reveal",
@@ -4885,6 +4919,8 @@ class DatabaseService:
                 reference_type="reveal",
                 metadata={},
             )
+            conn.commit()
+            return result
         finally:
             conn.close()
 
@@ -4895,7 +4931,7 @@ class DatabaseService:
         """
         conn = get_connection()
         try:
-            return self._record_credit_event(
+            result = self._record_credit_event(
                 conn,
                 user_id=user_id,
                 event_type="refund_reveal",
@@ -4904,6 +4940,8 @@ class DatabaseService:
                 reference_type="reveal",
                 metadata={},
             )
+            conn.commit()
+            return result
         finally:
             conn.close()
 
@@ -4923,7 +4961,7 @@ class DatabaseService:
         """
         conn = get_connection()
         try:
-            return self._record_credit_event(
+            result = self._record_credit_event(
                 conn,
                 user_id=user_id,
                 event_type="searchbug_cost",
@@ -4937,6 +4975,8 @@ class DatabaseService:
                     "latency_ms": latency_ms,
                 },
             )
+            conn.commit()
+            return result
         finally:
             conn.close()
 
@@ -4950,7 +4990,7 @@ class DatabaseService:
         try:
             # event_id do Stripe pode ser longo, usamos hash curto
             ref_id = int(hashlib.md5(event_id.encode()).hexdigest()[:15], 16)
-            return self._record_credit_event(
+            result = self._record_credit_event(
                 conn,
                 user_id=user_id,
                 event_type="stripe_payment",
@@ -4959,6 +4999,8 @@ class DatabaseService:
                 reference_type="stripe_event",
                 metadata={"stripe_event_id": event_id, "days": days},
             )
+            conn.commit()
+            return result
         finally:
             conn.close()
 

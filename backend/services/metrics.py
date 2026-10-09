@@ -72,10 +72,19 @@ _MAX_ERROR_LEN = 300
 class MetricsBuffer:
     """Fila de eventos de telemetria com flush de fundo."""
 
-    def __init__(self, table: str, columns: tuple, enabled: bool = True):
+    def __init__(
+        self,
+        table: str,
+        columns: tuple,
+        enabled: bool = True,
+        audit_hook=None,
+    ):
         self._table = table
         self._columns = tuple(columns)
         self._enabled = enabled
+        # `audit_hook` e chamado (conn, row, lastrowid) na MESMA transacao do
+        # insert, para o evento de auditoria nunca ficar orfao da sua linha.
+        self._audit_hook = audit_hook
         self._buf: Deque[Dict[str, Any]] = deque()
         self._lock = threading.Lock()
         self._task: Optional[asyncio.Task] = None
@@ -210,7 +219,12 @@ class MetricsBuffer:
         return row
 
     def _insert(self, rows: List[Dict[str, Any]]) -> None:
-        """Insert em transaccao propria, com conn propria e timeouts curtos."""
+        """Insert em transaccao propria, com conn propria e timeouts curtos.
+
+        Com `audit_hook`, cada linha e inserida individualmente para expor o
+        `lastrowid` (call_id) ao hook — a auditoria corre na MESMA transacao:
+        se falhar, o lote inteiro volta ao buffer e ninguem fica orfao.
+        """
         placeholders = ", ".join(f":{c}" for c in self._columns)
         sql = (
             f"INSERT INTO {self._table} ({', '.join(self._columns)}) "
@@ -219,7 +233,12 @@ class MetricsBuffer:
         conn = _metrics_connection()
         try:
             conn.execute("BEGIN")
-            conn.executemany(sql, rows)
+            if self._audit_hook is None:
+                conn.executemany(sql, rows)
+            else:
+                for row in rows:
+                    cur = conn.execute(sql, row)
+                    self._audit_hook(conn, row, cur.lastrowid)
             conn.commit()
         except Exception:
             try:
@@ -267,5 +286,44 @@ def _metrics_connection() -> sqlite3.Connection:
 
 # Instancias por tabela. `record()` e o unico metodo usado no caminho
 # critico; o resto e para o lifespan e para o painel.
-searchbug_metrics = MetricsBuffer("searchbug_calls", _SEARCHBUG_COLUMNS)
+
+
+def _searchbug_cost_audit(conn: sqlite3.Connection, row: Dict[str, Any], call_id: int) -> None:
+    """Auditoria de custo da chamada Searchbug, na mesma transacao do insert.
+
+    Somente chamadas `billed=1` (que chegaram ao provider e custaram dinheiro)
+    geram evento `searchbug_cost` no credit_ledger, com `user_id=0` (sistema) —
+    exatamente o mesmo formato que `backfill_credit_ledger` reconstroi, para
+    que as linhas vivas e as backfilled sejam identicas. Idempotente pela
+    unique index (user_id, reference_type, reference_id).
+
+    Import lazily (I/O, fora do caminho do request) e, se falhar, derruba a
+    transacao para o flush re-tentar o lote — nunca deixa telemetria sem a sua
+    auditoria. A import de `db` aqui e segura contra o ciclo db->searchbug->
+    metrics->db porque so acontece em runtime, nunca no import do modulo.
+    """
+    if not row.get("billed"):
+        return
+
+    from backend.services.db import _record_credit_event_connection
+
+    _record_credit_event_connection(
+        conn,
+        user_id=0,
+        event_type="searchbug_cost",
+        amount=0,
+        reference_id=call_id,
+        reference_type="searchbug_call",
+        metadata={
+            "billed": row.get("billed"),
+            "outcome": row.get("outcome"),
+            "city": row.get("city"),
+            "latency_ms": row.get("latency_ms"),
+        },
+    )
+
+
+searchbug_metrics = MetricsBuffer(
+    "searchbug_calls", _SEARCHBUG_COLUMNS, audit_hook=_searchbug_cost_audit
+)
 push_metrics = MetricsBuffer("push_deliveries", _PUSH_COLUMNS)

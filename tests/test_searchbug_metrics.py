@@ -16,6 +16,10 @@ Invariantes fixados aqui:
      aparecer como "zero eventos" enganador no painel.
   6. A classificaÃ§Ã£o de outcome Ã© uma funÃ§Ã£o pura partilhada entre o
      serviÃ§o, o painel e os testes.
+  7. Auditoria de custo: cada chamada `billed=1` gera UM evento
+     `searchbug_cost` no `credit_ledger` (user_id=0, sistema), gravado na
+     MESMA transacÃ§Ã£o do insert de telemetria — fatura nÃ£o pode existir sem
+     o seu registo de custo, nem duplicar.
 """
 from __future__ import annotations
 
@@ -23,7 +27,7 @@ import asyncio
 
 import pytest
 
-from backend.services.db import get_connection
+from backend.services.db import _record_credit_event_connection, get_connection
 from backend.services.metrics import (
     _SEARCHBUG_COLUMNS,
     MetricsBuffer,
@@ -38,10 +42,11 @@ from backend.services.searchbug import (
 
 @pytest.fixture(autouse=True)
 def _clean_calls():
-    """Zera a tabela de telemetria antes de cada teste."""
+    """Zera telemetria e auditoria de custo antes de cada teste."""
     conn = get_connection()
     try:
         conn.execute("DELETE FROM searchbug_calls")
+        conn.execute("DELETE FROM credit_ledger")
         conn.commit()
     finally:
         conn.close()
@@ -53,6 +58,21 @@ def _rows() -> list[dict]:
     try:
         cur = conn.execute(
             "SELECT * FROM searchbug_calls ORDER BY id"
+        )
+        return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _ledger() -> list[dict]:
+    """Eventos de auditoria de custo ('searchbug_cost') no credit_ledger."""
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            """SELECT id, user_id, event_type, amount, balance_after,
+                      reference_id, reference_type, metadata
+               FROM credit_ledger WHERE event_type = 'searchbug_cost'
+               ORDER BY id"""
         )
         return [dict(r) for r in cur.fetchall()]
     finally:
@@ -436,3 +456,121 @@ async def test_one_event_per_provider_call(monkeypatch, _configured):
 
     rows = await _flush()
     assert len(rows) == 1
+
+
+# --------------------------------------- 7. auditoria de custo no ledger
+
+
+@pytest.mark.asyncio
+async def test_billed_call_records_system_cost_event(monkeypatch, _configured):
+    """Chamada que chegou ao provider = evento de custo, user 0 (sistema)."""
+    payload = {
+        "Status": "OK",
+        "Data": {"RECORD": [{"PHONES": {"PHONE": ["2125551234"]}}]},
+    }
+    await _patch_client(monkeypatch, response=_FakeResponse(200, payload))
+
+    result = await _configured._lookup_searchbug("10 Main St", "New York", "NY")
+
+    assert result.success is True
+    rows = await _flush()
+
+    ledger = _ledger()
+    assert len(ledger) == 1
+    ev = ledger[0]
+    assert ev["user_id"] == 0, "custo e do sistema (user_id=0), como no backfill"
+    assert ev["event_type"] == "searchbug_cost"
+    assert ev["amount"] == 0, "auditoria de custo nunca altera saldo de creditos"
+    assert ev["balance_after"] == 0
+    assert ev["reference_type"] == "searchbug_call"
+    assert ev["reference_id"] == rows[0]["id"], "referencia ao call que o originou"
+
+    import json
+    meta = json.loads(ev["metadata"])
+    assert meta["billed"] == 1
+    assert meta["outcome"] == "success"
+    assert meta["city"] == "New York"
+    assert meta["latency_ms"] is not None
+
+
+@pytest.mark.asyncio
+async def test_not_billed_call_records_no_cost_event(monkeypatch):
+    """guard_skipped/not_configured = custo zero = nenhum evento de custo."""
+    monkeypatch.setattr(
+        "backend.services.searchbug.settings.SEARCHBUG_ACCOUNT_CODE", None, raising=False
+    )
+    service = PhoneLookupService()
+    service.searchbug_key = None
+
+    result = await service.lookup_phone("", "Miami", "FL", owner_name="John Smith")
+
+    assert result.success is False
+    await _flush()
+    assert _ledger() == [], "sem chamada paga nao ha auditoria de custo"
+
+
+@pytest.mark.asyncio
+async def test_cache_hit_records_no_cost_event(monkeypatch, _configured):
+    """Cache hit nao custa: nem telemetria billed nem evento de custo."""
+    payload = {
+        "Status": "OK",
+        "Data": {"RECORD": [{"PHONES": {"PHONE": ["2125551234"]}}]},
+    }
+    await _patch_client(monkeypatch, response=_FakeResponse(200, payload))
+
+    await _configured.lookup_phone(
+        "10 Main St", "New York", "NY", owner_name="John Smith", zip_code="10001"
+    )
+    await _configured.lookup_phone(
+        "10 Main St", "New York", "NY", owner_name="John Smith", zip_code="10001"
+    )
+
+    await _flush()
+    assert len(_ledger()) == 1, "so a chamada original (billed) gera custo"
+
+
+def test_audit_failure_rolls_back_telemetry_and_buffer():
+    """Auditoria rota nao pode deixar telemetria sem o seu custo.
+
+    O evento de custo corre na MESMA transacao: se falhar, a linha de
+    telemetria tambem e desfeita e o lote volta ao buffer (visivel, nao
+    engolido), tal como uma falha de insert normal.
+    """
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("credit_ledger indisponivel")
+
+    buf = MetricsBuffer("searchbug_calls", _SEARCHBUG_COLUMNS, audit_hook=_boom)
+    buf.record(outcome="success", billed=True, latency_ms=120, city="New York")
+
+    assert asyncio.run(buf.flush_once()) == 0
+    st = buf.stats()
+    assert st["buffered"] == 1, "lote volta ao buffer"
+    assert st["flush_errors"] == 1
+    assert st["flushed"] == 0
+    assert _rows() == [], "telemetria desfeita junto com a auditoria"
+    assert _ledger() == []
+
+
+def test_cost_event_is_idempotent_by_call_id():
+    """Re-inserir o mesmo (user, reference_type, call_id) nao duplica.
+
+    O core nao commita por si (quem commita e o flush/backfill); aqui a
+    transacao e commitada manualmente como os callers reais fazem.
+    """
+    conn = get_connection()
+    try:
+        for _ in range(2):
+            _record_credit_event_connection(
+                conn,
+                user_id=0,
+                event_type="searchbug_cost",
+                amount=0,
+                reference_id=12345,
+                reference_type="searchbug_call",
+                metadata={"billed": 1, "outcome": "success"},
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert len(_ledger()) == 1, "unique index (user, reference_type, call_id)"
