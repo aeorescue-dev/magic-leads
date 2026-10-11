@@ -36,6 +36,7 @@ import ReleaseModal from "@/components/ReleaseModal";
 import WelcomePopup from "@/components/WelcomePopup";
 import { PushNotificationButton } from "@/components/PushNotificationButton";
 import PushOnboardingBanner from "@/components/PushOnboardingBanner";
+import InterestsNudgeBanner from "@/components/InterestsNudgeBanner";
 import { LeadLocationMap } from "@/components/LeadLocationMap";
 import { StageBadge } from "@/components/ui/StageBadge";
 import { StageGuidePanel } from "@/components/ui/StageGuidePanel";
@@ -201,6 +202,7 @@ function DashboardPageInner() {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<"overview" | "opportunities" | "favorites" | "interests" | "alerts" | "history">("overview");
   const [interests, setInterests] = useState<Set<string>>(new Set(["Roof", "Structure", "Plumbing", "Grass", "Paint", "Permit_Rejected", "Heating", "Electrical", "Elevator", "Gas", "Rodent", "Mold", "Lead", "Unsanitary", "Door_Window", "Debris"]));
+  const [interestsConfigured, setInterestsConfigured] = useState<boolean | null>(null);
   const [dailyStats, setDailyStats] = useState<{ used: number; limit: number; remaining: number; reset_at: string } | null>(null);
 
   // Historico de casos encerrados. Desligado por omissao: o pool principal e
@@ -422,7 +424,9 @@ const URGENCIES = ["all", "high", "medium", "low"];
     if (userId) {
       fetchUserInterests(userId)
         .then((cats) => {
-          if (cats && cats.length > 0) {
+          const hasInterests = Array.isArray(cats) && cats.length > 0;
+          setInterestsConfigured(hasInterests);
+          if (hasInterests) {
             setInterests(new Set(cats));
           }
         })
@@ -635,6 +639,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
     if (next.has(catKey)) next.delete(catKey);
     else next.add(catKey);
     setInterests(next);
+    if (next.size > 0) setInterestsConfigured(true);
 
     if (userId) {
       try {
@@ -1496,8 +1501,22 @@ const URGENCIES = ["all", "high", "medium", "low"];
 
         {/* MAIN BODY CONTAINER */}
         <main className="flex-1 p-4 md:p-6 space-y-6 max-w-7xl mx-auto w-full">
-          {/* PUSH NOTIFICATION PROMPT */}
+          {/* Push Notification Button */}
           <PushOnboardingBanner />
+
+          {/* Nudge: utilizadores sem especialidades definidas */}
+          <InterestsNudgeBanner
+            show={interestsConfigured === false}
+            onSetup={() => {
+              setActiveTab("interests");
+              setTimeout(() => {
+                document.getElementById("interests-config")?.scrollIntoView({
+                  behavior: "smooth",
+                  block: "start",
+                });
+              }, 50);
+            }}
+          />
 
           {/* GREETING */}
           <div className="flex items-center justify-between flex-wrap gap-4">
@@ -2096,7 +2115,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
           {/* GRID: INTERESTS CONFIG + OPPORTUNITIES FEED */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* INTERESTS SECTION */}
-            <section className={`border rounded-2xl p-5 space-y-4 transition ${isDark ? "bg-[#10121a] border-white/5" : "bg-white border-slate-200 shadow-sm"}`}>
+            <section id="interests-config" className={`border rounded-2xl p-5 space-y-4 transition ${isDark ? "bg-[#10121a] border-white/5" : "bg-white border-slate-200 shadow-sm"}`}>
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="font-bold text-base">{t("dashboard.interests.title")}</h2>
