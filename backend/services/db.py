@@ -19,8 +19,8 @@ from .access import (
     normalize_status,
     parse_dt,
 )
-from .searchbug import PhoneLookupResult, searchbug_service
 from .lead_rules import institutional_owner_name_where
+from .searchbug import PhoneLookupResult, searchbug_service
 
 
 def _not_junk_where(alias: str = "") -> str:

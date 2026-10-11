@@ -13,6 +13,7 @@ from backend.services.lead_rules import (
     is_complete_delivery,
     is_corporate,
     is_incomplete_delivery,
+    is_institutional_name,
     is_unresolvable,
     missing_critical_fields,
 )
@@ -197,6 +198,7 @@ def test_classify_broken_lead():
     """Cenário real de produção: '2424, NYC, NY' sem qualquer contacto."""
     assert classify(lead(address="2424, NYC, NY")) == {
         "corporate": False,
+        "institutional": False,
         "address_resolvable": False,
         "unresolvable": True,
         "complete_delivery": False,
@@ -208,12 +210,27 @@ def test_classify_broken_lead():
 def test_classify_corporate_lead():
     assert classify(lead(owner_name="ACME LLC", mailing_address="PO BOX 9")) == {
         "corporate": True,
+        "institutional": False,
         "address_resolvable": True,
         "unresolvable": False,
         "complete_delivery": False,
         "incomplete_delivery": False,
         "charged": False,
     }
+
+
+def test_classify_flags_institutional_owner():
+    verdict = classify(lead(owner_name="NYC HOUSING AUTHORITY"))
+    assert verdict["institutional"] is True
+    assert verdict["charged"] is False
+
+
+def test_is_institutional_name_matches_authorities_but_not_people():
+    assert is_institutional_name("BOARD OF REGENTS OF") is True
+    assert is_institutional_name("NYC DEPARTMENT OF PARKS AND RECREATION") is True
+    assert is_institutional_name("JOHN PARKS") is False
+    assert is_institutional_name("65 MS LLC") is False
+    assert is_institutional_name(None) is False
 
 
 def test_classify_is_consistent_with_the_predicates():
