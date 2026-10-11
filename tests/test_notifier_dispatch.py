@@ -41,7 +41,7 @@ def _past(days: int = 1) -> str:
 def _reset_tables() -> None:
     conn = get_connection()
     try:
-        for table in ("notifications", "user_interests", "system_alerts", "leads", "users"):
+        for table in ("alert_usage", "notifications", "user_interests", "system_alerts", "leads", "users"):
             conn.execute(f"DELETE FROM {table}")
         conn.commit()
     finally:

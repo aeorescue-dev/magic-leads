@@ -51,7 +51,7 @@ from .models.schemas import (
 )
 from .scrapers.socrata_311 import socrata_scraper
 from .scrapers.socrata_discovery import socrata_discovery
-from .services import notifier, security
+from .services import alert_planner, notifier, security
 from .services.db import db_service
 from .services.enrichment import owner_enrichment
 from .services.lead_rules import (
@@ -65,6 +65,7 @@ from .services.lead_rules import (
 from .services.metrics import push_metrics, searchbug_metrics
 from .services.push_service import push_service
 from .services.searchbug import searchbug_service
+from .services.translations import render as _render_notification
 from .utils.logger import logger
 
 
@@ -1074,6 +1075,13 @@ async def update_lead(lead_id: int, payload: LeadUpdate, user: dict = Depends(_g
                 "Status da oportunidade atualizado",
                 f"A oportunidade em {lead.get('address') or 'endereço não informado'}, {lead.get('city') or ''} agora está '{payload.status}' (categoria {lead.get('issue_category') or 'N/I'})",
                 lead_id=lead_id,
+                msg_key="status_change",
+                msg_params={
+                    "addr": lead.get("address") or "N/I",
+                    "city": lead.get("city") or "N/I",
+                    "status": payload.status,
+                    "category": lead.get("issue_category") or "N/I",
+                },
             )
         await _annotate_visibility([lead], user)
         return _to_lead_response(lead)
@@ -1129,6 +1137,30 @@ async def delete_lead_note(lead_id: int, note_id: int, user: dict = Depends(_get
 # ------------------------------------------------------------------
 # Notificações (com filtro de "recentes" para o painel)
 # ------------------------------------------------------------------
+def _localize_notification(row: dict, locale: str | None) -> dict:
+    """Aplica o texto localizado a uma linha de notificação, se houver msg_key.
+
+    O title/message gravados servem de fallback; quando existe
+    msg_key + msg_params renderizamos no locale do utilizador na leitura.
+    """
+    item = dict(row)
+    msg_key = item.get("msg_key")
+    if not msg_key:
+        return item
+    params: dict = {}
+    raw = item.get("msg_params")
+    if raw:
+        try:
+            params = json.loads(raw) if isinstance(raw, str) else dict(raw)
+        except (ValueError, TypeError):
+            params = {}
+    rendered = _render_notification(msg_key, locale, **params)
+    if rendered:
+        item["title"] = rendered["title"]
+        item["message"] = rendered["message"]
+    return item
+
+
 @app.get("/api/notifications", response_model=list[NotificationResponse])
 async def list_notifications(
     user: dict = Depends(_get_current_user),
@@ -1143,19 +1175,22 @@ async def list_notifications(
     try:
         if unread == 1:
             filter = "unread"
+        user_row = await db_service.get_user_by_id(user["id"]) or {}
+        locale = user_row.get("locale")
         rows = await db_service.get_notifications_for_user(user["id"], filter=filter, limit=limit)
-        return [
-            NotificationResponse(
-                id=r["id"],
-                type=r["type"],
-                title=r["title"],
-                message=r["message"],
-                lead_id=r.get("lead_id"),
-                created_at=r["created_at"],
-                read=bool(r["read"]),
-            )
-            for r in rows
-        ]
+        out = []
+        for r in rows:
+            item = _localize_notification(r, locale)
+            out.append(NotificationResponse(
+                id=item["id"],
+                type=item["type"],
+                title=item["title"],
+                message=item["message"],
+                lead_id=item.get("lead_id"),
+                created_at=item["created_at"],
+                read=bool(item.get("read")),
+            ))
+        return out
     except Exception as e:
         logger.error(f"Erro ao listar notificações: {e}")
         raise HTTPException(status_code=500, detail="Erro ao listar notificações")
@@ -2310,10 +2345,9 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
             for nl in newly_added:
                 cat = (nl.get("issue_category") or "Structure").strip()
                 added_by_cat.setdefault(cat, []).append(nl)
-            for cat, items in added_by_cat.items():
-                report = await notifier.fanout_new_lead_batch(cat, items)
-                notified_total += int(report.created or 0)
-                audience_total += int(report.audience or 0)
+            report = await alert_planner.plan_and_dispatch(newly_added)
+            notified_total = int(report.created or 0)
+            audience_total = int(report.audience or 0)
 
             # Dead Man's Switch: alerta só quando NÃO houver nenhum elegível
             # (cap diário atingido é saudável e não dispara).
@@ -2455,6 +2489,16 @@ async def _lifespan(app):
     # persistir nada.
     await searchbug_metrics.start()
     await push_metrics.start()
+
+    # Alert Planner: semeia o orçamento de alertas de hoje a partir dos alertas
+    # new_lead já enviados (idempotente por dia). Impede que um deploy a meio
+    # do dia atribua um orçamento extra a quem já recebeu os seus 6 alertas.
+    try:
+        seeded = await db_service.seed_alert_usage_from_notifications()
+        if seeded:
+            logger.info(f"Alert Planner: {seeded} linha(s) de orçamento semeada(s)")
+    except Exception as e:
+        logger.warning(f"Falha no seed do orçamento de alertas: {e}")
 
     # Validação de VAPID keys no startup
     if not settings.VAPID_PUBLIC_KEY or not settings.VAPID_PRIVATE_KEY:
@@ -2635,6 +2679,8 @@ async def enrich_leads(city: str = "NYC", limit: int = 500, user: dict = Depends
                 "owner_enriched",
                 "Novos proprietários identificados",
                 f"{found} novo(s) proprietário(s) encontrado(s) em {city}",
+                msg_key="owner_enriched",
+                msg_params={"n": found, "city": city},
             )
         return {
             "status": "success",
@@ -2763,6 +2809,13 @@ async def enrich_all_leads(request: Request, limit_per_city: int = 200, _admin: 
                 "enrichment_complete",
                 "Enriquecimento de dados concluído",
                 f"Identificados: {total_owners_found} proprietários, {total_mailing_found} endereços de correspondência, {total_phones_found} telefones, {total_emails_found} e-mails",
+                msg_key="enrichment_complete",
+                msg_params={
+                    "owners": total_owners_found,
+                    "mailing": total_mailing_found,
+                    "phones": total_phones_found,
+                    "emails": total_emails_found,
+                },
             )
 
         return {
@@ -3551,21 +3604,24 @@ async def user_notifications(
         raise HTTPException(status_code=403, detail="Sem permissão")
     if unread == 1:
         filter = "unread"
+    user_row = await db_service.get_user_by_id(user_id) or {}
+    locale = user_row.get("locale")
     rows = await db_service.get_notifications_for_user(
         user_id, filter=filter, limit=limit
     )
-    return [
-        NotificationResponse(
-            id=r["id"],
-            type=r["type"],
-            title=r["title"],
-            message=r["message"],
-            lead_id=r.get("lead_id"),
-            created_at=r["created_at"],
-            read=bool(r["read"]),
-        )
-        for r in rows
-    ]
+    out = []
+    for r in rows:
+        item = _localize_notification(r, locale)
+        out.append(NotificationResponse(
+            id=item["id"],
+            type=item["type"],
+            title=item["title"],
+            message=item["message"],
+            lead_id=item.get("lead_id"),
+            created_at=item["created_at"],
+            read=bool(item.get("read")),
+        ))
+    return out
 
 
 @app.get("/api/users/{user_id}/notifications/unread-count")

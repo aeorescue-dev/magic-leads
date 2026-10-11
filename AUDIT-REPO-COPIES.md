@@ -25,10 +25,17 @@ path entre ferramentas** (`garimpador-leads` vs outros spellings do mesmo diret�
 
 ## 3. Pontos de i18n no backend (verificados verbatim)
 
-- `translations.py` — `tr()` (PT/EN/ES, fallback PT), grupos `new_lead`, `status_change`, `system`.
-- `push_service.py` — `send_new_lead_alert` e `send_status_change_alert` localizados por usuário.
-- `notifier.py` — `notify_users_for_lead` localiza por usuário (`tr()`/`normalize`).
-- `db.py` (coluna `locale`), `schemas.py` (UserCreate/Update/Response), `main.py` register (`locale` fallback PT).
+- `translations.py` — `DEFAULT_LOCALE="en"`, `tr()` (PT/EN/ES, fallback PT), `render()` (templating
+  por `msg_key`/`msg_params` → `{title, message}`), grupos `new_lead`, `status_change`, `system`,
+  `digest`, `owner_enriched`, `enrichment_complete`.
+- `alert_planner.py` — despacho localizado por utilizador (fair-equal + teto diário): push `new_lead`
+  e push `digest` via `push_service.send_to_user` (título/corpo por `render()` no locale do user).
+- `notifier.py` — fachada: `fanout_new_lead_batch` delega em `alert_planner.plan_and_dispatch`;
+  `guard_silent_fanout` (Dead Man's Switch). `notify_users_for_lead` foi removido na migração.
+- `push_service.py` — apenas `send_to_user` (gate `push_enabled`), `send_to_all` e debug. Os antigos
+  `send_new_lead_alert`/`send_status_change_alert`/`send_to_category` foram removidos (dead code).
+- `db.py` — colunas `locale`, `msg_key`/`msg_params`; `main.py` renderiza na leitura via
+  `_localize_notification` (schemas `UserCreate/Update/Response` mantêm `locale`).
 
 ## 4. Pendência (próxima sessão — frontend)
 

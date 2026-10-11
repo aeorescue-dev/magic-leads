@@ -286,18 +286,15 @@ async def test_send_to_user_records_not_configured(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.asyncio
 async def test_broadcast_kinds_are_labelled_on_the_real_path(monkeypatch):
     """Regressao: os broadcasts so rotulavam o caminho `not_configured`.
 
-    No caminho normal `send_to_category` chamava `send_to_user` sem `kind`, e
-    `send_to_user` sem kind assume `custom`. O painel via tudo como
-    notificacao de lead e perdia a separacao por tipo de envio.
+    No caminho normal `send_to_user` sem `kind` assume `custom`. O painel via
+    tudo como notificacao de lead e perdia a separacao por tipo de envio.
     """
     svc = _svc_configured(monkeypatch)
     _patch_webpush(monkeypatch)
-
-    async def _users(category):
-        return [{"id": 42}]
 
     async def _subs():
         return [{"user_id": 42, "endpoint": "https://push.example/42",
@@ -309,7 +306,6 @@ async def test_broadcast_kinds_are_labelled_on_the_real_path(monkeypatch):
     async def _noop(*args, **kwargs):
         return None
 
-    monkeypatch.setattr(db_service, "get_users_interested_in", _users)
     monkeypatch.setattr(db_service, "get_all_push_subscriptions", _subs)
     monkeypatch.setattr(db_service, "get_user_push_subscriptions", _user_subs)
     monkeypatch.setattr(db_service, "remove_push_subscription", _noop)
@@ -319,12 +315,11 @@ async def test_broadcast_kinds_are_labelled_on_the_real_path(monkeypatch):
 
     monkeypatch.setattr(db_service, "is_push_enabled", _enabled)
 
-    assert await svc.send_to_category("restaurants", {"title": "t"}) == 1
     assert await svc.send_to_all({"title": "t"}) == 1
 
-    rows = await _flush(2)
+    rows = await _flush(1)
     kinds = {r["kind"] for r in rows}
-    assert kinds == {"category_broadcast", "broadcast"}, f"kinds errados: {kinds}"
+    assert kinds == {"broadcast"}, f"kinds errados: {kinds}"
     assert {r["outcome"] for r in rows} == {"accepted"}
 
 

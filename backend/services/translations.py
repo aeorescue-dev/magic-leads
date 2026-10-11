@@ -96,6 +96,57 @@ TRANSLATIONS = {
             "push_tag": "sistema",
         },
     },
+    "digest": {
+        "pt": {
+            "title": "Resumo diário de alertas",
+            "main_msg": "Mais {n} oportunidades chegaram hoje — o limite de {limit} renova amanhã.",
+            "push_tag": "digest",
+        },
+        "en": {
+            "title": "Daily digest",
+            "main_msg": "More {n} new opportunities today — the limit of {limit} resets tomorrow.",
+            "push_tag": "digest",
+        },
+        "es": {
+            "title": "Resumen diario",
+            "main_msg": "Hoy llegaron {n} oportunidades más — el límite de {limit} se renueva mañana.",
+            "push_tag": "digest",
+        },
+    },
+    "owner_enriched": {
+        "pt": {
+            "title": "Novos proprietários identificados",
+            "main_msg": "{n} novo(s) proprietário(s) encontrado(s) em {city}",
+            "push_tag": "owner_enriched",
+        },
+        "en": {
+            "title": "New owners identified",
+            "main_msg": "{n} new owner(s) found in {city}",
+            "push_tag": "owner_enriched",
+        },
+        "es": {
+            "title": "Nuevos propietarios identificados",
+            "main_msg": "{n} nuevo(s) propietario(s) encontrado(s) en {city}",
+            "push_tag": "owner_enriched",
+        },
+    },
+    "enrichment_complete": {
+        "pt": {
+            "title": "Enriquecimento concluído",
+            "main_msg": "{owners} proprietário(s), {mailing} morada(s) postal(is), {phones} telefone(s) e {emails} email(s) encontrados.",
+            "push_tag": "enrichment_complete",
+        },
+        "en": {
+            "title": "Enrichment complete",
+            "main_msg": "{owners} owner(s), {mailing} mailing address(es), {phones} phone(s) and {emails} email(s) found.",
+            "push_tag": "enrichment_complete",
+        },
+        "es": {
+            "title": "Enriquecimiento completo",
+            "main_msg": "{owners} propietario(s), {mailing} dirección(es), {phones} teléfono(s) y {emails} correo(s) encontrados.",
+            "push_tag": "enrichment_complete",
+        },
+    },
 }
 
 
@@ -125,6 +176,36 @@ def tr(key: str, locale: Optional[str] = None, **kw) -> str:
         return text.format(**kw)
     except (KeyError, IndexError, ValueError):
         return text
+
+
+    try:
+        return text.format(**kw)
+    except (KeyError, IndexError, ValueError):
+        return text
+
+
+def render(group_key: str, locale: Optional[str] = None, **params) -> Optional[dict]:
+    """Renderiza {title, message} de um grupo, ou None se faltar o par.
+
+    Convenção dos grupos de notificação: chaves `title` + `main_msg`. Isso
+    permite guardar em `notifications.msg_key` apenas o nome do grupo e
+    localizar o texto na leitura (no locale do utilizador).
+    """
+    table = group(group_key, locale)
+    title = table.get("title")
+    message = table.get("main_msg")
+    if title is None or message is None:
+        return None
+
+    def _fmt(text: str) -> str:
+        if not params:
+            return text
+        try:
+            return text.format(**params)
+        except (KeyError, IndexError, ValueError):
+            return text
+
+    return {"title": _fmt(title), "message": _fmt(message)}
 
 
 _LAST_KNOWN: dict = {}

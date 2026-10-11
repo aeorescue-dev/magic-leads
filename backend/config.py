@@ -167,6 +167,22 @@ class Settings(BaseSettings):
     NOTIF_DLQ_MAX_FILES: int = 500
     NOTIF_DLQ_TTL_DAYS: int = 7
 
+    # Alert Planner: teto diário de alertas por utilizador. O orçamento é
+    # COMBINADO (in-app + push): 1 alerta = 1 unidade. Faixa restrita 5-8.
+    PUSH_DAILY_LIMIT: int = 6
+    # O digest diário do excedente é extra e NÃO conta para o teto.
+    ALERT_DIGEST_COUNTS_TOWARD_LIMIT: bool = False
+
+    @field_validator("PUSH_DAILY_LIMIT")
+    @classmethod
+    def _clamp_push_daily_limit(cls, v: int) -> int:
+        """Fail-safe: restringe o teto diário à faixa 5-8 (default 6)."""
+        try:
+            v = int(v)
+        except (TypeError, ValueError):
+            return 6
+        return max(5, min(8, v))
+
     model_config = SettingsConfigDict(
         env_file = ".env",
         case_sensitive = True,

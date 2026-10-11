@@ -15,7 +15,6 @@ from ..config import settings
 from ..utils.logger import logger
 from .db import db_service
 from .metrics import push_metrics
-from .translations import normalize
 
 MAX_RETRIES = 3
 BASE_BACKOFF = 1.0  # seconds
@@ -266,29 +265,6 @@ class PushService:
 
         return sent
 
-    async def send_to_category(self, category: str, payload: Dict) -> int:
-        """Envia push para todos usuários interessados na categoria."""
-        if not self.is_configured():
-            push_metrics.record(
-                outcome="not_configured", attempts=0, kind="category_broadcast",
-                error="VAPID keys not configured",
-            )
-            return 0
-
-        users = await db_service.get_users_interested_in(category)
-        if not users:
-            return 0
-
-        total_sent = 0
-        for user in users:
-            # `kind` explicito: sem isto as linhas reais deste broadcast
-            # ficavam rotuladas `custom` e o card nao conseguia separar
-            # broadcast de categoria das notificacoes de lead.
-            sent = await self.send_to_user(user["id"], payload, kind="category_broadcast")
-            total_sent += sent
-
-        return total_sent
-
     async def send_to_all(self, payload: Dict) -> int:
         """Envia push para todas as subscriptions ativas (broadcast)."""
         if not self.is_configured():
@@ -393,82 +369,5 @@ class PushService:
                     "error": res.get("error")
                 })
         return results
-
-    async def send_new_lead_alert(self, lead: dict, category: str, payload: Dict = None) -> int:
-        """Envia push de nova oportunidade para usuários interessados na categoria.
-
-        Título/mensagem localizados por `user["locale"]` via translations.tr()
-        (fallback PT). Retorna quantas subscriptions receberam.
-        """
-        from .translations import tr
-
-        addr = lead.get("address") or "endereço"
-        city = lead.get("city") or ""
-        icon_url = (
-            "https://magicleads-oficial.vercel.app/icons/magicleads-brand.svg"
-        )
-
-        def _payload_for(locale: Optional[str]):
-            return {
-                "title": tr("new_lead.push_title", locale),
-                "body": tr(
-                    "new_lead.main_msg", locale,
-                    category=category,
-                    addr=addr,
-                    city=city,
-                ),
-                "icon": icon_url,
-                "badge": icon_url,
-                "tag": f"new-lead-{lead.get('id')}",
-                "url": f"/dashboard?lead={lead.get('id')}",
-                "category": category,
-            }
-
-        users = await db_service.get_users_interested_in(category)
-        sent = 0
-        for user in users[:50]:
-            payload = _payload_for(normalize(user.get("locale")))
-            sent += await self.send_to_user(user["id"], payload, "lead_alert")
-        return sent
-
-    async def send_status_change_alert(self, lead: dict, new_status: str, category: str) -> int:
-        """Envia alerta de mudança de status localizado por `user["locale"]`.
-
-        Título/corpo por usuário via translations.tr() (fallback PT). Retorna
-        quantas subscriptions receberam.
-        """
-        from .translations import tr
-
-        addr = lead.get("address") or "endereço"
-        city = lead.get("city") or ""
-        icon_url = (
-            "https://magicleads-oficial.vercel.app/icons/magicleads-brand.svg"
-        )
-
-        def _payload_for(locale: Optional[str]):
-            return {
-                "title": tr("status_change.title", locale),
-                "body": tr(
-                    "status_change.main_msg", locale,
-                    addr=addr,
-                    city=city,
-                    status=new_status,
-                    category=category,
-                ),
-                "icon": icon_url,
-                "badge": icon_url,
-                "tag": f"status_{lead.get('id')}_{new_status}",
-                "url": f"/dashboard?lead={lead.get('id')}",
-                "category": category,
-                "status": new_status,
-            }
-
-        users = await db_service.get_users_interested_in(category)
-        sent = 0
-        for user in users[:50]:
-            payload = _payload_for(normalize(user.get("locale")))
-            sent += await self.send_to_user(user["id"], payload, "status_change")
-        return sent
-
 
 push_service = PushService()

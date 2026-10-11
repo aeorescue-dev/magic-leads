@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 import smtplib
 import socket
@@ -22,6 +23,8 @@ from .access import (
 )
 from .lead_rules import institutional_owner_name_where
 from .searchbug import PhoneLookupResult, searchbug_service
+from .translations import DEFAULT_LOCALE
+from .translations import render as _render_i18n
 
 
 def _not_junk_where(alias: str = "") -> str:
@@ -132,6 +135,7 @@ CREATE TABLE IF NOT EXISTS users (
   cities_filter TEXT DEFAULT NULL,
   push_enabled INTEGER DEFAULT 0,
   locale TEXT DEFAULT 'en',
+  alert_rotation_cursor INTEGER DEFAULT 0,
   welcome_popup_shown INTEGER DEFAULT 0,
   refund_count_today INTEGER DEFAULT 0,
   last_refund_date TEXT,
@@ -236,8 +240,23 @@ CREATE TABLE IF NOT EXISTS notifications (
   message TEXT NOT NULL,
   lead_id INTEGER REFERENCES leads(id) ON DELETE CASCADE,
   read INTEGER DEFAULT 0,
+  msg_key TEXT,
+  msg_params TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Alert Planner: orçamento diário de alertas por utilizador/categoria.
+-- 1 alerta (in-app + push, se elegível) = 1 unidade. Reset diário UTC.
+CREATE TABLE IF NOT EXISTS alert_usage (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  day TEXT NOT NULL,
+  category TEXT NOT NULL,
+  alerts INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id, day, category)
+);
+
+CREATE INDEX IF NOT EXISTS idx_alert_usage_day ON alert_usage (day);
 
 CREATE TABLE IF NOT EXISTS user_interests (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -774,6 +793,8 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         # migrating existing rows default to 0 (fail-closed: nobody becomes admin
         # by accident). Promotion happens explicitly via set_user_admin().
         conn.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0")
+    if user_cols and "alert_rotation_cursor" not in user_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN alert_rotation_cursor INTEGER DEFAULT 0")
 
     event_cols = {r["name"] for r in conn.execute("PRAGMA table_info(lead_events)").fetchall()}
     if event_cols:
@@ -785,6 +806,10 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     notif_cols = {r["name"] for r in conn.execute("PRAGMA table_info(notifications)").fetchall()}
     if notif_cols and "user_id" not in notif_cols:
         conn.execute("ALTER TABLE notifications ADD COLUMN user_id INTEGER")
+    if notif_cols and "msg_key" not in notif_cols:
+        conn.execute("ALTER TABLE notifications ADD COLUMN msg_key TEXT")
+    if notif_cols and "msg_params" not in notif_cols:
+        conn.execute("ALTER TABLE notifications ADD COLUMN msg_params TEXT")
     for index_sql in (
         "CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications (user_id, read)",
     ):
@@ -1025,7 +1050,9 @@ class DatabaseService:
             conn2 = get_connection()
             try:
                 row = conn2.execute(
-                    "SELECT id, issue_category, address, city FROM leads WHERE external_id = ? AND source_type = ?",
+                    "SELECT id, issue_category, address, city, owner_name, "
+                    "date_reported, case_status, status "
+                    "FROM leads WHERE external_id = ? AND source_type = ?",
                     (lead.external_id, lead.source_type.value if hasattr(lead.source_type, 'value') else str(lead.source_type)),
                 ).fetchone()
                 return dict(row) if row else None
@@ -1472,12 +1499,14 @@ class DatabaseService:
     # ---------------------------------------------------------------
     # Notificações
     # ---------------------------------------------------------------
-    def add_notification(self, type: str, title: str, message: str, lead_id: Optional[int] = None) -> Optional[dict]:
+    def add_notification(self, type: str, title: str, message: str, lead_id: Optional[int] = None,
+                         msg_key: Optional[str] = None, msg_params: Optional[dict] = None) -> Optional[dict]:
         conn = get_connection()
         try:
             conn.execute(
-                "INSERT INTO notifications (type, title, message, lead_id) VALUES (?, ?, ?, ?)",
-                (type, title, message, lead_id),
+                "INSERT INTO notifications (type, title, message, lead_id, msg_key, msg_params) VALUES (?, ?, ?, ?, ?, ?)",
+                (type, title, message, lead_id, msg_key,
+                 json.dumps(msg_params, ensure_ascii=False) if msg_params else None),
             )
             conn.commit()
             row = conn.execute(
@@ -2490,12 +2519,14 @@ class DatabaseService:
     # ---------------------------------------------------------------
     # Notificações por usuário
     # ---------------------------------------------------------------
-    def add_notification_for_user(self, user_id: int, type: str, title: str, message: str, lead_id: Optional[int] = None) -> Optional[dict]:
+    def add_notification_for_user(self, user_id: int, type: str, title: str, message: str, lead_id: Optional[int] = None,
+                                  msg_key: Optional[str] = None, msg_params: Optional[dict] = None) -> Optional[dict]:
         conn = get_connection()
         try:
             conn.execute(
-                "INSERT INTO notifications (user_id, type, title, message, lead_id) VALUES (?, ?, ?, ?, ?)",
-                (user_id, type, title, message, lead_id),
+                "INSERT INTO notifications (user_id, type, title, message, lead_id, msg_key, msg_params) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (user_id, type, title, message, lead_id, msg_key,
+                 json.dumps(msg_params, ensure_ascii=False) if msg_params else None),
             )
             conn.commit()
             row = conn.execute(
@@ -2605,8 +2636,6 @@ class DatabaseService:
     def _save_notification_dlq(self, user_id: int, type: str, title: str, message: str, lead_id: Optional[int], error: str) -> None:
         """Salva notificação falha no DLQ e aplica a retenção (ring buffer)."""
         try:
-            import json
-            from datetime import datetime
             dlq_dir = self._notification_dlq_dir()
             os.makedirs(dlq_dir, exist_ok=True)
             filename = f"notif_{datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')}_{user_id}.json"
@@ -2780,51 +2809,148 @@ class DatabaseService:
         finally:
             conn.close()
 
-    def upsert_daily_digest(self, user_id: int, extra_count: int) -> Optional[dict]:
-        """Insere ou atualiza a notificação de resumo diário para um usuário.
-        O digest NÃO conta no teto de 10 (tipo 'digest', não 'new_lead')."""
-        import re
+    def get_alert_usage_today(self, day: Optional[str] = None) -> dict:
+        """Uso do orçamento de alertas de hoje: {user_id: {category: alerts}}."""
+        day = day or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT user_id, category, alerts FROM alert_usage WHERE day = ?",
+                (day,),
+            ).fetchall()
+            out: dict = {}
+            for r in rows:
+                out.setdefault(r["user_id"], {})[r["category"]] = r["alerts"]
+            return out
+        finally:
+            conn.close()
+
+    def increment_alert_usage(self, user_id: int, category: str, amount: int = 1,
+                              day: Optional[str] = None) -> None:
+        """Soma `amount` ao orçamento do dia para (user, categoria)."""
+        day = day or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        conn = get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO alert_usage (user_id, day, category, alerts, updated_at) "
+                "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(user_id, day, category) DO UPDATE SET "
+                "alerts = alert_usage.alerts + excluded.alerts, updated_at = CURRENT_TIMESTAMP",
+                (user_id, day, category, int(amount)),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def seed_alert_usage_from_notifications(self, day: Optional[str] = None) -> int:
+        """Semeia o orçamento de hoje a partir dos alertas new_lead já enviados.
+
+        Idempotente: se já existirem linhas para o dia, não faz nada. Impede
+        que um deploy a meio do dia atribua orçamento extra a quem já recebeu.
+        Devolve o número de linhas (user, categoria) semeadas.
+        """
+        day = day or datetime.now(timezone.utc).strftime("%Y-%m-%d")
         conn = get_connection()
         try:
             existing = conn.execute(
-                "SELECT id, message FROM notifications "
+                "SELECT COUNT(*) FROM alert_usage WHERE day = ?", (day,)
+            ).fetchone()[0]
+            if existing:
+                return 0
+            cur = conn.execute(
+                """
+                INSERT INTO alert_usage (user_id, day, category, alerts, updated_at)
+                SELECT n.user_id, ?,
+                       COALESCE(l.issue_category, 'unknown') AS category,
+                       COUNT(*), CURRENT_TIMESTAMP
+                FROM notifications n
+                LEFT JOIN leads l ON l.id = n.lead_id
+                WHERE n.type = 'new_lead' AND n.user_id IS NOT NULL
+                  AND DATE(n.created_at) = ?
+                GROUP BY n.user_id, COALESCE(l.issue_category, 'unknown')
+                """,
+                (day, day),
+            )
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
+
+    def get_alert_rotation_cursor(self, user_id: int) -> int:
+        """Posição do cursor de rotação (alterna o topo da fila entre runs)."""
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT alert_rotation_cursor FROM users WHERE id = ?", (user_id,)
+            ).fetchone()
+            return int(row["alert_rotation_cursor"] or 0) if row else 0
+        finally:
+            conn.close()
+
+    def advance_alert_rotation_cursor(self, user_id: int, step: int = 1) -> int:
+        """Avança o cursor de rotação e devolve o novo valor."""
+        conn = get_connection()
+        try:
+            conn.execute(
+                "UPDATE users SET alert_rotation_cursor = "
+                "COALESCE(alert_rotation_cursor, 0) + ? WHERE id = ?",
+                (int(step), user_id),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT alert_rotation_cursor FROM users WHERE id = ?", (user_id,)
+            ).fetchone()
+            return int(row["alert_rotation_cursor"] or 0) if row else 0
+        finally:
+            conn.close()
+
+    def upsert_daily_digest(self, user_id: int, extra_count: int) -> Optional[dict]:
+        """Insere/atualiza o resumo diário localizável (msg_key='digest').
+
+        O digest NÃO conta no teto (tipo 'digest'). O texto é renderizado por
+        utilizador na leitura via `msg_key`/`msg_params`; ficam gravados como
+        fallback os textos no idioma default.
+        """
+        conn = get_connection()
+        try:
+            existing = conn.execute(
+                "SELECT id, msg_params FROM notifications "
                 "WHERE user_id = ? AND type = 'digest' AND DATE(created_at) = DATE('now')",
                 (user_id,),
             ).fetchone()
+            prev = 0
+            if existing and existing["msg_params"]:
+                try:
+                    prev = int(json.loads(existing["msg_params"]).get("n", 0))
+                except (ValueError, TypeError):
+                    prev = 0
+            total = prev + int(extra_count)
+            params = {"n": total, "limit": settings.PUSH_DAILY_LIMIT}
+            rendered = _render_i18n("digest", DEFAULT_LOCALE, **params) or {}
+            title = rendered.get("title") or "Daily digest"
+            message = rendered.get("message") or f"More {total} new leads today."
+            payload = json.dumps(params, ensure_ascii=False)
             if existing:
-                prev = 0
-                m = re.search(r"Mais (\d+)", existing["message"] or "")
-                if m:
-                    prev = int(m.group(1))
-                total = prev + extra_count
-                new_msg = (
-                    f"Mais {total} ofertas chegaram hoje "
-                    f"— o limite de 10 renova amanhã."
-                )
                 conn.execute(
-                    "UPDATE notifications SET message = ? WHERE id = ?",
-                    (new_msg, existing["id"]),
+                    "UPDATE notifications SET title = ?, message = ?, "
+                    "msg_key = 'digest', msg_params = ? WHERE id = ?",
+                    (title, message, payload, existing["id"]),
                 )
                 conn.commit()
                 row = conn.execute(
                     "SELECT * FROM notifications WHERE id = ?", (existing["id"],)
                 ).fetchone()
                 return dict(row) if row else None
-            else:
-                new_msg = (
-                    f"Mais {extra_count} ofertas chegaram hoje "
-                    f"— o limite de 10 renova amanhã."
-                )
-                conn.execute(
-                    "INSERT INTO notifications (user_id, type, title, message, lead_id) "
-                    "VALUES (?, 'digest', 'Resumo diário de alertas', ?, NULL)",
-                    (user_id, new_msg),
-                )
-                conn.commit()
-                row = conn.execute(
-                    "SELECT * FROM notifications WHERE id = last_insert_rowid()"
-                ).fetchone()
-                return dict(row) if row else None
+            conn.execute(
+                "INSERT INTO notifications (user_id, type, title, message, lead_id, msg_key, msg_params) "
+                "VALUES (?, 'digest', ?, ?, NULL, 'digest', ?)",
+                (user_id, title, message, payload),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT * FROM notifications WHERE id = last_insert_rowid()"
+            ).fetchone()
+            return dict(row) if row else None
         finally:
             conn.close()
 
@@ -5854,8 +5980,10 @@ class AsyncDatabaseService:
     async def get_locations_hierarchy(self) -> dict:
         return await anyio.to_thread.run_sync(self._service.get_locations_hierarchy)
 
-    async def add_notification(self, type: str, title: str, message: str, lead_id: Optional[int] = None) -> Optional[dict]:
-        return await anyio.to_thread.run_sync(self._service.add_notification, type, title, message, lead_id)
+    async def add_notification(self, type: str, title: str, message: str, lead_id: Optional[int] = None,
+                               msg_key: Optional[str] = None, msg_params: Optional[dict] = None) -> Optional[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.add_notification, type, title, message, lead_id, msg_key, msg_params)
 
     async def get_notifications(self, filter: str = "recent", limit: int = 50) -> List[dict]:
         return await anyio.to_thread.run_sync(self._service.get_notifications, filter, limit)
@@ -6013,8 +6141,10 @@ class AsyncDatabaseService:
             self._service.acknowledge_system_alert, alert_id
         )
 
-    async def add_notification_for_user(self, user_id: int, type: str, title: str, message: str, lead_id: Optional[int] = None) -> Optional[dict]:
-        return await anyio.to_thread.run_sync(self._service.add_notification_for_user, user_id, type, title, message, lead_id)
+    async def add_notification_for_user(self, user_id: int, type: str, title: str, message: str, lead_id: Optional[int] = None,
+                                        msg_key: Optional[str] = None, msg_params: Optional[dict] = None) -> Optional[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.add_notification_for_user, user_id, type, title, message, lead_id, msg_key, msg_params)
 
     async def get_notifications_for_user(self, user_id: int, filter: str = "recent", limit: int = 50) -> List[dict]:
         return await anyio.to_thread.run_sync(self._service.get_notifications_for_user, user_id, filter, limit)
@@ -6252,6 +6382,22 @@ class AsyncDatabaseService:
 
     async def upsert_daily_digest(self, user_id: int, extra_count: int) -> Optional[dict]:
         return await anyio.to_thread.run_sync(self._service.upsert_daily_digest, user_id, extra_count)
+
+    async def get_alert_usage_today(self, day: Optional[str] = None) -> dict:
+        return await anyio.to_thread.run_sync(self._service.get_alert_usage_today, day)
+
+    async def increment_alert_usage(self, user_id: int, category: str, amount: int = 1,
+                                    day: Optional[str] = None) -> None:
+        return await anyio.to_thread.run_sync(self._service.increment_alert_usage, user_id, category, amount, day)
+
+    async def seed_alert_usage_from_notifications(self, day: Optional[str] = None) -> int:
+        return await anyio.to_thread.run_sync(self._service.seed_alert_usage_from_notifications, day)
+
+    async def get_alert_rotation_cursor(self, user_id: int) -> int:
+        return await anyio.to_thread.run_sync(self._service.get_alert_rotation_cursor, user_id)
+
+    async def advance_alert_rotation_cursor(self, user_id: int, step: int = 1) -> int:
+        return await anyio.to_thread.run_sync(self._service.advance_alert_rotation_cursor, user_id, step)
 
     # ===== PASSWORD RESET ASYNC =====
 

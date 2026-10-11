@@ -9,9 +9,10 @@ def test_critical_imports():
     """Valida se todas as instâncias essenciais importam sem erro."""
     from backend.main import app
     from backend.scrapers.socrata_311 import socrata_scraper
+    from backend.services.alert_planner import plan_and_dispatch
     from backend.services.db import db_service
     from backend.services.enrichment import owner_enrichment
-    from backend.services.notifier import fanout_new_lead_batch, notify_users_for_lead
+    from backend.services.notifier import fanout_new_lead_batch
     from backend.services.phone_lookup import phone_lookup_service
     from backend.services.push_service import push_service
     from backend.services.security import (
@@ -23,7 +24,7 @@ def test_critical_imports():
     assert socrata_scraper is not None
     assert db_service is not None
     assert push_service is not None
-    assert notify_users_for_lead is not None
+    assert plan_and_dispatch is not None
     assert fanout_new_lead_batch is not None
     assert owner_enrichment is not None
     assert phone_lookup_service is not None
