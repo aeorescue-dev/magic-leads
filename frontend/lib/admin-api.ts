@@ -182,6 +182,7 @@ export interface AdminPushMetrics {
   };
   accepted_rate: number | null;
   live_subscriptions: number;
+  dlq: { pending: number; dropped: number; oldest_age_seconds: number | null };
   latency: {
     avg_ms: number | null;
     p50_ms: number | null;

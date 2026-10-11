@@ -160,6 +160,13 @@ class Settings(BaseSettings):
     # Webhook para alertas do scraper (Telegram/Slack/Email via n8n/Resend/etc)
     SCRAPER_WEBHOOK_URL: str = ""
 
+    # DLQ de notificações in-app. Ring buffer: impede acúmulo infinito em
+    # disco quando o INSERT falha repetidamente. Os ficheiros mais antigos
+    # (além do teto de ficheiros ou da idade máxima) são descartados e
+    # contabilizados para o painel admin.
+    NOTIF_DLQ_MAX_FILES: int = 500
+    NOTIF_DLQ_TTL_DAYS: int = 7
+
     model_config = SettingsConfigDict(
         env_file = ".env",
         case_sensitive = True,

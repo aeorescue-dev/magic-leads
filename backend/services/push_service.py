@@ -236,6 +236,16 @@ class PushService:
             )
             return 0
 
+        # Guarda server-side: nunca despachar push para quem tem o flag
+        # desligado. É defesa em profundidade — o fan-out já filtra — mas o
+        # choke point é aqui, onde todas as vias de envio convergem.
+        if not await db_service.is_push_enabled(user_id):
+            push_metrics.record(
+                outcome="push_disabled", attempts=0, user_id=user_id,
+                kind=kind, error="push_enabled is false",
+            )
+            return 0
+
         subscriptions = await db_service.get_user_push_subscriptions(user_id)
         if not subscriptions:
             return 0

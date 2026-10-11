@@ -2,7 +2,7 @@
 
 Fonte única para títulos + mensagens de push e notificações in-app, localizadas
 por usuário. Cada fan-out lê o campo `locale` do usuário (coluna `users.locale`,
-padrão "pt") e escolhe a língua correspondente.
+padrão "en") e escolhe a língua correspondente.
 
 Estrutura: TRANSLATIONS[grupo][locale]["chave"].
   - "new_lead":     nova oportunidade (base junto ao evitar 10/dia + push WNS).
@@ -12,12 +12,12 @@ Estrutura: TRANSLATIONS[grupo][locale]["chave"].
 Helper público:
   - tr(key, locale=None, **kw)        → texto com {placeholders} preenchidos.
   - group(locale=None, group=...)     → dict completo de um grupo para bulk/digest.
-  - normalize(locale)                 → "pt" | "en" | "es" (fallback "pt").
+  - normalize(locale)                 → "pt" | "en" | "es" (fallback "en").
 """
 
 from typing import Optional
 
-DEFAULT_LOCALE = "pt"
+DEFAULT_LOCALE = "en"
 SUPPORTED = ("pt", "en", "es")
 
 

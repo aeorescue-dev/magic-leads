@@ -281,7 +281,7 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str
     company_name: str
-    locale: Optional[str] = "pt"
+    locale: Optional[str] = None
 
 
 class UserLogin(BaseModel):
@@ -306,7 +306,7 @@ class UserResponse(BaseModel):
     leads_taken: int = 0
     conversions: int = 0
     push_enabled: bool = False
-    locale: str = "pt"
+    locale: str = "en"
     created_at: Optional[str] = None
 
 

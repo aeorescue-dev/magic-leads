@@ -3,6 +3,7 @@ import os
 import smtplib
 import socket
 import sqlite3
+import time
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
@@ -130,7 +131,7 @@ CREATE TABLE IF NOT EXISTS users (
   conversions INTEGER DEFAULT 0,
   cities_filter TEXT DEFAULT NULL,
   push_enabled INTEGER DEFAULT 0,
-  locale TEXT DEFAULT 'pt',
+  locale TEXT DEFAULT 'en',
   welcome_popup_shown INTEGER DEFAULT 0,
   refund_count_today INTEGER DEFAULT 0,
   last_refund_date TEXT,
@@ -428,6 +429,12 @@ CREATE TABLE IF NOT EXISTS system_alerts (
 
 CREATE INDEX IF NOT EXISTS idx_system_alerts_created ON system_alerts (created_at);
 CREATE INDEX IF NOT EXISTS idx_system_alerts_code ON system_alerts (code);
+
+-- Contadores operacionais persistentes (ex.: descartes da DLQ de notificações).
+CREATE TABLE IF NOT EXISTS dlq_counters (
+  name TEXT PRIMARY KEY,
+  value INTEGER DEFAULT 0
+);
 
 -- Fase 2: telemetria das consultas ao Searchbug (custo por consulta).
 -- billed=1 marca as consultas que chegaram mesmo ao provider, ou seja as
@@ -756,7 +763,7 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     if user_cols and "push_enabled" not in user_cols:
         conn.execute("ALTER TABLE users ADD COLUMN push_enabled INTEGER DEFAULT 0")
     if user_cols and "locale" not in user_cols:
-        conn.execute("ALTER TABLE users ADD COLUMN locale TEXT DEFAULT 'pt'")
+        conn.execute("ALTER TABLE users ADD COLUMN locale TEXT DEFAULT 'en'")
     if user_cols and "welcome_popup_shown" not in user_cols:
         conn.execute("ALTER TABLE users ADD COLUMN welcome_popup_shown INTEGER DEFAULT 0")
     if user_cols and "refund_count_today" not in user_cols:
@@ -1554,7 +1561,7 @@ class DatabaseService:
     # ---------------------------------------------------------------
     def create_user(self, email: str, password_hash: str, company_name: str, plan: str = "free",
                     subscription_status: Optional[str] = None, plan_until: Optional[str] = None,
-                    locale: str = "pt") -> Optional[dict]:
+                    locale: str = "en") -> Optional[dict]:
         conn = get_connection()
         try:
             exists = conn.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
@@ -2456,6 +2463,7 @@ class DatabaseService:
                 "by_outcome": [dict(r) for r in by_outcome],
                 "by_kind": [dict(r) for r in by_kind],
                 "recent": [dict(r) for r in recent],
+                "dlq": self.get_notification_dlq_stats(),
             }
         except sqlite3.OperationalError as exc:
             if "push_deliveries" not in str(exc):
@@ -2474,6 +2482,7 @@ class DatabaseService:
                 "by_outcome": [],
                 "by_kind": [],
                 "recent": [],
+                "dlq": self.get_notification_dlq_stats(),
             }
         finally:
             conn.close()
@@ -2501,15 +2510,106 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def _notification_dlq_dir(self) -> str:
+        return os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "data", "dlq", "notifications",
+        )
+
+    def _bump_dlq_counter(self, name: str, amount: int = 1) -> None:
+        """Incrementa um contador persistente da DLQ (ex.: 'dropped')."""
+        if amount <= 0:
+            return
+        conn = get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO dlq_counters (name, value) VALUES (?, ?) "
+                "ON CONFLICT(name) DO UPDATE SET value = value + excluded.value",
+                (name, amount),
+            )
+            conn.commit()
+        except sqlite3.OperationalError:
+            # BD antiga sem a tabela: a limpeza da DLQ não pode quebrar o INSERT.
+            pass
+        finally:
+            conn.close()
+
+    def _enforce_notification_dlq_retention(self, dlq_dir: str) -> int:
+        """Ring buffer da DLQ: descarta os mais antigos por idade e por teto.
+
+        Devolve quantos ficheiros foram descartados. Sem isto, cada INSERT
+        falhado deixava um ficheiro em disco — acúmulo infinito.
+        """
+        max_files = max(1, int(settings.NOTIF_DLQ_MAX_FILES))
+        ttl_days = max(1, int(settings.NOTIF_DLQ_TTL_DAYS))
+        try:
+            entries = []
+            for filename in os.listdir(dlq_dir):
+                if not filename.endswith(".json"):
+                    continue
+                path = os.path.join(dlq_dir, filename)
+                try:
+                    entries.append((os.path.getmtime(path), path))
+                except OSError:
+                    continue
+            entries.sort(reverse=True)  # mais recente primeiro
+            cutoff = time.time() - ttl_days * 86400
+            dropped = 0
+            for index, (mtime, path) in enumerate(entries):
+                if mtime < cutoff or index >= max_files:
+                    try:
+                        os.remove(path)
+                        dropped += 1
+                    except OSError:
+                        continue
+            if dropped:
+                self._bump_dlq_counter("dropped", dropped)
+                logger.warning(
+                    f"DLQ Notification: {dropped} ficheiro(s) descartado(s) "
+                    f"(teto={max_files}, ttl={ttl_days}d)"
+                )
+            return dropped
+        except OSError as e:
+            logger.error(f"Erro na retenção da DLQ de notificações: {e}")
+            return 0
+
+    def get_notification_dlq_stats(self) -> dict:
+        """Estado da DLQ de notificações: pendentes, descartados e idade do mais antigo."""
+        stats: dict = {"pending": 0, "dropped": 0, "oldest_age_seconds": None}
+        try:
+            dlq_dir = self._notification_dlq_dir()
+            if os.path.isdir(dlq_dir):
+                mtimes = []
+                for filename in os.listdir(dlq_dir):
+                    if not filename.endswith(".json"):
+                        continue
+                    try:
+                        mtimes.append(os.path.getmtime(os.path.join(dlq_dir, filename)))
+                    except OSError:
+                        continue
+                stats["pending"] = len(mtimes)
+                if mtimes:
+                    stats["oldest_age_seconds"] = int(time.time() - min(mtimes))
+        except OSError:
+            pass
+        conn = get_connection()
+        try:
+            row = conn.execute("SELECT value FROM dlq_counters WHERE name = 'dropped'").fetchone()
+            stats["dropped"] = int(row["value"]) if row else 0
+        except sqlite3.OperationalError:
+            pass
+        finally:
+            conn.close()
+        return stats
+
     def _save_notification_dlq(self, user_id: int, type: str, title: str, message: str, lead_id: Optional[int], error: str) -> None:
-        """Salva notificação falha no DLQ para reprocessamento posterior."""
+        """Salva notificação falha no DLQ e aplica a retenção (ring buffer)."""
         try:
             import json
-            import os
             from datetime import datetime
-            dlq_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "dlq", "notifications")
+            dlq_dir = self._notification_dlq_dir()
             os.makedirs(dlq_dir, exist_ok=True)
-            filename = f"notif_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{user_id}.json"
+            filename = f"notif_{datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')}_{user_id}.json"
             path = os.path.join(dlq_dir, filename)
             payload = {
                 "user_id": user_id,
@@ -2523,6 +2623,7 @@ class DatabaseService:
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False, indent=2)
             logger.warning(f"DLQ Notification: user {user_id} salvo em {filename}")
+            self._enforce_notification_dlq_retention(dlq_dir)
         except Exception as e:
             logger.error(f"Erro ao salvar notificação no DLQ: {e}")
 
@@ -5699,6 +5800,9 @@ class AsyncDatabaseService:
     async def reprocess_notification_dlq(self) -> int:
         return await anyio.to_thread.run_sync(self._service.reprocess_notification_dlq)
 
+    async def get_notification_dlq_stats(self) -> dict:
+        return await anyio.to_thread.run_sync(self._service.get_notification_dlq_stats)
+
     async def update_owner_phone(self, lead_id: int, owner_phone: Optional[str]) -> bool:
         return await anyio.to_thread.run_sync(self._service.update_owner_phone, lead_id, owner_phone)
 
@@ -5767,7 +5871,7 @@ class AsyncDatabaseService:
 
     async def create_user(self, email: str, password_hash: str, company_name: str, plan: str = "free",
                            subscription_status: Optional[str] = None, plan_until: Optional[str] = None,
-                           locale: str = "pt") -> Optional[dict]:
+                           locale: str = "en") -> Optional[dict]:
         return await anyio.to_thread.run_sync(self._service.create_user, email, password_hash, company_name, plan, subscription_status, plan_until, locale)
 
     async def get_user_by_email(self, email: str) -> Optional[dict]:

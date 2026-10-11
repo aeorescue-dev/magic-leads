@@ -314,6 +314,11 @@ async def test_broadcast_kinds_are_labelled_on_the_real_path(monkeypatch):
     monkeypatch.setattr(db_service, "get_user_push_subscriptions", _user_subs)
     monkeypatch.setattr(db_service, "remove_push_subscription", _noop)
 
+    async def _enabled(user_id):
+        return True
+
+    monkeypatch.setattr(db_service, "is_push_enabled", _enabled)
+
     assert await svc.send_to_category("restaurants", {"title": "t"}) == 1
     assert await svc.send_to_all({"title": "t"}) == 1
 

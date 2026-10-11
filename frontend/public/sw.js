@@ -29,6 +29,12 @@ self.addEventListener('push', (event) => {
           options.body = payload.body || options.body;
           if (payload.icon) options.icon = payload.icon;
           if (payload.tag) options.tag = payload.tag;
+          // Preserva o destino para o notificationclick: sem isto o clique
+          // abria sempre /dashboard e o leadId chegava undefined.
+          if (payload.url) options.data.url = payload.url;
+          if (payload.leadId !== undefined && payload.leadId !== null) {
+            options.data.leadId = payload.leadId;
+          }
         }
       } catch (e) {
         // Se falhar o parse do JSON (ex: texto puro do DevTools), usa o texto puro como body

@@ -515,6 +515,13 @@ export default function AdminPage() {
               </p>
             ) : null}
 
+            {push.dlq && (push.dlq.dropped > 0 || push.dlq.pending > 0) ? (
+              <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300">
+                DLQ de notificações in-app: {push.dlq.pending} pendente(s) e {push.dlq.dropped}{" "}
+                descartado(s) por retenção (ring buffer).
+              </p>
+            ) : null}
+
             {push.buffer.dropped > 0 || push.buffer.flush_errors > 0 ? (
               <p className="rounded-lg bg-rose-500/10 px-3 py-2 text-[11px] text-rose-300">
                 Telemetria perdida: {push.buffer.dropped} evento(s) descartado(s) e{" "}

@@ -2917,7 +2917,7 @@ async def register_user(request: Request, payload: UserCreate, response: Respons
         user = await db_service.create_user(
             payload.email.lower(), pwd_hash, payload.company_name, plan="free",
             subscription_status="expired", plan_until=None,
-            locale=payload.locale if payload.locale else "pt",
+            locale=payload.locale if payload.locale else "en",
         )
         if not user:
             raise HTTPException(status_code=409, detail="Email já cadastrado")
@@ -2951,6 +2951,7 @@ async def register_user(request: Request, payload: UserCreate, response: Respons
                 leads_taken=user.get("leads_taken") or 0,
                 conversions=user.get("conversions") or 0,
                 push_enabled=bool(user.get("push_enabled")),
+                locale=user.get("locale") or "en",
                 created_at=user.get("created_at"),
             ),
         )
@@ -3003,6 +3004,7 @@ async def login_user(request: Request, payload: UserLogin, response: Response = 
                 leads_taken=user.get("leads_taken") or 0,
                 conversions=user.get("conversions") or 0,
                 push_enabled=bool(user.get("push_enabled")),
+                locale=user.get("locale") or "en",
                 created_at=user.get("created_at"),
             ),
         )
@@ -3182,12 +3184,13 @@ async def demo_login(request: Request, response: Response = None):
             plan=user.get("plan"),
             subscription_status=user.get("subscription_status"),
             plan_until=user.get("plan_until"),
-            score=user.get("score") or 0,
-            leads_taken=user.get("leads_taken") or 0,
-            conversions=user.get("conversions") or 0,
-            created_at=user.get("created_at"),
-        ),
-    )
+                score=user.get("score") or 0,
+                leads_taken=user.get("leads_taken") or 0,
+                conversions=user.get("conversions") or 0,
+                locale=user.get("locale") or "en",
+                created_at=user.get("created_at"),
+            ),
+        )
 
 
 # ===== PASSWORD RESET =====

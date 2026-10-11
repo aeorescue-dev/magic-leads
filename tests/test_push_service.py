@@ -48,3 +48,22 @@ def test_send_single_debug_uses_headers_not_urgency(monkeypatch):
     assert calls.get("headers") == {"Urgency": "high"}
     assert calls.get("ttl") == 3600
     assert "urgency" not in calls
+
+
+def test_send_to_user_respects_push_enabled_flag(monkeypatch):
+    """Com push_enabled desligado, não lê subscriptions nem envia nada."""
+    svc = _configured_service(monkeypatch)
+    calls: dict = {}
+    monkeypatch.setattr(push_service, "webpush", _fake_webpush_factory(calls))
+
+    async def _disabled(user_id):
+        return False
+
+    async def _boom(user_id):
+        raise AssertionError("não devia ler subscriptions com push desligado")
+
+    monkeypatch.setattr(push_service.db_service, "is_push_enabled", _disabled)
+    monkeypatch.setattr(push_service.db_service, "get_user_push_subscriptions", _boom)
+
+    assert anyio.run(svc.send_to_user, 7, {"title": "t"}, "lead_alert") == 0
+    assert calls == {}
