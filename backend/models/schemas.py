@@ -214,6 +214,7 @@ class LeadResponse(BaseModel):
     # consome estes flags em vez de reimplementar a regra em TypeScript, para não
     # poder divergir do que a reserva vai realmente fazer.
     corporate: bool = False
+    institutional: bool = False
     address_resolvable: bool = True
     unresolvable: bool = False
 

@@ -17,6 +17,14 @@ Entrega e cobranca sao dissociadas:
   * Leads corporativos e incompletos sao sempre de graca.
 
 Por isso `charges_credit` significa "cobramos", nunca "entregamos".
+
+Separacao Privado vs Institucional/Governamental:
+  * Entidades publicas (AUTHORITY, DEPARTMENT, BOARD, EDUCATION, HOUSING,
+    PARKS, COMMISSION, AGENCY...) nunca tem telefone de pessoa para vender.
+    Uma consulta paga contra "NYC HOUSING AUTHORITY" devolve "No results" e
+    custa $0.45. `is_institutional_name` deteta-as com antecedencia para o
+    backend saltar a chamada paga (billed=0) e ainda entregar o lead com o
+    nome + morada recolhidos pelas fontes gratuitas (carta ou visita).
 """
 
 import re
@@ -245,10 +253,105 @@ def charges_credit(lead: Mapping[str, Any]) -> bool:
     return is_complete_delivery(lead)
 
 
+# ---------- Deteção de entidades governamentais/institucionais ----------
+# Proprietários que são entidades públicas (agências, autarquias, escolas,
+# universidades) NÃO têm telefone de pessoa para vender: uma consulta paga à
+# Searchbug contra "NYC HOUSING AUTHORITY" devolve "No results" e custa $0.45.
+# Detetá-los com antecedência permite entregar o lead (nome + morada das fontes
+# gratuitas) sem gastar dinheiro nem créditos. A regra é deliberadamente
+# generosa (enviesa para "institucional"): um falso positivo custa $0 (a chamada
+# paga é saltada); um falso negativo custa $0.45 numa consulta que, na prática,
+# não tem telefone para devolver.
+
+_INSTITUTIONAL_PREFIXES = (
+    "CITY OF", "COUNTY OF", "STATE OF", "TOWN OF", "BOROUGH OF", "VILLAGE OF",
+    "UNITED STATES", "U.S. GOVERNMENT", "US GOVERNMENT", "GOVERNMENT OF",
+    "NYC", "NEW YORK CITY", "NYCHA", "NYC HOUSING AUTHORITY",
+    "PORT AUTHORITY", "TRANSIT AUTHORITY", "HOUSING AUTHORITY", "BOARD OF",
+    "BOARD OF EDUCATION", "DEPARTMENT OF", "DEPT OF", "PUBLIC SCHOOL",
+    "SCHOOL DISTRICT", "COMMUNITY BOARD", "DISTRICT OF COLUMBIA",
+)
+
+_INSTITUTIONAL_STRONG_TOKENS = frozenset({
+    "AUTHORITY", "AGENCY", "AGENCIES", "GOVERNMENT", "GOVERNMENTAL",
+    "MUNICIPAL", "MUNICIPALITY", "COMMISSION", "FEDERAL", "LEGISLATURE",
+    "JUDICIARY", "DEPARTMENT", "DEPT", "BOROUGH", "COUNTY", "REGISTRY",
+    "SCHOOL", "SCHOOLS", "UNIVERSITY", "UNIV", "COLLEGE", "EDUCATION",
+    "HOUSING", "LIBRARY", "POLICE", "SANITATION", "TRANSIT",
+})
+
+# Palavras que também são apelidos comuns (PARKS, BOARD, FIRE): só contam em
+# posição NÃO-final, para "JOHN PARKS" não ser tratado como institucional.
+_INSTITUTIONAL_MEDIUM_TOKENS = frozenset({
+    "BOARD", "PARKS", "FIRE",
+})
+
+
+def is_institutional_name(name: Optional[str]) -> bool:
+    """True se `name` denota uma entidade pública/governamental/institucional.
+
+    Três critérios, qualquer um casa:
+      1) o nome COMEÇA por um prefixo público ("CITY OF", "NYC", "BOARD OF"...);
+      2) contém um token FORTE de entidade pública como palavra inteira
+         ("AUTHORITY", "AGENCY", "COMMISSION", "DEPARTMENT"...);
+      3) contém um token de instituição (EDUCATION/BOARD/PARKS/HOUSING/...) em
+         posição NÃO-final — evita falsos positivos de apelidos reais:
+         "JOHN PARKS" não é institucional, mas "NYC PARKS AND RECREATION" é.
+
+    A regra é generosa de propósito (ver discussão no fim do módulo): erros
+    para o lado institucional custam $0; erros para o lado privado custam
+    $0.45 de uma consulta que quase nunca tem telefone para devolver.
+    """
+    if not name:
+        return False
+    upper = re.sub(r"\s+", " ", str(name)).upper().strip(" .,-")
+    if not upper:
+        return False
+
+    # 1) Prefixo público.
+    if upper.startswith(_INSTITUTIONAL_PREFIXES):
+        return True
+
+    tokens = re.findall(r"[A-Z0-9]+", upper)
+
+    # 2) Token forte de entidade pública em qualquer posição.
+    for token in tokens:
+        if token in _INSTITUTIONAL_STRONG_TOKENS:
+            return True
+
+    # 3) Token de instituição apenas em posição não-final.
+    if len(tokens) >= 2 and tokens[-1] not in _INSTITUTIONAL_MEDIUM_TOKENS:
+        for token in tokens[:-1]:
+            if token in _INSTITUTIONAL_MEDIUM_TOKENS:
+                return True
+
+    return False
+
+
+def institutional_owner_name_where(alias: str = "") -> str:
+    """Expressão SQL equivalente a `is_institutional_name`, para contagens.
+
+    Vive nesta unidade para não divergir da regra Python: ambas usam os mesmos
+    prefixos/tokens. A versão SQL usa LIKE por substring (aproximação da regra
+    Python) — suficiente para COUNT(*) agregado; a classificação por-lead usa
+    sempre a função Python.
+    """
+    prefix = f"{alias}." if alias else ""
+    col = f"UPPER(COALESCE({prefix}owner_name, ''))"
+    prefixes = " OR ".join(
+        f"{col} LIKE '{p}%'" for p in _INSTITUTIONAL_PREFIXES
+    )
+    strong = " OR ".join(
+        f"{col} LIKE '%{t}%'" for t in _INSTITUTIONAL_STRONG_TOKENS
+    )
+    return f"(({prefixes}) OR ({strong}))"
+
+
 def classify(lead: Mapping[str, Any]) -> dict[str, Any]:
     """Avalia um lead uma vez e devolve o veredito consumido pelo frontend."""
     return {
         "corporate": is_corporate(lead),
+        "institutional": is_institutional_name(lead.get("owner_name")),
         "address_resolvable": address_is_resolvable(lead.get("address")),
         "unresolvable": is_unresolvable(lead),
         "complete_delivery": is_complete_delivery(lead),

@@ -211,6 +211,7 @@ def _to_lead_response(lead: dict) -> LeadResponse:
         stage_expires_at=stage_expires_at if (owns and engaged) else None,
         server_now=datetime.utcnow().isoformat() + "Z",
         corporate=rules["corporate"],
+        institutional=rules["institutional"],
         address_resolvable=rules["address_resolvable"],
         unresolvable=rules["unresolvable"],
         complete_delivery=rules["complete_delivery"],

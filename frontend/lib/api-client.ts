@@ -97,6 +97,10 @@ export interface LeadResponse {
   // Regra A resolvida no backend (backend/services/lead_rules.py). Lidos
   // diretamente pela UI, sem recalcular: a regra só existe num sítio.
   corporate?: boolean;
+  // Entidade publica/governamental (AUTHORITY, DEPARTMENT, BOARD, EDUCATION,
+  // HOUSING, PARKS, COMMISSION, AGENCY...). Calculada no backend; o filtro da
+  // dashboard usa-a para separar Privado de Institucional/Governamental.
+  institutional?: boolean;
   address_resolvable?: boolean;
   unresolvable?: boolean;
   // `charged` é a autoridade sobre o custo, calculada no backend sobre os
@@ -234,6 +238,8 @@ export interface DashboardSummary {
   by_category: Record<string, number>;
   by_city: Record<string, number>;
   by_urgency: Record<string, number>;
+  // Contagem por tipo de proprietario (privado vs institucional/governamental).
+  by_owner_type?: { institutional: number; private: number };
 }
 
 export async function fetchDashboardSummary(): Promise<DashboardSummary> {

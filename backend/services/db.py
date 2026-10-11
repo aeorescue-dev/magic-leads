@@ -20,6 +20,7 @@ from .access import (
     parse_dt,
 )
 from .searchbug import PhoneLookupResult, searchbug_service
+from .lead_rules import institutional_owner_name_where
 
 
 def _not_junk_where(alias: str = "") -> str:
@@ -3550,6 +3551,19 @@ class DatabaseService:
                 params
             ).fetchone()["c"]
 
+            # Por tipo de proprietario: Privado vs Institucional/Governamental.
+            # Uma unica query (o filtro `private` e o complemento de total). A
+            # expressao SQL vive em lead_rules.institutional_owner_name_where
+            # para nunca divergir da classificacao por-lead (is_institutional_name).
+            institutional = conn.execute(
+                f"SELECT COUNT(*) AS c FROM leads {base_where} AND {institutional_owner_name_where()}",
+                params
+            ).fetchone()["c"]
+            by_owner_type = {
+                "institutional": institutional,
+                "private": max(0, total_interested - institutional),
+            }
+
             # Por categoria (para os cards de interesse)
             by_cat_rows = conn.execute(
                 f"SELECT issue_category, COUNT(*) AS c FROM leads {base_where} GROUP BY issue_category ORDER BY c DESC",
@@ -3579,6 +3593,7 @@ class DatabaseService:
                 "by_category": by_category,
                 "by_city": by_city,
                 "by_urgency": by_urgency,
+                "by_owner_type": by_owner_type,
             }
         finally:
             conn.close()

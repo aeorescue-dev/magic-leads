@@ -18,6 +18,7 @@ import {
   Flame, Zap, Forklift, Droplets, Bug, Droplet, AlertTriangle,
   DoorOpen, AppWindow, Package, Wind,
   TrendingUp, Navigation, Smartphone, FolderOpen, Archive,
+  Landmark,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
@@ -212,6 +213,7 @@ function DashboardPageInner() {
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [selectedUrgency, setSelectedUrgency] = useState<string>("all");
   const [selectedType, setSelectedType] = useState<string>("all");
+  const [selectedOwnerType, setSelectedOwnerType] = useState<string>("all");
   const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
   const [publicMetrics, setPublicMetrics] = useState<PublicMetrics>(EMPTY_PUBLIC_METRICS);
   const [scraperState, setScraperState] = useState<ScraperRunState | null>(null);
@@ -247,6 +249,15 @@ const URGENCIES = ["all", "high", "medium", "low"];
     { value: "311", labelKey: "dashboard.lead_type.open" },
   ];
   const OBLIGATION_TYPES: readonly string[] = ["dob_violation", "hpd_violation"];
+
+  // Filtro rapido Privado vs Institucional/Governamental. O veredito
+  // `institutional` vem calculado do backend (lead_rules.py) e e lido aqui
+  // diretamente, sem recalcular a regra em TypeScript.
+  const OWNER_TYPES = [
+    { value: "all", labelKey: "dashboard.filter.all_owner_types" },
+    { value: "private", labelKey: "dashboard.filter.owner_type_private" },
+    { value: "institutional", labelKey: "dashboard.filter.owner_type_institutional" },
+  ];
 
 // Handlers para ações do lead (Maps, SMS, WhatsApp)
   const openMaps = (address: string) => {
@@ -1043,6 +1054,13 @@ const URGENCIES = ["all", "high", "medium", "low"];
         }
       }
 
+      // Owner type filter (Privado vs Institucional/Governamental)
+      if (selectedOwnerType !== "all") {
+        const isInstitutional = !!lead.institutional;
+        if (selectedOwnerType === "institutional" && !isInstitutional) return false;
+        if (selectedOwnerType === "private" && isInstitutional) return false;
+      }
+
       // Interest category filter (when in overview or opportunities)
       if (activeTab === "overview") {
         const cat = catOfLead(lead);
@@ -1083,7 +1101,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
 
       return true;
     });
-  }, [leads, activeTab, selectedCity, selectedCategory, selectedUrgency, selectedType, interests, searchQuery]);
+  }, [leads, activeTab, selectedCity, selectedCategory, selectedUrgency, selectedType, selectedOwnerType, interests, searchQuery]);
 
   // New alerts (not yet viewed)
   const newAlerts = useMemo(
@@ -1119,8 +1137,10 @@ const URGENCIES = ["all", "high", "medium", "low"];
       // Corporate lead: no phone, show badge and limited actions
       return (
         <div className="flex flex-wrap gap-2 pt-2">
-          <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-500/15 text-purple-400 text-xs font-semibold">
-            <Building2 className="h-3.5 w-3.5" /> {t("dashboard.badge.corporate")}
+          <span className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold ${selectedLead.institutional ? "bg-cyan-500/15 text-cyan-400" : "bg-purple-500/15 text-purple-400"}`}>
+            {selectedLead.institutional
+              ? <><Landmark className="h-3.5 w-3.5" /> {t("dashboard.badge.institutional")} · {t("dashboard.badge.institutional_channel")}</>
+              : <><Building2 className="h-3.5 w-3.5" /> {t("dashboard.badge.corporate")}</>}
           </span>
           {selectedLead.owner_email && (
             <a
@@ -1591,6 +1611,28 @@ const URGENCIES = ["all", "high", "medium", "low"];
                 className={`px-3 py-1.5 rounded-lg text-sm border ${theme === "dark" ? "bg-[#0b0d1a] border-white/10 text-white" : "bg-white border-slate-200"}`}
               >
                 {URGENCIES.map((u) => <option key={u} value={u}>{u === "all" ? t("dashboard.filter.all_urgency") || "Todas" : t(`dashboard.feed.urgency.${u}`) || u.charAt(0).toUpperCase() + u.slice(1)}</option>)}
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className={`text-xs font-medium ${T.text2}`}>{t("dashboard.filter.owner_type") || "👤 Proprietário:"}</span>
+              <select
+                value={selectedOwnerType}
+                onChange={(e) => setSelectedOwnerType(e.target.value)}
+                className={`px-3 py-1.5 rounded-lg text-sm border ${theme === "dark" ? "bg-[#0b0d1a] border-white/10 text-white" : "bg-white border-slate-200"}`}
+              >
+                {OWNER_TYPES.map((ot) => {
+                  const count =
+                    ot.value === "all"
+                      ? realTotalLeads
+                      : ot.value === "institutional"
+                        ? (dashboardSummary?.by_owner_type?.institutional ?? 0)
+                        : (dashboardSummary?.by_owner_type?.private ?? 0);
+                  return (
+                    <option key={ot.value} value={ot.value}>
+                      {t(ot.labelKey) || ot.value}{ot.value !== "all" ? ` (${count})` : ""}
+                    </option>
+                  );
+                })}
               </select>
             </div>
             <div className="flex items-center gap-2">
@@ -2192,13 +2234,20 @@ const URGENCIES = ["all", "high", "medium", "low"];
                               </span>
                             )}
 
-                            {isCorporateLead(lead) ? (
+                            {lead.institutional ? (
+                              <span
+                                className="text-[10px] font-semibold uppercase bg-cyan-500/15 text-cyan-400 px-2.5 py-1 rounded-full flex items-center gap-1"
+                                title={t("dashboard.badge.institutional_hint")}
+                              >
+                                <Landmark className="h-3 w-3" /> {t("dashboard.badge.institutional")} · {t("dashboard.badge.institutional_channel")}
+                              </span>
+                            ) : isCorporateLead(lead) ? (
                               <span className="text-[10px] font-semibold uppercase bg-purple-500/15 text-purple-400 px-2.5 py-1 rounded-full flex items-center gap-1">
-                                <Building2 className="h-3 w-3" /> {t("dashboard.badge.corporate")}
+                                <Building2 className="h-3 w-3" /> {t("dashboard.badge.private_corporate")}
                               </span>
                             ) : lead.owner_name && (
                               <span className="text-[10px] font-semibold uppercase bg-emerald-500/15 text-emerald-400 px-2.5 py-1 rounded-full flex items-center gap-1">
-                                <CheckCircle2 className="h-3 w-3" /> {t("dashboard.badge.owner_identified")}
+                                <CheckCircle2 className="h-3 w-3" /> {t("dashboard.badge.private_person")}
                               </span>
                             )}
 

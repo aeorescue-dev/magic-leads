@@ -29,7 +29,7 @@ import httpx
 
 from ..config import settings
 from ..utils.logger import logger
-from .lead_rules import address_is_resolvable
+from .lead_rules import address_is_resolvable, is_institutional_name
 from .metrics import searchbug_metrics
 
 
@@ -397,6 +397,26 @@ class PhoneLookupService:
                 provider="none",
             )
 
+        # GUARD_SKIPPED instituicao/governo: entidades publicas (AUTHORITY,
+        # DEPARTMENT, BOARD, EDUCATION, HOUSING, PARKS, COMMISSION, AGENCY...)
+        # nao tem telefone de pessoa para vender. Uma consulta PAGA contra
+        # "NYC HOUSING AUTHORITY" devolvia "No results" e custava $0.45.
+        # Saltar aqui poupa o dinheiro (billed=0) sem afetar a entrega: o lead
+        # continua a ser revelado com nome + morada das fontes gratuitas.
+        if is_institutional_name(clean_name):
+            logger.info(
+                f"[PHONE][guard_skipped] institucional para address={address!r} "
+                f"owner={clean_name!r} — provider NAO foi consultado (custo zero)"
+            )
+            searchbug_metrics.record(
+                outcome="guard_skipped", billed=False, city=city, error="institucional"
+            )
+            return PhoneLookupResult(
+                success=False,
+                error="guard_skipped:institucional",
+                provider="none",
+            )
+
         cache_key = self._cache_key(address, city, state, zip_code, clean_name)
         cached = self._phone_cache_get(cache_key)
         if cached is not None:
@@ -546,11 +566,12 @@ class PhoneLookupService:
             )
 
         # FNAME/LNAME so quando o owner_name e mesmo uma PESSOA. Um nome
-        # corporativo nao tem primeiro/ultimo nome: envia-lo partido ("65" /
-        # "MS LLC") estraga o match e custa uma chamada paga. Sem estes campos
-        # a consulta continua a funcionar pela morada, que e a chave real.
+        # corporativo ou institucional nao tem primeiro/ultimo nome: envia-lo
+        # partido ("65" / "MS LLC", "NYC" / "HOUSING AUTHORITY") estraga o match
+        # e custa uma chamada paga. Sem estes campos a consulta continua a
+        # funcionar pela morada, que e a chave real.
         fname = lname = ""
-        if owner_name and not is_corporate_name(owner_name):
+        if owner_name and not is_corporate_name(owner_name) and not is_institutional_name(owner_name):
             fname, lname = split_person_name(owner_name)
 
         clean_address = normalize_provider_address(address, city, state)
