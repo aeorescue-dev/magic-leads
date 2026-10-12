@@ -751,6 +751,36 @@ const URGENCIES = ["all", "high", "medium", "low"];
     }
   };
 
+  // Deep link das notificações push: `/dashboard?lead=<id>` abre o modal do
+  // lead. O Service Worker navega para este URL no clique da notificação; sem
+  // este efeito o parâmetro chegava mas era ignorado e o utilizador ficava no
+  // dashboard principal (o bug reportado).
+  const pushLeadHandled = useRef<string | null>(null);
+  useEffect(() => {
+    const leadParam = searchParams?.get("lead");
+    if (!leadParam || authLoading || !user) return;
+    if (pushLeadHandled.current === leadParam) return;
+    pushLeadHandled.current = leadParam;
+
+    const match = leads.find(
+      (l) => String(l.id) === leadParam || l.id === leadParam
+    );
+    if (match) {
+      openLeadDetail(match);
+    } else {
+      fetchLeadById(leadParam)
+        .then((found) => {
+          if (found) openLeadDetail(found);
+        })
+        .catch((e) => console.error("Falha ao abrir lead do deep link:", e));
+    }
+
+    // Limpa o parâmetro para não reabrir o lead num refresh manual.
+    const url = new URL(window.location.href);
+    url.searchParams.delete("lead");
+    router.replace(url.pathname + url.search, { scroll: false });
+  }, [searchParams, authLoading, user, leads, openLeadDetail, router]);
+
   // Lead actions inside modal
   const handleLeadAction = async (fn: () => Promise<any>, successText: string) => {
     if (!selectedLead) return;

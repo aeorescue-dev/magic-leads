@@ -60,26 +60,40 @@ self.addEventListener('notificationclick', (event) => {
     return;
   }
 
+  const rawUrl = event.notification.data?.url || '/dashboard';
   const leadId = event.notification.data?.leadId;
-  const url = event.notification.data?.url || '/dashboard';
 
-  event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true })
-      .then((clientList) => {
-        // Try to find existing window
-        for (const client of clientList) {
-          if (client.url.includes('/dashboard') && 'focus' in client) {
-            // Navigate existing window
-            client.postMessage({
-              type: 'NOTIFICATION_CLICK',
-              leadId: event.notification.data?.leadId,
-              url: url
-            });
-            return client.focus();
-          }
+  // Resolve o destino para URL absoluto (o payload traz `/dashboard?lead=42`).
+  let target;
+  try {
+    target = new URL(rawUrl, self.location.origin).href;
+  } catch (e) {
+    target = new URL('/dashboard', self.location.origin).href;
+  }
+
+  event.waitUntil((async () => {
+    const clientList = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+
+    // Prefere uma janela já aberta no dashboard; senão, qualquer janela nossa.
+    const targetClient =
+      clientList.find((c) => c.url.includes('/dashboard')) ||
+      clientList.find((c) => c.url.startsWith(self.location.origin));
+
+    if (targetClient) {
+      // FIX CRÍTICO: navegar a aba existente para o deep link. Antes só se
+      // fazia postMessage (sem listener na página) + focus(), pelo que o
+      // utilizador ficava preso no dashboard e o URL nunca mudava.
+      try {
+        if ('navigate' in targetClient) {
+          const navigated = await targetClient.navigate(target);
+          return await (navigated || targetClient).focus();
         }
-        // Open new window
-        return clients.openWindow(url);
-      })
-  );
+        targetClient.postMessage({ type: 'NOTIFICATION_CLICK', leadId, url: rawUrl });
+        return await targetClient.focus();
+      } catch {
+        // navigate pode falhar (cliente não controlado/cross-origin): abre nova aba.
+      }
+    }
+    return clients.openWindow(target);
+  })());
 });

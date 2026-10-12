@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
+import { buildLocaleRedirectPath } from "@/lib/locale-redirect";
+
 const LOCALES = ["pt", "en", "es"] as const;
 const DEFAULT_LOCALE = "en";
 const PROTECTED_PATHS = ["/dashboard"];
@@ -62,9 +64,13 @@ if (pathname === "/admin" || pathname.startsWith("/admin/")) {
       return response;
     }
 
-    // Other paths: explicit redirect using cookie or DEFAULT_LOCALE
-    const target = `/${locale}${pathname}`;
-    const redirectUrl = new URL(target, request.url);
+    // Other paths: explicit redirect using cookie or DEFAULT_LOCALE.
+    // Preserva a query string (ex.: `?lead=42` do deep link das notificações
+    // push) — sem isto o parâmetro perde-se no redirect de locale.
+    const redirectUrl = new URL(
+      buildLocaleRedirectPath(pathname, locale, request.nextUrl.search),
+      request.url,
+    );
     return NextResponse.redirect(redirectUrl);
   }
 
