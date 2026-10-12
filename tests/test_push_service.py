@@ -137,8 +137,73 @@ def test_vapid_401_removes_subscription(monkeypatch):
     assert removed == [(7, "https://example.invalid/dead")]
 
 
-def test_generic_403_does_not_remove_subscription(monkeypatch):
-    """Um 403 sem indício de VAPID é transitório: NÃO remove a subscription."""
+def test_is_dead_subscription_classifier():
+    assert push_service._is_dead_subscription(403, "VapidPkHashMismatch")
+    assert push_service._is_dead_subscription(401, "VAPID public key mismatch")
+    assert push_service._is_dead_subscription(403, "UnauthorizedRegistration")
+    assert push_service._is_dead_subscription(
+        403,
+        "the VAPID credentials in the authorization header do not correspond "
+        "to the credentials used to create the subscriptions.",
+    )
+    assert not push_service._is_dead_subscription(403, "Forbidden")
+    assert not push_service._is_dead_subscription(500, "vapid")
+    assert not push_service._is_dead_subscription(None, "vapid")
+
+
+def test_is_dead_subscription_empty_body_is_dead():
+    """401/403 com corpo vazio = rejeição de credencial sem detalhe -> morta."""
+    assert push_service._is_dead_subscription(401, "")
+    assert push_service._is_dead_subscription(401, None)
+    assert push_service._is_dead_subscription(403, "   ")
+    # Um 404/410/500 com corpo vazio continua a NÃO ser tratado aqui.
+    assert not push_service._is_dead_subscription(404, "")
+    assert not push_service._is_dead_subscription(500, "")
+
+
+def test_vapid_401_empty_body_removes_subscription(monkeypatch):
+    """Reproduz o padrão de produção: 401 com body vazio remove a subscription."""
+    from pywebpush import WebPushException
+
+    svc = _configured_service(monkeypatch)
+
+    def _boom(*args, **kwargs):
+        raise WebPushException("Push failed: 401 Unauthorized", response=_FakeResponse(401, ""))
+
+    monkeypatch.setattr(push_service, "webpush", _boom)
+    removed: list = []
+    _wire_subscription(monkeypatch, removed)
+
+    assert anyio.run(svc.send_to_user, 7, {"title": "t"}, "lead_alert") == 0
+    assert removed == [(7, "https://example.invalid/dead")]
+
+
+def test_vapid_403_fcm_text_removes_subscription(monkeypatch):
+    """O texto real do FCM ('do not correspond to the credentials') é mortal."""
+    from pywebpush import WebPushException
+
+    svc = _configured_service(monkeypatch)
+
+    def _boom(*args, **kwargs):
+        raise WebPushException(
+            "Forbidden",
+            response=_FakeResponse(
+                403,
+                "the VAPID credentials in the authorization header do not "
+                "correspond to the credentials used to create the subscriptions.",
+            ),
+        )
+
+    monkeypatch.setattr(push_service, "webpush", _boom)
+    removed: list = []
+    _wire_subscription(monkeypatch, removed)
+
+    assert anyio.run(svc.send_to_user, 7, {"title": "t"}, "lead_alert") == 0
+    assert removed == [(7, "https://example.invalid/dead")]
+
+
+def test_generic_403_with_body_does_not_remove_subscription(monkeypatch):
+    """Um 403 com corpo não-vazio e sem indício de VAPID NÃO remove."""
     from pywebpush import WebPushException
 
     svc = _configured_service(monkeypatch)
@@ -153,12 +218,3 @@ def test_generic_403_does_not_remove_subscription(monkeypatch):
 
     assert anyio.run(svc.send_to_user, 7, {"title": "t"}, "lead_alert") == 0
     assert removed == []
-
-
-def test_is_dead_subscription_classifier():
-    assert push_service._is_dead_subscription(403, "VapidPkHashMismatch")
-    assert push_service._is_dead_subscription(401, "VAPID public key mismatch")
-    assert push_service._is_dead_subscription(403, "UnauthorizedRegistration")
-    assert not push_service._is_dead_subscription(403, "Forbidden")
-    assert not push_service._is_dead_subscription(500, "vapid")
-    assert not push_service._is_dead_subscription(None, "vapid")

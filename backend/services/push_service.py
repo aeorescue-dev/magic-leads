@@ -36,24 +36,36 @@ MAX_BACKOFF = 30.0  # seconds
 _PUSH_TIMEOUT_MARKERS = ("timeout", "timed out", "etimedout")
 
 # 401/403 com estes indícios significam que a subscription foi criada com uma
-# chave VAPID diferente da nossa (ex.: FCM `VapidPkHashMismatch`) ou que o
-# auth secret é inválido. A subscription está morta E irrecuperável: retry
-# nunca resolve, só a remoção. Sem este sinal, 401/403 caíam em "rejected"
-# (400-499 genérico) e a subscription ficava presa a ser tentada para sempre.
+# chave VAPID diferente da nossa (ex.: FCM `VapidPkHashMismatch` ou "the VAPID
+# credentials ... do not correspond to the credentials used to create the
+# subscriptions") ou que o auth secret é inválido. A subscription está morta E
+# irrecuperável: retry nunca resolve, só a remoção.
 _VAPID_DEAD_MARKERS = (
     "vapidpk hashmismatch",
     "hashmismatch",
     "vapid",
     "unauthorizedregistration",
     "badjsonwebkey",
+    "do not correspond to the credentials",
 )
 
 
 def _is_dead_subscription(status_code: Optional[int], response_text: Optional[str]) -> bool:
-    """True quando um 401/403 indica subscription VAPID inválida (remover)."""
+    """True quando um 401/403 indica subscription VAPID inválida (remover).
+
+    Um 401/403 do serviço de push é uma falha de AUTENTICAÇÃO determinística
+    para aquela subscription: repetir nunca resolve. Removemos quando:
+
+      * o corpo traz um indício VAPID explícito (marcadores acima); ou
+      * o corpo vem VAZIO — o endpoint rejeitou a credencial sem dar detalhe
+        (é o padrão observado em produção nos 401 vazios, que de outro modo
+        ficavam presos a ser tentados para sempre como "rejected").
+    """
     if status_code not in (401, 403):
         return False
     text = (response_text or "").strip().lower()
+    if not text:
+        return True
     return any(marker in text for marker in _VAPID_DEAD_MARKERS)
 
 
