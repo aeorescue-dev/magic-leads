@@ -174,6 +174,7 @@ export interface AdminPushMetrics {
     accepted: number;
     expired: number;
     rejected: number;
+    rejected_dead: number;
     rate_limited: number;
     timeouts: number;
     errors: number;
@@ -204,6 +205,21 @@ export interface AdminPushMetrics {
     error: string | null;
   }[];
   buffer: { buffered: number; flushed: number; dropped: number; flush_errors: number };
+}
+
+// Alert Planner — orçamento diário de alertas (in-app + push) e excedente.
+//
+// `alerts_today` é o consumo combinado do dia (1 alerta = 1 unidade);
+// `users_at_cap` são os utilizadores que esgotaram o teto `limit`;
+// `digests_today` é o excedente enviado como digest (NÃO conta para o teto).
+export interface AdminPlannerMetrics {
+  day: string;
+  limit: number;
+  alerts_today: number;
+  users_active: number;
+  users_at_cap: number;
+  digests_today: number;
+  by_category: { category: string; alerts: number }[];
 }
 
 // Fase 3 — ledger append-only de créditos.
@@ -289,6 +305,11 @@ export function fetchAdminSearchbug(days = 7, recentLimit = 50): Promise<AdminSe
 
 export function fetchAdminPush(days = 7, recentLimit = 50): Promise<AdminPushMetrics> {
   return adminFetch(`/push?days=${days}&recent_limit=${recentLimit}`);
+}
+
+export function fetchAdminPlanner(day?: string): Promise<AdminPlannerMetrics> {
+  const q = day ? `?day=${day}` : "";
+  return adminFetch(`/planner${q}`);
 }
 
 export function fetchAdminCreditLedger(

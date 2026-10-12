@@ -27,12 +27,24 @@ from .translations import DEFAULT_LOCALE, normalize, render, tr
 
 @dataclass
 class PlanReport:
-    """Resultado de um plano de despacho."""
+    """Resultado de um plano de despacho.
+
+    - candidates: leads despacháveis após o filtro de qualidade (institucional /
+      sem categoria fora). É o "havia conteúdo para alertar" que o Dead Man's
+      Switch usa — distingue "nada a despachar" (0) de "candidatos sem
+      elegíveis".
+    - audience: utilizadores ELEGÍVEIS encontrados (independente de cap/dedup).
+    - city_filtered: a audiência ficou a 0 apesar de haver utilizadores
+      interessados, ou seja, o `cities_filter` de todos eles é que excluiu os
+      leads. Ruído de configuração, não bloqueio de fluxo.
+    """
 
     created: int = 0       # notificações in-app criadas
     audience: int = 0      # utilizadores elegíveis encontrados (pré-cap/dedup)
     digest: int = 0        # utilizadores com digest (excedente)
     pushed: int = 0        # pushes aceites pelo serviço
+    candidates: int = 0    # leads despacháveis (filtro de qualidade aplicado)
+    city_filtered: bool = False  # audiência zerada apenas pelo cities_filter
 
 
 def _city_allows(user: dict, city: str) -> bool:
@@ -172,8 +184,11 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
     audience: set = set()
     per_user: dict = {}
     user_locale: dict = {}
+    saw_users = False  # houve utilizadores interessados (antes do filtro de cidade)?
     for cat, cat_leads in by_cat.items():
         users = await db_service.get_users_interested_in(cat)
+        if users:
+            saw_users = True
         for u in users:
             uid = u["id"]
             for ld in cat_leads:
@@ -185,7 +200,15 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
                 per_user.setdefault(uid, {}).setdefault(cat, []).append(ld)
                 user_locale[uid] = normalize(u.get("locale"))
 
-    report = PlanReport(audience=len(audience))
+    # Audiência vazia só é bloqueio de fluxo quando NÃO havia ninguém
+    # interessado. Se havia e o cities_filter de todos excluiu os leads, é ruído
+    # de configuração (city_filtered) e não deve disparar o Dead Man's Switch.
+    city_filtered = len(audience) == 0 and saw_users
+    report = PlanReport(
+        audience=len(audience),
+        candidates=len(lead_ids),
+        city_filtered=city_filtered,
+    )
     push_jobs: list = []   # (uid, lead, cat)
     digest_jobs: list = []  # (uid, count)
 
@@ -286,6 +309,6 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
     logger.info(
         f"Alert Planner: {report.created} in-app, {report.digest} digest, "
         f"{report.pushed} push, audiência {report.audience} "
-        f"({len(by_cat)} categoria(s), teto {limit})"
+        f"({report.candidates} candidato(s), teto {limit})"
     )
     return report

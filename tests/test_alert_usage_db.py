@@ -105,3 +105,44 @@ def test_render_returns_localized_pair():
     es = render("digest", "es", n=1, limit=6)
     assert es and "1" in es["message"]
     assert render("does_not_exist", "en") is None
+
+
+def test_admin_alert_planner_metrics_aggregates():
+    uid1 = _mk_user()
+    uid2 = _mk_user()
+    day = "2019-03-03"
+    limit = settings.PUSH_DAILY_LIMIT
+
+    db_service._service.increment_alert_usage(uid1, "pothole", limit, day)
+    db_service._service.increment_alert_usage(uid2, "graffiti", 2, day)
+
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO notifications (user_id, type, title, message, msg_key, msg_params, created_at) "
+            "VALUES (?, 'digest', 't', 'm', 'digest', ?, ?)",
+            (uid1, json.dumps({"n": 3}), f"{day} 09:00:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    metrics = db_service._service.admin_get_alert_planner_metrics(day)
+    assert metrics["day"] == day
+    assert metrics["limit"] == limit
+    assert metrics["alerts_today"] == limit + 2
+    assert metrics["users_active"] == 2
+    assert metrics["users_at_cap"] == 1          # só uid1 bateu no teto
+    assert metrics["digests_today"] == 1
+    cats = {c["category"]: c["alerts"] for c in metrics["by_category"]}
+    assert cats == {"pothole": limit, "graffiti": 2}
+
+
+def test_admin_alert_planner_metrics_empty_is_zeros():
+    metrics = db_service._service.admin_get_alert_planner_metrics("2019-12-31")
+    assert metrics["day"] == "2019-12-31"
+    assert metrics["alerts_today"] == 0
+    assert metrics["users_active"] == 0
+    assert metrics["users_at_cap"] == 0
+    assert metrics["digests_today"] == 0
+    assert metrics["by_category"] == []

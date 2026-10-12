@@ -1516,6 +1516,20 @@ async def admin_push(
     return data
 
 
+@app.get("/api/admin/planner")
+async def admin_planner(
+    day: str | None = None,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Alert Planner: telemetria do orçamento diário de alertas.
+
+    Cruza `alert_usage` (consumo por utilizador/categoria, teto
+    `PUSH_DAILY_LIMIT`) com as notificações de excedente (`type='digest'`,
+    que NÃO contam para o teto). `day` em UTC (YYYY-MM-DD); default = hoje.
+    """
+    return await db_service.admin_get_alert_planner_metrics(day)
+
+
 # ------------------------------------------------- Fase 3: credit ledger
 
 @app.get("/api/admin/credit-ledger")
@@ -2355,11 +2369,15 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                 inserted=inserted,
                 notified=notified_total,
                 audience=audience_total,
+                candidates=int(report.candidates or 0),
+                city_filtered=bool(report.city_filtered),
                 context={
                     "run_id": run_id,
                     "inserted": inserted,
                     "notified": notified_total,
                     "audience": audience_total,
+                    "candidates": int(report.candidates or 0),
+                    "city_filtered": bool(report.city_filtered),
                     "categories": {c: len(v) for c, v in added_by_cat.items()},
                 },
             )

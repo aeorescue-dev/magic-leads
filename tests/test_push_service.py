@@ -67,3 +67,98 @@ def test_send_to_user_respects_push_enabled_flag(monkeypatch):
 
     assert anyio.run(svc.send_to_user, 7, {"title": "t"}, "lead_alert") == 0
     assert calls == {}
+
+
+# ---------------------------------------------------------------------------
+# 401/403 de VAPID inválido -> subscription morta removida da BD (Ponto 2)
+# ---------------------------------------------------------------------------
+
+class _FakeResponse:
+    def __init__(self, status_code: int, text: str):
+        self.status_code = status_code
+        self.text = text
+        self.headers: dict = {}
+
+
+def _wire_subscription(monkeypatch, store):
+    async def _enabled(user_id):
+        return True
+
+    async def _subs(user_id):
+        return [{
+            "endpoint": "https://example.invalid/dead",
+            "p256dh": "a",
+            "auth": "b",
+            "user_id": user_id,
+        }]
+
+    async def _remove(user_id, endpoint):
+        store.append((user_id, endpoint))
+        return True
+
+    monkeypatch.setattr(push_service.db_service, "is_push_enabled", _enabled)
+    monkeypatch.setattr(push_service.db_service, "get_user_push_subscriptions", _subs)
+    monkeypatch.setattr(push_service.db_service, "remove_push_subscription", _remove)
+
+
+def test_vapid_403_removes_subscription(monkeypatch):
+    from pywebpush import WebPushException
+
+    svc = _configured_service(monkeypatch)
+
+    def _boom(*args, **kwargs):
+        raise WebPushException(
+            "VAPID error", response=_FakeResponse(403, '{"reason":"VapidPkHashMismatch"}')
+        )
+
+    monkeypatch.setattr(push_service, "webpush", _boom)
+    removed: list = []
+    _wire_subscription(monkeypatch, removed)
+
+    assert anyio.run(svc.send_to_user, 7, {"title": "t"}, "lead_alert") == 0
+    assert removed == [(7, "https://example.invalid/dead")]
+
+
+def test_vapid_401_removes_subscription(monkeypatch):
+    from pywebpush import WebPushException
+
+    svc = _configured_service(monkeypatch)
+
+    def _boom(*args, **kwargs):
+        raise WebPushException(
+            "unauthorized", response=_FakeResponse(401, "UnauthorizedRegistration")
+        )
+
+    monkeypatch.setattr(push_service, "webpush", _boom)
+    removed: list = []
+    _wire_subscription(monkeypatch, removed)
+
+    assert anyio.run(svc.send_to_user, 7, {"title": "t"}, "lead_alert") == 0
+    assert removed == [(7, "https://example.invalid/dead")]
+
+
+def test_generic_403_does_not_remove_subscription(monkeypatch):
+    """Um 403 sem indício de VAPID é transitório: NÃO remove a subscription."""
+    from pywebpush import WebPushException
+
+    svc = _configured_service(monkeypatch)
+    monkeypatch.setattr(push_service, "MAX_RETRIES", 1)  # sem sleep de backoff
+
+    def _boom(*args, **kwargs):
+        raise WebPushException("forbidden", response=_FakeResponse(403, "Forbidden"))
+
+    monkeypatch.setattr(push_service, "webpush", _boom)
+    removed: list = []
+    _wire_subscription(monkeypatch, removed)
+
+    assert anyio.run(svc.send_to_user, 7, {"title": "t"}, "lead_alert") == 0
+    assert removed == []
+
+
+def test_is_dead_subscription_classifier():
+    assert push_service._is_dead_subscription(403, "VapidPkHashMismatch")
+    assert push_service._is_dead_subscription(401, "VAPID public key mismatch")
+    assert push_service._is_dead_subscription(403, "UnauthorizedRegistration")
+    assert not push_service._is_dead_subscription(403, "Forbidden")
+    assert not push_service._is_dead_subscription(500, "vapid")
+    assert not push_service._is_dead_subscription(None, "vapid")

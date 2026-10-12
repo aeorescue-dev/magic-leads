@@ -222,10 +222,12 @@ def test_fanout_creates_notification_and_dedups():
     first = _run(fanout_new_lead_batch("Roof", [lead]))
     assert first.created == 1
     assert first.audience == 1
+    assert first.candidates == 1
 
     second = _run(fanout_new_lead_batch("Roof", [lead]))
     assert second.created == 0          # dedup: já notificado
     assert second.audience == 1         # elegível ainda é detectado
+    assert second.candidates == 1
 
     conn = get_connection()
     try:
@@ -244,22 +246,37 @@ def test_dead_mans_switch_records_critical_alert():
 
     # Fluxo saudável (notificou) -> sem alerta
     assert _run(guard_silent_fanout(
-        inserted=5, notified=3, audience=10, context={"run_id": "ok"},
+        inserted=5, notified=3, audience=10, candidates=5, context={"run_id": "ok"},
     )) is True
     # Fluxo saudável (cap diário atingido: há elegíveis, mas notified == 0)
     # -> NÃO é bloqueio. Regressão do falso positivo NOTIFIER_SILENT_FAILURE.
     assert _run(guard_silent_fanout(
-        inserted=1471, notified=0, audience=8, context={"run_id": "capped"},
+        inserted=1471, notified=0, audience=8, candidates=1471,
+        context={"run_id": "capped"},
     )) is True
+    # Nada a despachar (todos os leads institucionais/sem categoria): o filtro
+    # de qualidade esvazia candidates -> NÃO é bloqueio.
+    assert _run(guard_silent_fanout(
+        inserted=5, notified=0, audience=0, candidates=0,
+        context={"run_id": "institutional"},
+    )) is True
+    # Audiência zerada apenas pelo cities_filter (havia interessados):
+    # ruído de configuração -> NÃO é bloqueio.
+    assert _run(guard_silent_fanout(
+        inserted=5, notified=0, audience=0, candidates=5, city_filtered=True,
+        context={"run_id": "city_filtered"},
+    )) is True
+
     conn = get_connection()
     try:
         assert conn.execute("SELECT COUNT(*) AS c FROM system_alerts").fetchone()["c"] == 0
     finally:
         conn.close()
 
-    # Bloqueio silencioso (nenhum destinatário elegível) -> alerta crítico
+    # Bloqueio silencioso (há candidatos mas nenhum destinatário elegível)
+    # -> alerta crítico
     assert _run(guard_silent_fanout(
-        inserted=5, notified=0, audience=0, context={"run_id": "blocked"},
+        inserted=5, notified=0, audience=0, candidates=5, context={"run_id": "blocked"},
     )) is False
 
     alerts = _run(db_service.get_recent_system_alerts(5))

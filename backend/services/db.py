@@ -2400,6 +2400,7 @@ class DatabaseService:
                   SUM(CASE WHEN outcome = 'accepted' THEN 1 ELSE 0 END) AS accepted,
                   SUM(CASE WHEN outcome = 'expired' THEN 1 ELSE 0 END) AS expired,
                   SUM(CASE WHEN outcome = 'rejected' THEN 1 ELSE 0 END) AS rejected,
+                  SUM(CASE WHEN outcome = 'rejected_dead' THEN 1 ELSE 0 END) AS rejected_dead,
                   SUM(CASE WHEN outcome = 'rate_limited' THEN 1 ELSE 0 END) AS rate_limited,
                   SUM(CASE WHEN outcome = 'timeout' THEN 1 ELSE 0 END) AS timeouts,
                   SUM(CASE WHEN outcome = 'error' THEN 1 ELSE 0 END) AS errors,
@@ -2480,6 +2481,7 @@ class DatabaseService:
                     "accepted": totals["accepted"] or 0,
                     "expired": totals["expired"] or 0,
                     "rejected": totals["rejected"] or 0,
+                    "rejected_dead": totals["rejected_dead"] or 0,
                     "rate_limited": totals["rate_limited"] or 0,
                     "timeouts": totals["timeouts"] or 0,
                     "errors": totals["errors"] or 0,
@@ -2502,6 +2504,7 @@ class DatabaseService:
                 "today": {"deliveries": 0, "accepted": 0, "expired": 0},
                 "totals": {
                     "deliveries": 0, "accepted": 0, "expired": 0, "rejected": 0,
+                    "rejected_dead": 0,
                     "rate_limited": 0, "timeouts": 0, "errors": 0,
                     "not_configured": 0, "retried": 0,
                 },
@@ -2512,6 +2515,75 @@ class DatabaseService:
                 "by_kind": [],
                 "recent": [],
                 "dlq": self.get_notification_dlq_stats(),
+            }
+        finally:
+            conn.close()
+
+    def admin_get_alert_planner_metrics(self, day: Optional[str] = None) -> dict:
+        """Telemetria do Alert Planner para o painel admin.
+
+        Cruza o orçamento consumido (`alert_usage`) com o excedente push
+        (notificações `type='digest'`). Tudo em UTC; `day` default = hoje.
+        """
+        day = day or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        limit = int(settings.PUSH_DAILY_LIMIT)
+        conn = get_connection()
+        try:
+            def scalar(sql: str, params: tuple = ()) -> int:
+                row = conn.execute(sql, params).fetchone()
+                if not row:
+                    return 0
+                val = row[0]
+                return int(val) if isinstance(val, (int, float)) else 0
+
+            alerts_today = scalar(
+                "SELECT COALESCE(SUM(alerts), 0) FROM alert_usage WHERE day = ?",
+                (day,),
+            )
+            users_active = scalar(
+                "SELECT COUNT(DISTINCT user_id) FROM alert_usage WHERE day = ?",
+                (day,),
+            )
+            users_at_cap = scalar(
+                """SELECT COUNT(*) FROM (
+                       SELECT user_id FROM alert_usage WHERE day = ?
+                       GROUP BY user_id HAVING SUM(alerts) >= ?
+                   )""",
+                (day, limit),
+            )
+            digests_today = scalar(
+                "SELECT COUNT(*) FROM notifications "
+                "WHERE type = 'digest' AND date(created_at) = ?",
+                (day,),
+            )
+            by_category = [
+                dict(r)
+                for r in conn.execute(
+                    """SELECT category, SUM(alerts) AS alerts
+                       FROM alert_usage WHERE day = ?
+                       GROUP BY category ORDER BY alerts DESC""",
+                    (day,),
+                ).fetchall()
+            ]
+
+            return {
+                "day": day,
+                "limit": limit,
+                "alerts_today": alerts_today,
+                "users_active": users_active,
+                "users_at_cap": users_at_cap,
+                "digests_today": digests_today,
+                "by_category": by_category,
+            }
+        except sqlite3.OperationalError:
+            return {
+                "day": day,
+                "limit": limit,
+                "alerts_today": 0,
+                "users_active": 0,
+                "users_at_cap": 0,
+                "digests_today": 0,
+                "by_category": [],
             }
         finally:
             conn.close()
@@ -6093,6 +6165,11 @@ class AsyncDatabaseService:
     async def admin_get_push_metrics(self, days: int = 7, recent_limit: int = 50) -> dict:
         return await anyio.to_thread.run_sync(
             self._service.admin_get_push_metrics, days, recent_limit
+        )
+
+    async def admin_get_alert_planner_metrics(self, day: Optional[str] = None) -> dict:
+        return await anyio.to_thread.run_sync(
+            self._service.admin_get_alert_planner_metrics, day
         )
 
     async def user_has_lead_history_access(self, user_id: int, lead_id: int) -> bool:

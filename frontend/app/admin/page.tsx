@@ -19,6 +19,7 @@ import {
   AdminAlert,
   AdminApiError,
   AdminOverview,
+  AdminPlannerMetrics,
   AdminPushMetrics,
   AdminReveal,
   AdminScraperRun,
@@ -31,6 +32,7 @@ import {
     AdminCreditReconcileResponse,
   fetchAdminAlerts,
   fetchAdminOverview,
+  fetchAdminPlanner,
   fetchAdminPush,
   fetchAdminReveals,
   fetchAdminScraperRuns,
@@ -146,6 +148,7 @@ export default function AdminPage() {
   const [alerts, setAlerts] = useState<AdminAlert[]>([]);
   const [searchbug, setSearchbug] = useState<AdminSearchbugMetrics | null>(null);
   const [push, setPush] = useState<AdminPushMetrics | null>(null);
+  const [planner, setPlanner] = useState<AdminPlannerMetrics | null>(null);
   const [creditLedger, setCreditLedger] = useState<AdminCreditLedgerResponse | null>(null);
   const [creditBalance, setCreditBalance] = useState<AdminCreditBalance | null>(null);
   const [busy, setBusy] = useState(false);
@@ -157,9 +160,10 @@ export default function AdminPage() {
       // apagar o resto do painel.
       const sb = fetchAdminSearchbug(7, 25).catch(() => null);
       const pu = fetchAdminPush(7, 25).catch(() => null);
+      const pl = fetchAdminPlanner().catch(() => null);
       const cl = fetchAdminCreditLedger(1, 50).catch(() => null);
       const cb = fetchAdminCreditBalance(1).catch(() => null);
-      const [ov, src, rn, rv, al, sbm, pum, clm, cbm] = await Promise.all([
+      const [ov, src, rn, rv, al, sbm, pum, plm, clm, cbm] = await Promise.all([
         fetchAdminOverview(),
         fetchAdminSources(),
         fetchAdminScraperRuns(15),
@@ -167,6 +171,7 @@ export default function AdminPage() {
         fetchAdminAlerts(20),
         sb,
         pu,
+        pl,
         cl,
         cb,
       ]);
@@ -177,6 +182,7 @@ export default function AdminPage() {
       setAlerts(al.alerts);
       setSearchbug(sbm);
       setPush(pum);
+      setPlanner(plm);
       setCreditLedger(clm);
       setCreditBalance(cbm);
       setGate("ok");
@@ -515,6 +521,13 @@ export default function AdminPage() {
               </p>
             ) : null}
 
+            {push.totals.rejected_dead > 0 ? (
+              <p className="rounded-lg bg-rose-500/10 px-3 py-2 text-[11px] text-rose-300">
+                {push.totals.rejected_dead} subscrição(ões) com VAPID inválido (401/403) removida(s)
+                da base — estavam a acumular tentativas que nunca entregariam nada.
+              </p>
+            ) : null}
+
             {push.dlq && (push.dlq.dropped > 0 || push.dlq.pending > 0) ? (
               <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300">
                 DLQ de notificações in-app: {push.dlq.pending} pendente(s) e {push.dlq.dropped}{" "}
@@ -633,6 +646,51 @@ export default function AdminPage() {
                 </div>
               </details>
             ) : null}
+          </div>
+        )}
+      </Card>
+
+      {/* ------------------------------------------------ alert planner */}
+      <Card
+        title="Alert Planner · hoje"
+        icon={<Activity className="h-4 w-4" />}
+        hint={planner ? `${planner.day} (UTC) · teto ${planner.limit}/utilizador` : undefined}
+      >
+        {!planner ? (
+          <p className="text-xs text-slate-500">Sem telemetria do Alert Planner.</p>
+        ) : (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <Kpi label="Alertas hoje" value={planner.alerts_today} sub="orçamento combinado" />
+              <Kpi label="Utilizadores ativos" value={planner.users_active} sub="consumiram vaga hoje" />
+              <Kpi label="No teto" value={planner.users_at_cap} sub={`>= ${planner.limit} alertas`} />
+              <Kpi label="Digests hoje" value={planner.digests_today} sub="excedente (não conta no teto)" />
+            </div>
+
+            {planner.by_category.length > 0 ? (
+              <div className="space-y-1">
+                <h3 className="text-[10px] uppercase tracking-wider text-slate-500">Por categoria</h3>
+                {planner.by_category.map((c) => {
+                  const max = Math.max(...planner.by_category.map((x) => x.alerts), 1);
+                  return (
+                    <div key={c.category} className="flex items-center gap-2 text-xs">
+                      <span className="w-28 shrink-0 truncate font-mono text-slate-400" title={c.category}>
+                        {c.category}
+                      </span>
+                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/5">
+                        <div
+                          className="h-full rounded-full bg-indigo-500/70"
+                          style={{ width: `${(c.alerts / max) * 100}%` }}
+                        />
+                      </div>
+                      <span className="w-8 shrink-0 text-right text-slate-500">{c.alerts}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-xs text-slate-500">Sem alertas despachados hoje.</p>
+            )}
           </div>
         )}
       </Card>

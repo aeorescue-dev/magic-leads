@@ -35,9 +35,35 @@ MAX_BACKOFF = 30.0  # seconds
 
 _PUSH_TIMEOUT_MARKERS = ("timeout", "timed out", "etimedout")
 
+# 401/403 com estes indícios significam que a subscription foi criada com uma
+# chave VAPID diferente da nossa (ex.: FCM `VapidPkHashMismatch`) ou que o
+# auth secret é inválido. A subscription está morta E irrecuperável: retry
+# nunca resolve, só a remoção. Sem este sinal, 401/403 caíam em "rejected"
+# (400-499 genérico) e a subscription ficava presa a ser tentada para sempre.
+_VAPID_DEAD_MARKERS = (
+    "vapidpk hashmismatch",
+    "hashmismatch",
+    "vapid",
+    "unauthorizedregistration",
+    "badjsonwebkey",
+)
+
+
+def _is_dead_subscription(status_code: Optional[int], response_text: Optional[str]) -> bool:
+    """True quando um 401/403 indica subscription VAPID inválida (remover)."""
+    if status_code not in (401, 403):
+        return False
+    text = (response_text or "").strip().lower()
+    return any(marker in text for marker in _VAPID_DEAD_MARKERS)
+
 
 def classify_push_outcome(status_code: Optional[int], error: Optional[str] = None) -> str:
-    """Normaliza o resultado de uma entrega de push num outcome estavel."""
+    """Normaliza o resultado de uma entrega de push num outcome estavel.
+
+    401/403 de VAPID inválido são classificados antes deste ponto (ramo
+    `rejected_dead` em `_send_single`). Aqui caem só os restantes 400-499
+    genéricos, que NÃO removem a subscription.
+    """
     if status_code is not None:
         if status_code in (404, 410):
             return "expired"
@@ -124,8 +150,9 @@ class PushService:
         """Envia push para uma única subscription com retry exponencial.
 
         `kind` é apenas rótulo para telemetria (lead_alert, status_change,
-        broadcast...). O valor de retorno é o que os callers já esperam:
-        True, False ou "expired" - inalterado. A Fase 2 só acrescenta métricas.
+        broadcast...). O valor de retorno é True, False ou um sentinel de
+        subscrição morta (`"expired"` para 404/410, `"rejected_dead"` para
+        401/403 de VAPID inválido) — os callers removem os dois da BD.
         """
         if not self.is_configured():
             # Bug operacional silencioso: sem VAPID nada é entregue e o
@@ -183,6 +210,16 @@ class PushService:
                     logger.info(f"Push subscription expired/invalid: {subscription['endpoint'][:50]}...")
                     _record("expired", attempt + 1)
                     return "expired"
+                # VAPID inválido (401/403): subscription morta, sem retry —
+                # é marcada para remoção pelo caller.
+                resp_text = e.response.text if e.response is not None else None
+                if _is_dead_subscription(last_status, resp_text):
+                    logger.info(
+                        f"Push subscription VAPID inválida (HTTP {last_status}): "
+                        f"{subscription['endpoint'][:50]}... — marcada para remoção"
+                    )
+                    _record("rejected_dead", attempt + 1)
+                    return "rejected_dead"
                 # Rate limiting - retry com backoff
                 if last_status == 429:
                     retry_after = e.response.headers.get("Retry-After")
@@ -256,10 +293,10 @@ class PushService:
             result = await self._send_single(sub, payload, kind)
             if result is True:
                 sent += 1
-            elif result == "expired":
+            elif result in ("expired", "rejected_dead"):
                 expired_endpoints.append(sub["endpoint"])
 
-        # Remove expired subscriptions
+        # Remove expired/dead subscriptions
         for endpoint in expired_endpoints:
             await db_service.remove_push_subscription(user_id, endpoint)
 
@@ -291,7 +328,7 @@ class PushService:
                 result = await self._send_single(sub, payload, "broadcast")
                 if result is True:
                     sent += 1
-                elif result == "expired":
+                elif result in ("expired", "rejected_dead"):
                     expired_endpoints.append(sub["endpoint"])
 
             for endpoint in expired_endpoints:
@@ -325,8 +362,20 @@ class PushService:
         except WebPushException as e:
             status = e.response.status_code if e.response is not None else None
             detail = str(e)
+        except WebPushException as e:
+            status = e.response.status_code if e.response is not None else None
+            detail = str(e)
             if status in (404, 410):
                 return {"ok": False, "error": f"expired (HTTP {status})", "expired": True, "detail": detail}
+            resp_text = e.response.text if e.response is not None else None
+            if _is_dead_subscription(status, resp_text):
+                return {
+                    "ok": False,
+                    "error": f"rejected_dead (HTTP {status})",
+                    "expired": True,
+                    "dead": True,
+                    "detail": detail,
+                }
             return {"ok": False, "error": f"WebPushException (HTTP {status}): {detail}"}
         except Exception as e:
             return {"ok": False, "error": f"Unexpected: {type(e).__name__}: {e}"}

@@ -37,12 +37,13 @@ def _reset() -> None:
         conn.close()
 
 
-def _user(interests=None, email=None) -> int:
+def _user(interests=None, email=None, cities_filter=None) -> int:
     conn = get_connection()
     try:
         cur = conn.execute(
             "INSERT INTO users (email, password_hash, company_name, plan, "
-            "subscription_status, plan_until) VALUES (?, ?, ?, ?, ?, ?)",
+            "subscription_status, plan_until, cities_filter) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 email or f"planner_{uuid.uuid4().hex[:10]}@test.com",
                 "not-a-real-hash",
@@ -50,6 +51,7 @@ def _user(interests=None, email=None) -> int:
                 "pro",
                 "active",
                 _future(),
+                cities_filter,
             ),
         )
         uid = cur.lastrowid
@@ -245,3 +247,36 @@ def test_institutional_lead_is_skipped():
     report = _run(plan_and_dispatch([lead]))
     assert report.created == 0
     assert report.audience == 0
+    assert report.candidates == 0  # nada despachável: não é bloqueio de fluxo
+
+
+def test_candidates_counts_only_dispatchable_leads():
+    _reset()
+    _user(["Roof"])
+    good = _lead("Roof", "NYC")
+    institutional = _lead("Roof", "NYC", owner_name="NYC HOUSING AUTHORITY")
+
+    report = _run(plan_and_dispatch([good, institutional]))
+    assert report.candidates == 1   # só o lead não institucional
+    assert report.audience == 1
+    assert report.created == 1
+    assert report.city_filtered is False
+
+
+def test_city_filtered_flag_when_all_users_block_city():
+    _reset()
+    _user(["Roof"], cities_filter='["Dallas"]')
+
+    report = _run(plan_and_dispatch([_lead("Roof", "NYC")]))
+    assert report.candidates == 1
+    assert report.audience == 0        # utilizador existe mas o filtro exclui NYC
+    assert report.city_filtered is True  # ruído de configuração, não bloqueio
+
+
+def test_no_city_filtered_flag_when_no_interested_users():
+    _reset()
+    # Sem utilizadores: há candidatos mas ninguém elegível (bloqueio real).
+    report = _run(plan_and_dispatch([_lead("Roof", "NYC")]))
+    assert report.candidates == 1
+    assert report.audience == 0
+    assert report.city_filtered is False

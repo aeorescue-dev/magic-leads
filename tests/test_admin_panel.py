@@ -17,6 +17,7 @@ Invariantes fixados aqui:
 """
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -84,6 +85,7 @@ def test_admin_routes_reject_global_secret_only(admin_client):
         "/api/admin/scraper/runs",
         "/api/admin/reveals",
         "/api/admin/alerts",
+        "/api/admin/planner",
     ],
 )
 def test_admin_routes_require_session(admin_client, path):
@@ -100,6 +102,7 @@ def test_admin_routes_require_session(admin_client, path):
         "/api/admin/scraper/runs",
         "/api/admin/reveals",
         "/api/admin/alerts",
+        "/api/admin/planner",
     ],
 )
 def test_admin_routes_reject_invalid_token(admin_client, path):
@@ -117,6 +120,7 @@ def test_admin_routes_reject_invalid_token(admin_client, path):
         "/api/admin/scraper/runs",
         "/api/admin/reveals",
         "/api/admin/alerts",
+        "/api/admin/planner",
     ],
 )
 def test_admin_routes_reject_non_admin_user(nonadmin_client, path):
@@ -443,3 +447,40 @@ def test_admin_push_window_excludes_old_rows(admin_client):
 
     month = client.get("/api/admin/push?days=90", headers=headers).json()
     assert month["totals"]["deliveries"] == 2
+
+
+# ------------------------------------------------- Alert Planner (Ponto 1)
+
+def test_admin_planner_requires_admin_role(admin_client, nonadmin_client):
+    client, _, _ = admin_client
+    _, nonadmin_headers = nonadmin_client
+    assert client.get("/api/admin/planner").status_code == 401
+    assert client.get("/api/admin/planner", headers=nonadmin_headers).status_code == 403
+
+
+def test_admin_planner_metrics(admin_client):
+    client, headers, _ = admin_client
+    svc = db_service._service
+    day = "2017-07-07"
+    uid = svc.create_user(f"planner-{uuid.uuid4().hex[:8]}@magicleads.app", "x", "Test Co")["id"]
+    svc.increment_alert_usage(uid, "pothole", 2, day)
+
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO notifications (user_id, type, title, message, msg_key, msg_params, created_at) "
+            "VALUES (?, 'digest', 't', 'm', 'digest', ?, ?)",
+            (uid, "{\"n\": 2}", f"{day} 08:00:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    data = client.get(f"/api/admin/planner?day={day}", headers=headers).json()
+    assert data["day"] == day
+    assert data["limit"] >= 5
+    assert data["alerts_today"] >= 2
+    assert data["users_active"] >= 1
+    assert data["digests_today"] == 1
+    cats = {c["category"]: c["alerts"] for c in data["by_category"]}
+    assert cats["pothole"] >= 2
