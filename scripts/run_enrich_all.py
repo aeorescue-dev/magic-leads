@@ -1,12 +1,12 @@
 import sys
-sys.path.insert(0, 'C:\\Users\\Fabio\\Documents\\Default Project\\garimpador-leads')
+sys.path.insert(0, r'C:\Users\Fabio\Documents\Default Project\garimpador-leads')
 import asyncio
+import argparse
 from backend.services import db as dbmod
 from backend.services.enrichment import owner_enrichment
 from backend.services.skip_trace import skip_trace_service
 
-async def enrich_all(limit_per_city=50):
-    cities = ['NYC', 'Boston', 'Dallasopendata', 'Dallas', 'Norfolk']
+async def enrich_all(cities, limit_per_city=50):
     total_processed = 0
     total_owners_found = 0
     total_mailing_found = 0
@@ -20,13 +20,13 @@ async def enrich_all(limit_per_city=50):
         conn = dbmod.get_connection()
         rows = conn.execute(
             "SELECT id, address, city FROM leads "
-            "WHERE city = ? "
+            "WHERE lower(city)=? "
             "AND (owner_name IS NULL OR owner_name = '' "
             "   OR mailing_address IS NULL OR mailing_address = '' "
             "   OR owner_phone IS NULL OR owner_phone = '' "
             "   OR owner_email IS NULL OR owner_email = '') "
             "ORDER BY date_reported DESC LIMIT ?",
-            (city, limit_per_city),
+            (city.lower(), limit_per_city),
         ).fetchall()
         conn.close()
         
@@ -106,4 +106,13 @@ async def enrich_all(limit_per_city=50):
     print(f"Emails: {total_emails_found}")
     print(f"Por cidade: {results_by_city}")
 
-asyncio.run(enrich_all(50))
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--cities", type=str, default="CHICAGO,DALLAS,BOSTON",
+                        help="Comma-separated list of cities to enrich")
+    parser.add_argument("--limit", type=int, default=50,
+                        help="Limit per city")
+    args = parser.parse_args()
+    
+    cities = [c.strip() for c in args.cities.split(",")]
+    asyncio.run(enrich_all(cities, args.limit))

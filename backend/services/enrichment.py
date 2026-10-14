@@ -352,6 +352,10 @@ class OwnerEnrichment:
                 city_esc = city_filter_value.replace("'", "''")
                 city_part = f" AND {city_filter_col} = '{city_esc}'"
             queries.append(f"{address_col} like '{full_address_esc}%'{city_part}")
+            # For address_col-only cities (e.g., Chicago), also try number + street pattern
+            # to handle directional prefixes/suffixes in dataset (e.g., "7025 S CALUMET AVE")
+            num_esc = num.replace("'", "''")
+            queries.append(f"{address_col} like '%{num_esc}% {street_for_query}%'{city_part}")
 
         if num_col and street_col:
             if cfg.get("number_as_string", True):
@@ -522,6 +526,17 @@ class OwnerEnrichment:
                     addr_num = addr_part.split(" ")[0] if " " in addr_part else addr_part
                     if addr_num == num:
                         return self._build_result(row, cfg, original_address)
+                    # Fallback: prefix match for house number (e.g. "67" matches "67-69")
+                    if addr_num.startswith(num) or num.startswith(addr_num):
+                        return self._build_result(row, cfg, original_address)
+                return self._build_result(row, cfg, original_address)
+
+        # Fallback 2: try matching by normalized full address comparison
+        orig_norm = normalize_street(original_address.split(",")[0].strip().upper())
+        for row in records:
+            full_addr = str(row.get(cfg["street_col"]) or "").upper()
+            row_norm = normalize_street(full_addr.split(",")[0].strip())
+            if orig_norm == row_norm:
                 return self._build_result(row, cfg, original_address)
 
         # Nenhum registo casou com a rua nem com o numero. Antes devolvia

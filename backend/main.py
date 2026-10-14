@@ -213,6 +213,8 @@ def _to_lead_response(lead: dict) -> LeadResponse:
         server_now=datetime.utcnow().isoformat() + "Z",
         corporate=rules["corporate"],
         institutional=rules["institutional"],
+        owner_class=rules.get("owner_class", "unknown"),
+        owner_kind=rules.get("owner_kind"),
         address_resolvable=rules["address_resolvable"],
         unresolvable=rules["unresolvable"],
         complete_delivery=rules["complete_delivery"],

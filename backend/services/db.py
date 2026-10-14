@@ -21,7 +21,7 @@ from .access import (
     normalize_status,
     parse_dt,
 )
-from .lead_rules import institutional_owner_name_where
+from .lead_rules import institutional_owner_name_where, is_institutional_name
 from .searchbug import PhoneLookupResult, searchbug_service
 from .translations import DEFAULT_LOCALE
 from .translations import render as _render_i18n
@@ -556,6 +556,10 @@ def get_connection() -> sqlite3.Connection:
         conn.execute("PRAGMA synchronous=NORMAL;")
     except sqlite3.OperationalError:
         pass  # fs read-only (serverless) — segue com leitura
+    try:
+        conn.create_function("is_institutional_name", 1, is_institutional_name)
+    except Exception:
+        pass
     return conn
 
 
@@ -3858,9 +3862,19 @@ class DatabaseService:
                 f"SELECT COUNT(*) AS c FROM leads {base_where} AND {institutional_owner_name_where()}",
                 params
             ).fetchone()["c"]
+            # Tri-estado
+            private = conn.execute(
+                f"SELECT COUNT(*) AS c FROM leads {base_where} AND owner_name IS NOT NULL AND owner_name != '' AND is_institutional_name(owner_name)=0",
+                params,
+            ).fetchone()["c"]
+            unknown = conn.execute(
+                f"SELECT COUNT(*) AS c FROM leads {base_where} AND (owner_name IS NULL OR owner_name = '')",
+                params,
+            ).fetchone()["c"]
             by_owner_type = {
                 "institutional": institutional,
-                "private": max(0, total_interested - institutional),
+                "private": private,
+                "unknown": unknown,
             }
 
             # Por categoria (para os cards de interesse)

@@ -486,6 +486,7 @@ const PT: Dict = {
   "dashboard.filter.all_owner_types": "Todos",
   "dashboard.filter.owner_type_private": "Apenas Privados",
   "dashboard.filter.owner_type_institutional": "Apenas Institucionais/Governamentais",
+  "dashboard.filter.owner_type_unknown": "Sem dados de proprietário / Desconhecido",
   "dashboard.lead_type.obligation": "Obrigação legal",
   "dashboard.lead_type.permit": "Obra autorizada",
   "dashboard.lead_type.open": "Chamado aberto",
@@ -1122,6 +1123,15 @@ const PT: Dict = {
   "dashboard.reveal.remaining": "Você ainda tem {remaining} de {limit} revelações hoje.",
   "dashboard.lock.logout": "Sair da conta",
 
+  // Dashboard — Phase 4: Phone Reveal & Credit Balance
+  "dashboard.action.reveal_phone": "Revelar Telefone",
+  "dashboard.toast.phone_revealed": "Telefone revelado com sucesso",
+  "dashboard.toast.phone_reveal_failed": "Não foi possível revelar o telefone",
+  "dashboard.toast.phone_reveal_error": "Erro ao revelar telefone",
+  "dashboard.sidebar.credit_balance": "Saldo de Créditos",
+  "dashboard.sidebar.credits_available": "créditos disponíveis",
+  "dashboard.sidebar.today_used": "Hoje",
+
   // Plan labels
   "plan.free": "Grátis",
   "plan.pro": "Pro",
@@ -1601,6 +1611,7 @@ const EN: Dict = {
   "dashboard.filter.all_owner_types": "All",
   "dashboard.filter.owner_type_private": "Private only",
   "dashboard.filter.owner_type_institutional": "Institutional/Government only",
+  "dashboard.filter.owner_type_unknown": "No owner data / Unknown",
   "dashboard.lead_type.obligation": "Legal obligation",
   "dashboard.lead_type.permit": "Approved work",
   "dashboard.lead_type.open": "Open request",
@@ -2723,6 +2734,7 @@ const ES: Dict = {
   "dashboard.filter.all_owner_types": "Todos",
   "dashboard.filter.owner_type_private": "Solo privados",
   "dashboard.filter.owner_type_institutional": "Solo institucionales/gubernamentales",
+  "dashboard.filter.owner_type_unknown": "Sin datos del propietario / Desconocido",
   "dashboard.lead_type.obligation": "Obligación legal",
   "dashboard.lead_type.permit": "Obra autorizada",
   "dashboard.lead_type.open": "Solicitud abierta",

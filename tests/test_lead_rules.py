@@ -196,7 +196,8 @@ def test_incomplete_delivery_is_always_free_and_corporate_is_always_free():
 # ---------------------------------------------------------------------------
 def test_classify_broken_lead():
     """Cenário real de produção: '2424, NYC, NY' sem qualquer contacto."""
-    assert classify(lead(address="2424, NYC, NY")) == {
+    result = classify(lead(address="2424, NYC, NY"))
+    assert result == {
         "corporate": False,
         "institutional": False,
         "address_resolvable": False,
@@ -204,11 +205,14 @@ def test_classify_broken_lead():
         "complete_delivery": False,
         "incomplete_delivery": True,
         "charged": False,
+        "owner_class": "unknown",
+        "owner_kind": "unknown",
     }
 
 
 def test_classify_corporate_lead():
-    assert classify(lead(owner_name="ACME LLC", mailing_address="PO BOX 9")) == {
+    result = classify(lead(owner_name="ACME LLC", mailing_address="PO BOX 9"))
+    assert result == {
         "corporate": True,
         "institutional": False,
         "address_resolvable": True,
@@ -216,6 +220,8 @@ def test_classify_corporate_lead():
         "complete_delivery": False,
         "incomplete_delivery": False,
         "charged": False,
+        "owner_class": "private",
+        "owner_kind": "company",
     }
 
 

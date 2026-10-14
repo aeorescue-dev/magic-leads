@@ -54,7 +54,10 @@ import {
   LeadOccurrence, fetchLeadOccurrences,
   fetchDashboardSummary, DashboardSummary,
   fetchScraperStatus, ScraperRunState,
-  fetchPublicMetrics, PublicMetrics, EMPTY_PUBLIC_METRICS, RELEASE_REASONS
+  fetchPublicMetrics, PublicMetrics, EMPTY_PUBLIC_METRICS, RELEASE_REASONS,
+  revealPhone, PhoneRevealResult,
+  fetchCreditBalance, CreditBalance,
+  fetchCreditLedger, CreditLedgerEntry,
 } from "@/lib/api-client";
 
 // Tipo enriquecido para o modal de revelação (com histórico e ocorrências)
@@ -259,6 +262,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
     { value: "all", labelKey: "dashboard.filter.all_owner_types" },
     { value: "private", labelKey: "dashboard.filter.owner_type_private" },
     { value: "institutional", labelKey: "dashboard.filter.owner_type_institutional" },
+    { value: "unknown", labelKey: "dashboard.filter.owner_type_unknown" },
   ];
 
 // Handlers para ações do lead (Maps, SMS, WhatsApp)
@@ -330,6 +334,12 @@ const URGENCIES = ["all", "high", "medium", "low"];
   const [revealTarget, setRevealTarget] = useState<EnrichedLead | null>(null);
   const [guideLead, setGuideLead] = useState<GuideLead | null>(null);
   const [contractorMetrics, setContractorMetrics] = useState<ContractorMetrics | null>(null);
+  
+  // Phone Reveal (Phase 4)
+  const [phoneRevealing, setPhoneRevealing] = useState<{ leadId: string | number; loading: boolean } | null>(null);
+  
+  // Credit Balance (Phase 4)
+  const [creditBalance, setCreditBalance] = useState<CreditBalance | null>(null);
   
   // Toast notifications (fila empilhável + auto-dismiss 4s)
   const [toasts, setToasts] = useState<{ id: number; message: string; type: "success" | "error" | "warning" }[]>([]);
@@ -561,6 +571,23 @@ const URGENCIES = ["all", "high", "medium", "low"];
     }
   }, [userId]);
 
+  // Fetch Credit Balance (Phase 4)
+  useEffect(() => {
+    if (userId) {
+      const fetchCredit = async () => {
+        try {
+          const balance = await fetchCreditBalance(userId);
+          setCreditBalance(balance);
+        } catch (e) {
+          console.error("Erro ao buscar saldo de créditos:", e);
+        }
+      };
+      fetchCredit();
+      const interval = setInterval(fetchCredit, 60000); // Refresh every minute
+      return () => clearInterval(interval);
+    }
+  }, [userId]);
+
   // Fetch "Meus Leads / Histórico" quando a aba está ativa ou filtros mudam
   useEffect(() => {
     if (activeTab !== "history" || !userId) return;
@@ -720,6 +747,36 @@ const URGENCIES = ["all", "high", "medium", "low"];
     if (lead.visibility_status === "reserved_by_me") return true;
     if (lead.revealed) return true;
     return !!lead.my_status && lead.my_status !== "available";
+  };
+
+  // Phone Reveal Handler (Phase 4)
+  const revealPhoneForLead = async (lead: LeadResponse) => {
+    if (!lead.owner_name || lead.owner_phone) return;
+    if (phoneRevealing?.loading) return;
+    
+    setPhoneRevealing({ leadId: lead.id, loading: true });
+    setBusyAction(true);
+    try {
+      const result = await revealPhone(lead.id);
+      if (result.success && result.phone) {
+        // Update lead in list with the revealed phone
+        setLeads((prev) => prev.map((l) =>
+          l.id === lead.id ? { ...l, owner_phone: result.phone } : l
+        ));
+        // Update selected lead if it's open in modal
+        if (selectedLead?.id === lead.id) {
+          setSelectedLead((prev) => prev ? { ...prev, owner_phone: result.phone } : null);
+        }
+        showToast(t("dashboard.toast.phone_revealed") || "Telefone revelado com sucesso", "success");
+      } else {
+        showToast(result.error || t("dashboard.toast.phone_reveal_failed"), "warning");
+      }
+    } catch (e: any) {
+      showToast(e?.message || t("dashboard.toast.phone_reveal_error"), "error");
+    } finally {
+      setPhoneRevealing(null);
+      setBusyAction(false);
+    }
   };
 
   // Open Lead Detail
@@ -1089,11 +1146,17 @@ const URGENCIES = ["all", "high", "medium", "low"];
         }
       }
 
-      // Owner type filter (Privado vs Institucional/Governamental)
+      // Owner type filter (Privado vs Institucional/Governamental vs Desconhecido)
       if (selectedOwnerType !== "all") {
-        const isInstitutional = !!lead.institutional;
-        if (selectedOwnerType === "institutional" && !isInstitutional) return false;
-        if (selectedOwnerType === "private" && isInstitutional) return false;
+        const oc = (lead as any).owner_class;
+        if (oc) {
+          if (selectedOwnerType !== oc) return false;
+        } else {
+          const isInstitutional = !!lead.institutional;
+          if (selectedOwnerType === "institutional" && !isInstitutional) return false;
+          if (selectedOwnerType === "private" && isInstitutional) return false;
+          if (selectedOwnerType === "unknown" && lead.owner_name) return false;
+        }
       }
 
       // Interest category filter (when in overview or opportunities)
@@ -1368,7 +1431,39 @@ const URGENCIES = ["all", "high", "medium", "low"];
           </div>
         </nav>
 
-        {/* User Card in Sidebar */}
+        {/* Credit Balance Display (Phase 4) */}
+          {creditBalance && (
+            <div className={`px-3 py-2 border-t ${T.border}`}>
+              <div className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "var(--text-muted)" }}>
+                {t("dashboard.sidebar.credit_balance") || "Saldo de Créditos"}
+              </div>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="h-7 w-7 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                    <TrendingUp className="h-3.5 w-3.5" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-bold" style={{ color: "var(--text-primary)" }}>
+                      {creditBalance.balance}
+                    </div>
+                    <div className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+                      {t("dashboard.sidebar.credits_available") || "créditos disponíveis"}
+                    </div>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-[10px] font-medium" style={{ color: "var(--text-muted)" }}>
+                    {t("dashboard.sidebar.today_used") || "Hoje"}
+                  </div>
+                  <div className="text-sm font-bold text-amber-400">
+                    {creditBalance.counts?.consume_reveal?.count ?? 0} / {dailyStats?.limit ?? 10}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* User Card in Sidebar */}
         <div className={`p-3 border-t ${T.border}`}>
           <div className={`flex items-center gap-3 px-2 py-2 rounded-xl transition ${T.navHover}`}>
             <div className="h-9 w-9 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-xs font-bold text-white shadow-sm">
@@ -1675,7 +1770,9 @@ const URGENCIES = ["all", "high", "medium", "low"];
                       ? realTotalLeads
                       : ot.value === "institutional"
                         ? (dashboardSummary?.by_owner_type?.institutional ?? 0)
-                        : (dashboardSummary?.by_owner_type?.private ?? 0);
+                        : ot.value === "private"
+                          ? (dashboardSummary?.by_owner_type?.private ?? 0)
+                          : (dashboardSummary?.by_owner_type as any)?.unknown ?? 0;
                   return (
                     <option key={ot.value} value={ot.value}>
                       {t(ot.labelKey) || ot.value}{ot.value !== "all" ? ` (${count})` : ""}
@@ -2300,25 +2397,35 @@ const URGENCIES = ["all", "high", "medium", "low"];
                               </span>
                             )}
 
-                            {vis === "available" && (
-                              <>
-                                <span className="text-[10px] font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-400 px-2.5 py-1 rounded-full flex items-center gap-1">
-                                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" /> {t("dashboard.status.available")}
-                                </span>
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); handleQuickReserve(lead); }}
-                                  disabled={busyAction || (subscription && !subscription.can_access) || isBlockedByQuota(lead, dailyStats?.remaining)}
-                                  className="flex items-center gap-1.5 text-[11px] font-bold bg-indigo-500 hover:bg-indigo-400 text-white px-3 py-1.5 rounded-lg transition shadow-sm disabled:opacity-50"
-                                >
-                                  <Lock className="h-3 w-3" /> {isFreeLead(lead) ? t("dashboard.action.reserve_corporate") : t("dashboard.action.reserve_1h")}
-                                </button>
-                                {shouldShowAddressWarning(lead) && (
-                                  <span className="text-[10px] text-amber-500/90 flex items-center gap-1">
-                                    <AlertTriangle className="h-3 w-3" /> {t("dashboard.badge.address_unresolvable")}
+{vis === "available" && (
+                                <>
+                                  <span className="text-[10px] font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-400 px-2.5 py-1 rounded-full flex items-center gap-1">
+                                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" /> {t("dashboard.status.available")}
                                   </span>
-                                )}
-                              </>
-                            )}
+                                  {/* Reveal Phone button - for leads with owner_name but no owner_phone */}
+                                  {lead.owner_name && !lead.owner_phone && (
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); revealPhoneForLead(lead); }}
+                                      disabled={busyAction || phoneRevealing?.loading || phoneRevealing?.leadId === lead.id}
+                                      className="flex items-center gap-1.5 text-[11px] font-bold bg-violet-500 hover:bg-violet-400 text-white px-3 py-1.5 rounded-lg transition shadow-sm disabled:opacity-50"
+                                    >
+                                      <Smartphone className="h-3 w-3" /> {t("dashboard.action.reveal_phone") || "Revelar Telefone"}
+                                    </button>
+                                  )}
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); handleQuickReserve(lead); }}
+                                    disabled={busyAction || (subscription && !subscription.can_access) || isBlockedByQuota(lead, dailyStats?.remaining)}
+                                    className="flex items-center gap-1.5 text-[11px] font-bold bg-indigo-500 hover:bg-indigo-400 text-white px-3 py-1.5 rounded-lg transition shadow-sm disabled:opacity-50"
+                                  >
+                                    <Lock className="h-3 w-3" /> {isFreeLead(lead) ? t("dashboard.action.reserve_corporate") : t("dashboard.action.reserve_1h")}
+                                  </button>
+                                  {shouldShowAddressWarning(lead) && (
+                                    <span className="text-[10px] text-amber-500/90 flex items-center gap-1">
+                                      <AlertTriangle className="h-3 w-3" /> {t("dashboard.badge.address_unresolvable")}
+                                    </span>
+                                  )}
+                                </>
+                              )}
                             {isMine && (
                               <>
                                 <span className="text-[10px] font-bold uppercase tracking-wider bg-rose-500/15 text-rose-400 px-2.5 py-1 rounded-full flex items-center gap-1">
@@ -2430,6 +2537,16 @@ const URGENCIES = ["all", "high", "medium", "low"];
                                   <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-400 px-2.5 py-1 rounded-full">
                                     <BadgeCheck className="h-3 w-3" /> {t("dashboard.action.revealed")}
                                   </span>
+                                  {/* Reveal Phone button - for my leads with owner_name but no owner_phone */}
+                                  {lead.owner_name && !lead.owner_phone && (
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); revealPhoneForLead(lead); }}
+                                      disabled={busyAction || phoneRevealing?.loading || phoneRevealing?.leadId === lead.id}
+                                      className="flex items-center gap-1.5 text-[11px] font-bold bg-violet-500 hover:bg-violet-400 text-white px-3 py-1.5 rounded-lg transition shadow-sm disabled:opacity-50"
+                                    >
+                                      <Smartphone className="h-3 w-3" /> {t("dashboard.action.reveal_phone") || "Revelar Telefone"}
+                                    </button>
+                                  )}
                                   <button
                                     onClick={(e) => { e.stopPropagation(); openMaps(lead.address); }}
                                     className="flex items-center gap-1.5 text-[11px] font-semibold bg-slate-500/15 text-slate-300 px-3 py-1.5 rounded-lg hover:bg-slate-500/25 transition"

@@ -357,18 +357,31 @@ class PhoneLookupService:
             except Exception as e:
                 logger.warning(f"Falha ao fechar client HTTP do phone lookup: {e}")
 
-    async def lookup_phone(self, address: str, city: str, state: str, owner_name: str | None = None, zip_code: str | None = None) -> "PhoneLookupResult":
-        """Look up phone number for an address via fallback chain.
+    async def lookup_phone(self, address: str, city: str, state: str,
+                           owner_name: str | None = None, zip_code: str | None = None,
+                           owner_class: str | None = None) -> "PhoneLookupResult":
+        """Waterfall L2/L3 phone lookup via Searchbug api_nape.
+
+        L2 (Name + Address): Para leads PRIVATE com owner_name verificado.
+        - Usa FNAME/LNAME + ADDRESS/CITY/STATE/ZIP
+        - So chamado quando owner_class == "private" E clean_name existe
+
+        L3 (Address-only): Para leads UNKNOWN com endereco resolvivel.
+        - Usa apenas ADDRESS/CITY/STATE/ZIP (sem FNAME/LNAME)
+        - So chamado quando owner_class == "unknown" E address_is_resolvable
+
+        INSTITUTIONAL leads: NUNCA consultados (guard_skipped institucional).
 
         Regra de custo: esta e a etapa FINAL e PAGA, chamada apenas depois do
-        enriquecimento gratuito. Sem um owner_name utilizavel, a consulta seria
-        cega (so por endereco) e devolveria quase sempre "No results" a pagar.
-        Por isso recusa-se ANTES de qualquer chamada ao provider.
+        enriquecimento gratuito.
         """
+        # Resolve owner_class se nao fornecido
+        if owner_class is None:
+            from .lead_rules import get_owner_class
+            owner_class = get_owner_class(owner_name)
+
+        # GUARD: endereco nao resolvivel = nao consultar (L2 e L3)
         if not address_is_resolvable(address):
-            # GUARD_SKIPPED: nós não consultámos o Searchbug. Registado com
-            # prefixo proprio para nunca se confundir com o provider respondeu
-            # "No results", que implicaria uma chamada PAGA.
             logger.info(
                 f"[PHONE][guard_skipped] address_incompleta para {address!r} — "
                 f"provider NAO foi consultado (custo zero)"
@@ -397,13 +410,8 @@ class PhoneLookupService:
                 provider="none",
             )
 
-        # GUARD_SKIPPED instituicao/governo: entidades publicas (AUTHORITY,
-        # DEPARTMENT, BOARD, EDUCATION, HOUSING, PARKS, COMMISSION, AGENCY...)
-        # nao tem telefone de pessoa para vender. Uma consulta PAGA contra
-        # "NYC HOUSING AUTHORITY" devolvia "No results" e custava $0.45.
-        # Saltar aqui poupa o dinheiro (billed=0) sem afetar a entrega: o lead
-        # continua a ser revelado com nome + morada das fontes gratuitas.
-        if is_institutional_name(clean_name):
+        # GUARD_SKIPPED institucional: entidades publicas nao tem telefone de pessoa
+        if is_institutional_name(clean_name) or owner_class == "institutional":
             logger.info(
                 f"[PHONE][guard_skipped] institucional para address={address!r} "
                 f"owner={clean_name!r} — provider NAO foi consultado (custo zero)"
@@ -417,7 +425,15 @@ class PhoneLookupService:
                 provider="none",
             )
 
-        cache_key = self._cache_key(address, city, state, zip_code, clean_name)
+        # Decide camada (L2 ou L3) baseada no owner_class E tipo de nome
+        # L2 (Name+Address): apenas para private com nome de PESSOA (nao corporativo)
+        # L3 (Address-only): para unknown, OU private com nome corporativo
+        is_person_name = clean_name is not None and not is_corporate_name(clean_name)
+        use_name = owner_class == "private" and is_person_name
+        layer = "L2" if use_name else "L3"
+
+        # Cache key inclui a camada para nao colidir L2 vs L3
+        cache_key = self._cache_key(address, city, state, zip_code, clean_name, layer=layer)
         cached = self._phone_cache_get(cache_key)
         if cached is not None:
             phone, was_hit, was_negative = cached
@@ -430,7 +446,6 @@ class PhoneLookupService:
                     phone=phone,
                     provider="cache",
                 )
-            # "sem resultado" dentro do TTL: nao voltar a pagar por isto hoje
             searchbug_metrics.record(
                 outcome="cache_negative", billed=False, city=city, error=None
             )
@@ -440,37 +455,33 @@ class PhoneLookupService:
                 provider="cache",
             )
 
-        # Provider chain (ordered by reliability/cost)
-        providers = [
-            ("Searchbug", self._lookup_searchbug),
-        ]
-
-        for name, func in providers:
-            try:
-                result = await func(
-                    address,
-                    city,
-                    state,
-                    owner_name=clean_name,
-                    zip_code=zip_code,
-                )
-                if result.success and result.phone:
-                    logger.info(f"Phone lookup successful via {name} for {address}, {city}, {state}")
-                    self._phone_cache_put(cache_key, result.phone)
-                    return result
-                else:
-                    logger.warning(
-                        f"[PHONE][provider_no_results] {name} consultou e nao "
-                        f"devolveu telefone para {address!r}, {city} ({result.error}) — "
-                        f"chamada PAGA"
-                    )
-                    self._phone_cache_put(cache_key, None)
-            except Exception as e:
+        # L2: Name + Address (apenas para private com nome limpo)
+        if layer == "L2":
+            logger.info(f"[PHONE][L2] Name+Address para {address!r}, {city} owner={clean_name!r}")
+            result = await self._lookup_searchbug_nape(
+                address, city, state, owner_name=clean_name, zip_code=zip_code
+            )
+            if result.success and result.phone:
+                logger.info(f"Phone lookup L2 successful for {address}, {city}, {state}")
+                self._phone_cache_put(cache_key, result.phone)
+                return result
+            else:
+                outcome = classify_searchbug_outcome(result.success, result.error)
                 logger.warning(
-                    f"[PHONE][provider_error] {name} deu excepcao para "
-                    f"{address!r}, {city}: {e} — resultado guardado como negativo"
+                    f"[PHONE][L2][{outcome}] Searchbug consultou e nao "
+                    f"devolveu telefone para {address!r}, {city} ({result.error}) — "
+                    f"billed={result.error is None or outcome != 'no_results'}"
                 )
                 self._phone_cache_put(cache_key, None)
+                # L2 falhou -> cai para L3 APENAS em erros transitórios (timeout, http_error).
+                # Se L2 (pessoa) deu "no_results", L3 (endereço só) não vai ajudar.
+                if outcome in ("timeout", "http_error") and address_is_resolvable(address):
+                    logger.info(f"[PHONE][L2->L3] L2 falhou ({outcome}), tentando L3 address-only para {address!r}, {city}")
+                    return await self._lookup_l3(address, city, state, zip_code, cache_key)
+
+        # L3: Address-only (para unknown com endereco resolvivel)
+        elif layer == "L3":
+            return await self._lookup_l3(address, city, state, zip_code, cache_key)
 
         # All providers failed
         return PhoneLookupResult(
@@ -479,6 +490,30 @@ class PhoneLookupService:
             provider="none"
         )
 
+    async def _lookup_l3(self, address: str, city: str, state: str,
+                         zip_code: str | None, cache_key: str) -> "PhoneLookupResult":
+        """L3: Address-only lookup via api_nape (sem FNAME/LNAME)."""
+        logger.info(f"[PHONE][L3] Address-only para {address!r}, {city}")
+        result = await self._lookup_searchbug_nape(
+            address, city, state, owner_name=None, zip_code=zip_code
+        )
+        if result.success and result.phone:
+            logger.info(f"Phone lookup L3 successful for {address}, {city}, {state}")
+            self._phone_cache_put(cache_key, result.phone)
+            return result
+        else:
+            logger.warning(
+                f"[PHONE][L3][no_results] Searchbug consultou e nao "
+                f"devolveu telefone para {address!r}, {city} ({result.error}) — "
+                f"chamada PAGA (billed={result.error is None or 'no_results' not in (result.error or '')})"
+            )
+            self._phone_cache_put(cache_key, None)
+            return PhoneLookupResult(
+                success=False,
+                error=result.error or "L3 no results",
+                provider="Searchbug"
+            )
+
     def _cache_key(
         self,
         address: str,
@@ -486,11 +521,15 @@ class PhoneLookupService:
         state: str,
         zip_code: str | None,
         clean_name: str | None,
+        layer: str = "L2",
     ) -> str:
         """Chave de cache do telefone.
 
         Inclui o ZIP: o mesmo address/city/state com ZIP diferente e outro
         imovel. Sem ele, um "nao achou" em Park Ave contaminava o 11201.
+
+        Inclui a layer (L2/L3): L2 e L3 sao consultas diferentes para o mesmo
+        endereco. Sem isso, um negativo L2 bloquearia uma potencial L3.
 
         E um METODO, e nao uma expressao inline, para que os testes nunca
         voltem a duplicar o formato da chave a mao -- foi exatamente isso que
@@ -503,6 +542,7 @@ class PhoneLookupService:
                 (state or "").strip().upper(),
                 (zip_code or "").strip().upper(),
                 (clean_name or "").upper(),
+                layer.upper(),
             ]
         )
 
@@ -525,10 +565,25 @@ class PhoneLookupService:
         self._phone_cache[key] = (time.monotonic(), phone)
 
     async def _lookup_searchbug(self, address: str, city: str, state: str, owner_name: str | None = None, zip_code: str | None = None) -> "PhoneLookupResult":
-        """Lookup via Searchbug Contact Info API (api_contact).
+        """Lookup via Searchbug Contact Info API (api_contact) — LEGACY.
 
         Requer SEARCHBUG_ACCOUNT_CODE (CO_CODE) e SEARCHBUG_API_KEY (PASS).
         Endpoint: POST https://data.searchbug.com/api/search.aspx
+        Retorna Data.RECORD[].PHONES.PHONE[]
+        """
+        return await self._lookup_searchbug_nape(
+            address, city, state, owner_name=owner_name, zip_code=zip_code, use_api_contact=True
+        )
+
+    async def _lookup_searchbug_nape(self, address: str, city: str, state: str,
+                                     owner_name: str | None = None, zip_code: str | None = None,
+                                     use_api_contact: bool = False) -> "PhoneLookupResult":
+        """Lookup via Searchbug People Search API (api_nape).
+
+        Requer SEARCHBUG_ACCOUNT_CODE (CO_CODE) e SEARCHBUG_API_KEY (PASS).
+        Endpoint: POST https://data.searchbug.com/api/search.aspx
+        Tipo: api_nape (mais barato que api_contact).
+        Resposta: Data.RECORD[].FNAME, LNAME, PHONE (simples, nao PHONES.PHONE[]).
         """
         account_code = getattr(settings, "SEARCHBUG_ACCOUNT_CODE", None) or os.getenv("SEARCHBUG_ACCOUNT_CODE")
         api_key = self.searchbug_key
@@ -580,7 +635,7 @@ class PhoneLookupService:
         form_data = {
             "CO_CODE": account_code,
             "PASS": api_key,
-            "TYPE": "api_contact",
+            "TYPE": "api_contact" if use_api_contact else "api_nape",
             "FORMAT": "JSON",
             "ADDRESS": clean_address,
             "CITY": city,
@@ -614,13 +669,15 @@ class PhoneLookupService:
             status = data.get("Status") or data.get("STATUS")
             if status and status.upper() in ("ERROR", "NORESULTS"):
                 error = data.get("ERROR") or data.get("Error") or "No results"
+                # no_results nao e cobrado segundo documentacao Searchbug
+                billed_for_no_results = status.upper() != "NORESULTS"
                 return _record(
                     PhoneLookupResult(success=False, error=str(error), provider="Searchbug", raw=data),
-                    billed=True,
+                    billed=billed_for_no_results,
                     http_status=200,
                 )
 
-            # Extrai telefone do formato novo: Data.RECORD[].PHONES.PHONE[]
+            # Extrai telefone do formato api_nape: Data.RECORD[].FNAME, LNAME, PHONE
             data_obj = data.get("Data") or data.get("DATA")
             if not data_obj:
                 return _record(
@@ -634,36 +691,31 @@ class PhoneLookupService:
                 records = [records]
 
             for rec in records:
-                phones_obj = rec.get("PHONES") or rec.get("Phones")
-                if not phones_obj:
-                    continue
-                phone_list = phones_obj.get("PHONE") or phones_obj.get("Phone") or []
-                if isinstance(phone_list, str):
-                    phone_list = [phone_list]
-                for phone in phone_list:
-                    if phone and str(phone).strip():
-                        return _record(
-                            PhoneLookupResult(
-                                success=True,
-                                phone=normalize_us_phone(str(phone).strip()),
-                                phone_type=str(rec.get("PHONE_TYPE") or rec.get("PhoneType") or "").strip().lower() or None,
-                                carrier=str(rec.get("CARRIER") or rec.get("Carrier") or "").strip() or None,
-                                is_connected=bool(rec.get("IS_CONNECTED") or rec.get("IsConnected")) if rec.get("IS_CONNECTED") or rec.get("IsConnected") else None,
-                                provider="Searchbug",
-                                raw=data
-                            ),
-                            billed=True,
-                            http_status=200,
-                        )
+                phone = rec.get("PHONE") or rec.get("Phone")
+                if phone and str(phone).strip():
+                    return _record(
+                        PhoneLookupResult(
+                            success=True,
+                            phone=normalize_us_phone(str(phone).strip()),
+                            phone_type=str(rec.get("PHONE_TYPE") or rec.get("PhoneType") or "").strip().lower() or None,
+                            carrier=str(rec.get("CARRIER") or rec.get("Carrier") or "").strip() or None,
+                            is_connected=bool(rec.get("IS_CONNECTED") or rec.get("IsConnected")) if rec.get("IS_CONNECTED") or rec.get("IsConnected") else None,
+                            provider="Searchbug",
+                            raw=data
+                        ),
+                        billed=True,
+                        http_status=200,
+                    )
 
+            # Sem telefone nos resultados
             return _record(
                 PhoneLookupResult(success=False, error="No phone found in results", provider="Searchbug", raw=data),
-                billed=True,
+                billed=False,  # no_results nao e cobrado
                 http_status=200,
             )
 
         except Exception as e:
-            logger.warning(f"Searchbug Contact Info API error: {e}")
+            logger.warning(f"Searchbug People Search API (api_nape) error: {e}")
             return _record(
                 PhoneLookupResult(success=False, error=str(e), provider="Searchbug"),
                 billed=True,

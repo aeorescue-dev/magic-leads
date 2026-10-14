@@ -30,6 +30,31 @@ Separacao Privado vs Institucional/Governamental:
 import re
 from typing import Any, Mapping, Optional
 
+# Avoid circular import: is_corporate_name lives in searchbug but also needed here.
+try:
+    from .searchbug import is_corporate_name  # type: ignore
+except Exception:
+    def is_corporate_name(name: Optional[str]) -> bool:
+        if not name:
+            return False
+        upper = str(name).upper()
+        for token in re.findall(r"[A-Z0-9]+", upper):
+            if token in {
+                "LLC", "INC", "INCORPORATED", "CORP", "CORPORATION", "CO", "COMPANY",
+                "LTD", "LIMITED", "LP", "LLP", "PLLC", "PC", "PA", "TRUST", "HOLDING",
+                "HOLDINGS", "REALTY", "PROPERTY", "PROPERTIES", "ASSOC", "ASSOCIATES",
+                "ASSOCIATION", "PARTNERS", "PARTNERSHIP", "ENTERPRISE", "ENTERPRISES",
+                "BANK", "FINANCIAL", "MGMT", "MANAGEMENT", "SERVICES", "SERVICE",
+                "SOLUTIONS", "DEVELOPMENT", "INVESTMENTS", "CAPITAL", "CONSTRUCTION",
+                "MAINTENANCE", "ESTATE", "ESTATES", "FUND", "FUNDING", "GROUP",
+            }:
+                return True
+        compact = re.sub(r"[^A-Z]", "", upper)
+        for suffix in ("LLC", "INC", "CORP", "LTD", "LP", "LLP", "PLLC", "PC", "PA"):
+            if len(suffix) > 2 and compact.endswith(suffix):
+                return True
+        return False
+
 # Nomes de campo usados nos logs e no payload de entrega incompleta.
 MISSING_OWNER_NAME = "owner_name"
 MISSING_CONTACT = "owner_phone_or_mailing_address"
@@ -328,6 +353,30 @@ def is_institutional_name(name: Optional[str]) -> bool:
     return False
 
 
+# Tri-estado para tipo de proprietário
+OWNER_CLASS_UNKNOWN = "unknown"
+OWNER_CLASS_INSTITUTIONAL = "institutional"
+OWNER_CLASS_PRIVATE = "private"
+
+
+def get_owner_class(name: Optional[str]) -> str:
+    if not _present(name):
+        return OWNER_CLASS_UNKNOWN
+    if is_institutional_name(name):
+        return OWNER_CLASS_INSTITUTIONAL
+    return OWNER_CLASS_PRIVATE
+
+
+def get_owner_kind(name: Optional[str]) -> str:
+    if not _present(name):
+        return "unknown"
+    if is_corporate_name(name):
+        return "company"
+    if is_institutional_name(name):
+        return "company"
+    return "person"
+
+
 def institutional_owner_name_where(alias: str = "") -> str:
     """Expressão SQL equivalente a `is_institutional_name`, para contagens.
 
@@ -349,12 +398,15 @@ def institutional_owner_name_where(alias: str = "") -> str:
 
 def classify(lead: Mapping[str, Any]) -> dict[str, Any]:
     """Avalia um lead uma vez e devolve o veredito consumido pelo frontend."""
+    name = lead.get("owner_name")
     return {
         "corporate": is_corporate(lead),
-        "institutional": is_institutional_name(lead.get("owner_name")),
+        "institutional": is_institutional_name(name),
         "address_resolvable": address_is_resolvable(lead.get("address")),
         "unresolvable": is_unresolvable(lead),
         "complete_delivery": is_complete_delivery(lead),
         "incomplete_delivery": is_incomplete_delivery(lead),
         "charged": charges_credit(lead),
+        "owner_class": get_owner_class(name),
+        "owner_kind": get_owner_kind(name),
     }

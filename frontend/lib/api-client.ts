@@ -239,7 +239,7 @@ export interface DashboardSummary {
   by_city: Record<string, number>;
   by_urgency: Record<string, number>;
   // Contagem por tipo de proprietario (privado vs institucional/governamental).
-  by_owner_type?: { institutional: number; private: number };
+  by_owner_type?: { institutional: number; private: number; unknown?: number };
 }
 
 export async function fetchDashboardSummary(): Promise<DashboardSummary> {
@@ -1080,5 +1080,107 @@ export async function fetchMyLeadsHistory(params: {
   const q = qs.toString();
   return handle<MyLeadsHistoryResponse>(
     await fetch(`${API_URL}/api/me/history${q ? `?${q}` : ""}`, { credentials: "include", headers: { ...authHeaders() } })
+  );
+}
+
+// ------------------------------------------------------------------
+// Phone Reveal (Phase 4: on-demand lookup via Searchbug api_nape)
+// ------------------------------------------------------------------
+export interface PhoneRevealResult {
+  success: boolean;
+  phone?: string;
+  phone_type?: string;
+  carrier?: string;
+  is_connected?: boolean;
+  error?: string;
+  provider?: string;
+  billed?: boolean;
+}
+
+export async function revealPhone(leadId: string | number): Promise<PhoneRevealResult> {
+  return handle<PhoneRevealResult>(
+    await fetch(`${API_URL}/api/leads/${leadId}/reveal-phone`, {
+      method: "POST",
+      credentials: "include",
+      headers: { ...authHeaders() },
+    })
+  );
+}
+
+// ------------------------------------------------------------------
+// Credit Ledger (Phase 4: user-facing credit balance & history)
+// ------------------------------------------------------------------
+export interface CreditBalance {
+  balance: number;
+  counts: Record<string, { count: number; total_amount: number }>;
+}
+
+export interface CreditLedgerEntry {
+  id: number;
+  created_at: string;
+  user_id: number;
+  event_type: string;
+  amount: number;
+  balance_after: number;
+  reference_id?: number;
+  reference_type?: string;
+  metadata?: string;
+}
+
+export async function fetchCreditBalance(userId: number): Promise<CreditBalance> {
+  return handle<CreditBalance>(
+    await fetch(`${API_URL}/api/users/${userId}/credit-balance`, {
+      credentials: "include",
+      headers: { ...authHeaders() },
+    })
+  );
+}
+
+export async function fetchCreditLedger(userId: number, limit = 100, offset = 0): Promise<CreditLedgerEntry[]> {
+  const q = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  return handle<CreditLedgerEntry[]>(
+    await fetch(`${API_URL}/api/users/${userId}/credit-ledger?${q.toString()}`, {
+      credentials: "include",
+      headers: { ...authHeaders() },
+    })
+  );
+}
+
+// ------------------------------------------------------------------
+// Admin: Searchbug Telemetry (Phase 4)
+// ------------------------------------------------------------------
+export interface SearchbugMetrics {
+  today: { calls: number; billed_calls: number; ghost_charges: number };
+  totals: {
+    calls: number;
+    billed_calls: number;
+    successes: number;
+    ghost_charges: number;
+    timeouts: number;
+    saved_calls: number;
+  };
+  success_rate: number | null;
+  latency: { avg_ms: number | null; p50_ms: number | null; p95_ms: number | null; max_ms: number | null; samples: number };
+  by_outcome: Array<{ outcome: string; n: number; billed_n: number }>;
+  by_city: Array<{ city: string; calls: number; billed_calls: number; ghost_charges: number }>;
+  recent: Array<{
+    id: number;
+    called_at: string;
+    outcome: string;
+    billed: number;
+    latency_ms: number | null;
+    http_status: number | null;
+    city: string | null;
+    error: string | null;
+  }>;
+}
+
+export async function fetchSearchbugMetrics(days = 7, recent_limit = 50): Promise<SearchbugMetrics> {
+  const q = new URLSearchParams({ days: String(days), recent_limit: String(recent_limit) });
+  return handle<SearchbugMetrics>(
+    await fetch(`${API_URL}/api/admin/searchbug?${q.toString()}`, {
+      credentials: "include",
+      headers: { ...authHeaders() },
+    })
   );
 }

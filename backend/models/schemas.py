@@ -215,6 +215,8 @@ class LeadResponse(BaseModel):
     # poder divergir do que a reserva vai realmente fazer.
     corporate: bool = False
     institutional: bool = False
+    owner_class: str = "unknown"
+    owner_kind: Optional[str] = None
     address_resolvable: bool = True
     unresolvable: bool = False
 

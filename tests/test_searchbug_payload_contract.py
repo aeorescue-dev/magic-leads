@@ -209,17 +209,18 @@ async def test_negative_cache_does_not_leak_across_zips(service):
     Conta-se as chamadas ao PROVIDER, nao as HTTP: o provider e substituido
     aqui, por isso nao ha pedidos para capturar.
 
-    Sequencia: 10011 (miss) -> 10012 (miss) -> 10011 (hit no negativo).
-    Esperado: 2 chamadas pagas. Sem o ZIP na chave, a 2a herdava o negativo da
-    1a e o cliente pagava um "nao achou" por um imovel que nunca foi consultado.
+    Sequencia: 10011 (miss L2) -> 10012 (miss L2) -> 10011 (hit no negativo L2).
+    Esperado: 2 chamadas pagas (L2 para cada ZIP). Sem o ZIP na chave, a 2a herdava
+    o negativo da 1a e o cliente pagava um "nao achou" por um imovel que nunca
+    foi consultado.
     """
     paid_calls = []
 
-    async def _no_results(address, city, state, owner_name=None, zip_code=None):
+    async def _no_results(address, city, state, owner_name=None, zip_code=None, use_api_contact=False):
         paid_calls.append(zip_code)
         return PhoneLookupResult(success=False, error="No results", provider="Searchbug")
 
-    service._lookup_searchbug = _no_results
+    service._lookup_searchbug_nape = _no_results
     service._phone_cache.clear()
 
     for zip_code in ("10011", "10012", "10011"):
@@ -231,6 +232,7 @@ async def test_negative_cache_does_not_leak_across_zips(service):
             zip_code=zip_code,
         )
 
+    # Each unique ZIP gets one L2 call (no L3 fallback on no_results), third call hits L2 negative cache
     assert paid_calls == ["10011", "10012"], (
         f"o cache negativeu entre imoveis diferentes: chamadas pagas={paid_calls}"
     )

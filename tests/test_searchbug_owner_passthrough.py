@@ -2,17 +2,15 @@
 
 Contexto
 --------
-`PhoneLookupService.lookup_phone` (backend/services/searchbug.py:107) recebe
-`owner_name` e `zip_code`, mas a cadeia de providers chamava:
+`PhoneLookupService.lookup_phone` recebe `owner_name` e `zip_code` e decide
+a camada (L2/L3) do waterfall:
 
-    result = await func(address, city, state)      # <- descartava os dois
+L2 (Name+Address): Para leads PRIVATE com owner_name de pessoa verificado.
+L3 (Address-only): Para leads UNKNOWN com endereco resolvivel, ou PRIVATE com
+nome corporativo.
 
-O `_lookup_searchbug` (linha 139) aceita e usa esses parametros para montar
-FNAME/LNAME/ZIP no pedido pago. Descartados no dispatcher, toda a consulta
-paga era cega, apenas por endereco.
-
-Impacto observado em producao (deploy 0f287...): 19 respostas "No results"
-para 2 sucessos no mesmo intervalo, com credenciais válidas.
+O `_lookup_searchbug_nape` aceita e usa esses parametros para montar
+FNAME/LNAME/ZIP no pedido pago (api_nape).
 
 Regra arquitectural que este teste protege: o Searchbug é a ETAPA FINAL e
 ISOLADA de telefone, e tem de usar o nome e o endereço já garimpados.
@@ -31,10 +29,10 @@ def _ok_result():
 
 @pytest.mark.asyncio
 async def test_lookup_phone_forwards_owner_name_and_zip(monkeypatch):
-    """owner_name e zip_code chegam ao provider sem alteracao."""
+    """owner_name e zip_code chegam ao provider sem alteracao (L2)."""
     captured = {}
 
-    async def _fake_provider(address, city, state, owner_name=None, zip_code=None):
+    async def _fake_provider(address, city, state, owner_name=None, zip_code=None, use_api_contact=False):
         captured.update(
             address=address,
             city=city,
@@ -45,7 +43,7 @@ async def test_lookup_phone_forwards_owner_name_and_zip(monkeypatch):
         return _ok_result()
 
     service = PhoneLookupService()
-    monkeypatch.setattr(service, "_lookup_searchbug", _fake_provider, raising=False)
+    monkeypatch.setattr(service, "_lookup_searchbug_nape", _fake_provider, raising=False)
 
     result = await service.lookup_phone(
         "2800 MICHIGAN AVE",
@@ -65,15 +63,15 @@ async def test_lookup_phone_forwards_owner_name_and_zip(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_lookup_phone_normalizes_owner_name_before_forwarding(monkeypatch):
-    """O owner_name e normalizado: espacos e pontuacao de datasets publicos."""
+    """O owner_name e normalizado: espacos e pontuacao de datasets publicos (L2)."""
     captured = {}
 
-    async def _fake_provider(address, city, state, owner_name=None, zip_code=None):
+    async def _fake_provider(address, city, state, owner_name=None, zip_code=None, use_api_contact=False):
         captured.update(owner_name=owner_name, zip_code=zip_code)
         return _ok_result()
 
     service = PhoneLookupService()
-    monkeypatch.setattr(service, "_lookup_searchbug", _fake_provider, raising=False)
+    monkeypatch.setattr(service, "_lookup_searchbug_nape", _fake_provider, raising=False)
 
     await service.lookup_phone(
         "101 WEST 104 STREET",
@@ -90,15 +88,15 @@ async def test_lookup_phone_normalizes_owner_name_before_forwarding(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_lookup_phone_strips_trailing_comma_from_owner_name(monkeypatch):
-    """'BIG BEAR,' (observado em producao) nao pode virar LNAME='BEAR,'."""
+    """'BIG BEAR,' (observado em producao) nao pode virar LNAME='BEAR,' (L2)."""
     captured = {}
 
-    async def _fake_provider(address, city, state, owner_name=None, zip_code=None):
+    async def _fake_provider(address, city, state, owner_name=None, zip_code=None, use_api_contact=False):
         captured.update(owner_name=owner_name)
         return _ok_result()
 
     service = PhoneLookupService()
-    monkeypatch.setattr(service, "_lookup_searchbug", _fake_provider, raising=False)
+    monkeypatch.setattr(service, "_lookup_searchbug_nape", _fake_provider, raising=False)
 
     await service.lookup_phone(
         "101 WEST 104 STREET", "NEW YORK", "NY", owner_name="BIG BEAR,"
@@ -109,15 +107,15 @@ async def test_lookup_phone_strips_trailing_comma_from_owner_name(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_provider_is_called_when_contract_is_satisfied(monkeypatch):
-    """Guarda estrutural: com nome e endereco validos, o provider e chamado."""
+    """Guarda estrutural: com nome e endereco validos, o provider e chamado (L2)."""
     captured = {}
 
-    async def _strict_provider(address, city, state, owner_name=None, zip_code=None):
+    async def _strict_provider(address, city, state, owner_name=None, zip_code=None, use_api_contact=False):
         captured["chamada"] = True
         return _ok_result()
 
     service = PhoneLookupService()
-    monkeypatch.setattr(service, "_lookup_searchbug", _strict_provider, raising=False)
+    monkeypatch.setattr(service, "_lookup_searchbug_nape", _strict_provider, raising=False)
 
     await service.lookup_phone(
         "9630 63 DRIVE", "MIAMI", "FL", owner_name="MARIA SANTOS", zip_code="33142"
@@ -128,7 +126,7 @@ async def test_provider_is_called_when_contract_is_satisfied(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_searchbug_builds_fname_lname_zip_from_owner(monkeypatch):
-    """O pedido pago ao Searchbug inclui FNAME/LNAME/ZIP."""
+    """O pedido pago ao Searchbug api_nape inclui FNAME/LNAME/ZIP."""
     captured = {}
 
     class _FakeResponse:
@@ -161,7 +159,7 @@ async def test_searchbug_builds_fname_lname_zip_from_owner(monkeypatch):
     service = PhoneLookupService()
     service.searchbug_key = "fake-key"
 
-    await service._lookup_searchbug(
+    await service._lookup_searchbug_nape(
         "101 WEST 104 STREET",
         "NEW YORK",
         "NY",
@@ -174,7 +172,7 @@ async def test_searchbug_builds_fname_lname_zip_from_owner(monkeypatch):
     assert data.get("LNAME") == "SANTOS", f"LNAME ausente: {data}"
     assert data.get("ZIP") == "10025", f"ZIP ausente: {data}"
     assert data.get("CO_CODE") == "123456"
-    assert data.get("TYPE") == "api_contact"
+    assert data.get("TYPE") == "api_nape"
 
 
 # ---------------------------------------------------------------------------
@@ -203,13 +201,13 @@ async def test_no_paid_call_without_usable_input(monkeypatch, owner_name, addres
     """Nenhum provider e chamado sem dados utilizaveis: o credito fica intacto."""
     chamado = False
 
-    async def _provider(*args, **kwargs):
+    async def _provider(address, city, state, owner_name=None, zip_code=None, use_api_contact=False):
         nonlocal chamado
         chamado = True
         return _ok_result()
 
     service = PhoneLookupService()
-    monkeypatch.setattr(service, "_lookup_searchbug", _provider, raising=False)
+    monkeypatch.setattr(service, "_lookup_searchbug_nape", _provider, raising=False)
 
     result = await service.lookup_phone(address, "NEW YORK", "NY", owner_name=owner_name)
 
@@ -224,23 +222,24 @@ async def test_corporate_owner_is_allowed(monkeypatch):
     """Um proprietario registado como empresa e contacto valido: nao rejeitar.
 
     So o que nao e um nome e recusado. 'TEXAS UTILITIES ELEC CO' e um
-    proprietario registado legitimo e deve poder gerar consulta.
+    proprietario registado legitimo e deve poder gerar consulta (L3 address-only).
     """
     captured = {}
 
-    async def _provider(address, city, state, owner_name=None, zip_code=None):
+    async def _provider(address, city, state, owner_name=None, zip_code=None, use_api_contact=False):
         captured.update(owner_name=owner_name)
         return _ok_result()
 
     service = PhoneLookupService()
-    monkeypatch.setattr(service, "_lookup_searchbug", _provider, raising=False)
+    monkeypatch.setattr(service, "_lookup_searchbug_nape", _provider, raising=False)
 
     result = await service.lookup_phone(
         "100 MAIN ST", "DALLAS", "TX", owner_name="TEXAS UTILITIES ELEC CO"
     )
 
     assert result.success is True
-    assert captured["owner_name"] == "TEXAS UTILITIES ELEC CO"
+    # Corporate name goes to L3 (address-only), so provider receives None
+    assert captured["owner_name"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -250,15 +249,15 @@ async def test_corporate_owner_is_allowed(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_second_call_is_served_from_cache(monkeypatch):
-    """Duas reservas do mesmo imivel: uma so chamada paga."""
+    """Duas reservas do mesmo imivel: uma so chamada paga (L2 cache)."""
     chamadas = []
 
-    async def _provider(address, city, state, owner_name=None, zip_code=None):
+    async def _provider(address, city, state, owner_name=None, zip_code=None, use_api_contact=False):
         chamadas.append(address)
         return _ok_result()
 
     service = PhoneLookupService()
-    monkeypatch.setattr(service, "_lookup_searchbug", _provider, raising=False)
+    monkeypatch.setattr(service, "_lookup_searchbug_nape", _provider, raising=False)
 
     a = await service.lookup_phone("101 WEST 104 STREET", "NEW YORK", "NY", owner_name="MARIA SANTOS")
     b = await service.lookup_phone("101 WEST 104 STREET", "NEW YORK", "NY", owner_name="MARIA SANTOS")
@@ -270,15 +269,15 @@ async def test_second_call_is_served_from_cache(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_negative_result_is_cached_too(monkeypatch):
-    """Um 'No results' tambem fica em cache: clicar outra vez nao re-paga."""
+    """Um 'No results' tambem fica em cache: clicar outra vez nao re-paga (L2 cache)."""
     chamadas = []
 
-    async def _provider(address, city, state, owner_name=None, zip_code=None):
+    async def _provider(address, city, state, owner_name=None, zip_code=None, use_api_contact=False):
         chamadas.append(address)
         return PhoneLookupResult(success=False, error="No results", provider="Searchbug")
 
     service = PhoneLookupService()
-    monkeypatch.setattr(service, "_lookup_searchbug", _provider, raising=False)
+    monkeypatch.setattr(service, "_lookup_searchbug_nape", _provider, raising=False)
 
     await service.lookup_phone("101 WEST 104 STREET", "NEW YORK", "NY", owner_name="MARIA SANTOS")
     segundo = await service.lookup_phone("101 WEST 104 STREET", "NEW YORK", "NY", owner_name="MARIA SANTOS")
@@ -290,19 +289,19 @@ async def test_negative_result_is_cached_too(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_negative_cache_expires_so_lead_can_retry(monkeypatch):
-    """Passado o TTL negativo, o lead volta a ser tentado.
+    """Passado o TTL negativo, o lead volta a ser tentado (L2 cache key includes layer).
 
     Sem isto, um lead que falhou uma vez nunca mais seria tentado, mesmo
     depois de o enriquecimento gratuito melhorar.
     """
     chamadas = []
 
-    async def _provider(address, city, state, owner_name=None, zip_code=None):
+    async def _provider(address, city, state, owner_name=None, zip_code=None, use_api_contact=False):
         chamadas.append(address)
         return PhoneLookupResult(success=False, error="No results", provider="Searchbug")
 
     service = PhoneLookupService()
-    monkeypatch.setattr(service, "_lookup_searchbug", _provider, raising=False)
+    monkeypatch.setattr(service, "_lookup_searchbug_nape", _provider, raising=False)
 
     await service.lookup_phone("101 WEST 104 STREET", "NEW YORK", "NY", owner_name="MARIA SANTOS")
     # avanca o relogio para alem do TTL negativo
@@ -311,7 +310,7 @@ async def test_negative_cache_expires_so_lead_can_retry(monkeypatch):
     # partiu quando o ZIP foi acrescentado ao formato.
     monkeypatch.setitem(
         service._phone_cache,
-        service._cache_key("101 WEST 104 STREET", "NEW YORK", "NY", None, "MARIA SANTOS"),
+        service._cache_key("101 WEST 104 STREET", "NEW YORK", "NY", None, "MARIA SANTOS", layer="L2"),
         (-sb._PHONE_CACHE_TTL_FAIL - 1, None),
     )
 
@@ -321,15 +320,15 @@ async def test_negative_cache_expires_so_lead_can_retry(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_cache_key_separates_different_properties(monkeypatch):
-    """Imoveis diferentes nao partilham cache."""
+    """Imoveis diferentes nao partilham cache (L2 keys include ZIP and layer)."""
     chamadas = []
 
-    async def _provider(address, city, state, owner_name=None, zip_code=None):
+    async def _provider(address, city, state, owner_name=None, zip_code=None, use_api_contact=False):
         chamadas.append(address)
         return _ok_result()
 
     service = PhoneLookupService()
-    monkeypatch.setattr(service, "_lookup_searchbug", _provider, raising=False)
+    monkeypatch.setattr(service, "_lookup_searchbug_nape", _provider, raising=False)
 
     await service.lookup_phone("101 WEST 104 STREET", "NEW YORK", "NY", owner_name="MARIA SANTOS")
     await service.lookup_phone("2800 MICHIGAN AVE", "CHICAGO", "IL", owner_name="JOSE LIMA")
