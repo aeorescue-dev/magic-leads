@@ -211,6 +211,7 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
     )
     push_jobs: list = []   # (uid, lead, cat)
     digest_jobs: list = []  # (uid, count)
+    digest_push_jobs: list = []  # (uid, total_n) — só quando o digest muda
 
     # 4) Seleção fair-equal + criação in-app (orçamento combinado).
     for uid, cat_map in per_user.items():
@@ -245,8 +246,18 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
     # 4b) Digest do excedente (não conta no teto).
     for uid, count in digest_jobs:
         try:
-            await db_service.upsert_daily_digest(uid, count)
+            res = await db_service.upsert_daily_digest(uid, count)
             report.digest += 1
+            # Só enviamos push no PRIMEIRO digest do dia: evita que a mesma
+            # notificação genérica seja reenviada a cada run (o digest in-app
+            # continua a acumular os aumentos seguintes em silêncio).
+            if res and res.get("_is_new"):
+                total_n = count
+                try:
+                    total_n = int(json.loads(res.get("msg_params") or "{}").get("n", count))
+                except (ValueError, TypeError):
+                    total_n = count
+                digest_push_jobs.append((uid, total_n))
         except Exception as e:
             logger.error(f"Digest diário user={uid} falhou: {e}")
 
@@ -283,8 +294,8 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
         except Exception as e:
             logger.error(f"Push error user={uid} lead={lead.get('id')}: {e}")
 
-    # 6) Push do digest (adicional, nunca conta para o teto).
-    for uid, count in digest_jobs:
+    # 6) Push do digest (adicional, nunca conta para o teto). Só os que mudaram.
+    for uid, count in digest_push_jobs:
         try:
             if not await db_service.is_push_enabled(uid):
                 continue

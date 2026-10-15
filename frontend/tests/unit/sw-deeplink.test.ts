@@ -25,6 +25,8 @@ function loadSW() {
   const showNotification = vi.fn().mockResolvedValue(undefined);
   const openWindow = vi.fn().mockResolvedValue(undefined);
   const matchAll = vi.fn().mockResolvedValue([]);
+  const claim = vi.fn().mockResolvedValue(undefined);
+  const skipWaiting = vi.fn().mockResolvedValue(undefined);
 
   const sandbox: Record<string, unknown> = {
     self: {
@@ -33,15 +35,16 @@ function loadSW() {
         listeners[type] = cb;
       },
       registration: { showNotification },
+      skipWaiting,
     },
-    clients: { matchAll, openWindow },
+    clients: { matchAll, openWindow, claim },
     console: { log: () => {}, error: () => {}, warn: () => {} },
     URL,
   };
   sandbox.globalThis = sandbox;
   vm.runInNewContext(swCode, sandbox);
 
-  return { listeners, showNotification, matchAll, openWindow };
+  return { listeners, showNotification, matchAll, openWindow, claim, skipWaiting };
 }
 
 function click(
@@ -58,6 +61,24 @@ function click(
   });
   return { pending: Promise.all(pending), close };
 }
+
+describe("sw.js ciclo de vida — ativação imediata", () => {
+  it("install chama skipWaiting para não ficar em 'waiting'", () => {
+    const { listeners, skipWaiting } = loadSW();
+    listeners.install({});
+    expect(skipWaiting).toHaveBeenCalledTimes(1);
+  });
+
+  it("activate chama clients.claim para assumir a página", async () => {
+    const { listeners, claim } = loadSW();
+    const pending: Promise<unknown>[] = [];
+    listeners.activate({
+      waitUntil: (p: Promise<unknown>) => pending.push(p),
+    });
+    await Promise.all(pending);
+    expect(claim).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("sw.js push — payload preserva a rota", () => {
   it("copia url e leadId do payload para options.data", async () => {

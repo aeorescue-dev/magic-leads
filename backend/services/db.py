@@ -54,6 +54,37 @@ _TRADE_CATEGORIES = (
     "Unsanitary", "Door_Window", "Debris",
 )
 
+# Aliases legados (PT) que versões antigas do frontend gravavam como
+# "categoria de interesse". Mantidos para compatibilidade na leitura.
+_LEGACY_CATEGORY_ALIASES = {
+    "telhado": "Roof", "estrutura": "Structure", "encanamento": "Plumbing",
+    "mato": "Grass", "pintura": "Paint", "obras": "Permit_Rejected",
+    "heating": "Heating", "electrical": "Electrical", "elevator": "Elevator",
+    "gas": "Gas", "rodent": "Rodent", "mold": "Mold", "lead": "Lead",
+    "unsanitary": "Unsanitary", "door_window": "Door_Window", "debris": "Debris",
+}
+
+
+def normalize_trade_categories(values) -> List[str]:
+    """Normaliza categorias de interesse para o vocabulário canónico.
+
+    Aceita tanto as chaves canónicas (ex.: "Roof") como as legadas PT
+    (ex.: "telhado"). Devolve a lista canónica sem duplicados, na ordem de
+    entrada. Chaves desconhecidas/vazias são ignoradas.
+    """
+    canonical = set(_TRADE_CATEGORIES)
+    out: List[str] = []
+    seen: set = set()
+    for value in values or []:
+        if not value:
+            continue
+        key = str(value).strip()
+        resolved = key if key in canonical else _LEGACY_CATEGORY_ALIASES.get(key.lower())
+        if resolved and resolved not in seen:
+            seen.add(resolved)
+            out.append(resolved)
+    return out
+
 # Status considerados "chamado aberto / em andamento" (gatilho preditivo).
 _OPEN_STATUSES = (
     "open", "new", "in progress", "in_progress", "assigned", "active",
@@ -3015,6 +3046,11 @@ class DatabaseService:
                 except (ValueError, TypeError):
                     prev = 0
             total = prev + int(extra_count)
+            # `_is_new` diz ao planner se este é o PRIMEIRO digest do dia —
+            # só nesse caso vale a pena enviar push. Sem isto, cada run com
+            # novos leads reenviava a mesma notificação genérica; os aumentos
+            # seguintes do dia ficam apenas no in-app.
+            is_new = existing is None
             params = {"n": total, "limit": settings.PUSH_DAILY_LIMIT}
             rendered = _render_i18n("digest", DEFAULT_LOCALE, **params) or {}
             title = rendered.get("title") or "Daily digest"
@@ -3030,7 +3066,11 @@ class DatabaseService:
                 row = conn.execute(
                     "SELECT * FROM notifications WHERE id = ?", (existing["id"],)
                 ).fetchone()
-                return dict(row) if row else None
+                if not row:
+                    return None
+                out = dict(row)
+                out["_is_new"] = is_new
+                return out
             conn.execute(
                 "INSERT INTO notifications (user_id, type, title, message, lead_id, msg_key, msg_params) "
                 "VALUES (?, 'digest', ?, ?, NULL, 'digest', ?)",
@@ -3040,7 +3080,11 @@ class DatabaseService:
             row = conn.execute(
                 "SELECT * FROM notifications WHERE id = last_insert_rowid()"
             ).fetchone()
-            return dict(row) if row else None
+            if not row:
+                return None
+            out = dict(row)
+            out["_is_new"] = is_new
+            return out
         finally:
             conn.close()
 
@@ -3801,17 +3845,13 @@ class DatabaseService:
             """
             params = []
 
-            # Se tem interesses, filtrar por categoria mapeada
+            # Se tem interesses, filtrar por categoria.
+            # As chaves chegam canónicas (ex.: "Roof") — o antigo `cat_map`
+            # só conhecia as legadas PT ("telhado"), pelo que `cat_map.get(c)`
+            # devolvia None e o filtro era DESCARTADO em silêncio (o resumo
+            # mostrava todos os leads, ignorando as categorias escolhidas).
             if interest_categories:
-                # Mapear chaves do frontend para valores do banco
-                cat_map = {
-                    "telhado": "Roof", "estrutura": "Structure", "encanamento": "Plumbing", "mato": "Grass",
-                    "pintura": "Paint", "obras": "Permit_Rejected", "heating": "Heating",
-                    "electrical": "Electrical", "elevator": "Elevator", "gas": "Gas",
-                    "rodent": "Rodent", "mold": "Mold", "lead": "Lead",
-                    "unsanitary": "Unsanitary", "door_window": "Door_Window", "debris": "Debris"
-                }
-                db_cats = [cat_map.get(c) for c in interest_categories if cat_map.get(c)]
+                db_cats = normalize_trade_categories(interest_categories)
                 if db_cats:
                     placeholders = ",".join("?" * len(db_cats))
                     base_where += f" AND issue_category IN ({placeholders})"

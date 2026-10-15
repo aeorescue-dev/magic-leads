@@ -2,6 +2,21 @@
 // Seve exclusivamente para push e notificationclick.
 // Nao intercepta requisicoes de rede/navegacao para evitar net::ERR_FAILED.
 
+// Ciclo de vida do Service Worker.
+//
+// IMPORTANTE: sem `skipWaiting` + `clients.claim` uma versão NOVA do sw.js
+// fica presa em estado "waiting" até TODOS os clientes (abas/PWA) fecharem.
+// Num PWA/aba de longa duração o SW antigo continua a controlar a página, pelo
+// que correções do handler `notificationclick` (o deep link) nunca chegavam a
+// produzir efeito para quem já tinha o SW antigo instalado.
+self.addEventListener('install', () => {
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(clients.claim());
+});
+
 // Fetch event - explicitly do NOT intercept any request.
 // Page navigations, Next.js assets and API calls all go straight to the
 // network, so no redirected/error response ever leaks through respondWith.

@@ -92,11 +92,13 @@ def test_digest_is_localized_and_accumulates():
     assert first["type"] == "digest"
     assert first["msg_key"] == "digest"
     assert first["title"] == expected["title"]
+    assert first["_is_new"] is True            # 1.º digest do dia
 
     second = db_service._service.upsert_daily_digest(uid, 2)
     params = json.loads(second["msg_params"])
     assert params["n"] == 5
     assert params["limit"] == limit
+    assert second["_is_new"] is False          # já existia: não reenvia push
 
 
 def test_render_returns_localized_pair():

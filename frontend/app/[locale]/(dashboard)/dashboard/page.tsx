@@ -102,6 +102,10 @@ const CATEGORIES: Category[] = [
   { key: "Debris", labelKey: "dashboard.cat.debris", icon: Wind, color: "#64748b", keywords: ["debris", "garbage", "trash", "rubbish", "litter", "dumping", "entulho", "lixo"] },
 ];
 
+// Todas as categorias da plataforma — default dos interesses e valor
+// auto-persistido quando o utilizador ainda não tem interesses gravados.
+const ALL_CATEGORY_KEYS = CATEGORIES.map((cat) => cat.key);
+
 function matchCategory(lead: LeadResponse, keywords: string[]) {
   const hay = `${lead.issue_category || ""} ${lead.issue_description || ""} ${lead.case_title || ""} ${lead.descriptor || ""} ${lead.department || ""}`.toLowerCase();
   return keywords.some((k) => hay.includes(k));
@@ -204,7 +208,7 @@ function DashboardPageInner() {
   const [selectedCity, setSelectedCity] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<"overview" | "opportunities" | "favorites" | "interests" | "alerts" | "history">("overview");
-  const [interests, setInterests] = useState<Set<string>>(new Set(["Roof", "Structure", "Plumbing", "Grass", "Paint", "Permit_Rejected", "Heating", "Electrical", "Elevator", "Gas", "Rodent", "Mold", "Lead", "Unsanitary", "Door_Window", "Debris"]));
+  const [interests, setInterests] = useState<Set<string>>(new Set(ALL_CATEGORY_KEYS));
   const [interestsConfigured, setInterestsConfigured] = useState<boolean | null>(null);
   const [dailyStats, setDailyStats] = useState<{ used: number; limit: number; remaining: number; reset_at: string } | null>(null);
 
@@ -438,6 +442,12 @@ const URGENCIES = ["all", "high", "medium", "low"];
           setInterestsConfigured(hasInterests);
           if (hasInterests) {
             setInterests(new Set(cats));
+          } else {
+            // Sem interesses gravados: o backend trata o utilizador como "sem
+            // configuração" e torna-o elegível a TODAS as categorias (fallback),
+            // enviando alertas que ele não escolheu. Persistimos o default
+            // (todas) para que o estado do backend fique explícito. Best-effort.
+            updateUserInterests(userId, ALL_CATEGORY_KEYS).catch(() => {});
           }
         })
         .catch(() => {});
@@ -662,6 +672,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
 
   // Toggle category interest
   const toggleInterest = async (catKey: string) => {
+    const prev = interests;
     const next = new Set(interests);
     if (next.has(catKey)) next.delete(catKey);
     else next.add(catKey);
@@ -673,6 +684,11 @@ const URGENCIES = ["all", "high", "medium", "low"];
         await updateUserInterests(userId, Array.from(next));
       } catch (e) {
         console.error(e);
+        // Reverte a UI: sem isto o utilizador via a categoria como guardada
+        // quando o PUT falhou — e o backend continuava a usar os interesses
+        // antigos (ou o fallback "todas"), enviando alertas indesejados.
+        setInterests(prev);
+        showToast(t("dashboard.interests.save_error"), "error");
       }
     }
   };

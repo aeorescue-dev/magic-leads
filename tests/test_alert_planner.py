@@ -233,6 +233,31 @@ def test_push_sent_once_when_enabled(monkeypatch):
     assert calls == [(uid, "lead_alert")]
 
 
+def test_digest_push_only_once_per_day(monkeypatch):
+    _reset()
+    uid = _user(["Roof"])
+    db_service._service.set_user_push_enabled(uid, True)
+    db_service._service.increment_alert_usage(uid, "Roof", 6)  # teto esgotado
+
+    calls = []
+
+    async def fake_push(user_id, payload, kind="custom"):
+        calls.append(kind)
+        return 1
+
+    monkeypatch.setattr(push_service, "send_to_user", fake_push)
+
+    first = _run(plan_and_dispatch([_lead("Roof", "NYC")]))
+    assert first.created == 0
+    assert first.digest == 1
+    assert calls.count("digest") == 1          # 1.º digest do dia → push
+
+    second = _run(plan_and_dispatch([_lead("Roof", "NYC")]))
+    assert second.created == 0
+    assert second.digest == 1
+    assert calls.count("digest") == 1          # aumento seguinte NÃO reenvia
+
+
 def test_cursor_advances_after_dispatch():
     _reset()
     uid = _user(["Roof"])
