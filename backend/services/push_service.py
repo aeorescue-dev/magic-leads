@@ -374,9 +374,6 @@ class PushService:
         except WebPushException as e:
             status = e.response.status_code if e.response is not None else None
             detail = str(e)
-        except WebPushException as e:
-            status = e.response.status_code if e.response is not None else None
-            detail = str(e)
             if status in (404, 410):
                 return {"ok": False, "error": f"expired (HTTP {status})", "expired": True, "detail": detail}
             resp_text = e.response.text if e.response is not None else None

@@ -309,6 +309,7 @@ class UserResponse(BaseModel):
     conversions: int = 0
     push_enabled: bool = False
     locale: str = "en"
+    is_admin: bool = False
     created_at: Optional[str] = None
 
 

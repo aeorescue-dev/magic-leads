@@ -28,11 +28,12 @@ function authHeaders(): Record<string, string> {
 }
 
 async function adminFetch<T>(path: string, options?: RequestInit): Promise<T> {
+  const { headers: optHeaders, ...rest } = options ?? {};
   const res = await fetch(`${API_URL}/api/admin${path}`, {
     credentials: "include",
-    headers: { ...authHeaders() },
     cache: "no-store",
-    ...options,
+    ...rest,
+    headers: { ...authHeaders(), ...(optHeaders as Record<string, string> | undefined) },
   });
   if (!res.ok) {
     let detail = res.statusText;
@@ -331,4 +332,23 @@ export function fetchAdminCreditBackfill(): Promise<AdminCreditBackfillResponse>
 export function fetchAdminCreditReconcile(userId = 0): Promise<AdminCreditReconcileResponse> {
   const q = userId > 0 ? `?user_id=${userId}` : "";
   return adminFetch(`/credit-reconcile${q}`, { method: "POST" });
+}
+
+export interface AdminPushTestResult {
+  status: "ok";
+  sent: number;
+  subscriptions: number;
+  configured: boolean;
+}
+
+export function sendAdminTestPush(body?: {
+  title?: string;
+  body?: string;
+  url?: string;
+}): Promise<AdminPushTestResult> {
+  return adminFetch<AdminPushTestResult>("/push/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body ?? {}),
+  });
 }

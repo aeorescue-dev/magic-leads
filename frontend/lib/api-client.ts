@@ -541,6 +541,7 @@ export interface AuthUser {
   conversions: number;
   push_enabled?: boolean;
   welcome_popup_shown?: boolean;
+  is_admin?: boolean;
   created_at?: string;
 }
 

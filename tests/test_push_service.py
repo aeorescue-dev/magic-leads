@@ -218,3 +218,79 @@ def test_generic_403_with_body_does_not_remove_subscription(monkeypatch):
 
     assert anyio.run(svc.send_to_user, 7, {"title": "t"}, "lead_alert") == 0
     assert removed == []
+
+
+# ---------------------------------------------------------------------------
+# Regressão: `_send_single_debug` nunca pode devolver None.
+#
+# Um `except WebPushException` duplicado (o primeiro sem `return`) fazia a
+# função cair para fora do bloco e devolver `None`. O endpoint de debug
+# `/api/push/send-test` acede a `result["ok"]` -> AttributeError -> HTTP 500.
+# ---------------------------------------------------------------------------
+
+def test_send_single_debug_expired_returns_dict(monkeypatch):
+    from pywebpush import WebPushException
+
+    svc = _configured_service(monkeypatch)
+
+    def _boom(*args, **kwargs):
+        raise WebPushException("gone", response=_FakeResponse(410, ""))
+
+    monkeypatch.setattr(push_service, "webpush", _boom)
+    sub = {"endpoint": "https://example.invalid/ep", "p256dh": "a", "auth": "b"}
+
+    result = svc._send_single_debug(sub, {"title": "t"})
+    assert isinstance(result, dict), "nunca pode devolver None (bug do except duplicado)"
+    assert result["ok"] is False
+    assert result.get("expired") is True
+
+
+def test_send_single_debug_dead_vapid_returns_dict(monkeypatch):
+    from pywebpush import WebPushException
+
+    svc = _configured_service(monkeypatch)
+
+    def _boom(*args, **kwargs):
+        raise WebPushException(
+            "Forbidden", response=_FakeResponse(403, '{"reason":"VapidPkHashMismatch"}')
+        )
+
+    monkeypatch.setattr(push_service, "webpush", _boom)
+    sub = {"endpoint": "https://example.invalid/ep", "p256dh": "a", "auth": "b"}
+
+    result = svc._send_single_debug(sub, {"title": "t"})
+    assert isinstance(result, dict)
+    assert result["ok"] is False
+    assert result.get("dead") is True
+
+
+def test_send_single_debug_generic_error_returns_dict(monkeypatch):
+    from pywebpush import WebPushException
+
+    svc = _configured_service(monkeypatch)
+
+    def _boom(*args, **kwargs):
+        raise WebPushException("boom", response=_FakeResponse(500, "server error"))
+
+    monkeypatch.setattr(push_service, "webpush", _boom)
+    sub = {"endpoint": "https://example.invalid/ep", "p256dh": "a", "auth": "b"}
+
+    result = svc._send_single_debug(sub, {"title": "t"})
+    assert isinstance(result, dict)
+    assert result["ok"] is False
+    assert "500" in result["error"]
+
+
+def test_send_single_debug_unexpected_exception_returns_dict(monkeypatch):
+    svc = _configured_service(monkeypatch)
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("network exploded")
+
+    monkeypatch.setattr(push_service, "webpush", _boom)
+    sub = {"endpoint": "https://example.invalid/ep", "p256dh": "a", "auth": "b"}
+
+    result = svc._send_single_debug(sub, {"title": "t"})
+    assert isinstance(result, dict)
+    assert result["ok"] is False
+    assert "RuntimeError" in result["error"]

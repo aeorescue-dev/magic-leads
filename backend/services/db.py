@@ -1959,30 +1959,44 @@ class DatabaseService:
     ) -> bool:
         """
         Cria uma nova sessão para o usuário.
-        Se já existirem 2 sessões ativas, remove a mais antiga (FIFO).
+
+        Regra do teto de sessões:
+          * utilizadores normais: no máximo 2 sessões ativas; ao entrar a 3ª,
+            a mais antiga é removida (FIFO por last_active_at);
+          * ADMINISTRADORES: isentos do teto. O painel /admin é acessado em
+            ambientes de confiança (laptop, telemóvel, browser de trabalho) e
+            um login noutro dispositivo não pode expulsar (401) a sessão aberta
+            no painel — era isso que fazia o painel dizer "sessão expirada"
+            mesmo com a conta de admin corretamente autenticada.
         """
         conn = get_connection()
         try:
-            # Conta sessões atuais
-            count = conn.execute(
-                "SELECT COUNT(*) as cnt FROM user_sessions WHERE user_id = ?",
-                (user_id,),
-            ).fetchone()["cnt"]
+            row = conn.execute(
+                "SELECT is_admin FROM users WHERE id = ?", (user_id,)
+            ).fetchone()
+            is_admin = bool(row["is_admin"]) if row else False
 
-            if count >= 2:
-                # Remove a sessão mais antiga (FIFO)
-                conn.execute(
-                    """
-                    DELETE FROM user_sessions
-                    WHERE id = (
-                        SELECT id FROM user_sessions
-                        WHERE user_id = ?
-                        ORDER BY last_active_at ASC
-                        LIMIT 1
-                    )
-                    """,
+            if not is_admin:
+                # Conta sessões atuais
+                count = conn.execute(
+                    "SELECT COUNT(*) as cnt FROM user_sessions WHERE user_id = ?",
                     (user_id,),
-                )
+                ).fetchone()["cnt"]
+
+                if count >= 2:
+                    # Remove a sessão mais antiga (FIFO)
+                    conn.execute(
+                        """
+                        DELETE FROM user_sessions
+                        WHERE id = (
+                            SELECT id FROM user_sessions
+                            WHERE user_id = ?
+                            ORDER BY last_active_at ASC
+                            LIMIT 1
+                        )
+                        """,
+                        (user_id,),
+                    )
 
             # Insere a nova sessão
             conn.execute(

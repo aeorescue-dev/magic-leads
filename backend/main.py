@@ -1518,6 +1518,45 @@ async def admin_push(
     return data
 
 
+@app.post("/api/admin/push/test")
+async def admin_push_test(
+    payload: SendTestPushRequest | None = None,
+    admin: dict = Depends(_require_admin_user),
+):
+    """Envia um push de teste PARA O PRÓPRIO ADMIN autenticado (via sessão).
+
+    Diferente de `/api/push/send-test` (que exige o X-Admin-Secret e pode
+    fazer broadcast), esta rota usa a sessão do painel `/admin` e entrega
+    apenas para os dispositivos do admin que está a clicar no botão — é a
+    forma correta de o admin validar o próprio dispositivo.
+
+    Devolve `sent` = número de subscrições para as quais o Web Push foi
+    aceite (`accepted`, não prova de entrega).
+    """
+    if not push_service.is_configured():
+        raise HTTPException(status_code=503, detail="Push notifications not configured")
+
+    subs = await db_service.get_user_push_subscriptions(admin["id"])
+    if not subs:
+        raise HTTPException(
+            status_code=404,
+            detail="Nenhum dispositivo subscrito para este admin. "
+            "Ative as notificações neste browser primeiro.",
+        )
+
+    req = payload or SendTestPushRequest()
+    push_payload = {
+        "title": req.title,
+        "body": req.body,
+        "tag": req.tag,
+        "url": req.url,
+        "icon": "https://magicleads-oficial.vercel.app/icons/magicleads-brand.svg",
+        "badge": "https://magicleads-oficial.vercel.app/icons/magicleads-brand.svg",
+    }
+    sent = await push_service.send_to_user(admin["id"], push_payload)
+    return {"status": "ok", "sent": sent, "subscriptions": len(subs), "configured": True}
+
+
 @app.get("/api/admin/planner")
 async def admin_planner(
     day: str | None = None,
@@ -3025,6 +3064,7 @@ async def register_user(request: Request, payload: UserCreate, response: Respons
                 conversions=user.get("conversions") or 0,
                 push_enabled=bool(user.get("push_enabled")),
                 locale=user.get("locale") or "en",
+                is_admin=bool(user.get("is_admin")),
                 created_at=user.get("created_at"),
             ),
         )
@@ -3078,6 +3118,7 @@ async def login_user(request: Request, payload: UserLogin, response: Response = 
                 conversions=user.get("conversions") or 0,
                 push_enabled=bool(user.get("push_enabled")),
                 locale=user.get("locale") or "en",
+                is_admin=bool(user.get("is_admin")),
                 created_at=user.get("created_at"),
             ),
         )
@@ -3104,6 +3145,8 @@ async def me(user: dict = Depends(_get_current_user)):
         leads_taken=full.get("leads_taken") or 0,
         conversions=full.get("conversions") or 0,
         push_enabled=bool(full.get("push_enabled")),
+        locale=full.get("locale") or "en",
+        is_admin=bool(full.get("is_admin")),
         created_at=full.get("created_at"),
     )
 
@@ -3261,6 +3304,7 @@ async def demo_login(request: Request, response: Response = None):
                 leads_taken=user.get("leads_taken") or 0,
                 conversions=user.get("conversions") or 0,
                 locale=user.get("locale") or "en",
+                is_admin=bool(user.get("is_admin")),
                 created_at=user.get("created_at"),
             ),
         )

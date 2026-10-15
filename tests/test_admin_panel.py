@@ -484,3 +484,79 @@ def test_admin_planner_metrics(admin_client):
     assert data["digests_today"] == 1
     cats = {c["category"]: c["alerts"] for c in data["by_category"]}
     assert cats["pothole"] >= 2
+
+
+# ------------------------------------------------- Fase 4: sessões admin
+
+def _session_count(user_id: int) -> int:
+    conn = get_connection()
+    try:
+        return conn.execute(
+            "SELECT COUNT(*) AS c FROM user_sessions WHERE user_id = ?", (user_id,)
+        ).fetchone()["c"]
+    finally:
+        conn.close()
+
+
+def test_admin_sessions_exempt_from_fifo_eviction(admin_client):
+    """Um login do admin noutro dispositivo NAO pode expulsar a sessao do painel.
+
+    O teto de 2 sessoes (FIFO) fazia /admin devolver 401 ("sessao expirada")
+    mesmo com a conta de admin autenticada — bastava um terceiro login.
+    """
+    _, _, admin_id = admin_client
+    svc = db_service._service
+
+    # 3 sessoes novas por cima da sessao criada pelo fixture.
+    for i in range(3):
+        svc.create_user_session(admin_id, _hash_token(f"pytest-admin-extra-{i}"), "Pytest Extra", None)
+
+    # 1 (fixture) + 3 (novas) — nenhuma foi evicted.
+    assert _session_count(admin_id) >= 4
+
+
+def test_normal_sessions_still_capped_at_two():
+    """Utilizadores normais continuam limitados a 2 sessoes (FIFO)."""
+    svc = db_service._service
+    email = f"pytest-fifo-{uuid.uuid4().hex[:8]}@magicleads.app"
+    user = svc.create_user(email, "x", "Fifo Co", plan="free", subscription_status="active")
+    assert user is not None
+    uid = user["id"]
+
+    for i in range(3):
+        svc.create_user_session(uid, _hash_token(f"pytest-fifo-{uid}-{i}"), "Pytest", None)
+
+    assert _session_count(uid) == 2
+
+
+def test_login_and_me_expose_is_admin(admin_client):
+    """O frontend tem de saber que a conta e admin para reconhecer o perfil."""
+    client, headers, admin_id = admin_client
+    me = client.get("/api/auth/me", headers=headers)
+    assert me.status_code == 200, me.text
+    assert me.json()["is_admin"] is True
+
+
+# ------------------------------------------------- Fase 4: push de teste
+
+def test_admin_push_test_gate(admin_client, nonadmin_client):
+    """A rota de push de teste exige sessao admin (nao o secret global)."""
+    client, _, _ = admin_client
+    _, nonadmin_headers = nonadmin_client
+
+    assert client.post("/api/admin/push/test").status_code == 401
+    assert client.post("/api/admin/push/test", headers=nonadmin_headers).status_code == 403
+    assert (
+        client.post(
+            "/api/admin/push/test",
+            headers={"X-Admin-Secret": main_module.settings.ADMIN_SECRET or "anything"},
+        ).status_code
+        == 401
+    )
+
+
+def test_admin_push_test_authorized_for_admin(admin_client):
+    """Admin autenticado passa o gate (200/404/503, nunca 401/403)."""
+    client, headers, _ = admin_client
+    r = client.post("/api/admin/push/test", headers=headers)
+    assert r.status_code not in (401, 403), r.text
