@@ -82,6 +82,20 @@ def _qualified_lead(category: str) -> None:
         conn.close()
 
 
+def _qualified_lead_in(city: str, category: str = "Roof") -> None:
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO leads (external_id, source_type, address, city, state, "
+            "issue_category, case_status, date_reported) "
+            "VALUES (?, '311', ?, ?, 'NY', ?, 'open', '2026-01-01T00:00:00')",
+            (uuid.uuid4().hex, f"{uuid.uuid4().hex[:8]} Main Street", city, category),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def test_dashboard_summary_filters_by_canonical_category():
     _clear_leads()
     for _ in range(3):
@@ -119,3 +133,55 @@ def test_dashboard_summary_by_category_only_has_filtered_cats():
 
     summary = db_service._service.get_dashboard_summary(["Roof"])
     assert set(summary["by_category"].keys()) == {"Roof"}
+
+
+def test_dashboard_summary_by_city_sums_to_total_interested():
+    """Invariante da barra de cidades: soma(by_city) == total_interested.
+
+    O totalizador do painel e a barra de cidades consomem a mesma base
+    (`base_where`), pelo que uma cidade isolada nunca pode exceder o total.
+    """
+    _clear_leads()
+    for _ in range(4):
+        _qualified_lead_in("NYC")
+    for _ in range(3):
+        _qualified_lead_in("Chicago")
+
+    summary = db_service._service.get_dashboard_summary(None)
+    assert summary["total_interested"] == 7
+    assert sum(summary["by_city"].values()) == summary["total_interested"]
+    assert summary["by_city"] == {"NYC": 4, "Chicago": 3}
+
+
+def test_public_metrics_novas_oportunidades_is_real_inserted():
+    """A frescura é o `inserted` REAL do último run, não um piso estimado.
+
+    Regressão: `novas_oportunidades = max(captured_24h, média(inserted))`
+    inflava o número (piso mínimo 500) e não correspondia a nenhuma query.
+    """
+    _clear_leads()
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            "INSERT INTO scraper_runs (run_id, trigger, started_at, finished_at, "
+            "status, inserted) VALUES (?, 'test', datetime('now'), datetime('now'), "
+            "'success', 42)",
+            (uuid.uuid4().hex,),
+        )
+        run_id = cur.lastrowid
+        conn.commit()
+    finally:
+        conn.close()
+
+    try:
+        metrics = db_service._service.get_public_metrics()
+        assert metrics["last_scrape"]["inserted"] == 42
+        assert metrics["last_scrape"]["novas_oportunidades"] == 42
+        assert "floor" not in metrics["last_scrape"]
+    finally:
+        conn = get_connection()
+        try:
+            conn.execute("DELETE FROM scraper_runs WHERE id = ?", (run_id,))
+            conn.commit()
+        finally:
+            conn.close()

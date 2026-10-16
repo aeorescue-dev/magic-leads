@@ -42,9 +42,9 @@ import { StageBadge } from "@/components/ui/StageBadge";
 import { StageGuidePanel } from "@/components/ui/StageGuidePanel";
 import { ReserveGuideModal } from "@/components/ui/ReserveGuideModal";
 import {
-  LeadResponse, LeadStats, CityCount, Notification, Note, HistoryEvent,
+  LeadResponse, LeadStats, Notification, Note, HistoryEvent,
   ContractorMetrics,
-  fetchTodayLeads, fetchStats, fetchCitiesWithCounts,
+  fetchTodayLeads, fetchStats,
   fetchLeadById, toggleFavorite, recordContact, fetchNotes, addNote, deleteNote,
   fetchUserNotifications, fetchUserUnreadCount, markUserNotificationRead, markAllUserNotificationsRead,
   fetchLeadStatus, reserveLead, releaseLead, contactLead, negotiateLead, convertLead,
@@ -204,7 +204,6 @@ function DashboardPageInner() {
   const [currentPage, setCurrentPage] = useState(1);
   const [hasMoreLeads, setHasMoreLeads] = useState(true);
   const [stats, setStats] = useState<LeadStats | null>(null);
-  const [citiesWithCounts, setCitiesWithCounts] = useState<CityCount[]>([]);
   const [selectedCity, setSelectedCity] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<"overview" | "opportunities" | "favorites" | "interests" | "alerts" | "history">("overview");
@@ -515,9 +514,8 @@ const URGENCIES = ["all", "high", "medium", "low"];
     (async () => {
       setLoadingLeads(true);
       try {
-        const [statsData, citiesData, leadsData, summaryData, scraperData, publicMetricsData] = await Promise.all([
+        const [statsData, leadsData, summaryData, scraperData, publicMetricsData] = await Promise.all([
           fetchStats().catch(() => null),
-          fetchCitiesWithCounts().catch(() => []),
           fetchTodayLeads(50, selectedCity === "all" ? undefined : selectedCity, includeClosed, 1, selectedType === "all" ? undefined : selectedType).catch(() => ({ leads: [], total: 0, page: 1, per_page: 50 })),
           fetchDashboardSummary().catch(() => null),
           fetchScraperStatus().catch(() => null),
@@ -525,9 +523,6 @@ const URGENCIES = ["all", "high", "medium", "low"];
         ]);
         if (!active) return;
         if (statsData) setStats(statsData);
-        if (Array.isArray(citiesData) && citiesData.length > 0) {
-          setCitiesWithCounts(citiesData);
-        }
         if (summaryData) setDashboardSummary(summaryData);
         if (scraperData) setScraperState(scraperData);
         if (publicMetricsData) setPublicMetrics(publicMetricsData);
@@ -557,7 +552,6 @@ const URGENCIES = ["all", "high", "medium", "low"];
         .catch(() => {});
       fetchDashboardSummary().then(setDashboardSummary).catch(() => {});
       fetchStats().then(setStats).catch(() => {});
-      fetchCitiesWithCounts().then(setCitiesWithCounts).catch(() => {});
       fetchScraperStatus().then(setScraperState).catch(() => {});
       fetchPublicMetrics().then(setPublicMetrics).catch(() => {});
     }, 30000);
@@ -1224,7 +1218,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
   );
 
 // Use Dashboard Summary for real KPIs (falls back to stats if summary not loaded)
-  const realTotalLeads = dashboardSummary?.total_interested ?? (stats?.total ?? stats?.total_leads ?? 1249);
+  const realTotalLeads = dashboardSummary?.total_interested ?? (stats?.total ?? stats?.total_leads ?? 0);
   const lastScrapeText = String(dashboardSummary?.last_scrape ?? "");
   const scrapeCount = Number(lastScrapeText.match(/\d+/)?.[0] || 0);
   const lastScrapeDisplay = lastScrapeText || "Aguardando dados...";
@@ -1855,7 +1849,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
             {[
               { label: t("dashboard.kpi.interested") || "No seu interesse", value: dashboardSummary?.total_interested ?? 0, delta: t("dashboard.kpi.opportunities") || "oportunidades reais", icon: Building2, color: "#6366f1" },
-              { label: t("dashboard.kpi.last_scrape"), value: publicMetrics?.last_scrape?.novas_oportunidades ?? scrapeCount + 500, delta: t("dashboard.kpi.updated_now"), icon: TrendingUp, color: "#22c55e" },
+              { label: t("dashboard.kpi.last_scrape"), value: publicMetrics?.last_scrape?.novas_oportunidades ?? scrapeCount, delta: t("dashboard.kpi.updated_now"), icon: TrendingUp, color: "#22c55e" },
               { label: t("dashboard.kpi.with_contact") || "Com contato", value: dashboardSummary?.with_contact ?? 0, delta: t("dashboard.kpi.ready_call") || "prontas p/ ligar", icon: Phone, color: "#f59e0b" },
               { label: t("dashboard.kpi.urgent") || "Urgentes", value: dashboardSummary?.urgent ?? 0, delta: t("dashboard.kpi.need_action") || "precisam ação", icon: AlertCircle, color: "#ef4444" },
             ].map((k) => (
@@ -1891,14 +1885,14 @@ const URGENCIES = ["all", "high", "medium", "low"];
             {(() => {
               // Fixed list of all 4 cities - always show all
               const allCities = ["NYC", "Chicago", "Dallas", "Boston"];
-              // Build lookup from API data
+              // Mesma base canônica do totalizador (dashboardSummary.by_city):
+              // garante soma(cidades) == totalizador por identidade matemática.
+              const byCity = dashboardSummary?.by_city ?? {};
               const apiCounts: Record<string, number> = {};
-              citiesWithCounts.forEach((c) => { apiCounts[c.city.toLowerCase()] = c.count; });
-              // Fallback counts for when API doesn't have a city
-              const fallbackCounts: Record<string, number> = { "nyc": 1125, "chicago": 277, "dallas": 346, "boston": 25 };
+              Object.entries(byCity).forEach(([name, n]) => { apiCounts[name.trim().toUpperCase()] = n; });
               return allCities.map((city) => {
                 const key = city.toLowerCase();
-                const count = apiCounts[key] ?? fallbackCounts[key] ?? 0;
+                const count = apiCounts[city.toUpperCase()] ?? 0;
                 return (
                   <button
                     key={city}

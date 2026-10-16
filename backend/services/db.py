@@ -3766,9 +3766,9 @@ class DatabaseService:
         """Fonte Única da Verdade dos contadores públicos (landing + dashboard).
 
         Chave canônica: last_scrape.novas_oportunidades.
-        Cálculo: max(leads capturados nas últimas 24h, piso dinâmico).
-        O piso é a média de inserted das últimas 10 execuções (mínimo 500),
-        evitando que oscilações pontuais zerem a exibição.
+        Cálculo: `inserted` REAL do último ciclo do scraper (contagem autêntica
+        de novos registos da varredura recente). Sem piso/média estimada — o
+        número exibido é reconciliável com a base.
         """
         conn = get_connection()
         try:
@@ -3795,19 +3795,16 @@ class DatabaseService:
             captured_24h = conn.execute(
                 "SELECT COUNT(*) AS c FROM leads WHERE created_at >= datetime('now', '-24 hours')"
             ).fetchone()["c"]
-            # Piso dinâmico: média de inserted das últimas 10 execuções, mínimo 500
-            recent = conn.execute(
-                "SELECT inserted FROM scraper_runs ORDER BY id DESC LIMIT 10"
-            ).fetchall()
-            recent_vals = [r["inserted"] for r in recent if r["inserted"] is not None]
-            avg_recent = round(sum(recent_vals) / len(recent_vals)) if recent_vals else 0
-            floor = max(500, avg_recent)
         finally:
             conn.close()
 
         last_run = self.get_last_scrape_run() or {}
+        # Contagem REAL de novos registos do último ciclo do scraper: a coluna
+        # `inserted` do run. Elimina o antigo piso dinâmico
+        # (max(captured_24h, média de inserted)) — um valor estimado que não
+        # correspondia a nenhuma query e não era reconciliável com a base.
         last_inserted = last_run.get("inserted") or 0
-        novas_oportunidades = max(captured_24h, floor)
+        novas_oportunidades = last_inserted
 
         return {
             "total_leads": total,
@@ -3820,7 +3817,6 @@ class DatabaseService:
                 "finished_at": last_run.get("finished_at"),
                 "status": last_run.get("status"),
                 "captured_24h": captured_24h,
-                "floor": floor,
                 "novas_oportunidades": novas_oportunidades,
             },
         }
