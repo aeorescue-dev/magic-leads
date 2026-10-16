@@ -766,6 +766,34 @@ def test_outbound_templates_are_english_only():
         outbound_templates.assert_english_only("Hello - rotação")
 
 
+def test_outbound_templates_hide_data_sources():
+    """Requisito comercial critico: o copy nunca revela a origem interna.
+
+    O cliente nao pode saber que o produto deriva de dados publicos / registos
+    municipais. Esta guarda impede regressoes nesse posicionamento B2B.
+    """
+    forbidden = (
+        "311",
+        "permit",
+        "violation",
+        "socrata",
+        "open data",
+        "public record",
+        "government",
+        "agency",
+        "department of",
+        "service request",
+        "inspection",
+        "city database",
+        "city records",
+        "municipal",
+    )
+    for niche, tpl in outbound_templates.TEMPLATES.items():
+        haystack = (tpl["subject"] + "\n" + tpl["body"]).lower()
+        for term in forbidden:
+            assert term not in haystack, f"nicho {niche!r} expoe origem: {term!r}"
+
+
 def test_outbound_config_exposes_niches_and_language(admin_client):
     client, headers, _ = admin_client
     body = client.get("/api/admin/outbound/config", headers=headers).json()

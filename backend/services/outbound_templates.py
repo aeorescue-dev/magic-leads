@@ -95,6 +95,13 @@ DEFAULT_NICHE = "general_contractors"
 
 # --------------------------------------------------------------- templates
 
+# COPY POLICY: never reveal where the data comes from. No mention of 311,
+# permits, code violations, city records, government agencies or "public
+# databases" - that is internal intelligence. MagicLeads is positioned as a
+# market-intelligence platform that connects contractors to active projects,
+# property owners and commercial opportunities. Tone: commercial, direct,
+# built to earn a reply (offer an exclusive sample for the contractor's city).
+#
 # Placeholders available to every template (all resolved from real data):
 #   {company_name}   recipient business name
 #   {contact_name}   recipient contact / first line of address book
@@ -105,120 +112,135 @@ DEFAULT_NICHE = "general_contractors"
 #   {count}          number of matching opportunities
 #   {sender_name}    signer (the MagicLeads rep)
 #
-# All copy is American Business English.
+# All copy is American Business English. Keep it ASCII: assert_english_only
+# rejects accents, curly quotes and em-dashes, so use ' and - only.
 TEMPLATES: dict[str, dict[str, str]] = {
     "general_contractors": {
-        "subject": "{count} new contractor leads in {city} this week",
+        "subject": "New project opportunities in {city} this week",
         "body": (
             "Hi {contact_name},\n\n"
-            "I'm {sender_name} with MagicLeads. We track open permits, code "
-            "violations and 311 service requests across {city} every day and "
-            "turn them into ready-to-work job leads.\n\n"
-            "Right now we have {count} active opportunities in {city} - for "
-            "example {address}. Each lead includes the property address and the "
-            "owner's contact details, so your team can reach out the same day.\n\n"
-            "Would you like a free sample of this week's list for {company_name}?\n\n"
+            "I'm {sender_name} from MagicLeads. We track active residential and "
+            "commercial property developments across {city} and deliver verified, "
+            "high-intent job leads directly to licensed general contractors.\n\n"
+            "We currently have {count} active project opportunities in {city} - "
+            "including verified properties near {address}. Each lead includes "
+            "direct decision-maker contact details so your team can submit bids "
+            "ahead of the competition.\n\n"
+            "Would {company_name} be open to reviewing a free sample list of this "
+            "week's top project leads in {city}?\n\n"
             "Best regards,\n"
             "{sender_name}\n"
-            "MagicLeads - contractor leads for {city}, {state}"
+            "MagicLeads - Premium Commercial & Residential Leads"
         ),
     },
     "roofing": {
-        "subject": "{count} roofing jobs open in {city} - free sample inside",
+        "subject": "New roofing projects in {city} this week",
         "body": (
             "Hi {contact_name},\n\n"
-            "This is {sender_name} at MagicLeads. We monitor roof permits, "
-            "structural violations and 311 reports across {city} and package "
-            "them as closing-ready roofing leads.\n\n"
-            "We currently have {count} active roofing and structure "
-            "opportunities in {city} - for instance {address}. Every record "
-            "comes with the property address, the issue on file and the owner's "
-            "contact info.\n\n"
-            "Want a free sample of this week's jobs for {company_name}?\n\n"
+            "I'm {sender_name} from MagicLeads. We track active residential and "
+            "commercial property developments across {city} and deliver verified "
+            "roofing and exterior leads directly to licensed roofing "
+            "contractors.\n\n"
+            "We currently have {count} active roofing projects in {city} - "
+            "including verified properties near {address}. Each lead includes "
+            "direct decision-maker contact details so your team can bid before "
+            "the competition.\n\n"
+            "Would {company_name} be open to reviewing a free sample list of this "
+            "week's top roofing opportunities in {city}?\n\n"
             "Best regards,\n"
             "{sender_name}\n"
-            "MagicLeads - roofing leads for {city}, {state}"
+            "MagicLeads - Premium Commercial & Residential Leads"
         ),
     },
     "remodeling": {
-        "subject": "{count} remodeling jobs in {city} - leads ready to work",
+        "subject": "New remodeling projects in {city} this week",
         "body": (
             "Hi {contact_name},\n\n"
-            "I'm {sender_name} with MagicLeads. We collect remodeling, "
-            "renovation and permit activity across {city} and hand it to local "
-            "remodeling companies as qualified leads.\n\n"
-            "There are {count} active remodeling opportunities in {city} right "
-            "now - one example is {address}. Each lead lists the property "
-            "address, the scope on record and the owner's contact details.\n\n"
-            "Would you like a free sample for {company_name} to test the "
-            "quality?\n\n"
+            "I'm {sender_name} from MagicLeads. We track active residential and "
+            "commercial property developments across {city} and deliver verified "
+            "remodeling and renovation leads directly to licensed remodeling "
+            "companies.\n\n"
+            "We currently have {count} active remodeling projects in {city} - "
+            "including verified properties near {address}. Each lead includes "
+            "direct decision-maker contact details so your team can bid before "
+            "the competition.\n\n"
+            "Would {company_name} be open to reviewing a free sample list of this "
+            "week's top remodeling opportunities in {city}?\n\n"
             "Best regards,\n"
             "{sender_name}\n"
-            "MagicLeads - remodeling leads for {city}, {state}"
+            "MagicLeads - Premium Commercial & Residential Leads"
         ),
     },
     "plumbing": {
-        "subject": "{count} plumbing jobs in {city} - work available now",
+        "subject": "New plumbing projects in {city} this week",
         "body": (
             "Hi {contact_name},\n\n"
-            "This is {sender_name} at MagicLeads. We track plumbing violations, "
-            "unsanitary conditions and permit activity across {city} and turn "
-            "them into plumbing work leads.\n\n"
-            "We have {count} active plumbing opportunities in {city} - for "
-            "example {address}. Each one comes with the property address, the "
-            "issue on file and the owner's contact details.\n\n"
-            "Interested in a free sample for {company_name}?\n\n"
+            "I'm {sender_name} from MagicLeads. We track active residential and "
+            "commercial property developments across {city} and deliver verified "
+            "plumbing leads directly to licensed plumbing contractors.\n\n"
+            "We currently have {count} active plumbing projects in {city} - "
+            "including verified properties near {address}. Each lead includes "
+            "direct decision-maker contact details so your team can bid before "
+            "the competition.\n\n"
+            "Would {company_name} be open to reviewing a free sample list of this "
+            "week's top plumbing opportunities in {city}?\n\n"
             "Best regards,\n"
             "{sender_name}\n"
-            "MagicLeads - plumbing leads for {city}, {state}"
+            "MagicLeads - Premium Commercial & Residential Leads"
         ),
     },
     "electrical": {
-        "subject": "{count} electrical jobs in {city} - verified leads",
+        "subject": "New electrical projects in {city} this week",
         "body": (
             "Hi {contact_name},\n\n"
-            "I'm {sender_name} with MagicLeads. We monitor electrical, elevator "
-            "and gas violations across {city} so licensed electrical "
-            "contractors can act on them first.\n\n"
-            "There are {count} active electrical opportunities in {city} right "
-            "now - for example {address}. Every lead includes the property "
-            "address, the issue on file and the owner's contact info.\n\n"
-            "Would you like a free sample this week for {company_name}?\n\n"
+            "I'm {sender_name} from MagicLeads. We track active residential and "
+            "commercial property developments across {city} and deliver verified "
+            "electrical leads directly to licensed electrical contractors.\n\n"
+            "We currently have {count} active electrical projects in {city} - "
+            "including verified properties near {address}. Each lead includes "
+            "direct decision-maker contact details so your team can bid before "
+            "the competition.\n\n"
+            "Would {company_name} be open to reviewing a free sample list of this "
+            "week's top electrical opportunities in {city}?\n\n"
             "Best regards,\n"
             "{sender_name}\n"
-            "MagicLeads - electrical leads for {city}, {state}"
+            "MagicLeads - Premium Commercial & Residential Leads"
         ),
     },
     "hvac": {
-        "subject": "{count} heating and HVAC jobs in {city} - free sample",
+        "subject": "New heating and HVAC projects in {city} this week",
         "body": (
             "Hi {contact_name},\n\n"
-            "This is {sender_name} at MagicLeads. We track heating complaints, "
-            "gas issues and mold reports across {city} and package them as HVAC "
-            "service leads.\n\n"
-            "We currently have {count} active heating and HVAC opportunities in "
-            "{city} - for example {address}. Each record includes the property "
-            "address, the issue on file and the owner's contact details.\n\n"
-            "Want a free sample of this week's jobs for {company_name}?\n\n"
+            "I'm {sender_name} from MagicLeads. We track active residential and "
+            "commercial property developments across {city} and deliver verified "
+            "heating and HVAC leads directly to HVAC companies.\n\n"
+            "We currently have {count} active heating and HVAC projects in {city} "
+            "- including verified properties near {address}. Each lead includes "
+            "direct decision-maker contact details so your team can bid before "
+            "the competition.\n\n"
+            "Would {company_name} be open to reviewing a free sample list of this "
+            "week's top HVAC opportunities in {city}?\n\n"
             "Best regards,\n"
             "{sender_name}\n"
-            "MagicLeads - HVAC leads for {city}, {state}"
+            "MagicLeads - Premium Commercial & Residential Leads"
         ),
     },
     "restoration": {
-        "subject": "{count} restoration jobs in {city} - leads ready now",
+        "subject": "New restoration projects in {city} this week",
         "body": (
             "Hi {contact_name},\n\n"
-            "I'm {sender_name} with MagicLeads. We monitor mold, unsanitary, "
-            "rodent and debris reports across {city} and turn them into "
-            "restoration and cleanup leads.\n\n"
-            "There are {count} active restoration opportunities in {city} right "
-            "now - for example {address}. Each lead lists the property address, "
-            "the issue on file and the owner's contact info.\n\n"
-            "Would you like a free sample for {company_name}?\n\n"
+            "I'm {sender_name} from MagicLeads. We track active residential and "
+            "commercial property developments across {city} and deliver verified "
+            "restoration and cleanup leads directly to restoration companies.\n\n"
+            "We currently have {count} active restoration projects in {city} - "
+            "including verified properties near {address}. Each lead includes "
+            "direct decision-maker contact details so your team can bid before "
+            "the competition.\n\n"
+            "Would {company_name} be open to reviewing a free sample list of this "
+            "week's top restoration opportunities in {city}?\n\n"
             "Best regards,\n"
             "{sender_name}\n"
-            "MagicLeads - restoration leads for {city}, {state}"
+            "MagicLeads - Premium Commercial & Residential Leads"
         ),
     },
 }
