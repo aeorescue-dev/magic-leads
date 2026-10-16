@@ -4,6 +4,7 @@ import os
 import smtplib
 import socket
 import sqlite3
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
@@ -21,7 +22,7 @@ from .access import (
     normalize_status,
     parse_dt,
 )
-from .lead_rules import institutional_owner_name_where, is_institutional_name
+from .lead_rules import institutional_owner_name_matches, is_institutional_name
 from .searchbug import PhoneLookupResult, searchbug_service
 from .translations import DEFAULT_LOCALE
 from .translations import render as _render_i18n
@@ -127,6 +128,31 @@ def _qualified_where(alias: str = "") -> str:
         _not_junk_where(alias),
     ]
     return " AND ".join(parts)
+
+
+# ----- Cache in-process do resumo do dashboard (P0 de performance) -----
+# `get_dashboard_summary` fazia ~11 varreduras pesadas idênticas (≈290 ms cada
+# na base local, ≈3.8 s no total) e era recomputado a cada pedido: mount,
+# polling de 30 s e mudanças de cidade/tipo. O resumo depende apenas do
+# conjunto de categorias de interesse (não do utilizador), pelo que é seguro
+# cacheá-lo por esse conjunto. TTL curto mantém a frescura (a cadência do
+# scraper é muito mais lenta); `clear_dashboard_summary_cache()` permite
+# invalidar explicitamente (ex.: no fim de cada scrape).
+_DASHBOARD_SUMMARY_CACHE: dict = {}
+_DASHBOARD_SUMMARY_CACHE_LOCK = threading.Lock()
+try:
+    _DASHBOARD_SUMMARY_CACHE_TTL = float(
+        os.environ.get("DASHBOARD_SUMMARY_CACHE_TTL", "45")
+    )
+except (TypeError, ValueError):
+    _DASHBOARD_SUMMARY_CACHE_TTL = 45.0
+
+
+def clear_dashboard_summary_cache() -> None:
+    """Invalida o cache in-process do resumo do dashboard."""
+    with _DASHBOARD_SUMMARY_CACHE_LOCK:
+        _DASHBOARD_SUMMARY_CACHE.clear()
+
 
 # Banco de dados SQLite: em produção DEVE apontar para volume persistente (Railway).
 # Prioridade: LEADS_DB_PATH > DATA_DIR/leads.db > data/leads.db (repo, dev local).
@@ -3830,6 +3856,20 @@ class DatabaseService:
         Returns:
             Dict com totais reais filtrados por interesse do usuário.
         """
+        # Normaliza as categorias (canónicas ou legadas PT) — define o filtro da
+        # query e a chave do cache.
+        db_cats: List[str] = []
+        if interest_categories:
+            db_cats = normalize_trade_categories(interest_categories)
+
+        cache_key = frozenset(db_cats)
+        if _DASHBOARD_SUMMARY_CACHE_TTL > 0:
+            now = time.monotonic()
+            with _DASHBOARD_SUMMARY_CACHE_LOCK:
+                cached = _DASHBOARD_SUMMARY_CACHE.get(cache_key)
+                if cached and (now - cached[0]) < _DASHBOARD_SUMMARY_CACHE_TTL:
+                    return cached[1]
+
         conn = get_connection()
         try:
             # Base query com filtro de 7 dias em updated_at (cada varredura toca os leads)
@@ -3839,116 +3879,118 @@ class DatabaseService:
                   AND datetime(updated_at) >= datetime('now', '-7 days')
                   AND {_qualified_where()}
             """
-            params = []
+            params: list = []
 
             # Se tem interesses, filtrar por categoria.
             # As chaves chegam canónicas (ex.: "Roof") — o antigo `cat_map`
             # só conhecia as legadas PT ("telhado"), pelo que `cat_map.get(c)`
             # devolvia None e o filtro era DESCARTADO em silêncio (o resumo
             # mostrava todos os leads, ignorando as categorias escolhidas).
-            if interest_categories:
-                db_cats = normalize_trade_categories(interest_categories)
-                if db_cats:
-                    placeholders = ",".join("?" * len(db_cats))
-                    base_where += f" AND issue_category IN ({placeholders})"
-                    params.extend(db_cats)
+            if db_cats:
+                placeholders = ",".join("?" * len(db_cats))
+                base_where += f" AND issue_category IN ({placeholders})"
+                params.extend(db_cats)
 
-            # Total no interesse
-            total_interested = conn.execute(
-                f"SELECT COUNT(*) AS c FROM leads {base_where}", params
-            ).fetchone()["c"]
-
-            # Última Varredura do Robô (baseado em leads realmente inseridos recentemente)
-            # Conta leads criados nas últimas 2h (janela da varredura periódica do robô)
-            # e agrupa por cidade para mostrar as fontes ativas.
-            recent_cutoff = datetime.utcnow() - timedelta(hours=2)
-            recent_cutoff_str = recent_cutoff.strftime("%Y-%m-%d %H:%M:%S")
-            # Contagem REAL de leads na janela da última varredura (sem LIMIT 100/estático)
-            recent_count = conn.execute(
-                f"SELECT COUNT(*) AS c FROM leads {base_where} AND updated_at >= ?",
-                params + [recent_cutoff_str]
-            ).fetchone()["c"]
-            # Amostra dos mais recentes (cidades/fontes e horário) — só para exibição
-            recent_leads = conn.execute(
-                f"SELECT updated_at, city FROM leads {base_where} AND updated_at >= ? ORDER BY updated_at DESC LIMIT 100",
-                params + [recent_cutoff_str]
+            # Varredura ÚNICA: todas as métricas derivam destas colunas. Antes
+            # o mesmo `base_where` era reexecutado ~11 vezes (≈290 ms cada).
+            rows = conn.execute(
+                f"SELECT updated_at, city, issue_category, urgency_level, owner_name "
+                f"FROM leads {base_where}",
+                params,
             ).fetchall()
 
-            if recent_count > 0 and recent_leads:
-                # Obtém as cidades mais recentes para mostrar as fontes
-                cities = list(set([r["city"] for r in recent_leads if r["city"]]))
+            total_interested = len(rows)
+
+            # Última Varredura do Robô (janela de 2h). A comparação de
+            # `updated_at` é feita como texto — mesma semântica do antigo
+            # `updated_at >= ?` do SQLite (BINARY em TEXT; a coluna usa
+            # `DEFAULT CURRENT_TIMESTAMP`, formato "YYYY-MM-DD HH:MM:SS").
+            recent_cutoff_str = (datetime.utcnow() - timedelta(hours=2)).strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+            recent = [
+                r for r in rows
+                if r["updated_at"] and r["updated_at"] >= recent_cutoff_str
+            ]
+            recent_count = len(recent)
+
+            with_contact = 0
+            urgent = 0
+            institutional = 0
+            private = 0
+            unknown = 0
+            by_category: dict = {}
+            by_city: dict = {}
+            by_urgency: dict = {}
+
+            for r in rows:
+                owner = r["owner_name"]
+                has_owner = owner is not None and owner != ""
+                if not has_owner:
+                    unknown += 1
+                else:
+                    with_contact += 1
+                    # `private` usa a MESMA função Python que o antigo UDF SQL
+                    # (`is_institutional_name`). `institutional` reproduz o
+                    # predicado SQL das contagens (institutional_owner_name_matches),
+                    # que é uma aproximação e pode divergir da regra Python —
+                    # exatamente como fazia o SQL antigo.
+                    if not is_institutional_name(owner):
+                        private += 1
+                    if institutional_owner_name_matches(owner):
+                        institutional += 1
+
+                if r["urgency_level"] == "high":
+                    urgent += 1
+
+                cat = r["issue_category"]
+                by_category[cat] = by_category.get(cat, 0) + 1
+                city = r["city"]
+                by_city[city] = by_city.get(city, 0) + 1
+                urg = r["urgency_level"]
+                by_urgency[urg] = by_urgency.get(urg, 0) + 1
+
+            if recent_count > 0 and recent:
+                # Amostra dos mais recentes (cidades/fontes e horário) — só para exibição
+                sample = sorted(
+                    recent, key=lambda r: r["updated_at"], reverse=True
+                )[:100]
+                cities = list(set([r["city"] for r in sample if r["city"]]))
                 cities_str = ", ".join(cities[:3]) + ("..." if len(cities) > 3 else "")
                 # Tempo desde a varredura mais recente
-                most_recent = datetime.fromisoformat(recent_leads[0]["updated_at"].replace("T", " ")) if hasattr(recent_leads[0]["updated_at"], "replace") else recent_leads[0]["updated_at"]
+                most_recent = datetime.fromisoformat(
+                    sample[0]["updated_at"].replace("T", " ")
+                ) if hasattr(sample[0]["updated_at"], "replace") else sample[0]["updated_at"]
                 if isinstance(most_recent, str):
                     most_recent = datetime.strptime(most_recent, "%Y-%m-%d %H:%M:%S")
                 hours_ago = max(1, round((datetime.now() - most_recent).total_seconds() / 3600))
                 last_scrape_info = f"{recent_count} novas oportunidades ({cities_str}) Atualizado há {hours_ago} horas · 100% com registro público"
             else:
                 # Fallback: usa a contagem 24h se não houver leads recentes
-                last_24h = conn.execute(
-                    f"SELECT COUNT(*) AS c FROM leads {base_where} AND updated_at >= datetime('now', '-24 hours')",
-                    params
-                ).fetchone()["c"]
+                last_24h_cutoff_str = (
+                    datetime.utcnow() - timedelta(hours=24)
+                ).strftime("%Y-%m-%d %H:%M:%S")
+                last_24h = sum(
+                    1 for r in rows
+                    if r["updated_at"] and r["updated_at"] >= last_24h_cutoff_str
+                )
                 last_scrape_info = f"{last_24h} novas oportunidades nas últimas 24h"
 
-            # Com contato (owner_name preenchido)
-            with_contact = conn.execute(
-                f"SELECT COUNT(*) AS c FROM leads {base_where} AND owner_name IS NOT NULL AND owner_name != ''",
-                params
-            ).fetchone()["c"]
-
-            # Urgentes (high)
-            urgent = conn.execute(
-                f"SELECT COUNT(*) AS c FROM leads {base_where} AND urgency_level = 'high'",
-                params
-            ).fetchone()["c"]
-
-            # Por tipo de proprietario: Privado vs Institucional/Governamental.
-            # Uma unica query (o filtro `private` e o complemento de total). A
-            # expressao SQL vive em lead_rules.institutional_owner_name_where
-            # para nunca divergir da classificacao por-lead (is_institutional_name).
-            institutional = conn.execute(
-                f"SELECT COUNT(*) AS c FROM leads {base_where} AND {institutional_owner_name_where()}",
-                params
-            ).fetchone()["c"]
-            # Tri-estado
-            private = conn.execute(
-                f"SELECT COUNT(*) AS c FROM leads {base_where} AND owner_name IS NOT NULL AND owner_name != '' AND is_institutional_name(owner_name)=0",
-                params,
-            ).fetchone()["c"]
-            unknown = conn.execute(
-                f"SELECT COUNT(*) AS c FROM leads {base_where} AND (owner_name IS NULL OR owner_name = '')",
-                params,
-            ).fetchone()["c"]
             by_owner_type = {
                 "institutional": institutional,
                 "private": private,
                 "unknown": unknown,
             }
 
-            # Por categoria (para os cards de interesse)
-            by_cat_rows = conn.execute(
-                f"SELECT issue_category, COUNT(*) AS c FROM leads {base_where} GROUP BY issue_category ORDER BY c DESC",
-                params
-            ).fetchall()
-            by_category = {r["issue_category"]: r["c"] for r in by_cat_rows}
+            # Ordena por contagem desc (mesma ordem do antigo `ORDER BY c DESC`).
+            by_category = dict(
+                sorted(by_category.items(), key=lambda kv: kv[1], reverse=True)
+            )
+            by_city = dict(
+                sorted(by_city.items(), key=lambda kv: kv[1], reverse=True)
+            )
 
-            # Por cidade
-            by_city_rows = conn.execute(
-                f"SELECT city, COUNT(*) AS c FROM leads {base_where} GROUP BY city ORDER BY c DESC",
-                params
-            ).fetchall()
-            by_city = {r["city"]: r["c"] for r in by_city_rows}
-
-            # Urgência breakdown
-            urgency_rows = conn.execute(
-                f"SELECT urgency_level, COUNT(*) AS c FROM leads {base_where} GROUP BY urgency_level",
-                params
-            ).fetchall()
-            by_urgency = {r["urgency_level"]: r["c"] for r in urgency_rows}
-
-            return {
+            result = {
                 "total_interested": total_interested,
                 "last_scrape": last_scrape_info,
                 "with_contact": with_contact,
@@ -3958,6 +4000,12 @@ class DatabaseService:
                 "by_urgency": by_urgency,
                 "by_owner_type": by_owner_type,
             }
+
+            if _DASHBOARD_SUMMARY_CACHE_TTL > 0:
+                with _DASHBOARD_SUMMARY_CACHE_LOCK:
+                    _DASHBOARD_SUMMARY_CACHE[cache_key] = (time.monotonic(), result)
+
+            return result
         finally:
             conn.close()
 

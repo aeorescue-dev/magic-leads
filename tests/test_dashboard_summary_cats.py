@@ -12,6 +12,7 @@ import uuid
 import pytest
 
 from backend.services.db import (
+    clear_dashboard_summary_cache,
     db_service,
     get_connection,
     normalize_trade_categories,
@@ -20,15 +21,19 @@ from backend.services.db import (
 
 @pytest.fixture(autouse=True)
 def _isolate_leads():
-    """Limpa `leads` antes e depois de cada teste.
+    """Limpa `leads` e o cache do resumo antes e depois de cada teste.
 
     As linhas inseridas aqui são visíveis para outros ficheiros (ex.:
     test_imports::test_leads_endpoint lista /api/leads) e este ficheiro corre
-    antes, pelo que sem isolamento poluiriam esses testes.
+    antes, pelo que sem isolamento poluiriam esses testes. O cache in-process
+    do resumo (TTL curto) também tem de ser invalidado entre testes, senão um
+    resultado de um teste serviria o seguinte.
     """
+    clear_dashboard_summary_cache()
     _clear_leads()
     yield
     _clear_leads()
+    clear_dashboard_summary_cache()
 
 
 

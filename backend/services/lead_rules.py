@@ -396,6 +396,33 @@ def institutional_owner_name_where(alias: str = "") -> str:
     return f"(({prefixes}) OR ({strong}))"
 
 
+def institutional_owner_name_matches(name: Optional[str]) -> bool:
+    """Réplica Python EXATA de `institutional_owner_name_where`.
+
+    Reproduz o predicado SQL das contagens agregadas
+    (`UPPER(COALESCE(owner_name,''))` com prefixos `LIKE 'PREFIX%'` ou tokens
+    fortes por substring), para que a agregação single-pass em Python produza
+    o MESMO número que a antiga query SQL.
+
+    NÃO coincide necessariamente com `is_institutional_name`: a regra Python
+    tem o critério extra do token médio não-final (ex.: "NYC PARKS" é
+    institucional pela regra Python mas não pelo predicado SQL). Por isso esta
+    função nunca deve ser trocada por aquela nas contagens.
+    """
+    if not name:
+        return False
+    upper = str(name).upper()
+    if not upper:
+        return False
+    for p in _INSTITUTIONAL_PREFIXES:
+        if upper.startswith(p):
+            return True
+    for t in _INSTITUTIONAL_STRONG_TOKENS:
+        if t in upper:
+            return True
+    return False
+
+
 def classify(lead: Mapping[str, Any]) -> dict[str, Any]:
     """Avalia um lead uma vez e devolve o veredito consumido pelo frontend."""
     name = lead.get("owner_name")
