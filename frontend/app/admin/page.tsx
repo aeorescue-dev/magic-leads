@@ -8,9 +8,15 @@ import {
   BellRing,
   CheckCircle2,
   Database,
+  Languages,
   Loader2,
+  Mail,
   RefreshCcw,
   Search,
+  Send,
+  SendHorizontal,
+  ShieldAlert,
+  Sparkles,
   Users,
   Wallet,
 } from "lucide-react";
@@ -18,6 +24,9 @@ import {
 import {
   AdminAlert,
   AdminApiError,
+  AdminOutboundConfigResponse,
+  AdminOutboundPreview,
+  AdminOutboundSimulation,
   AdminOverview,
   AdminPlannerMetrics,
   AdminPushMetrics,
@@ -31,6 +40,7 @@ import {
     AdminCreditLedgerResponse,
     AdminCreditReconcileResponse,
   fetchAdminAlerts,
+  fetchAdminOutboundConfig,
   fetchAdminOverview,
   fetchAdminPlanner,
   fetchAdminPush,
@@ -42,7 +52,10 @@ import {
     fetchAdminCreditBackfill,
     fetchAdminCreditLedger,
     fetchAdminCreditReconcile,
+  generateAdminOutboundPreview,
+  sendAdminOutbound,
   sendAdminTestPush,
+  simulateAdminOutbound,
 } from "@/lib/admin-api";
 import { AUTH_TOKEN_KEY } from "@/lib/api-client";
 
@@ -100,6 +113,444 @@ function fmtDt(value?: string | null) {
   const d = new Date(value.includes("T") ? value : value.replace(" ", "T"));
   if (isNaN(d.getTime())) return value;
   return d.toLocaleString("pt-PT", { dateStyle: "short", timeStyle: "short" });
+}
+
+// --------------------------------------------------------------- outbound
+
+const OUTBOUND_LABELS: Record<string, string> = {
+  send_enabled: "Envio ligado",
+  enrich_enabled: "Enriquecimento ligado",
+  batch_size: "Tamanho do lote",
+  max_spend_per_batch_usd: "Teto de gasto/lote (US$)",
+  daily_enrich_cap: "Teto diário de enriquecimento",
+  daily_send_cap: "Teto diário de envio",
+  per_mailbox_daily_cap: "Teto diário por caixa",
+  warmup_enabled: "Warm-up ligado",
+  min_warmup_days: "Dias mínimos de warm-up",
+  quiet_hours_start: "Hora de silêncio (início)",
+  quiet_hours_end: "Hora de silêncio (fim)",
+  scrape_fallback_snov: "Fallback Snov (scrape)",
+};
+
+const OUTBOUND_FLAGS = new Set([
+  "send_enabled",
+  "enrich_enabled",
+  "warmup_enabled",
+  "scrape_fallback_snov",
+]);
+
+function fmtUsd(usd: number) {
+  return `US$ ${(Number.isFinite(usd) ? usd : 0).toFixed(2)}`;
+}
+
+function OutboundPanel() {
+  const [config, setConfig] = useState<AdminOutboundConfigResponse | null>(null);
+  const [city, setCity] = useState<string>("");
+  const [niche, setNiche] = useState<string>("");
+  const [sim, setSim] = useState<AdminOutboundSimulation | null>(null);
+  const [preview, setPreview] = useState<AdminOutboundPreview | null>(null);
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [simulating, setSimulating] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [sendState, setSendState] = useState<{
+    state: "idle" | "sending" | "blocked" | "error";
+    message?: string;
+  }>({ state: "idle" });
+
+  const loadConfig = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const cfg = await fetchAdminOutboundConfig();
+      setConfig(cfg);
+      setCity((prev) => (prev && cfg.cities.includes(prev) ? prev : cfg.cities[0] ?? ""));
+      setNiche((prev) => prev || cfg.default_niche);
+    } catch (e) {
+      setError(
+        e instanceof AdminApiError ? e.message : "Falha ao carregar a configuração de outbound."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadConfig();
+  }, [loadConfig]);
+
+  const runPreview = useCallback(async () => {
+    if (!city) return;
+    setPreviewing(true);
+    setError(null);
+    try {
+      const result = await generateAdminOutboundPreview(city, niche || undefined);
+      setPreview(result);
+      setSubject(result.preview.subject);
+      setBody(result.preview.body);
+    } catch (e) {
+      setError(e instanceof AdminApiError ? e.message : "Falha ao gerar a prévia.");
+    } finally {
+      setPreviewing(false);
+    }
+  }, [city, niche]);
+
+  const runSimulation = useCallback(async () => {
+    if (!city) return;
+    setSimulating(true);
+    setError(null);
+    setSendState({ state: "idle" });
+    try {
+      const result = await simulateAdminOutbound(city, undefined, niche || undefined);
+      setSim(result);
+      setPreview(null);
+      setSubject(result.preview.subject);
+      setBody(result.preview.body);
+    } catch (e) {
+      setError(e instanceof AdminApiError ? e.message : "Falha na simulação.");
+    } finally {
+      setSimulating(false);
+    }
+  }, [city, niche]);
+
+  const trySend = useCallback(async () => {
+    if (!sim?.batch?.id) return;
+    setSendState({ state: "sending" });
+    try {
+      await sendAdminOutbound(sim.batch.id, city);
+      setSendState({ state: "error", message: "Resposta inesperada do servidor." });
+    } catch (e) {
+      if (e instanceof AdminApiError) {
+        setSendState({ state: "blocked", message: e.message });
+      } else {
+        setSendState({ state: "error", message: "Falha ao contactar o servidor." });
+      }
+    }
+  }, [sim, city]);
+
+  const cityConfig = city && config ? config.per_city[city] : null;
+  const sendEnabled = cityConfig ? cityConfig.send_enabled === "1" : false;
+  const configRows = cityConfig
+    ? Object.keys(OUTBOUND_LABELS).filter((k) => k in cityConfig)
+    : [];
+
+  // Prévia "ativa": a geração explícita tem prioridade; senão a da simulação.
+  const activePreview = preview ?? sim;
+  const previewLanguage = activePreview?.language ?? config?.language ?? "en-US";
+  const previewCount = sim ? sim.qualified_available : preview?.count ?? 0;
+  const recipient = activePreview?.recipient_sample ?? null;
+  const opportunity = activePreview?.opportunity_sample ?? null;
+  const sampleSource = activePreview?.sample_source;
+
+  return (
+    <Card
+      title="Outbound frio · simulador dry-run"
+      icon={<Mail className="h-4 w-4" />}
+      hint={`envio desligado — só simulação · templates EN (US)`}
+    >
+      <div className="space-y-4">
+        {/* selector de cidade */}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-slate-500">Cidade</span>
+          {(config?.cities ?? []).map((c) => (
+            <button
+              key={c}
+              onClick={() => {
+                setCity(c);
+                setSim(null);
+                setPreview(null);
+                setSendState({ state: "idle" });
+              }}
+              className={`rounded-lg border px-3 py-1.5 text-xs font-semibold ${
+                c === city
+                  ? "border-indigo-500/50 bg-indigo-500/15 text-indigo-300"
+                  : "border-white/10 text-slate-400 hover:bg-white/5"
+              }`}
+            >
+              {c}
+            </button>
+          ))}
+          {loading ? <Loader2 className="h-4 w-4 animate-spin text-slate-500" /> : null}
+        </div>
+
+        {/* selector de nicho (segmento de construção) */}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-slate-500">Nicho</span>
+          {(config?.niches ?? []).map((n) => (
+            <button
+              key={n.key}
+              onClick={() => {
+                setNiche(n.key);
+                setSim(null);
+                setPreview(null);
+                setSendState({ state: "idle" });
+              }}
+              className={`rounded-lg border px-3 py-1.5 text-xs font-semibold ${
+                n.key === niche
+                  ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-300"
+                  : "border-white/10 text-slate-400 hover:bg-white/5"
+              }`}
+            >
+              {n.label}
+            </button>
+          ))}
+        </div>
+
+        {error ? (
+          <p className="rounded-lg border border-rose-500/30 bg-rose-500/5 px-3 py-2 text-[11px] text-rose-300">
+            {error}
+          </p>
+        ) : null}
+
+        {/* config efetiva da cidade */}
+        {cityConfig ? (
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
+            {configRows.map((k) => {
+              const value = cityConfig[k];
+              const isFlag = OUTBOUND_FLAGS.has(k);
+              const on = value === "1";
+              return (
+                <div
+                  key={k}
+                  className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2"
+                >
+                  <div className="text-[10px] uppercase tracking-wider text-slate-500">
+                    {OUTBOUND_LABELS[k]}
+                  </div>
+                  <div
+                    className={`text-sm font-bold ${
+                      isFlag ? (on ? "text-emerald-400" : "text-slate-500") : "text-slate-100"
+                    }`}
+                  >
+                    {isFlag ? (on ? "ligado" : "desligado") : value}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
+
+        {/* gerar prévia + simular */}
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => void runPreview()}
+            disabled={!city || previewing}
+            className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50"
+          >
+            {previewing ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Sparkles className="h-3.5 w-3.5" />
+            )}
+            Gerar prévia (dados reais)
+          </button>
+          <button
+            onClick={() => void runSimulation()}
+            disabled={!city || simulating}
+            className="inline-flex items-center gap-2 rounded-lg bg-indigo-500 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-400 disabled:opacity-50"
+          >
+            {simulating ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Send className="h-3.5 w-3.5" />
+            )}
+            Simular lote (dry-run)
+          </button>
+          <span className="inline-flex items-center gap-1 rounded-md border border-white/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+            <Languages className="h-3 w-3" /> {previewLanguage}
+          </span>
+          <span className="text-[11px] text-slate-500">
+            Não envia nada. Calcula o inventário, o custo estimado e o template do nicho.
+          </span>
+        </div>
+
+        {/* dados reais que preenchem a prévia */}
+        {activePreview ? (
+          <div className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2.5">
+            <div className="mb-1.5 flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500">
+              <span>Prévia preenchida com dados reais</span>
+              <span
+                className={`rounded px-1.5 py-0.5 text-[9px] font-semibold ${
+                  sampleSource === "enriched_contact"
+                    ? "bg-emerald-500/15 text-emerald-300"
+                    : "bg-amber-500/15 text-amber-300"
+                }`}
+              >
+                {sampleSource === "enriched_contact"
+                  ? "contacto enriquecido"
+                  : "fallback: nome do proprietário"}
+              </span>
+              <span className="rounded bg-indigo-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-indigo-300">
+                {activePreview.niche_label}
+              </span>
+            </div>
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-slate-400 md:grid-cols-3">
+              <div>
+                <dt className="text-slate-600">Destinatário (empresa)</dt>
+                <dd className="text-slate-200">{recipient?.company_name ?? "your company"}</dd>
+              </div>
+              <div>
+                <dt className="text-slate-600">Contacto</dt>
+                <dd className="text-slate-200">{recipient?.contact_name ?? "there"}</dd>
+              </div>
+              <div>
+                <dt className="text-slate-600">E-mail destinatário</dt>
+                <dd className="text-slate-200">{recipient?.email ?? "— (a enriquecer)"}</dd>
+              </div>
+              <div>
+                <dt className="text-slate-600">Oportunidade (endereço)</dt>
+                <dd className="text-slate-200">{opportunity?.address ?? "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-slate-600">Categoria</dt>
+                <dd className="text-slate-200">{opportunity?.issue_category ?? "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-slate-600">Oportunidades no nicho</dt>
+                <dd className="text-slate-200">{previewCount}</dd>
+              </div>
+            </dl>
+          </div>
+        ) : null}
+
+        {/* resultado da simulação (custo + lote rascunho) */}
+        {sim ? (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <Kpi
+                label="Empreiteiros qualificados"
+                value={sim.qualified_available}
+                sub={`disponíveis em ${sim.city}`}
+              />
+              <Kpi
+                label="Tamanho do lote"
+                value={sim.batch_size}
+                sub={`configurado: ${sim.configured_batch_size}`}
+              />
+              <Kpi
+                label="Custo estimado"
+                value={
+                  <span className={sim.over_budget ? "text-amber-400" : "text-slate-100"}>
+                    {fmtUsd(sim.cost_estimate.total_usd)}
+                  </span>
+                }
+                sub={`teto: ${fmtUsd(Number(sim.max_spend_per_batch_usd) || 0)}`}
+              />
+              <Kpi
+                label="Lote rascunho"
+                value={sim.batch ? `#${sim.batch.id}` : "—"}
+                sub={sim.batch?.status ?? "—"}
+              />
+            </div>
+
+            {sim.over_budget ? (
+              <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-300">
+                Custo estimado acima do teto por lote ({fmtUsd(Number(sim.max_spend_per_batch_usd) || 0)}).
+                Reduz o tamanho do lote ou revê a config antes de avançar.
+              </p>
+            ) : null}
+
+            {/* detalhe do custo */}
+            <details className="rounded-lg border border-white/10 p-2">
+              <summary className="cursor-pointer text-xs font-semibold text-slate-400">
+                Como se chega ao custo
+              </summary>
+              <ul className="mt-2 space-y-1 text-[11px] text-slate-400">
+                <li>Scrape próprio (HTTP): {fmtUsd(sim.cost_estimate.scrape_cost_usd)}</li>
+                <li>
+                  Fallback Snov: {sim.cost_estimate.snov_emails} e-mail(s) ×{" "}
+                  {fmtUsd(sim.cost_estimate.snov_per_email_usd)} ={" "}
+                  {fmtUsd(sim.cost_estimate.snov_cost_usd)}
+                </li>
+                <li>
+                  Taxa estimada de fallback:{" "}
+                  {Math.round(sim.cost_estimate.snov_fallback_rate * 100)}%
+                </li>
+              </ul>
+            </details>
+          </div>
+        ) : null}
+
+        {/* prévia editável (gerada por nicho com dados reais) */}
+        {activePreview ? (
+          <div className="space-y-2">
+            <h3 className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500">
+              <span>Prévia do e-mail (editável)</span>
+              <span className="inline-flex items-center gap-1 rounded bg-indigo-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-indigo-300">
+                <Languages className="h-3 w-3" /> {previewLanguage}
+              </span>
+              <span className="rounded bg-slate-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-slate-300">
+                {activePreview.niche_label}
+              </span>
+            </h3>
+            <label className="block text-[11px] text-slate-500">
+              Assunto
+              <input
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-white/10 bg-[#0b0e14] px-3 py-2 text-xs text-slate-200 outline-none focus:border-indigo-500/50"
+              />
+            </label>
+            <label className="block text-[11px] text-slate-500">
+              Corpo
+              <textarea
+                value={body}
+                onChange={(e) => setBody(e.target.value)}
+                rows={10}
+                spellCheck={false}
+                className="mt-1 w-full resize-y rounded-lg border border-white/10 bg-[#0b0e14] px-3 py-2 font-mono text-[11px] leading-relaxed text-slate-200 outline-none focus:border-indigo-500/50"
+              />
+            </label>
+            <p className="text-[10px] text-slate-600">
+              Placeholders disponíveis: {(activePreview.placeholders ?? []).map((p) => `{${p}}`).join(", ")}.
+              O texto é editável na prévia e na simulação — ainda não persiste. Todo o copy é
+              redigido em inglês comercial americano (en-US).
+            </p>
+          </div>
+        ) : null}
+
+        {/* trava de segurança */}
+        {sim ? (
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-3 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2.5">
+              <ShieldAlert
+                className={`h-4 w-4 ${sendEnabled ? "text-amber-400" : "text-emerald-400"}`}
+              />
+              <div className="mr-auto text-[11px] text-slate-400">
+                {sendEnabled
+                  ? "Envio LIGADO na configuração, mas o motor ainda não existe."
+                  : "Envio DESLIGADO (send_enabled=0). Só a simulação está disponível."}
+              </div>
+              <button
+                onClick={() => void trySend()}
+                disabled={!sendEnabled || !sim.batch || sendState.state === "sending"}
+                title={sendEnabled ? undefined : "Bloqueado: send_enabled=0"}
+                className="inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-400 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {sendState.state === "sending" ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <SendHorizontal className="h-3.5 w-3.5" />
+                )}
+                Enviar lote real
+              </button>
+            </div>
+            {sendState.state === "blocked" || sendState.state === "error" ? (
+              <p
+                className={`text-[11px] font-semibold ${
+                  sendState.state === "blocked" ? "text-emerald-400" : "text-rose-400"
+                }`}
+              >
+                {sendState.message}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    </Card>
+  );
 }
 
 // --------------------------------------------------------------- gate
@@ -285,6 +736,9 @@ export default function AdminPage() {
           sub={`${overview?.credits.refunded_today ?? 0} estornados`}
         />
       </div>
+
+      {/* ------------------------------------------------------ outbound */}
+      <OutboundPanel />
 
       <div className="grid gap-5 lg:grid-cols-2">
         {/* -------------------------------------------------- fontes */}

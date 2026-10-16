@@ -51,8 +51,8 @@ from .models.schemas import (
 )
 from .scrapers.socrata_311 import socrata_scraper
 from .scrapers.socrata_discovery import socrata_discovery
-from .services import alert_planner, notifier, security
-from .services.db import db_service
+from .services import alert_planner, notifier, outbound_templates, security
+from .services.db import SERVED_CITIES, db_service
 from .services.enrichment import owner_enrichment
 from .services.lead_rules import (
     charges_credit,
@@ -1555,6 +1555,263 @@ async def admin_push_test(
     }
     sent = await push_service.send_to_user(admin["id"], push_payload)
     return {"status": "ok", "sent": sent, "subscriptions": len(subs), "configured": True}
+
+
+# ------------------------------------------------- Outbound (frio) — dry-run
+#
+# O motor de envio AINDA NAO EXISTE. Este bloco entrega apenas:
+#   1) leitura da config isolada por cidade (selector do painel);
+#   2) simulacao dry-run (preview: contagem, custo estimado, template);
+#   3) um endpoint de envio fail-closed que recusa sempre enquanto
+#      `send_enabled=0` e nunca envia de facto.
+# Nada aqui escreve em `outbound_messages` nem chama Gmail/Snov.
+
+# Estimativas para o simulador. O scrape e' gratis (pedidos HTTP proprios);
+# so' o fallback pago (Snov) tem custo por e-mail encontrado. A taxa e' a
+# fraccao estimada de leads que o scrape NAO resolve e cai para o Snov.
+_SNOV_PER_EMAIL_USD = 0.015
+_SNOV_FALLBACK_RATE = 0.7
+
+# Idioma OBRIGATORIO: todo o copy outbound e' ingles comercial americano
+# (en-US), independentemente do idioma da plataforma. Os templates vivem em
+# `services/outbound_templates.py`, que se auto-valida no import (sem acentos
+# nem termos PT). Placeholders {company_name}/{city}/... sao preenchidos com
+# dados REAIS antes de o admin aprovar o lote.
+_OUTBOUND_LANGUAGE = "en-US"
+
+
+def _estimate_outbound_cost(batch_size: int) -> dict:
+    """Estima o custo do enriquecimento de um lote (scrape gratis + Snov pago).
+
+    Devolve o detalhe para o painel mostrar de onde vem o numero — nao e' um
+    orcamento, e' uma heuristica conservadora para o admin decidir.
+    """
+    size = max(0, int(batch_size))
+    snov_hits = round(size * _SNOV_FALLBACK_RATE)
+    snov_cost = round(snov_hits * _SNOV_PER_EMAIL_USD, 2)
+    return {
+        "batch_size": size,
+        "scrape_cost_usd": 0.0,
+        "snov_emails": snov_hits,
+        "snov_per_email_usd": _SNOV_PER_EMAIL_USD,
+        "snov_fallback_rate": _SNOV_FALLBACK_RATE,
+        "snov_cost_usd": snov_cost,
+        "total_usd": snov_cost,
+    }
+
+
+class OutboundSimulateRequest(BaseModel):
+    city: str
+    batch_size: int | None = None
+    niche: str | None = None
+
+
+class OutboundPreviewRequest(BaseModel):
+    city: str
+    niche: str | None = None
+
+
+class OutboundSendRequest(BaseModel):
+    batch_id: int
+    city: str | None = None
+
+
+def _build_outbound_preview(
+    city: str,
+    niche: str,
+    count: int,
+    sample: dict | None,
+    contact: dict | None = None,
+) -> dict:
+    """Monta o e-mail REAL (dados reais + template do nicho) para o painel.
+
+    Destinatario (empresa/contacto) vem de `outbound_contacts` quando ha
+    enriquecimento; caso contrario cai no `owner_name` do lead (stand-in).
+    A oportunidade (endereco/categoria) vem sempre do lead real. `render_email`
+    corre `assert_english_only`, garantindo en-US tambem apos edicao.
+    """
+    context = outbound_templates.build_context(
+        sample, city, niche, count, contact=contact
+    )
+    rendered = outbound_templates.render_email(niche, context)
+    if contact and (contact.get("company_name") or contact.get("email")):
+        sample_source = "enriched_contact"
+    else:
+        sample_source = "lead_owner_fallback"
+    return {
+        "niche": niche,
+        "niche_label": outbound_templates.NICHES.get(
+            niche, outbound_templates.NICHES[outbound_templates.DEFAULT_NICHE]
+        )["label"],
+        "language": _OUTBOUND_LANGUAGE,
+        "template": outbound_templates.get_template(niche),
+        "placeholders": sorted(context.keys()),
+        "context": context,
+        "sample_source": sample_source,
+        "recipient_sample": contact,
+        "opportunity_sample": sample,
+        "preview": rendered,
+    }
+
+
+@app.get("/api/admin/outbound/config")
+async def admin_outbound_config(_admin: dict = Depends(_require_admin_user)):
+    """Config isolada por cidade + global, para o selector do painel.
+
+    Cada cidade recebe a config efetiva (defaults < global < override da cidade),
+    por isso a UI mostra exatamente o que o motor de envio aplicaria.
+    """
+    per_city = {}
+    for city in SERVED_CITIES:
+        per_city[city] = await db_service.get_outbound_config(city)
+    global_config = await db_service.get_outbound_config()
+    return {
+        "cities": list(SERVED_CITIES),
+        "global": global_config,
+        "per_city": per_city,
+        "send_enabled": global_config.get("send_enabled") == "1",
+        "niches": outbound_templates.niche_options(),
+        "default_niche": outbound_templates.DEFAULT_NICHE,
+        "language": _OUTBOUND_LANGUAGE,
+    }
+
+
+@app.post("/api/admin/outbound/preview")
+async def admin_outbound_preview(
+    payload: OutboundPreviewRequest,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Gera dinamicamente a previa do e-mail para um nicho — com dados REAIS.
+
+    Nao cria lote nem envia nada. Conta as oportunidades da cidade para o
+    nicho, escolhe uma linha real da BD e devolve o e-mail ja preenchido
+    (ingles americano), pronto a rever/editar no painel antes de aprovar.
+    """
+    city = (payload.city or "").strip().upper()
+    if city not in SERVED_CITIES:
+        raise HTTPException(status_code=400, detail="Cidade nao servida")
+
+    niche = (payload.niche or "").strip() or outbound_templates.DEFAULT_NICHE
+    if niche not in outbound_templates.NICHES:
+        raise HTTPException(status_code=400, detail="Nicho invalido")
+
+    categories = outbound_templates.niche_categories(niche)
+    count = await db_service.count_qualified_contractors_in_city(city, categories)
+    sample = await db_service.get_outbound_sample_lead(city, categories)
+    contact = await db_service.get_outbound_sample_contact(city)
+
+    preview = _build_outbound_preview(city, niche, count, sample, contact)
+    preview.update({"city": city, "count": count})
+    return preview
+
+
+@app.post("/api/admin/outbound/simulate")
+async def admin_outbound_simulate(
+    payload: OutboundSimulateRequest,
+    admin: dict = Depends(_require_admin_user),
+):
+    """Simulacao dry-run de um lote: NAO envia nem cria mensagens.
+
+    Devolve o inventario de leads qualificados da cidade, o tamanho de lote
+    efetivo, a estimativa de custo e o template editavel. Grava um lote em
+    RASCUNHO (`dry_run=1`, status='previewed') so' para auditoria.
+    """
+    city = (payload.city or "").strip().upper()
+    if city not in SERVED_CITIES:
+        raise HTTPException(status_code=400, detail="Cidade nao servida")
+
+    niche = (payload.niche or "").strip() or outbound_templates.DEFAULT_NICHE
+    if niche not in outbound_templates.NICHES:
+        raise HTTPException(status_code=400, detail="Nicho invalido")
+
+    categories = outbound_templates.niche_categories(niche)
+    config = await db_service.get_outbound_config(city)
+    qualified = await db_service.count_qualified_contractors_in_city(city, categories)
+
+    try:
+        configured = int(config.get("batch_size") or 0)
+    except (TypeError, ValueError):
+        configured = 0
+    requested = payload.batch_size if (payload.batch_size and payload.batch_size > 0) else configured
+    batch_size = max(0, min(requested, qualified))
+
+    cost = _estimate_outbound_cost(batch_size)
+
+    sample = await db_service.get_outbound_sample_lead(city, categories)
+    contact = await db_service.get_outbound_sample_contact(city)
+    preview = _build_outbound_preview(city, niche, qualified, sample, contact)
+
+    batch = await db_service.create_outbound_batch(
+        city=city,
+        name=f"[DRY-RUN] {city} - {niche} - {batch_size} leads",
+        filters_json=json.dumps(
+            {"city": city, "niche": niche, "batch_size": batch_size, "dry_run": True}
+        ),
+        created_by=admin.get("id"),
+        kind="email",
+    )
+    if batch and batch.get("id"):
+        batch = await db_service.mark_outbound_batch_previewed(
+            batch["id"], batch_size, cost["total_usd"]
+        )
+
+    max_spend = config.get("max_spend_per_batch_usd")
+    try:
+        over_budget = cost["total_usd"] > float(max_spend or 0)
+    except (TypeError, ValueError):
+        over_budget = False
+
+    return {
+        "city": city,
+        "niche": niche,
+        "qualified_available": qualified,
+        "batch_size": batch_size,
+        "configured_batch_size": configured,
+        "config": config,
+        "cost_estimate": cost,
+        "over_budget": over_budget,
+        "max_spend_per_batch_usd": max_spend,
+        "language": _OUTBOUND_LANGUAGE,
+        "niche_label": preview["niche_label"],
+        "template": preview["template"],
+        "placeholders": preview["placeholders"],
+        "preview": preview["preview"],
+        "context": preview["context"],
+        "sample_source": preview["sample_source"],
+        "recipient_sample": preview["recipient_sample"],
+        "opportunity_sample": preview["opportunity_sample"],
+        "send_enabled": config.get("send_enabled") == "1",
+        "batch": batch,
+        "dry_run": True,
+    }
+
+
+@app.post("/api/admin/outbound/send")
+async def admin_outbound_send(
+    payload: OutboundSendRequest,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Travao de seguranca: o envio real esta DESLIGADO.
+
+    Fail-closed em duas camadas: se `send_enabled=0` (estado por defeito),
+    recusa com 409; mesmo com `send_enabled=1`, o motor nao existe, logo
+    devolve 503. Nunca envia nada nesta fase do projeto.
+    """
+    city = (payload.city or "").strip().upper()
+    config = (
+        await db_service.get_outbound_config(city)
+        if city in SERVED_CITIES
+        else await db_service.get_outbound_config()
+    )
+    if config.get("send_enabled") != "1":
+        raise HTTPException(
+            status_code=409,
+            detail="Envio desligado (send_enabled=0). Use a simulacao dry-run.",
+        )
+    raise HTTPException(
+        status_code=503,
+        detail="Motor de envio ainda nao implementado (fase futura: Gmail API).",
+    )
 
 
 @app.get("/api/admin/planner")

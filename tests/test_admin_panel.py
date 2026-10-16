@@ -31,6 +31,7 @@ from backend.models.schemas import (
     SourceType,
     UrgencyLevel,
 )
+from backend.services import outbound_templates
 from backend.services.db import db_service, get_connection
 
 ADMIN_EMAIL = "pytest-admin@magicleads.app"
@@ -560,3 +561,359 @@ def test_admin_push_test_authorized_for_admin(admin_client):
     client, headers, _ = admin_client
     r = client.post("/api/admin/push/test", headers=headers)
     assert r.status_code not in (401, 403), r.text
+
+
+# ------------------------------------------------- Outbound frio (dry-run)
+#
+# Invariantes fixados aqui:
+#   1. O simulador é dry-run: NUNCA enfileira em `outbound_messages`.
+#   2. A config é isolada por cidade (defaults < global < override da cidade).
+#   3. A trava de envio é fail-closed: `send_enabled=0` -> 409; mesmo ligado,
+#      o motor não existe -> 503. Nunca 200 a enviar.
+#   4. O gate de role vale também para estas rotas.
+
+
+def _count(table: str) -> int:
+    conn = get_connection()
+    try:
+        return conn.execute(f"SELECT COUNT(*) AS c FROM {table}").fetchone()["c"]
+    finally:
+        conn.close()
+
+
+def _seed_outbound_lead(
+    city: str,
+    external_id: str,
+    address: str = "1 OUTBOUND SIM AVENUE",
+    owner_name: str = "VITORIO CONTRACTING LLC",
+    issue_category: IssueCategory = IssueCategory.ROOF,
+) -> int:
+    """Semeia um lead que passa `_qualified_where` (endereço + categoria + gatilho)."""
+    payload = EnrichedLead(
+        external_id=external_id,
+        source_type=SourceType.SERVICE_311,
+        address=address,
+        city=city,
+        state="NY",
+        zip_code="10001",
+        lat=None,
+        lng=None,
+        county="KINGS",
+        issue_category=issue_category,
+        issue_description="outbound dry-run seed",
+        urgency_level=UrgencyLevel.MEDIUM,
+        case_status="open",
+        owner_name=owner_name,
+        owner_phone="3475550111",
+        owner_email="outbound.seed@example.com",
+        date_reported=datetime(2026, 1, 15, 12, 0, 0),
+        image_url=None,
+        source_url=None,
+    )
+    row = db_service._service.insert_lead_new(payload)
+    assert row is not None
+    return row["id"]
+
+
+def test_outbound_config_requires_admin(admin_client, nonadmin_client):
+    client, _, _ = admin_client
+    _, nonadmin_headers = nonadmin_client
+    assert client.get("/api/admin/outbound/config").status_code == 401
+    assert (
+        client.get("/api/admin/outbound/config", headers=nonadmin_headers).status_code == 403
+    )
+
+
+def test_outbound_config_lists_served_cities_with_send_disabled(admin_client):
+    client, headers, _ = admin_client
+    r = client.get("/api/admin/outbound/config", headers=headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["cities"] == ["NYC", "CHICAGO", "DALLAS", "BOSTON"]
+    assert body["send_enabled"] is False
+    for city in body["cities"]:
+        assert city in body["per_city"]
+        assert body["per_city"][city]["send_enabled"] == "0"
+
+
+def test_outbound_config_city_override_is_isolated(admin_client):
+    """O override de uma cidade não deve contaminar as outras; o global propaga."""
+    client, headers, _ = admin_client
+    svc = db_service._service
+    svc.set_outbound_config("batch_size", "111", city="")
+    svc.set_outbound_config("batch_size", "222", city="NYC")
+    try:
+        body = client.get("/api/admin/outbound/config", headers=headers).json()
+        assert body["per_city"]["NYC"]["batch_size"] == "222"
+        assert body["per_city"]["CHICAGO"]["batch_size"] == "111"
+        assert body["global"]["batch_size"] == "111"
+    finally:
+        svc.set_outbound_config("batch_size", "200", city="")
+        conn = get_connection()
+        try:
+            conn.execute("DELETE FROM outbound_config WHERE city='NYC' AND key='batch_size'")
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def test_outbound_send_is_fail_closed_when_disabled(admin_client):
+    """Travao de seguranca: com send_enabled=0 o envio recusa com 409."""
+    client, headers, _ = admin_client
+    r = client.post(
+        "/api/admin/outbound/send", headers=headers, json={"batch_id": 1, "city": "NYC"}
+    )
+    assert r.status_code == 409, r.text
+
+
+def test_outbound_send_is_503_when_enabled_but_engine_absent(admin_client):
+    """Mesmo ligado, sem motor implementado o envio devolve 503 (nunca 200)."""
+    client, headers, _ = admin_client
+    svc = db_service._service
+    svc.set_outbound_config("send_enabled", "1", city="")
+    try:
+        r = client.post(
+            "/api/admin/outbound/send", headers=headers, json={"batch_id": 1, "city": "NYC"}
+        )
+        assert r.status_code == 503, r.text
+    finally:
+        svc.set_outbound_config("send_enabled", "0", city="")
+
+
+def test_outbound_simulate_requires_admin(admin_client, nonadmin_client):
+    client, _, _ = admin_client
+    _, nonadmin_headers = nonadmin_client
+    body = {"city": "NYC"}
+    assert client.post("/api/admin/outbound/simulate", json=body).status_code == 401
+    assert (
+        client.post(
+            "/api/admin/outbound/simulate", json=body, headers=nonadmin_headers
+        ).status_code
+        == 403
+    )
+
+
+def test_outbound_simulate_rejects_unserved_city(admin_client):
+    client, headers, _ = admin_client
+    r = client.post("/api/admin/outbound/simulate", headers=headers, json={"city": "MIAMI"})
+    assert r.status_code == 400, r.text
+
+
+def test_outbound_simulate_dry_run_never_queues_messages(admin_client):
+    """O simulador calcula e grava um rascunho, mas nunca enfileira mensagens."""
+    client, headers, _ = admin_client
+    _seed_outbound_lead("NYC", "outbound-sim-1", address="1 OUTBOUND SIM AVENUE")
+
+    before = _count("outbound_messages")
+    r = client.post(
+        "/api/admin/outbound/simulate", headers=headers, json={"city": "NYC", "batch_size": 50}
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    assert body["dry_run"] is True
+    assert body["send_enabled"] is False
+    assert body["qualified_available"] >= 1
+    assert body["batch_size"] == min(50, body["qualified_available"])
+    assert set(body["template"]) == {"subject", "body"}
+
+    # Custo: scrape grátis + fallback Snov pago.
+    assert body["cost_estimate"]["scrape_cost_usd"] == 0
+    assert body["cost_estimate"]["snov_cost_usd"] >= 0
+    assert body["cost_estimate"]["total_usd"] == body["cost_estimate"]["snov_cost_usd"]
+
+    # Nada foi enfileirado: a simulação não escreve em outbound_messages.
+    assert _count("outbound_messages") == before
+
+    # O lote fica apenas como rascunho previewed.
+    assert body["batch"]["status"] == "previewed"
+    assert body["batch"]["dry_run"] == 1
+    assert body["batch"]["contact_count"] == body["batch_size"]
+
+
+def test_outbound_simulate_caps_batch_at_inventory(admin_client):
+    """Pedir mais do que existe não inventa leads: o lote fica limitado ao inventário."""
+    client, headers, _ = admin_client
+    r = client.post(
+        "/api/admin/outbound/simulate", headers=headers, json={"city": "BOSTON", "batch_size": 100000}
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["batch_size"] == body["qualified_available"]
+    assert body["batch_size"] <= 100000
+
+
+# --------------------------------------------------------------------------
+# Templates dinâmicos por nicho + idioma obrigatório (en-US).
+#
+#   1. A prévia é gerada dinamicamente e preenchida com dados REAIS (endereço,
+#      empresa/contacto) — nunca placeholders por resolver.
+#   2. Todo o copy outbound é inglês comercial americano; o guard de import
+#      recusa qualquer template fora de en-US.
+#   3. O nicho filtra o inventário (telhados não contam canalização).
+# --------------------------------------------------------------------------
+
+
+def test_outbound_templates_are_english_only():
+    """Nenhum template pode conter acentos/termos PT — o guard recusa no import."""
+    for niche, tpl in outbound_templates.TEMPLATES.items():
+        outbound_templates.assert_english_only(tpl["subject"])
+        outbound_templates.assert_english_only(tpl["body"])
+    # O guard é real: uma string PT dispara excepção.
+    with pytest.raises(ValueError):
+        outbound_templates.assert_english_only("Ola empreiteiro, obrigado pela preferencia")
+    with pytest.raises(ValueError):
+        outbound_templates.assert_english_only("Hello - rotação")
+
+
+def test_outbound_config_exposes_niches_and_language(admin_client):
+    client, headers, _ = admin_client
+    body = client.get("/api/admin/outbound/config", headers=headers).json()
+    assert body["language"] == "en-US"
+    assert body["default_niche"] in {n["key"] for n in body["niches"]}
+    assert any(n["key"] == "roofing" for n in body["niches"])
+
+
+def test_outbound_preview_requires_admin(admin_client, nonadmin_client):
+    client, _, _ = admin_client
+    _, nonadmin_headers = nonadmin_client
+    body = {"city": "NYC", "niche": "roofing"}
+    assert client.post("/api/admin/outbound/preview", json=body).status_code == 401
+    assert (
+        client.post(
+            "/api/admin/outbound/preview", json=body, headers=nonadmin_headers
+        ).status_code
+        == 403
+    )
+
+
+def test_outbound_preview_rejects_unserved_city_and_bad_niche(admin_client):
+    client, headers, _ = admin_client
+    assert (
+        client.post(
+            "/api/admin/outbound/preview", headers=headers, json={"city": "MIAMI"}
+        ).status_code
+        == 400
+    )
+    assert (
+        client.post(
+            "/api/admin/outbound/preview",
+            headers=headers,
+            json={"city": "NYC", "niche": "not_a_niche"},
+        ).status_code
+        == 400
+    )
+
+
+def test_outbound_preview_renders_real_data_in_english(admin_client):
+    """A prévia preenche os placeholders com dados reais, toda em en-US."""
+    client, headers, _ = admin_client
+    _seed_outbound_lead(
+        "CHICAGO",
+        "outbound-preview-1",
+        address="500 N MICHIGAN AVENUE",
+        owner_name="SKYLINE ROOFING LLC",
+        issue_category=IssueCategory.ROOF,
+    )
+    r = client.post(
+        "/api/admin/outbound/preview", headers=headers, json={"city": "CHICAGO", "niche": "roofing"}
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["language"] == "en-US"
+    assert body["niche"] == "roofing"
+    assert body["count"] >= 1
+
+    subject = body["preview"]["subject"]
+    rendered = body["preview"]["body"]
+    # Sem placeholders por resolver.
+    assert "{" not in subject and "}" not in subject
+    assert "{" not in rendered and "}" not in rendered
+    # Dados reais: endereço e nome da empresa aparecem no corpo.
+    assert "500 N MICHIGAN AVENUE" in rendered
+    assert "SKYLINE ROOFING LLC" in rendered
+    # A prévia e' estritamente en-US (mesmo guard dos templates).
+    outbound_templates.assert_english_only(subject)
+    outbound_templates.assert_english_only(rendered)
+
+
+def test_outbound_preview_falls_back_to_lead_owner_without_enrichment(admin_client):
+    """Sem contacto enriquecido, a prévia usa owner_name (stand-in) e sinaliza-o."""
+    client, headers, _ = admin_client
+    _seed_outbound_lead(
+        "DALLAS",
+        "outbound-preview-fallback-1",
+        address="100 MAIN STREET",
+        owner_name="LONE STAR BUILDERS LLC",
+        issue_category=IssueCategory.ROOF,
+    )
+    r = client.post(
+        "/api/admin/outbound/preview", headers=headers, json={"city": "DALLAS", "niche": "roofing"}
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["sample_source"] == "lead_owner_fallback"
+    assert "LONE STAR BUILDERS LLC" in body["preview"]["body"]
+
+
+def test_outbound_preview_uses_enriched_contact_when_available(admin_client):
+    """Com contacto enriquecido, empresa/contacto reais entram na prévia."""
+    client, headers, _ = admin_client
+    lead_id = _seed_outbound_lead(
+        "BOSTON",
+        "outbound-preview-contact-1",
+        address="77 BEACON STREET",
+        owner_name="BEACON PROPERTY HOLDINGS",
+        issue_category=IssueCategory.ROOF,
+    )
+    db_service._service.create_outbound_contact(
+        lead_id=lead_id,
+        email="hello@bostonroofing.example",
+        city="BOSTON",
+        state="MA",
+        company_name="BOSTON ROOFING PARTNERS",
+        contact_name="Alex Morgan",
+    )
+    r = client.post(
+        "/api/admin/outbound/preview", headers=headers, json={"city": "BOSTON", "niche": "roofing"}
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["sample_source"] == "enriched_contact"
+    assert "BOSTON ROOFING PARTNERS" in body["preview"]["body"]
+    assert "Alex Morgan" in body["preview"]["body"]
+
+
+def test_outbound_niche_filters_inventory(admin_client):
+    """O nicho restringe a contagem: telhados não incluem canalização.
+
+    Roof/Structure e Plumbing/Unsanitary/Lead são conjuntos disjuntos, logo o
+    total (general contractors) é >= soma dos dois nichos e maior que cada um.
+    """
+    client, headers, _ = admin_client
+    _seed_outbound_lead(
+        "NYC",
+        "outbound-niche-roof-1",
+        address="1 NICHE ROOF AVENUE",
+        issue_category=IssueCategory.ROOF,
+    )
+    _seed_outbound_lead(
+        "NYC",
+        "outbound-niche-plumb-1",
+        address="2 NICHE PLUMB AVENUE",
+        issue_category=IssueCategory.PLUMBING,
+    )
+
+    def _count_for(niche: str) -> int:
+        return client.post(
+            "/api/admin/outbound/preview", headers=headers, json={"city": "NYC", "niche": niche}
+        ).json()["count"]
+
+    total = _count_for("general_contractors")
+    roof = _count_for("roofing")
+    plumb = _count_for("plumbing")
+
+    assert roof >= 1 and plumb >= 1
+    assert roof + plumb <= total
+    assert roof < total and plumb < total
+

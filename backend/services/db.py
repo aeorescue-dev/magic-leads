@@ -7,7 +7,7 @@ import sqlite3
 import threading
 import time
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import anyio
 import httpx
@@ -22,7 +22,11 @@ from .access import (
     normalize_status,
     parse_dt,
 )
-from .lead_rules import institutional_owner_name_matches, is_institutional_name
+from .lead_rules import (
+    institutional_owner_name_matches,
+    institutional_owner_name_where,
+    is_institutional_name,
+)
 from .searchbug import PhoneLookupResult, searchbug_service
 from .translations import DEFAULT_LOCALE
 from .translations import render as _render_i18n
@@ -562,6 +566,132 @@ CREATE INDEX IF NOT EXISTS idx_push_deliveries_sent ON push_deliveries (sent_at)
 CREATE INDEX IF NOT EXISTS idx_push_deliveries_outcome ON push_deliveries (outcome);
 CREATE INDEX IF NOT EXISTS idx_push_deliveries_expired ON push_deliveries (outcome, sent_at);
 
+-- OUTBOUND: E-mail frio B2B (pausado — envios desativados por defeito)
+-- Mantém isolamento por cidade e utiliza Gmail API sobre HTTPS.
+-- Chave composta para configuração por cidade: city='' = default global (override por cidade).
+
+CREATE TABLE IF NOT EXISTS outbound_config (
+  scope TEXT NOT NULL DEFAULT 'outbound',
+  city TEXT NOT NULL DEFAULT '',
+  key TEXT NOT NULL,
+  value TEXT,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (scope, city, key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_outbound_config_scope_city ON outbound_config (scope, city);
+
+CREATE TABLE IF NOT EXISTS sending_mailboxes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  email TEXT NOT NULL UNIQUE,
+  provider TEXT NOT NULL DEFAULT 'gmail',
+  transport TEXT NOT NULL DEFAULT 'gmail_api',
+  domain TEXT,
+  display_name TEXT,
+  city TEXT DEFAULT '',
+  daily_cap INTEGER NOT NULL DEFAULT 25,
+  enabled INTEGER NOT NULL DEFAULT 0,
+  warmup_state TEXT NOT NULL DEFAULT 'cold',
+  warmup_started_at TEXT,
+  last_send_at TEXT,
+  auth_ref TEXT,
+  notes TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_sending_mailboxes_enabled ON sending_mailboxes (enabled, city);
+CREATE INDEX IF NOT EXISTS idx_sending_mailboxes_city ON sending_mailboxes (city);
+
+CREATE TABLE IF NOT EXISTS outbound_contacts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  lead_id INTEGER REFERENCES leads(id) ON DELETE CASCADE,
+  kind TEXT DEFAULT 'business',
+  company_name TEXT,
+  contact_name TEXT,
+  email TEXT NOT NULL UNIQUE,
+  email_source TEXT DEFAULT 'scrape',
+  email_status TEXT DEFAULT 'unknown',
+  city TEXT,
+  state TEXT,
+  consent_basis TEXT DEFAULT 'b2b_legit_interest',
+  enriched_at TEXT,
+  last_verified_at TEXT,
+  unsubscribed INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_outbound_contacts_city ON outbound_contacts (city);
+CREATE INDEX IF NOT EXISTS idx_outbound_contacts_unsub ON outbound_contacts (unsubscribed);
+
+CREATE TABLE IF NOT EXISTS outbound_batches (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  city TEXT,
+  name TEXT,
+  kind TEXT NOT NULL DEFAULT 'email',
+  filters_json TEXT,
+  status TEXT NOT NULL DEFAULT 'draft',
+  contact_count INTEGER DEFAULT 0,
+  est_cost_usd REAL DEFAULT 0,
+  actual_cost_usd REAL DEFAULT 0,
+  dry_run INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  previewed_at TEXT,
+  started_at TEXT,
+  finished_at TEXT,
+  note TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_outbound_batches_city_status ON outbound_batches (city, status);
+CREATE INDEX IF NOT EXISTS idx_outbound_batches_status ON outbound_batches (status);
+
+CREATE TABLE IF NOT EXISTS outbound_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  batch_id INTEGER REFERENCES outbound_batches(id) ON DELETE CASCADE,
+  contact_id INTEGER REFERENCES outbound_contacts(id) ON DELETE SET NULL,
+  mailbox_id INTEGER REFERENCES sending_mailboxes(id) ON DELETE SET NULL,
+  city TEXT,
+  channel TEXT NOT NULL DEFAULT 'email',
+  to_email TEXT,
+  subject TEXT,
+  body_hash TEXT,
+  status TEXT NOT NULL DEFAULT 'queued',
+  error TEXT,
+  provider_id TEXT UNIQUE,
+  cost_usd REAL DEFAULT 0,
+  segments INTEGER DEFAULT 1,
+  queued_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  sent_at TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_outbound_messages_batch ON outbound_messages (batch_id, status);
+CREATE INDEX IF NOT EXISTS idx_outbound_messages_status ON outbound_messages (status);
+CREATE INDEX IF NOT EXISTS idx_outbound_messages_contact ON outbound_messages (contact_id);
+CREATE INDEX IF NOT EXISTS idx_outbound_messages_mailbox ON outbound_messages (mailbox_id, sent_at);
+
+CREATE TABLE IF NOT EXISTS suppressions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  value TEXT NOT NULL,
+  channel TEXT NOT NULL DEFAULT 'email',
+  reason TEXT DEFAULT 'manual',
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(value, channel)
+);
+
+CREATE INDEX IF NOT EXISTS idx_suppressions_value ON suppressions (value);
+
+CREATE TABLE IF NOT EXISTS outbound_daily_counters (
+  city TEXT NOT NULL DEFAULT '',
+  day TEXT NOT NULL,
+  sent INTEGER DEFAULT 0,
+  enriched INTEGER DEFAULT 0,
+  spend_usd REAL DEFAULT 0,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (city, day)
+);
+
 -- Fase 3: ledger append-only de créditos.
 --
 -- event_type:
@@ -618,6 +748,42 @@ def get_connection() -> sqlite3.Connection:
     except Exception:
         pass
     return conn
+
+
+# Valores por defeito da configuração de outbound. `get_outbound_config` recorre
+# sempre a este mapa, por isso o sistema funciona mesmo sem linhas semeadas.
+# As linhas globais (city='') são semeadas em `init_db` apenas como ponto de
+# partida editável na UI; overrides por cidade (city='NYC', etc.) são criados à
+# medida. `send_enabled`/`enrich_enabled` arrancam a 0 (envio DESLIGADO).
+_OUTBOUND_CONFIG_DEFAULTS = {
+    "send_enabled": "0",
+    "enrich_enabled": "0",
+    "batch_size": "200",
+    "max_spend_per_batch_usd": "6.0",
+    "daily_enrich_cap": "1000",
+    "daily_send_cap": "100",
+    "per_mailbox_daily_cap": "25",
+    "warmup_enabled": "1",
+    "min_warmup_days": "14",
+    "quiet_hours_start": "22:00",
+    "quiet_hours_end": "07:00",
+    "scrape_fallback_snov": "1",
+}
+
+
+def _seed_outbound_defaults(conn: sqlite3.Connection) -> None:
+    """Semeia as linhas globais da configuração de outbound (idempotente).
+
+    Chamado só a partir de `init_db` (nunca em `get_connection`, que corre em
+    cada query): o seed é um INSERT OR IGNORE de 12 chaves, barato mas fora do
+    caminho crítico.
+    """
+    for key, value in _OUTBOUND_CONFIG_DEFAULTS.items():
+        conn.execute(
+            "INSERT OR IGNORE INTO outbound_config (scope, city, key, value) "
+            "VALUES ('outbound', '', ?, ?)",
+            (key, value),
+        )
 
 
 def _ratio(numerator: Optional[int], denominator: Optional[int]) -> Optional[float]:
@@ -732,6 +898,7 @@ def init_db() -> None:
                     conn = get_connection()
                 conn.executescript(DEFAULT_SCHEMA)
                 _migrate_schema(conn)
+                _seed_outbound_defaults(conn)
                 conn.commit()
             finally:
                 conn.close()
@@ -995,6 +1162,347 @@ class DatabaseService:
 
     def __init__(self):
         init_db()
+
+    _OUTBOUND_CONFIG_DEFAULTS = _OUTBOUND_CONFIG_DEFAULTS
+
+    def get_outbound_config(self, city: Optional[str] = None) -> dict:
+        """Merge global and per-city outbound config (global wins, city overrides)."""
+        cfg = dict(self._OUTBOUND_CONFIG_DEFAULTS)
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT city, key, value FROM outbound_config WHERE scope='outbound'"
+            ).fetchall()
+            for r in rows:
+                if not r["key"]:
+                    continue
+                if r["city"] == "":
+                    if r["key"] in cfg or True:
+                        cfg[r["key"]] = r["value"] if r["value"] is not None else cfg.get(r["key"])
+            city_up = (city or "").strip().upper()
+            for r in rows:
+                if r["city"] and (r["city"].upper() == city_up or r["city"] == city):
+                    cfg[r["key"]] = r["value"] if r["value"] is not None else cfg.get(r["key"])
+        finally:
+            conn.close()
+        return cfg
+
+    def set_outbound_config(self, key: str, value: str, city: str = "", scope: str = "outbound") -> bool:
+        conn = get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO outbound_config (scope, city, key, value, updated_at) "
+                "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(scope, city, key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP",
+                (scope, city or "", key, str(value) if value is not None else None),
+            )
+            conn.commit()
+            return True
+        except Exception:
+            return False
+        finally:
+            conn.close()
+
+    def list_sending_mailboxes(self, enabled_only: bool = False) -> List[dict]:
+        conn = get_connection()
+        try:
+            if enabled_only:
+                rows = conn.execute(
+                    "SELECT * FROM sending_mailboxes WHERE enabled=1 ORDER BY id"
+                ).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM sending_mailboxes ORDER BY id").fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def upsert_sending_mailbox(
+        self,
+        email: str,
+        provider: str = "gmail",
+        transport: str = "gmail_api",
+        domain: Optional[str] = None,
+        display_name: Optional[str] = None,
+        city: str = "",
+        daily_cap: int = 25,
+        enabled: int = 0,
+        warmup_state: str = "cold",
+        auth_ref: Optional[str] = None,
+        notes: Optional[str] = None,
+    ) -> Optional[dict]:
+        conn = get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO sending_mailboxes (email, provider, transport, domain, display_name, city, daily_cap, enabled, warmup_state, auth_ref, notes, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(email) DO UPDATE SET provider=excluded.provider, transport=excluded.transport, domain=excluded.domain, display_name=excluded.display_name, city=excluded.city, daily_cap=excluded.daily_cap, enabled=excluded.enabled, warmup_state=excluded.warmup_state, auth_ref=excluded.auth_ref, notes=excluded.notes, updated_at=CURRENT_TIMESTAMP",
+                (email.lower(), provider, transport, domain, display_name, city or "", int(daily_cap), int(enabled), warmup_state, auth_ref, notes),
+            )
+            conn.commit()
+            r = conn.execute("SELECT * FROM sending_mailboxes WHERE email=?", (email.lower(),)).fetchone()
+            return dict(r) if r else None
+        except Exception:
+            return None
+        finally:
+            conn.close()
+
+    def create_outbound_batch(
+        self,
+        city: Optional[str] = None,
+        name: Optional[str] = None,
+        filters_json: Optional[str] = None,
+        created_by: Optional[int] = None,
+        kind: str = "email",
+    ) -> Optional[dict]:
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "INSERT INTO outbound_batches (city, name, kind, filters_json, status, dry_run, created_by) "
+                "VALUES (?, ?, ?, ?, 'draft', 1, ?)",
+                (city, name, kind, filters_json, created_by),
+            )
+            conn.commit()
+            bid = cur.lastrowid
+            r = conn.execute("SELECT * FROM outbound_batches WHERE id=?", (bid,)).fetchone()
+            return dict(r) if r else None
+        except Exception:
+            return None
+        finally:
+            conn.close()
+
+    def mark_outbound_batch_previewed(
+        self,
+        batch_id: int,
+        contact_count: int,
+        est_cost_usd: float,
+    ) -> Optional[dict]:
+        """Grava a estimativa de um lote de dry-run (status='previewed').
+
+        Nunca cria mensagens nem ativa envio: apenas fixa `contact_count`,
+        `est_cost_usd` e `previewed_at` para auditoria/confirmacao futura.
+        """
+        conn = get_connection()
+        try:
+            conn.execute(
+                "UPDATE outbound_batches SET status='previewed', contact_count=?, "
+                "est_cost_usd=?, previewed_at=CURRENT_TIMESTAMP WHERE id=?",
+                (int(contact_count), float(est_cost_usd), batch_id),
+            )
+            conn.commit()
+            r = conn.execute("SELECT * FROM outbound_batches WHERE id=?", (batch_id,)).fetchone()
+            return dict(r) if r else None
+        except Exception:
+            return None
+        finally:
+            conn.close()
+
+    def list_outbound_batches(self, limit: int = 50) -> List[dict]:
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM outbound_batches ORDER BY id DESC LIMIT ?",
+                (int(limit),),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def add_suppression(self, value: str, channel: str = "email", reason: str = "manual") -> bool:
+        if not value:
+            return False
+        conn = get_connection()
+        try:
+            conn.execute(
+                "INSERT OR IGNORE INTO suppressions (value, channel, reason) VALUES (?, ?, ?)",
+                (value.lower(), channel, reason),
+            )
+            conn.commit()
+            return True
+        except Exception:
+            return False
+        finally:
+            conn.close()
+
+    def is_suppressed(self, value: str, channel: str = "email") -> bool:
+        if not value:
+            return False
+        conn = get_connection()
+        try:
+            r = conn.execute(
+                "SELECT 1 FROM suppressions WHERE lower(value)=? AND channel IN (?, 'all') LIMIT 1",
+                (value.lower(), channel),
+            ).fetchone()
+            return bool(r)
+        finally:
+            conn.close()
+
+    def list_suppressions(self, limit: int = 100) -> List[dict]:
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM suppressions ORDER BY id DESC LIMIT ?",
+                (int(limit),),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def create_outbound_contact(
+        self,
+        lead_id: Optional[int],
+        email: str,
+        city: Optional[str] = None,
+        state: Optional[str] = None,
+        company_name: Optional[str] = None,
+        contact_name: Optional[str] = None,
+        email_source: str = "scrape",
+        kind: str = "business",
+    ) -> Optional[dict]:
+        if not email:
+            return None
+        conn = get_connection()
+        try:
+            conn.execute(
+                "INSERT OR IGNORE INTO outbound_contacts (lead_id, kind, company_name, contact_name, email, email_source, email_status, city, state) "
+                "VALUES (?, ?, ?, ?, ?, ?, 'unknown', ?, ?)",
+                (lead_id, kind, company_name, contact_name, email.lower(), email_source, city, state),
+            )
+            conn.commit()
+            r = conn.execute("SELECT * FROM outbound_contacts WHERE email=?", (email.lower(),)).fetchone()
+            return dict(r) if r else None
+        except Exception:
+            return None
+        finally:
+            conn.close()
+
+    def enqueue_outbound_message(
+        self,
+        batch_id: Optional[int],
+        contact_id: Optional[int],
+        mailbox_id: Optional[int] = None,
+        city: Optional[str] = None,
+        to_email: Optional[str] = None,
+        subject: Optional[str] = None,
+        body_hash: Optional[str] = None,
+        cost_usd: float = 0.0,
+        segments: int = 1,
+    ) -> Optional[dict]:
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "INSERT INTO outbound_messages (batch_id, contact_id, mailbox_id, city, channel, to_email, subject, body_hash, status, cost_usd, segments) "
+                "VALUES (?, ?, ?, ?, 'email', ?, ?, ?, 'queued', ?, ?)",
+                (batch_id, contact_id, mailbox_id, city, to_email and to_email.lower(), subject, body_hash, float(cost_usd), int(segments)),
+            )
+            conn.commit()
+            mid = cur.lastrowid
+            r = conn.execute("SELECT * FROM outbound_messages WHERE id=?", (mid,)).fetchone()
+            return dict(r) if r else None
+        except Exception:
+            return None
+        finally:
+            conn.close()
+
+    def count_qualified_contractors_in_city(
+        self, city: str, categories: Optional[List[str]] = None
+    ) -> int:
+        """Leads qualificados disponíveis numa cidade (para o simulador dry-run).
+
+        Qualificado = `_qualified_where` (endereço + 16 ofícios + gatilho
+        preditivo) E proprietário NÃO institucional (a própria cidade não é
+        empreiteiro acionável) E lead ainda disponível (não reservado/
+        convertido). Espelha a lógica de inventário do feed.
+
+        `categories` restringe ao nicho (ex.: Roof/Structure para telhados);
+        vazio/None conta todos os ofícios.
+        """
+        if not city:
+            return 0
+        conn = get_connection()
+        try:
+            where = _qualified_where()
+            not_institutional = institutional_owner_name_where()
+            params: List[Any] = [city]
+            cat_clause = ""
+            clean = [c for c in (categories or []) if c]
+            if clean:
+                marks = ", ".join("?" for _ in clean)
+                cat_clause = f"AND issue_category IN ({marks}) "
+                params.extend(clean)
+            q = (
+                "SELECT COUNT(*) AS c FROM leads "
+                f"WHERE {where} "
+                "AND UPPER(TRIM(city)) = UPPER(TRIM(?)) "
+                "AND (lead_status IS NULL OR lead_status = 'available') "
+                f"AND NOT ({not_institutional}) "
+                f"{cat_clause}"
+            )
+            return int(conn.execute(q, params).fetchone()["c"])
+        finally:
+            conn.close()
+
+    def get_outbound_sample_lead(
+        self, city: str, categories: Optional[List[str]] = None
+    ) -> Optional[dict]:
+        """Uma linha REAL qualificada da cidade, para a prévia do template.
+
+        Devolve os campos que o e-mail usa (empresa/proprietário, endereço,
+        categoria, estado) do lead mais recente que casa o filtro. Serve para o
+        painel mostrar exatamente o e-mail que sairia, com dados reais.
+        """
+        if not city:
+            return None
+        conn = get_connection()
+        try:
+            where = _qualified_where()
+            not_institutional = institutional_owner_name_where()
+            params: List[Any] = [city]
+            cat_clause = ""
+            clean = [c for c in (categories or []) if c]
+            if clean:
+                marks = ", ".join("?" for _ in clean)
+                cat_clause = f"AND issue_category IN ({marks}) "
+                params.extend(clean)
+            q = (
+                "SELECT owner_name, address, city, COALESCE(state, '') AS state, "
+                "issue_category, issue_description, date_reported "
+                "FROM leads "
+                f"WHERE {where} "
+                "AND UPPER(TRIM(city)) = UPPER(TRIM(?)) "
+                "AND (lead_status IS NULL OR lead_status = 'available') "
+                f"AND NOT ({not_institutional}) "
+                f"{cat_clause}"
+                "ORDER BY COALESCE(date_reported, '') DESC LIMIT 1"
+            )
+            row = conn.execute(q, params).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def get_outbound_sample_contact(self, city: str) -> Optional[dict]:
+        """Um contacto REAL enriquecido da cidade, para a prévia do template.
+
+        `outbound_contacts` guarda a empresa/contacto/e-mail reais do
+        destinatário (empreiteiro), obtidos por scrape/Snov. Se ainda não
+        houver enriquecimento (tabela vazia), devolve None e a prévia cai no
+        fallback (owner_name do lead) — fica claro para o admin.
+        """
+        if not city:
+            return None
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT id, lead_id, company_name, contact_name, email, state "
+                "FROM outbound_contacts "
+                "WHERE UPPER(TRIM(city)) = UPPER(TRIM(?)) "
+                "AND COALESCE(unsubscribed, 0) = 0 "
+                "AND COALESCE(email, '') <> '' "
+                "ORDER BY COALESCE(enriched_at, created_at, '') DESC LIMIT 1",
+                (city,),
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
 
     def insert_lead(self, lead: EnrichedLead) -> bool:
         """Insere lead no banco; ignora se (external_id, source_type) já existe."""
@@ -5844,9 +6352,12 @@ class DatabaseService:
         return False
 
     def _send_via_email_api(self, email: str, reset_url: str) -> bool:
-        """Envia via Resend HTTPS (:443, liberado no Railway). Retorna False em falha."""
-        import traceback
+        """Envia via Resend HTTPS (:443, liberado no Railway). Retorna False em falha.
 
+        NOTA: Apenas e-mails TRANSAUCIONAIS (recuperação de senha). A AUP da Resend
+        proíbe e-mail frio/prospeção — o outbound usa caixas próprias (Gmail API).
+        """
+        import traceback
 
         email_from = settings.EMAIL_FROM or "Magic Leads <noreply@magic-leads-production.up.railway.app>"
         body = (
@@ -6645,6 +7156,147 @@ class AsyncDatabaseService:
 
     async def reconcile_credits(self, user_id: Optional[int] = None) -> dict:
         return await anyio.to_thread.run_sync(self._service.reconcile_credits, user_id)
+
+    # ===== OUTBOUND (queue structure — envio pausado) =====
+    async def get_outbound_config(self, city: Optional[str] = None) -> dict:
+        return await anyio.to_thread.run_sync(self._service.get_outbound_config, city)
+
+    async def set_outbound_config(self, key: str, value: str, city: str = "", scope: str = "outbound") -> bool:
+        return await anyio.to_thread.run_sync(self._service.set_outbound_config, key, value, city, scope)
+
+    async def list_sending_mailboxes(self, enabled_only: bool = False) -> List[dict]:
+        return await anyio.to_thread.run_sync(self._service.list_sending_mailboxes, enabled_only)
+
+    async def upsert_sending_mailbox(
+        self,
+        email: str,
+        provider: str = "gmail",
+        transport: str = "gmail_api",
+        domain: Optional[str] = None,
+        display_name: Optional[str] = None,
+        city: str = "",
+        daily_cap: int = 25,
+        enabled: int = 0,
+        warmup_state: str = "cold",
+        auth_ref: Optional[str] = None,
+        notes: Optional[str] = None,
+    ) -> Optional[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.upsert_sending_mailbox,
+            email,
+            provider,
+            transport,
+            domain,
+            display_name,
+            city,
+            daily_cap,
+            enabled,
+            warmup_state,
+            auth_ref,
+            notes,
+        )
+
+    async def create_outbound_batch(
+        self,
+        city: Optional[str] = None,
+        name: Optional[str] = None,
+        filters_json: Optional[str] = None,
+        created_by: Optional[int] = None,
+        kind: str = "email",
+    ) -> Optional[dict]:
+        return await anyio.to_thread.run_sync(self._service.create_outbound_batch, city, name, filters_json, created_by, kind)
+
+    async def mark_outbound_batch_previewed(
+        self,
+        batch_id: int,
+        contact_count: int,
+        est_cost_usd: float,
+    ) -> Optional[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.mark_outbound_batch_previewed,
+            batch_id,
+            contact_count,
+            est_cost_usd,
+        )
+
+    async def list_outbound_batches(self, limit: int = 50) -> List[dict]:
+        return await anyio.to_thread.run_sync(self._service.list_outbound_batches, limit)
+
+    async def add_suppression(self, value: str, channel: str = "email", reason: str = "manual") -> bool:
+        return await anyio.to_thread.run_sync(self._service.add_suppression, value, channel, reason)
+
+    async def is_suppressed(self, value: str, channel: str = "email") -> bool:
+        return await anyio.to_thread.run_sync(self._service.is_suppressed, value, channel)
+
+    async def list_suppressions(self, limit: int = 100) -> List[dict]:
+        return await anyio.to_thread.run_sync(self._service.list_suppressions, limit)
+
+    async def create_outbound_contact(
+        self,
+        lead_id: Optional[int],
+        email: str,
+        city: Optional[str] = None,
+        state: Optional[str] = None,
+        company_name: Optional[str] = None,
+        contact_name: Optional[str] = None,
+        email_source: str = "scrape",
+        kind: str = "business",
+    ) -> Optional[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.create_outbound_contact,
+            lead_id,
+            email,
+            city,
+            state,
+            company_name,
+            contact_name,
+            email_source,
+            kind,
+        )
+
+    async def enqueue_outbound_message(
+        self,
+        batch_id: Optional[int],
+        contact_id: Optional[int],
+        mailbox_id: Optional[int] = None,
+        city: Optional[str] = None,
+        to_email: Optional[str] = None,
+        subject: Optional[str] = None,
+        body_hash: Optional[str] = None,
+        cost_usd: float = 0.0,
+        segments: int = 1,
+    ) -> Optional[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.enqueue_outbound_message,
+            batch_id,
+            contact_id,
+            mailbox_id,
+            city,
+            to_email,
+            subject,
+            body_hash,
+            cost_usd,
+            segments,
+        )
+
+    async def count_qualified_contractors_in_city(
+        self, city: str, categories: Optional[List[str]] = None
+    ) -> int:
+        return await anyio.to_thread.run_sync(
+            self._service.count_qualified_contractors_in_city, city, categories
+        )
+
+    async def get_outbound_sample_lead(
+        self, city: str, categories: Optional[List[str]] = None
+    ) -> Optional[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.get_outbound_sample_lead, city, categories
+        )
+
+    async def get_outbound_sample_contact(self, city: str) -> Optional[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.get_outbound_sample_contact, city
+        )
 
 
 # Instância global (interface async, compatível com o antigo supabase_service)

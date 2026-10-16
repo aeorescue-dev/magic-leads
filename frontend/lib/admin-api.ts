@@ -334,6 +334,141 @@ export function fetchAdminCreditReconcile(userId = 0): Promise<AdminCreditReconc
   return adminFetch(`/credit-reconcile${q}`, { method: "POST" });
 }
 
+// ------------------------------------------------- Outbound (frio) — dry-run
+//
+// O motor de envio NÃO existe. Estes endpoints servem o selector de cidade
+// isolado por configuração, a simulação dry-run (contagem + custo + template)
+// e uma trava de segurança de envio que recusa sempre enquanto `send_enabled=0`.
+// Os templates são gerados dinamicamente por nicho e são SEMPRE em inglês
+// comercial americano (en-US), independentemente do idioma da plataforma.
+export interface OutboundConfig {
+  [key: string]: string;
+}
+
+export interface OutboundNiche {
+  key: string;
+  label: string;
+  categories: string[];
+}
+
+export interface AdminOutboundConfigResponse {
+  cities: string[];
+  global: OutboundConfig;
+  per_city: Record<string, OutboundConfig>;
+  send_enabled: boolean;
+  niches: OutboundNiche[];
+  default_niche: string;
+  language: string;
+}
+
+export interface AdminOutboundCostEstimate {
+  batch_size: number;
+  scrape_cost_usd: number;
+  snov_emails: number;
+  snov_per_email_usd: number;
+  snov_fallback_rate: number;
+  snov_cost_usd: number;
+  total_usd: number;
+}
+
+export interface AdminOutboundBatch {
+  id: number;
+  city: string | null;
+  name: string | null;
+  kind: string;
+  status: string;
+  contact_count: number;
+  est_cost_usd: number;
+  actual_cost_usd: number;
+  dry_run: number;
+  created_by: number | null;
+  created_at: string;
+  previewed_at: string | null;
+}
+
+export interface AdminOutboundRecipientSample {
+  id: number;
+  company_name: string | null;
+  contact_name: string | null;
+  email: string | null;
+  state: string | null;
+}
+
+export interface AdminOutboundOpportunitySample {
+  owner_name: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  issue_category: string | null;
+}
+
+export interface AdminOutboundPreview {
+  city: string;
+  niche: string;
+  niche_label: string;
+  language: string;
+  count: number;
+  template: { subject: string; body: string };
+  placeholders: string[];
+  context: Record<string, string>;
+  sample_source: "enriched_contact" | "lead_owner_fallback";
+  recipient_sample: AdminOutboundRecipientSample | null;
+  opportunity_sample: AdminOutboundOpportunitySample | null;
+  preview: { subject: string; body: string };
+}
+
+export interface AdminOutboundSimulation extends Omit<AdminOutboundPreview, "city" | "count"> {
+  city: string;
+  qualified_available: number;
+  batch_size: number;
+  configured_batch_size: number;
+  config: OutboundConfig;
+  cost_estimate: AdminOutboundCostEstimate;
+  over_budget: boolean;
+  max_spend_per_batch_usd: string | number;
+  send_enabled: boolean;
+  batch: AdminOutboundBatch | null;
+  dry_run: boolean;
+}
+
+export function fetchAdminOutboundConfig(): Promise<AdminOutboundConfigResponse> {
+  return adminFetch<AdminOutboundConfigResponse>("/outbound/config");
+}
+
+export function generateAdminOutboundPreview(
+  city: string,
+  niche?: string
+): Promise<AdminOutboundPreview> {
+  return adminFetch<AdminOutboundPreview>("/outbound/preview", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ city, niche: niche ?? null }),
+  });
+}
+
+export function simulateAdminOutbound(
+  city: string,
+  batchSize?: number,
+  niche?: string
+): Promise<AdminOutboundSimulation> {
+  return adminFetch<AdminOutboundSimulation>("/outbound/simulate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ city, batch_size: batchSize ?? null, niche: niche ?? null }),
+  });
+}
+
+export function sendAdminOutbound(
+  batchId: number,
+  city?: string
+): Promise<{ status: string }> {
+  return adminFetch<{ status: string }>("/outbound/send", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ batch_id: batchId, city: city ?? null }),
+  });
+}
+
 export interface AdminPushTestResult {
   status: "ok";
   sent: number;
