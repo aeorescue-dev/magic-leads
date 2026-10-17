@@ -103,8 +103,10 @@ DEFAULT_NICHE = "general_contractors"
 # built to earn a reply (offer an exclusive sample for the contractor's city).
 #
 # Placeholders available to every template (all resolved from real data):
-#   {company_name}   recipient business name
-#   {contact_name}   recipient contact / first line of address book
+#   {company_name}   recipient business name (falls back to "your team" when
+#                    the name is missing, generic or an address SPV)
+#   {contact_name}   recipient contact (falls back to "<Company> team", else
+#                    "there") - see build_context for the rules
 #   {city}           friendly market name ("New York City", "Chicago", ...)
 #   {state}          two-letter state ("NY", "IL", "TX", "MA")
 #   {category}       humanized trade for the niche ("roofing", "plumbing")
@@ -324,6 +326,63 @@ def humanize_category(category: Optional[str]) -> str:
     return key.replace("_", " ").strip().lower()
 
 
+# Fallback heuristics for recipient personalization. Recipient companies from
+# the lead feed are often address SPVs (e.g. "20 E. 190TH ST. LLC") or empty,
+# which read badly in the copy. These helpers keep the email natural:
+#   - the greeting falls back to "<Company> team" when there is no contact name;
+#   - the closing line uses "your team" instead of an address/generic company.
+_GENERIC_COMPANIES = {
+    "",
+    "your company",
+    "the company",
+    "company",
+    "your team",
+    "team",
+    "n/a",
+    "na",
+    "none",
+    "unknown",
+    "not available",
+}
+
+_HAS_HOUSE_NUMBER = re.compile(r"^\s*\d")
+_STREET_TOKEN = re.compile(
+    r"\b(?:ST|STREET|AVE|AVENUE|RD|ROAD|BLVD|BOULEVARD|DR|DRIVE|LN|LANE|PL|"
+    r"PLACE|CT|COURT|WAY|TER|TERRACE|PKWY|PARKWAY|HWY|HIGHWAY|SQ|SQUARE)\b",
+    re.IGNORECASE,
+)
+# Street suffix immediately followed by an entity suffix ("190TH ST. LLC").
+_STREET_THEN_ENTITY = re.compile(
+    r"\b(?:ST|STREET|AVE|AVENUE|RD|ROAD|BLVD|BOULEVARD|DR|DRIVE|LN|LANE|PL|"
+    r"PLACE|CT|COURT|WAY|TER|TERRACE|PKWY|PARKWAY|HWY|HIGHWAY|SQ|SQUARE)\b\.?"
+    r"\s+(?:LLC|L\.L\.C\.?|INC|CORP|LP|LLP|LTD|TRUST|HOLDINGS?)\b",
+    re.IGNORECASE,
+)
+
+
+def is_generic_company(name: Optional[str]) -> bool:
+    """True when the name is a placeholder rather than a real business."""
+    return (name or "").strip().strip(",.").strip().lower() in _GENERIC_COMPANIES
+
+
+def is_address_company(name: Optional[str]) -> bool:
+    """True when the name looks like a property SPV (street address + entity)."""
+    n = (name or "").strip()
+    if not n:
+        return False
+    if _STREET_THEN_ENTITY.search(n):
+        return True
+    # "20 E. 190TH ST. LLC": a house number only counts with a street token, so
+    # real brands like "5 Star Plumbing LLC" survive.
+    return bool(_HAS_HOUSE_NUMBER.match(n)) and bool(_STREET_TOKEN.search(n))
+
+
+def is_usable_company(name: Optional[str]) -> bool:
+    """A company name worth showing: not empty, not generic, not an address."""
+    n = (name or "").strip()
+    return bool(n) and not is_generic_company(n) and not is_address_company(n)
+
+
 def build_context(
     sample: Optional[Mapping[str, Any]],
     city: str,
@@ -336,9 +395,16 @@ def build_context(
 
     Recipient fields (`company_name`, `contact_name`) come from an enriched
     `outbound_contacts` row when available; otherwise they fall back to the
-    lead's `owner_name` (clearly a stand-in) and a generic greeting. The
-    opportunity fields (`address`, `category`) always come from the real lead.
-    Every value is a string; missing data falls back to English - never PT.
+    lead's `owner_name`. Personalization degrades gracefully so the copy always
+    reads naturally:
+
+    * `company_name` -> the real business name, or "your team" when the name is
+      missing, generic, or an address SPV ("20 E. 190TH ST. LLC").
+    * `contact_name` -> the individual's name, else "<Company> team" when a
+      usable business name exists, else "there".
+
+    The opportunity fields (`address`, `category`) always come from the real
+    lead. Every value is a string; missing data falls back to English - never PT.
     """
     sample = sample or {}
     contact = contact or {}
@@ -347,10 +413,19 @@ def build_context(
     company = (contact.get("company_name") or "").strip()
     if not company:
         company = (sample.get("owner_name") or "").strip()
+    company_usable = is_usable_company(company)
+
+    contact_name = (contact.get("contact_name") or "").strip()
+    if contact_name:
+        greeting_name = contact_name
+    elif company_usable:
+        greeting_name = f"{company} team"
+    else:
+        greeting_name = "there"
 
     return {
-        "company_name": company or "your company",
-        "contact_name": (contact.get("contact_name") or "").strip() or "there",
+        "company_name": company if company_usable else "your team",
+        "contact_name": greeting_name,
         "city": display_city,
         "state": (contact.get("state") or "").strip() or CITY_STATE.get(city, ""),
         "category": humanize_category(sample.get("issue_category")),

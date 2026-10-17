@@ -794,6 +794,45 @@ def test_outbound_templates_hide_data_sources():
             assert term not in haystack, f"nicho {niche!r} expoe origem: {term!r}"
 
 
+def test_outbound_build_context_personalization_fallbacks():
+    """Fallbacks humanizam empresas genericas/SPV e a saudacao sem contacto."""
+    from backend.services import outbound_templates as ot
+
+    def _ctx(company=None, contact=None, owner=None):
+        sample = {
+            "owner_name": owner or "",
+            "address": "1 EXAMPLE STREET",
+            "issue_category": "Roof",
+        }
+        contact_row = None
+        if company is not None or contact is not None:
+            contact_row = {"company_name": company, "contact_name": contact}
+        return ot.build_context(sample, "NYC", "roofing", 5, contact=contact_row)
+
+    # Nome individual vence na saudacao; empresa real mantem-se no fecho.
+    c = _ctx(company="Acme Roofing", contact="Alex Morgan")
+    assert c["contact_name"] == "Alex Morgan"
+    assert c["company_name"] == "Acme Roofing"
+
+    # Sem contacto individual -> "Hi <Company> team,".
+    c = _ctx(company="Acme Roofing", contact="")
+    assert c["contact_name"] == "Acme Roofing team"
+
+    # Empresa SPV de endereco nao aparece no copy; saudacao cai para "there".
+    c = _ctx(owner="20 E. 190TH ST. LLC")
+    assert c["company_name"] == "your team"
+    assert c["contact_name"] == "there"
+    body = ot.render(ot.get_template("roofing")["body"], c)
+    assert "Would your team be open" in body
+    assert "Hi there," in body
+
+    # Empresa generica -> "your team".
+    assert _ctx(company="your company")["company_name"] == "your team"
+
+    # Marca real com numero ("5 Star Plumbing LLC") continua utilizavel.
+    assert _ctx(company="5 Star Plumbing LLC")["company_name"] == "5 Star Plumbing LLC"
+
+
 def test_outbound_config_exposes_niches_and_language(admin_client):
     client, headers, _ = admin_client
     body = client.get("/api/admin/outbound/config", headers=headers).json()
