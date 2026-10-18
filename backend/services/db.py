@@ -4430,7 +4430,7 @@ class DatabaseService:
             # Contagem viva equivalente ao recent_count do dashboard: leads
             # atualizados nas últimas 2h (janela do card "Última varredura").
             recent_2h = conn.execute(
-                "SELECT COUNT(*) AS c FROM leads WHERE updated_at >= datetime('now', '-2 hours')"
+                f"SELECT COUNT(*) AS c FROM leads WHERE updated_at >= datetime('now', '-2 hours') AND {_qualified_where()}"
             ).fetchone()["c"]
         finally:
             conn.close()
