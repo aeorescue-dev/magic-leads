@@ -590,12 +590,18 @@ class OwnerEnrichment:
     async def enrich_batch(self, address_city_pairs: List[tuple]) -> Dict[str, Optional[Dict[str, Any]]]:
         out = {}
         seen = set()
-        for address, city in address_city_pairs:
+        for item in address_city_pairs:
+            if len(item) == 3:
+                address, city, bbl = item
+                bbl = bbl if bbl else None
+            else:
+                address, city = item[0], item[1] if len(item) > 1 else ""
+                bbl = None
             key = f"{city}:{address}"
             if key in seen:
                 continue
             seen.add(key)
-            out[key] = await self.enrich(address, city)
+            out[key] = await self.enrich(address, city, bbl=bbl)
         return out
 
 

@@ -57,6 +57,11 @@ class Socrata311Scraper:
 
     # 311 Service Requests (era referenciado por fetch_nyc_311 mas nunca definido)
     NYC_DATASET = "erm2-nwe9"
+    # Service Requests do Chicago Data Portal. `fetch_chicago_311` passava
+    # `self.CHICAGO_DATASET` ao _fetch_soql, mas o atributo nunca existiu na
+    # classe — qualquer chamada a esse caminho morria com AttributeError.
+    # E o mesmo dataset ja usado pelo pipeline principal (backend.main).
+    CHICAGO_DATASET = "v6vf-nfxy"
 
     def __init__(self):
         self.keywords = settings.SCRAPER_KEYWORDS

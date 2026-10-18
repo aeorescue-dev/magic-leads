@@ -485,7 +485,7 @@ async def enrich_owners(limit: int = 200):
         from backend.services import db as dbmod
         conn = dbmod.get_connection()
         rows = conn.execute(
-            "SELECT id, address, city FROM leads "
+            "SELECT id, address, city, bbl FROM leads "
             "WHERE (owner_name IS NULL OR owner_name = '') "
             "ORDER BY date_reported DESC LIMIT ?",
             (limit,)
@@ -494,9 +494,15 @@ async def enrich_owners(limit: int = 200):
         
         enriched = 0
         for row in rows:
-            owner = await owner_enrichment.enrich(row["address"], row["city"])
-            if owner:
-                db_service.update_owner(row["id"], owner)
+            owner = await owner_enrichment.enrich(
+                row["address"], row["city"],
+                bbl=row["bbl"] if "bbl" in row.keys() else None,
+            )
+            # enrich() devolve None ou um dict ({owner_name, ...}); passar o
+            # dict inteiro a update_owner() tentaria gravar um dict em
+            # leads.owner_name e rebentava com o bind do sqlite.
+            if owner and owner.get("owner_name"):
+                await db_service.update_owner(row["id"], owner["owner_name"])
                 enriched += 1
         
         logger.info(f"Owner enrichment: {enriched} names found")

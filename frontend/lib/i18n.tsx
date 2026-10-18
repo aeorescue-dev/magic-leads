@@ -465,6 +465,7 @@ const PT: Dict = {
   "dashboard.kpi.interested.delta": "oportunidades hoje",
   "dashboard.kpi.new_24h": "Novas 24h",
   "dashboard.kpi.with_contact": "Com contato",
+  "dashboard.kpi.owner_identified": "com proprietário identificado",
   "dashboard.kpi.urgent": "Urgentes",
   "dashboard.kpi.last_scrape": "Última varredura",
   "dashboard.kpi.updated_now": "atualizado agora",
@@ -1093,10 +1094,14 @@ const PT: Dict = {
   // O aviso antigo ("Endereço incompleto — sem dados de contacto") acusava o
   // endereço, mas a condição que o disparava é a ausência de contacto: 93,4%
   // destes leads tem endereço resolvível. O texto passa a dizer o que falta.
+  // O resumo agregado tinha o mesmo problema ao contrário: "só é possível
+  // escrever por carta ou visita presencial" não se sustenta porque a contagem
+  // é `!complete_delivery` (nome + telefone), logo inclui leads com e-mail, e
+  // a própria lista tem o botão "Revelar telefone".
   "dashboard.badge.no_contact_data": "Sem telefone",
   "dashboard.badge.address_unresolvable": "Endereço incompleto — sem contacto",
   "dashboard.badge.contact_summary":
-    "{count} de {total} oportunidades sem telefone. Sem contacto, só é possível escrever por carta ou visita presencial.",
+    "{count} de {total} oportunidades ainda sem telefone. Pode contactar por e-mail ou carta, ou pesquisar o número em Revelar telefone.",
   "dashboard.badge.owner_identified": "Dono identificado",
   "dashboard.badge.no_owner_data": "Endereço incompleto — sem dados de contacto",
   "dashboard.badge.closed": "Encerrado",
@@ -1591,6 +1596,7 @@ const EN: Dict = {
   "dashboard.kpi.interested.delta": "opportunities today",
   "dashboard.kpi.new_24h": "New 24h",
   "dashboard.kpi.with_contact": "With contact",
+  "dashboard.kpi.owner_identified": "owner identified",
   "dashboard.kpi.urgent": "Urgent",
   "dashboard.kpi.today": "entered today",
   "dashboard.kpi.last_scrape": "Last scrape",
@@ -2237,7 +2243,7 @@ const EN: Dict = {
   "dashboard.badge.no_contact_data": "No phone",
   "dashboard.badge.address_unresolvable": "Incomplete address — no contact",
   "dashboard.badge.contact_summary":
-    "{count} of {total} opportunities have no phone number. Without contact details, you can only reach these by mail or in person.",
+    "{count} of {total} opportunities have no phone number yet. You can still reach them by email or mail, or look up a number with Reveal phone.",
   "dashboard.badge.owner_identified": "Owner identified",
   "dashboard.badge.no_owner_data": "Incomplete address — no contact data",
   "dashboard.badge.corporate": "Corporate Lead",
@@ -2715,6 +2721,7 @@ const ES: Dict = {
   "dashboard.kpi.interested.delta": "oportunidades hoy",
   "dashboard.kpi.new_24h": "Nuevas 24h",
   "dashboard.kpi.with_contact": "Con contacto",
+  "dashboard.kpi.owner_identified": "propietario identificado",
   "dashboard.kpi.urgent": "Urgentes",
   "dashboard.kpi.today": "entraron hoy",
   "dashboard.kpi.last_scrape": "Última varredura",
@@ -3328,7 +3335,7 @@ const ES: Dict = {
   "dashboard.badge.no_contact_data": "Sin teléfono",
   "dashboard.badge.address_unresolvable": "Dirección incompleta — sin contacto",
   "dashboard.badge.contact_summary":
-    "{count} de {total} oportunidades no tienen teléfono. Sin contacto, solo se puede escribir por correo o visita.",
+    "{count} de {total} oportunidades aún sin teléfono. Puede contactar por correo o carta, o buscar el número en Revelar teléfono.",
   "dashboard.badge.owner_identified": "Dueño identificado",
   "dashboard.badge.no_owner_data": "Dirección incompleta — sin datos de contacto",
   "dashboard.badge.corporate": "Lead Corporativo",

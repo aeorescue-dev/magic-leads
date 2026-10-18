@@ -196,6 +196,11 @@ function DashboardPageInner() {
   // DECLARE userId BEFORE ALL HANDLERS
   const userId = user?.id;
 
+  // Tamanho fixo da pagina do feed de oportunidades. Serve para os tres pontos
+  // de carregamento (carga inicial, polling e "carregar mais") usarem o MESMO
+  // numero e evitarem hasMore divergente.
+  const PAGE_SIZE = 50;
+
   // State
   const [theme, setTheme] = useState<Theme>("dark");
   const [leads, setLeads] = useState<LeadResponse[]>([]);
@@ -203,6 +208,11 @@ function DashboardPageInner() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [hasMoreLeads, setHasMoreLeads] = useState(true);
+  // Total do conjunto que o feed do SERVIDOR devolve para os filtros ativos
+  // (cidade + tipo + categoria + urgencia + encerrados). Era mostrado
+  // `dashboardSummary.total_interested` (6.626 no total), que e um KPI de toda
+  // a plataforma e nao o numero de linhas que o feed pode realmente carregar.
+  const [feedTotal, setFeedTotal] = useState(0);
   const [stats, setStats] = useState<LeadStats | null>(null);
   const [selectedCity, setSelectedCity] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -516,7 +526,15 @@ const URGENCIES = ["all", "high", "medium", "low"];
       try {
         const [statsData, leadsData, summaryData, scraperData, publicMetricsData] = await Promise.all([
           fetchStats().catch(() => null),
-          fetchTodayLeads(50, selectedCity === "all" ? undefined : selectedCity, includeClosed, 1, selectedType === "all" ? undefined : selectedType).catch(() => ({ leads: [], total: 0, page: 1, per_page: 50 })),
+          fetchTodayLeads(
+            PAGE_SIZE,
+            selectedCity === "all" ? undefined : selectedCity,
+            includeClosed,
+            1,
+            selectedType === "all" ? undefined : selectedType,
+            selectedCategory === "all" ? undefined : selectedCategory,
+            selectedUrgency === "all" ? undefined : selectedUrgency
+          ).catch(() => ({ leads: [], total: 0, page: 1, per_page: PAGE_SIZE })),
           fetchDashboardSummary().catch(() => null),
           fetchScraperStatus().catch(() => null),
           fetchPublicMetrics().catch(() => null),
@@ -526,9 +544,14 @@ const URGENCIES = ["all", "high", "medium", "low"];
         if (summaryData) setDashboardSummary(summaryData);
         if (scraperData) setScraperState(scraperData);
         if (publicMetricsData) setPublicMetrics(publicMetricsData);
-        setLeads(leadsData.leads || []);
+        const page = leadsData.leads || [];
+        setLeads(page);
         setCurrentPage(1);
-        setHasMoreLeads((leadsData.leads?.length || 0) >= 50);
+        setFeedTotal(Number(leadsData.total) || 0);
+        // `total` vem do SERVIDOR (a pagina so devolve PAGE_SIZE linhas). Antes
+        // usava-se `page.length >= 50`, que nunca soube detectar "ha mais" a
+        // partir de filtros de categoria/urgencia aplicados no cliente.
+        setHasMoreLeads(leadsData.total > page.length);
       } catch (e) {
         console.error("Erro ao carregar dados do dashboard:", e);
       } finally {
@@ -538,16 +561,26 @@ const URGENCIES = ["all", "high", "medium", "low"];
     return () => {
       active = false;
     };
-  }, [selectedCity, selectedType, includeClosed]);
+  }, [selectedCity, selectedType, selectedCategory, selectedUrgency, includeClosed]);
 
   // Real-time polling: refresh leads + KPIs every 30 seconds
   useEffect(() => {
     const interval = setInterval(() => {
-      fetchTodayLeads(50, selectedCity === "all" ? undefined : selectedCity, includeClosed, 1, selectedType === "all" ? undefined : selectedType)
+      fetchTodayLeads(
+        PAGE_SIZE,
+        selectedCity === "all" ? undefined : selectedCity,
+        includeClosed,
+        1,
+        selectedType === "all" ? undefined : selectedType,
+        selectedCategory === "all" ? undefined : selectedCategory,
+        selectedUrgency === "all" ? undefined : selectedUrgency
+      )
         .then((data) => {
-          setLeads(data.leads || []);
+          const page = data.leads || [];
+          setLeads(page);
           setCurrentPage(1);
-          setHasMoreLeads((data.leads?.length || 0) >= 50);
+          setFeedTotal(Number(data.total) || 0);
+          setHasMoreLeads(data.total > page.length);
         })
         .catch(() => {});
       fetchDashboardSummary().then(setDashboardSummary).catch(() => {});
@@ -556,7 +589,9 @@ const URGENCIES = ["all", "high", "medium", "low"];
       fetchPublicMetrics().then(setPublicMetrics).catch(() => {});
     }, 30000);
     return () => clearInterval(interval);
-  }, [selectedCity, includeClosed]);
+    // FALTOU selectedType aqui: mudar o seletor "Tipo" recriava o intervalo,
+    // mas continuava a pedir o tipo ANTIGO (value stale) nos polls seguintes.
+  }, [selectedCity, selectedType, selectedCategory, selectedUrgency, includeClosed]);
 
   // Fetch daily stats (limit 10/day)
   useEffect(() => {
@@ -733,11 +768,22 @@ const URGENCIES = ["all", "high", "medium", "low"];
     setLoadingMore(true);
     try {
       const nextPage = currentPage + 1;
-      const data = await fetchTodayLeads(50, selectedCity === "all" ? undefined : selectedCity, includeClosed, nextPage, selectedType === "all" ? undefined : selectedType);
+      const data = await fetchTodayLeads(
+        PAGE_SIZE,
+        selectedCity === "all" ? undefined : selectedCity,
+        includeClosed,
+        nextPage,
+        selectedType === "all" ? undefined : selectedType,
+        selectedCategory === "all" ? undefined : selectedCategory,
+        selectedUrgency === "all" ? undefined : selectedUrgency
+      );
       if (data.leads && data.leads.length > 0) {
         setLeads((prev) => [...prev, ...data.leads]);
         setCurrentPage(nextPage);
-        setHasMoreLeads(data.leads.length >= 50);
+        setFeedTotal(Number(data.total) || 0);
+        // O servidor ja devolveu o total do conjunto filtrado; nao faz sentido
+        // depender do tamanho da pagina (que fica truncado em PAGE_SIZE).
+        setHasMoreLeads(nextPage * PAGE_SIZE < data.total);
       } else {
         setHasMoreLeads(false);
       }
@@ -746,7 +792,9 @@ const URGENCIES = ["all", "high", "medium", "low"];
     } finally {
       setLoadingMore(false);
     }
-  }, [currentPage, hasMoreLeads, loadingMore, selectedCity, selectedType]);
+    // includeClosed FALTOU: alternar o interruptor de historico nao recriava o
+    // callback, por isso "carregar mais" continuava a pagina sem o parametro.
+  }, [currentPage, hasMoreLeads, loadingMore, selectedCity, selectedType, selectedCategory, selectedUrgency, includeClosed]);
 
   // O lead já está em "Meus Leads" (revelado por mim: reservado, em negociação,
   // convertido, liberado ou com hold expirado). Nesse estado o botão
@@ -1195,18 +1243,6 @@ const URGENCIES = ["all", "high", "medium", "low"];
         return false;
       }
 
-      // Search query
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        const matchesAddress = (lead.address || "").toLowerCase().includes(q);
-        const matchesOwner = (lead.owner_name || "").toLowerCase().includes(q);
-        const matchesDesc = (lead.issue_description || "").toLowerCase().includes(q);
-        const matchesCat = (lead.issue_category || "").toLowerCase().includes(q);
-        if (!matchesAddress && !matchesOwner && !matchesDesc && !matchesCat) {
-          return false;
-        }
-      }
-
       return true;
     });
   }, [leads, activeTab, selectedCity, selectedCategory, selectedUrgency, selectedType, selectedOwnerType, interests, searchQuery]);
@@ -1387,7 +1423,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
           {[
             { id: "overview", icon: LayoutDashboard, label: t("dashboard.nav.overview") },
-            { id: "opportunities", icon: FolderKanban, label: t("dashboard.nav.opportunities"), badge: String(realTotalLeads) },
+            { id: "opportunities", icon: FolderKanban, label: t("dashboard.nav.opportunities"),               badge: realTotalLeads.toLocaleString() },
             { id: "favorites", icon: Star, label: t("dashboard.nav.favorites"), badge: String(leads.filter((l) => l.favorited).length || "") },
             { id: "interests", icon: SlidersHorizontal, label: t("dashboard.nav.interests"), badge: String(interests.size) },
             { id: "alerts", icon: Bell, label: t("dashboard.nav.alerts"), badge: unreadCount > 0 ? String(unreadCount) : undefined },
@@ -1849,8 +1885,16 @@ const URGENCIES = ["all", "high", "medium", "low"];
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
             {[
               { label: t("dashboard.kpi.interested") || "No seu interesse", value: dashboardSummary?.total_interested ?? 0, delta: t("dashboard.kpi.opportunities") || "oportunidades reais", icon: Building2, color: "#6366f1" },
-              { label: t("dashboard.kpi.last_scrape"), value: publicMetrics?.last_scrape?.novas_oportunidades ?? scrapeCount, delta: t("dashboard.kpi.updated_now"), icon: TrendingUp, color: "#22c55e" },
-              { label: t("dashboard.kpi.with_contact") || "Com contato", value: dashboardSummary?.with_contact ?? 0, delta: t("dashboard.kpi.ready_call") || "prontas p/ ligar", icon: Phone, color: "#f59e0b" },
+              // Card "Última varredura": conta os leads actualizados na janela de
+              // 2h (recent_count, devolvido pelo resumo). Fica explicitamente à
+              // frente do public_metrics.novas_oportunidades, que era 0 quando
+              // o worker reiniciava sem gravar o scraper_runs — o card não podia
+              // mostrar 0 com dezenas de milhares de leads actualizados.
+              { label: t("dashboard.kpi.last_scrape"), value: dashboardSummary?.recent_count ?? publicMetrics?.last_scrape?.novas_oportunidades ?? scrapeCount, delta: t("dashboard.kpi.updated_now"), icon: TrendingUp, color: "#22c55e" },
+              // `with_contact` conta leads COM PROPRIETÁRIO IDENTIFICADO — não
+              // telefone (as validações de ligações só acontecem na reserva, de
+              // propósito: o número é pago). "prontas p/ ligar" era mentira.
+              { label: t("dashboard.kpi.with_contact") || "Com contato", value: dashboardSummary?.with_contact ?? 0, delta: t("dashboard.kpi.owner_identified") || "com proprietário identificado", icon: Phone, color: "#f59e0b" },
               { label: t("dashboard.kpi.urgent") || "Urgentes", value: dashboardSummary?.urgent ?? 0, delta: t("dashboard.kpi.need_action") || "precisam ação", icon: AlertCircle, color: "#ef4444" },
             ].map((k) => (
               <div key={k.label} className={`border rounded-xl p-4 transition-colors ${theme === "dark" ? "bg-[#10121a] border-white/5" : "bg-white border-slate-200 shadow-sm"}`}>
@@ -1858,7 +1902,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
                   <div className={`text-xs ${T.text2}`}>{k.label}</div>
                   <k.icon className="h-4 w-4" style={{ color: k.color }} />
                 </div>
-                <div className="text-2xl md:text-3xl font-bold mt-1" style={{ color: k.color }}>{k.value}</div>
+                <div className="text-2xl md:text-3xl font-bold mt-1" style={{ color: k.color }}>{Number(k.value ?? 0).toLocaleString()}</div>
                 <div className={`text-[11px] mt-2 flex items-center gap-1 ${T.text2}`}>
                   <span>{k.delta}</span>
                 </div>
@@ -1880,7 +1924,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
                   : `${T.border} ${T.navHover} ${T.text2}`
               }`}
             >
-              {t("dashboard.feed.all_cities")} ({realTotalLeads})
+              {t("dashboard.feed.all_cities")} ({realTotalLeads.toLocaleString()})
             </button>
             {(() => {
               // Fixed list of all 4 cities - always show all
@@ -1903,7 +1947,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
                         : `${T.border} ${T.navHover} ${T.text2}`
                     }`}
                   >
-                    {city} ({count})
+                    {city} ({count.toLocaleString()})
                   </button>
                 );
               });
@@ -2312,7 +2356,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
                     <span>{t("dashboard.feed.all_title")}</span>
                     {/* ACCURATE COUNT INDICATOR */}
                     <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400">
-                      {filteredLeads.length} de {realTotalLeads}
+                      {filteredLeads.length.toLocaleString()} de {feedTotal.toLocaleString()}
                     </span>
                   </h2>
                   <p className={`text-xs ${T.text2}`}>{t("dashboard.feed.filtered_sub")}</p>

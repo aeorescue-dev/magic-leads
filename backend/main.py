@@ -52,7 +52,18 @@ from .models.schemas import (
 from .scrapers.socrata_311 import socrata_scraper
 from .scrapers.socrata_discovery import socrata_discovery
 from .services import alert_planner, notifier, outbound_templates, security
-from .services.db import SERVED_CITIES, db_service
+from .services.db import (  # noqa: F401  — usados nos filtros de qualificação
+    _OPEN_STATUSES,
+    _TRADE_CATEGORIES,
+    SERVED_CITIES,
+    _address_where,
+    _category_where,
+    _junk_where,
+    _not_junk_where,
+    _qualified_where,
+    _trigger_where,
+    db_service,
+)
 from .services.enrichment import owner_enrichment
 from .services.lead_rules import (
     charges_credit,
@@ -227,72 +238,16 @@ def _to_lead_response(lead: dict) -> LeadResponse:
 
 
 # ------------------------------------------------------------------
-# Ruído urbano NÃO-serviço (não corresponde aos 16 ofícios da plataforma):
-# estacionamento, tráfego/sinalização, veículos abandonados, TPW, testes.
-# Não lista mais os ofícios (telhado, encanamento, pintura, pragas, lixo,
-# esgoto etc.) — esses agora são oportunidades qualificadas.
+# Filtro de QUALIFICAÇÃO (endereço + 16 ofícios + gatilho preditivo + ruído).
+# A implementação canónica importa-se de backend/services/db.py (ver import no
+# topo deste módulo). Antes existiam DUAS cópias quase iguais aqui e em db.py,
+# com duas divergências reais:
+#   * o gatilho daqui incluía 'hpd_violation' mas o de db.py não (3858 leads
+#     qualificados na aba Oportunidades e descartados do dashboard);
+#   * o filtro de ruído daqui varria 5 colunas (case_title, resolution e
+#     department incluídas) mas o de db.py só varria 3.
+# Unificamos em db.py para o dashboard e as listas contarem o mesmo conjunto.
 # ------------------------------------------------------------------
-_JUNK_TERMS = [
-    "parking enforcement", "traffic signal", "general traffic", "signal",
-    "sign repair", "missing sign", "bike rack", "boston bikes",
-    "abandoned vehicle", "abandoned bicycle", "abandoned bike", "illegal auto",
-    "dead animal", "hydrant", "towing", "tpw", "transportation",
-    "debug test", "test issue", "contractors complaint", "fair housing",
-    "needle", "work w/out permit", "working beyond hours",
-]
-
-_RICH_COLS = ["issue_description", "descriptor", "case_title",
-              "resolution_description", "department"]
-
-
-def _junk_where(alias: str = "") -> str:
-    """Fragmento SQL: verdadeiro quando o lead é lixo urbano (a excluir)."""
-    cols = [f"{alias}.{c}" if alias else c for c in _RICH_COLS]
-    concat = " || ' ' || ".join(f"COALESCE({c}, '')" for c in cols)
-    return "(" + " OR ".join(
-        f"LOWER({concat}) LIKE '%{t}%'" for t in _JUNK_TERMS
-    ) + ")"
-
-
-def _not_junk_where(alias: str = "") -> str:
-    return f"NOT {_junk_where(alias)}"
-
-
-# As 16 categorias de ofícios da plataforma.
-_TRADE_CATEGORIES = (
-    "Roof", "Structure", "Plumbing", "Grass", "Paint", "Permit_Rejected",
-    "Heating", "Electrical", "Elevator", "Gas", "Rodent", "Mold", "Lead",
-    "Unsanitary", "Door_Window", "Debris",
-)
-
-# Status "chamado aberto / em andamento" (gatilho preditivo).
-_OPEN_STATUSES = (
-    "open", "new", "in progress", "in_progress", "assigned", "active",
-    "approved", "issued", "pending", "acknowledged", "referred", "scheduled",
-    "investigation", "awaiting", "awaiting assignment",
-)
-
-
-def _address_where(alias: str = "") -> str:
-    prefix = f"{alias}." if alias else ""
-    return f"TRIM({prefix}address) IS NOT NULL AND LENGTH(TRIM({prefix}address)) > 8"
-
-
-def _category_where(alias: str = "") -> str:
-    prefix = f"{alias}." if alias else ""
-    values = ", ".join(f"'{c}'" for c in _TRADE_CATEGORIES)
-    return f"{prefix}issue_category IN ({values})"
-
-
-def _trigger_where(alias: str = "") -> str:
-    """Obrigação legal (violação/multa/permisção) OU chamado 311 aberto/em andamento."""
-    prefix = f"{alias}." if alias else ""
-    statuses = ", ".join(f"'{s}'" for s in _OPEN_STATUSES)
-    return (
-        f"(LOWER({prefix}case_status) IN ({statuses}) "
-        f"OR {prefix}source_type IN ('permit', 'dob_violation', 'hpd_violation', 'tax_delinquency'))"
-    )
-
 
 # Datasets que nao sao 311 mas usam o mesmo scraper generico. Sem esta tabela
 # o source_type fica "311" e o lead nunca aparece no filtro de obrigacao legal.
@@ -301,16 +256,6 @@ _SOURCE_TYPE_BY_ENTRY = {
     "dob_violations": "dob_violation",
     "dob_permits": "permit",
 }
-
-
-def _qualified_where(alias: str = "") -> str:
-    parts = [
-        _address_where(alias),
-        _category_where(alias),
-        _trigger_where(alias),
-        _not_junk_where(alias),
-    ]
-    return " AND ".join(parts)
 
 
 app = FastAPI(
@@ -802,7 +747,16 @@ async def recent_leads(limit: int = 12, user: dict | None = Depends(_get_optiona
 
 # Demandas do dia (lote mais recente de todas as cidades) — feed "ver tudo"
 @app.get("/api/leads/today", response_model=LeadsListResponse)
-async def leads_today(limit: int = 60, page: int = 1, city: str = None, type: str = None, include_incomplete: bool = False, user: dict | None = Depends(_get_optional_user)):
+async def leads_today(
+    limit: int = 60,
+    page: int = 1,
+    city: str = None,
+    type: str = None,
+    category: str = None,
+    urgency: str = None,
+    include_incomplete: bool = False,
+    user: dict | None = Depends(_get_optional_user),
+):
     """Retorna demandas dos últimos 7 dias.
 
     REGRA FIXA por default: apenas leads QUALIFICADOS (endereço + 16 ofícios +
@@ -835,6 +789,20 @@ async def leads_today(limit: int = 60, page: int = 1, city: str = None, type: st
                 if wanted:
                     sql += " AND source_type IN (%s)" % ",".join("?" * len(wanted))
                     params.extend(wanted)
+            # Filtros "Categoria" e "Urgencia" do dashboard. Antes existiam
+            # apenas no cliente (page.tsx), pelo que cada pagina/polling voltava
+            # a trazer a lista inteira e a filtragem local mostrava contagens
+            # (header = total da API) diferentes das linhas visiveis.
+            if category:
+                cats = [t.strip() for t in str(category).split(",") if t.strip()]
+                if cats:
+                    sql += " AND issue_category IN (%s)" % ",".join("?" * len(cats))
+                    params.extend(cats)
+            if urgency:
+                urg = [t.strip() for t in str(urgency).split(",") if t.strip()]
+                if urg:
+                    sql += " AND urgency_level IN (%s)" % ",".join("?" * len(urg))
+                    params.extend(urg)
             if not include_incomplete:
                 sql += f" AND {_qualified_where()}"
 
@@ -2969,7 +2937,7 @@ async def enrich_leads(city: str = "NYC", limit: int = 500, user: dict = Depends
         # pega leads sem owner_name
         conn = dbmod.get_connection()
         rows = conn.execute(
-            "SELECT id, address, city FROM leads "
+            "SELECT id, address, city, bbl FROM leads "
             "WHERE (owner_name IS NULL OR owner_name = '') AND city = ? "
             "ORDER BY date_reported DESC LIMIT ?",
             (city, limit),
@@ -2981,7 +2949,7 @@ async def enrich_leads(city: str = "NYC", limit: int = 500, user: dict = Depends
         found = 0
         for row in rows:
             enrich_result = await owner_enrichment.enrich(
-                row["address"], row["city"], bbl=row["bbl"] if "bbl" in row.keys() else None
+                row["address"], row["city"], bbl=row["bbl"] if "bbl" in row.keys() and row["bbl"] else None
             )
             if enrich_result and enrich_result.get("owner_name"):
                 await db_service.update_owner(row["id"], enrich_result["owner_name"])
@@ -3035,7 +3003,7 @@ async def enrich_all_leads(request: Request, limit_per_city: int = 200, _admin: 
             # Pega leads sem owner_name OU sem mailing_address OU sem phone/email
             conn = dbmod.get_connection()
             rows = conn.execute(
-                "SELECT id, address, city FROM leads "
+                "SELECT id, address, city, bbl FROM leads "
                 "WHERE city = ? "
                 "AND (owner_name IS NULL OR owner_name = '' "
                 "   OR mailing_address IS NULL OR mailing_address = '' "
@@ -3057,7 +3025,7 @@ async def enrich_all_leads(request: Request, limit_per_city: int = 200, _admin: 
             city_emails = 0
 
             # Prepare address-city pairs for batch enrichment
-            address_city_pairs = [(row["address"], row["city"]) for row in rows]
+            address_city_pairs = [(row["address"], row["city"], row["bbl"]) if "bbl" in row.keys() else (row["address"], row["city"]) for row in rows]
 
             # Batch owner enrichment
             enrichment_results = await owner_enrichment.enrich_batch(address_city_pairs)
@@ -4348,12 +4316,121 @@ async def contact_lead(
         raise HTTPException(status_code=404, detail="Lead não encontrado")
     if result.get("error") == "already_reserved":
         raise HTTPException(status_code=409, detail="Lead reservado por outro usuário")
-    # Sinalizou contato => watchdog de reveals para de notificar o empreiteiro
+    # Sinalizou contacto => o watchdog de reveals deixa de notificar o empreiteiro
     try:
         await db_service.flag_reveal_contact(user["id"], lead_id)
     except Exception:
         pass
     return {"status": "ok", "channel": payload.channel, "contact_count": result.get("contact_count", 0)}
+
+
+@app.post("/api/leads/{lead_id}/reveal-phone")
+async def reveal_phone_endpoint(
+    lead_id: int,
+    user: dict = Depends(_get_current_user),
+):
+    """Busca o telefone de um lead que ja tem proprietario identificado (Phase 4).
+
+    Caminho "on-demand" do dashboard (frontend `revealPhone`): o botao so
+    aparece quando existe `owner_name` e falta `owner_phone`. Antes este
+    endpoint simplesmente NAO EXISTIA — `fetch` devolvia 404 e o botao caia no
+    toast de erro generico.
+
+    Reutiliza o mesmo caminho de dados do fluxo /reserve
+    (owner_enrichment.enrich -> searchbug_service.lookup_phone ->
+    update_owner_phone), com a mesma protecao de cota diaria: sem isso o
+    botao permitiria procuras pagas ilimitadas sem reserva nem debito de
+    creditos.
+
+    Contrato devolvido (frontend/lib/api-client.ts `PhoneRevealResult`):
+    `success=false` sai com HTTP 200 + `error` — e o que o handler da UI
+    espera (`result.success`/`result.error`), nao uma excecao.
+    """
+    user_id = user["id"]
+    try:
+        sub_status = await db_service.get_user_subscription_status(user_id)
+        if not sub_status.get("can_access", False):
+            raise HTTPException(
+                status_code=403,
+                detail=sub_status.get("message", "Acesso negado"),
+            )
+
+        pre = await db_service.precheck_reveal(user_id, lead_id)
+        pre_status = pre.get("status")
+        pre_lead = pre.get("lead") or {}
+        if pre_status == "not_found":
+            raise HTTPException(status_code=404, detail="Lead não encontrado")
+        if pre_status == "already_reserved":
+            return {"success": False, "error": "already_reserved"}
+
+        # Ja tem telefone: nada a procurar (evita chamada paga repetida).
+        if pre_lead.get("owner_phone"):
+            return {"success": True, "phone": pre_lead.get("owner_phone")}
+        if not pre_lead.get("owner_name"):
+            return {"success": False, "error": "owner_name_missing"}
+
+        # Cota diaria (10/dia): sem isto o reveal-phone seria um bypass da
+        # quota aplicada em reveal_lead. `get_daily_leads_used` devolve
+        # {used, limit, remaining, reset_at}.
+        daily = await db_service.get_daily_leads_used(user_id)
+        if int(daily.get("remaining", 0)) <= 0:
+            return {"success": False, "error": "daily_limit_reached"}
+
+        phone = None
+        provider = None
+        owner_name = pre_lead.get("owner_name")
+        try:
+            enrich_result = await owner_enrichment.enrich(
+                pre_lead.get("address", ""),
+                pre_lead.get("city", ""),
+                bbl=pre_lead.get("bbl") if hasattr(pre_lead, "get") else None,
+            )
+            if enrich_result:
+                if not owner_name and enrich_result.get("owner_name"):
+                    owner_name = enrich_result["owner_name"]
+                    await db_service.update_owner(lead_id, owner_name)
+                if owner_name:
+                    phone_result = await searchbug_service.lookup_phone(
+                        pre_lead.get("address", ""),
+                        pre_lead.get("city", ""),
+                        pre_lead.get("state", ""),
+                        owner_name=owner_name,
+                        zip_code=pre_lead.get("zip_code") or pre_lead.get("zip"),
+                    )
+                    if phone_result.success and phone_result.phone:
+                        phone = phone_result.phone
+                        provider = getattr(phone_result, "provider", None)
+                        await db_service.update_owner_phone(lead_id, phone)
+                    else:
+                        # guarda_skipped:* = custo zero (o guard de custo
+                        # recusou); nao e o mesmo que provider sem resultados.
+                        logger.info(
+                            f"[PHONE][reveal-phone] lead {lead_id}: "
+                            f"{phone_result.error or 'provider sem resultado'}"
+                        )
+        except Exception as e:
+            logger.warning(f"reveal-phone: enriquecimento falhou lead {lead_id}: {e}")
+
+        if not phone:
+            refreshed = await db_service.get_lead_by_id(lead_id)
+            if refreshed:
+                phone = dict(refreshed).get("owner_phone") or None
+
+        if not phone:
+            return {"success": False, "error": "phone_not_found"}
+
+        # Conta na cota diaria so quando ha telefone real a entregar.
+        try:
+            await db_service.increment_daily_leads(user_id)
+        except Exception:
+            pass
+        await db_service.record_event(lead_id, "revealed")
+        return {"success": True, "phone": phone, "provider": provider or "searchbug"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"reveal-phone failed for lead_id={lead_id}: {e}")
+        raise HTTPException(status_code=500, detail="Erro interno")
 
 
 @app.post("/api/leads/{lead_id}/report-invalid")

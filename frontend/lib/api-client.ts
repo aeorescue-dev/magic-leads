@@ -222,17 +222,31 @@ export async function fetchLeads(params: {
   return handle<LeadsListResponse>(await fetch(`${API_URL}/api/leads?${q}`, { credentials: "include", headers: { ...authHeaders() } }));
 }
 
-export async function fetchTodayLeads(limit: number = 60, city?: string, includeIncomplete: boolean = false, page: number = 1, type?: string): Promise<LeadsListResponse> {
+export async function fetchTodayLeads(
+  limit: number = 60,
+  city?: string,
+  includeIncomplete: boolean = false,
+  page: number = 1,
+  type?: string,
+  category?: string,
+  urgency?: string
+): Promise<LeadsListResponse> {
   const q = new URLSearchParams({ limit: String(limit), page: String(page) });
   if (city && city !== "Todas") q.set("city", city);
   if (includeIncomplete) q.set("include_incomplete", "true");
-  if (type) q.set("type", type);
+  if (type && type !== "all") q.set("type", type);
+  // Filtros de Categoria/Urigencia passam agora ao SERVIDOR: antes eram
+  // aplicados so em cliente, pelo que o total do header (total da API) e o
+  // numero de linhas visiveis divergiam a cada pagina/polling.
+  if (category && category !== "all") q.set("category", category);
+  if (urgency && urgency !== "all") q.set("urgency", urgency);
   return handle<LeadsListResponse>(await fetch(`${API_URL}/api/leads/today?${q.toString()}`, { credentials: "include", headers: { ...authHeaders() } }));
 }
 
 export interface DashboardSummary {
   total_interested: number;
   last_scrape: string;
+  recent_count: number;
   with_contact: number;
   urgent: number;
   by_category: Record<string, number>;

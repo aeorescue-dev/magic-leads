@@ -31,25 +31,45 @@ from .searchbug import PhoneLookupResult, searchbug_service
 from .translations import DEFAULT_LOCALE
 from .translations import render as _render_i18n
 
+# Ruído urbano NÃO-serviço (não corresponde aos 16 ofícios da plataforma):
+# estacionamento, tráfego/sinalização, veículos abandonados, TPW, testes.
+# NÃO lista os ofícios (telhado, encanamento, pintura, pragas, lixo, esgoto
+# etc.) — esses são oportunidades qualificadas.
+# FONTE ÚNICA: a ingestão (backend.main) importa estes símbolos daqui, para o
+# dashboard (`get_dashboard_summary`) e a aba Oportunidades (/api/leads/today)
+# nunca filtrarem universos diferentes.
+_JUNK_TERMS = [
+    "parking enforcement", "traffic signal", "general traffic", "signal",
+    "sign repair", "missing sign", "bike rack", "boston bikes",
+    "abandoned vehicle", "abandoned bicycle", "abandoned bike", "illegal auto",
+    "dead animal", "hydrant", "towing", "tpw", "transportation",
+    "debug test", "test issue", "contractors complaint", "fair housing",
+    "needle", "work w/out permit", "working beyond hours",
+]
+
+# Colunas de texto "ricas" avaliadas pelo filtro de ruído. Tem de ser idêntico
+# ao que a ingestão usava localmente: um chamado com o termo em `case_title`
+# (ou numa resolução/department) passava num dos lados e era rejeitado no outro.
+_RICH_COLS = (
+    "issue_description", "descriptor", "case_title",
+    "resolution_description", "department",
+)
+
+
+def _junk_where(alias: str = "") -> str:
+    """Fragmento SQL: verdadeiro quando o lead é ruído urbano (a excluir)."""
+    cols = [f"{alias}.{c}" if alias else c for c in _RICH_COLS]
+    concat = " || ' ' || ".join(f"COALESCE({c}, '')" for c in cols)
+    return "(" + " OR ".join(
+        f"LOWER({concat}) LIKE '%{t}%'" for t in _JUNK_TERMS
+    ) + ")"
+
 
 def _not_junk_where(alias: str = "") -> str:
-    """Filtro de não-serviço: mantém apenas ruído urbano que NÃO corresponde aos 16 ofícios
-    da plataforma (estacionamento, tráfego/sinalização, veículos abandonados, TPW)."""
-    prefix = f"{alias}." if alias else ""
-    junk_terms = [
-        "parking enforcement", "traffic signal", "general traffic", "signal",
-        "sign repair", "missing sign", "bike rack", "boston bikes",
-        "abandoned vehicle", "abandoned bicycle", "abandoned bike", "illegal auto",
-        "dead animal", "hydrant", "towing", "tpw", "transportation",
-        "debug test", "test issue", "contractors complaint", "fair housing",
-        "needle", "work w/out permit", "working beyond hours",
-    ]
-    conditions = []
-    for term in junk_terms:
-        conditions.append(f"LOWER(COALESCE({prefix}issue_category, '')) NOT LIKE '%{term}%'")
-        conditions.append(f"LOWER(COALESCE({prefix}issue_description, '')) NOT LIKE '%{term}%'")
-        conditions.append(f"LOWER(COALESCE({prefix}descriptor, '')) NOT LIKE '%{term}%'")
-    return " AND ".join(conditions)
+    """Filtro de não-serviço: mantém apenas ruído urbano que NÃO corresponde aos
+    16 ofícios da plataforma (estacionamento, tráfego/sinalização, veículos
+    abandonados, TPW)."""
+    return f"NOT {_junk_where(alias)}"
 
 
 # As 16 categorias de ofícios da plataforma (modelo de negócio).
@@ -118,7 +138,7 @@ def _trigger_where(alias: str = "") -> str:
     statuses = ", ".join(f"'{s}'" for s in _OPEN_STATUSES)
     return (
         f"(LOWER({prefix}case_status) IN ({statuses}) "
-        f"OR {prefix}source_type IN ('permit', 'dob_violation', 'tax_delinquency'))"
+        f"OR {prefix}source_type IN ('permit', 'dob_violation', 'hpd_violation', 'tax_delinquency'))"
     )
 
 
@@ -1157,6 +1177,127 @@ def _record_credit_event_connection(
     return new_balance
 
 
+# ---------------------------------------------------------------------------
+# INSERT/UPSERT de leads — regras de deduplicação
+#
+# A tabela `leads` tem DUAS restrições únicas: (external_id, source_type) — a
+# chave natural de um chamado — e (address, city) — um imóvel = um lead.
+# O ON CONFLICT antigo usava apenas (address, city) e fazia
+# `external_id=excluded.external_id`: quando um chamado novo caía num imóvel já
+# existente, o UPDATE atribuía a esse imóvel um external_id que PODIA já
+# pertencer a outra linha, e o SQLite abortava com
+# "UNIQUE constraint failed: leads.external_id, leads.source_type".
+# (Reproduzível: linha A ext=1 addr=X; linha B ext=2 addr=Y; chega ext=2 addr=X.)
+#
+# A resolução passa a ser explícita:
+#   * se (external_id, source_type) já existe → UPDATE por esse par, sem tocar
+#     nas chaves únicas (nem address/city);
+#   * senão → INSERT ... ON CONFLICT(address, city) DO UPDATE, também sem tocar
+#     nas chaves — um imóvel já rastreado apenas recebe os dados mais novos.
+# Assim nenhuma combinação consegue violar as duas restrições. O endereço não
+# é herdado por outra linha (external_id continua a ser a chave de dedup, como
+# já exigia backend/scripts/normalize_addresses.py).
+# ---------------------------------------------------------------------------
+
+# Colunas de dados do lead (todas menos as 4 chaves de identidade/endereço).
+_LEAD_DATA_COLS = (
+    "state", "zip_code", "lat", "lng", "county",
+    "issue_category", "issue_description", "urgency_level",
+    "owner_name", "owner_phone", "owner_email", "owner_status", "mailing_address",
+    "date_reported", "image_url", "source_url", "is_validated", "created_at",
+    "address_unit", "address_type", "address_street", "address_city",
+    "address_state", "address_zip", "case_title", "subject", "reason", "type",
+    "queue", "department", "closure_reason", "case_status", "on_time",
+    "sla_target_dt", "closed_dt", "submitted_photo", "closed_photo", "source",
+    "neighborhood", "ward", "precinct", "descriptor", "resolution_description",
+    "resolution_action_updated_date", "bbl",
+)
+
+# Campos que NÃO são sobrescritos quando o valor novo chega NULL/vazio (um
+# re-scrape não apaga o proprietário/telefone/morada já enriquecidos).
+_LEAD_PRESERVE_COLS = frozenset({
+    "owner_name", "owner_phone", "owner_email", "owner_status",
+    "mailing_address", "bbl",
+})
+
+
+def _lead_insert_values(lead) -> dict:
+    """Valores das colunas de um EnrichedLead, no vocabulário da tabela."""
+    src = lead.source_type.value if hasattr(lead.source_type, "value") else str(lead.source_type)
+    cat = lead.issue_category.value if hasattr(lead.issue_category, "value") else str(lead.issue_category)
+    urg = lead.urgency_level.value if hasattr(lead.urgency_level, "value") else str(lead.urgency_level)
+    return {
+        "external_id": lead.external_id,
+        "source_type": src,
+        "address": lead.address,
+        "city": lead.city,
+        "state": lead.state,
+        "zip_code": lead.zip_code,
+        "lat": lead.lat,
+        "lng": lead.lng,
+        "county": lead.county,
+        "issue_category": cat,
+        "issue_description": lead.issue_description,
+        "urgency_level": urg,
+        "owner_name": lead.owner_name,
+        "owner_phone": lead.owner_phone,
+        "owner_email": lead.owner_email,
+        "owner_status": lead.owner_status,
+        "mailing_address": getattr(lead, "mailing_address", None),
+        "date_reported": lead.date_reported.isoformat(),
+        "image_url": lead.image_url,
+        "source_url": lead.source_url,
+        "is_validated": 1 if getattr(lead, "is_validated", False) else 0,
+        "created_at": datetime.now().isoformat(),
+        "address_unit": lead.address_unit,
+        "address_type": lead.address_type,
+        "address_street": lead.address_street,
+        "address_city": lead.address_city,
+        "address_state": lead.address_state,
+        "address_zip": lead.address_zip,
+        "case_title": lead.case_title,
+        "subject": lead.subject,
+        "reason": lead.reason,
+        "type": lead.type,
+        "queue": lead.queue,
+        "department": lead.department,
+        "closure_reason": lead.closure_reason,
+        "case_status": lead.case_status,
+        "on_time": lead.on_time,
+        "sla_target_dt": lead.sla_target_dt,
+        "closed_dt": lead.closed_dt,
+        "submitted_photo": lead.submitted_photo,
+        "closed_photo": lead.closed_photo,
+        "source": lead.source,
+        "neighborhood": lead.neighborhood,
+        "ward": lead.ward,
+        "precinct": lead.precinct,
+        "descriptor": lead.descriptor,
+        "resolution_description": lead.resolution_description,
+        "resolution_action_updated_date": lead.resolution_action_updated_date,
+        "bbl": getattr(lead, "bbl", None),
+    }
+
+
+def _lead_set_clause(placeholder: str) -> str:
+    """Cláusula SET para as colunas de dados (sem tocar nas chaves únicas).
+
+    `placeholder` = "excluded.<col>" para o UPSERT, ou "?" para o UPDATE por
+    (external_id, source_type). `created_at` fica de fora: é a data da primeira
+    observação e não pode ser reescrita por um re-scrape.
+    """
+    parts = []
+    for col in _LEAD_DATA_COLS:
+        if col == "created_at":
+            continue
+        if col in _LEAD_PRESERVE_COLS:
+            parts.append(f"{col}=COALESCE(NULLIF({placeholder.format(col=col)}, ''), leads.{col})")
+        else:
+            parts.append(f"{col}={placeholder.format(col=col)}")
+    parts.append("updated_at=datetime('now')")
+    return ", ".join(parts)
+
+
 class DatabaseService:
     """Interface type-safe sobre o SQLite (espelha o antigo SupabaseService)."""
 
@@ -1505,93 +1646,48 @@ class DatabaseService:
             conn.close()
 
     def insert_lead(self, lead: EnrichedLead) -> bool:
-        """Insere lead no banco; ignora se (external_id, source_type) já existe."""
+        """Insere (ou actualiza) um lead respeitando as DUAS chaves únicas.
+
+        - já existe (external_id, source_type) → UPDATE por essa chave;
+        - já existe (address, city) mas não a chave natural → UPSERT do imóvel,
+          que só recebe os dados mais novos (sem mudar de external_id);
+        - caso contrário → INSERT.
+
+        Ver `_LEAD_DATA_COLS` para o porquê de o ON CONFLICT não poder escrever
+        `external_id`: era assim que o re-scrape explodia com
+        "UNIQUE constraint failed: leads.external_id, leads.source_type".
+        """
+        values = _lead_insert_values(lead)
+        insert_cols = ["external_id", "source_type", "address", "city"] + list(_LEAD_DATA_COLS)
         conn = get_connection()
         try:
-            conn.execute(
-                """
-                INSERT INTO leads (
-                  external_id, source_type, address, city, state, zip_code,
-                  lat, lng, county, issue_category, issue_description, urgency_level,
-                  owner_name, owner_phone, owner_email, owner_status, mailing_address,
-                  date_reported, image_url, source_url, is_validated, created_at,
-                  address_unit, address_type, address_street, address_city, address_state, address_zip,
-                  case_title, subject, reason, type, queue, department,
-                  closure_reason, case_status, on_time, sla_target_dt, closed_dt,
-                  submitted_photo, closed_photo, source, neighborhood, ward, precinct,
-                  descriptor, resolution_description, resolution_action_updated_date,
-                  bbl
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(address, city) DO UPDATE SET
-                  bbl=COALESCE(NULLIF(excluded.bbl, ''), leads.bbl),
-                  external_id=excluded.external_id,
-                  source_type=excluded.source_type,
-                  state=excluded.state,
-                  zip_code=excluded.zip_code,
-                  lat=excluded.lat,
-                  lng=excluded.lng,
-                  county=excluded.county,
-                  issue_category=excluded.issue_category,
-                  issue_description=excluded.issue_description,
-                  urgency_level=excluded.urgency_level,
-                  owner_name=CASE WHEN excluded.owner_name IS NOT NULL AND excluded.owner_name != '' THEN excluded.owner_name ELSE leads.owner_name END,
-                  owner_phone=CASE WHEN excluded.owner_phone IS NOT NULL AND excluded.owner_phone != '' THEN excluded.owner_phone ELSE leads.owner_phone END,
-                  owner_email=CASE WHEN excluded.owner_email IS NOT NULL AND excluded.owner_email != '' THEN excluded.owner_email ELSE leads.owner_email END,
-                  owner_status=CASE WHEN excluded.owner_status IS NOT NULL AND excluded.owner_status != '' THEN excluded.owner_status ELSE leads.owner_status END,
-                  mailing_address=CASE WHEN excluded.mailing_address IS NOT NULL AND excluded.mailing_address != '' THEN excluded.mailing_address ELSE leads.mailing_address END,
-                  date_reported=excluded.date_reported,
-                  image_url=excluded.image_url,
-                  source_url=excluded.source_url,
-                  is_validated=excluded.is_validated,
-                  updated_at=datetime('now'),
-                  address_unit=excluded.address_unit,
-                  address_type=excluded.address_type,
-                  address_street=excluded.address_street,
-                  address_city=excluded.address_city,
-                  address_state=excluded.address_state,
-                  address_zip=excluded.address_zip,
-                  case_title=excluded.case_title,
-                  subject=excluded.subject,
-                  reason=excluded.reason,
-                  type=excluded.type,
-                  queue=excluded.queue,
-                  department=excluded.department,
-                  closure_reason=excluded.closure_reason,
-                  case_status=excluded.case_status,
-                  on_time=excluded.on_time,
-                  sla_target_dt=excluded.sla_target_dt,
-                  closed_dt=excluded.closed_dt,
-                  submitted_photo=excluded.submitted_photo,
-                  closed_photo=excluded.closed_photo,
-                  source=excluded.source,
-                  neighborhood=excluded.neighborhood,
-                  ward=excluded.ward,
-                  precinct=excluded.precinct,
-                  descriptor=excluded.descriptor,
-                  resolution_description=excluded.resolution_description,
-                  resolution_action_updated_date=excluded.resolution_action_updated_date
-                """,
-                (
-                    lead.external_id, lead.source_type.value, lead.address, lead.city,
-                    lead.state, lead.zip_code, lead.lat, lead.lng, lead.county,
-                    lead.issue_category.value, lead.issue_description, lead.urgency_level.value,
-                    lead.owner_name, lead.owner_phone, lead.owner_email, lead.owner_status,
-                    getattr(lead, "mailing_address", None),
-                    lead.date_reported.isoformat(), lead.image_url, lead.source_url,
-                    1 if getattr(lead, "is_validated", False) else 0, datetime.now().isoformat(),
-                    lead.address_unit, lead.address_type, lead.address_street, lead.address_city, lead.address_state, lead.address_zip,
-                    lead.case_title, lead.subject, lead.reason, lead.type, lead.queue, lead.department,
-                    lead.closure_reason, lead.case_status, lead.on_time, lead.sla_target_dt, lead.closed_dt,
-                    lead.submitted_photo, lead.closed_photo, lead.source, lead.neighborhood, lead.ward, lead.precinct,
-                    lead.descriptor, lead.resolution_description, lead.resolution_action_updated_date,
-                    getattr(lead, "bbl", None),
-                ),
-            )
+            existing = conn.execute(
+                "SELECT 1 FROM leads WHERE external_id = ? AND source_type = ?",
+                (values["external_id"], values["source_type"]),
+            ).fetchone()
+            if existing:
+                data_params = [values[c] for c in _LEAD_DATA_COLS if c != "created_at"]
+                conn.execute(
+                    f"UPDATE leads SET {_lead_set_clause('?')} "
+                    "WHERE external_id = ? AND source_type = ?",
+                    (*data_params, values["external_id"], values["source_type"]),
+                )
+            else:
+                placeholders = ", ".join("?" for _ in insert_cols)
+                conn.execute(
+                    f"INSERT INTO leads ({', '.join(insert_cols)}) VALUES ({placeholders}) "
+                    f"ON CONFLICT(address, city) DO UPDATE SET {_lead_set_clause('excluded.{col}')}",
+                    [values[c] for c in insert_cols],
+                )
             conn.commit()
             logger.info(f"Lead inserido/atualizado: {lead.external_id}")
             return True
         except Exception as e:
-            logger.error(f"Erro ao inserir lead: {e}")
+            logger.error(f"Erro ao inserir lead {getattr(lead, 'external_id', '?')}: {e}")
+            try:
+                conn.rollback()
+            except Exception:
+                pass
             return False
         finally:
             conn.close()
@@ -4338,7 +4434,16 @@ class DatabaseService:
         # (max(captured_24h, média de inserted)) — um valor estimado que não
         # correspondia a nenhuma query e não era reconciliável com a base.
         last_inserted = last_run.get("inserted") or 0
-        novas_oportunidades = last_inserted
+        # FALLBACK: sem nenhum run persistido (primeira instalação, worker que
+        # reiniciou antes de gravar, ou DB novo) o card "Última varredura" da
+        # dashboard mostrava 0 mesmo com milhares de leads captados. Nesse caso
+        # recuamos para as inserções reais das últimas 24h — um número que
+        # existe de facto na base. Mantém-se o `inserted` autêntico do run
+        # sempre que ele existir.
+        if last_run:
+            novas_oportunidades = last_inserted
+        else:
+            novas_oportunidades = captured_24h
 
         return {
             "total_leads": total,
@@ -4472,7 +4577,7 @@ class DatabaseService:
                 if isinstance(most_recent, str):
                     most_recent = datetime.strptime(most_recent, "%Y-%m-%d %H:%M:%S")
                 hours_ago = max(1, round((datetime.now() - most_recent).total_seconds() / 3600))
-                last_scrape_info = f"{recent_count} novas oportunidades ({cities_str}) Atualizado há {hours_ago} horas · 100% com registro público"
+                last_scrape_info = f"{recent_count} novas oportunidades ({cities_str}) Atualizado há {hours_ago} horas"
             else:
                 # Fallback: usa a contagem 24h se não houver leads recentes
                 last_24h_cutoff_str = (
@@ -4501,6 +4606,12 @@ class DatabaseService:
             result = {
                 "total_interested": total_interested,
                 "last_scrape": last_scrape_info,
+                # Janela de 2h, em NÚMERO (não só dentro do texto `last_scrape`):
+                # é o que o card "Última varredura" da dashboard deve exibir.
+                # Antes o card lia public_metrics.novas_oportunidades (coluna
+                # `inserted` de scraper_runs), que era 0 sempre que o worker
+                # reiniciava sem gravar o run — mesmo com milhares de leads novos.
+                "recent_count": recent_count,
                 "with_contact": with_contact,
                 "urgent": urgent,
                 "by_category": by_category,
