@@ -1890,7 +1890,14 @@ const URGENCIES = ["all", "high", "medium", "low"];
               // frente do public_metrics.novas_oportunidades, que era 0 quando
               // o worker reiniciava sem gravar o scraper_runs — o card não podia
               // mostrar 0 com dezenas de milhares de leads actualizados.
-              { label: t("dashboard.kpi.last_scrape"), value: dashboardSummary?.recent_count ?? publicMetrics?.last_scrape?.novas_oportunidades ?? scrapeCount, delta: t("dashboard.kpi.updated_now"), icon: TrendingUp, color: "#22c55e" },
+              // BUG: usava-se `??`, que NÃO passa à frente quando o valor é um 0
+              // VÁLIDO (recent_count é 0 assim que a janela de 2h esvazia). Como
+              // a landing lia novas_oportunidades directamente e mostrava 2.796,
+              // só o card ficava em 0. Com `||` o 0 cai para o valor real das
+              // últimas 24h (novas_oportunidades, e depois captured_24h = entradas
+              // novas na base), pelo que o card nunca mostra 0 enquanto houver
+              // dados recentes.
+              { label: t("dashboard.kpi.last_scrape"), value: dashboardSummary?.recent_count || publicMetrics?.last_scrape?.novas_oportunidades || publicMetrics?.last_scrape?.captured_24h || scrapeCount, delta: t("dashboard.kpi.updated_now"), icon: TrendingUp, color: "#22c55e" },
               // `with_contact` conta leads COM PROPRIETÁRIO IDENTIFICADO — não
               // telefone (as validações de ligações só acontecem na reserva, de
               // propósito: o número é pago). "prontas p/ ligar" era mentira.
