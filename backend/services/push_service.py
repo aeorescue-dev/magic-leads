@@ -296,6 +296,13 @@ class PushService:
 
         subscriptions = await db_service.get_user_push_subscriptions(user_id)
         if not subscriptions:
+            # Utilizador com push ligado mas SEM dispositivo subscrito: o segundo
+            # modo de falha invisivel (o primeiro e `not_configured`). Sem este
+            # record o painel mostra "0 entregas" e nunca explica a causa.
+            push_metrics.record(
+                outcome="no_subscriptions", attempts=0, user_id=user_id,
+                kind=kind, error="user has no push subscriptions",
+            )
             return 0
 
         sent = 0

@@ -180,6 +180,7 @@ export interface AdminPushMetrics {
     timeouts: number;
     errors: number;
     not_configured: number;
+    no_subscriptions: number;
     retried: number;
   };
   accepted_rate: number | null;

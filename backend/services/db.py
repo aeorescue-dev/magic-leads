@@ -3084,6 +3084,7 @@ class DatabaseService:
                   SUM(CASE WHEN outcome = 'timeout' THEN 1 ELSE 0 END) AS timeouts,
                   SUM(CASE WHEN outcome = 'error' THEN 1 ELSE 0 END) AS errors,
                   SUM(CASE WHEN outcome = 'not_configured' THEN 1 ELSE 0 END) AS not_configured,
+                  SUM(CASE WHEN outcome = 'no_subscriptions' THEN 1 ELSE 0 END) AS no_subscriptions,
                   SUM(CASE WHEN attempts > 1 THEN 1 ELSE 0 END) AS retried
                 FROM push_deliveries WHERE sent_at >= ?
                 """,
@@ -3165,6 +3166,7 @@ class DatabaseService:
                     "timeouts": totals["timeouts"] or 0,
                     "errors": totals["errors"] or 0,
                     "not_configured": totals["not_configured"] or 0,
+                    "no_subscriptions": totals["no_subscriptions"] or 0,
                     "retried": totals["retried"] or 0,
                 },
                 "accepted_rate": _ratio(totals["accepted"], totals["deliveries"]),
@@ -3185,7 +3187,7 @@ class DatabaseService:
                     "deliveries": 0, "accepted": 0, "expired": 0, "rejected": 0,
                     "rejected_dead": 0,
                     "rate_limited": 0, "timeouts": 0, "errors": 0,
-                    "not_configured": 0, "retried": 0,
+                    "not_configured": 0, "no_subscriptions": 0, "retried": 0,
                 },
                 "accepted_rate": None,
                 "live_subscriptions": 0,

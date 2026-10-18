@@ -1007,7 +1007,8 @@ export default function AdminPage() {
         </div>
         {!push ? (
           <p className="text-xs text-slate-500">
-            Sem telemetria de push. O buffer só escreve quando há uma subscrição para notificar.
+            Sem telemetria de push. O buffer também regista tentativas bloqueadas
+            (sem VAPID, push desligado ou sem dispositivo subscrito).
           </p>
         ) : (
           <div className="space-y-4">
@@ -1038,6 +1039,14 @@ export default function AdminPage() {
               <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300">
                 {push.totals.not_configured} tentativa(s) com o push desligado (sem VAPID). Nada
                 foi enviado e nada apareceu nos logs do utilizador.
+              </p>
+            ) : null}
+
+            {push.totals.no_subscriptions > 0 ? (
+              <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300">
+                {push.totals.no_subscriptions} tentativa(s) para utilizador(es) com push ligado
+                mas nenhum dispositivo subscrito. O utilizador tem de ativar as notificações
+                no browser/PWA — não é falha de entrega.
               </p>
             ) : null}
 

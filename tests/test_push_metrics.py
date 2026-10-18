@@ -286,6 +286,32 @@ async def test_send_to_user_records_not_configured(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_send_to_user_records_no_subscriptions(monkeypatch):
+    """Push ligado mas SEM dispositivo subscrito é o segundo modo de falha
+    invisível: o utilizador parece "sem notificações" e o painel mostrava
+    apenas 0 entregas, sem dizer porquê."""
+    svc = _svc_configured(monkeypatch)
+
+    async def _enabled(user_id):
+        return True
+
+    async def _no_subs(user_id):
+        return []
+
+    monkeypatch.setattr(db_service, "is_push_enabled", _enabled)
+    monkeypatch.setattr(db_service, "get_user_push_subscriptions", _no_subs)
+
+    sent = await svc.send_to_user(42, {"title": "t"}, "lead_alert")
+    assert sent == 0
+
+    rows = await _flush(1)
+    assert rows[0]["outcome"] == "no_subscriptions"
+    assert rows[0]["attempts"] == 0
+    assert rows[0]["user_id"] == 42
+    assert rows[0]["kind"] == "lead_alert"
+
+
+@pytest.mark.asyncio
 @pytest.mark.asyncio
 async def test_broadcast_kinds_are_labelled_on_the_real_path(monkeypatch):
     """Regressao: os broadcasts so rotulavam o caminho `not_configured`.

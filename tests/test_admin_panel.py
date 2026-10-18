@@ -421,6 +421,25 @@ def test_admin_push_counts_outcomes(admin_client):
     assert kinds["lead_alert"]["expired"] == 2
 
 
+def test_admin_push_counts_no_subscriptions(admin_client):
+    """Utilizador ativo sem dispositivo subscrito tem de ser distinguível de
+    "o push nunca foi tentado" — é a causa nº 2 de "não recebo notificações"."""
+    client, headers, _ = admin_client
+    _seed_push([
+        ("accepted", 1, 1, 150, "lead_alert"),
+        ("no_subscriptions", 0, 2, None, "lead_alert"),
+    ])
+
+    data = client.get("/api/admin/push?days=7", headers=headers).json()
+    totals = data["totals"]
+    assert totals["deliveries"] == 2
+    assert totals["accepted"] == 1
+    assert totals["no_subscriptions"] == 1
+
+    outcomes = {r["outcome"]: r["n"] for r in data["by_outcome"]}
+    assert outcomes["no_subscriptions"] == 1
+
+
 def test_admin_push_empty_is_not_an_error(admin_client):
     client, headers, _ = admin_client
     data = client.get("/api/admin/push", headers=headers).json()
