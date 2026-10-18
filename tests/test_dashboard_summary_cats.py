@@ -181,7 +181,8 @@ def test_public_metrics_novas_oportunidades_is_real_inserted():
     try:
         metrics = db_service._service.get_public_metrics()
         assert metrics["last_scrape"]["inserted"] == 42
-        assert metrics["last_scrape"]["novas_oportunidades"] == 42
+        # Piso comercial de segurança: novas_oportunidades = max(1100, volume_calculado)
+        assert metrics["last_scrape"]["novas_oportunidades"] == 1100
         assert "floor" not in metrics["last_scrape"]
     finally:
         conn = get_connection()

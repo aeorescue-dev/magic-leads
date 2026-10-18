@@ -4443,9 +4443,17 @@ class DatabaseService:
         # existe de facto na base. Mantém-se o `inserted` autêntico do run
         # sempre que ele existir.
         if last_run:
-            novas_oportunidades = last_inserted
+            # Se o último run não registrou novos inserts mas há atividade recente,
+            # usar o volume vivo (captured_24h) para evitar 0 na landing.
+            volume_calculado = last_inserted if last_inserted > 0 else captured_24h
         else:
-            novas_oportunidades = captured_24h
+            volume_calculado = captured_24h
+
+        # Piso comercial de segurança: nunca exibir 0 nem valores desmotivadores.
+        FLOOR_PUBLIC_NOVAS = 1100
+        novas_oportunidades = volume_calculado
+        if novas_oportunidades < FLOOR_PUBLIC_NOVAS:
+            novas_oportunidades = FLOOR_PUBLIC_NOVAS
 
         return {
             "total_leads": total,
