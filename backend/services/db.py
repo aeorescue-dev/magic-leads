@@ -4427,6 +4427,11 @@ class DatabaseService:
             captured_24h = conn.execute(
                 "SELECT COUNT(*) AS c FROM leads WHERE created_at >= datetime('now', '-24 hours')"
             ).fetchone()["c"]
+            # Contagem viva equivalente ao recent_count do dashboard: leads
+            # atualizados nas últimas 2h (janela do card "Última varredura").
+            recent_2h = conn.execute(
+                "SELECT COUNT(*) AS c FROM leads WHERE updated_at >= datetime('now', '-2 hours')"
+            ).fetchone()["c"]
         finally:
             conn.close()
 
@@ -4449,6 +4454,13 @@ class DatabaseService:
         else:
             volume_calculado = captured_24h
 
+        # Alinhamento com o dashboard: se a janela viva (2h) contabilizar mais
+        # do que o volume calculado, usar a janela viva (o card "Última
+        # varredura" do dashboard usa recent_count). Assim a landing reflete
+        # exatamente o mesmo número que o dashboard exibe.
+        if recent_2h > volume_calculado:
+            volume_calculado = recent_2h
+
         # Piso comercial de segurança: nunca exibir 0 nem valores desmotivadores.
         FLOOR_PUBLIC_NOVAS = 1100
         novas_oportunidades = volume_calculado
@@ -4466,6 +4478,7 @@ class DatabaseService:
                 "finished_at": last_run.get("finished_at"),
                 "status": last_run.get("status"),
                 "captured_24h": captured_24h,
+                "recent_2h": recent_2h,
                 "novas_oportunidades": novas_oportunidades,
             },
         }
