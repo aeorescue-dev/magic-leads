@@ -638,11 +638,32 @@ CREATE TABLE IF NOT EXISTS outbound_contacts (
   enriched_at TEXT,
   last_verified_at TEXT,
   unsubscribed INTEGER NOT NULL DEFAULT 0,
+  company_domain TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_outbound_contacts_city ON outbound_contacts (city);
 CREATE INDEX IF NOT EXISTS idx_outbound_contacts_unsub ON outbound_contacts (unsubscribed);
+
+-- Telemetria das chamadas de enriquecimento de e-mail (Snov.io).
+-- outcome: success | not_configured | no_domain | invalid_email |
+--          provider_no_results | http_error | timeout | error
+-- billed=1 marca chamadas que chegaram ao provedor (custo por e-mail verificado).
+CREATE TABLE IF NOT EXISTS outbound_enrichment_calls (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  called_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  provider TEXT NOT NULL DEFAULT 'snov',
+  outcome TEXT NOT NULL,
+  billed INTEGER DEFAULT 0,
+  latency_ms INTEGER,
+  http_status INTEGER,
+  city TEXT,
+  email TEXT,
+  error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_outbound_enrichment_calls_at ON outbound_enrichment_calls (called_at);
+CREATE INDEX IF NOT EXISTS idx_outbound_enrichment_calls_outcome ON outbound_enrichment_calls (outcome);
 
 CREATE TABLE IF NOT EXISTS outbound_batches (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -804,6 +825,53 @@ def _seed_outbound_defaults(conn: sqlite3.Connection) -> None:
             "VALUES ('outbound', '', ?, ?)",
             (key, value),
         )
+
+
+def record_outbound_enrichment_call(
+    outcome: str,
+    billed: int = 0,
+    latency_ms: Optional[int] = None,
+    http_status: Optional[int] = None,
+    city: Optional[str] = None,
+    email: Optional[str] = None,
+    error: Optional[str] = None,
+    provider: str = "snov",
+) -> bool:
+    """Regista uma chamada de enriquecimento de e-mail (telemetria Fase 2).
+
+    Nunca levanta excecao: a telemetria nao pode falhar o fluxo de envio.
+    """
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO outbound_enrichment_calls "
+            "(provider, outcome, billed, latency_ms, http_status, city, email, error) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (provider, outcome, int(billed), latency_ms, http_status, city, email, error),
+        )
+        conn.commit()
+        return True
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+
+def outbound_enrichment_usage_today(day: str) -> dict:
+    """Chamadas/billed/spend de enriquecimento do dia (para o teto diario)."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) AS calls, COALESCE(SUM(billed), 0) AS billed "
+            "FROM outbound_enrichment_calls WHERE called_at >= ?",
+            (f"{day} 00:00:00",),
+        ).fetchone()
+        return {
+            "calls": int(row["calls"] or 0),
+            "billed": int(row["billed"] or 0),
+        }
+    finally:
+        conn.close()
 
 
 def _ratio(numerator: Optional[int], denominator: Optional[int]) -> Optional[float]:
@@ -1097,6 +1165,14 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
             )
         except sqlite3.OperationalError:
             pass
+
+    # Fase 2 outbound: `outbound_contacts.company_domain` guarda o dominio da
+    # empresa (para o Snov.io). Adicionado a bancos antigos de forma idempotente.
+    contact_cols = {
+        r["name"] for r in conn.execute("PRAGMA table_info(outbound_contacts)").fetchall()
+    }
+    if contact_cols and "company_domain" not in contact_cols:
+        conn.execute("ALTER TABLE outbound_contacts ADD COLUMN company_domain TEXT")
 
 
 class _SmtpConnect(smtplib.SMTP):
@@ -1642,6 +1718,379 @@ class DatabaseService:
                 (city,),
             ).fetchone()
             return dict(row) if row else None
+        finally:
+            conn.close()
+
+    # ===== OUTBOUND Fase 2: fila, contadores, mailboxes e telemetria =====
+
+    def get_outbound_batch(self, batch_id: int) -> Optional[dict]:
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT * FROM outbound_batches WHERE id=?", (int(batch_id),)
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def start_outbound_batch(self, batch_id: int) -> Optional[dict]:
+        """Promove um lote a REAL: dry_run=0, status='sending', started_at=now."""
+        conn = get_connection()
+        try:
+            conn.execute(
+                "UPDATE outbound_batches SET dry_run=0, status='sending', "
+                "started_at=CURRENT_TIMESTAMP WHERE id=?",
+                (int(batch_id),),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT * FROM outbound_batches WHERE id=?", (int(batch_id),)
+            ).fetchone()
+            return dict(row) if row else None
+        except Exception:
+            return None
+        finally:
+            conn.close()
+
+    def finish_outbound_batch(self, batch_id: int, status: str = "sent") -> bool:
+        conn = get_connection()
+        try:
+            conn.execute(
+                "UPDATE outbound_batches SET status=?, finished_at=CURRENT_TIMESTAMP "
+                "WHERE id=?",
+                (status, int(batch_id)),
+            )
+            conn.commit()
+            return True
+        except Exception:
+            return False
+        finally:
+            conn.close()
+
+    def update_outbound_batch_stats(
+        self, batch_id: int, contact_count: int, est_cost_usd: float
+    ) -> bool:
+        conn = get_connection()
+        try:
+            conn.execute(
+                "UPDATE outbound_batches SET contact_count=?, est_cost_usd=? WHERE id=?",
+                (int(contact_count), float(est_cost_usd), int(batch_id)),
+            )
+            conn.commit()
+            return True
+        except Exception:
+            return False
+        finally:
+            conn.close()
+
+    def list_outbound_leads(
+        self, city: str, categories: Optional[List[str]] = None, limit: int = 200
+    ) -> List[dict]:
+        """Leads qualificados disponiveis na cidade, para materializar um lote.
+
+        Mesma definicao do simulador (`_qualified_where` + nao institucional +
+        disponivel), agora devolvendo as linhas reais para o enriquecimento.
+        """
+        if not city:
+            return []
+        conn = get_connection()
+        try:
+            where = _qualified_where()
+            not_institutional = institutional_owner_name_where()
+            params: List[Any] = [city]
+            cat_clause = ""
+            clean = [c for c in (categories or []) if c]
+            if clean:
+                marks = ", ".join("?" for _ in clean)
+                cat_clause = f"AND issue_category IN ({marks}) "
+                params.extend(clean)
+            params.append(int(limit))
+            q = (
+                "SELECT id, owner_name, owner_email, address, city, "
+                "COALESCE(state, '') AS state, issue_category "
+                "FROM leads "
+                f"WHERE {where} "
+                "AND UPPER(TRIM(city)) = UPPER(TRIM(?)) "
+                "AND (lead_status IS NULL OR lead_status = 'available') "
+                f"AND NOT ({not_institutional}) "
+                f"{cat_clause}"
+                "ORDER BY COALESCE(date_reported, '') DESC LIMIT ?"
+            )
+            return [dict(r) for r in conn.execute(q, params).fetchall()]
+        finally:
+            conn.close()
+
+    def get_outbound_contact_by_lead(self, lead_id: int) -> Optional[dict]:
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT * FROM outbound_contacts WHERE lead_id=? ORDER BY id DESC LIMIT 1",
+                (int(lead_id),),
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def get_outbound_contact_by_email(self, email: str) -> Optional[dict]:
+        if not email:
+            return None
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT * FROM outbound_contacts WHERE email=?", (email.lower(),)
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def upsert_outbound_contact(
+        self,
+        lead_id: Optional[int],
+        email: str,
+        city: Optional[str] = None,
+        state: Optional[str] = None,
+        company_name: Optional[str] = None,
+        contact_name: Optional[str] = None,
+        email_source: str = "snov",
+        email_status: str = "unknown",
+        company_domain: Optional[str] = None,
+    ) -> Optional[dict]:
+        if not email:
+            return None
+        conn = get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO outbound_contacts "
+                "(lead_id, kind, company_name, contact_name, email, email_source, "
+                "email_status, city, state, company_domain, enriched_at, last_verified_at) "
+                "VALUES (?, 'business', ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(email) DO UPDATE SET "
+                "email_status=excluded.email_status, "
+                "enriched_at=CURRENT_TIMESTAMP, last_verified_at=CURRENT_TIMESTAMP, "
+                "email_source=excluded.email_source, "
+                "company_name=COALESCE(excluded.company_name, outbound_contacts.company_name), "
+                "contact_name=COALESCE(excluded.contact_name, outbound_contacts.contact_name), "
+                "company_domain=COALESCE(excluded.company_domain, outbound_contacts.company_domain), "
+                "lead_id=COALESCE(outbound_contacts.lead_id, excluded.lead_id)",
+                (
+                    lead_id,
+                    company_name,
+                    contact_name,
+                    email.lower(),
+                    email_source,
+                    email_status,
+                    city,
+                    state,
+                    company_domain,
+                ),
+            )
+            conn.commit()
+            r = conn.execute(
+                "SELECT * FROM outbound_contacts WHERE email=?", (email.lower(),)
+            ).fetchone()
+            return dict(r) if r else None
+        except Exception:
+            return None
+        finally:
+            conn.close()
+
+    def update_outbound_contact_status(
+        self,
+        contact_id: int,
+        email_status: Optional[str] = None,
+        unsubscribed: Optional[int] = None,
+    ) -> bool:
+        conn = get_connection()
+        try:
+            sets = []
+            params: List[Any] = []
+            if email_status is not None:
+                sets.append("email_status=?")
+                params.append(email_status)
+            if unsubscribed is not None:
+                sets.append("unsubscribed=?")
+                params.append(int(unsubscribed))
+            if not sets:
+                return True
+            sets.append("last_verified_at=CURRENT_TIMESTAMP")
+            params.append(int(contact_id))
+            conn.execute(
+                f"UPDATE outbound_contacts SET {', '.join(sets)} WHERE id=?", params
+            )
+            conn.commit()
+            return True
+        except Exception:
+            return False
+        finally:
+            conn.close()
+
+    def list_queued_outbound_messages(
+        self, limit: int = 10, city: Optional[str] = None
+    ) -> List[dict]:
+        conn = get_connection()
+        try:
+            q = "SELECT * FROM outbound_messages WHERE status='queued'"
+            params: List[Any] = []
+            if city:
+                q += " AND UPPER(TRIM(COALESCE(city,''))) = UPPER(TRIM(?))"
+                params.append(city)
+            q += " ORDER BY id LIMIT ?"
+            params.append(int(limit))
+            return [dict(r) for r in conn.execute(q, params).fetchall()]
+        finally:
+            conn.close()
+
+    def get_outbound_message(self, message_id: int) -> Optional[dict]:
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT * FROM outbound_messages WHERE id=?", (int(message_id),)
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def update_outbound_message(
+        self,
+        message_id: int,
+        status: Optional[str] = None,
+        provider_id: Optional[str] = None,
+        error: Optional[str] = None,
+        sent_at: Optional[str] = None,
+        mailbox_id: Optional[int] = None,
+    ) -> bool:
+        conn = get_connection()
+        try:
+            sets = []
+            params: List[Any] = []
+            if status is not None:
+                sets.append("status=?")
+                params.append(status)
+            if provider_id is not None:
+                sets.append("provider_id=?")
+                params.append(provider_id)
+            if error is not None:
+                sets.append("error=?")
+                params.append(error)
+            if sent_at is not None:
+                sets.append("sent_at=?")
+                params.append(sent_at)
+            if mailbox_id is not None:
+                sets.append("mailbox_id=?")
+                params.append(int(mailbox_id))
+            if not sets:
+                return True
+            params.append(int(message_id))
+            conn.execute(
+                f"UPDATE outbound_messages SET {', '.join(sets)} WHERE id=?", params
+            )
+            conn.commit()
+            return True
+        except Exception:
+            return False
+        finally:
+            conn.close()
+
+    def count_outbound_messages(
+        self, status: Optional[str] = None, batch_id: Optional[int] = None
+    ) -> int:
+        conn = get_connection()
+        try:
+            q = "SELECT COUNT(*) AS c FROM outbound_messages WHERE 1=1"
+            params: List[Any] = []
+            if status:
+                q += " AND status=?"
+                params.append(status)
+            if batch_id is not None:
+                q += " AND batch_id=?"
+                params.append(int(batch_id))
+            return int(conn.execute(q, params).fetchone()["c"])
+        finally:
+            conn.close()
+
+    def count_mailbox_sent_today(self, mailbox_id: int, day: str) -> int:
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) AS c FROM outbound_messages "
+                "WHERE mailbox_id=? AND status='sent' AND sent_at >= ?",
+                (int(mailbox_id), f"{day} 00:00:00"),
+            ).fetchone()
+            return int(row["c"])
+        finally:
+            conn.close()
+
+    def get_outbound_counter(self, city: str, day: str) -> dict:
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT * FROM outbound_daily_counters WHERE city=? AND day=?",
+                (city or "", day),
+            ).fetchone()
+            if row:
+                return dict(row)
+            return {"city": city or "", "day": day, "sent": 0, "enriched": 0, "spend_usd": 0.0}
+        finally:
+            conn.close()
+
+    def increment_outbound_counter(
+        self, city: str, day: str, sent: int = 0, enriched: int = 0, spend_usd: float = 0.0
+    ) -> bool:
+        conn = get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO outbound_daily_counters (city, day, sent, enriched, spend_usd, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(city, day) DO UPDATE SET "
+                "sent = outbound_daily_counters.sent + excluded.sent, "
+                "enriched = outbound_daily_counters.enriched + excluded.enriched, "
+                "spend_usd = outbound_daily_counters.spend_usd + excluded.spend_usd, "
+                "updated_at = CURRENT_TIMESTAMP",
+                ((city or ""), day, int(sent), int(enriched), float(spend_usd)),
+            )
+            conn.commit()
+            return True
+        except Exception:
+            return False
+        finally:
+            conn.close()
+
+    def update_mailbox_after_send(
+        self, mailbox_id: int, warmup_state: Optional[str] = None
+    ) -> bool:
+        conn = get_connection()
+        try:
+            if warmup_state:
+                conn.execute(
+                    "UPDATE sending_mailboxes SET last_send_at=CURRENT_TIMESTAMP, "
+                    "warmup_state=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (warmup_state, int(mailbox_id)),
+                )
+            else:
+                conn.execute(
+                    "UPDATE sending_mailboxes SET last_send_at=CURRENT_TIMESTAMP, "
+                    "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (int(mailbox_id),),
+                )
+            conn.commit()
+            return True
+        except Exception:
+            return False
+        finally:
+            conn.close()
+
+    def set_mailbox_warmup_started(self, mailbox_id: int) -> bool:
+        conn = get_connection()
+        try:
+            conn.execute(
+                "UPDATE sending_mailboxes SET warmup_started_at=COALESCE(warmup_started_at, CURRENT_TIMESTAMP), "
+                "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (int(mailbox_id),),
+            )
+            conn.commit()
+            return True
+        except Exception:
+            return False
         finally:
             conn.close()
 
@@ -7430,6 +7879,139 @@ class AsyncDatabaseService:
     async def get_outbound_sample_contact(self, city: str) -> Optional[dict]:
         return await anyio.to_thread.run_sync(
             self._service.get_outbound_sample_contact, city
+        )
+
+    # ===== OUTBOUND Fase 2 (async wrappers) =====
+
+    async def get_outbound_batch(self, batch_id: int) -> Optional[dict]:
+        return await anyio.to_thread.run_sync(self._service.get_outbound_batch, batch_id)
+
+    async def start_outbound_batch(self, batch_id: int) -> Optional[dict]:
+        return await anyio.to_thread.run_sync(self._service.start_outbound_batch, batch_id)
+
+    async def finish_outbound_batch(self, batch_id: int, status: str = "sent") -> bool:
+        return await anyio.to_thread.run_sync(self._service.finish_outbound_batch, batch_id, status)
+
+    async def update_outbound_batch_stats(
+        self, batch_id: int, contact_count: int, est_cost_usd: float
+    ) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.update_outbound_batch_stats, batch_id, contact_count, est_cost_usd
+        )
+
+    async def list_outbound_leads(
+        self, city: str, categories: Optional[List[str]] = None, limit: int = 200
+    ) -> List[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.list_outbound_leads, city, categories, limit
+        )
+
+    async def get_outbound_contact_by_lead(self, lead_id: int) -> Optional[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.get_outbound_contact_by_lead, lead_id
+        )
+
+    async def get_outbound_contact_by_email(self, email: str) -> Optional[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.get_outbound_contact_by_email, email
+        )
+
+    async def upsert_outbound_contact(
+        self,
+        lead_id: Optional[int],
+        email: str,
+        city: Optional[str] = None,
+        state: Optional[str] = None,
+        company_name: Optional[str] = None,
+        contact_name: Optional[str] = None,
+        email_source: str = "snov",
+        email_status: str = "unknown",
+        company_domain: Optional[str] = None,
+    ) -> Optional[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.upsert_outbound_contact,
+            lead_id,
+            email,
+            city,
+            state,
+            company_name,
+            contact_name,
+            email_source,
+            email_status,
+            company_domain,
+        )
+
+    async def update_outbound_contact_status(
+        self,
+        contact_id: int,
+        email_status: Optional[str] = None,
+        unsubscribed: Optional[int] = None,
+    ) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.update_outbound_contact_status, contact_id, email_status, unsubscribed
+        )
+
+    async def list_queued_outbound_messages(
+        self, limit: int = 10, city: Optional[str] = None
+    ) -> List[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.list_queued_outbound_messages, limit, city
+        )
+
+    async def get_outbound_message(self, message_id: int) -> Optional[dict]:
+        return await anyio.to_thread.run_sync(self._service.get_outbound_message, message_id)
+
+    async def update_outbound_message(
+        self,
+        message_id: int,
+        status: Optional[str] = None,
+        provider_id: Optional[str] = None,
+        error: Optional[str] = None,
+        sent_at: Optional[str] = None,
+        mailbox_id: Optional[int] = None,
+    ) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.update_outbound_message,
+            message_id,
+            status,
+            provider_id,
+            error,
+            sent_at,
+            mailbox_id,
+        )
+
+    async def count_outbound_messages(
+        self, status: Optional[str] = None, batch_id: Optional[int] = None
+    ) -> int:
+        return await anyio.to_thread.run_sync(
+            self._service.count_outbound_messages, status, batch_id
+        )
+
+    async def count_mailbox_sent_today(self, mailbox_id: int, day: str) -> int:
+        return await anyio.to_thread.run_sync(
+            self._service.count_mailbox_sent_today, mailbox_id, day
+        )
+
+    async def get_outbound_counter(self, city: str, day: str) -> dict:
+        return await anyio.to_thread.run_sync(self._service.get_outbound_counter, city, day)
+
+    async def increment_outbound_counter(
+        self, city: str, day: str, sent: int = 0, enriched: int = 0, spend_usd: float = 0.0
+    ) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.increment_outbound_counter, city, day, sent, enriched, spend_usd
+        )
+
+    async def update_mailbox_after_send(
+        self, mailbox_id: int, warmup_state: Optional[str] = None
+    ) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.update_mailbox_after_send, mailbox_id, warmup_state
+        )
+
+    async def set_mailbox_warmup_started(self, mailbox_id: int) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.set_mailbox_warmup_started, mailbox_id
         )
 
 

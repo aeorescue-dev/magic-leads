@@ -114,6 +114,8 @@ class Settings(BaseSettings):
     @field_validator(
         "SMTP_HOST", "SMTP_USER", "SMTP_PASS", "SMTP_FROM",
         "EMAIL_API_KEY",
+        "SNOV_CLIENT_ID", "SNOV_CLIENT_SECRET",
+        "GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN",
         mode="before",
     )
     @classmethod
@@ -159,6 +161,36 @@ class Settings(BaseSettings):
 
     # Webhook para alertas do scraper (Telegram/Slack/Email via n8n/Resend/etc)
     SCRAPER_WEBHOOK_URL: str = ""
+
+    # ---------------------------------------------------------------- Outbound
+    # Fase 2: enriquecimento de e-mail (Snov.io) e envio (Gmail API).
+    # Sem SNOV_CLIENT_ID/SNOV_CLIENT_SECRET o enriquecimento fica fail-soft
+    # (outcome=not_configured) e nada e' enfileirado. O envio continua
+    # fail-closed por `send_enabled=0` na base de dados.
+    SNOV_BASE_URL: str = "https://api.snov.io"
+    SNOV_CLIENT_ID: str = ""
+    SNOV_CLIENT_SECRET: str = ""
+    SNOV_TIMEOUT_SECONDS: float = 20.0
+    # Custo unitario usado na telemetria/orcamento do lote (o painel ja' usa 0.015).
+    SNOV_PER_EMAIL_USD: float = 0.015
+    # Maximo de verificacoes pagas por lead numa unica busca (anti-spam de custo).
+    SNOV_MAX_VERIFICATIONS: int = 5
+
+    # Gmail API (Google Workspace OAuth2). Cada caixa pode guardar as suas
+    # credenciais em `sending_mailboxes.auth_ref` (JSON); estas env vars sao o
+    # fallback global quando a caixa nao tem auth_ref proprio.
+    GMAIL_CLIENT_ID: str = ""
+    GMAIL_CLIENT_SECRET: str = ""
+    GMAIL_REFRESH_TOKEN: str = ""
+    GMAIL_TOKEN_URL: str = "https://oauth2.googleapis.com/token"
+    GMAIL_API_URL: str = "https://gmail.googleapis.com/gmail/v1"
+    GMAIL_TIMEOUT_SECONDS: float = 20.0
+
+    # Worker interno de outbound (esteira). O primeiro tick so' acontece depois
+    # do intervalo; `send_enabled=0` mantem o envio bloqueado mesmo com o loop on.
+    OUTBOUND_WORKER_ENABLED: bool = True
+    OUTBOUND_WORKER_INTERVAL_SECONDS: int = 60
+    OUTBOUND_WORKER_CHUNK: int = 10
 
     # DLQ de notificações in-app. Ring buffer: impede acúmulo infinito em
     # disco quando o INSERT falha repetidamente. Os ficheiros mais antigos

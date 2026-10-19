@@ -27,6 +27,7 @@ import {
   AdminOutboundConfigResponse,
   AdminOutboundPreview,
   AdminOutboundSimulation,
+  AdminOutboundStatus,
   AdminOverview,
   AdminPlannerMetrics,
   AdminPushMetrics,
@@ -41,6 +42,7 @@ import {
     AdminCreditReconcileResponse,
   fetchAdminAlerts,
   fetchAdminOutboundConfig,
+  fetchAdminOutboundStatus,
   fetchAdminOverview,
   fetchAdminPlanner,
   fetchAdminPush,
@@ -56,6 +58,8 @@ import {
   sendAdminOutbound,
   sendAdminTestPush,
   simulateAdminOutbound,
+  triggerAdminOutboundWorker,
+  updateAdminOutboundConfig,
 } from "@/lib/admin-api";
 import { AUTH_TOKEN_KEY } from "@/lib/api-client";
 
@@ -156,9 +160,11 @@ function OutboundPanel() {
   const [previewing, setPreviewing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sendState, setSendState] = useState<{
-    state: "idle" | "sending" | "blocked" | "error";
+    state: "idle" | "sending" | "blocked" | "error" | "ok";
     message?: string;
   }>({ state: "idle" });
+  const [status, setStatus] = useState<AdminOutboundStatus | null>(null);
+  const [toggling, setToggling] = useState(false);
 
   const loadConfig = useCallback(async () => {
     setLoading(true);
@@ -168,6 +174,9 @@ function OutboundPanel() {
       setConfig(cfg);
       setCity((prev) => (prev && cfg.cities.includes(prev) ? prev : cfg.cities[0] ?? ""));
       setNiche((prev) => prev || cfg.default_niche);
+      fetchAdminOutboundStatus()
+        .then(setStatus)
+        .catch(() => setStatus(null));
     } catch (e) {
       setError(
         e instanceof AdminApiError ? e.message : "Falha ao carregar a configuração de outbound."
@@ -219,8 +228,14 @@ function OutboundPanel() {
     if (!sim?.batch?.id) return;
     setSendState({ state: "sending" });
     try {
-      await sendAdminOutbound(sim.batch.id, city);
-      setSendState({ state: "error", message: "Resposta inesperada do servidor." });
+      const result = await sendAdminOutbound(sim.batch.id, city);
+      setSendState({
+        state: "ok",
+        message: `Lote #${result.batch_id} enfileirado: ${result.queued} destinatário(s) validado(s), ${
+          result.no_email
+        } sem e-mail. O worker envia respeitando tetos e quiet hours.`,
+      });
+      void loadConfig();
     } catch (e) {
       if (e instanceof AdminApiError) {
         setSendState({ state: "blocked", message: e.message });
@@ -228,10 +243,47 @@ function OutboundPanel() {
         setSendState({ state: "error", message: "Falha ao contactar o servidor." });
       }
     }
-  }, [sim, city]);
+  }, [sim, city, loadConfig]);
+
+  const toggleFlag = useCallback(
+    async (key: "send_enabled" | "enrich_enabled", next: boolean) => {
+      setToggling(true);
+      setError(null);
+      try {
+        await updateAdminOutboundConfig({ [key]: next });
+        await loadConfig();
+      } catch (e) {
+        setError(e instanceof AdminApiError ? e.message : "Falha ao atualizar a configuração.");
+      } finally {
+        setToggling(false);
+      }
+    },
+    [loadConfig]
+  );
+
+  const runWorker = useCallback(async () => {
+    setToggling(true);
+    setError(null);
+    try {
+      const result = await triggerAdminOutboundWorker();
+      setStatus(await fetchAdminOutboundStatus());
+      setSendState({
+        state: "ok",
+        message: `Tick do worker: ${result.sent} enviado(s)${
+          result.skipped ? `, ${result.skipped} ignorado(s)` : ""
+        }${result.failed ? `, ${result.failed} falha(s)` : ""} (estado: ${result.status}).`,
+      });
+    } catch (e) {
+      setError(e instanceof AdminApiError ? e.message : "Falha ao correr o worker.");
+    } finally {
+      setToggling(false);
+    }
+  }, []);
 
   const cityConfig = city && config ? config.per_city[city] : null;
   const sendEnabled = cityConfig ? cityConfig.send_enabled === "1" : false;
+  const globalSendEnabled = config?.global?.send_enabled === "1";
+  const globalEnrichEnabled = config?.global?.enrich_enabled === "1";
   const configRows = cityConfig
     ? Object.keys(OUTBOUND_LABELS).filter((k) => k in cityConfig)
     : [];
@@ -246,9 +298,13 @@ function OutboundPanel() {
 
   return (
     <Card
-      title="Outbound frio · simulador dry-run"
+      title="Outbound frio · motor real + simulador"
       icon={<Mail className="h-4 w-4" />}
-      hint={`envio desligado — só simulação · templates EN (US)`}
+      hint={
+        globalSendEnabled
+          ? `envio LIGADO no global · templates EN (US)`
+          : `envio desligado (fail-closed) · só simulação · templates EN (US)`
+      }
     >
       <div className="space-y-4">
         {/* selector de cidade */}
@@ -331,6 +387,70 @@ function OutboundPanel() {
             })}
           </div>
         ) : null}
+
+        {/* toggles do admin + estado do motor (Fase 2) */}
+        <div className="space-y-2 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[10px] uppercase tracking-wider text-slate-500">
+              Motor de envio
+            </span>
+            <button
+              onClick={() => void toggleFlag("send_enabled", !globalSendEnabled)}
+              disabled={toggling}
+              className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold disabled:opacity-50 ${
+                globalSendEnabled
+                  ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-300"
+                  : "border-white/10 text-slate-400 hover:bg-white/5"
+              }`}
+            >
+              {globalSendEnabled ? (
+                <CheckCircle2 className="h-3.5 w-3.5" />
+              ) : (
+                <Ban className="h-3.5 w-3.5" />
+              )}
+              Envio real {globalSendEnabled ? "ligado" : "desligado"}
+            </button>
+            <button
+              onClick={() => void toggleFlag("enrich_enabled", !globalEnrichEnabled)}
+              disabled={toggling}
+              className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold disabled:opacity-50 ${
+                globalEnrichEnabled
+                  ? "border-indigo-500/50 bg-indigo-500/15 text-indigo-300"
+                  : "border-white/10 text-slate-400 hover:bg-white/5"
+              }`}
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              Enriquecimento {globalEnrichEnabled ? "ligado" : "desligado"}
+            </button>
+            <button
+              onClick={() => void runWorker()}
+              disabled={!globalSendEnabled || toggling}
+              title={globalSendEnabled ? undefined : "Bloqueado: send_enabled=0"}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {toggling ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RefreshCcw className="h-3.5 w-3.5" />
+              )}
+              Rodar worker
+            </button>
+            {status ? (
+              <span className="ml-auto text-[11px] text-slate-500">
+                fila {status.queued} · enviados hoje {status.sent_today} · enriquecidos{" "}
+                {status.enriched_today} · {fmtUsd(status.spend_today_usd)}
+              </span>
+            ) : null}
+          </div>
+          <p className="text-[10px] text-slate-600">
+            Envio real pela Gmail API com warm-up por caixa, tetos diários e quiet hours (UTC).
+            Snov {status?.snov_configured ? "configurado" : "não configurado"}.
+            {status?.quiet_hours_now ? " Agora em quiet hours — o worker não envia." : ""}
+            {status && status.mailboxes.length === 0
+              ? " Sem caixas de envio configuradas — o envio fica em espera."
+              : ""}
+          </p>
+        </div>
 
         {/* gerar prévia + simular */}
         <div className="flex flex-wrap items-center gap-3">
@@ -520,8 +640,8 @@ function OutboundPanel() {
               />
               <div className="mr-auto text-[11px] text-slate-400">
                 {sendEnabled
-                  ? "Envio LIGADO na configuração, mas o motor ainda não existe."
-                  : "Envio DESLIGADO (send_enabled=0). Só a simulação está disponível."}
+                  ? "Envio LIGADO: promover este lote enfileira os e-mails validados; o worker envia respeitando tetos e quiet hours."
+                  : "Envio DESLIGADO (send_enabled=0). Liga o envio real acima ou usa só a simulação."}
               </div>
               <button
                 onClick={() => void trySend()}
@@ -537,10 +657,14 @@ function OutboundPanel() {
                 Enviar lote real
               </button>
             </div>
-            {sendState.state === "blocked" || sendState.state === "error" ? (
+            {sendState.state !== "idle" && sendState.state !== "sending" ? (
               <p
                 className={`text-[11px] font-semibold ${
-                  sendState.state === "blocked" ? "text-emerald-400" : "text-rose-400"
+                  sendState.state === "ok"
+                    ? "text-emerald-400"
+                    : sendState.state === "blocked"
+                      ? "text-amber-400"
+                      : "text-rose-400"
                 }`}
               >
                 {sendState.message}

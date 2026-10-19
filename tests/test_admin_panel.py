@@ -685,16 +685,94 @@ def test_outbound_send_is_fail_closed_when_disabled(admin_client):
     assert r.status_code == 409, r.text
 
 
-def test_outbound_send_is_503_when_enabled_but_engine_absent(admin_client):
-    """Mesmo ligado, sem motor implementado o envio devolve 503 (nunca 200)."""
+def test_outbound_send_requires_existing_batch_when_enabled(admin_client):
+    """Com envio ligado, lote inexistente devolve 404 (nunca inventa lote)."""
     client, headers, _ = admin_client
     svc = db_service._service
     svc.set_outbound_config("send_enabled", "1", city="")
     try:
         r = client.post(
-            "/api/admin/outbound/send", headers=headers, json={"batch_id": 1, "city": "NYC"}
+            "/api/admin/outbound/send", headers=headers, json={"batch_id": 999999, "city": "NYC"}
         )
-        assert r.status_code == 503, r.text
+        assert r.status_code == 404, r.text
+    finally:
+        svc.set_outbound_config("send_enabled", "0", city="")
+
+
+def test_outbound_send_promotes_batch_and_enqueues_valid_contact(admin_client):
+    """O envio real promove o rascunho e enfileira SO e-mails validos.
+
+    Neste caso ja' existe um contacto `valid` (enriquecimento manual), por
+    isso o motor nao chama Snov e enfileira 1 mensagem de facto.
+    """
+    client, headers, _ = admin_client
+    svc = db_service._service
+    lead_id = _seed_outbound_lead("NYC", "outbound-send-1", address="9 SEND AVENUE")
+    contact = svc.upsert_outbound_contact(
+        lead_id=lead_id,
+        email="ops@vitorio-contracting.com",
+        city="NYC",
+        state="NY",
+        company_name="VITORIO CONTRACTING LLC",
+        contact_name="Maria Souza",
+        email_source="manual",
+        email_status="valid",
+    )
+    assert contact and contact["email_status"] == "valid"
+
+    svc.set_outbound_config("send_enabled", "1", city="")
+    before = _count("outbound_messages")
+    try:
+        sim = client.post(
+            "/api/admin/outbound/simulate", headers=headers, json={"city": "NYC", "batch_size": 1}
+        )
+        assert sim.status_code == 200, sim.text
+        batch_id = sim.json()["batch"]["id"]
+
+        r = client.post(
+            "/api/admin/outbound/send", headers=headers, json={"batch_id": batch_id, "city": "NYC"}
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["status"] == "queued"
+        assert body["queued"] == 1
+        assert _count("outbound_messages") == before + 1
+
+        batch = db_service._service.get_outbound_batch(batch_id)
+        assert batch["dry_run"] == 0
+        assert batch["status"] == "sending"
+    finally:
+        svc.set_outbound_config("send_enabled", "0", city="")
+
+
+def test_outbound_send_rejects_already_started_batch(admin_client):
+    """Um lote ja' promovido nao pode ser promovido duas vezes (409)."""
+    client, headers, _ = admin_client
+    svc = db_service._service
+    lead_id = _seed_outbound_lead("NYC", "outbound-send-2", address="11 SEND AVENUE")
+    svc.upsert_outbound_contact(
+        lead_id=lead_id,
+        email="office@vitorio-contracting.com",
+        city="NYC",
+        state="NY",
+        company_name="VITORIO CONTRACTING LLC",
+        email_source="manual",
+        email_status="valid",
+    )
+    svc.set_outbound_config("send_enabled", "1", city="")
+    try:
+        sim = client.post(
+            "/api/admin/outbound/simulate", headers=headers, json={"city": "NYC", "batch_size": 1}
+        )
+        batch_id = sim.json()["batch"]["id"]
+        first = client.post(
+            "/api/admin/outbound/send", headers=headers, json={"batch_id": batch_id, "city": "NYC"}
+        )
+        assert first.status_code == 200, first.text
+        second = client.post(
+            "/api/admin/outbound/send", headers=headers, json={"batch_id": batch_id, "city": "NYC"}
+        )
+        assert second.status_code == 409, second.text
     finally:
         svc.set_outbound_config("send_enabled", "0", city="")
 

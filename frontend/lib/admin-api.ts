@@ -335,13 +335,13 @@ export function fetchAdminCreditReconcile(userId = 0): Promise<AdminCreditReconc
   return adminFetch(`/credit-reconcile${q}`, { method: "POST" });
 }
 
-// ------------------------------------------------- Outbound (frio) — dry-run
+// ------------------------------------------------- Outbound (frio) — Fase 2
 //
-// O motor de envio NÃO existe. Estes endpoints servem o selector de cidade
-// isolado por configuração, a simulação dry-run (contagem + custo + template)
-// e uma trava de segurança de envio que recusa sempre enquanto `send_enabled=0`.
-// Os templates são gerados dinamicamente por nicho e são SEMPRE em inglês
-// comercial americano (en-US), independentemente do idioma da plataforma.
+// O motor de envio REAL existe (Snov + Gmail API) mas continua fail-closed:
+// só envia com `send_enabled=1`. Estes endpoints servem o selector por cidade,
+// a simulação dry-run, os toggles do admin (config), o estado operacional
+// (fila/tetos/warm-up) e o envio real. Todo o copy é SEMPRE inglês comercial
+// americano (en-US), independentemente do idioma da plataforma.
 export interface OutboundConfig {
   [key: string]: string;
 }
@@ -432,8 +432,81 @@ export interface AdminOutboundSimulation extends Omit<AdminOutboundPreview, "cit
   dry_run: boolean;
 }
 
+export interface AdminOutboundQueuedResult {
+  status: string;
+  batch_id: number;
+  queued: number;
+  skipped: number;
+  no_email: number;
+  spend_usd: number;
+  total_leads: number;
+  batch: AdminOutboundBatch | null;
+}
+
+export interface AdminOutboundStatusMailbox {
+  id: number;
+  email: string;
+  city: string;
+  enabled: number;
+  daily_cap: number;
+  effective_cap: number;
+  sent_today: number;
+  warmup_state: string;
+  warmup_days: number;
+}
+
+export interface AdminOutboundStatus {
+  send_enabled: boolean;
+  enrich_enabled: boolean;
+  quiet_hours_now: boolean;
+  day: string;
+  queued: number;
+  sent_today: number;
+  enriched_today: number;
+  spend_today_usd: number;
+  snov_configured: boolean;
+  mailboxes: AdminOutboundStatusMailbox[];
+  config: OutboundConfig;
+}
+
+export interface AdminOutboundConfigUpdateResult {
+  status: string;
+  city: string | null;
+  send_enabled: boolean;
+  enrich_enabled: boolean;
+  config: OutboundConfig;
+}
+
+export interface AdminOutboundWorkerResult {
+  status: string;
+  sent: number;
+  skipped?: number;
+  failed?: number;
+}
+
 export function fetchAdminOutboundConfig(): Promise<AdminOutboundConfigResponse> {
   return adminFetch<AdminOutboundConfigResponse>("/outbound/config");
+}
+
+export function updateAdminOutboundConfig(payload: {
+  send_enabled?: boolean;
+  enrich_enabled?: boolean;
+  city?: string | null;
+}): Promise<AdminOutboundConfigUpdateResult> {
+  return adminFetch<AdminOutboundConfigUpdateResult>("/outbound/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchAdminOutboundStatus(): Promise<AdminOutboundStatus> {
+  return adminFetch<AdminOutboundStatus>("/outbound/status");
+}
+
+export function triggerAdminOutboundWorker(limit?: number): Promise<AdminOutboundWorkerResult> {
+  const qs = limit ? `?limit=${limit}` : "";
+  return adminFetch<AdminOutboundWorkerResult>(`/outbound/worker${qs}`, { method: "POST" });
 }
 
 export function generateAdminOutboundPreview(
@@ -462,8 +535,8 @@ export function simulateAdminOutbound(
 export function sendAdminOutbound(
   batchId: number,
   city?: string
-): Promise<{ status: string }> {
-  return adminFetch<{ status: string }>("/outbound/send", {
+): Promise<AdminOutboundQueuedResult> {
+  return adminFetch<AdminOutboundQueuedResult>("/outbound/send", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ batch_id: batchId, city: city ?? null }),

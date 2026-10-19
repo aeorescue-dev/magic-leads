@@ -74,6 +74,7 @@ from .services.lead_rules import (
     is_corporate as is_corporate_lead,
 )
 from .services.metrics import push_metrics, searchbug_metrics
+from .services.outbound_engine import outbound_engine
 from .services.push_service import push_service
 from .services.searchbug import searchbug_service
 from .services.translations import render as _render_notification
@@ -1525,14 +1526,16 @@ async def admin_push_test(
     return {"status": "ok", "sent": sent, "subscriptions": len(subs), "configured": True}
 
 
-# ------------------------------------------------- Outbound (frio) — dry-run
+# ------------------------------------------------- Outbound (frio) — Fase 2
 #
-# O motor de envio AINDA NAO EXISTE. Este bloco entrega apenas:
-#   1) leitura da config isolada por cidade (selector do painel);
+# O motor de envio REAL vive em `services/outbound_engine.py` (Snov + Gmail).
+# Este bloco expoe ao painel:
+#   1) leitura/escrita da config isolada por cidade (toggles do admin);
 #   2) simulacao dry-run (preview: contagem, custo estimado, template);
-#   3) um endpoint de envio fail-closed que recusa sempre enquanto
-#      `send_enabled=0` e nunca envia de facto.
-# Nada aqui escreve em `outbound_messages` nem chama Gmail/Snov.
+#   3) envio real fail-closed: so' corre com `send_enabled=1`, promove o lote
+#      (dry_run=0) e materializa `outbound_messages` apenas com e-mails `valid`;
+#   4) estado operacional (fila, tetos, caixas, warm-up).
+# Com `send_enabled=0` (default) nada e' enfileirado nem enviado.
 
 # Estimativas para o simulador. O scrape e' gratis (pedidos HTTP proprios);
 # so' o fallback pago (Snov) tem custo por e-mail encontrado. A taxa e' a
@@ -1581,6 +1584,12 @@ class OutboundPreviewRequest(BaseModel):
 
 class OutboundSendRequest(BaseModel):
     batch_id: int
+    city: str | None = None
+
+
+class OutboundConfigUpdateRequest(BaseModel):
+    send_enabled: bool | None = None
+    enrich_enabled: bool | None = None
     city: str | None = None
 
 
@@ -1642,6 +1651,69 @@ async def admin_outbound_config(_admin: dict = Depends(_require_admin_user)):
         "default_niche": outbound_templates.DEFAULT_NICHE,
         "language": _OUTBOUND_LANGUAGE,
     }
+
+
+@app.post("/api/admin/outbound/config")
+async def admin_outbound_update_config(
+    payload: OutboundConfigUpdateRequest,
+    admin: dict = Depends(_require_admin_user),
+):
+    """Liga/desliga o envio real e o enriquecimento (toggles do admin).
+
+    Escopo isolado: grava em `outbound_config` (global ou override por cidade).
+    Desligar `send_enabled` e' sempre permitido e para imediatamente o worker.
+    """
+    city = (payload.city or "").strip().upper()
+    if city and city not in SERVED_CITIES:
+        raise HTTPException(status_code=400, detail="Cidade nao servida")
+    if payload.send_enabled is None and payload.enrich_enabled is None:
+        raise HTTPException(status_code=400, detail="Nada para atualizar")
+
+    if payload.send_enabled is not None:
+        await db_service.set_outbound_config(
+            "send_enabled", "1" if payload.send_enabled else "0", city
+        )
+    if payload.enrich_enabled is not None:
+        await db_service.set_outbound_config(
+            "enrich_enabled", "1" if payload.enrich_enabled else "0", city
+        )
+    logger.info(
+        "[OUTBOUND] Config atualizada por admin=%s city=%s send=%s enrich=%s",
+        (admin or {}).get("id"),
+        city or "GLOBAL",
+        payload.send_enabled,
+        payload.enrich_enabled,
+    )
+    config = (
+        await db_service.get_outbound_config(city) if city else await db_service.get_outbound_config()
+    )
+    return {
+        "status": "ok",
+        "city": city or None,
+        "send_enabled": config.get("send_enabled") == "1",
+        "enrich_enabled": config.get("enrich_enabled") == "1",
+        "config": config,
+    }
+
+
+@app.get("/api/admin/outbound/status")
+async def admin_outbound_status(_admin: dict = Depends(_require_admin_user)):
+    """Estado operacional do motor: fila, tetos do dia, caixas e warm-up."""
+    return await outbound_engine.status()
+
+
+@app.post("/api/admin/outbound/worker")
+async def admin_outbound_worker(
+    limit: int | None = None,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Dispara um tick manual do worker (envio imediato, respeitando travas).
+
+    Util para validar o pipeline por demanda sem esperar pelo loop do processo.
+    Devolve {sent, skipped, failed, status}. `status='disabled'` se
+    `send_enabled=0`; `status='quiet_hours'` fora da janela de envio.
+    """
+    return await outbound_engine.process_queue(limit=limit)
 
 
 @app.post("/api/admin/outbound/preview")
@@ -1759,11 +1831,12 @@ async def admin_outbound_send(
     payload: OutboundSendRequest,
     _admin: dict = Depends(_require_admin_user),
 ):
-    """Travao de seguranca: o envio real esta DESLIGADO.
+    """Promove um lote a REAL e enfileira os destinatarios validos.
 
-    Fail-closed em duas camadas: se `send_enabled=0` (estado por defeito),
-    recusa com 409; mesmo com `send_enabled=1`, o motor nao existe, logo
-    devolve 503. Nunca envia nada nesta fase do projeto.
+    Fail-closed: recusa (409) enquanto `send_enabled=0` (default). Com o envio
+    ligado, exige um lote existente (404) e ainda nao iniciado (409), promove-o
+    (`dry_run=0`, status='sending') e delega no motor o enriquecimento/validacao.
+    O worker assincrono e' quem envia, respeitando tetos e quiet hours.
     """
     city = (payload.city or "").strip().upper()
     config = (
@@ -1774,12 +1847,33 @@ async def admin_outbound_send(
     if config.get("send_enabled") != "1":
         raise HTTPException(
             status_code=409,
-            detail="Envio desligado (send_enabled=0). Use a simulacao dry-run.",
+            detail="Envio desligado (send_enabled=0). Ative o envio real no painel.",
         )
-    raise HTTPException(
-        status_code=503,
-        detail="Motor de envio ainda nao implementado (fase futura: Gmail API).",
+
+    batch = await db_service.get_outbound_batch(payload.batch_id)
+    if not batch:
+        raise HTTPException(status_code=404, detail="Lote nao encontrado")
+    if batch.get("status") in ("sending", "sent"):
+        raise HTTPException(status_code=409, detail="Lote ja iniciado/enviado")
+    if not batch.get("dry_run"):
+        raise HTTPException(status_code=409, detail="Lote nao e' um rascunho dry-run")
+
+    promoted = await db_service.start_outbound_batch(batch["id"])
+    if not promoted:
+        raise HTTPException(status_code=500, detail="Falha ao promover o lote")
+    result = await outbound_engine.enqueue_batch(promoted, config=config)
+    logger.info(
+        "[OUTBOUND] Lote %s promovido: %s enfileirado(s), %s sem e-mail",
+        batch["id"],
+        result.get("queued"),
+        result.get("no_email"),
     )
+    return {
+        "status": "queued",
+        "batch_id": batch["id"],
+        "batch": await db_service.get_outbound_batch(batch["id"]),
+        **result,
+    }
 
 
 @app.get("/api/admin/planner")
@@ -2767,6 +2861,7 @@ async def _scheduler_loop():
 async def _lifespan(app):
     _scheduler_task = None
     _watchdog_task = None
+    _outbound_task = None
 
     # Fase 2: o writer de telemetria arranca com o processo. Sem isto o
     # buffer acumula em memoria ate limite e perde eventos sem nunca
@@ -2808,6 +2903,18 @@ async def _lifespan(app):
     # esta e agora a cobertura garantida, independente de trafego e de terceiros.
     _watchdog_task = asyncio.create_task(_hold_watchdog_loop())
 
+    # Worker do Outbound Frio (Fase 2). Dorme primeiro para nao disparar durante
+    # os testes nem na arrancagem. Fail-closed por dentro: com `send_enabled=0`
+    # o tick e' um no-op, portanto ativar a task em si nao envia nada.
+    if getattr(settings, "OUTBOUND_WORKER_ENABLED", True):
+        _outbound_task = asyncio.create_task(_outbound_worker_loop())
+        logger.info(
+            "Outbound worker ativo (a cada %ss) — envio real so' com send_enabled=1",
+            getattr(settings, "OUTBOUND_WORKER_INTERVAL_SECONDS", 60),
+        )
+    else:
+        logger.info("[OUTBOUND] Worker desativado por OUTBOUND_WORKER_ENABLED=0")
+
     # Diagnóstico de e-mail no startup
     if settings.EMAIL_API_KEY:
         logger.info(
@@ -2837,7 +2944,11 @@ async def _lifespan(app):
     else:
         logger.warning("[AVISO]️ Stripe NÃO configurado completamente — checkout usará mock")
     yield
-    for name, task in (("scheduler", _scheduler_task), ("watchdog", _watchdog_task)):
+    for name, task in (
+        ("scheduler", _scheduler_task),
+        ("watchdog", _watchdog_task),
+        ("outbound", _outbound_task),
+    ):
         if task:
             task.cancel()
             try:
@@ -2860,6 +2971,11 @@ async def _lifespan(app):
         await searchbug_service.aclose()
     except Exception as e:
         logger.warning(f"Erro ao fechar client HTTP do phone lookup: {e}")
+    # Fecha os clients HTTP do outbound (Gmail + Snov).
+    try:
+        await outbound_engine.aclose()
+    except Exception as e:
+        logger.warning(f"Erro ao fechar clients do outbound: {e}")
 
 
 async def _hold_watchdog_loop():
@@ -2895,6 +3011,31 @@ async def _hold_watchdog_loop():
         except Exception as e:
             # Uma falha aqui nao pode matar o loop: o proximo ciclo volta a tentar.
             logger.error(f"Erro no watchdog de holds: {e}", exc_info=True)
+
+
+async def _outbound_worker_loop():
+    """Tick periodico do motor de envio real (Outbound Frio - Fase 2).
+
+    Respeita sempre o estado global `send_enabled`: com o envio desligado o
+    process_queue devolve `status='disabled'` e nao faz nada. A quiet hours e'
+    avaliada em UTC pelo proprio motor, portanto este loop pode correr a
+    qualquer hora.
+    """
+    interval_s = max(10, int(getattr(settings, "OUTBOUND_WORKER_INTERVAL_SECONDS", 60) or 60))
+    while True:
+        try:
+            # Dorme primeiro: evita disparos na arrancagem e nos testes.
+            await asyncio.sleep(interval_s)
+            result = await outbound_engine.process_queue()
+            if result.get("sent") or result.get("failed") or result.get("skipped"):
+                logger.info("[OUTBOUND] Worker tick: %s", result)
+            elif result.get("status") not in ("idle", "disabled", "quiet_hours"):
+                logger.debug("[OUTBOUND] Worker tick: %s", result)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            # Uma falha nao pode matar o loop: no proximo ciclo volta a tentar.
+            logger.error(f"Erro no outbound worker: {e}", exc_info=True)
 
 
 app.router.lifespan_context = _lifespan
