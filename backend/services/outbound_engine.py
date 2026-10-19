@@ -4,7 +4,7 @@ Fecha a esteira de envio: materializa lotes em `outbound_messages`, aplica as
 travas anti-spam (so' e-mails `valid`), o warm-up por caixa, os tetos diarios e
 as quiet hours, e envia pela Gmail API.
 
-Fica integralmente no dominio outbound (`outbound_*`, Gmail, Snov). Nao toca
+Fica integralmente no dominio outbound (`outbound_*`, Gmail, EmailListVerify). Nao toca
 Dashboard, ingestao/UPSERT, Landing, Push ou Resend. O envio real continua
 fail-closed: `send_enabled=0` (default) desliga todo o processamento.
 """
@@ -19,8 +19,8 @@ from ..config import settings
 from ..utils.logger import logger
 from . import outbound_templates
 from .db import SERVED_CITIES, db_service
+from .enrichment_emaillistverify import emaillistverify_service
 from .gmail import gmail_sender
-from .snov import snov_service
 
 # --------------------------------------------------------------- helpers
 
@@ -131,8 +131,8 @@ class OutboundEngine:
     ENRICH_CONCURRENCY = 4
 
     async def aclose(self) -> None:
-        """Fecha os clients HTTP partilhados (Gmail/Snov) no shutdown."""
-        for client in (gmail_sender, snov_service):
+        """Fecha os clients HTTP partilhados (Gmail/EmailListVerify) no shutdown."""
+        for client in (gmail_sender, emaillistverify_service):
             try:
                 await client.aclose()
             except Exception:
@@ -178,7 +178,7 @@ class OutboundEngine:
             if contact and contact.get("email_status") == "valid" and not contact.get("unsubscribed"):
                 pass  # reaproveita contacto validado
             elif enrich_enabled and enrichment_left > 0 and spend_total < max_spend:
-                result = await snov_service.find_and_verify(
+                result = await emaillistverify_service.find_and_verify(
                     owner_email=lead.get("owner_email"),
                     company_name=lead.get("owner_name"),
                     contact_name=(contact or {}).get("contact_name"),
@@ -195,7 +195,7 @@ class OutboundEngine:
                         state=lead.get("state"),
                         company_name=lead.get("owner_name"),
                         contact_name=(contact or {}).get("contact_name"),
-                        email_source="snov",
+                        email_source="emaillistverify",
                         email_status="valid",
                     )
                 else:
@@ -472,7 +472,8 @@ class OutboundEngine:
             "spend_today_usd": round(spend_today, 4),
             "config": global_config,
             "mailboxes": mailbox_rows,
-            "snov_configured": snov_service.configured,
+            "enrichment_configured": emaillistverify_service.configured,
+            "enrichment_provider": "emaillistverify",
         }
 
 

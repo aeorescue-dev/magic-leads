@@ -444,7 +444,7 @@ function OutboundPanel() {
           </div>
           <p className="text-[10px] text-slate-600">
             Envio real pela Gmail API com warm-up por caixa, tetos diários e quiet hours (UTC).
-            Snov {status?.snov_configured ? "configurado" : "não configurado"}.
+            EmailListVerify {status?.enrichment_configured ? "configurado" : "não configurado"}.
             {status?.quiet_hours_now ? " Agora em quiet hours — o worker não envia." : ""}
             {status && status.mailboxes.length === 0
               ? " Sem caixas de envio configuradas — o envio fica em espera."

@@ -1528,7 +1528,7 @@ async def admin_push_test(
 
 # ------------------------------------------------- Outbound (frio) — Fase 2
 #
-# O motor de envio REAL vive em `services/outbound_engine.py` (Snov + Gmail).
+# O motor de envio REAL vive em `services/outbound_engine.py` (EmailListVerify + Gmail).
 # Este bloco expoe ao painel:
 #   1) leitura/escrita da config isolada por cidade (toggles do admin);
 #   2) simulacao dry-run (preview: contagem, custo estimado, template);
@@ -2971,7 +2971,7 @@ async def _lifespan(app):
         await searchbug_service.aclose()
     except Exception as e:
         logger.warning(f"Erro ao fechar client HTTP do phone lookup: {e}")
-    # Fecha os clients HTTP do outbound (Gmail + Snov).
+    # Fecha os clients HTTP do outbound (Gmail + EmailListVerify).
     try:
         await outbound_engine.aclose()
     except Exception as e:

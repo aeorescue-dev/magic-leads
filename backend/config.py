@@ -115,6 +115,7 @@ class Settings(BaseSettings):
         "SMTP_HOST", "SMTP_USER", "SMTP_PASS", "SMTP_FROM",
         "EMAIL_API_KEY",
         "SNOV_CLIENT_ID", "SNOV_CLIENT_SECRET",
+        "EMAILLISTVERIFY_API_KEY",
         "GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN",
         mode="before",
     )
@@ -175,6 +176,22 @@ class Settings(BaseSettings):
     SNOV_PER_EMAIL_USD: float = 0.015
     # Maximo de verificacoes pagas por lead numa unica busca (anti-spam de custo).
     SNOV_MAX_VERIFICATIONS: int = 5
+
+    # ---------------------------------------------------------------- Outbound (enriquecimento)
+    # Fase 2: o enriquecimento de e-mail usa EmailListVerify (Pay-As-You-Go,
+    # $6.99/1.000 creditos, sem mensalidade). Sem EMAILLISTVERIFY_API_KEY o
+    # enriquecimento fica fail-soft (outcome=not_configured) e nada e'
+    # enfileirado. O envio continua fail-closed por `send_enabled=0` na base.
+    EMAILLISTVERIFY_BASE_URL: str = "https://api.emaillistverify.com"
+    EMAILLISTVERIFY_VERIFY_URL: str = "https://apps.emaillistverify.com/api/verifyEmail"
+    EMAILLISTVERIFY_API_KEY: str = ""
+    EMAILLISTVERIFY_TIMEOUT_SECONDS: float = 20.0
+    # Custo unitario por credito (usado na telemetria/orcamento do lote).
+    EMAILLISTVERIFY_PER_CREDIT_USD: float = 0.00699
+    # Creditos por operacao: verifyEmail=1, findContact (nome)=5, (dominio)=10.
+    EMAILLISTVERIFY_VERIFY_CREDITS: int = 1
+    EMAILLISTVERIFY_FIND_CREDITS_NAMED: int = 5
+    EMAILLISTVERIFY_FIND_CREDITS_DOMAIN: int = 10
 
     # Gmail API (Google Workspace OAuth2). Cada caixa pode guardar as suas
     # credenciais em `sending_mailboxes.auth_ref` (JSON); estas env vars sao o

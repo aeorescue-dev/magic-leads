@@ -464,7 +464,8 @@ export interface AdminOutboundStatus {
   sent_today: number;
   enriched_today: number;
   spend_today_usd: number;
-  snov_configured: boolean;
+  enrichment_configured: boolean;
+  enrichment_provider?: string;
   mailboxes: AdminOutboundStatusMailbox[];
   config: OutboundConfig;
 }
