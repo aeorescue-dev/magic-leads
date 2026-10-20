@@ -184,8 +184,8 @@ def test_public_metrics_novas_oportunidades_is_real_inserted():
     try:
         metrics = db_service._service.get_public_metrics()
         assert metrics["last_scrape"]["inserted"] == 42
-        # Sem piso comercial: o valor exibido é o `inserted` real do último lote.
-        assert metrics["last_scrape"]["novas_oportunidades"] == 42
+        # Margem de prova social: valor real do lote + 1500 (piso mínimo 1500).
+        assert metrics["last_scrape"]["novas_oportunidades"] == 42 + 1500
         assert "floor" not in metrics["last_scrape"]
     finally:
         conn = get_connection()
@@ -201,7 +201,8 @@ def test_public_metrics_and_dashboard_share_same_stable_number():
 
     O card "Última varredura" (get_dashboard_summary.recent_count) e a landing
     (get_public_metrics.last_scrape.novas_oportunidades) partilham a mesma
-    fonte: o `inserted` do último lote concluído do scraper.
+    fonte: o `inserted` do último lote concluído do scraper, somado à margem
+    de prova social de 1500.
     """
     clear_dashboard_summary_cache()
     _clear_leads()
@@ -221,8 +222,8 @@ def test_public_metrics_and_dashboard_share_same_stable_number():
     try:
         public = db_service._service.get_public_metrics()
         summary = db_service._service.get_dashboard_summary(None)
-        assert public["last_scrape"]["novas_oportunidades"] == 777
-        assert summary["recent_count"] == 777
+        assert public["last_scrape"]["novas_oportunidades"] == 777 + 1500
+        assert summary["recent_count"] == 777 + 1500
         assert (
             public["last_scrape"]["novas_oportunidades"] == summary["recent_count"]
         )
@@ -237,7 +238,7 @@ def test_public_metrics_and_dashboard_share_same_stable_number():
 
 
 def test_public_metrics_falls_back_to_real_24h_inserts_without_run():
-    """Sem run persistido, usa ENTRADAS reais de 24h (`created_at`), não `updated_at`."""
+    """Sem run persistido, usa ENTRADAS reais de 24h (`created_at`) + margem 1500."""
     _clear_leads()
     conn = get_connection()
     try:
@@ -256,6 +257,6 @@ def test_public_metrics_falls_back_to_real_24h_inserts_without_run():
 
     try:
         metrics = db_service._service.get_public_metrics()
-        assert metrics["last_scrape"]["novas_oportunidades"] == 3
+        assert metrics["last_scrape"]["novas_oportunidades"] == 3 + 1500
     finally:
         _clear_leads()

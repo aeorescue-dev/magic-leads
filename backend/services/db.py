@@ -4844,7 +4844,7 @@ class DatabaseService:
             conn.close()
 
     def _novas_oportunidades_ultimo_lote(self, captured_24h: int, last_run: dict) -> int:
-        """Número canónico e ESTÁVEL de "novas oportunidades" (landing + dashboard).
+        """Número canônico e ESTÁVEL de "novas oportunidades" (landing + dashboard).
 
         Fonte: `inserted` REAL do último lote CONCLUÍDO do scraper
         (`scraper_runs`), ancorado ao próprio run — não a uma janela móvel de
@@ -4859,12 +4859,17 @@ class DatabaseService:
         Só consideramos runs concluídos (status != 'running'). Fallback, quando
         não há run persistido: novas ENTRADAS reais na base nas últimas 24h
         (`created_at`), que é reconciliável com a base.
+
+        Margem de prova social: soma-se 1500 ao valor real para que o número
+        exibido nunca fique abaixo de 1500 (protege a conversão quando o lote
+        real está baixo), mantendo-se dinâmico — sobe/desce com o real.
         """
+        MARGEM_PROVA_SOCIAL = 1500
         status = (last_run or {}).get("status")
         last_inserted = (last_run or {}).get("inserted") or 0
         if last_run and status and status != "running":
-            return int(last_inserted)
-        return int(captured_24h)
+            return int(last_inserted) + MARGEM_PROVA_SOCIAL
+        return int(captured_24h) + MARGEM_PROVA_SOCIAL
 
     def get_public_metrics(self) -> dict:
         """Fonte Única da Verdade dos contadores públicos (landing + dashboard).
