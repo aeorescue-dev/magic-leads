@@ -22,7 +22,7 @@ from ..config import settings
 from ..utils.logger import logger
 from .db import _OPEN_STATUSES, db_service
 from .lead_rules import is_institutional_name
-from .translations import DEFAULT_LOCALE, normalize, render, tr
+from .translations import normalize, render, tr
 
 
 @dataclass
@@ -227,10 +227,15 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
                 "addr": ld.get("address") or "",
                 "city": ld.get("city") or "",
             }
+            # Localiza o texto in-app no idioma do utilizador (não no fallback
+            # EN). O push abaixo reusa o mesmo locale; o in-app gravado passa a
+            # nascer no idioma correto em vez de depender só da localização na
+            # leitura.
+            locale = user_locale.get(uid)
             created = await _create_inapp(
                 uid, ld["id"], params,
-                tr("new_lead.title", DEFAULT_LOCALE),
-                tr("new_lead.main_msg", DEFAULT_LOCALE, **params),
+                tr("new_lead.title", locale),
+                tr("new_lead.main_msg", locale, **params),
             )
             if created:
                 await db_service.increment_alert_usage(uid, cat)
@@ -246,7 +251,7 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
     # 4b) Digest do excedente (não conta no teto).
     for uid, count in digest_jobs:
         try:
-            res = await db_service.upsert_daily_digest(uid, count)
+            res = await db_service.upsert_daily_digest(uid, count, locale=user_locale.get(uid))
             report.digest += 1
             # Só enviamos push no PRIMEIRO digest do dia: evita que a mesma
             # notificação genérica seja reenviada a cada run (o digest in-app
@@ -309,7 +314,7 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
                     or tr("digest.main_msg", locale, n=count, limit=limit),
                     "icon": "https://magicleads-oficial.vercel.app/icons/magicleads-brand.svg",
                     "badge": "https://magicleads-oficial.vercel.app/icons/magicleads-brand.svg",
-                    "tag": f"digest_{DEFAULT_LOCALE}",
+                    "tag": f"digest_{normalize(locale)}",
                     "url": "/dashboard",
                 },
                 "digest",

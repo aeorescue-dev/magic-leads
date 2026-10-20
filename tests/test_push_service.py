@@ -294,3 +294,74 @@ def test_send_single_debug_unexpected_exception_returns_dict(monkeypatch):
     assert isinstance(result, dict)
     assert result["ok"] is False
     assert "RuntimeError" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# Sanitização do estado zumbi (push_enabled=1 sem subscription) e telemetria.
+# ---------------------------------------------------------------------------
+
+def test_send_to_user_disables_push_when_no_subscriptions(monkeypatch):
+    """Flag ligado mas sem device -> regista no_subscriptions e desliga o flag."""
+    svc = _configured_service(monkeypatch)
+
+    async def _enabled(user_id):
+        return True
+
+    async def _no_subs(user_id):
+        return []
+
+    disabled: list = []
+
+    async def _disable(user_id):
+        disabled.append(user_id)
+        return True
+
+    monkeypatch.setattr(push_service.db_service, "is_push_enabled", _enabled)
+    monkeypatch.setattr(push_service.db_service, "get_user_push_subscriptions", _no_subs)
+    monkeypatch.setattr(push_service.db_service, "disable_push_if_no_subscriptions", _disable)
+
+    assert anyio.run(svc.send_to_user, 7, {"title": "t"}, "lead_alert") == 0
+    assert disabled == [7]
+
+
+def test_send_to_user_disables_push_after_last_sub_dies(monkeypatch):
+    """Quando a última sub expira, o flag push_enabled é desligado."""
+    from pywebpush import WebPushException
+
+    svc = _configured_service(monkeypatch)
+
+    def _boom(*args, **kwargs):
+        raise WebPushException("gone", response=_FakeResponse(410, ""))
+
+    monkeypatch.setattr(push_service, "webpush", _boom)
+    removed: list = []
+    _wire_subscription(monkeypatch, removed)
+
+    disabled: list = []
+
+    async def _disable(user_id):
+        disabled.append(user_id)
+        return True
+
+    monkeypatch.setattr(push_service.db_service, "disable_push_if_no_subscriptions", _disable)
+
+    assert anyio.run(svc.send_to_user, 7, {"title": "t"}, "lead_alert") == 0
+    assert removed == [(7, "https://example.invalid/dead")]
+    assert disabled == [7]
+
+
+def test_send_single_telemetry_uses_explicit_user_id(monkeypatch):
+    """A telemetria grava o user_id passado mesmo sem user_id na subscrição."""
+    svc = _configured_service(monkeypatch)
+    recorded: list = []
+
+    def _record(**fields):
+        recorded.append(fields)
+
+    monkeypatch.setattr(push_service.push_metrics, "record", _record)
+    monkeypatch.setattr(push_service, "webpush", lambda **kw: "ok")
+
+    sub = {"endpoint": "https://example.invalid/ep", "p256dh": "a", "auth": "b"}
+    assert anyio.run(svc._send_single, sub, {"title": "t"}, "lead_alert", 42) is True
+    assert recorded and recorded[0]["user_id"] == 42
+    assert recorded[0]["kind"] == "lead_alert"

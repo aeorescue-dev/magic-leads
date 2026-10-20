@@ -1224,10 +1224,9 @@ async def unsubscribe_push(
 ):
     """Remove uma push subscription do usuário."""
     ok = await db_service.remove_push_subscription(user["id"], payload.endpoint)
-    # Se não restarem subscriptions, marca push_enabled = false
-    remaining = await db_service.get_user_push_subscriptions(user["id"])
-    if not remaining:
-        await db_service.set_user_push_enabled(user["id"], False)
+    # Se não restarem subscriptions, marca push_enabled = false (sanitização
+    # atómica: evita o estado zumbi flag=1 sem dispositivo subscrito).
+    await db_service.disable_push_if_no_subscriptions(user["id"])
     return {"status": "ok", "unsubscribed": ok}
 
 
@@ -1236,7 +1235,21 @@ async def update_push_enabled(
     payload: PushEnabledUpdate,
     user: dict = Depends(_get_current_user),
 ):
-    """Define manualmente o flag push_enabled do usuário."""
+    """Define manualmente o flag push_enabled do usuário.
+
+    Ativar push sem nenhuma subscription registada criaria um estado zumbi
+    (flag=1, nenhum dispositivo), que gera `no_subscriptions` a cada run.
+    Nesse caso a ativação é recusada.
+    """
+    if payload.enabled:
+        subs = await db_service.get_user_push_subscriptions(user["id"])
+        if not subs:
+            return {
+                "status": "ok",
+                "push_enabled": False,
+                "updated": False,
+                "error": "no_subscriptions",
+            }
     ok = await db_service.set_user_push_enabled(user["id"], payload.enabled)
     return {"status": "ok", "push_enabled": payload.enabled, "updated": ok}
 

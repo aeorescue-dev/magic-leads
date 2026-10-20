@@ -158,13 +158,16 @@ class PushService:
     def is_configured(self) -> bool:
         return self._configured
 
-    async def _send_single(self, subscription: Dict, payload: Dict, kind: str = "custom"):
+    async def _send_single(self, subscription: Dict, payload: Dict, kind: str = "custom",
+                           user_id: Optional[int] = None):
         """Envia push para uma única subscription com retry exponencial.
 
         `kind` é apenas rótulo para telemetria (lead_alert, status_change,
-        broadcast...). O valor de retorno é True, False ou um sentinel de
-        subscrição morta (`"expired"` para 404/410, `"rejected_dead"` para
-        401/403 de VAPID inválido) — os callers removem os dois da BD.
+        broadcast...). `user_id` é o destinatário explícito: se a subscription
+        não trouxer `user_id` (ex.: caminho antigo), usa este para que a
+        telemetria nunca fique órfã. O valor de retorno é True, False ou um
+        sentinel de subscrição morta (`"expired"` para 404/410, `"rejected_dead"`
+        para 401/403 de VAPID inválido) — os callers removem os dois da BD.
         """
         if not self.is_configured():
             # Bug operacional silencioso: sem VAPID nada é entregue e o
@@ -172,6 +175,7 @@ class PushService:
             # Este outcome torna-o visível no painel.
             push_metrics.record(
                 outcome="not_configured", attempts=0, kind=kind,
+                user_id=subscription.get("user_id") or user_id,
                 error="VAPID keys not configured",
             )
             return False
@@ -179,6 +183,9 @@ class PushService:
         started = time.monotonic()
         last_error = None
         last_status: Optional[int] = None
+        # Destinatário explícito: a subscrição é a fonte primária, o parâmetro
+        # é a rede de segurança (torna a telemetria auditável por utilizador).
+        recipient_id = subscription.get("user_id") or user_id
 
         def _record(outcome: str, attempts: int) -> None:
             try:
@@ -187,7 +194,7 @@ class PushService:
                     attempts=attempts,
                     latency_ms=int((time.monotonic() - started) * 1000),
                     http_status=last_status,
-                    user_id=subscription.get("user_id"),
+                    user_id=recipient_id,
                     kind=kind,
                     error=None if outcome == "accepted" else (str(last_error) if last_error else outcome),
                 )
@@ -303,13 +310,20 @@ class PushService:
                 outcome="no_subscriptions", attempts=0, user_id=user_id,
                 kind=kind, error="user has no push subscriptions",
             )
+            # Sanitização: um flag push_enabled=1 sem subscription é um estado
+            # zumbi. Desliga-o para que a próxima varredura não volte a tentar
+            # enviar para o vazio.
+            try:
+                await db_service.disable_push_if_no_subscriptions(user_id)
+            except Exception:  # pragma: no cover - nunca quebra o envio
+                logger.debug("Falha ao sanitizar push_enabled user=%s", user_id, exc_info=True)
             return 0
 
         sent = 0
         expired_endpoints = []
 
         for sub in subscriptions:
-            result = await self._send_single(sub, payload, kind)
+            result = await self._send_single(sub, payload, kind, user_id=user_id)
             if result is True:
                 sent += 1
             elif result in ("expired", "rejected_dead"):
@@ -318,6 +332,15 @@ class PushService:
         # Remove expired/dead subscriptions
         for endpoint in expired_endpoints:
             await db_service.remove_push_subscription(user_id, endpoint)
+
+        # Sanitização: se todas as subs morreram/expiraram, o flag fica ligado
+        # apontando para o vazio. Desliga-o para não gerar no_subscriptions
+        # repetidos nos próximos runs.
+        if expired_endpoints:
+            try:
+                await db_service.disable_push_if_no_subscriptions(user_id)
+            except Exception:  # pragma: no cover - nunca quebra o envio
+                logger.debug("Falha ao sanitizar push_enabled user=%s", user_id, exc_info=True)
 
         return sent
 
@@ -344,7 +367,7 @@ class PushService:
             sent = 0
             expired_endpoints = []
             for sub in subs:
-                result = await self._send_single(sub, payload, "broadcast")
+                result = await self._send_single(sub, payload, "broadcast", user_id=user_id)
                 if result is True:
                     sent += 1
                 elif result in ("expired", "rejected_dead"):
@@ -352,6 +375,13 @@ class PushService:
 
             for endpoint in expired_endpoints:
                 await db_service.remove_push_subscription(user_id, endpoint)
+
+            # Sanitização do estado zumbi após remoção de subs mortas.
+            if expired_endpoints:
+                try:
+                    await db_service.disable_push_if_no_subscriptions(user_id)
+                except Exception:  # pragma: no cover - nunca quebra o envio
+                    logger.debug("Falha ao sanitizar push_enabled user=%s", user_id, exc_info=True)
 
             total_sent += sent
 

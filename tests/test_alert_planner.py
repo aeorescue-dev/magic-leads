@@ -37,13 +37,13 @@ def _reset() -> None:
         conn.close()
 
 
-def _user(interests=None, email=None, cities_filter=None) -> int:
+def _user(interests=None, email=None, cities_filter=None, locale=None) -> int:
     conn = get_connection()
     try:
         cur = conn.execute(
             "INSERT INTO users (email, password_hash, company_name, plan, "
-            "subscription_status, plan_until, cities_filter) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "subscription_status, plan_until, cities_filter, locale) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 email or f"planner_{uuid.uuid4().hex[:10]}@test.com",
                 "not-a-real-hash",
@@ -52,6 +52,7 @@ def _user(interests=None, email=None, cities_filter=None) -> int:
                 "active",
                 _future(),
                 cities_filter,
+                locale or "en",
             ),
         )
         uid = cur.lastrowid
@@ -305,3 +306,65 @@ def test_no_city_filtered_flag_when_no_interested_users():
     assert report.candidates == 1
     assert report.audience == 0
     assert report.city_filtered is False
+
+
+# ---------------------------------------------------------------------------
+# i18n do in-app: o texto nasce no idioma do utilizador (não no fallback EN).
+# ---------------------------------------------------------------------------
+
+def test_inapp_notification_is_localized_in_user_locale():
+    _reset()
+    uid = _user(["Roof"], locale="pt")
+    _run(plan_and_dispatch([_lead("Roof", "NYC")]))
+
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT title, message FROM notifications "
+            "WHERE user_id = ? AND type = 'new_lead'",
+            (uid,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row is not None
+    assert row["title"] == "Nova oportunidade"
+    assert "oportunidade" in row["message"]
+
+
+def test_inapp_notification_spanish_for_es_user():
+    _reset()
+    uid = _user(["Roof"], locale="es")
+    _run(plan_and_dispatch([_lead("Roof", "NYC")]))
+
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT title FROM notifications WHERE user_id = ? AND type = 'new_lead'",
+            (uid,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row is not None
+    assert row["title"] == "Nueva oportunidad"
+
+
+def test_digest_inapp_notification_is_localized():
+    _reset()
+    uid = _user(["Roof"], locale="pt")
+    db_service._service.increment_alert_usage(uid, "Roof", 6)  # teto esgotado
+    _run(plan_and_dispatch([_lead("Roof", "NYC")]))
+
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT title, message FROM notifications "
+            "WHERE user_id = ? AND type = 'digest'",
+            (uid,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row is not None
+    assert row["title"] == "Resumo diário de alertas"

@@ -3014,14 +3014,46 @@ class DatabaseService:
             conn.close()
 
     def get_user_push_subscriptions(self, user_id: int) -> List[dict]:
-        """Retorna todas as push subscriptions de um usuário."""
+        """Retorna todas as push subscriptions de um usuário.
+
+        Inclui `user_id` no resultado para que a telemetria de entrega
+        (push_deliveries) consiga gravar o destinatário explicitamente — sem
+        ele, cada evento de lead_alert/digest ficava com user_id NULL e era
+        impossível auditar por utilizador.
+        """
         conn = get_connection()
         try:
             rows = conn.execute(
-                "SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ?",
+                "SELECT user_id, endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ?",
                 (user_id,),
             ).fetchall()
             return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def disable_push_if_no_subscriptions(self, user_id: int) -> bool:
+        """Desliga `push_enabled` quando o utilizador não tem subscrições.
+
+        Evita o estado zumbi: flag `push_enabled=1` sem nenhum dispositivo
+        subscrito, que faz o serviço tentar enviar para o vazio e registar
+        `no_subscriptions` a cada run. Idempotente e fail-soft.
+
+        Devolve True se o flag foi desligado por esta chamada.
+        """
+        conn = get_connection()
+        try:
+            remaining = conn.execute(
+                "SELECT COUNT(*) FROM push_subscriptions WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()[0]
+            if remaining:
+                return False
+            cur = conn.execute(
+                "UPDATE users SET push_enabled = 0 WHERE id = ? AND push_enabled = 1",
+                (user_id,),
+            )
+            conn.commit()
+            return cur.rowcount > 0
         finally:
             conn.close()
 
@@ -4106,12 +4138,13 @@ class DatabaseService:
         finally:
             conn.close()
 
-    def upsert_daily_digest(self, user_id: int, extra_count: int) -> Optional[dict]:
+    def upsert_daily_digest(self, user_id: int, extra_count: int, locale: Optional[str] = None) -> Optional[dict]:
         """Insere/atualiza o resumo diário localizável (msg_key='digest').
 
         O digest NÃO conta no teto (tipo 'digest'). O texto é renderizado por
-        utilizador na leitura via `msg_key`/`msg_params`; ficam gravados como
-        fallback os textos no idioma default.
+        utilizador na leitura via `msg_key`/`msg_params`. O texto gravado é
+        localizado no idioma do utilizador quando `locale` é fornecido (senão
+        usa o default como fallback).
         """
         conn = get_connection()
         try:
@@ -4133,7 +4166,7 @@ class DatabaseService:
             # seguintes do dia ficam apenas no in-app.
             is_new = existing is None
             params = {"n": total, "limit": settings.PUSH_DAILY_LIMIT}
-            rendered = _render_i18n("digest", DEFAULT_LOCALE, **params) or {}
+            rendered = _render_i18n("digest", locale or DEFAULT_LOCALE, **params) or {}
             title = rendered.get("title") or "Daily digest"
             message = rendered.get("message") or f"More {total} new leads today."
             payload = json.dumps(params, ensure_ascii=False)
@@ -7356,6 +7389,9 @@ class AsyncDatabaseService:
     async def get_user_push_subscriptions(self, user_id: int) -> List[dict]:
         return await anyio.to_thread.run_sync(self._service.get_user_push_subscriptions, user_id)
 
+    async def disable_push_if_no_subscriptions(self, user_id: int) -> bool:
+        return await anyio.to_thread.run_sync(self._service.disable_push_if_no_subscriptions, user_id)
+
     async def get_all_push_subscriptions(self) -> List[dict]:
         return await anyio.to_thread.run_sync(self._service.get_all_push_subscriptions)
 
@@ -7680,8 +7716,8 @@ class AsyncDatabaseService:
     async def get_alerted_pairs_for_leads(self, lead_ids: List[int]) -> List[dict]:
         return await anyio.to_thread.run_sync(self._service.get_alerted_pairs_for_leads, lead_ids)
 
-    async def upsert_daily_digest(self, user_id: int, extra_count: int) -> Optional[dict]:
-        return await anyio.to_thread.run_sync(self._service.upsert_daily_digest, user_id, extra_count)
+    async def upsert_daily_digest(self, user_id: int, extra_count: int, locale: Optional[str] = None) -> Optional[dict]:
+        return await anyio.to_thread.run_sync(self._service.upsert_daily_digest, user_id, extra_count, locale)
 
     async def get_alert_usage_today(self, day: Optional[str] = None) -> dict:
         return await anyio.to_thread.run_sync(self._service.get_alert_usage_today, day)
