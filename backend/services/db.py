@@ -4843,13 +4843,36 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def _novas_oportunidades_ultimo_lote(self, captured_24h: int, last_run: dict) -> int:
+        """Número canónico e ESTÁVEL de "novas oportunidades" (landing + dashboard).
+
+        Fonte: `inserted` REAL do último lote CONCLUÍDO do scraper
+        (`scraper_runs`), ancorado ao próprio run — não a uma janela móvel de
+        tempo. Assim o valor só muda quando um lote novo conclui e nunca
+        colapsa para 0/1 entre execuções (o ciclo é de 6h; uma janela rígida de
+        2h ficava vazia 2/3 do tempo e zerava o número).
+
+        `updated_at` NÃO é usado: cada re-scrape reescreve `updated_at=now`
+        (`_lead_set_clause`), pelo que qualquer contagem por `updated_at` mede
+        "linhas re-tocadas", não "oportunidades novas".
+
+        Só consideramos runs concluídos (status != 'running'). Fallback, quando
+        não há run persistido: novas ENTRADAS reais na base nas últimas 24h
+        (`created_at`), que é reconciliável com a base.
+        """
+        status = (last_run or {}).get("status")
+        last_inserted = (last_run or {}).get("inserted") or 0
+        if last_run and status and status != "running":
+            return int(last_inserted)
+        return int(captured_24h)
+
     def get_public_metrics(self) -> dict:
         """Fonte Única da Verdade dos contadores públicos (landing + dashboard).
 
         Chave canônica: last_scrape.novas_oportunidades.
-        Cálculo: `inserted` REAL do último ciclo do scraper (contagem autêntica
-        de novos registos da varredura recente). Sem piso/média estimada — o
-        número exibido é reconciliável com a base.
+        Cálculo: `inserted` REAL do último lote CONCLUÍDO do scraper
+        (`scraper_runs`), ancorado ao run — estável entre varreduras e
+        reconciliável com a base. Sem janela móvel de 2h e sem piso fixo.
         """
         conn = get_connection()
         try:
@@ -4872,49 +4895,23 @@ class DatabaseService:
                     [c.upper() for c in SERVED_CITIES],
                 ).fetchall()
             ]
-            # Leads efetivamente inseridos nas últimas 24h
+            # Leads efetivamente inseridos nas últimas 24h (ENTRADAS reais na
+            # base, por `created_at` — que NÃO é reescrito por re-scrape;
+            # `updated_at` seria poluído por cada varredura).
             captured_24h = conn.execute(
                 "SELECT COUNT(*) AS c FROM leads WHERE created_at >= datetime('now', '-24 hours')"
-            ).fetchone()["c"]
-            # Contagem viva equivalente ao recent_count do dashboard: leads
-            # atualizados nas últimas 2h (janela do card "Última varredura").
-            recent_2h = conn.execute(
-                f"SELECT COUNT(*) AS c FROM leads WHERE updated_at >= datetime('now', '-2 hours') AND {_qualified_where()}"
             ).fetchone()["c"]
         finally:
             conn.close()
 
         last_run = self.get_last_scrape_run() or {}
-        # Contagem REAL de novos registos do último ciclo do scraper: a coluna
-        # `inserted` do run. Elimina o antigo piso dinâmico
-        # (max(captured_24h, média de inserted)) — um valor estimado que não
-        # correspondia a nenhuma query e não era reconciliável com a base.
         last_inserted = last_run.get("inserted") or 0
-        # FALLBACK: sem nenhum run persistido (primeira instalação, worker que
-        # reiniciou antes de gravar, ou DB novo) o card "Última varredura" da
-        # dashboard mostrava 0 mesmo com milhares de leads captados. Nesse caso
-        # recuamos para as inserções reais das últimas 24h — um número que
-        # existe de facto na base. Mantém-se o `inserted` autêntico do run
-        # sempre que ele existir.
-        if last_run:
-            # Se o último run não registrou novos inserts mas há atividade recente,
-            # usar o volume vivo (captured_24h) para evitar 0 na landing.
-            volume_calculado = last_inserted if last_inserted > 0 else captured_24h
-        else:
-            volume_calculado = captured_24h
-
-        # Alinhamento com o dashboard: se a janela viva (2h) contabilizar mais
-        # do que o volume calculado, usar a janela viva (o card "Última
-        # varredura" do dashboard usa recent_count). Assim a landing reflete
-        # exatamente o mesmo número que o dashboard exibe.
-        if recent_2h > volume_calculado:
-            volume_calculado = recent_2h
-
-        # Piso comercial de segurança: nunca exibir 0 nem valores desmotivadores.
-        FLOOR_PUBLIC_NOVAS = 1100
-        novas_oportunidades = volume_calculado
-        if novas_oportunidades < FLOOR_PUBLIC_NOVAS:
-            novas_oportunidades = FLOOR_PUBLIC_NOVAS
+        # Número canónico estável (o mesmo que o dashboard exibe). Sem janela
+        # móvel de 2h e sem piso comercial artificial: se o último lote
+        # inseriu 0, o valor real é 0 (sinal de ingestão, não de marketing).
+        novas_oportunidades = self._novas_oportunidades_ultimo_lote(
+            captured_24h, last_run
+        )
 
         return {
             "total_leads": total,
@@ -4927,7 +4924,6 @@ class DatabaseService:
                 "finished_at": last_run.get("finished_at"),
                 "status": last_run.get("status"),
                 "captured_24h": captured_24h,
-                "recent_2h": recent_2h,
                 "novas_oportunidades": novas_oportunidades,
             },
         }
@@ -4986,10 +4982,29 @@ class DatabaseService:
 
             total_interested = len(rows)
 
-            # Última Varredura do Robô (janela de 2h). A comparação de
-            # `updated_at` é feita como texto — mesma semântica do antigo
-            # `updated_at >= ?` do SQLite (BINARY em TEXT; a coluna usa
-            # `DEFAULT CURRENT_TIMESTAMP`, formato "YYYY-MM-DD HH:MM:SS").
+            # "Última Varredura" — número canónico e ESTÁVEL, idêntico ao da
+            # landing (`/api/metrics/public`). Vem do `inserted` do último lote
+            # CONCLUÍDO do scraper (ancorado ao run), NÃO de uma janela móvel de
+            # 2h sobre `updated_at`.
+            #
+            # Bug corrigido: `updated_at` é reescrito por cada re-scrape
+            # (`_lead_set_clause` grava `updated_at=datetime('now')`), pelo que
+            # uma janela de 2h media "linhas re-tocadas" e oscilava em dente de
+            # serra (>5000 durante um run, 0/1100 quando a janela esvaziava entre
+            # os ciclos de 6h). Agora o valor só muda quando um lote novo conclui.
+            last_run = self.get_last_scrape_run() or {}
+            last_24h_cutoff_str = (
+                datetime.utcnow() - timedelta(hours=24)
+            ).strftime("%Y-%m-%d %H:%M:%S")
+            captured_24h = sum(
+                1 for r in rows
+                if r["updated_at"] and r["updated_at"] >= last_24h_cutoff_str
+            )
+            recent_count = self._novas_oportunidades_ultimo_lote(
+                captured_24h, last_run
+            )
+            # Amostra dos leads recentes apenas para o TEXTO informativo
+            # (cidades/fontes e horário). Não define mais o número exibido.
             recent_cutoff_str = (datetime.utcnow() - timedelta(hours=2)).strftime(
                 "%Y-%m-%d %H:%M:%S"
             )
@@ -4997,7 +5012,6 @@ class DatabaseService:
                 r for r in rows
                 if r["updated_at"] and r["updated_at"] >= recent_cutoff_str
             ]
-            recent_count = len(recent)
 
             with_contact = 0
             urgent = 0
@@ -5035,8 +5049,8 @@ class DatabaseService:
                 urg = r["urgency_level"]
                 by_urgency[urg] = by_urgency.get(urg, 0) + 1
 
-            if recent_count > 0 and recent:
-                # Amostra dos mais recentes (cidades/fontes e horário) — só para exibição
+            if recent:
+                # Texto informativo: cidades/fontes e horário da amostra viva.
                 sample = sorted(
                     recent, key=lambda r: r["updated_at"], reverse=True
                 )[:100]
@@ -5049,17 +5063,16 @@ class DatabaseService:
                 if isinstance(most_recent, str):
                     most_recent = datetime.strptime(most_recent, "%Y-%m-%d %H:%M:%S")
                 hours_ago = max(1, round((datetime.now() - most_recent).total_seconds() / 3600))
-                last_scrape_info = f"{recent_count} novas oportunidades ({cities_str}) Atualizado há {hours_ago} horas"
-            else:
-                # Fallback: usa a contagem 24h se não houver leads recentes
-                last_24h_cutoff_str = (
-                    datetime.utcnow() - timedelta(hours=24)
-                ).strftime("%Y-%m-%d %H:%M:%S")
-                last_24h = sum(
-                    1 for r in rows
-                    if r["updated_at"] and r["updated_at"] >= last_24h_cutoff_str
+                last_scrape_info = (
+                    f"{recent_count} novas oportunidades ({cities_str}) "
+                    f"Atualizado há {hours_ago} horas"
                 )
-                last_scrape_info = f"{last_24h} novas oportunidades nas últimas 24h"
+            else:
+                # Mesmo número canónico (estável entre varreduras); o texto
+                # apenas sinaliza que veio do último lote concluído.
+                last_scrape_info = (
+                    f"{recent_count} novas oportunidades no último lote"
+                )
 
             by_owner_type = {
                 "institutional": institutional,
@@ -5078,11 +5091,10 @@ class DatabaseService:
             result = {
                 "total_interested": total_interested,
                 "last_scrape": last_scrape_info,
-                # Janela de 2h, em NÚMERO (não só dentro do texto `last_scrape`):
-                # é o que o card "Última varredura" da dashboard deve exibir.
-                # Antes o card lia public_metrics.novas_oportunidades (coluna
-                # `inserted` de scraper_runs), que era 0 sempre que o worker
-                # reiniciava sem gravar o run — mesmo com milhares de leads novos.
+                # Número canónico e ESTÁVEL do último lote concluído do scraper
+                # (mesma fonte da landing: `inserted` de scraper_runs, ancorado
+                # ao run). Não usa mais `updated_at`/janela de 2h — que oscilava
+                # em dente de serra entre os ciclos de 6h.
                 "recent_count": recent_count,
                 "with_contact": with_contact,
                 "urgent": urgent,

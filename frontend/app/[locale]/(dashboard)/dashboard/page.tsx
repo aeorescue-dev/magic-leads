@@ -1885,19 +1885,13 @@ const URGENCIES = ["all", "high", "medium", "low"];
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
             {[
               { label: t("dashboard.kpi.interested") || "No seu interesse", value: dashboardSummary?.total_interested ?? 0, delta: t("dashboard.kpi.opportunities") || "oportunidades reais", icon: Building2, color: "#6366f1" },
-              // Card "Última varredura": conta os leads actualizados na janela de
-              // 2h (recent_count, devolvido pelo resumo). Fica explicitamente à
-              // frente do public_metrics.novas_oportunidades, que era 0 quando
-              // o worker reiniciava sem gravar o scraper_runs — o card não podia
-              // mostrar 0 com dezenas de milhares de leads actualizados.
-              // BUG: usava-se `??`, que NÃO passa à frente quando o valor é um 0
-              // VÁLIDO (recent_count é 0 assim que a janela de 2h esvazia). Como
-              // a landing lia novas_oportunidades directamente e mostrava 2.796,
-              // só o card ficava em 0. Com `||` o 0 cai para o valor real das
-              // últimas 24h (novas_oportunidades, e depois captured_24h = entradas
-              // novas na base), pelo que o card nunca mostra 0 enquanto houver
-              // dados recentes.
-              { label: t("dashboard.kpi.last_scrape"), value: dashboardSummary?.recent_count || publicMetrics?.last_scrape?.novas_oportunidades || publicMetrics?.last_scrape?.captured_24h || scrapeCount, delta: t("dashboard.kpi.updated_now"), icon: TrendingUp, color: "#22c55e" },
+              // Card "Última varredura": número canónico e ESTÁVEL do último lote
+              // concluído do scraper — a MESMA fonte da landing
+              // (`/api/metrics/public` → last_scrape.novas_oportunidades).
+              // Antes usava `recent_count` (janela móvel de 2h sobre `updated_at`,
+              // reescrito por cada re-scrape) e oscilava >5000 ↔ 1100 ↔ 1.
+              // Agora ambos (dashboard e landing) exibem exatamente o mesmo valor.
+              { label: t("dashboard.kpi.last_scrape"), value: publicMetrics?.last_scrape?.novas_oportunidades ?? dashboardSummary?.recent_count ?? scrapeCount, delta: t("dashboard.kpi.updated_now"), icon: TrendingUp, color: "#22c55e" },
               // `with_contact` conta leads COM PROPRIETÁRIO IDENTIFICADO — não
               // telefone (as validações de ligações só acontecem na reserva, de
               // propósito: o número é pago). "prontas p/ ligar" era mentira.

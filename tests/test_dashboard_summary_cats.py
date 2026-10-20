@@ -159,10 +159,13 @@ def test_dashboard_summary_by_city_sums_to_total_interested():
 
 
 def test_public_metrics_novas_oportunidades_is_real_inserted():
-    """A frescura é o `inserted` REAL do último run, não um piso estimado.
+    """A frescura é o `inserted` REAL do último lote CONCLUÍDO, sem piso.
 
-    Regressão: `novas_oportunidades = max(captured_24h, média(inserted))`
-    inflava o número (piso mínimo 500) e não correspondia a nenhuma query.
+    Regressão (bug do card "Última varredura"): o número vinha de uma janela
+    móvel de 2h sobre `updated_at` (reescrito a cada re-scrape) e oscilava em
+    dente de serra (>5000 durante um run, 0/1100 quando a janela esvaziava
+    entre os ciclos de 6h). Agora é ancorado ao `inserted` do run concluído —
+    estável entre varreduras e reconciliável com a base.
     """
     _clear_leads()
     conn = get_connection()
@@ -181,8 +184,8 @@ def test_public_metrics_novas_oportunidades_is_real_inserted():
     try:
         metrics = db_service._service.get_public_metrics()
         assert metrics["last_scrape"]["inserted"] == 42
-        # Piso comercial de segurança: novas_oportunidades = max(1100, volume_calculado)
-        assert metrics["last_scrape"]["novas_oportunidades"] == 1100
+        # Sem piso comercial: o valor exibido é o `inserted` real do último lote.
+        assert metrics["last_scrape"]["novas_oportunidades"] == 42
         assert "floor" not in metrics["last_scrape"]
     finally:
         conn = get_connection()
@@ -191,3 +194,68 @@ def test_public_metrics_novas_oportunidades_is_real_inserted():
             conn.commit()
         finally:
             conn.close()
+
+
+def test_public_metrics_and_dashboard_share_same_stable_number():
+    """Dashboard e Landing exibem o MESMO número, estável entre varreduras.
+
+    O card "Última varredura" (get_dashboard_summary.recent_count) e a landing
+    (get_public_metrics.last_scrape.novas_oportunidades) partilham a mesma
+    fonte: o `inserted` do último lote concluído do scraper.
+    """
+    clear_dashboard_summary_cache()
+    _clear_leads()
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            "INSERT INTO scraper_runs (run_id, trigger, started_at, finished_at, "
+            "status, inserted) VALUES (?, 'test', datetime('now'), datetime('now'), "
+            "'success', 777)",
+            (uuid.uuid4().hex,),
+        )
+        run_id = cur.lastrowid
+        conn.commit()
+    finally:
+        conn.close()
+
+    try:
+        public = db_service._service.get_public_metrics()
+        summary = db_service._service.get_dashboard_summary(None)
+        assert public["last_scrape"]["novas_oportunidades"] == 777
+        assert summary["recent_count"] == 777
+        assert (
+            public["last_scrape"]["novas_oportunidades"] == summary["recent_count"]
+        )
+    finally:
+        clear_dashboard_summary_cache()
+        conn = get_connection()
+        try:
+            conn.execute("DELETE FROM scraper_runs WHERE id = ?", (run_id,))
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def test_public_metrics_falls_back_to_real_24h_inserts_without_run():
+    """Sem run persistido, usa ENTRADAS reais de 24h (`created_at`), não `updated_at`."""
+    _clear_leads()
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM scraper_runs")
+        for _ in range(3):
+            conn.execute(
+                "INSERT INTO leads (external_id, source_type, address, city, state, "
+                "issue_category, case_status, date_reported, created_at) "
+                "VALUES (?, '311', ?, 'NYC', 'NY', 'Roof', 'open', "
+                "'2026-01-01T00:00:00', datetime('now'))",
+                (uuid.uuid4().hex, f"{uuid.uuid4().hex[:8]} Main Street"),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    try:
+        metrics = db_service._service.get_public_metrics()
+        assert metrics["last_scrape"]["novas_oportunidades"] == 3
+    finally:
+        _clear_leads()
