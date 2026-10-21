@@ -377,23 +377,40 @@ class Socrata311Scraper:
             "created_date", "creation_date", "createdtime", "requested_datetime",
             "requested_date", "created", "date_entered", "open_date", "service_request_date",
             "inspection_date", "inspectiondate", "approved_date", "approveddate", "novissueddate",
+            # Datasets de permisos/obra (Chicago, LA, NYC DOB): a data do pedido
+            # ou da emissao. Sem estas, o dataset e' considerado sem data e o
+            # scraper aborta a fonte inteira.
+            "issue_date", "issued_date", "submitted_date", "application_date",
+            "effective_date", "served_date", "hearing_date",
         )
-        desc_col = find(
+        # Prioridade (nao ordem do dataset): num dataset de permisos, o campo
+        # "work_description" e' o que nomeia o oficio; a ordem das colunas
+        # deixaria pegar campos vazios ("construction", "permit_condition").
+        desc_col = find_prio(
             "complaint_type", "type_of_service_request", "service_request_type",
-            "request_type", "issue_type", "category", "title", "type", "sr_type",
-            "violation_type", "service_type", "novdescription", "nov_description", "description",
+            "request_type", "issue_type", "violation_type", "service_type",
+            "novdescription", "nov_description", "description", "sr_type",
+            "work_description", "work_desc", "use_desc", "permit_type",
+            "permit_sub_type", "violation_description", "application_type",
+            "section_law_description1", "review_type", "category", "title", "type",
         )
-        lat_col = find("latitude", "lat", "lat_address", "lat_location")
+        lat_col = find("latitude", "lat", "lat_address", "lat_location",
+                        "lat_long_location")
         lng_col = find("longitude", "lon", "lng", "long", "long_address")
         ext_col = find(
             "unique_key", "service_request_number", "service_request_id",
             "request_number", "case_number", "id", "sr_number", "violationid",
+            # Datasets de permisos/obra: o numero do pedido e' o id natural.
+            "permit_nbr", "permit_number", "dob_violation_number",
+            "ecb_violation_number", "bic_number", "application_id",
         )
 
         # endereço: várias cidades usam formatos diferentes
         addr_candidates = [
             "incident_address", "street_address", "address", "full_address",
             "street_name", "location_address", "open_data_channel", "housenumber",
+            # Datasets de permisos/obra: o endereco vem num campo unico.
+            "primary_address", "location", "site_address", "property_address",
         ]
         addr_col = None
         for f, fname in zip(fns, field_names or []):
@@ -449,8 +466,10 @@ class Socrata311Scraper:
         # addr_col abaixo devolveria apenas o numero e o lead ficava sem rua.
         addr_num_col = find(
             "incident_address", "housenumber", "house_no", "house_number", "street_number",
+            "respondent_house_number",
         )
-        addr_street_col = find("streetname", "street_name", "street")
+        addr_street_col = find("streetname", "street_name", "street",
+                               "respondent_street")
 
         # BBL (borough-block-lot): identificador canonico de imovel em NYC.
         # Quando presente, o enriquecimento de proprietario passa a ser exacto.
@@ -476,14 +495,20 @@ class Socrata311Scraper:
     async def fetch_from_dataset(
         self, domain: str, dataset_id: str, city: str, state: str,
         field_names: List[str], hours: int = 48, limit: int = 50000,
-        keyword_filter: bool = True, source_type: Optional[str] = None,
+        trade_filter: bool = True, source_type: Optional[str] = None,
     ) -> List[RawLead311]:
         """Busca 311 genérico de qualquer cidade Socrata, detectando as colunas.
 
-        keyword_filter=True  -> filtra por palavras-chave (scrape incremental).
-        keyword_filter=False -> traz todos os registros da janela (usado no backfill).
-        source_type          -> classifica o lead (ex: "hpd_violation"). Sem isto
-                               tudo cai em "311" e os filtros da UI ficam vazios.
+        trade_filter=True  -> filtra por CATEGORIA DE OFÍCIO: mantém o que a
+            descrição identifica como ofício real (canalização, entulho, endings
+            electric, ...) e descarta o que caiu no fallback genérico ("Estrutura"),
+            que é ruído de 311 (recolha de lixo, candeeiros, multidões). A
+            filtragem anterior por `SCRAPER_KEYWORDS` descartava ofícios REAIS
+            cuja redação não bate com a lista (medido: 156 PLUMBING + 16 GRASS +
+            14 RODENT por ciclo em Dallas, 113 PLUMBING em NYC).
+        trade_filter=False -> traz todos os registos da janela (usado no backfill).
+        source_type        -> classifica o lead (ex: "hpd_violation"). Sem isto
+            tudo cai em "311" e os filtros da UI ficam vazios.
         """
         cols = self._guess_columns(field_names)
         if not cols["_has_date"] or not cols["_has_desc"]:
@@ -540,57 +565,81 @@ class Socrata311Scraper:
             lead = self._parse_generic_row(row, cols, city, state, source_type=source_type)
             if not lead:
                 continue
-            if keyword_filter:
-                # filtro de segurança client-side (caso o SQL não tenha pego tudo)
-                desc = (lead.issue_description or "").lower()
-                if not any(kw.lower() in desc for kw in self.keywords):
+            if trade_filter:
+                # Filtro por OFÍCIO (nao por lista de palavras): a categoria
+                # inferida diz se a descricao nomeia um oficio real. O fallback
+                # generico (Estrutura) e' ruido de 311 e e' descartado.
+                _cat, matched = self._infer_category_ex(
+                    lead.issue_description, source_type
+                )
+                if not matched:
                     continue
             leads.append(lead)
         logger.info(f"{city} 311: {len(leads)} leads válidos")
         return leads
 
     def _infer_category(self, description: str, source_type: str = None) -> "IssueCategory":
-        """Infere a categoria a partir das palavras-chave da descrição.
+        """Infer the category from the description keywords.
 
-        Mapeia exclusivamente para as 16 categorias/ofícios da plataforma.
-        Fallback: Obras & Permissões (Permit_Rejected) para fontes de obrigação
-        legal (permit/violação/fiscalização); Structure para os demais."""
+        Maps exclusively to the 16 trade categories of the platform.
+        Fallback: Works & Permits (Permit_Rejected) for legal-obligation
+        sources (permit/violation/inspection); Structure for everything else.
+        """
+        return self._infer_category_ex(description, source_type)[0]
+
+    def _infer_category_ex(
+        self, description: str, source_type: str = None
+    ) -> tuple["IssueCategory", bool]:
+        """Like `_infer_category`, but also says whether a SPECIFIC trade matched.
+
+        The second element is False when the category is the generic fallback
+        (Structure) - i.e. the description did not name a trade. That is what
+        separates a real signal ("SEWER - Complaint") from noise ("Missed
+        Collection"), and it is what the scraper filter uses to keep the former
+        and drop the latter. The keyword list in `SCRAPER_KEYWORDS` cannot do
+        this: it misses real trades whose wording differs from the list
+        (measured: 156 PLUMBING + 16 GRASS + 14 RODENT records per cycle were
+        being dropped in Dallas alone).
+        """
         desc = (description or "").lower()
-        # Categorias específicas (devem vir ANTES das genéricas para não serem capturadas por palavras-chave amplas)
+        # Specific categories (must come BEFORE the generic ones so they are not
+        # captured by the broader keywords).
         if any(k in desc for k in ["heat", "hot water", "heating", "boiler", "no heat", "radiator", "no hot water"]):
-            return IssueCategory.HEATING
+            return IssueCategory.HEATING, True
         if any(k in desc for k in ["gas", "gas leak", "cooking gas", "gas odor", "gas smell"]):
-            return IssueCategory.GAS
+            return IssueCategory.GAS, True
         if any(k in desc for k in ["electric", "electrical", "wiring", "outlet", "circuit", "panel", "short circuit"]):
-            return IssueCategory.ELECTRICAL
+            return IssueCategory.ELECTRICAL, True
         if any(k in desc for k in ["elevator", "lift"]):
-            return IssueCategory.ELEVATOR
+            return IssueCategory.ELEVATOR, True
         if any(k in desc for k in ["rodent", "rat", "mice", "mouse", "vermin", "roach", "pest", "cockroach", "bed bug", "infestation", "pigeon"]):
-            return IssueCategory.RODENT
+            return IssueCategory.RODENT, True
         if any(k in desc for k in ["mold", "mildew", "fungus", "water damage"]):
-            return IssueCategory.MOLD
+            return IssueCategory.MOLD, True
         if any(k in desc for k in ["lead", "lead paint", "lead hazard"]):
-            return IssueCategory.LEAD
+            return IssueCategory.LEAD, True
         if any(k in desc for k in ["unsanitary", "sanitary", "filth", "sewage backup", "unsatisfactory living conditions", "hoarding", "sewage", "septic", "raw sewage", "bad odor", "foul odor", "squalid"]):
-            return IssueCategory.UNSANITARY
+            return IssueCategory.UNSANITARY, True
         if any(k in desc for k in ["door", "window", "frame", "sash", "jamb", "broken window", "stuck window"]):
-            return IssueCategory.DOOR_WINDOW
+            return IssueCategory.DOOR_WINDOW, True
         if any(k in desc for k in ["debris", "garbage", "trash", "rubbish", "litter", "dumping", "junk", "dumpster", "bulk removal", "overflowing garbage"]):
-            return IssueCategory.DEBRIS
-        # Categorias genéricas (vêm depois)
+            return IssueCategory.DEBRIS, True
+        # Generic categories (come after)
         if any(k in desc for k in ["roof", "gutter", "shingle", "roof leak", "shed"]):
-            return IssueCategory.ROOF
+            return IssueCategory.ROOF, True
         if any(k in desc for k in ["plumb", "water", "leak", "pipe", "sewer", "drain", "backflow"]):
-            return IssueCategory.PLUMBING
+            return IssueCategory.PLUMBING, True
         if any(k in desc for k in ["paint", "plaster", "graffiti", "facade", "façade", "peeling"]):
-            return IssueCategory.PAINT
+            return IssueCategory.PAINT, True
         if any(k in desc for k in ["structur", "foundation", "wall", "collapse", "crack", "unsafe building", "sagging", "deterioration", "buckling", "leaning"]):
-            return IssueCategory.STRUCTURE
+            return IssueCategory.STRUCTURE, True
         if any(k in desc for k in ["grass", "weed", "vegetation", "overgrown", "blight", "high weeds", "vacant lot", "tall grass", "brush", "excessive vegetation"]):
-            return IssueCategory.GRASS
+            return IssueCategory.GRASS, True
         if source_type in ("permit", "dob_violation", "hpd_violation", "tax_delinquency"):
-            return IssueCategory.PERMIT_REJECTED  # Obras & Permissões
-        return IssueCategory.STRUCTURE  # fallback conservador
+            # Works & Permits: a legal-obligation source IS a trade signal, even
+            # when the description does not name one.
+            return IssueCategory.PERMIT_REJECTED, True
+        return IssueCategory.STRUCTURE, False
 
     def _infer_urgency(self, description: str) -> UrgencyLevel:
         """Infere o nível de urgência a partir da descrição do chamado 311.

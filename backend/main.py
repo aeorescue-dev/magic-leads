@@ -257,6 +257,8 @@ _SOURCE_TYPE_BY_ENTRY = {
     "hpd_violations": "hpd_violation",
     "dob_violations": "dob_violation",
     "dob_permits": "permit",
+    "chi_permits": "permit",
+    "la_permits": "permit",
 }
 
 
@@ -2294,6 +2296,14 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
             {"domain": "data.cityofnewyork.us", "dataset": "erm2-nwe9", "city": "NYC", "state": "NY", "hours": 96, "limit": 5000, "fields": ["unique_key", "created_date", "closed_date", "due_date", "complaint_type", "descriptor", "incident_address", "street_name", "intersection_street_1", "cross_street_1", "incident_zip", "latitude", "longitude", "status", "agency_name", "borough", "bbl", "community_board", "council_district", "police_precinct", "resolution_description", "open_data_channel_type"]},
             {"domain": "data.cityofnewyork.us", "dataset": "wvxf-dwi5", "city": "NYC", "state": "NY", "hours": 120, "type": "hpd_violations", "fields": ["violationid", "buildingid", "inspectiondate", "approveddate", "housenumber", "lowhousenumber", "highhousenumber", "streetname", "boro", "zip", "apartment", "latitude", "longitude", "novtype", "novdescription", "violationstatus", "currentstatus", "novissueddate", "communityboard", "councildistrict", "bbl", "block", "lot"]},  # HPD Housing Maintenance Code Violations
             {"domain": "data.cityofchicago.org", "dataset": "v6vf-nfxy", "city": "Chicago", "state": "IL", "hours": 48, "fields": ["sr_number", "created_date", "sr_type", "street_address", "zip_code", "latitude", "longitude", "status"]},  # id= sr_number
+            # Chicago Building Permits: fonte NOVA (medido: 2.817 registos por
+            # janela de 30 dias, com oficio classificado a partir de
+            # `work_description` — 1.114 electricos, 214 telhados, 83
+            # canalizacoes, 233 roedores, 199 portas/Janelas). E' a unica fonte
+            # de Chicago que nao seja 311 e traz obra a serio (remodelacao,
+            # substituicao electrica, telhado) — que e' o que o contractor
+            # consegue fechar.
+            {"domain": "data.cityofchicago.org", "dataset": "ydr8-5enu", "city": "Chicago", "state": "IL", "hours": 720, "type": "chi_permits", "limit": 5000, "fields": ["id", "issue_date", "work_description", "permit_type", "permit_status", "street_number", "street_name", "latitude", "longitude", "community_area", "ward", "application_start_date"]},
             {"domain": "www.dallasopendata.com", "dataset": "d7e7-envw", "city": "Dallas", "state": "TX", "hours": 48, "fields": ["service_request_number", "created_date", "service_request_type", "address", "lat_location", "status"]},
         ]
 

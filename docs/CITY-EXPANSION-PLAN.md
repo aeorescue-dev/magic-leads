@@ -6,6 +6,78 @@
 
 ---
 
+## 0. ⚠️ Actualização 2026-10-21 — auditoria empírica que mudou a conclusão
+
+Medi com o **fetcher real** e a **heurística real de colunas** (`_guess_columns`)
+contra o catálogo nacional da Socrata. Resultados que contrariam o plano original:
+
+### 0.1 Os ~90 datasets "por categoria" são ARQUIVOS MORTOS
+
+| Dataset | Último registo |
+|---|---|
+| CUNY HPD paint/plaster · HPD general constr · sewer | **2012-03 / 2014-03** |
+| CUNY rodent · industrial waste | 2019-07 / 2019-08 |
+| CUNY asbestos · dirty sidewalk · HPD heat/hot water | 2021-09 / 2022-03 / 2020-11 |
+| CHI sanitation code · rodent baiting · pot holes · tree debris · graffiti · tree trims | **2018-12-18** |
+| CHI abandoned vehicles | 2020-07-23 |
+| DAL code violations | 2018-07-31 |
+| **CUNY (todos)** · **Kansas City (todos)** | **0 datasets LIVE** |
+
+> **Ligá-los produziria ZERO leads novos.** Uma obra de 2014 não é uma
+> oportunidade de hoje. O plano original tratava estes datasets como
+> multiplicador de produção — **está errado**, e o teste empírico apanhou-o
+> antes de qualquer código ser escrito.
+
+### 0.2 O que é LIVE (e o que isso nos dá)
+
+| Domínio | LIVE | Notas |
+|---|---:|---|
+| `data.cityofnewyork.us` | 311 (erm2-nwe9), HPD (wvxf-dwi5) + **DOB ECB** (6bgk-3dad) | DOB ECB: endereço é o do *respondente* (Caixa de Correio) → **não usado** |
+| `data.cityofchicago.org` | 311 (v6vf-nfxy) + **Building Permits** (ydr8-5enu) | ✅ **activado** |
+| `www.dallasopendata.com` | 311 (d7e7-envw, 4n3h-rfqm) | 4n3h tem `lat_long_location`; d7e7 tem `lat_location` |
+| `data.lacity.org` | **3 datasets de permits LIVE** (building/electrical/mechanical) | ⚠️ LA é cidade nova — ver §5 |
+| `bronx.lehman.cuny.edu` | **0** | mirror estático |
+| `data.kcmo.org` | **0** | 311 existe mas parado em 2018 |
+
+**Nenhuma outra cidade dos EUA testadas** (~60) tem 311/permits na Socrata:
+Filadélfia, Houston, Phoenix, Atlanta, Miami, Seattle, LA(311), Denver, Austin,
+San Antonio, DC, Baltimore, Charlotte, Nashville, Portland, Minneapolis,
+Cleveland, St. Louis, Pittsburgh, New Orleans, Vegas, Tucson, Fresno, Omaha,
+Albuquerque, El Paso, Jacksonville, Memphis, Louisville, Richmond, Buffalo,
+Columbus, Indianapolis, Tulsa, OKC, Rochester, Hartford, Providence, Raleigh,
+Norfolk, Fort Worth, San José, San Diego.
+→ O portal deles é **ArcGIS/outros** (`data.phila.gov` → 404, `data.seattle.gov`
+→ 0 datasets). **Exigem um transportador novo.**
+
+### 0.3 O gargalo real: o filtro de ofício, não as cidades
+
+Medido com o fetcher real (mesmo dataset, filtro antigo vs. novo):
+
+| Fonte | Endereços novos (filtro antigo) | (filtro por ofício) |
+|---|---:|---:|
+| Dallas | 8 | **1.358** |
+| NYC | 1.037 | **4.273** |
+| Chicago | 100 | **2.750** |
+
+O filtro antigo (lista `SCRAPER_KEYWORDS` sobre a descrição) descartava
+ofícios **REAIS** cuja redação não bate com a lista: 156 PLUMBING + 16 GRASS +
+14 RODENT por ciclo em Dallas, 113 PLUMBING em NYC. → **Corrigido** (filtro por
+categoria de ofício, com fallback genérico = ruído).
+
+### 0.4 O multiplicador de 10x (janela de fetch) — medido, **ainda não implementado**
+
+| Fonte | Janela actual (48-96h) | Janela 7 dias | Tempo de fetch |
+|---|---:|---:|---:|
+| NYC 311 | ~1.037 | **11.170** | 19,6s |
+| CHI 311 | 100 | **1.081** | 27,8s |
+| DAL 311 | 8 | **574** | 2,8s |
+
+O fetch é barato (≈50s no total), mas o volume de escrita na BD cresce ~30x —
+**exige um desenho de backfill** (scrape profundo nocturno vs. incremental de
+6h) antes de ser seguro. Fica como **fase 2 do Movimento #1**.
+
+---
+
 ## 1. Estado actual
 
 | | |
