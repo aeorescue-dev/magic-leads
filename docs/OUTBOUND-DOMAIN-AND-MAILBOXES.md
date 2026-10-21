@@ -103,10 +103,36 @@ mostra `SPF: pass`, `DKIM: pass` e `DMARC: pass`.
 
 O e-mail de recuperação de checkout (Prioridade A) sai pela Resend. Para usar
 `noreply@magicleads.app`:
+
 1. resend.com → Domains → Add Domain → `magicleads.app`.
-2. Adicionar os registos DNS que a Resend indicar (normalmente SPF já
-   coberto + DKIM próprio da Resend, ex. `resend._domainkey`).
+2. Adicionar os registos DNS que a Resend indicar.
 3. Definir `EMAIL_FROM="Magic Leads <noreply@magicleads.app>"` no Railway.
+
+> ### ⚠️ ARMADILHA CRÍTICA: só pode existir **UM** registo SPF
+>
+> Se a Resend te pedir para criar um registo SPF **novo**, **NÃO o cries**.
+> Dois registos SPF no mesmo nome = `permerror` = **todo o correio do domínio
+> passa a ser rejeitado** (Google e Gmail inclusive). O SPF tem de ser **um
+> único registo**, com a include da Resend **somada** à do Google:
+>
+> ```
+> v=spf1 include:_spf.google.com include:<include-da-resend> ~all
+> ```
+>
+> A Resend normalmente só exige **DKIM** (CNAME) quando o domínio já tem SPF —
+> nesse caso basta acrescentar o CNAME de DKIM. Se ela insistir no SPF, usa a
+> **opção mais segura: um subdomínio dedicado** (ex.: `send.magicleads.app`),
+> que tem o seu próprio SPF e não colide com nada:
+>
+> ```
+> # no subdomínio send.magicleads.app (isolado, sem conflito)
+> send.   TXT   "v=spf1 include:<include-da-resend> ~all"
+> ```
+>
+> E define `EMAIL_FROM="Magic Leads <noreply@send.magicleads.app>"`.
+> **DKIM pode ter vários selectors** (Google + Resend em simultâneo) — só o
+> SPF é exclusivo.
+
 
 ---
 
@@ -224,4 +250,21 @@ Host: resend._domainkey.magicleads.app
 Value: p=<valor fornecido pela Resend>
 ```
 
-MX records **não** devem ser alterados (o e-mail continua no Google Workspace).
+> **SPF: UM registo só.** Se a Resend pedir um SPF novo, **NÃO o cries** —
+> dois SPF no mesmo nome dão `permerror` e o correio do domínio inteiro
+> (Google incluído) deixa de ser aceito. Ou se faz `include:` da Resend no
+> SPF que já existe, ou se usa um subdomínio dedicado (`send.`) com SPF
+> próprio. Ver §2.4.
+
+### Registos MX
+
+A activação do Google Workspace **normalmente exige** apontar os MX para o
+Google (`smtp.google.com` / `aspmx.l.google.com`, etc.). Isso **é seguro**
+para o outbound: o motor envia pela **Gmail API** (HTTPS), não por MX — o MX
+só governa quem *recebe* correio no domínio.
+
+> Antes de mudar os MX, confirma onde estão hoje. Se `magicleads.app` já tem
+> MX de outro serviço (parcelling, forwarding, um mail provider antigo) e
+> **recebes** correio importante lá, guarda os registos actuales antes de
+> substituir.
+
