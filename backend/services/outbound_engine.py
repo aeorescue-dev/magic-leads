@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from ..config import settings
@@ -233,6 +233,17 @@ class OutboundEngine:
                 skipped += 1
                 continue
             body_hash = hashlib.sha256(rendered["body"].encode("utf-8")).hexdigest()
+            # Sequencia (Prioridade D): o passo 1 (amostra) agenda o passo 2
+            # (oferta) para daqui a N dias, se o destinatario nao responder.
+            next_step_at = None
+            if getattr(settings, "OUTBOUND_SEQUENCE_ENABLED", True):
+                delay_days = _int(
+                    getattr(settings, "OUTBOUND_SEQUENCE_STEP2_DELAY_DAYS", 3), 3
+                )
+                if delay_days > 0:
+                    next_step_at = _now_str(
+                        datetime.now(timezone.utc) + timedelta(days=delay_days)
+                    )
             msg = await db_service.enqueue_outbound_message(
                 batch_id=batch.get("id"),
                 contact_id=contact["id"],
@@ -240,6 +251,8 @@ class OutboundEngine:
                 to_email=email,
                 subject=rendered["subject"],
                 body_hash=body_hash,
+                sequence_step=1,
+                next_step_at=next_step_at,
             )
             if msg:
                 queued += 1
@@ -259,6 +272,130 @@ class OutboundEngine:
             "spend_usd": round(spend_total, 4),
             "total_leads": len(leads),
         }
+
+    # ---------------------------------------------------------- sequence
+
+    async def schedule_next_steps(self, now: Optional[datetime] = None) -> dict:
+        """Cria o proximo passo da sequencia para quem ja' recebeu o anterior.
+
+        Passo 1 = e-mail de amostra (sem preco). Passo 2 = e-mail da oferta
+        ($120/semana). O passo 2 so' e' criado se o destinatario:
+          * nao respondeu (`replied_at` vazio);
+          * nao se desinscreveu;
+          * nao esta' suprimido.
+
+        Sem deteccao automatica de respostas (exige scope `gmail.readonly`),
+        `replied_at` e' marcado manualmente pelo painel. Conservative: na duvida
+        NAO se envia o passo 2.
+        """
+        now = now or datetime.now(timezone.utc)
+        if not getattr(settings, "OUTBOUND_SEQUENCE_ENABLED", True):
+            return {"scheduled": 0, "skipped": 0}
+        max_step = _int(getattr(settings, "OUTBOUND_SEQUENCE_MAX_STEP", 2), 2)
+        if max_step < 2:
+            return {"scheduled": 0, "skipped": 0}
+
+        due = await db_service.list_outbound_messages_due_for_sequence(_now_str(now))
+        scheduled = 0
+        skipped = 0
+
+        for message in due:
+            step = _int(message.get("sequence_step"), 1)
+            if step >= max_step:
+                # Ultimo passo: consome o agendamento e nao cria mais nada.
+                await db_service.set_outbound_message_next_step(message["id"], None)
+                continue
+
+            to_email = (message.get("to_email") or "").strip()
+            if not to_email:
+                await db_service.set_outbound_message_next_step(message["id"], None)
+                continue
+
+            contact = await db_service.get_outbound_contact_by_email(to_email)
+            if not contact:
+                await db_service.set_outbound_message_next_step(message["id"], None)
+                skipped += 1
+                continue
+            if contact.get("replied_at") or contact.get("unsubscribed"):
+                await db_service.set_outbound_message_next_step(message["id"], None)
+                skipped += 1
+                continue
+            if await db_service.is_suppressed(to_email):
+                await db_service.set_outbound_message_next_step(message["id"], None)
+                skipped += 1
+                continue
+
+            city = (message.get("city") or "").strip().upper()
+            batch = (
+                await db_service.get_outbound_batch(message["batch_id"])
+                if message.get("batch_id")
+                else None
+            )
+            niche = outbound_templates.DEFAULT_NICHE
+            if batch:
+                filters = _parse_json(batch.get("filters_json"))
+                niche = filters.get("niche") or niche
+            categories = outbound_templates.niche_categories(niche)
+
+            lead = None
+            if contact.get("lead_id"):
+                lead = await db_service.get_lead_by_id(contact["lead_id"])
+            if not lead:
+                await db_service.set_outbound_message_next_step(message["id"], None)
+                skipped += 1
+                continue
+
+            count = await db_service.count_qualified_contractors_in_city(city, categories)
+            if count <= 0:
+                count = _int(batch.get("contact_count"), 0) if batch else 0
+
+            try:
+                context = outbound_templates.build_context(
+                    lead, city, niche, count, contact=contact
+                )
+                context["url"] = outbound_templates.sequence_url(city, niche, step=step + 1)
+                rendered = outbound_templates.render_sequence_email("step2_offer", context)
+            except Exception as e:
+                logger.warning(
+                    "[OUTBOUND] Falha ao renderizar o passo %s: %s", step + 1, e
+                )
+                await db_service.set_outbound_message_next_step(message["id"], None)
+                skipped += 1
+                continue
+
+            body_hash = hashlib.sha256(rendered["body"].encode("utf-8")).hexdigest()
+            next_step_at = None
+            if step + 1 < max_step:
+                delay_days = _int(
+                    getattr(settings, "OUTBOUND_SEQUENCE_STEP2_DELAY_DAYS", 3), 3
+                )
+                if delay_days > 0:
+                    next_step_at = _now_str(
+                        datetime.now(timezone.utc) + timedelta(days=delay_days)
+                    )
+
+            created = await db_service.enqueue_outbound_message(
+                batch_id=message.get("batch_id"),
+                contact_id=contact["id"],
+                city=city,
+                to_email=to_email,
+                subject=rendered["subject"],
+                body_hash=body_hash,
+                sequence_step=step + 1,
+                next_step_at=next_step_at,
+            )
+            # Consome o agendamento desta mensagem, venha a criacao bem ou mal:
+            # re-tentar o passo nao pode duplicar (o indice unico por passo
+            # garante isso, mas nao vale a pena insistir).
+            await db_service.set_outbound_message_next_step(message["id"], None)
+            if created:
+                scheduled += 1
+            else:
+                skipped += 1
+
+        if scheduled:
+            logger.info("[OUTBOUND] Sequencia: %s mensagem(s) do proximo passo criada(s)", scheduled)
+        return {"scheduled": scheduled, "skipped": skipped}
 
     # ---------------------------------------------------------- worker tick
 
@@ -303,6 +440,9 @@ class OutboundEngine:
         limit = limit or _int(
             getattr(settings, "OUTBOUND_WORKER_CHUNK", 10), 10
         )
+        # Sequencia (Prioridade D): agenda o proximo passo antes de drenar a
+        # fila, para que o passo 2 entre na MESMA janela de envio.
+        await self.schedule_next_steps(now)
         messages = await db_service.list_queued_outbound_messages(limit=limit)
         day = day_key(now)
         sent = 0
@@ -362,7 +502,9 @@ class OutboundEngine:
                 logger.info("[OUTBOUND] Sem caixa com capacidade agora — parando o tick")
                 break
 
-            subject, body = await self._render_message(batch, contact, city)
+            subject, body = await self._render_message(
+                batch, contact, city, _int(message.get("sequence_step"), 1)
+            )
             if body is None:
                 await db_service.update_outbound_message(
                     message["id"], status="failed", error="cannot render message"
@@ -417,7 +559,11 @@ class OutboundEngine:
         return {"status": "ok", "sent": sent, "skipped": skipped, "failed": failed}
 
     async def _render_message(
-        self, batch: Optional[dict], contact: dict, city: str
+        self,
+        batch: Optional[dict],
+        contact: dict,
+        city: str,
+        sequence_step: int = 1,
     ) -> tuple[Optional[str], Optional[str]]:
         """Re-renderiza subject+body a partir do lead real (integridade = hash)."""
         niche = outbound_templates.DEFAULT_NICHE
@@ -441,7 +587,16 @@ class OutboundEngine:
             return None, None
         try:
             context = outbound_templates.build_context(lead, city, niche, count, contact=contact)
-            rendered = outbound_templates.render_email(niche, context)
+            if sequence_step >= 2:
+                # Passo da sequencia (oferta): template proprio + link da landing.
+                context["url"] = outbound_templates.sequence_url(
+                    city, niche, step=sequence_step
+                )
+                rendered = outbound_templates.render_sequence_email(
+                    "step2_offer", context
+                )
+            else:
+                rendered = outbound_templates.render_email(niche, context)
         except Exception as e:
             logger.warning("[OUTBOUND] Falha ao re-renderizar mensagem: %s", e)
             return None, None
@@ -497,6 +652,13 @@ class OutboundEngine:
             "mailboxes": mailbox_rows,
             "enrichment_configured": emaillistverify_service.configured,
             "enrichment_provider": "emaillistverify",
+            "sequence": {
+                "enabled": bool(getattr(settings, "OUTBOUND_SEQUENCE_ENABLED", True)),
+                "step2_delay_days": _int(
+                    getattr(settings, "OUTBOUND_SEQUENCE_STEP2_DELAY_DAYS", 3), 3
+                ),
+                "max_step": _int(getattr(settings, "OUTBOUND_SEQUENCE_MAX_STEP", 2), 2),
+            },
         }
 
 

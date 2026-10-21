@@ -17,6 +17,7 @@ Invariantes fixados aqui:
 """
 from __future__ import annotations
 
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -1166,4 +1167,78 @@ def test_outbound_niche_filters_inventory(admin_client):
     assert roof >= 1 and plumb >= 1
     assert roof + plumb <= total
     assert roof < total and plumb < total
+
+
+# ------------------------------------------------------- Prioridade A/D (admin)
+
+
+def test_admin_billing_funnel_exposes_funnel_and_recovery(admin_client):
+    """O painel tem de mostrar onde esta' a perda no checkout."""
+    client, headers, _ = admin_client
+    r = client.get("/api/admin/billing/funnel", headers=headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    funnel = body["funnel"]
+    for key in (
+        "sessions_created",
+        "sessions_with_email",
+        "sessions_completed",
+        "sessions_expired",
+        "sessions_open",
+        "sessions_recovered",
+        "email_capture_rate",
+        "conversion_rate",
+    ):
+        assert key in funnel, f"falta {key} no funil"
+    assert 0.0 <= funnel["conversion_rate"] <= 1.0
+    assert "recovery" in body
+    assert "enabled" in body["recovery"]
+
+
+def test_admin_billing_funnel_requires_admin(admin_client, nonadmin_client):
+    """O funil de billing é sensível: exige admin real."""
+    client, _, _ = admin_client
+    _, nonadmin_headers = nonadmin_client
+    assert client.get("/api/admin/billing/funnel").status_code == 401
+    assert (
+        client.get("/api/admin/billing/funnel", headers=nonadmin_headers).status_code
+        == 403
+    )
+
+
+def test_admin_can_mark_outbound_contact_replied(admin_client):
+    """Marcar 'respondeu' trava a sequencia (trava automatica exige gmail.readonly)."""
+    client, headers, _ = admin_client
+    svc = db_service._service
+    contact = svc.upsert_outbound_contact(
+        lead_id=None,
+        email=f"replied-{os.urandom(4).hex()}@magicleads.app",
+        city="NYC",
+        state="NY",
+        company_name="Replied Co",
+        email_source="manual",
+        email_status="valid",
+    )
+    assert contact is not None
+    r = client.post(
+        f"/api/admin/outbound/replied?contact_id={contact['id']}", headers=headers
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "ok"
+
+    row = svc.get_outbound_contact_by_email(contact["email"])
+    assert row["replied_at"], "o contacto devia ficar marcado como respondido"
+
+
+def test_admin_outbound_status_exposes_sequence_config(admin_client):
+    """O estado do motor expõe a configuração da sequência."""
+    client, headers, _ = admin_client
+    r = client.get("/api/admin/outbound/status", headers=headers)
+    assert r.status_code == 200, r.text
+    seq = r.json().get("sequence")
+    assert seq is not None
+    assert "enabled" in seq
+    assert "step2_delay_days" in seq
+    assert "max_step" in seq
+
 

@@ -6,8 +6,9 @@ import os
 import secrets
 import sqlite3
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
+import anyio
 import httpx
 import stripe
 from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Request, Response
@@ -1715,6 +1716,24 @@ async def admin_outbound_status(_admin: dict = Depends(_require_admin_user)):
     return await outbound_engine.status()
 
 
+@app.post("/api/admin/outbound/replied")
+async def admin_outbound_mark_replied(
+    contact_id: int, _admin: dict = Depends(_require_admin_user)
+):
+    """Marca um contacto como tendo respondido (trava a sequencia).
+
+    A deteccao automatica de respostas exige o scope `gmail.readonly` (ver
+    docs/OUTBOUND-DOMAIN-AND-MAILBOXES.md, secao 5). Sem ele, esta rota e' a
+    forma de impedir que o passo 2 (oferta) vá para quem ja' respondeu.
+    """
+    if contact_id <= 0:
+        raise HTTPException(status_code=400, detail="contact_id invalido")
+    ok = await db_service.mark_outbound_contact_replied(contact_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Contacto nao encontrado")
+    return {"status": "ok", "contact_id": contact_id, "replied_at": _now_iso()}
+
+
 @app.post("/api/admin/outbound/worker")
 async def admin_outbound_worker(
     limit: int | None = None,
@@ -2928,6 +2947,20 @@ async def _lifespan(app):
     else:
         logger.info("[OUTBOUND] Worker desativado por OUTBOUND_WORKER_ENABLED=0")
 
+    # Recuperacao de checkout abandonado (Prioridade A). Fail-closed: sem
+    # EMAIL_API_KEY/EMAIL_FROM nao envia nada; so' actua sobre utilizadores que
+    # ja' iniciaram um pagamento e ainda nao pagaram.
+    if getattr(settings, "CHECKOUT_RECOVERY_ENABLED", True):
+        _checkout_recovery_task = asyncio.create_task(_checkout_recovery_loop())
+        logger.info(
+            "Recuperacao de checkout ativa (a cada %ss, apos %s min) — canal: %s",
+            getattr(settings, "CHECKOUT_RECOVERY_INTERVAL_SECONDS", 900),
+            getattr(settings, "CHECKOUT_RECOVERY_AFTER_MINUTES", 90),
+            "Resend" if settings.EMAIL_API_KEY and settings.EMAIL_FROM else "(sem canal)",
+        )
+    else:
+        logger.info("[CHECKOUT] Recuperacao desativada por CHECKOUT_RECOVERY_ENABLED=0")
+
     # Diagnóstico de e-mail no startup
     if settings.EMAIL_API_KEY:
         logger.info(
@@ -3049,6 +3082,142 @@ async def _outbound_worker_loop():
         except Exception as e:
             # Uma falha nao pode matar o loop: no proximo ciclo volta a tentar.
             logger.error(f"Erro no outbound worker: {e}", exc_info=True)
+
+
+# ------------------------------------------------------------------
+# Recuperacao de checkout abandonado (Prioridade A)
+# ------------------------------------------------------------------
+
+def _now_iso() -> str:
+    """Timestamp UTC no formato do SQLite (YYYY-MM-DD HH:MM:SS)."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+async def _send_checkout_recovery_email(
+    to_email: str, company_name: str, checkout_url: str
+) -> bool:
+    """Envia o e-mail de recuperacao (transacional) via Resend.
+
+    Fail-soft: sem `EMAIL_API_KEY`/`EMAIL_FROM` nao envia e devolve False.
+    """
+    if not settings.EMAIL_API_KEY or not settings.EMAIL_FROM:
+        return False
+    subject = "Your Magic Leads list is still waiting"
+    body = (
+        f"Hi {company_name or 'there'},\n\n"
+        "You started a Magic Leads checkout but did not finish. Your access to "
+        "this week's opportunities is still open:\n\n"
+        f"{checkout_url}\n\n"
+        "Magic Leads gives you 300 exclusive opportunities per week - one "
+        "contractor per address, with the contact details and the exact service "
+        "needed. $120 for 7 days, cancel anytime.\n\n"
+        "If you did not start this checkout, you can ignore this email.\n\n"
+        "— Magic Leads"
+    )
+    try:
+        resp = await anyio.to_thread.run_sync(
+            lambda: httpx.post(
+                "https://api.resend.com/emails",
+                headers={
+                    "Authorization": f"Bearer {settings.EMAIL_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "from": settings.EMAIL_FROM,
+                    "to": [to_email],
+                    "subject": subject,
+                    "text": body,
+                },
+                timeout=15,
+            )
+        )
+        if resp.status_code == 200:
+            logger.info("[CHECKOUT] E-mail de recuperacao enviado para %s", to_email)
+            return True
+        logger.warning(
+            "[CHECKOUT] Resend recusou o recuperacao (HTTP %s) para %s",
+            resp.status_code,
+            to_email,
+        )
+        return False
+    except Exception as e:
+        logger.warning("[CHECKOUT] Falha no e-mail de recuperacao para %s: %s", to_email, e)
+        return False
+
+
+async def _checkout_recovery_loop():
+    """Lembra utilizadores que iniciaram o checkout e nao pagaram.
+
+    Corre a cada `CHECKOUT_RECOVERY_INTERVAL_SECONDS`. Fail-closed: sem canal de
+    e-mail configurado nao faz nada. Nunca toca em quem ja' tem plano activo.
+    """
+    interval_s = max(120, int(getattr(settings, "CHECKOUT_RECOVERY_INTERVAL_SECONDS", 900)))
+    after_minutes = max(10, int(getattr(settings, "CHECKOUT_RECOVERY_AFTER_MINUTES", 90)))
+    max_reminders = max(1, int(getattr(settings, "CHECKOUT_RECOVERY_MAX_REMINDERS", 2)))
+    while True:
+        try:
+            await asyncio.sleep(interval_s)
+            if not getattr(settings, "CHECKOUT_RECOVERY_ENABLED", True):
+                continue
+            if not settings.EMAIL_API_KEY or not settings.EMAIL_FROM:
+                continue
+            cutoff = (
+                datetime.now(timezone.utc) - timedelta(minutes=after_minutes)
+            ).strftime("%Y-%m-%d %H:%M:%S")
+            rows = await db_service.list_recoverable_checkout_sessions(
+                cutoff, max_reminders=max_reminders, limit=50
+            )
+            sent = 0
+            for row in rows:
+                # Ja' tem plano activo? Nao ha nada a recuperar.
+                plan_until = (row.get("plan_until") or "").strip()
+                if plan_until:
+                    try:
+                        if datetime.strptime(
+                            plan_until.replace("T", " ")[:19], "%Y-%m-%d %H:%M:%S"
+                        ) > datetime.now(timezone.utc).replace(tzinfo=None):
+                            continue
+                    except ValueError:
+                        pass
+                email = (row.get("email") or row.get("user_email") or "").strip()
+                url = (row.get("url") or "").strip()
+                if not email or not url:
+                    continue
+                ok = await _send_checkout_recovery_email(
+                    email, row.get("company_name") or "", url
+                )
+                await db_service.mark_checkout_reminded(row["session_id"])
+                if ok:
+                    sent += 1
+            if sent:
+                logger.info("[CHECKOUT] Recuperacao: %s e-mail(s) enviado(s)", sent)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"Erro no loop de recuperacao de checkout: {e}", exc_info=True)
+
+
+@app.get("/api/admin/billing/funnel")
+async def admin_billing_funnel(_admin: dict = Depends(_require_admin_user)):
+    """Funil de checkout: criado -> abriu (com email) -> pagou.
+
+    Sem isto nao ha forma de saber onde esta' a perda: 'nao klikou', 'chegou ao
+    Stripe e desistiu' ou 'pagou e nao recebeu acesso'.
+    """
+    stats = await db_service.checkout_funnel_stats()
+    recent = await db_service.list_recoverable_checkout_sessions(
+        "9999-12-31 23:59:59", max_reminders=99, limit=20
+    )
+    return {
+        "funnel": stats,
+        "recovery": {
+            "enabled": bool(getattr(settings, "CHECKOUT_RECOVERY_ENABLED", True)),
+            "channel_configured": bool(settings.EMAIL_API_KEY and settings.EMAIL_FROM),
+            "after_minutes": int(getattr(settings, "CHECKOUT_RECOVERY_AFTER_MINUTES", 90)),
+            "max_reminders": int(getattr(settings, "CHECKOUT_RECOVERY_MAX_REMINDERS", 2)),
+        },
+        "open_sessions": len(recent),
+    }
 
 
 app.router.lifespan_context = _lifespan
@@ -3762,11 +3931,23 @@ def _stripe_configured() -> bool:
     )
 
 
-def _create_stripe_checkout_session(user_id: int, locale: str = "auto") -> tuple:
+async def _create_stripe_checkout_session(
+    user_id: int, locale: str = "auto", email: "str | None" = None
+) -> tuple:
     """Cria sessão Stripe de PAGAMENTO AVULSO (sem recorrência) de 7 dias.
 
     Retorna (mock: bool, checkout_url: Optional[str]). Pagamento único em USD;
     o acesso é liberado pelo webhook (checkout.session.completed) por 7 dias.
+
+    Prioridade A (funil de checkout):
+      * `customer_email` pre-preenche o e-mail do cliente e FAZ O STRIPE
+        registar a intenção — sem isto não há como distinguir "não foi ao
+        checkout" de "chegou ao checkout e desistiu", porque antes ninguém
+        preenchia email nenhum (`customer_details` vazio em 100% das sessões).
+      * IDEMPOTENCIA: no máximo uma sessão ABERTA por utilizador. Cliques
+        repetidos no botão de pagar já criaram 9 sessões órfãs num único
+        utilizador; agora reutiliza-se a sessão aberta (ou expira-se a
+        antiga e cria-se uma nova), acabando com a pilha de sessões mortas.
     """
     has_stripe = _stripe_configured()
     if not has_stripe:
@@ -3789,6 +3970,52 @@ def _create_stripe_checkout_session(user_id: int, locale: str = "auto") -> tuple
     cancel_url = f"{settings.FRONTEND_URL.rstrip('/')}{cancel_path}"
     success_url = f"{settings.FRONTEND_URL.rstrip('/')}/dashboard?paid=1"
 
+    clean_email = (email or "").strip().lower() or None
+
+    # --- Idempotência: reaproveita (ou recicla) a sessão aberta do utilizador.
+    try:
+        existing = stripe.checkout.Session.list(
+            client_reference_id=str(user_id), status="open", limit=3
+        )
+        open_sessions = list(getattr(existing, "data", []) or [])
+    except Exception as e:
+        logger.warning("Stripe: nao foi possivel listar sessoes abertas (%s)", e)
+        open_sessions = []
+
+    if open_sessions:
+        # Ordena por mais recente e devolve a URL da mais nova.
+        def _created(s):
+            return getattr(s, "created", 0) or 0
+
+        newest = max(open_sessions, key=_created)
+        newest_id = getattr(newest, "id", None)
+        # Expira as restantes para nao deixar pilha de sessoes mortas.
+        for s in open_sessions:
+            sid = getattr(s, "id", None)
+            if sid and sid != newest_id:
+                try:
+                    stripe.checkout.Session.expire(sid)
+                except Exception:
+                    pass
+        if newest_id:
+            url = getattr(newest, "url", None)
+            if url:
+                await_record = await db_service.record_checkout_session(
+                    user_id,
+                    newest_id,
+                    clean_email,
+                    settings.PLAN_AMOUNT_CENTS,
+                    "usd",
+                    url,
+                )
+                logger.info(
+                    "Stripe: reutilizada sessao aberta %s para user %s (nova=%s)",
+                    newest_id,
+                    user_id,
+                    await_record,
+                )
+                return False, url
+
     session = stripe.checkout.Session.create(
         mode="payment",
         currency="usd",
@@ -3796,6 +4023,7 @@ def _create_stripe_checkout_session(user_id: int, locale: str = "auto") -> tuple
         success_url=success_url,
         cancel_url=cancel_url,
         client_reference_id=str(user_id),
+        customer_email=clean_email,
         locale=stripe_locale,
         metadata={
             "user_id": str(user_id),
@@ -3803,6 +4031,17 @@ def _create_stripe_checkout_session(user_id: int, locale: str = "auto") -> tuple
             "plan": settings.PLAN_NAME.lower(),
         },
     )
+    try:
+        await db_service.record_checkout_session(
+            user_id,
+            session.id,
+            clean_email,
+            settings.PLAN_AMOUNT_CENTS,
+            "usd",
+            session.url,
+        )
+    except Exception as e:
+        logger.warning("Falha ao registar sessao de checkout: %s", e)
     return False, session.url
 
 
@@ -3834,7 +4073,9 @@ async def create_checkout(request: Request, user: dict = Depends(_get_current_us
         locale = "es"
 
     try:
-        mock, checkout_url = _create_stripe_checkout_session(user["id"], locale)
+        mock, checkout_url = await _create_stripe_checkout_session(
+            user["id"], locale, full.get("email")
+        )
     except Exception as e:
         logger.error(f"Erro ao criar checkout Stripe: {type(e).__name__}: {e}")
         # Include Stripe error details if available
@@ -3866,7 +4107,9 @@ async def stripe_create_checkout(request: Request, user: dict = Depends(_get_cur
         locale = "es"
 
     try:
-        mock, checkout_url = _create_stripe_checkout_session(user["id"], locale)
+        mock, checkout_url = await _create_stripe_checkout_session(
+            user["id"], locale, full.get("email")
+        )
     except Exception as e:
         logger.error(f"Erro ao criar checkout Stripe: {type(e).__name__}: {e}")
         detail = "Falha ao iniciar checkout"
@@ -3955,6 +4198,16 @@ async def stripe_webhook(request: Request, stripe_signature: str | None = Header
         if not recorded:
             return {"status": "received", "handled": True, "idempotent": True}
 
+        # Funil de checkout: fecha a sessao como paga.
+        session_id = session_obj.get("id")
+        if session_id:
+            try:
+                await db_service.update_checkout_session(
+                    session_id, status="completed", completed_at=_now_iso()
+                )
+            except Exception as e:
+                logger.warning("Falha ao marcar checkout como completed: %s", e)
+
         updated = await db_service.extend_access(user_id, days=7)
         if updated is None:
             logger.error(f"Stripe {event_id}: user {user_id} não encontrado")
@@ -3978,6 +4231,15 @@ async def stripe_webhook(request: Request, stripe_signature: str | None = Header
 
     # Demais eventos: registra para idempotência e ignora.
     await db_service.record_stripe_event(event_id, event_type, None)
+    # Funil de checkout: uma sessao que expirou SEM pagamento e' o ponto de
+    # perda que o e-mail de recuperacao tem de atacar.
+    if event_type == "checkout.session.expired":
+        expired_id = ((event.get("data") or {}).get("object") or {}).get("id")
+        if expired_id:
+            try:
+                await db_service.update_checkout_session(expired_id, status="expired")
+            except Exception as e:
+                logger.warning("Falha ao marcar checkout como expired: %s", e)
     return {"status": "received", "handled": False}
 
 

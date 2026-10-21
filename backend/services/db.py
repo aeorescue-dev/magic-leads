@@ -516,6 +516,30 @@ CREATE TABLE IF NOT EXISTS stripe_events (
   processed_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Funil de checkout (Prioridade A). Cada TENTATIVA de pagamento fica registada
+-- para medir 'criou -> abriu -> pagou' e permitir recuperar carrinho
+-- abandonado. Sem esta tabela nao ha forma de saber se a perda esta' no
+-- checkout, no Stripe ou no cancelamento do cliente.
+-- status: open | completed | expired
+CREATE TABLE IF NOT EXISTS checkout_sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  session_id TEXT UNIQUE,
+  email TEXT,
+  amount_cents INTEGER DEFAULT 0,
+  currency TEXT DEFAULT 'usd',
+  status TEXT NOT NULL DEFAULT 'open',
+  url TEXT,
+  reminders INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  completed_at TEXT,
+  reminded_at TEXT,
+  updated_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_checkout_sessions_user ON checkout_sessions (user_id, status);
+CREATE INDEX IF NOT EXISTS idx_checkout_sessions_status ON checkout_sessions (status, created_at);
+
 -- Tabela de auditoria de anomalias de fluxo (Dead Man's Switch).
 CREATE TABLE IF NOT EXISTS system_alerts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -639,6 +663,7 @@ CREATE TABLE IF NOT EXISTS outbound_contacts (
   last_verified_at TEXT,
   unsubscribed INTEGER NOT NULL DEFAULT 0,
   company_domain TEXT,
+  replied_at TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -702,6 +727,8 @@ CREATE TABLE IF NOT EXISTS outbound_messages (
   provider_id TEXT UNIQUE,
   cost_usd REAL DEFAULT 0,
   segments INTEGER DEFAULT 1,
+  sequence_step INTEGER NOT NULL DEFAULT 1,
+  next_step_at TEXT,
   queued_at TEXT DEFAULT CURRENT_TIMESTAMP,
   sent_at TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -712,13 +739,13 @@ CREATE INDEX IF NOT EXISTS idx_outbound_messages_status ON outbound_messages (st
 CREATE INDEX IF NOT EXISTS idx_outbound_messages_contact ON outbound_messages (contact_id);
 CREATE INDEX IF NOT EXISTS idx_outbound_messages_mailbox ON outbound_messages (mailbox_id, sent_at);
 
--- Dedup dura (Outbound): um mesmo destinatario nunca pode ter mais do que uma
--- mensagem ATIVA (queued/sending/sent). E' a barreira final contra reenvios
--- entre lotes; o filtro `NOT EXISTS` em `list_outbound_leads` e' a primeira.
--- Parcial para nao colidir com estados terminais (skipped/failed/suppressed).
-CREATE UNIQUE INDEX IF NOT EXISTS ux_outbound_messages_to_email_active
-  ON outbound_messages (to_email)
-  WHERE to_email IS NOT NULL AND status IN ('queued', 'sending', 'sent');
+-- NOTA: os indices `idx_outbound_messages_sequence` e
+-- `ux_outbound_messages_to_email_active` NAO sao criados aqui de proposito:
+-- dependem de `sequence_step`, uma coluna que so' existe depois de
+-- `_migrate_schema` (ALTER TABLE). Se fossem criados no schema, o
+-- `executescript` levantaria "no such column" numa base ja' existente e o
+-- `init_db` abortaria ANTES de aplicar as migracoes. Sao criados no bloco
+-- de migracao, depois das colunas.
 
 CREATE TABLE IF NOT EXISTS suppressions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1000,8 +1027,16 @@ def init_db() -> None:
             _ensure_demo_user()
             logger.info(f"Banco SQLite pronto em {DB_PATH}")
             return
-        except sqlite3.OperationalError:
-            logger.warning("Filesystem read-only — usando banco versionado (leitura apenas).")
+        except sqlite3.OperationalError as e:
+            # Pode ser um filesystem read-only OU um erro de esquema (ex.: uma
+            # coluna que o schema assume mas a base ainda nao tem). A mensagem
+            # anterior dizia sempre "read-only" e mascarava bugs de migracao.
+            logger.warning(
+                "init_db: falha ao aplicar o schema (%s) — %s. "
+                "A base pode estar em modo leitura ou desatualizada.",
+                type(e).__name__,
+                e,
+            )
             return
 
 
@@ -1181,6 +1216,12 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     if contact_cols and "company_domain" not in contact_cols:
         conn.execute("ALTER TABLE outbound_contacts ADD COLUMN company_domain TEXT")
 
+    # Sequencia de e-mails (Prioridade D): marca de resposta no contacto.
+    # Enquanto a deteccao automatica de respostas nao existir (exige scope
+    # `gmail.readonly`), este campo e' a fonte de verdade manual.
+    if contact_cols and "replied_at" not in contact_cols:
+        conn.execute("ALTER TABLE outbound_contacts ADD COLUMN replied_at TEXT")
+
     # Limpeza: `scrape_fallback_snov` era o toggle do fallback Snov.io, que foi
     # substituido pelo EmailListVerify. Nao e' lido por nenhum codigo (so'
     # aparecia no painel), por isso a linha e' removida das bases ja' semeadas
@@ -1194,16 +1235,57 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     # duplicados ativos (ex.: reenvios historicos): nao criamos o indice se
     # houver colisao, para nunca falhar o arranque. Bancos novos (schema acima)
     # ja' nascem com o indice.
-    try:
-        conn.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS ux_outbound_messages_to_email_active "
-            "ON outbound_messages (to_email) "
-            "WHERE to_email IS NOT NULL AND status IN ('queued', 'sending', 'sent')"
-        )
-    except sqlite3.IntegrityError:
-        logger.warning(
-            "[OUTBOUND] dedup index nao criado: existem to_email duplicados ativos"
-        )
+    #
+    # A chave passou a ser (to_email, sequence_step) para permitir a sequencia
+    # de e-mails (passo 1 = amostra, passo 2 = oferta) sem duplicar o MESMO
+    # passo. Se a base ainda tem a versao antiga (so' `to_email`), o indice e'
+    # recriado.
+    #
+    # ORDEM IMPORTANTE: as colunas da sequencia tem de existir ANTES do indice
+    # — `CREATE INDEX ... (to_email, sequence_step)` falha com "no such column"
+    # numa base antiga, e o indice ficaria por criar em silencio.
+    msg_cols = {
+        r["name"] for r in conn.execute("PRAGMA table_info(outbound_messages)").fetchall()
+    }
+    if msg_cols:
+        if "sequence_step" not in msg_cols:
+            conn.execute(
+                "ALTER TABLE outbound_messages ADD COLUMN sequence_step INTEGER NOT NULL DEFAULT 1"
+            )
+        if "next_step_at" not in msg_cols:
+            conn.execute("ALTER TABLE outbound_messages ADD COLUMN next_step_at TEXT")
+        try:
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_outbound_messages_sequence "
+                "ON outbound_messages (status, next_step_at)"
+            )
+        except sqlite3.OperationalError:
+            pass
+
+    def _ensure_outbound_dedup_index() -> None:
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='index' "
+            "AND name='ux_outbound_messages_to_email_active'"
+        ).fetchone()
+        current_sql = (row["sql"] if row else "") or ""
+        if row and "sequence_step" not in current_sql:
+            conn.execute("DROP INDEX IF EXISTS ux_outbound_messages_to_email_active")
+        try:
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ux_outbound_messages_to_email_active "
+                "ON outbound_messages (to_email, sequence_step) "
+                "WHERE to_email IS NOT NULL AND status IN ('queued', 'sending', 'sent')"
+            )
+        except sqlite3.IntegrityError:
+            logger.warning(
+                "[OUTBOUND] dedup index nao criado: existem to_email duplicados ativos"
+            )
+        except sqlite3.OperationalError as e:
+            logger.warning("[OUTBOUND] nao foi possivel recriar o indice de dedup: %s", e)
+
+    _ensure_outbound_dedup_index()
+
+
 
 
 class _SmtpConnect(smtplib.SMTP):
@@ -1634,23 +1716,78 @@ class DatabaseService:
         body_hash: Optional[str] = None,
         cost_usd: float = 0.0,
         segments: int = 1,
+        sequence_step: int = 1,
+        next_step_at: Optional[str] = None,
     ) -> Optional[dict]:
         conn = get_connection()
         try:
             cur = conn.execute(
-                "INSERT OR IGNORE INTO outbound_messages (batch_id, contact_id, mailbox_id, city, channel, to_email, subject, body_hash, status, cost_usd, segments) "
-                "VALUES (?, ?, ?, ?, 'email', ?, ?, ?, 'queued', ?, ?)",
-                (batch_id, contact_id, mailbox_id, city, to_email and to_email.lower(), subject, body_hash, float(cost_usd), int(segments)),
+                "INSERT OR IGNORE INTO outbound_messages (batch_id, contact_id, mailbox_id, city, channel, to_email, subject, body_hash, status, cost_usd, segments, sequence_step, next_step_at) "
+                "VALUES (?, ?, ?, ?, 'email', ?, ?, ?, 'queued', ?, ?, ?, ?)",
+                (batch_id, contact_id, mailbox_id, city, to_email and to_email.lower(), subject, body_hash, float(cost_usd), int(segments), int(sequence_step), next_step_at),
             )
             conn.commit()
             if cur.rowcount == 0:
-                # Dedup: ja' existe mensagem ativa para este destinatario.
+                # Dedup: ja' existe mensagem ativa para este destinatario (mesmo passo).
                 return None
             mid = cur.lastrowid
             r = conn.execute("SELECT * FROM outbound_messages WHERE id=?", (mid,)).fetchone()
             return dict(r) if r else None
         except Exception:
             return None
+        finally:
+            conn.close()
+
+    def list_outbound_messages_due_for_sequence(
+        self, now: str, limit: int = 50
+    ) -> List[dict]:
+        """Mensagens ENVIADAS cujo proximo passo da sequencia ja' pode ser criado.
+
+        `next_step_at` e' posto quando a mensagem e' enfileirada e consumido
+        (posto a NULL) quando o passo seguinte e' criado — assim cada passo e'
+        agendado uma unica vez.
+        """
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM outbound_messages "
+                "WHERE status='sent' AND next_step_at IS NOT NULL AND next_step_at <= ? "
+                "ORDER BY id ASC LIMIT ?",
+                (now, int(limit)),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def set_outbound_message_next_step(
+        self, message_id: int, next_step_at: Optional[str]
+    ) -> bool:
+        """Marca (ou limpa) o agendamento do proximo passo de uma mensagem."""
+        conn = get_connection()
+        try:
+            conn.execute(
+                "UPDATE outbound_messages SET next_step_at=? WHERE id=?",
+                (next_step_at, int(message_id)),
+            )
+            conn.commit()
+            return True
+        except Exception:
+            return False
+        finally:
+            conn.close()
+
+    def mark_outbound_contact_replied(self, contact_id: int) -> bool:
+        """Marca o contacto como respondido (trava a sequencia)."""
+        conn = get_connection()
+        try:
+            conn.execute(
+                "UPDATE outbound_contacts SET replied_at=CURRENT_TIMESTAMP WHERE id=?",
+                (int(contact_id),),
+            )
+            conn.commit()
+            return True
+        except Exception:
+            return False
         finally:
             conn.close()
 
@@ -2928,6 +3065,154 @@ class DatabaseService:
                 "SELECT 1 FROM stripe_events WHERE event_id = ?", (event_id,)
             ).fetchone()
             return row is not None
+        finally:
+            conn.close()
+
+    # ---------------------------------------------------------------
+    # Funil de checkout (Prioridade A)
+    # ---------------------------------------------------------------
+    def record_checkout_session(
+        self,
+        user_id: int,
+        session_id: str,
+        email: Optional[str] = None,
+        amount_cents: int = 0,
+        currency: str = "usd",
+        url: Optional[str] = None,
+    ) -> bool:
+        """Regista uma tentativa de checkout (idempotente por `session_id`)."""
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO checkout_sessions "
+                "(user_id, session_id, email, amount_cents, currency, status, url) "
+                "VALUES (?, ?, ?, ?, ?, 'open', ?)",
+                (
+                    int(user_id),
+                    session_id,
+                    (email or "").strip().lower() or None,
+                    int(amount_cents or 0),
+                    currency or "usd",
+                    url,
+                ),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        except Exception:
+            return False
+        finally:
+            conn.close()
+
+    def update_checkout_session(
+        self,
+        session_id: str,
+        status: Optional[str] = None,
+        completed_at: Optional[str] = None,
+    ) -> bool:
+        """Atualiza o estado de uma sessao de checkout (open/completed/expired)."""
+        conn = get_connection()
+        try:
+            sets: List[str] = []
+            params: List[Any] = []
+            if status is not None:
+                sets.append("status=?")
+                params.append(status)
+            if completed_at is not None:
+                sets.append("completed_at=?")
+                params.append(completed_at)
+            if not sets:
+                return True
+            sets.append("updated_at=CURRENT_TIMESTAMP")
+            params.append(session_id)
+            conn.execute(
+                f"UPDATE checkout_sessions SET {', '.join(sets)} WHERE session_id=?",
+                params,
+            )
+            conn.commit()
+            return True
+        except Exception:
+            return False
+        finally:
+            conn.close()
+
+    def get_open_checkout_session(self, user_id: int) -> Optional[dict]:
+        """Sessao de checkout AINDA ABERTA do utilizador (a mais recente)."""
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT * FROM checkout_sessions WHERE user_id=? AND status='open' "
+                "ORDER BY id DESC LIMIT 1",
+                (int(user_id),),
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def list_recoverable_checkout_sessions(
+        self, older_than: str, max_reminders: int = 2, limit: int = 50
+    ) -> List[dict]:
+        """Sessoes abertas ha mais de `older_than` (YYYY-MM-DD HH:MM:SS) semlembrar.
+
+        Usadas pelo loop de recuperacao de carrinho abandonado.
+        """
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT cs.*, u.email AS user_email, u.company_name, u.plan_until "
+                "FROM checkout_sessions cs "
+                "JOIN users u ON u.id = cs.user_id "
+                "WHERE cs.status='open' AND cs.created_at <= ? "
+                f"AND cs.reminders < {int(max_reminders)} "
+                "ORDER BY cs.id ASC LIMIT ?",
+                (older_than, int(limit)),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def mark_checkout_reminded(self, session_id: str) -> bool:
+        conn = get_connection()
+        try:
+            conn.execute(
+                "UPDATE checkout_sessions SET reminders = reminders + 1, "
+                "reminded_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP "
+                "WHERE session_id=?",
+                (session_id,),
+            )
+            conn.commit()
+            return True
+        except Exception:
+            return False
+        finally:
+            conn.close()
+
+    def checkout_funnel_stats(self) -> dict:
+        """Funil 'criou -> abriu (com email) -> pagou' para o painel admin."""
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT "
+                " COUNT(*) AS created, "
+                " SUM(CASE WHEN email IS NOT NULL AND email <> '' THEN 1 ELSE 0 END) AS with_email, "
+                " SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) AS completed, "
+                " SUM(CASE WHEN status='expired' THEN 1 ELSE 0 END) AS expired, "
+                " SUM(CASE WHEN status='open' THEN 1 ELSE 0 END) AS still_open, "
+                " SUM(CASE WHEN reminders > 0 THEN 1 ELSE 0 END) AS recovered "
+                "FROM checkout_sessions"
+            ).fetchone()
+            created = int(row["created"] or 0)
+            with_email = int(row["with_email"] or 0)
+            completed = int(row["completed"] or 0)
+            return {
+                "sessions_created": created,
+                "sessions_with_email": with_email,
+                "sessions_completed": completed,
+                "sessions_expired": int(row["expired"] or 0),
+                "sessions_open": int(row["still_open"] or 0),
+                "sessions_recovered": int(row["recovered"] or 0),
+                "email_capture_rate": round(with_email / created, 4) if created else 0.0,
+                "conversion_rate": round(completed / created, 4) if created else 0.0,
+            }
         finally:
             conn.close()
 
@@ -7432,6 +7717,58 @@ class AsyncDatabaseService:
     async def has_stripe_event(self, event_id: str) -> bool:
         return await anyio.to_thread.run_sync(self._service.has_stripe_event, event_id)
 
+    async def record_checkout_session(
+        self,
+        user_id: int,
+        session_id: str,
+        email: Optional[str] = None,
+        amount_cents: int = 0,
+        currency: str = "usd",
+        url: Optional[str] = None,
+    ) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.record_checkout_session,
+            user_id,
+            session_id,
+            email,
+            amount_cents,
+            currency,
+            url,
+        )
+
+    async def update_checkout_session(
+        self,
+        session_id: str,
+        status: Optional[str] = None,
+        completed_at: Optional[str] = None,
+    ) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.update_checkout_session, session_id, status, completed_at
+        )
+
+    async def get_open_checkout_session(self, user_id: int) -> Optional[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.get_open_checkout_session, user_id
+        )
+
+    async def list_recoverable_checkout_sessions(
+        self, older_than: str, max_reminders: int = 2, limit: int = 50
+    ) -> List[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.list_recoverable_checkout_sessions,
+            older_than,
+            max_reminders,
+            limit,
+        )
+
+    async def mark_checkout_reminded(self, session_id: str) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.mark_checkout_reminded, session_id
+        )
+
+    async def checkout_funnel_stats(self) -> dict:
+        return await anyio.to_thread.run_sync(self._service.checkout_funnel_stats)
+
     async def set_user_interests(self, user_id: int, categories: List[str]) -> bool:
         return await anyio.to_thread.run_sync(self._service.set_user_interests, user_id, categories)
 
@@ -7966,6 +8303,8 @@ class AsyncDatabaseService:
         body_hash: Optional[str] = None,
         cost_usd: float = 0.0,
         segments: int = 1,
+        sequence_step: int = 1,
+        next_step_at: Optional[str] = None,
     ) -> Optional[dict]:
         return await anyio.to_thread.run_sync(
             self._service.enqueue_outbound_message,
@@ -7978,6 +8317,27 @@ class AsyncDatabaseService:
             body_hash,
             cost_usd,
             segments,
+            sequence_step,
+            next_step_at,
+        )
+
+    async def list_outbound_messages_due_for_sequence(
+        self, now: str, limit: int = 50
+    ) -> List[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.list_outbound_messages_due_for_sequence, now, limit
+        )
+
+    async def set_outbound_message_next_step(
+        self, message_id: int, next_step_at: Optional[str]
+    ) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.set_outbound_message_next_step, message_id, next_step_at
+        )
+
+    async def mark_outbound_contact_replied(self, contact_id: int) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.mark_outbound_contact_replied, contact_id
         )
 
     async def count_qualified_contractors_in_city(

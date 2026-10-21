@@ -267,6 +267,73 @@ for _niche, _tpl in TEMPLATES.items():
 del _niche, _tpl
 
 
+# --------------------------------------------------------------- sequence
+#
+# SEQUENCIA DE E-MAILS (Prioridade D).
+#
+# Passo 1 = e-mail de amostra (os templates de nicho acima): cria interesse sem
+# preco nem marcas concorrentes.
+# Passo 2 = e-mail da OFERTA ($120/semana). So' vai para quem JÁ recebeu o
+# passo 1, por isso o preco aqui e' seguro para a entregabilidade (audiencia
+# quente) e e' o que converte.
+#
+# O preco nao aparece no assunto (assunto com "$" e' gatilho de spam) e sim
+# no corpo. A CTA leva para a landing com city/niche para o interested ver a
+# cobertura da sua regiao antes de se registar.
+SEQUENCE_TEMPLATES: dict[str, dict[str, str]] = {
+    "step2_offer": {
+        "subject": "{count} {category} jobs in {city} - one contractor each",
+        "body": (
+            "Hi {contact_name},\n\n"
+            "I wanted to follow up on my last note with the straightforward part.\n\n"
+            "Magic Leads gives you 300 verified opportunities a week in {city} - "
+            "each one exclusive to a single contractor, with the owner's contact "
+            "details and the exact service needed.\n\n"
+            "It is $120 for 7 days. No commitment, and you can cancel whenever "
+            "you want. If you close one job, the week pays for itself many "
+            "times over.\n\n"
+            "You can see what this week's list looks like here:\n"
+            "{url}\n\n"
+            "Best regards,\n"
+            "Magic Leads\n\n"
+            "https://www.magicleads.app/\n\n"
+            'To stop receiving these emails, reply "unsubscribe".'
+        ),
+    },
+}
+
+for _step, _tpl in SEQUENCE_TEMPLATES.items():
+    assert_english_only(_tpl["subject"])
+    assert_english_only(_tpl["body"])
+del _step, _tpl
+
+# Link da landing para o passo da sequencia (o `url` no corpo do e-mail 2).
+SEQUENCE_LANDING_BASE = "https://www.magicleads.app/en"
+
+
+def sequence_url(city: Optional[str], niche: Optional[str], step: int = 2) -> str:
+    """URL da landing para o passo da sequencia, com cidade e nicho."""
+    parts = []
+    if city:
+        parts.append(f"city={str(city).strip().upper()}")
+    if niche:
+        parts.append(f"niche={niche}")
+    parts.append(f"step={int(step)}")
+    return f"{SEQUENCE_LANDING_BASE}?{'&'.join(parts)}"
+
+
+def render_sequence_email(step: str, context: Mapping[str, str]) -> dict[str, str]:
+    """Renderiza o e-mail de um passo da sequencia (subject+body), en-US."""
+    tpl = SEQUENCE_TEMPLATES.get(step)
+    if not tpl:
+        raise KeyError(f"passo de sequencia desconhecido: {step}")
+    subject = render(tpl["subject"], context).strip()
+    body = render(tpl["body"], context).strip()
+    assert_english_only(subject)
+    assert_english_only(body)
+    return {"subject": subject, "body": body}
+
+
 # --------------------------------------------------------------- helpers
 
 # Human-readable market names for the served cities (used inside the copy).

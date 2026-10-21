@@ -31,6 +31,14 @@ class Settings(BaseSettings):
     TRIAL_DAYS: int = 7
     RESERVATION_MINUTES: int = 15      # Lead reservation hold time
 
+    # Recuperacao de checkout abandonado (Prioridade A). So' acts sobre
+    # utilizadores que JA' cliquem em pagar — e' transacional (Resend), nunca
+    # prospeccao a frio (essa usa as caixas Gmail do outbound).
+    CHECKOUT_RECOVERY_ENABLED: bool = True
+    CHECKOUT_RECOVERY_INTERVAL_SECONDS: int = 900   # 15 min
+    CHECKOUT_RECOVERY_AFTER_MINUTES: int = 90       # espera antes de lembrar
+    CHECKOUT_RECOVERY_MAX_REMINDERS: int = 2
+
     # APIs
     TRUTHFINDER_API_KEY: str = ""  # Optional, para skip tracing
     GOOGLE_GEOCODER_API_KEY: str = ""  # Optional
@@ -208,6 +216,14 @@ class Settings(BaseSettings):
     OUTBOUND_WORKER_ENABLED: bool = True
     OUTBOUND_WORKER_INTERVAL_SECONDS: int = 60
     OUTBOUND_WORKER_CHUNK: int = 10
+
+    # Sequencia de e-mails (Prioridade D). Passo 1 = amostra (sem preco),
+    # passo 2 = oferta ($120/semana). O passo 2 so' e' agendado para quem
+    # recebeu o passo 1 e nao respondeu, se nao se desinscreveu e nao foi
+    # suprimido.
+    OUTBOUND_SEQUENCE_ENABLED: bool = True
+    OUTBOUND_SEQUENCE_STEP2_DELAY_DAYS: int = 3
+    OUTBOUND_SEQUENCE_MAX_STEP: int = 2
 
     # DLQ de notificações in-app. Ring buffer: impede acúmulo infinito em
     # disco quando o INSERT falha repetidamente. Os ficheiros mais antigos

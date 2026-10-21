@@ -500,3 +500,141 @@ def test_engine_claim_outbound_message_is_atomic(engine):
     assert svc.get_outbound_message(msg["id"])["status"] == "sending"
 
 
+# ------------------------------------------------------------------ sequence
+
+
+def test_outbound_step2_template_is_english_and_has_offer():
+    """O e-mail 2 traz a oferta ($120/semana) e mantem o opt-out."""
+    from backend.services import outbound_templates as ot
+
+    tpl = ot.SEQUENCE_TEMPLATES["step2_offer"]
+    ot.assert_english_only(tpl["subject"])
+    ot.assert_english_only(tpl["body"])
+    assert "$120" in tpl["body"]
+    assert 'reply "unsubscribe"' in tpl["body"]
+    # O preco nao vai no assunto (gatilho de spam).
+    assert "$" not in tpl["subject"]
+
+    ctx = ot.build_context(
+        {"owner_name": "", "address": "1 MAIN ST", "issue_category": "Roof"},
+        "NYC",
+        "roofing",
+        120,
+    )
+    ctx["url"] = ot.sequence_url("NYC", "roofing", step=2)
+    rendered = ot.render_sequence_email("step2_offer", ctx)
+    assert "New York City" in rendered["body"]
+    assert "roofing" in rendered["body"]
+    assert "magicleads.app/en?city=NYC&niche=roofing&step=2" in rendered["body"]
+    assert "{" not in rendered["body"] and "}" not in rendered["body"]
+
+
+@pytest.mark.asyncio
+async def test_engine_schedules_step2_after_step1_sent(engine, monkeypatch):
+    """Enviado o passo 1, o passo 2 (oferta) e' enfileirado."""
+    svc = engine_module.db_service._service
+    lead_id = _seed_lead("BOSTON", "engine-seq-1", "10 SEQUENCE AVENUE")
+    contact = _seed_contact(lead_id, "seq1@vitorio.com")
+    batch = svc.create_outbound_batch(
+        city="BOSTON", name="engine-seq-1",
+        filters_json=json.dumps({"city": "BOSTON", "niche": "roofing"}), kind="email",
+    )
+    svc.mark_outbound_batch_previewed(batch["id"], 1, 0.0)
+    batch = svc.start_outbound_batch(batch["id"])
+
+    _set_config(send_enabled="1", enrich_enabled="0")
+    try:
+        await engine.enqueue_batch(batch)
+        queued = svc.list_queued_outbound_messages(limit=10)
+        assert queued, "o passo 1 devia estar na fila"
+        step1 = queued[0]
+        assert step1["sequence_step"] == 1
+        assert step1["next_step_at"], "o passo 1 tem de agendar o passo 2"
+
+        # Simula o envio: a mensagem passa a 'sent' e o agendamento esta' vencido.
+        svc.update_outbound_message(step1["id"], status="sent")
+        svc.set_outbound_message_next_step(step1["id"], "2000-01-01 00:00:00")
+
+        result = await engine.schedule_next_steps()
+        assert result["scheduled"] == 1
+
+        step2 = [
+            m for m in svc.list_queued_outbound_messages(limit=10)
+            if m["sequence_step"] == 2
+        ]
+        assert len(step2) == 1
+        assert step2[0]["to_email"] == "seq1@vitorio.com"
+        # O agendamento do passo 1 foi consumido.
+        assert svc.get_outbound_message(step1["id"])["next_step_at"] is None
+    finally:
+        _set_config(send_enabled="0")
+
+
+@pytest.mark.asyncio
+async def test_engine_does_not_schedule_step2_if_replied(engine, monkeypatch):
+    """Quem ja' respondeu nao recebe o e-mail da oferta."""
+    svc = engine_module.db_service._service
+    lead_id = _seed_lead("BOSTON", "engine-seq-2", "11 SEQUENCE AVENUE")
+    contact = _seed_contact(lead_id, "seq2@vitorio.com")
+    batch = svc.create_outbound_batch(
+        city="BOSTON", name="engine-seq-2",
+        filters_json=json.dumps({"city": "BOSTON", "niche": "roofing"}), kind="email",
+    )
+    svc.mark_outbound_batch_previewed(batch["id"], 1, 0.0)
+    batch = svc.start_outbound_batch(batch["id"])
+
+    _set_config(send_enabled="1", enrich_enabled="0")
+    try:
+        await engine.enqueue_batch(batch)
+        step1 = svc.list_queued_outbound_messages(limit=10)[0]
+        svc.update_outbound_message(step1["id"], status="sent")
+        svc.set_outbound_message_next_step(step1["id"], "2000-01-01 00:00:00")
+
+        # O contacto respondeu -> a sequencia para.
+        assert svc.mark_outbound_contact_replied(contact["id"]) is True
+
+        result = await engine.schedule_next_steps()
+        assert result["scheduled"] == 0
+        assert not [
+            m for m in svc.list_queued_outbound_messages(limit=10)
+            if m["sequence_step"] == 2
+        ]
+    finally:
+        _set_config(send_enabled="0")
+
+
+@pytest.mark.asyncio
+async def test_engine_step2_is_not_duplicated(engine, monkeypatch):
+    """O mesmo passo nunca e' criado duas vezes (indice unico por email+passo)."""
+    svc = engine_module.db_service._service
+    lead_id = _seed_lead("BOSTON", "engine-seq-3", "12 SEQUENCE AVENUE")
+    _seed_contact(lead_id, "seq3@vitorio.com")
+    batch = svc.create_outbound_batch(
+        city="BOSTON", name="engine-seq-3",
+        filters_json=json.dumps({"city": "BOSTON", "niche": "roofing"}), kind="email",
+    )
+    svc.mark_outbound_batch_previewed(batch["id"], 1, 0.0)
+    batch = svc.start_outbound_batch(batch["id"])
+
+    _set_config(send_enabled="1", enrich_enabled="0")
+    try:
+        await engine.enqueue_batch(batch)
+        step1 = svc.list_queued_outbound_messages(limit=10)[0]
+        svc.update_outbound_message(step1["id"], status="sent")
+        svc.set_outbound_message_next_step(step1["id"], "2000-01-01 00:00:00")
+
+        await engine.schedule_next_steps()
+        # Reagenda o passo 1 (simula um tick que nao consumiu) -> nao duplica.
+        svc.set_outbound_message_next_step(step1["id"], "2000-01-01 00:00:00")
+        await engine.schedule_next_steps()
+
+        step2 = [
+            m for m in svc.list_queued_outbound_messages(limit=10)
+            if m["sequence_step"] == 2
+        ]
+        assert len(step2) == 1
+    finally:
+        _set_config(send_enabled="0")
+
+
+
