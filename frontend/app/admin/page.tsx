@@ -133,14 +133,12 @@ const OUTBOUND_LABELS: Record<string, string> = {
   min_warmup_days: "Dias mínimos de warm-up",
   quiet_hours_start: "Hora de silêncio (início)",
   quiet_hours_end: "Hora de silêncio (fim)",
-  scrape_fallback_snov: "Fallback Snov (scrape)",
 };
 
 const OUTBOUND_FLAGS = new Set([
   "send_enabled",
   "enrich_enabled",
   "warmup_enabled",
-  "scrape_fallback_snov",
 ]);
 
 function fmtUsd(usd: number) {

@@ -816,7 +816,6 @@ _OUTBOUND_CONFIG_DEFAULTS = {
     "min_warmup_days": "14",
     "quiet_hours_start": "22:00",
     "quiet_hours_end": "07:00",
-    "scrape_fallback_snov": "1",
 }
 
 
@@ -824,7 +823,7 @@ def _seed_outbound_defaults(conn: sqlite3.Connection) -> None:
     """Semeia as linhas globais da configuração de outbound (idempotente).
 
     Chamado só a partir de `init_db` (nunca em `get_connection`, que corre em
-    cada query): o seed é um INSERT OR IGNORE de 12 chaves, barato mas fora do
+    cada query): o seed é um INSERT OR IGNORE de 11 chaves, barato mas fora do
     caminho crítico.
     """
     for key, value in _OUTBOUND_CONFIG_DEFAULTS.items():
@@ -1181,6 +1180,15 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     }
     if contact_cols and "company_domain" not in contact_cols:
         conn.execute("ALTER TABLE outbound_contacts ADD COLUMN company_domain TEXT")
+
+    # Limpeza: `scrape_fallback_snov` era o toggle do fallback Snov.io, que foi
+    # substituido pelo EmailListVerify. Nao e' lido por nenhum codigo (so'
+    # aparecia no painel), por isso a linha e' removida das bases ja' semeadas
+    # para o painel ficar alinhado apenas com o EmailListVerify.
+    conn.execute(
+        "DELETE FROM outbound_config "
+        "WHERE scope='outbound' AND key='scrape_fallback_snov'"
+    )
 
     # Fase 2 outbound: dedup dura no destinatario. Bancos antigos podem ja' ter
     # duplicados ativos (ex.: reenvios historicos): nao criamos o indice se
