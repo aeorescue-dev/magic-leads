@@ -930,6 +930,90 @@ def test_outbound_build_context_personalization_fallbacks():
     assert _ctx(company="5 Star Plumbing LLC")["company_name"] == "5 Star Plumbing LLC"
 
 
+def test_outbound_copy_count_floor_and_rounding():
+    """{count} do copy: piso 40+ e arredondamento para multiplos de 10."""
+    from backend.services import outbound_templates as ot
+
+    # Abaixo do piso -> "40+".
+    assert ot.copy_count(0) == "40+"
+    assert ot.copy_count(1) == "40+"
+    assert ot.copy_count(3) == "40+"
+    assert ot.copy_count(39) == "40+"
+    # No piso e acima (ate' 99) -> numero real.
+    assert ot.copy_count(40) == "40"
+    assert ot.copy_count(47) == "47"
+    assert ot.copy_count(63) == "63"
+    assert ot.copy_count(99) == "99"
+    # 100+ -> arredonda para baixo ao multiplo de 10.
+    assert ot.copy_count(100) == "100"
+    assert ot.copy_count(203) == "200"
+    # Entradas invalidas nunca rebentam e caem no piso.
+    assert ot.copy_count(None) == "40+"
+    assert ot.copy_count("nope") == "40+"
+
+
+def test_outbound_address_tail_is_conditional():
+    """Com endereco real usa-o; sem endereco cai para "across {city}"."""
+    from backend.services import outbound_templates as ot
+
+    with_addr = ot.build_context(
+        {"owner_name": "", "address": "329 BERRY STREET", "issue_category": "Roof"},
+        "NYC",
+        "roofing",
+        50,
+    )
+    assert with_addr["address_tail"] == (
+        ", including a verified project near 329 BERRY STREET"
+    )
+    body = ot.render(ot.get_template("roofing")["body"], with_addr)
+    assert "near 329 BERRY STREET" in body
+    assert "across New York City" not in body
+
+    no_addr = ot.build_context(
+        {"owner_name": "", "address": "", "issue_category": "Roof"},
+        "NYC",
+        "roofing",
+        50,
+    )
+    assert no_addr["address_tail"] == ", including verified projects across New York City"
+    body2 = ot.render(ot.get_template("roofing")["body"], no_addr)
+    assert "across New York City" in body2
+    assert "a property in your area" not in body2
+
+
+def test_outbound_hardened_copy_has_signature_and_optout():
+    """Assinatura fixa + URL unica + opt-out obrigatorio em todos os nichos."""
+    from backend.services import outbound_templates as ot
+
+    for niche, tpl in ot.TEMPLATES.items():
+        body = tpl["body"]
+        assert "Magic Leads" in body, niche
+        assert "https://www.magicleads.app/" in body, niche
+        assert 'reply "unsubscribe"' in body, niche
+        # Uma unica URL (sem tracking/UTM).
+        assert body.count("http") == 1, niche
+        assert "utm_" not in body.lower(), niche
+
+
+def test_outbound_hardened_copy_has_no_trigger_words():
+    """Sem precos, marcas concorrentes nem alegacoes de resultado."""
+    from backend.services import outbound_templates as ot
+
+    banned = (
+        "$",
+        "angi",
+        "google",
+        "meta ads",
+        "100%",
+        "guaranteed",
+        "already closing",
+    )
+    for niche, tpl in ot.TEMPLATES.items():
+        haystack = (tpl["subject"] + "\n" + tpl["body"]).lower()
+        for term in banned:
+            assert term not in haystack, f"nicho {niche!r} contem gatilho: {term!r}"
+
+
 def test_outbound_config_exposes_niches_and_language(admin_client):
     client, headers, _ = admin_client
     body = client.get("/api/admin/outbound/config", headers=headers).json()
@@ -993,9 +1077,8 @@ def test_outbound_preview_renders_real_data_in_english(admin_client):
     # Sem placeholders por resolver.
     assert "{" not in subject and "}" not in subject
     assert "{" not in rendered and "}" not in rendered
-    # Dados reais: endereço e nome da empresa aparecem no corpo.
+    # Dados reais: o endereço aparece na clausula condicional.
     assert "500 N MICHIGAN AVENUE" in rendered
-    assert "SKYLINE ROOFING LLC" in rendered
     # A prévia e' estritamente en-US (mesmo guard dos templates).
     outbound_templates.assert_english_only(subject)
     outbound_templates.assert_english_only(rendered)
@@ -1017,7 +1100,9 @@ def test_outbound_preview_falls_back_to_lead_owner_without_enrichment(admin_clie
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["sample_source"] == "lead_owner_fallback"
-    assert "LONE STAR BUILDERS LLC" in body["preview"]["body"]
+    # Owner utilizavel vira saudacao "<Empresa> team" (a empresa so' entra na
+    # saudacao; o corpo endurecido nao cita o nome da empresa).
+    assert "Hi LONE STAR BUILDERS LLC team," in body["preview"]["body"]
 
 
 def test_outbound_preview_uses_enriched_contact_when_available(admin_client):
@@ -1044,7 +1129,8 @@ def test_outbound_preview_uses_enriched_contact_when_available(admin_client):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["sample_source"] == "enriched_contact"
-    assert "BOSTON ROOFING PARTNERS" in body["preview"]["body"]
+    # A copy endurecida usa o contacto individual na saudacao; a empresa deixa
+    # de aparecer no corpo (sem nome de empresa no copy aprovado).
     assert "Alex Morgan" in body["preview"]["body"]
 
 

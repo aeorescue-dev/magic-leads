@@ -165,7 +165,14 @@ class OutboundEngine:
         enrichment_left = max(0, daily_enrich_cap - billed_today) if daily_enrich_cap > 0 else 10**9
 
         leads = await db_service.list_outbound_leads(city, categories, limit)
-        count_for_copy = len(leads)
+        # `{count}` no copy reflecte o inventario REAL da cidade/nicho (mesma
+        # fonte da previa do painel), nao o tamanho do lote. Fonte unica para
+        # previa e envio; o piso/arredondamento e' aplicado por copy_count.
+        count_for_copy = await db_service.count_qualified_contractors_in_city(
+            city, categories
+        )
+        if count_for_copy <= 0:
+            count_for_copy = len(leads)
 
         queued = 0
         skipped = 0
@@ -363,6 +370,14 @@ class OutboundEngine:
                 failed += 1
                 continue
 
+            # Claim atomico: so' o tick que ganhar a corrida (queued->sending)
+            # envia. Ticks sobrepostos veem rowcount=0 e saltam — sem reenvio.
+            if not await db_service.claim_outbound_message(message["id"]):
+                logger.info(
+                    "[OUTBOUND] Mensagem %s ja' reclamada por outro tick", message["id"]
+                )
+                continue
+
             result = await gmail_sender.send(
                 mailbox,
                 message["to_email"],
@@ -407,10 +422,18 @@ class OutboundEngine:
         """Re-renderiza subject+body a partir do lead real (integridade = hash)."""
         niche = outbound_templates.DEFAULT_NICHE
         count = 0
+        categories = None
         if batch:
             filters = _parse_json(batch.get("filters_json"))
             niche = filters.get("niche") or niche
-            count = _int(batch.get("contact_count"), 0)
+            categories = outbound_templates.niche_categories(niche)
+        # Mesmo `{count}` da previa e do enqueue: inventario real da cidade/nicho.
+        try:
+            count = await db_service.count_qualified_contractors_in_city(city, categories)
+        except Exception:
+            count = 0
+        if count <= 0:
+            count = _int(batch.get("contact_count"), 0) if batch else 0
         lead = None
         if contact.get("lead_id"):
             lead = await db_service.get_lead_by_id(contact["lead_id"])

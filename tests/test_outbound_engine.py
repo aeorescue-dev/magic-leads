@@ -448,3 +448,55 @@ async def test_engine_status_reports_queue_and_mailboxes(engine):
     assert "effective_cap" in status["mailboxes"][0]
     assert "warmup_state" in status["mailboxes"][0]
 
+
+# ------------------------------------------------------------------ dedup + claim
+
+
+def test_engine_dedup_index_blocks_second_active_message(engine):
+    """O indice unico parcial impede 2 mensagens ativas para o mesmo e-mail."""
+    svc = engine_module.db_service._service
+    first = svc.enqueue_outbound_message(
+        batch_id=None, contact_id=None, city="BOSTON", to_email="dup@vitorio.com",
+        subject="s", body_hash="h1",
+    )
+    assert first is not None
+    dup = svc.enqueue_outbound_message(
+        batch_id=None, contact_id=None, city="BOSTON", to_email="dup@vitorio.com",
+        subject="s", body_hash="h2",
+    )
+    # INSERT OR IGNORE: a segunda nao entra (dedup dura).
+    assert dup is None
+    assert (
+        svc.count_outbound_messages(status="queued") <= 1
+    )
+
+
+def test_engine_enqueue_skips_leads_already_messaged(engine):
+    """list_outbound_leads exclui leads cujo contacto ja' tem mensagem ativa."""
+    svc = engine_module.db_service._service
+    lead_id = _seed_lead("BOSTON", "engine-dedup-1", "9 DEDUP AVENUE")
+    contact = _seed_contact(lead_id, "dedup-lead@vitorio.com")
+    # Primeira mensagem ativa para este contacto.
+    assert svc.enqueue_outbound_message(
+        batch_id=None, contact_id=contact["id"], city="BOSTON",
+        to_email="dedup-lead@vitorio.com", subject="s", body_hash="h",
+    ) is not None
+    # O lead ja' nao volta a ser oferecido a lotes futuros.
+    remaining = svc.list_outbound_leads("BOSTON", None, 200)
+    assert all(r["id"] != lead_id for r in remaining)
+
+
+def test_engine_claim_outbound_message_is_atomic(engine):
+    """Claim: queued->sending so' 'e verdadeiro uma vez (sem reenvio)."""
+    svc = engine_module.db_service._service
+    msg = svc.enqueue_outbound_message(
+        batch_id=None, contact_id=None, city="BOSTON", to_email="claim@vitorio.com",
+        subject="s", body_hash="h",
+    )
+    assert msg is not None
+    assert svc.claim_outbound_message(msg["id"]) is True
+    # Segundo tick: a mensagem ja' nao esta' 'queued'.
+    assert svc.claim_outbound_message(msg["id"]) is False
+    assert svc.get_outbound_message(msg["id"])["status"] == "sending"
+
+

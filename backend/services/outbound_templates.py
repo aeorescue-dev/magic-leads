@@ -103,146 +103,158 @@ DEFAULT_NICHE = "general_contractors"
 # built to earn a reply (offer an exclusive sample for the contractor's city).
 #
 # Placeholders available to every template (all resolved from real data):
-#   {company_name}   recipient business name (falls back to "your team" when
-#                    the name is missing, generic or an address SPV)
 #   {contact_name}   recipient contact (falls back to "<Company> team", else
 #                    "there") - see build_context for the rules
 #   {city}           friendly market name ("New York City", "Chicago", ...)
-#   {state}          two-letter state ("NY", "IL", "TX", "MA")
 #   {category}       humanized trade for the niche ("roofing", "plumbing")
-#   {address}        a REAL opportunity address in the city
-#   {count}          number of matching opportunities
-#   {sender_name}    signer (the MagicLeads rep)
+#   {count}          number of matching opportunities (floored/rounded for the
+#                    copy - see copy_count)
+#   {address_tail}   conditional clause for the opportunity line ("..., including
+#                    a verified project near <ADDRESS>" when a real address
+#                    exists, else "..., including verified projects across
+#                    <CITY>") - see build_context
 #
-# All copy is American Business English. Keep it ASCII: assert_english_only
-# rejects accents, curly quotes and em-dashes, so use ' and - only.
+# COPY POLICY (hardened, no trigger words): no prices, no competitor brand
+# names (Angi/Google/Meta), no result claims, no ALL-CAPS superlatives. One URL
+# only (footer), no tracking/UTM. A plain-text opt-out is mandatory. Copy is
+# American Business English; keep it ASCII (assert_english_only rejects accents,
+# curly quotes and em-dashes, so use ' and - only).
+#
+# NOTE: {company_name}, {state} and {sender_name} are still produced by
+# build_context for backwards compatibility, but the hardened copy below does
+# not reference them.
 TEMPLATES: dict[str, dict[str, str]] = {
     "general_contractors": {
         "subject": "New project opportunities in {city} this week",
         "body": (
             "Hi {contact_name},\n\n"
-            "I'm {sender_name} from MagicLeads. We track active residential and "
-            "commercial property developments across {city} and deliver verified, "
-            "high-intent job leads directly to licensed general contractors.\n\n"
-            "We currently have {count} active project opportunities in {city} - "
-            "including verified properties near {address}. Each lead includes "
-            "direct decision-maker contact details so your team can submit bids "
-            "ahead of the competition.\n\n"
-            "Would {company_name} be open to reviewing a free sample list of this "
-            "week's top project leads in {city}?\n\n"
+            "We connect licensed general contractors in {city} with active, "
+            "exclusive job opportunities - homeowners who need work done right "
+            "now.\n\n"
+            "Instead of chasing shared or cold leads, each opportunity is matched "
+            "to a single contractor and includes the homeowner's contact details, "
+            "the address, and the exact service needed.\n\n"
+            "We currently have {count} active project opportunities in {city}"
+            "{address_tail}.\n\n"
+            "Would your team be open to reviewing this week's list?\n\n"
             "Best regards,\n"
-            "{sender_name}\n"
-            "MagicLeads - Premium Commercial & Residential Leads"
+            "Magic Leads\n\n"
+            "https://www.magicleads.app/\n\n"
+            'To stop receiving these emails, reply "unsubscribe".'
         ),
     },
     "roofing": {
         "subject": "New roofing projects in {city} this week",
         "body": (
             "Hi {contact_name},\n\n"
-            "I'm {sender_name} from MagicLeads. We track active residential and "
-            "commercial property developments across {city} and deliver verified "
-            "roofing and exterior leads directly to licensed roofing "
-            "contractors.\n\n"
-            "We currently have {count} active roofing projects in {city} - "
-            "including verified properties near {address}. Each lead includes "
-            "direct decision-maker contact details so your team can bid before "
-            "the competition.\n\n"
-            "Would {company_name} be open to reviewing a free sample list of this "
-            "week's top roofing opportunities in {city}?\n\n"
+            "We connect licensed roofing contractors in {city} with active, "
+            "exclusive job opportunities - homeowners who need work done right "
+            "now.\n\n"
+            "Instead of chasing shared or cold leads, each opportunity is matched "
+            "to a single contractor and includes the homeowner's contact details, "
+            "the address, and the exact service needed.\n\n"
+            "We currently have {count} active roofing opportunities in {city}"
+            "{address_tail}.\n\n"
+            "Would your team be open to reviewing this week's list?\n\n"
             "Best regards,\n"
-            "{sender_name}\n"
-            "MagicLeads - Premium Commercial & Residential Leads"
+            "Magic Leads\n\n"
+            "https://www.magicleads.app/\n\n"
+            'To stop receiving these emails, reply "unsubscribe".'
         ),
     },
     "remodeling": {
         "subject": "New remodeling projects in {city} this week",
         "body": (
             "Hi {contact_name},\n\n"
-            "I'm {sender_name} from MagicLeads. We track active residential and "
-            "commercial property developments across {city} and deliver verified "
-            "remodeling and renovation leads directly to licensed remodeling "
-            "companies.\n\n"
-            "We currently have {count} active remodeling projects in {city} - "
-            "including verified properties near {address}. Each lead includes "
-            "direct decision-maker contact details so your team can bid before "
-            "the competition.\n\n"
-            "Would {company_name} be open to reviewing a free sample list of this "
-            "week's top remodeling opportunities in {city}?\n\n"
+            "We connect licensed remodeling contractors in {city} with active, "
+            "exclusive job opportunities - homeowners who need work done right "
+            "now.\n\n"
+            "Instead of chasing shared or cold leads, each opportunity is matched "
+            "to a single contractor and includes the homeowner's contact details, "
+            "the address, and the exact service needed.\n\n"
+            "We currently have {count} active remodeling opportunities in {city}"
+            "{address_tail}.\n\n"
+            "Would your team be open to reviewing this week's list?\n\n"
             "Best regards,\n"
-            "{sender_name}\n"
-            "MagicLeads - Premium Commercial & Residential Leads"
+            "Magic Leads\n\n"
+            "https://www.magicleads.app/\n\n"
+            'To stop receiving these emails, reply "unsubscribe".'
         ),
     },
     "plumbing": {
         "subject": "New plumbing projects in {city} this week",
         "body": (
             "Hi {contact_name},\n\n"
-            "I'm {sender_name} from MagicLeads. We track active residential and "
-            "commercial property developments across {city} and deliver verified "
-            "plumbing leads directly to licensed plumbing contractors.\n\n"
-            "We currently have {count} active plumbing projects in {city} - "
-            "including verified properties near {address}. Each lead includes "
-            "direct decision-maker contact details so your team can bid before "
-            "the competition.\n\n"
-            "Would {company_name} be open to reviewing a free sample list of this "
-            "week's top plumbing opportunities in {city}?\n\n"
+            "We connect licensed plumbing contractors in {city} with active, "
+            "exclusive job opportunities - homeowners who need work done right "
+            "now.\n\n"
+            "Instead of chasing shared or cold leads, each opportunity is matched "
+            "to a single contractor and includes the homeowner's contact details, "
+            "the address, and the exact service needed.\n\n"
+            "We currently have {count} active plumbing opportunities in {city}"
+            "{address_tail}.\n\n"
+            "Would your team be open to reviewing this week's list?\n\n"
             "Best regards,\n"
-            "{sender_name}\n"
-            "MagicLeads - Premium Commercial & Residential Leads"
+            "Magic Leads\n\n"
+            "https://www.magicleads.app/\n\n"
+            'To stop receiving these emails, reply "unsubscribe".'
         ),
     },
     "electrical": {
         "subject": "New electrical projects in {city} this week",
         "body": (
             "Hi {contact_name},\n\n"
-            "I'm {sender_name} from MagicLeads. We track active residential and "
-            "commercial property developments across {city} and deliver verified "
-            "electrical leads directly to licensed electrical contractors.\n\n"
-            "We currently have {count} active electrical projects in {city} - "
-            "including verified properties near {address}. Each lead includes "
-            "direct decision-maker contact details so your team can bid before "
-            "the competition.\n\n"
-            "Would {company_name} be open to reviewing a free sample list of this "
-            "week's top electrical opportunities in {city}?\n\n"
+            "We connect licensed electrical contractors in {city} with active, "
+            "exclusive job opportunities - homeowners who need work done right "
+            "now.\n\n"
+            "Instead of chasing shared or cold leads, each opportunity is matched "
+            "to a single contractor and includes the homeowner's contact details, "
+            "the address, and the exact service needed.\n\n"
+            "We currently have {count} active electrical opportunities in {city}"
+            "{address_tail}.\n\n"
+            "Would your team be open to reviewing this week's list?\n\n"
             "Best regards,\n"
-            "{sender_name}\n"
-            "MagicLeads - Premium Commercial & Residential Leads"
+            "Magic Leads\n\n"
+            "https://www.magicleads.app/\n\n"
+            'To stop receiving these emails, reply "unsubscribe".'
         ),
     },
     "hvac": {
         "subject": "New heating and HVAC projects in {city} this week",
         "body": (
             "Hi {contact_name},\n\n"
-            "I'm {sender_name} from MagicLeads. We track active residential and "
-            "commercial property developments across {city} and deliver verified "
-            "heating and HVAC leads directly to HVAC companies.\n\n"
-            "We currently have {count} active heating and HVAC projects in {city} "
-            "- including verified properties near {address}. Each lead includes "
-            "direct decision-maker contact details so your team can bid before "
-            "the competition.\n\n"
-            "Would {company_name} be open to reviewing a free sample list of this "
-            "week's top HVAC opportunities in {city}?\n\n"
+            "We connect licensed HVAC contractors in {city} with active, "
+            "exclusive job opportunities - homeowners who need work done right "
+            "now.\n\n"
+            "Instead of chasing shared or cold leads, each opportunity is matched "
+            "to a single contractor and includes the homeowner's contact details, "
+            "the address, and the exact service needed.\n\n"
+            "We currently have {count} active heating and HVAC opportunities in "
+            "{city}{address_tail}.\n\n"
+            "Would your team be open to reviewing this week's list?\n\n"
             "Best regards,\n"
-            "{sender_name}\n"
-            "MagicLeads - Premium Commercial & Residential Leads"
+            "Magic Leads\n\n"
+            "https://www.magicleads.app/\n\n"
+            'To stop receiving these emails, reply "unsubscribe".'
         ),
     },
     "restoration": {
         "subject": "New restoration projects in {city} this week",
         "body": (
             "Hi {contact_name},\n\n"
-            "I'm {sender_name} from MagicLeads. We track active residential and "
-            "commercial property developments across {city} and deliver verified "
-            "restoration and cleanup leads directly to restoration companies.\n\n"
-            "We currently have {count} active restoration projects in {city} - "
-            "including verified properties near {address}. Each lead includes "
-            "direct decision-maker contact details so your team can bid before "
-            "the competition.\n\n"
-            "Would {company_name} be open to reviewing a free sample list of this "
-            "week's top restoration opportunities in {city}?\n\n"
+            "We connect licensed restoration contractors in {city} with active, "
+            "exclusive job opportunities - homeowners who need work done right "
+            "now.\n\n"
+            "Instead of chasing shared or cold leads, each opportunity is matched "
+            "to a single contractor and includes the homeowner's contact details, "
+            "the address, and the exact service needed.\n\n"
+            "We currently have {count} active restoration opportunities in {city}"
+            "{address_tail}.\n\n"
+            "Would your team be open to reviewing this week's list?\n\n"
             "Best regards,\n"
-            "{sender_name}\n"
-            "MagicLeads - Premium Commercial & Residential Leads"
+            "Magic Leads\n\n"
+            "https://www.magicleads.app/\n\n"
+            'To stop receiving these emails, reply "unsubscribe".'
         ),
     },
 }
@@ -273,6 +285,34 @@ CITY_STATE: dict[str, str] = {
 }
 
 _PLACEHOLDER = re.compile(r"\{([a-z_]+)\}")
+
+
+# Business rule: the copy must never show a small or zero opportunity count
+# (it destroys commercial credibility). Anything under the floor is shown as
+# "<floor>+"; 40-99 shows the real number; 100+ is floored to a round ten so a
+# large city reads as an approximate weekly volume, not a fake-precise figure.
+COPY_COUNT_FLOOR = 40
+COPY_COUNT_ROUND_AT = 100
+COPY_COUNT_STEP = 10
+
+
+def copy_count(count: Any) -> str:
+    """Opportunity count for the copy, with a consistency floor.
+
+    Rules (business-approved):
+      * 0..(floor-1)      -> "<floor>+"          (e.g. 3 -> "40+")
+      * floor..99         -> the real number     (e.g. 47 -> "47")
+      * >= 100            -> floor to a ten      (e.g. 203 -> "200")
+    """
+    try:
+        n = int(count)
+    except (TypeError, ValueError):
+        n = 0
+    if n < COPY_COUNT_FLOOR:
+        return f"{COPY_COUNT_FLOOR}+"
+    if n < COPY_COUNT_ROUND_AT:
+        return str(n)
+    return str(n - (n % COPY_COUNT_STEP))
 
 
 def niche_options() -> list[dict[str, Any]]:
@@ -423,14 +463,23 @@ def build_context(
     else:
         greeting_name = "there"
 
+    # Conditional opportunity clause: a real address reads naturally; with no
+    # address we fall back to the city so the sentence never repeats "your area".
+    real_address = (sample.get("address") or "").strip()
+    if real_address:
+        address_tail = f", including a verified project near {real_address}"
+    else:
+        address_tail = f", including verified projects across {display_city}"
+
     return {
         "company_name": company if company_usable else "your team",
         "contact_name": greeting_name,
         "city": display_city,
         "state": (contact.get("state") or "").strip() or CITY_STATE.get(city, ""),
         "category": humanize_category(sample.get("issue_category")),
-        "address": (sample.get("address") or "").strip() or "a property in your area",
-        "count": str(int(count)),
+        "address": real_address or "a property in your area",
+        "address_tail": address_tail,
+        "count": copy_count(count),
         "sender_name": sender_name,
     }
 

@@ -712,6 +712,14 @@ CREATE INDEX IF NOT EXISTS idx_outbound_messages_status ON outbound_messages (st
 CREATE INDEX IF NOT EXISTS idx_outbound_messages_contact ON outbound_messages (contact_id);
 CREATE INDEX IF NOT EXISTS idx_outbound_messages_mailbox ON outbound_messages (mailbox_id, sent_at);
 
+-- Dedup dura (Outbound): um mesmo destinatario nunca pode ter mais do que uma
+-- mensagem ATIVA (queued/sending/sent). E' a barreira final contra reenvios
+-- entre lotes; o filtro `NOT EXISTS` em `list_outbound_leads` e' a primeira.
+-- Parcial para nao colidir com estados terminais (skipped/failed/suppressed).
+CREATE UNIQUE INDEX IF NOT EXISTS ux_outbound_messages_to_email_active
+  ON outbound_messages (to_email)
+  WHERE to_email IS NOT NULL AND status IN ('queued', 'sending', 'sent');
+
 CREATE TABLE IF NOT EXISTS suppressions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   value TEXT NOT NULL,
@@ -1174,6 +1182,21 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     if contact_cols and "company_domain" not in contact_cols:
         conn.execute("ALTER TABLE outbound_contacts ADD COLUMN company_domain TEXT")
 
+    # Fase 2 outbound: dedup dura no destinatario. Bancos antigos podem ja' ter
+    # duplicados ativos (ex.: reenvios historicos): nao criamos o indice se
+    # houver colisao, para nunca falhar o arranque. Bancos novos (schema acima)
+    # ja' nascem com o indice.
+    try:
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_outbound_messages_to_email_active "
+            "ON outbound_messages (to_email) "
+            "WHERE to_email IS NOT NULL AND status IN ('queued', 'sending', 'sent')"
+        )
+    except sqlite3.IntegrityError:
+        logger.warning(
+            "[OUTBOUND] dedup index nao criado: existem to_email duplicados ativos"
+        )
+
 
 class _SmtpConnect(smtplib.SMTP):
     """Conexão SMTP forçando IPv4 (containers Docker/Railway costumam não ter
@@ -1607,16 +1630,39 @@ class DatabaseService:
         conn = get_connection()
         try:
             cur = conn.execute(
-                "INSERT INTO outbound_messages (batch_id, contact_id, mailbox_id, city, channel, to_email, subject, body_hash, status, cost_usd, segments) "
+                "INSERT OR IGNORE INTO outbound_messages (batch_id, contact_id, mailbox_id, city, channel, to_email, subject, body_hash, status, cost_usd, segments) "
                 "VALUES (?, ?, ?, ?, 'email', ?, ?, ?, 'queued', ?, ?)",
                 (batch_id, contact_id, mailbox_id, city, to_email and to_email.lower(), subject, body_hash, float(cost_usd), int(segments)),
             )
             conn.commit()
+            if cur.rowcount == 0:
+                # Dedup: ja' existe mensagem ativa para este destinatario.
+                return None
             mid = cur.lastrowid
             r = conn.execute("SELECT * FROM outbound_messages WHERE id=?", (mid,)).fetchone()
             return dict(r) if r else None
         except Exception:
             return None
+        finally:
+            conn.close()
+
+    def claim_outbound_message(self, message_id: int) -> bool:
+        """Claim atomico: `queued` -> `sending` so' para o primeiro tick.
+
+        Devolve True apenas para o worker que ganhar a corrida (rowcount=1);
+        qualquer tick sobreposto ve' rowcount=0 e tem de saltar a mensagem.
+        """
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE outbound_messages SET status='sending' "
+                "WHERE id=? AND status='queued'",
+                (int(message_id),),
+            )
+            conn.commit()
+            return cur.rowcount == 1
+        except Exception:
+            return False
         finally:
             conn.close()
 
@@ -1790,6 +1836,10 @@ class DatabaseService:
 
         Mesma definicao do simulador (`_qualified_where` + nao institucional +
         disponivel), agora devolvendo as linhas reais para o enriquecimento.
+
+        Dedup: exclui leads cujo contacto enriquecido (`outbound_contacts.email`)
+        ja' tenha uma mensagem ATIVA (queued/sending/sent), para nunca reenviar
+        o mesmo destinatario em lotes futuros.
         """
         if not city:
             return []
@@ -1814,6 +1864,13 @@ class DatabaseService:
                 "AND (lead_status IS NULL OR lead_status = 'available') "
                 f"AND NOT ({not_institutional}) "
                 f"{cat_clause}"
+                "AND NOT EXISTS ("
+                "  SELECT 1 FROM outbound_contacts oc "
+                "  JOIN outbound_messages om ON om.to_email = oc.email "
+                "  WHERE oc.lead_id = leads.id "
+                "    AND oc.email IS NOT NULL "
+                "    AND om.status IN ('queued', 'sending', 'sent')"
+                ") "
                 "ORDER BY COALESCE(date_reported, '') DESC LIMIT ?"
             )
             return [dict(r) for r in conn.execute(q, params).fetchall()]
@@ -8013,6 +8070,11 @@ class AsyncDatabaseService:
 
     async def get_outbound_message(self, message_id: int) -> Optional[dict]:
         return await anyio.to_thread.run_sync(self._service.get_outbound_message, message_id)
+
+    async def claim_outbound_message(self, message_id: int) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.claim_outbound_message, message_id
+        )
 
     async def update_outbound_message(
         self,
