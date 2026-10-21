@@ -31,6 +31,7 @@ import {
 } from "@/lib/lead-delivery";
 import { buildOutreachMessage } from "@/lib/outreach";
 import { buildFullAddress } from "@/lib/address";
+import { shouldSeedDefaultInterests, toggleInterestKey } from "@/lib/interests";
 import CheckoutModal from "@/components/CheckoutModal";
 import ReleaseModal from "@/components/ReleaseModal";
 import WelcomePopup from "@/components/WelcomePopup";
@@ -219,6 +220,11 @@ function DashboardPageInner() {
   const [activeTab, setActiveTab] = useState<"overview" | "opportunities" | "favorites" | "interests" | "alerts" | "history">("overview");
   const [interests, setInterests] = useState<Set<string>>(new Set(ALL_CATEGORY_KEYS));
   const [interestsConfigured, setInterestsConfigured] = useState<boolean | null>(null);
+  // O utilizador ja' interagiu com as especialidades? Distingue "nunca
+  // configurou" (o backend trata como "todas") de "configurou e quer zero".
+  // E' um ref (e' nao um estado): o valor e' lido dentro de um callback
+  // assincrono, onde um useState seria um snapshot do momento do render.
+  const interestsTouchedRef = useRef(false);
   const [dailyStats, setDailyStats] = useState<{ used: number; limit: number; remaining: number; reset_at: string } | null>(null);
 
   // Historico de casos encerrados. Desligado por omissao: o pool principal e
@@ -451,7 +457,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
           setInterestsConfigured(hasInterests);
           if (hasInterests) {
             setInterests(new Set(cats));
-          } else {
+          } else if (shouldSeedDefaultInterests(cats, interestsTouchedRef.current)) {
             // Sem interesses gravados: o backend trata o utilizador como "sem
             // configuração" e torna-o elegível a TODAS as categorias (fallback),
             // enviando alertas que ele não escolheu. Persistimos o default
@@ -461,6 +467,9 @@ const URGENCIES = ["all", "high", "medium", "low"];
         })
         .catch(() => {});
     }
+    // `interestsTouchedRef` e' lido dentro do .then, mas nao pode ser
+    // dependencia do efeito: mudar o efeito re-disparava o seed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
   // Refresh notifications and unread count
@@ -702,11 +711,13 @@ const URGENCIES = ["all", "high", "medium", "low"];
   // Toggle category interest
   const toggleInterest = async (catKey: string) => {
     const prev = interests;
-    const next = new Set(interests);
-    if (next.has(catKey)) next.delete(catKey);
-    else next.add(catKey);
+    // Invariante: a selecção nunca fica vazia — no backend "sem categorias"
+    // significa "todas as categorias". Sem isto, o utilizador que
+    // desmarcasse todas via ver a escolha desaparecer no reload seguinte.
+    const next = toggleInterestKey(prev, catKey, ALL_CATEGORY_KEYS);
     setInterests(next);
-    if (next.size > 0) setInterestsConfigured(true);
+    interestsTouchedRef.current = true;
+    setInterestsConfigured(true);
 
     if (userId) {
       try {
