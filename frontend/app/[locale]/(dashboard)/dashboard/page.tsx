@@ -268,11 +268,11 @@ const URGENCIES = ["all", "high", "medium", "low"];
   const LEAD_TYPES = [
     { value: "all", labelKey: "dashboard.filter.all_types" },
     // "Obrigacao legal" e um grupo: violacoes do DOB e do HPD sao a mesma categoria
-    { value: "dob_violation,hpd_violation", labelKey: "dashboard.lead_type.obligation" },
+    { value: "dob_violation,hpd_violation,311", labelKey: "dashboard.lead_type.obligation" },
     { value: "permit", labelKey: "dashboard.lead_type.permit" },
     { value: "311", labelKey: "dashboard.lead_type.open" },
   ];
-  const OBLIGATION_TYPES: readonly string[] = ["dob_violation", "hpd_violation"];
+  const OBLIGATION_TYPES: readonly string[] = ["dob_violation", "hpd_violation", "311"];
 
   // Filtro rapido Privado vs Institucional/Governamental. O veredito
   // `institutional` vem calculado do backend (lead_rules.py) e e lido aqui
