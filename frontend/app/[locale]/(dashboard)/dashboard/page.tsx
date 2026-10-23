@@ -1211,7 +1211,8 @@ const URGENCIES = ["all", "high", "medium", "low"];
       // Type filter
       if (selectedType !== "all") {
         const typeList = selectedType.split(",");
-        if (!typeList.includes(lead.source_type)) {
+        const st = lead.source_type;
+        if (!st || !typeList.includes(st)) {
           return false;
         }
       }
