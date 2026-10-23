@@ -1229,7 +1229,8 @@ const URGENCIES = ["all", "high", "medium", "low"];
       }
 
       // Interest category filter (when in overview or opportunities)
-      if (activeTab === "overview") {
+      // Bypass when a specific lead type is selected (show all API results)
+      if (activeTab === "overview" && selectedType === "all") {
         const cat = catOfLead(lead);
         if (!interests.has(cat.key)) return false;
       }
