@@ -1842,7 +1842,13 @@ const URGENCIES = ["all", "high", "medium", "low"];
               <span className={`text-xs font-medium ${T.text2}`}>{t("dashboard.filter.type") || "Tipo:"}</span>
               <select
                 value={selectedType}
-                onChange={(e) => setSelectedType(e.target.value)}
+                onChange={(e) => {
+                  const newType = e.target.value;
+                  setSelectedType(newType);
+                  if (newType !== "all") {
+                    setSelectedCategory("all");
+                  }
+                }}
                 className={`px-3 py-1.5 rounded-lg text-sm border ${theme === "dark" ? "bg-[#0b0d1a] border-white/10 text-white" : "bg-white border-slate-200"}`}
               >
                 {LEAD_TYPES.map((lt) => <option key={lt.value} value={lt.value}>{t(lt.labelKey)}</option>)}
