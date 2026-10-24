@@ -2226,6 +2226,38 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def get_available_outbound_cities(self) -> List[str]:
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT DISTINCT UPPER(TRIM(city)) as city FROM leads WHERE city IS NOT NULL AND TRIM(city) != '' "
+                "UNION SELECT DISTINCT UPPER(TRIM(city)) as city FROM outbound_contacts WHERE city IS NOT NULL AND TRIM(city) != ''"
+            ).fetchall()
+            cities = set(SERVED_CITIES)
+            for r in rows:
+                if r["city"]:
+                    cities.add(r["city"].strip().upper())
+            return sorted(list(cities))
+        finally:
+            conn.close()
+
+    def get_available_outbound_categories(self, city: Optional[str] = None) -> List[str]:
+        conn = get_connection()
+        try:
+            if city:
+                rows = conn.execute(
+                    "SELECT DISTINCT issue_category FROM leads WHERE UPPER(TRIM(city)) = UPPER(TRIM(?)) AND issue_category IS NOT NULL AND TRIM(issue_category) != ''",
+                    (city,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT DISTINCT issue_category FROM leads WHERE issue_category IS NOT NULL AND TRIM(issue_category) != ''"
+                ).fetchall()
+            cats = [r["issue_category"] for r in rows if r["issue_category"]]
+            return sorted(list(set(cats)))
+        finally:
+            conn.close()
+
     def update_outbound_contact_status(
         self,
         contact_id: int,
@@ -8555,6 +8587,12 @@ class AsyncDatabaseService:
             domain,
             state,
         )
+
+    async def get_available_outbound_cities(self) -> List[str]:
+        return await anyio.to_thread.run_sync(self._service.get_available_outbound_cities)
+
+    async def get_available_outbound_categories(self, city: Optional[str] = None) -> List[str]:
+        return await anyio.to_thread.run_sync(self._service.get_available_outbound_categories, city)
 
     async def start_outbound_batch(self, batch_id: int) -> Optional[dict]:
         return await anyio.to_thread.run_sync(self._service.start_outbound_batch, batch_id)

@@ -1663,21 +1663,20 @@ def _build_outbound_preview(
 
 @app.get("/api/admin/outbound/config")
 async def admin_outbound_config(_admin: dict = Depends(_require_admin_user)):
-    """Config isolada por cidade + global, para o selector do painel.
-
-    Cada cidade recebe a config efetiva (defaults < global < override da cidade),
-    por isso a UI mostra exatamente o que o motor de envio aplicaria.
-    """
+    """Config isolada por cidade + global, para o selector do painel (dinâmico)."""
+    cities = await db_service.get_available_outbound_cities()
     per_city = {}
-    for city in SERVED_CITIES:
+    for city in cities:
         per_city[city] = await db_service.get_outbound_config(city)
     global_config = await db_service.get_outbound_config()
+    dynamic_cats = await db_service.get_available_outbound_categories()
     return {
-        "cities": list(SERVED_CITIES),
+        "cities": cities,
         "global": global_config,
         "per_city": per_city,
         "send_enabled": global_config.get("send_enabled") == "1",
         "niches": outbound_templates.niche_options(),
+        "dynamic_categories": dynamic_cats,
         "default_niche": outbound_templates.DEFAULT_NICHE,
         "language": _OUTBOUND_LANGUAGE,
     }
