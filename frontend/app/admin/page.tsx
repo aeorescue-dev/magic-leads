@@ -60,7 +60,6 @@ import {
   simulateAdminOutbound,
   triggerAdminOutboundWorker,
   updateAdminOutboundConfig,
-  importAdminB2BLeads,
 } from "@/lib/admin-api";
 import { AUTH_TOKEN_KEY } from "@/lib/api-client";
 
@@ -144,95 +143,6 @@ const OUTBOUND_FLAGS = new Set([
 
 function fmtUsd(usd: number) {
   return `US$ ${(Number.isFinite(usd) ? usd : 0).toFixed(2)}`;
-}
-
-function B2BImportCard() {
-  const [jsonInput, setJsonInput] = useState("");
-  const [importing, setImporting] = useState(false);
-  const [resultMsg, setResultMsg] = useState<string | null>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  const handleImportJson = async () => {
-    setImporting(true);
-    setResultMsg(null);
-    setErrorMsg(null);
-    try {
-      let leads = [];
-      const trimmed = jsonInput.trim();
-      if (trimmed.startsWith("[")) {
-        leads = JSON.parse(trimmed);
-      } else {
-        const lines = trimmed.split("\n").filter(Boolean);
-        if (lines[0].includes(",")) {
-          const headers = lines[0].split(",").map((h) => h.trim().toLowerCase());
-          for (let i = 1; i < lines.length; i++) {
-            const vals = lines[i].split(",").map((v) => v.trim());
-            const obj: any = {};
-            headers.forEach((h, idx) => {
-              obj[h] = vals[idx] || "";
-            });
-            leads.push(obj);
-          }
-        } else {
-          throw new Error("Formato inválido. Use JSON array [ {email, company_name, city, ...} ] ou CSV com cabeçalho.");
-        }
-      }
-
-      const res = await importAdminB2BLeads(leads);
-      setResultMsg(`Sucesso! ${res.imported} leads B2B importados (${res.failed} falhas de ${res.total} total).`);
-      setJsonInput("");
-    } catch (e: any) {
-      setErrorMsg(e instanceof AdminApiError ? e.message : e.message || "Falha ao importar leads.");
-    } finally {
-      setImporting(false);
-    }
-  };
-
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const content = event.target?.result as string;
-      if (content) setJsonInput(content);
-    };
-    reader.readAsText(file);
-  };
-
-  return (
-    <Card title="Importar Leads B2B (CSV / JSON)" icon={<Users className="h-4 w-4" />} hint="Adiciona leads com e-mail e domínio garantidos">
-      <div className="space-y-3">
-        <div className="text-xs text-slate-400">
-          Carregue um ficheiro JSON/CSV ou cole o JSON com os campos: <code className="text-indigo-300">email, company_name, city, category, contact_name, domain, state</code>.
-        </div>
-        <div>
-          <input
-            type="file"
-            accept=".json,.csv,.txt"
-            onChange={handleFileUpload}
-            className="text-xs text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-600 file:text-white hover:file:bg-indigo-500 cursor-pointer"
-          />
-        </div>
-        <textarea
-          rows={4}
-          value={jsonInput}
-          onChange={(e) => setJsonInput(e.target.value)}
-          placeholder={`[\n  {\n    "email": "contato@empresa.com",\n    "company_name": "Empresa Exemplo",\n    "city": "NYC",\n    "category": "General Contractors",\n    "domain": "empresa.com"\n  }\n]`}
-          className="w-full rounded-xl border border-white/10 bg-black/40 p-3 font-mono text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
-        />
-        {resultMsg && <div className="rounded-xl bg-emerald-500/10 p-3 text-xs text-emerald-400 font-medium">{resultMsg}</div>}
-        {errorMsg && <div className="rounded-xl bg-red-500/10 p-3 text-xs text-red-400 font-medium">{errorMsg}</div>}
-        <button
-          onClick={handleImportJson}
-          disabled={importing || !jsonInput.trim()}
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white transition hover:bg-indigo-500 disabled:opacity-50"
-        >
-          {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-          Importar Leads B2B para o Motor
-        </button>
-      </div>
-    </Card>
-  );
 }
 
 function OutboundPanel() {
@@ -395,9 +305,6 @@ function OutboundPanel() {
       }
     >
       <div className="space-y-4">
-        {/* Módulo de Importação B2B */}
-        <B2BImportCard />
-
         {/* selector de cidade */}
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[10px] uppercase tracking-wider text-slate-500">Cidade</span>
