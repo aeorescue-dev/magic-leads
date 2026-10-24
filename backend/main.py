@@ -1609,6 +1609,20 @@ class OutboundConfigUpdateRequest(BaseModel):
     city: str | None = None
 
 
+class OutboundImportItem(BaseModel):
+    email: str
+    company_name: str
+    city: str
+    category: str | None = "General Contractors"
+    contact_name: str | None = None
+    domain: str | None = None
+    state: str | None = None
+
+
+class OutboundImportRequest(BaseModel):
+    leads: list[OutboundImportItem]
+
+
 def _build_outbound_preview(
     city: str,
     niche: str,
@@ -1907,6 +1921,41 @@ async def admin_outbound_send(
         "batch_id": batch["id"],
         "batch": await db_service.get_outbound_batch(batch["id"]),
         **result,
+    }
+
+
+@app.post("/api/admin/outbound/import")
+async def admin_outbound_import(
+    payload: OutboundImportRequest,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Importa leads B2B diretamente com e-mail e domínio preenchidos (Opção 1)."""
+    if not payload.leads:
+        raise HTTPException(status_code=400, detail="Lista de leads vazia")
+    imported = 0
+    failed = 0
+    for item in payload.leads:
+        if not item.email or not item.company_name or not item.city:
+            failed += 1
+            continue
+        res = await db_service.import_b2b_lead(
+            email=item.email,
+            company_name=item.company_name,
+            city=item.city,
+            category=item.category or "General Contractors",
+            contact_name=item.contact_name,
+            domain=item.domain,
+            state=item.state,
+        )
+        if res:
+            imported += 1
+        else:
+            failed += 1
+    return {
+        "status": "ok",
+        "imported": imported,
+        "failed": failed,
+        "total": len(payload.leads),
     }
 
 
@@ -4187,8 +4236,25 @@ async def stripe_webhook(request: Request, stripe_signature: str | None = Header
         raise HTTPException(status_code=400, detail="Evento sem id")
 
     # Idempotência: nunca processa o mesmo evento duas vezes.
-    if await db_service.has_stripe_event(event_id):
+    # EXCEPÇÃO (Sprint 1): um `checkout.session.completed` registado mas SEM
+    # acesso concedido (`granted=0`) tem de ser REPROCESSADO — o retry do
+    # Stripe é a única forma de o cliente receber o acesso que pagou. Antes,
+    # o evento era gravado ANTES do `extend_access` e um crash a meio
+    # significava "cliente pagou e nunca recebeu acesso", em silencio.
+    existing = await db_service.get_stripe_event(event_id)
+    try:
+        already_granted = int((existing or {}).get("granted", 1)) == 1
+    except (TypeError, ValueError):
+        already_granted = True
+    if existing and (
+        already_granted or event_type != "checkout.session.completed"
+    ):
         return {"status": "received", "handled": True, "idempotent": True}
+    if existing and event_type == "checkout.session.completed":
+        logger.info(
+            "Stripe %s: retoma concessao de acesso (evento visto sem efeito)",
+            event_id,
+        )
 
     if event_type == "checkout.session.completed":
         session_obj = (event.get("data") or {}).get("object") or {}
@@ -4204,9 +4270,14 @@ async def stripe_webhook(request: Request, stripe_signature: str | None = Header
             await db_service.record_stripe_event(event_id, event_type, None)
             return {"status": "received", "handled": False, "reason": "invalid_user_id"}
 
-        recorded = await db_service.record_stripe_event(event_id, event_type, user_id)
-        if not recorded:
-            return {"status": "received", "handled": True, "idempotent": True}
+        if not existing:
+            # Fica com `granted=0`: só é marcado como concedido DEPOIS de o
+            # acesso ser estendido (ver `mark_stripe_event_granted`).
+            recorded = await db_service.record_stripe_event(
+                event_id, event_type, user_id, granted=0
+            )
+            if not recorded:
+                return {"status": "received", "handled": True, "idempotent": True}
 
         # Funil de checkout: fecha a sessao como paga.
         session_id = session_obj.get("id")
@@ -4218,10 +4289,23 @@ async def stripe_webhook(request: Request, stripe_signature: str | None = Header
             except Exception as e:
                 logger.warning("Falha ao marcar checkout como completed: %s", e)
 
-        updated = await db_service.extend_access(user_id, days=7)
+        try:
+            updated = await db_service.extend_access(user_id, days=7)
+        except Exception as e:
+            # A base pode estar busy: o evento fica com granted=0 e o retry do
+            # Stripe volta a tentar. O cliente NAO fica sem acesso.
+            logger.error(
+                "Stripe %s: falha ao estender acesso do user %s (%s) — "
+                "o retry do Stripe vai reprocessar",
+                event_id, user_id, e,
+            )
+            return {"status": "received", "handled": False, "reason": "extend_access_failed"}
         if updated is None:
             logger.error(f"Stripe {event_id}: user {user_id} não encontrado")
             return {"status": "received", "handled": False, "reason": "user_not_found"}
+
+        # O efeito foi aplicado: agora sim, o evento fica como processado.
+        await db_service.mark_stripe_event_granted(event_id)
 
         customer_id = session_obj.get("customer")
         if customer_id:

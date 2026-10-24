@@ -544,6 +544,31 @@ export function sendAdminOutbound(
   });
 }
 
+export interface AdminOutboundImportItem {
+  email: string;
+  company_name: string;
+  city: string;
+  category?: string;
+  contact_name?: string;
+  domain?: string;
+  state?: string;
+}
+
+export interface AdminOutboundImportResult {
+  status: string;
+  imported: number;
+  failed: number;
+  total: number;
+}
+
+export function importAdminB2BLeads(leads: AdminOutboundImportItem[]): Promise<AdminOutboundImportResult> {
+  return adminFetch<AdminOutboundImportResult>("/outbound/import", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ leads }),
+  });
+}
+
 export interface AdminPushTestResult {
   status: "ok";
   sent: number;

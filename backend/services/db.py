@@ -513,6 +513,11 @@ CREATE TABLE IF NOT EXISTS stripe_events (
   event_id TEXT NOT NULL UNIQUE,
   event_type TEXT,
   user_id INTEGER,
+  -- 1 = o evento ja' deu o que tinha a dar (acesso concedido / so' registado).
+  -- 0 = o evento foi visto mas o efeito NAO foi aplicado: o retry do Stripe
+  -- tem de voltar a tentar. Sem esta distincao, um evento gravado antes do
+  -- `extend_access` e um crash faziam o cliente pagar e nunca receber acesso.
+  granted INTEGER NOT NULL DEFAULT 1,
   processed_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -729,6 +734,10 @@ CREATE TABLE IF NOT EXISTS outbound_messages (
   segments INTEGER DEFAULT 1,
   sequence_step INTEGER NOT NULL DEFAULT 1,
   next_step_at TEXT,
+  -- Instante do claim atomico (queued -> sending). Sem isto, uma mensagem
+  -- presa em 'sending' (o processo morreu a meio do envio) e' indistinguivel
+  -- de uma em curso — e nao ha como limpa-la.
+  claimed_at TEXT,
   queued_at TEXT DEFAULT CURRENT_TIMESTAMP,
   sent_at TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -1222,6 +1231,17 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     if contact_cols and "replied_at" not in contact_cols:
         conn.execute("ALTER TABLE outbound_contacts ADD COLUMN replied_at TEXT")
 
+    # Sprint 1: `stripe_events.granted` distingue "evento visto" de "acesso ja'
+    # concedido". Sem esta coluna, um webhook que falhasse a meio era visto
+    # como processado e o retry do Stripe nao concedia o acesso.
+    stripe_cols = {
+        r["name"] for r in conn.execute("PRAGMA table_info(stripe_events)").fetchall()
+    }
+    if stripe_cols and "granted" not in stripe_cols:
+        conn.execute(
+            "ALTER TABLE stripe_events ADD COLUMN granted INTEGER NOT NULL DEFAULT 1"
+        )
+
     # Limpeza: `scrape_fallback_snov` era o toggle do fallback Snov.io, que foi
     # substituido pelo EmailListVerify. Nao e' lido por nenhum codigo (so'
     # aparecia no painel), por isso a linha e' removida das bases ja' semeadas
@@ -1254,6 +1274,8 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
             )
         if "next_step_at" not in msg_cols:
             conn.execute("ALTER TABLE outbound_messages ADD COLUMN next_step_at TEXT")
+        if "claimed_at" not in msg_cols:
+            conn.execute("ALTER TABLE outbound_messages ADD COLUMN claimed_at TEXT")
         try:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_outbound_messages_sequence "
@@ -1796,11 +1818,15 @@ class DatabaseService:
 
         Devolve True apenas para o worker que ganhar a corrida (rowcount=1);
         qualquer tick sobreposto ve' rowcount=0 e tem de saltar a mensagem.
+
+        Regista `claimed_at` para que o reaper saiba ha quanto tempo a
+        mensagem esta' presa (o processo pode morrer a meio do envio).
         """
         conn = get_connection()
         try:
             cur = conn.execute(
-                "UPDATE outbound_messages SET status='sending' "
+                "UPDATE outbound_messages SET status='sending', "
+                "claimed_at=CURRENT_TIMESTAMP "
                 "WHERE id=? AND status='queued'",
                 (int(message_id),),
             )
@@ -1808,6 +1834,50 @@ class DatabaseService:
             return cur.rowcount == 1
         except Exception:
             return False
+        finally:
+            conn.close()
+
+    def fail_stale_sending_outbound_messages(self, older_than: str) -> int:
+        """Marca como 'failed' as mensagens presas em 'sending' ha demasiado tempo.
+
+        Happens quando o processo morre entre o claim e o `status='sent'`
+        (deploy, OOM, restart): sem isto, a mensagem ficava em 'sending' PARA
+        SEMPRE — credito de enriquecimento gasto, lead contactado, e-mail
+        nunca enviado, e sem qualquer aviso.
+
+        Semantica: at-most-once. Nao reenfileiramos, porque nao sabemos se
+        o envio chegou a acontecer (e um e-mail frio duplicado e' pior do que
+        um e-mail perdido). O lead NAO e' consumido pelo outbound, pelo que a
+        unica perda real e' o credito de enriquecimento e um toque.
+
+        `next_step_at` e' preservado: a sequencia (passo 2) continua agendada.
+        """
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE outbound_messages SET status='failed', "
+                "error='stale sending claim (processo terminado a meio do envio)', "
+                "claimed_at=NULL "
+                "WHERE status='sending' AND claimed_at IS NOT NULL AND claimed_at < ?",
+                (older_than,),
+            )
+            conn.commit()
+            return cur.rowcount
+        except Exception:
+            return 0
+        finally:
+            conn.close()
+
+    def count_stale_sending_outbound_messages(self, older_than: str) -> int:
+        """Quantas mensagens estao presas em 'sending' (saude do outbound)."""
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) AS c FROM outbound_messages "
+                "WHERE status='sending' AND claimed_at IS NOT NULL AND claimed_at < ?",
+                (older_than,),
+            ).fetchone()
+            return int(row["c"])
         finally:
             conn.close()
 
@@ -1839,7 +1909,7 @@ class DatabaseService:
                 params.extend(clean)
             q = (
                 "SELECT COUNT(*) AS c FROM leads "
-                f"WHERE {where} "
+                f"WHERE ({where} OR source_type = 'import_b2b') "
                 "AND UPPER(TRIM(city)) = UPPER(TRIM(?)) "
                 "AND (lead_status IS NULL OR lead_status = 'available') "
                 f"AND NOT ({not_institutional}) "
@@ -1875,7 +1945,7 @@ class DatabaseService:
                 "SELECT owner_name, address, city, COALESCE(state, '') AS state, "
                 "issue_category, issue_description, date_reported "
                 "FROM leads "
-                f"WHERE {where} "
+                f"WHERE ({where} OR source_type = 'import_b2b') "
                 "AND UPPER(TRIM(city)) = UPPER(TRIM(?)) "
                 "AND (lead_status IS NULL OR lead_status = 'available') "
                 f"AND NOT ({not_institutional}) "
@@ -2004,7 +2074,7 @@ class DatabaseService:
                 "SELECT id, owner_name, owner_email, address, city, "
                 "COALESCE(state, '') AS state, issue_category "
                 "FROM leads "
-                f"WHERE {where} "
+                f"WHERE ({where} OR source_type = 'import_b2b') "
                 "AND UPPER(TRIM(city)) = UPPER(TRIM(?)) "
                 "AND (lead_status IS NULL OR lead_status = 'available') "
                 f"AND NOT ({not_institutional}) "
@@ -2090,6 +2160,66 @@ class DatabaseService:
             r = conn.execute(
                 "SELECT * FROM outbound_contacts WHERE email=?", (email.lower(),)
             ).fetchone()
+            return dict(r) if r else None
+        except Exception:
+            return None
+        finally:
+            conn.close()
+
+    def import_b2b_lead(
+        self,
+        email: str,
+        company_name: str,
+        city: str,
+        category: str = "General Contractors",
+        contact_name: Optional[str] = None,
+        domain: Optional[str] = None,
+        state: Optional[str] = None,
+    ) -> Optional[dict]:
+        if not email or not company_name or not city:
+            return None
+        clean_email = email.strip().lower()
+        clean_city = city.strip().upper()
+        if clean_city == "NEW YORK":
+            clean_city = "NYC"
+
+        default_states = {"NYC": "NY", "CHICAGO": "IL", "DALLAS": "TX", "BOSTON": "MA"}
+        st = (state or "").strip().upper() or default_states.get(clean_city, "NY")
+
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "INSERT INTO leads (source_type, owner_name, owner_email, city, state, issue_category, lead_status, created_at, updated_at) "
+                "VALUES ('import_b2b', ?, ?, ?, ?, ?, 'available', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                (company_name, clean_email, clean_city, st, category),
+            )
+            lead_id = cur.lastrowid
+
+            conn.execute(
+                "INSERT INTO outbound_contacts "
+                "(lead_id, kind, company_name, contact_name, email, email_source, "
+                "email_status, city, state, company_domain, enriched_at, last_verified_at) "
+                "VALUES (?, 'business', ?, ?, ?, 'import', 'valid', ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(email) DO UPDATE SET "
+                "email_status='valid', "
+                "email_source='import', "
+                "enriched_at=CURRENT_TIMESTAMP, last_verified_at=CURRENT_TIMESTAMP, "
+                "company_name=COALESCE(excluded.company_name, outbound_contacts.company_name), "
+                "contact_name=COALESCE(excluded.contact_name, outbound_contacts.contact_name), "
+                "company_domain=COALESCE(excluded.company_domain, outbound_contacts.company_domain), "
+                "lead_id=COALESCE(outbound_contacts.lead_id, excluded.lead_id)",
+                (
+                    lead_id,
+                    company_name,
+                    contact_name,
+                    clean_email,
+                    clean_city,
+                    st,
+                    domain or (clean_email.split('@')[1] if '@' in clean_email else None),
+                ),
+            )
+            conn.commit()
+            r = conn.execute("SELECT * FROM outbound_contacts WHERE email=?", (clean_email,)).fetchone()
             return dict(r) if r else None
         except Exception:
             return None
@@ -3044,17 +3174,47 @@ class DatabaseService:
     # Pagamentos avulsos (Stripe) — idempotência por event_id
     # ---------------------------------------------------------------
     def record_stripe_event(self, event_id: str, event_type: str,
-                            user_id: Optional[int] = None) -> bool:
-        """Registra um evento Stripe. Retorna True se é novo, False se já processado."""
+                            user_id: Optional[int] = None,
+                            granted: int = 1) -> bool:
+        """Registra um evento Stripe. Retorna True se é novo, False se já existe.
+
+        `granted=0` marca o evento como "visto mas ainda sem efeito aplicado"
+        (usado no `checkout.session.completed`: so' se marca como concedido
+        DEPOIS de o acesso ser estendido). O retry do Stripe volta a encontrar
+        o evento com `granted=0` e volta a tentar conceder o acesso.
+        """
         conn = get_connection()
         try:
             cur = conn.execute(
-                "INSERT OR IGNORE INTO stripe_events (event_id, event_type, user_id) "
-                "VALUES (?, ?, ?)",
-                (event_id, event_type, user_id),
+                "INSERT OR IGNORE INTO stripe_events (event_id, event_type, user_id, granted) "
+                "VALUES (?, ?, ?, ?)",
+                (event_id, event_type, user_id, 1 if granted else 0),
             )
             conn.commit()
             return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def get_stripe_event(self, event_id: str) -> Optional[dict]:
+        """O evento Stripe ja' registado (com o estado `granted`), ou None."""
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT * FROM stripe_events WHERE event_id = ?", (event_id,)
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def mark_stripe_event_granted(self, event_id: str) -> bool:
+        """Marca o evento como tendo concedido o efeito (acesso estendido)."""
+        conn = get_connection()
+        try:
+            conn.execute(
+                "UPDATE stripe_events SET granted=1 WHERE event_id=?", (event_id,)
+            )
+            conn.commit()
+            return True
         finally:
             conn.close()
 
@@ -7709,9 +7869,20 @@ class AsyncDatabaseService:
         return await anyio.to_thread.run_sync(self._service.extend_access, user_id, days)
 
     async def record_stripe_event(self, event_id: str, event_type: str,
-                                  user_id: Optional[int] = None) -> bool:
+                                  user_id: Optional[int] = None,
+                                  granted: int = 1) -> bool:
         return await anyio.to_thread.run_sync(
-            self._service.record_stripe_event, event_id, event_type, user_id
+            self._service.record_stripe_event, event_id, event_type, user_id, granted
+        )
+
+    async def get_stripe_event(self, event_id: str) -> Optional[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.get_stripe_event, event_id
+        )
+
+    async def mark_stripe_event_granted(self, event_id: str) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.mark_stripe_event_granted, event_id
         )
 
     async def has_stripe_event(self, event_id: str) -> bool:
@@ -8364,6 +8535,27 @@ class AsyncDatabaseService:
     async def get_outbound_batch(self, batch_id: int) -> Optional[dict]:
         return await anyio.to_thread.run_sync(self._service.get_outbound_batch, batch_id)
 
+    async def import_b2b_lead(
+        self,
+        email: str,
+        company_name: str,
+        city: str,
+        category: str = "General Contractors",
+        contact_name: Optional[str] = None,
+        domain: Optional[str] = None,
+        state: Optional[str] = None,
+    ) -> Optional[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.import_b2b_lead,
+            email,
+            company_name,
+            city,
+            category,
+            contact_name,
+            domain,
+            state,
+        )
+
     async def start_outbound_batch(self, batch_id: int) -> Optional[dict]:
         return await anyio.to_thread.run_sync(self._service.start_outbound_batch, batch_id)
 
@@ -8442,6 +8634,16 @@ class AsyncDatabaseService:
     async def claim_outbound_message(self, message_id: int) -> bool:
         return await anyio.to_thread.run_sync(
             self._service.claim_outbound_message, message_id
+        )
+
+    async def fail_stale_sending_outbound_messages(self, older_than: str) -> int:
+        return await anyio.to_thread.run_sync(
+            self._service.fail_stale_sending_outbound_messages, older_than
+        )
+
+    async def count_stale_sending_outbound_messages(self, older_than: str) -> int:
+        return await anyio.to_thread.run_sync(
+            self._service.count_stale_sending_outbound_messages, older_than
         )
 
     async def update_outbound_message(
