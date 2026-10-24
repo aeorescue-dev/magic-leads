@@ -225,6 +225,11 @@ class Settings(BaseSettings):
     OUTBOUND_SEQUENCE_STEP2_DELAY_DAYS: int = 3
     OUTBOUND_SEQUENCE_MAX_STEP: int = 2
 
+    # Reaper das mensagens presas em 'sending' (o processo morreu a meio do
+    # envio). Passados N minutos, a mensagem e' marcada como 'failed' em vez de
+    # ficar em 'sending' PARA SEMPRE (credito gasto, e-mail nunca enviado).
+    OUTBOUND_STALE_SENDING_MINUTES: int = 15
+
     # DLQ de notificações in-app. Ring buffer: impede acúmulo infinito em
     # disco quando o INSERT falha repetidamente. Os ficheiros mais antigos
     # (além do teto de ficheiros ou da idade máxima) são descartados e

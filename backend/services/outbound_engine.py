@@ -273,6 +273,38 @@ class OutboundEngine:
             "total_leads": len(leads),
         }
 
+    # ---------------------------------------------------------- reaper
+
+    async def reap_stale_sending(self, now: Optional[datetime] = None) -> int:
+        """Marca como 'failed' as mensagens presas em 'sending' ha demasiado tempo.
+
+        Motivo: o claim atomico (`queued -> sending`) acontece ANTES do envio.
+        Se o processo morrer a meio (deploy, OOM, restart), a mensagem fica em
+        'sending' PARA SEMPRE: o `list_queued_outbound_messages` so' le
+        'queued' e nao havia reaper.
+
+        Semantica at-most-once: nao reenfileiramos, porque nao sabemos se o
+        envio chegou a acontecer, e um e-mail frio duplicado e' pior do que um
+        e-mail perdido (o lead nao e' consumido pelo outbound).
+        """
+        now = now or datetime.now(timezone.utc)
+        minutes = _int(getattr(settings, "OUTBOUND_STALE_SENDING_MINUTES", 15), 15)
+        if minutes <= 0:
+            return 0
+        cutoff = _now_str(now - timedelta(minutes=minutes))
+        try:
+            n = await db_service.fail_stale_sending_outbound_messages(cutoff)
+        except Exception as e:
+            logger.warning("[OUTBOUND] reaper falhou: %s", e)
+            return 0
+        if n:
+            logger.warning(
+                "[OUTBOUND] %s mensagem(ns) presa(s) em 'sending' ha mais de %s min "
+                "-> marcadas como failed (o processo morreu a meio do envio)",
+                n, minutes,
+            )
+        return n
+
     # ---------------------------------------------------------- sequence
 
     async def schedule_next_steps(self, now: Optional[datetime] = None) -> dict:
@@ -440,6 +472,10 @@ class OutboundEngine:
         limit = limit or _int(
             getattr(settings, "OUTBOUND_WORKER_CHUNK", 10), 10
         )
+        # Sprint 1: limpa mensagens presas em 'sending' (o processo morreu entre
+        # o claim e o envio — tipicamente num deploy). Sem isto ficavam para
+        # sempre: credito gasto, lead contactado, e-mail nunca enviado.
+        await self.reap_stale_sending(now)
         # Sequencia (Prioridade D): agenda o proximo passo antes de drenar a
         # fila, para que o passo 2 entre na MESMA janela de envio.
         await self.schedule_next_steps(now)
@@ -659,6 +695,13 @@ class OutboundEngine:
                 ),
                 "max_step": _int(getattr(settings, "OUTBOUND_SEQUENCE_MAX_STEP", 2), 2),
             },
+            "stale_sending": await db_service.count_stale_sending_outbound_messages(
+                _now_str(
+                    (now - timedelta(minutes=_int(
+                        getattr(settings, "OUTBOUND_STALE_SENDING_MINUTES", 15), 15
+                    ))).replace(tzinfo=timezone.utc)
+                )
+            ),
         }
 
 
