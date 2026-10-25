@@ -37,6 +37,7 @@ from backend.models.schemas import (
     UrgencyLevel,
 )
 from backend.services.db import db_service, get_connection
+from backend.utils.time import utcnow
 
 EMAIL = "pytest-reserve-atomic@magicleads.app"
 
@@ -292,7 +293,7 @@ def test_free_lead_is_allowed_when_daily_quota_is_exhausted(user_and_client, no_
     client, headers, user_id = user_and_client
 
     svc = db_service._service
-    today = datetime.utcnow().date().isoformat()
+    today = utcnow().date().isoformat()
     original_used = _used(user_id)
     conn = get_connection()
     try:

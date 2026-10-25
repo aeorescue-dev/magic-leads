@@ -11,13 +11,13 @@ import asyncio
 import os
 import sys
 import uuid
-from datetime import datetime
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from backend.main import _scrape_runs, _scrape_worker  # noqa: E402
+from backend.utils.time import utcnow  # noqa: E402
 
 
 def main() -> int:
@@ -30,7 +30,7 @@ def main() -> int:
     _scrape_runs[run_id] = {
         "run_id": run_id,
         "running": True,
-        "started_at": datetime.utcnow().isoformat(),
+        "started_at": utcnow().isoformat(),
         "inserted": 0,
         "total_raw": 0,
         "status": "running",

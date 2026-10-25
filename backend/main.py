@@ -79,6 +79,7 @@ from .services.push_service import push_service
 from .services.searchbug import searchbug_service
 from .services.translations import render as _render_notification
 from .utils.logger import logger
+from .utils.time import utcnow
 
 
 def _map_category(complaint_type: str) -> IssueCategory:
@@ -222,7 +223,7 @@ def _to_lead_response(lead: dict) -> LeadResponse:
         my_status=lead.get("_my_status"),
         stage=lead_status if (owns and (engaged or lead_status == "converted")) else None,
         stage_expires_at=stage_expires_at if (owns and engaged) else None,
-        server_now=datetime.utcnow().isoformat() + "Z",
+        server_now=utcnow().isoformat() + "Z",
         corporate=rules["corporate"],
         institutional=rules["institutional"],
         owner_class=rules.get("owner_class", "unknown"),
@@ -607,7 +608,7 @@ async def _annotate_visibility(leads: list, user: dict | None) -> None:
                 expires = datetime.fromisoformat(str(stage_expires_at).replace("Z", "+00:00"))
                 if expires.tzinfo is not None:
                     expires = expires.replace(tzinfo=None)
-                hours_left = int((expires - datetime.utcnow()).total_seconds() / 3600)
+                hours_left = int((expires - utcnow()).total_seconds() / 3600)
                 lead["hours_remaining"] = max(0, hours_left)
             except Exception:
                 lead["hours_remaining"] = 0
@@ -1339,7 +1340,7 @@ async def run_scraper(
     run_id = uuid.uuid4().hex[:12]
     _scrape_runs[run_id] = {
         "run_id": run_id, "running": True,
-        "started_at": datetime.utcnow().isoformat(),
+        "started_at": utcnow().isoformat(),
         "inserted": 0, "total_raw": 0, "status": "running", "error": None,
     }
     asyncio.create_task(_scrape_worker(run_id, max_cities, hours_override=hours))
@@ -2159,14 +2160,14 @@ def _ensure_dlq_dir() -> None:
 def _dlq_save(run_id: str, city: str, leads: list, error: str) -> str:
     """Salva batch falho no DLQ para reprocessamento posterior."""
     _ensure_dlq_dir()
-    filename = f"{run_id}_{city}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json"
+    filename = f"{run_id}_{city}_{utcnow().strftime('%Y%m%d_%H%M%S')}.json"
     path = os.path.join(DLQ_DIR, filename)
     payload = {
         "run_id": run_id,
         "city": city,
         "leads": leads,
         "error": error,
-        "saved_at": datetime.utcnow().isoformat(),
+        "saved_at": utcnow().isoformat(),
     }
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
@@ -2314,7 +2315,7 @@ async def _send_scraper_webhook(run_id: str, city_results: dict, dlq_reprocessed
 
     lines = [
         f"📊 **Scraper Run `{run_id}`** {hours_info}",
-        f"🕐 {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC | Trigger: {trigger}",
+        f"🕐 {utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC | Trigger: {trigger}",
         "",
         f"📥 **Total bruto**: {total_raw} | [OK] **Inseridos**: {inserted} | 🔄 **DLQ reprocessado**: {dlq_reprocessed}",
     ]
@@ -2420,7 +2421,7 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
             circuit_open_until = health.get("circuit_open_until")
 
             # Circuit Breaker: pula cidade se circuit breaker aberto
-            if circuit_open_until and datetime.utcnow().isoformat() < circuit_open_until:
+            if circuit_open_until and utcnow().isoformat() < circuit_open_until:
                 logger.warning(f"Circuit Breaker ATIVO para {city} até {circuit_open_until} — pulando")
                 # Nao sobrescrever leads ja obtidos por outra fonte da cidade.
                 _slot = city_results.setdefault(
@@ -2925,13 +2926,13 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
             status=run_status, inserted=inserted,
             total_raw=len(all_raw), cities_covered=len(cities_ok),
             note=_nota,
-            running=False, finished_at=datetime.utcnow().isoformat(),
+            running=False, finished_at=utcnow().isoformat(),
         )
         await db_service.record_scrape_run(state)
 
     except Exception as e:
         logger.error(f"Erro no scraper [run {run_id}]: {e}", exc_info=True)
-        state.update(status="error", error=str(e), running=False, finished_at=datetime.utcnow().isoformat())
+        state.update(status="error", error=str(e), running=False, finished_at=utcnow().isoformat())
         await db_service.record_scrape_run(state)
 
 
@@ -2954,7 +2955,7 @@ def _scheduled_scrape(max_cities: int = 8, hours_override: int = None):
     run_id = uuid.uuid4().hex[:12]
     _scrape_runs[run_id] = {
         "run_id": run_id, "running": True,
-        "started_at": datetime.utcnow().isoformat(),
+        "started_at": utcnow().isoformat(),
         "inserted": 0, "total_raw": 0, "status": "running", "error": None,
         "trigger": "scheduler",
     }
@@ -2973,7 +2974,7 @@ async def _scheduler_loop():
         await asyncio.sleep(interval_seconds)
         try:
             # Verifica se é hora da varredura noturna estendida (02:00 UTC)
-            now_utc = datetime.utcnow()
+            now_utc = utcnow()
             if now_utc.hour == 2 and now_utc.minute < (interval_seconds // 60):
                 logger.info("Scheduler: disparando varredura noturna estendida (hours=120)")
                 _scheduled_scrape(max_cities=12, hours_override=120)
@@ -4751,7 +4752,7 @@ async def reserve_lead(
             "my_status": "reserved",
             "stage": lead.get("lead_status", "reserved"),
             "stage_expires_at": _to_iso_utc(lead.get("stage_expires_at") or lead.get("reserved_until")),
-            "server_now": datetime.utcnow().isoformat() + "Z",
+            "server_now": utcnow().isoformat() + "Z",
             "message": (
                 "Dados revelados — reserva de 1 hora ativa"
                 if charge_credit
@@ -4786,7 +4787,7 @@ async def reserve_lead(
         if reset_at:
             try:
                 reset_dt = datetime.fromisoformat(reset_at.replace("Z", "+00:00"))
-                hours_left = int((reset_dt - datetime.utcnow()).total_seconds() / 3600)
+                hours_left = int((reset_dt - utcnow()).total_seconds() / 3600)
                 reset_str = f" Reset em {hours_left}h."
             except Exception:
                 pass
@@ -5045,7 +5046,7 @@ async def cron_expire_holds(x_cron_secret: str | None = Header(None)):
             "status": "ok",
             "expired_holds": expired,
             "reveals_processed": reveals,
-            "at": datetime.utcnow().isoformat(),
+            "at": utcnow().isoformat(),
         }
     except Exception as e:
         logger.error(f"Erro no cron expire-holds: {e}", exc_info=True)

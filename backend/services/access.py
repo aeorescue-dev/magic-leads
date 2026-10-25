@@ -11,6 +11,8 @@ em outros módulos (foi exatamente esse drift que silenciou o despacho).
 
 from datetime import datetime, timezone
 
+from ..utils.time import utcnow
+
 # Tokens canônicos persistidos.
 STATUS_ACTIVE = "active"
 STATUS_TRIAL = "trial"
@@ -86,5 +88,5 @@ def is_access_active(
     if until is None:
         return False
     if now is None:
-        now = datetime.utcnow()
+        now = utcnow()
     return until > now

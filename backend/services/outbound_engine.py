@@ -88,16 +88,31 @@ def _parse_hhmm(value: Optional[str]) -> Optional[tuple[int, int]]:
     return None
 
 
+def _now_dt(now: Optional[datetime] = None) -> datetime:
+    """Normaliza para UTC antes de formatar.
+
+    Se um chamador passar um datetime aware noutro fuso, formatar sem converter
+    produzia um cutoff deslocado — o reaper podia marcar como 'failed' um envio
+    que acabou de ser reclamado (ou nunca limpar um preso). Datetimes naive sao
+    assumidos UTC (contrato do projeto/SQLite).
+    """
+    dt = now or datetime.now(timezone.utc)
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc)
+    return dt
+
+
 def day_key(now: Optional[datetime] = None) -> str:
-    return (now or datetime.now(timezone.utc)).strftime("%Y-%m-%d")
+    return _now_dt(now).strftime("%Y-%m-%d")
 
 
 def _now_str(now: Optional[datetime] = None) -> str:
-    return (now or datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S")
+    return _now_dt(now).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def is_quiet_hours(now: datetime, start: Optional[str], end: Optional[str]) -> bool:
     """True se `now` (UTC) cai dentro do intervalo de silencio (aceita wrap)."""
+    now = _now_dt(now)
     s = _parse_hhmm(start)
     e = _parse_hhmm(end)
     if not s or not e or s == e:
@@ -495,6 +510,17 @@ class OutboundEngine:
         global_config = await db_service.get_outbound_config()
         if global_config.get("send_enabled") != "1":
             return {"status": "disabled", "sent": 0}
+
+        # Sprint 1: limpa mensagens presas em 'sending' (o processo morreu entre
+        # o claim e o envio — tipicamente num deploy). Sem isto ficavam para
+        # sempre: credito gasto, lead contactado, e-mail nunca enviado.
+        # Corre ANTES das quiet hours: o reaper nao envia nada e, se so'
+        # corresse na janela de envio, um deploy a noite deixava as linhas
+        # presas ate' 9h depois (22:00-07:00 UTC) e o painel mostrava-as como
+        # 'sending' o dia inteiro. Dois reapers concorrentes sao seguros: o
+        # UPDATE condicional transita cada linha uma unica vez (at-most-once).
+        await self.reap_stale_sending(now)
+
         if is_quiet_hours(
             now, global_config.get("quiet_hours_start"), global_config.get("quiet_hours_end")
         ):
@@ -503,10 +529,6 @@ class OutboundEngine:
         limit = limit or _int(
             getattr(settings, "OUTBOUND_WORKER_CHUNK", 10), 10
         )
-        # Sprint 1: limpa mensagens presas em 'sending' (o processo morreu entre
-        # o claim e o envio — tipicamente num deploy). Sem isto ficavam para
-        # sempre: credito gasto, lead contactado, e-mail nunca enviado.
-        await self.reap_stale_sending(now)
         # Sequencia (Prioridade D): agenda o proximo passo antes de drenar a
         # fila, para que o passo 2 entre na MESMA janela de envio.
         await self.schedule_next_steps(now)
@@ -724,9 +746,12 @@ class OutboundEngine:
             },
             "stale_sending": await db_service.count_stale_sending_outbound_messages(
                 _now_str(
-                    (now - timedelta(minutes=_int(
-                        getattr(settings, "OUTBOUND_STALE_SENDING_MINUTES", 15), 15
-                    ))).replace(tzinfo=timezone.utc)
+                    now
+                    - timedelta(
+                        minutes=_int(
+                            getattr(settings, "OUTBOUND_STALE_SENDING_MINUTES", 15), 15
+                        )
+                    )
                 )
             ),
         }

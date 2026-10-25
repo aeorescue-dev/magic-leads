@@ -25,6 +25,7 @@ from backend.models.schemas import (
     UrgencyLevel,
 )
 from backend.services.db import db_service
+from backend.utils.time import utcnow
 
 EMAIL = "pytest-provider-path@magicleads.app"
 TOKEN = "pytest-provider-path-token"
@@ -127,7 +128,7 @@ def reset_quota():
 
     def _reset(user_id):
         svc = db_service._service
-        today = datetime.utcnow().date().isoformat()
+        today = utcnow().date().isoformat()
         conn = get_connection()
         try:
             conn.execute(

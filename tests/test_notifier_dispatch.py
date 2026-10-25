@@ -13,7 +13,7 @@ vocabulário real do banco. Estes testes blindam:
 
 import asyncio
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from backend.services.access import (
     STATUS_ACTIVE,
@@ -24,6 +24,7 @@ from backend.services.access import (
 )
 from backend.services.db import db_service, get_connection
 from backend.services.notifier import fanout_new_lead_batch, guard_silent_fanout
+from backend.utils.time import utcnow
 
 
 def _run(coro):
@@ -31,11 +32,11 @@ def _run(coro):
 
 
 def _future(days: int = 5) -> str:
-    return (datetime.utcnow() + timedelta(days=days)).isoformat()
+    return (utcnow() + timedelta(days=days)).isoformat()
 
 
 def _past(days: int = 1) -> str:
-    return (datetime.utcnow() - timedelta(days=days)).isoformat()
+    return (utcnow() - timedelta(days=days)).isoformat()
 
 
 def _reset_tables() -> None:
@@ -89,7 +90,7 @@ def _create_lead(city: str = "NYC", category: str = "Roof") -> int:
                 f"{uuid.uuid4().hex[:6]} Test St",
                 city,
                 category,
-                datetime.utcnow().isoformat(),
+                utcnow().isoformat(),
             ),
         )
         conn.commit()
@@ -216,7 +217,7 @@ def test_fanout_creates_notification_and_dedups():
         "issue_category": "Roof",
         "address": "1 Main St",
         "city": "NYC",
-        "date_reported": datetime.utcnow().isoformat(),
+        "date_reported": utcnow().isoformat(),
     }
 
     first = _run(fanout_new_lead_batch("Roof", [lead]))

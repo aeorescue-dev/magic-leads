@@ -37,6 +37,7 @@ from backend.models.schemas import (
     UrgencyLevel,
 )
 from backend.services.db import db_service, get_connection
+from backend.utils.time import utcnow
 
 EMAIL = "pytest-lead-lifecycle@magicleads.app"
 _EXT = {"n": 0}
@@ -121,7 +122,7 @@ def _lead(lead_id: int) -> dict:
 
 def _force_stage_expiry(lead_id: int, past_minutes: int = 5) -> None:
     """Empurra a janela da fase para o passado, para exercitar o sweeper."""
-    when = (datetime.utcnow() - timedelta(minutes=past_minutes)).strftime("%Y-%m-%d %H:%M:%S")
+    when = (utcnow() - timedelta(minutes=past_minutes)).strftime("%Y-%m-%d %H:%M:%S")
     conn = get_connection()
     try:
         conn.execute("UPDATE leads SET stage_expires_at = ? WHERE id = ?", (when, lead_id))
@@ -154,7 +155,7 @@ def test_reserve_creates_1h_window(user_and_client):
     assert lead["lead_status"] == "reserved"
     expires = _parse(lead["stage_expires_at"])
     assert expires is not None, "reserva não definiu stage_expires_at"
-    delta = expires - datetime.utcnow()
+    delta = expires - utcnow()
     assert timedelta(minutes=50) < delta <= timedelta(minutes=61), delta
 
 
@@ -166,7 +167,7 @@ def test_contact_opens_48h_window(user_and_client):
     db_service._service.record_contact(lead_id, user_id, "sms")
     lead = _lead(lead_id)
     assert lead["lead_status"] == "contacted"
-    delta = _parse(lead["stage_expires_at"]) - datetime.utcnow()
+    delta = _parse(lead["stage_expires_at"]) - utcnow()
     assert timedelta(hours=STAGE_HOURS - 1) < delta <= timedelta(hours=STAGE_HOURS), delta
 
 
@@ -195,7 +196,7 @@ def test_negotiate_opens_new_48h_window(user_and_client):
 
     lead = _lead(lead_id)
     assert lead["lead_status"] == "in_negotiation"
-    delta = _parse(lead["stage_expires_at"]) - datetime.utcnow()
+    delta = _parse(lead["stage_expires_at"]) - utcnow()
     assert timedelta(hours=STAGE_HOURS - 1) < delta <= timedelta(hours=STAGE_HOURS), delta
 
 
@@ -272,7 +273,7 @@ def test_engaged_leads_are_not_touched_by_1h_watchdog(user_and_client):
     # 61 min desde a reserva, sem tocar no prazo da fase (48h).
     conn = get_connection()
     try:
-        past = (datetime.utcnow() - timedelta(minutes=61)).strftime("%Y-%m-%d %H:%M:%S")
+        past = (utcnow() - timedelta(minutes=61)).strftime("%Y-%m-%d %H:%M:%S")
         conn.execute("UPDATE lead_reveals SET revealed_at = ? WHERE lead_id = ? AND user_id = ?", (past, lead_id, user_id))
         conn.execute("UPDATE leads SET reserved_until = ? WHERE id = ?", (past, lead_id))
         conn.commit()
@@ -324,7 +325,7 @@ def test_access_survives_utc_day_change(user_and_client):
     # Simula reveal criado "ontem".
     conn = get_connection()
     try:
-        yesterday = (datetime.utcnow().date() - timedelta(days=1)).isoformat()
+        yesterday = (utcnow().date() - timedelta(days=1)).isoformat()
         conn.execute(
             "UPDATE lead_reveals SET revealed_date = ? WHERE lead_id = ? AND user_id = ?",
             (yesterday, lead_id, user_id),
@@ -350,7 +351,7 @@ def test_next_day_reserve_does_not_recharge(user_and_client):
 
     conn = get_connection()
     try:
-        yesterday = (datetime.utcnow().date() - timedelta(days=1)).isoformat()
+        yesterday = (utcnow().date() - timedelta(days=1)).isoformat()
         conn.execute(
             "UPDATE lead_reveals SET revealed_date = ? WHERE lead_id = ? AND user_id = ?",
             (yesterday, lead_id, user_id),

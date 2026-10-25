@@ -15,6 +15,7 @@ import httpx
 from ..config import settings
 from ..models.schemas import EnrichedLead
 from ..utils.logger import logger
+from ..utils.time import utcnow
 from .access import (
     STATUS_ACTIVE,
     STATUS_TRIAL,
@@ -1846,17 +1847,17 @@ class DatabaseService:
     def fail_stale_sending_outbound_messages(self, older_than: str) -> int:
         """Marca como 'failed' as mensagens presas em 'sending' ha demasiado tempo.
 
-        Happens quando o processo morre entre o claim e o `status='sent'`
-        (deploy, OOM, restart): sem isto, a mensagem ficava em 'sending' PARA
-        SEMPRE — credito de enriquecimento gasto, lead contactado, e-mail
-        nunca enviado, e sem qualquer aviso.
+        O `claimed_at` e' gravado no claim atomico. Mensagens em 'sending' sem
+        `claimed_at` (linhas anteriores a essa coluna existir) usam
+        `queued_at`/`created_at` como fallback — sem isso ficariam presas para
+        sempre, que era o bug que o reaper devia resolver.
 
-        Semantica: at-most-once. Nao reenfileiramos, porque nao sabemos se
-        o envio chegou a acontecer (e um e-mail frio duplicado e' pior do que
-        um e-mail perdido). O lead NAO e' consumido pelo outbound, pelo que a
-        unica perda real e' o credito de enriquecimento e um toque.
+        O UPDATE e' UMA instrucao condicional: se dois workers/reapers correrem
+        em paralelo, o SQLite serializa os escritores e so' um transita cada
+        linha (o outro ve' rowcount 0). Nunca reenvia: at-most-once.
 
-        `next_step_at` e' preservado: a sequencia (passo 2) continua agendada.
+        `next_step_at` e' preservado (metadado; a sequencia so' parte de
+        mensagens `sent`).
         """
         conn = get_connection()
         try:
@@ -1864,12 +1865,14 @@ class DatabaseService:
                 "UPDATE outbound_messages SET status='failed', "
                 "error='stale sending claim (processo terminado a meio do envio)', "
                 "claimed_at=NULL "
-                "WHERE status='sending' AND claimed_at IS NOT NULL AND claimed_at < ?",
+                "WHERE status='sending' "
+                "AND COALESCE(claimed_at, queued_at, created_at) < ?",
                 (older_than,),
             )
             conn.commit()
             return cur.rowcount
-        except Exception:
+        except Exception as e:
+            logger.warning("[OUTBOUND] falha ao limpar 'sending' presos: %s", e)
             return 0
         finally:
             conn.close()
@@ -1880,7 +1883,8 @@ class DatabaseService:
         try:
             row = conn.execute(
                 "SELECT COUNT(*) AS c FROM outbound_messages "
-                "WHERE status='sending' AND claimed_at IS NOT NULL AND claimed_at < ?",
+                "WHERE status='sending' "
+                "AND COALESCE(claimed_at, queued_at, created_at) < ?",
                 (older_than,),
             ).fetchone()
             return int(row["c"])
@@ -3318,7 +3322,7 @@ class DatabaseService:
             user = conn.execute("SELECT plan_until FROM users WHERE id = ?", (user_id,)).fetchone()
             if not user:
                 return None
-            now = datetime.utcnow()
+            now = utcnow()
             current = self._parse_dt(user["plan_until"])
             base = max(now, current) if current else now
             new_until = base + timedelta(days=days)
@@ -3975,7 +3979,7 @@ class DatabaseService:
         """Números de topo para o painel admin (tudo em UTC, hoje = UTC)."""
         conn = get_connection()
         try:
-            today = datetime.utcnow().date().isoformat()
+            today = utcnow().date().isoformat()
 
             def scalar(sql: str, params: tuple = ()) -> int:
                 row = conn.execute(sql, params).fetchone()
@@ -4028,7 +4032,7 @@ class DatabaseService:
             ).fetchone()
 
             return {
-                "generated_at": datetime.utcnow().isoformat(),
+                "generated_at": utcnow().isoformat(),
                 "today": today,
                 "leads": {
                     "total": total_leads,
@@ -4544,7 +4548,7 @@ class DatabaseService:
         try:
             dlq_dir = self._notification_dlq_dir()
             os.makedirs(dlq_dir, exist_ok=True)
-            filename = f"notif_{datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')}_{user_id}.json"
+            filename = f"notif_{utcnow().strftime('%Y%m%d_%H%M%S_%f')}_{user_id}.json"
             path = os.path.join(dlq_dir, filename)
             payload = {
                 "user_id": user_id,
@@ -4553,7 +4557,7 @@ class DatabaseService:
                 "message": message,
                 "lead_id": lead_id,
                 "error": error,
-                "saved_at": datetime.utcnow().isoformat(),
+                "saved_at": utcnow().isoformat(),
             }
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False, indent=2)
@@ -4944,7 +4948,7 @@ class DatabaseService:
             ).fetchone()
             if pen and pen["penalty_level"] == self.PENALTY_LEVEL_SUSPENDED:
                 penalizado_ate = pen["penalty_until"] or ""
-                if penalizado_ate >= datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"):
+                if penalizado_ate >= utcnow().strftime("%Y-%m-%d %H:%M:%S"):
                     return {"error": "suspended", "penalty_until": penalizado_ate}
                 else:
                     conn.execute(
@@ -4957,7 +4961,7 @@ class DatabaseService:
                     "SELECT expires_at FROM lead_holds WHERE user_id = ? ORDER BY id DESC LIMIT 1",
                     (user_id,),
                 ).fetchone()
-                if last_hold and last_hold["expires_at"] and last_hold["expires_at"] > datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"):
+                if last_hold and last_hold["expires_at"] and last_hold["expires_at"] > utcnow().strftime("%Y-%m-%d %H:%M:%S"):
                     return {"error": "reduced_delay", "message": "Prioridade reduzida: aguarde 5min entre reservas"}
             lead = conn.execute("SELECT * FROM leads WHERE id = ?", (lead_id,)).fetchone()
             if not lead:
@@ -5058,7 +5062,7 @@ class DatabaseService:
         releases_this_month = (row["releases_this_month"] or 0) + 1 if row else 1
         suspicious_releases = (row["suspicious_releases"] or 0) + (1 if suspicious else 0) if row else (1 if suspicious else 0)
 
-        now = datetime.utcnow()
+        now = utcnow()
         _now_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
         penalty_level = (row["penalty_level"] or 0) if row else 0
@@ -5237,7 +5241,7 @@ class DatabaseService:
         """
         conn = get_connection()
         try:
-            now = datetime.utcnow()
+            now = utcnow()
             rows = conn.execute(
                 """
                 SELECT l.*, h.held_at, h.expires_at AS hold_expires_at, h.released_at AS hold_released_at,
@@ -5704,7 +5708,7 @@ class DatabaseService:
             # os ciclos de 6h). Agora o valor só muda quando um lote novo conclui.
             last_run = self.get_last_scrape_run() or {}
             last_24h_cutoff_str = (
-                datetime.utcnow() - timedelta(hours=24)
+                utcnow() - timedelta(hours=24)
             ).strftime("%Y-%m-%d %H:%M:%S")
             captured_24h = sum(
                 1 for r in rows
@@ -5715,7 +5719,7 @@ class DatabaseService:
             )
             # Amostra dos leads recentes apenas para o TEXTO informativo
             # (cidades/fontes e horário). Não define mais o número exibido.
-            recent_cutoff_str = (datetime.utcnow() - timedelta(hours=2)).strftime(
+            recent_cutoff_str = (utcnow() - timedelta(hours=2)).strftime(
                 "%Y-%m-%d %H:%M:%S"
             )
             recent = [
@@ -5954,16 +5958,16 @@ class DatabaseService:
                 "circuit_open_until": None,
                 "last_success_at": None,
                 "anomaly_counter": 0,
-                "last_seen_at": datetime.utcnow().isoformat(),
-                "updated_at": datetime.utcnow().isoformat(),
+                "last_seen_at": utcnow().isoformat(),
+                "updated_at": utcnow().isoformat(),
             }
         except Exception as e:
             logger.error(f"Erro ao ler city_health para {city}: {e}")
             return {
                 "city": city, "failure_count": 0, "circuit_open_until": None,
                 "last_success_at": None, "anomaly_counter": 0,
-                "last_seen_at": datetime.utcnow().isoformat(),
-                "updated_at": datetime.utcnow().isoformat(),
+                "last_seen_at": utcnow().isoformat(),
+                "updated_at": utcnow().isoformat(),
             }
         finally:
             conn.close()
@@ -5984,7 +5988,7 @@ class DatabaseService:
         """Registra sucesso da cidade: reseta failure_count, atualiza last_success_at,
         e auto-recupera circuit breaker se estava aberto."""
         conn = get_connection()
-        now = datetime.utcnow().isoformat()
+        now = utcnow().isoformat()
         try:
             conn.execute(
                 """
@@ -6009,7 +6013,7 @@ class DatabaseService:
         """Registra falha da cidade. Retorna estado atualizado.
         Se failure_count >= 3, abre circuit breaker por 1 hora."""
         conn = get_connection()
-        now = datetime.utcnow().isoformat()
+        now = utcnow().isoformat()
         circuit_open_until = None
         try:
             # Get current state
@@ -6022,7 +6026,7 @@ class DatabaseService:
             # Open circuit breaker after 3 consecutive failures
             if new_failures >= 3:
                 from datetime import timedelta
-                circuit_open_until = (datetime.utcnow() + timedelta(hours=1)).isoformat()
+                circuit_open_until = (utcnow() + timedelta(hours=1)).isoformat()
 
             conn.execute(
                 """
@@ -6053,7 +6057,7 @@ class DatabaseService:
         """Incrementa contador de anomalia (cidade zerou).
         Retorna novo valor do contador."""
         conn = get_connection()
-        now = datetime.utcnow().isoformat()
+        now = utcnow().isoformat()
         try:
             row = conn.execute(
                 "SELECT anomaly_counter FROM city_health WHERE city = ?", (city,)
@@ -6083,7 +6087,7 @@ class DatabaseService:
     def reset_anomaly_counter(self, city: str) -> None:
         """Reseta contador de anomalia após sucesso (cidade teve leads)."""
         conn = get_connection()
-        now = datetime.utcnow().isoformat()
+        now = utcnow().isoformat()
         try:
             conn.execute(
                 """
@@ -6136,7 +6140,7 @@ class DatabaseService:
                     "action": None,
                 }
 
-            now = datetime.utcnow()
+            now = utcnow()
             sub_status = normalize_status(user["subscription_status"])
             plan_until = parse_dt(user["plan_until"])
             can_access = is_access_active(user["subscription_status"], user["plan_until"], now)
@@ -6208,7 +6212,7 @@ class DatabaseService:
         """Inicia trial de 3 dias para novo usuário (UTC, usa coluna plan_until)."""
         conn = get_connection()
         try:
-            now = datetime.utcnow()
+            now = utcnow()
             trial_ends = now + timedelta(days=3)
             conn.execute(
                 "UPDATE users SET plan_until = ?, subscription_status = 'trial' WHERE id = ?",
@@ -6223,7 +6227,7 @@ class DatabaseService:
         """Ativa subscription paga de 1 semana ($120) (UTC, usa coluna plan_until)."""
         conn = get_connection()
         try:
-            now = datetime.utcnow()
+            now = utcnow()
             subscription_ends = now + timedelta(weeks=1)
             conn.execute(
                 """UPDATE users SET
@@ -6243,7 +6247,7 @@ class DatabaseService:
 
     def _utc_tomorrow_midnight(self) -> datetime:
         """Meia-noite próxima em UTC (reset do limite diário)."""
-        now = datetime.utcnow()
+        now = utcnow()
         tomorrow = now + timedelta(days=1)
         return tomorrow.replace(hour=0, minute=0, second=0, microsecond=0)
 
@@ -6251,7 +6255,7 @@ class DatabaseService:
         """Retorna leads usados hoje e limite (10) — reset em meia-noite UTC."""
         conn = get_connection()
         try:
-            today = datetime.utcnow().date().isoformat()
+            today = utcnow().date().isoformat()
             record = conn.execute(
                 "SELECT leads_used, leads_limit, reset_at FROM user_daily_stats WHERE user_id = ? AND date = ?",
                 (user_id, today)
@@ -6272,7 +6276,7 @@ class DatabaseService:
                     "limit": limit,
                     "remaining": max(0, limit - used),
                     "reset_at": reset_at.isoformat(),
-                    "reset_in_hours": round(max(0, (reset_at - datetime.utcnow()).total_seconds() / 3600), 2),
+                    "reset_in_hours": round(max(0, (reset_at - utcnow()).total_seconds() / 3600), 2),
                 }
             else:
                 return {
@@ -6280,7 +6284,7 @@ class DatabaseService:
                     "limit": limit,
                     "remaining": limit,
                     "reset_at": reset_at.isoformat(),
-                    "reset_in_hours": round(max(0, (reset_at - datetime.utcnow()).total_seconds() / 3600), 2),
+                    "reset_in_hours": round(max(0, (reset_at - utcnow()).total_seconds() / 3600), 2),
                 }
         finally:
             conn.close()
@@ -6289,7 +6293,7 @@ class DatabaseService:
         """Incrementa contador. Retorna True se dentro do limite (10). Reset em meia-noite UTC."""
         conn = get_connection()
         try:
-            today = datetime.utcnow().date().isoformat()
+            today = utcnow().date().isoformat()
             reset_at = self._utc_tomorrow_midnight().isoformat()
 
             record = conn.execute(
@@ -6421,7 +6425,7 @@ class DatabaseService:
         conn = get_connection()
         try:
             self._expire_lead_holds(conn)
-            today = datetime.utcnow().date().isoformat()
+            today = utcnow().date().isoformat()
 
             # 1. Lead existe?
             lead = conn.execute("SELECT * FROM leads WHERE id = ?", (lead_id,)).fetchone()
@@ -6566,7 +6570,7 @@ class DatabaseService:
         """Marca contact_flagged=1 no reveal ativo (emitir contato = parar watchdog)."""
         conn = get_connection()
         try:
-            today = datetime.utcnow().date().isoformat()
+            today = utcnow().date().isoformat()
             cur = conn.execute(
                 """UPDATE lead_reveals SET contact_flagged = 1
                    WHERE user_id = ? AND lead_id = ? AND revealed_date = ?
@@ -6585,7 +6589,7 @@ class DatabaseService:
         """
         conn = get_connection()
         try:
-            now = datetime.utcnow()
+            now = utcnow()
             rows = conn.execute(
                 """SELECT r.*, l.address, l.issue_category, l.owner_name
                    FROM lead_reveals r
@@ -6787,7 +6791,7 @@ class DatabaseService:
         """
         conn = get_connection()
         try:
-            today = datetime.utcnow().date().isoformat()
+            today = utcnow().date().isoformat()
 
             # 1. Busca o reveal ativo para este lead/usuário hoje
             reveal = None
@@ -6811,7 +6815,7 @@ class DatabaseService:
                 except Exception:
                     return {"allowed": False, "reason": "invalid_revealed_at", "revealed_at": None, "params": {}}
 
-                elapsed_min = (datetime.utcnow() - revealed_dt).total_seconds() / 60.0
+                elapsed_min = (utcnow() - revealed_dt).total_seconds() / 60.0
                 if elapsed_min > self.REPORT_WINDOW_MIN:
                     return {
                         "allowed": False,
@@ -6843,7 +6847,7 @@ class DatabaseService:
 
             # 4. Limite diário de estornos (Regra D) - SEMPRE verificado
             if check_daily_limit:
-                today = datetime.utcnow().date().isoformat()
+                today = utcnow().date().isoformat()
                 refund_count = conn.execute(
                     """SELECT COUNT(*) as cnt FROM lead_reveals
                        WHERE user_id = ? AND refunded = 1 AND revealed_date = ?""",
@@ -6865,7 +6869,7 @@ class DatabaseService:
                 if user_refund:
                     user_last_date = user_refund["last_refund_date"]
                     user_count = user_refund["refund_count_today"] or 0
-                    if user_last_date == datetime.utcnow().date().isoformat() and user_count >= self.MAX_REFUNDS_PER_DAY:
+                    if user_last_date == utcnow().date().isoformat() and user_count >= self.MAX_REFUNDS_PER_DAY:
                         return {
                             "allowed": False,
                             "reason": "daily_refund_limit_exceeded",
@@ -6939,7 +6943,7 @@ class DatabaseService:
         """
         conn = get_connection()
         try:
-            today = datetime.utcnow().date().isoformat()
+            today = utcnow().date().isoformat()
 
             # Re-valida permissões (defesa em profundidade) usando validação unificada
             safety = self.validate_refund_safety(
@@ -6969,7 +6973,7 @@ class DatabaseService:
             )
 
             # 2. Decrementa user_daily_stats (devolve a cota)
-            today = datetime.utcnow().date().isoformat()
+            today = utcnow().date().isoformat()
             stat = conn.execute(
                 "SELECT leads_used FROM user_daily_stats WHERE user_id = ? AND date = ?",
                 (user_id, today),
@@ -7050,7 +7054,7 @@ class DatabaseService:
         """Retorna status de estornos do usuário hoje."""
         conn = get_connection()
         try:
-            today = datetime.utcnow().date().isoformat()
+            today = utcnow().date().isoformat()
             refund_count = conn.execute(
                 "SELECT refund_count_today, last_refund_date FROM users WHERE id = ?", (user_id,)
             ).fetchone()
@@ -7458,7 +7462,7 @@ class DatabaseService:
                 ledger_balance = ledger["balance"]
 
                 # 2) Quota diária real (user_daily_stats de hoje)
-                today = datetime.utcnow().date().isoformat()
+                today = utcnow().date().isoformat()
                 uds = conn.execute(
                     "SELECT leads_used, leads_limit FROM user_daily_stats WHERE user_id = ? AND date = ?",
                     (uid, today),
@@ -7481,9 +7485,9 @@ class DatabaseService:
                 if user and user["plan_until"]:
                     try:
                         plan_until = datetime.fromisoformat(user["plan_until"].replace("Z", "+00:00"))
-                        if plan_until > datetime.utcnow():
+                        if plan_until > utcnow():
                             _plan_active = True
-                            _plan_days_left = max(0, (plan_until - datetime.utcnow()).days)
+                            _plan_days_left = max(0, (plan_until - utcnow()).days)
                     except Exception:
                         pass
 
@@ -7554,7 +7558,7 @@ class DatabaseService:
             token = secrets.token_urlsafe(32)
             token_hash = hashlib.sha256(token.encode()).hexdigest()
 
-            expires_at = datetime.utcnow() + timedelta(hours=expires_hours)
+            expires_at = utcnow() + timedelta(hours=expires_hours)
 
             conn.execute(
                 """INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
@@ -7583,7 +7587,7 @@ class DatabaseService:
                 return None
             if row["used"]:
                 return None
-            if datetime.fromisoformat(row["expires_at"]) < datetime.utcnow():
+            if datetime.fromisoformat(row["expires_at"]) < utcnow():
                 return None
 
             return row["user_id"]
@@ -7603,7 +7607,7 @@ class DatabaseService:
                 (token_hash,)
             ).fetchone()
 
-            if not row or row["used"] or datetime.fromisoformat(row["expires_at"]) < datetime.utcnow():
+            if not row or row["used"] or datetime.fromisoformat(row["expires_at"]) < utcnow():
                 return False
 
             # Atualiza senha
