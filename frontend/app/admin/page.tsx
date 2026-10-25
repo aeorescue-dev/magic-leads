@@ -229,7 +229,7 @@ function OutboundPanel() {
       const result = await sendAdminOutbound(sim.batch.id, city);
       setSendState({
         state: "ok",
-        message: `Lote #${result.batch_id} enfileirado: ${result.queued} destinatário(s) validado(s), ${
+        message: `Lote #${result.batch_id}: ${result.queued} de ${result.total_leads} lead(s) enfileirado(s); ${
           result.no_email
         } sem e-mail. O worker envia respeitando tetos e quiet hours.`,
       });
@@ -536,11 +536,16 @@ function OutboundPanel() {
         {/* resultado da simulação (custo + lote rascunho) */}
         {sim ? (
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
               <Kpi
                 label="Empreiteiros qualificados"
                 value={sim.qualified_available}
                 sub={`disponíveis em ${sim.city}`}
+              />
+              <Kpi
+                label="Com e-mail"
+                value={sim.sendable_recipients ?? 0}
+                sub="enfileiráveis agora"
               />
               <Kpi
                 label="Tamanho do lote"
@@ -562,6 +567,13 @@ function OutboundPanel() {
                 sub={sim.batch?.status ?? "—"}
               />
             </div>
+
+            {(sim.sendable_recipients ?? 0) === 0 ? (
+              <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-300">
+                Nenhum destinatário com e-mail nesta cidade: o lote enfileira 0. Importe
+                contatos B2B com e-mail antes de enviar o lote real.
+              </p>
+            ) : null}
 
             {sim.over_budget ? (
               <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-300">

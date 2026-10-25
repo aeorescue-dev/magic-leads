@@ -72,6 +72,12 @@ def _not_junk_where(alias: str = "") -> str:
     return f"NOT {_junk_where(alias)}"
 
 
+# Status de e-mail aceitos no envio e origens confiaveis (import/manual).
+# Fonte unica: o motor (`outbound_engine.is_sendable_contact`) e o diagnostico
+# do admin leem daqui, para nunca divergirem.
+SENDABLE_EMAIL_STATUSES: tuple[str, ...] = ("valid", "verified", "catch_all", "catch-all")
+TRUSTED_EMAIL_SOURCES: tuple[str, ...] = ("import", "manual")
+
 # As 16 categorias de ofícios da plataforma (modelo de negócio).
 _TRADE_CATEGORIES = (
     "Roof", "Structure", "Plumbing", "Grass", "Paint", "Permit_Rejected",
@@ -1905,7 +1911,7 @@ class DatabaseService:
             clean = [c for c in (categories or []) if c]
             if clean:
                 marks = ", ".join("?" for _ in clean)
-                cat_clause = f"AND issue_category IN ({marks}) "
+                cat_clause = f"AND (source_type = 'import_b2b' OR issue_category IN ({marks})) "
                 params.extend(clean)
             q = (
                 "SELECT COUNT(*) AS c FROM leads "
@@ -1919,11 +1925,89 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def count_outbound_recipients(self, city: str) -> int:
+        """Leads da cidade que ja' tem um destinatario contactavel (e-mail).
+
+        Mede o que o lote consegue REALMENTE enfileirar hoje: contacto em
+        `outbound_contacts` com e-mail e nao cancelado, ou lead B2B importado
+        com `owner_email` preenchido. E' o numero que o painel deve mostrar ao
+        lado das "oportunidades" (que sao o inventario, nao destinatarios).
+        """
+        if not city:
+            return 0
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) AS c FROM leads "
+                "WHERE UPPER(TRIM(city)) = UPPER(TRIM(?)) "
+                "AND (lead_status IS NULL OR lead_status = 'available') "
+                "AND ("
+                "  (source_type = 'import_b2b' AND COALESCE(owner_email, '') <> '') "
+                "  OR EXISTS ("
+                "    SELECT 1 FROM outbound_contacts oc "
+                "    WHERE oc.lead_id = leads.id "
+                "      AND COALESCE(oc.email, '') <> '' "
+                "      AND COALESCE(oc.unsubscribed, 0) = 0"
+                "  )"
+                ")",
+                (city,),
+            ).fetchone()
+            return int(row["c"])
+        finally:
+            conn.close()
+
+    def outbound_diagnostics(self, city: str) -> dict:
+        """Radiografia do funil para uma cidade (caixa preta do Lote #28).
+
+        Responde, so' com leituras: quantos leads existem, quantos ja' tem
+        e-mail, quantos vieram de import B2B e quantos contactos sao realmente
+        enfileiraveis. Serve para separar "inventario" de "destinatarios".
+        """
+        conn = get_connection()
+        try:
+            def one(sql: str, params: tuple = ()) -> int:
+                return int(conn.execute(sql, params).fetchone()[0])
+
+            city_where = "UPPER(TRIM(city)) = UPPER(TRIM(?))"
+            status_rows = conn.execute(
+                "SELECT COALESCE(email_status, 'NULL') AS status, COUNT(*) AS c "
+                f"FROM outbound_contacts WHERE {city_where} GROUP BY status",
+                (city,),
+            ).fetchall()
+            sendable_marks = ", ".join("?" for _ in SENDABLE_EMAIL_STATUSES)
+            return {
+                "city": city,
+                "leads_total": one(f"SELECT COUNT(*) FROM leads WHERE {city_where}", (city,)),
+                "leads_with_email": one(
+                    f"SELECT COUNT(*) FROM leads WHERE {city_where} "
+                    "AND COALESCE(owner_email, '') <> ''",
+                    (city,),
+                ),
+                "import_leads": one(
+                    f"SELECT COUNT(*) FROM leads WHERE {city_where} "
+                    "AND source_type = 'import_b2b'",
+                    (city,),
+                ),
+                "contacts_total": one(
+                    f"SELECT COUNT(*) FROM outbound_contacts WHERE {city_where}", (city,)
+                ),
+                "contacts_by_status": {r["status"]: int(r["c"]) for r in status_rows},
+                "contacts_sendable": one(
+                    f"SELECT COUNT(*) FROM outbound_contacts WHERE {city_where} "
+                    "AND COALESCE(email, '') <> '' AND COALESCE(unsubscribed, 0) = 0 "
+                    f"AND (LOWER(COALESCE(email_status, '')) IN ({sendable_marks}) "
+                    f"OR LOWER(COALESCE(email_source, '')) IN ({', '.join('?' for _ in TRUSTED_EMAIL_SOURCES)}))",
+                    (city, *SENDABLE_EMAIL_STATUSES, *TRUSTED_EMAIL_SOURCES),
+                ),
+                "recipients": self.count_outbound_recipients(city),
+            }
+        finally:
+            conn.close()
+
     def get_outbound_sample_lead(
         self, city: str, categories: Optional[List[str]] = None
     ) -> Optional[dict]:
         """Uma linha REAL qualificada da cidade, para a prévia do template.
-
         Devolve os campos que o e-mail usa (empresa/proprietário, endereço,
         categoria, estado) do lead mais recente que casa o filtro. Serve para o
         painel mostrar exatamente o e-mail que sairia, com dados reais.
@@ -1939,7 +2023,7 @@ class DatabaseService:
             clean = [c for c in (categories or []) if c]
             if clean:
                 marks = ", ".join("?" for _ in clean)
-                cat_clause = f"AND issue_category IN ({marks}) "
+                cat_clause = f"AND (source_type = 'import_b2b' OR issue_category IN ({marks})) "
                 params.extend(clean)
             q = (
                 "SELECT owner_name, address, city, COALESCE(state, '') AS state, "
@@ -2067,7 +2151,7 @@ class DatabaseService:
             clean = [c for c in (categories or []) if c]
             if clean:
                 marks = ", ".join("?" for _ in clean)
-                cat_clause = f"AND issue_category IN ({marks}) "
+                cat_clause = f"AND (source_type = 'import_b2b' OR issue_category IN ({marks})) "
                 params.extend(clean)
             params.append(int(limit))
             q = (
@@ -2081,12 +2165,22 @@ class DatabaseService:
                 f"{cat_clause}"
                 "AND NOT EXISTS ("
                 "  SELECT 1 FROM outbound_contacts oc "
-                "  JOIN outbound_messages om ON om.to_email = oc.email "
+                "  JOIN outbound_messages om ON LOWER(om.to_email) = LOWER(oc.email) "
                 "  WHERE oc.lead_id = leads.id "
                 "    AND oc.email IS NOT NULL "
                 "    AND om.status IN ('queued', 'sending', 'sent')"
                 ") "
-                "ORDER BY COALESCE(date_reported, '') DESC LIMIT ?"
+                # Destinatarios ja' contactaveis primeiro: um lote de 200 nunca
+                # deve gastar as suas vagas em permissoes sem e-mail enquanto
+                # existem leads B2B com e-mail valido na mesma cidade.
+                "ORDER BY ("
+                "  SELECT COUNT(*) FROM outbound_contacts oc2 "
+                "  WHERE oc2.lead_id = leads.id "
+                "    AND COALESCE(oc2.email, '') <> '' "
+                "    AND COALESCE(oc2.unsubscribed, 0) = 0"
+                ") DESC, "
+                "(COALESCE(owner_email, '') <> '') DESC, "
+                "COALESCE(date_reported, '') DESC LIMIT ?"
             )
             return [dict(r) for r in conn.execute(q, params).fetchall()]
         finally:
@@ -2095,8 +2189,14 @@ class DatabaseService:
     def get_outbound_contact_by_lead(self, lead_id: int) -> Optional[dict]:
         conn = get_connection()
         try:
+            # Prefere um contacto ENVIAVEL (com e-mail e nao cancelado). O
+            # `ORDER BY id DESC` antigo podia devolver a linha mais recente
+            # (ex.: e-mail vazio/`unknown`), escondendo um `valid` anterior.
             row = conn.execute(
-                "SELECT * FROM outbound_contacts WHERE lead_id=? ORDER BY id DESC LIMIT 1",
+                "SELECT * FROM outbound_contacts WHERE lead_id=? "
+                "ORDER BY (COALESCE(email, '') <> '' AND COALESCE(unsubscribed, 0) = 0) DESC, "
+                "CASE WHEN LOWER(COALESCE(email_status, '')) IN ('valid', 'verified') "
+                "THEN 0 ELSE 1 END, id DESC LIMIT 1",
                 (int(lead_id),),
             ).fetchone()
             return dict(row) if row else None
@@ -2185,15 +2285,42 @@ class DatabaseService:
 
         default_states = {"NYC": "NY", "CHICAGO": "IL", "DALLAS": "TX", "BOSTON": "MA"}
         st = (state or "").strip().upper() or default_states.get(clean_city, "NY")
+        # `leads` exige external_id/address/date_reported (NOT NULL). O INSERT
+        # antigo omitia os tres, rebentava e o except silencioso devolvia None:
+        # nenhum lead B2B entrava na BD (lote saia sempre com 0 e-mails).
+        external_id = f"b2b:{clean_email}"
 
         conn = get_connection()
         try:
-            cur = conn.execute(
-                "INSERT INTO leads (source_type, owner_name, owner_email, city, state, issue_category, lead_status, created_at, updated_at) "
-                "VALUES ('import_b2b', ?, ?, ?, ?, ?, 'available', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
-                (company_name, clean_email, clean_city, st, category),
+            conn.execute(
+                "INSERT OR IGNORE INTO leads "
+                "(external_id, source_type, address, city, state, issue_category, "
+                "issue_description, owner_name, owner_email, case_status, date_reported, "
+                "lead_status, created_at, updated_at) "
+                "VALUES (?, 'import_b2b', '', ?, ?, ?, ?, ?, ?, 'open', CURRENT_TIMESTAMP, "
+                "'available', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                (
+                    external_id,
+                    clean_city,
+                    st,
+                    category,
+                    f"B2B contact import ({category})",
+                    company_name,
+                    clean_email,
+                ),
             )
-            lead_id = cur.lastrowid
+            lead_row = conn.execute(
+                "SELECT id FROM leads WHERE external_id=? AND source_type='import_b2b'",
+                (external_id,),
+            ).fetchone()
+            if not lead_row:
+                logger.error(
+                    "[OUTBOUND] import_b2b nao criou lead para %s (cidade %s)",
+                    clean_email,
+                    clean_city,
+                )
+                return None
+            lead_id = lead_row["id"]
 
             conn.execute(
                 "INSERT INTO outbound_contacts "
@@ -2207,7 +2334,7 @@ class DatabaseService:
                 "company_name=COALESCE(excluded.company_name, outbound_contacts.company_name), "
                 "contact_name=COALESCE(excluded.contact_name, outbound_contacts.contact_name), "
                 "company_domain=COALESCE(excluded.company_domain, outbound_contacts.company_domain), "
-                "lead_id=COALESCE(outbound_contacts.lead_id, excluded.lead_id)",
+                "lead_id=excluded.lead_id",
                 (
                     lead_id,
                     company_name,
@@ -2222,6 +2349,9 @@ class DatabaseService:
             r = conn.execute("SELECT * FROM outbound_contacts WHERE email=?", (clean_email,)).fetchone()
             return dict(r) if r else None
         except Exception:
+            logger.exception(
+                "[OUTBOUND] Falha ao importar lead B2B %s (%s)", clean_email, clean_city
+            )
             return None
         finally:
             conn.close()
@@ -8549,6 +8679,14 @@ class AsyncDatabaseService:
         return await anyio.to_thread.run_sync(
             self._service.count_qualified_contractors_in_city, city, categories
         )
+
+    async def count_outbound_recipients(self, city: str) -> int:
+        return await anyio.to_thread.run_sync(
+            self._service.count_outbound_recipients, city
+        )
+
+    async def outbound_diagnostics(self, city: str) -> dict:
+        return await anyio.to_thread.run_sync(self._service.outbound_diagnostics, city)
 
     async def get_outbound_sample_lead(
         self, city: str, categories: Optional[List[str]] = None

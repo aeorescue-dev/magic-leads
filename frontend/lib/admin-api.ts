@@ -421,6 +421,7 @@ export interface AdminOutboundPreview {
 export interface AdminOutboundSimulation extends Omit<AdminOutboundPreview, "city" | "count"> {
   city: string;
   qualified_available: number;
+  sendable_recipients: number;
   batch_size: number;
   configured_batch_size: number;
   config: OutboundConfig;

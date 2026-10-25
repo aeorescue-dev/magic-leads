@@ -18,7 +18,12 @@ from typing import Any, Optional
 from ..config import settings
 from ..utils.logger import logger
 from . import outbound_templates
-from .db import SERVED_CITIES, db_service
+from .db import (
+    SENDABLE_EMAIL_STATUSES,
+    SERVED_CITIES,
+    TRUSTED_EMAIL_SOURCES,
+    db_service,
+)
 from .enrichment_emaillistverify import emaillistverify_service
 from .gmail import gmail_sender
 
@@ -36,6 +41,26 @@ def _float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+# Status de e-mail aceitos no envio. `valid` e' o gate historico; `verified` e
+# `catch_all` vem dos provedores de verificacao. Contactos de origem
+# `import`/`manual` entraram ja' com e-mail fornecido pelo operador/fornecedor,
+# por isso nao dependem do status gravado (imports antigos podiam gravar NULL).
+# Fonte unica: `db.py` (o diagnostico do admin usa as mesmas listas).
+def is_sendable_contact(contact: Optional[dict]) -> bool:
+    """Verdadeiro quando o contacto tem e-mail preenchido e pode receber copy."""
+    if not contact:
+        return False
+    if not str(contact.get("email") or "").strip():
+        return False
+    if _int(contact.get("unsubscribed"), 0):
+        return False
+    source = str(contact.get("email_source") or "").strip().lower()
+    if source in TRUSTED_EMAIL_SOURCES:
+        return True
+    status = str(contact.get("email_status") or "").strip().lower()
+    return status in SENDABLE_EMAIL_STATUSES
 
 
 def _parse_json(value: Any) -> dict:
@@ -182,7 +207,13 @@ class OutboundEngine:
 
         for lead in leads:
             contact = await db_service.get_outbound_contact_by_lead(lead["id"])
-            if contact and contact.get("email_status") == "valid" and not contact.get("unsubscribed"):
+            if not contact and lead.get("owner_email"):
+                # Import B2B: o e-mail tambem esta no proprio lead, caso a
+                # linha de `outbound_contacts` tenha ficado noutro lead.
+                contact = await db_service.get_outbound_contact_by_email(
+                    lead["owner_email"]
+                )
+            if is_sendable_contact(contact):
                 pass  # reaproveita contacto validado
             elif enrich_enabled and enrichment_left > 0 and spend_total < max_spend:
                 result = await emaillistverify_service.find_and_verify(
@@ -515,13 +546,9 @@ class OutboundEngine:
                 if message.get("to_email")
                 else None
             )
-            if (
-                not contact
-                or contact.get("email_status") != "valid"
-                or contact.get("unsubscribed")
-            ):
+            if not is_sendable_contact(contact):
                 await db_service.update_outbound_message(
-                    message["id"], status="skipped", error="email not confirmed valid"
+                    message["id"], status="skipped", error="email not sendable"
                 )
                 skipped += 1
                 continue

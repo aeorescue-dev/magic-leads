@@ -56,7 +56,6 @@ from .services import alert_planner, notifier, outbound_templates, security
 from .services.db import (  # noqa: F401  — usados nos filtros de qualificação
     _OPEN_STATUSES,
     _TRADE_CATEGORIES,
-    SERVED_CITIES,
     _address_where,
     _category_where,
     _junk_where,
@@ -1661,6 +1660,40 @@ def _build_outbound_preview(
     }
 
 
+@app.get("/api/admin/outbound/diagnostics")
+async def admin_outbound_diagnostics(
+    city: str = "NYC",
+    niche: str = "",
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Radiografia do funil outbound: leads x e-mails x enfileiraveis.
+
+    Responde em producao (SQLite do volume) sem precisar de shell: quantos
+    leads existem na cidade, quantos tem e-mail, quantos vieram de import B2B,
+    quantos contactos estao `valid`/`verified` e quantos podem entrar na fila.
+    """
+    city = (city or "").strip().upper()
+    if not city:
+        raise HTTPException(status_code=400, detail="Cidade obrigatoria")
+    niche = (niche or "").strip() or outbound_templates.DEFAULT_NICHE
+    if niche not in outbound_templates.NICHES:
+        raise HTTPException(status_code=400, detail="Nicho invalido")
+
+    categories = outbound_templates.niche_categories(niche)
+    data = await db_service.outbound_diagnostics(city)
+    pool = await db_service.list_outbound_leads(city, categories, 200)
+    data.update(
+        {
+            "niche": niche,
+            "qualified_available": await db_service.count_qualified_contractors_in_city(
+                city, categories
+            ),
+            "batch_pool_200": len(pool),
+        }
+    )
+    return data
+
+
 @app.get("/api/admin/outbound/config")
 async def admin_outbound_config(_admin: dict = Depends(_require_admin_user)):
     """Config isolada por cidade + global, para o selector do painel (dinâmico)."""
@@ -1693,8 +1726,10 @@ async def admin_outbound_update_config(
     Desligar `send_enabled` e' sempre permitido e para imediatamente o worker.
     """
     city = (payload.city or "").strip().upper()
-    if city and city not in SERVED_CITIES:
-        raise HTTPException(status_code=400, detail="Cidade nao servida")
+    if city:
+        available = await db_service.get_available_outbound_cities()
+        if city not in available:
+            raise HTTPException(status_code=400, detail="Cidade sem leads/contactos")
     if payload.send_enabled is None and payload.enrich_enabled is None:
         raise HTTPException(status_code=400, detail="Nada para atualizar")
 
@@ -1775,8 +1810,9 @@ async def admin_outbound_preview(
     (ingles americano), pronto a rever/editar no painel antes de aprovar.
     """
     city = (payload.city or "").strip().upper()
-    if city not in SERVED_CITIES:
-        raise HTTPException(status_code=400, detail="Cidade nao servida")
+    available_cities = await db_service.get_available_outbound_cities()
+    if city not in available_cities:
+        raise HTTPException(status_code=400, detail="Cidade sem leads/contactos")
 
     niche = (payload.niche or "").strip() or outbound_templates.DEFAULT_NICHE
     if niche not in outbound_templates.NICHES:
@@ -1804,8 +1840,9 @@ async def admin_outbound_simulate(
     RASCUNHO (`dry_run=1`, status='previewed') so' para auditoria.
     """
     city = (payload.city or "").strip().upper()
-    if city not in SERVED_CITIES:
-        raise HTTPException(status_code=400, detail="Cidade nao servida")
+    available_cities = await db_service.get_available_outbound_cities()
+    if city not in available_cities:
+        raise HTTPException(status_code=400, detail="Cidade sem leads/contactos")
 
     niche = (payload.niche or "").strip() or outbound_templates.DEFAULT_NICHE
     if niche not in outbound_templates.NICHES:
@@ -1814,6 +1851,8 @@ async def admin_outbound_simulate(
     categories = outbound_templates.niche_categories(niche)
     config = await db_service.get_outbound_config(city)
     qualified = await db_service.count_qualified_contractors_in_city(city, categories)
+    # Inventario != destinatarios: so' estes podem entrar na fila hoje.
+    sendable_recipients = await db_service.count_outbound_recipients(city)
 
     try:
         configured = int(config.get("batch_size") or 0)
@@ -1852,6 +1891,7 @@ async def admin_outbound_simulate(
         "city": city,
         "niche": niche,
         "qualified_available": qualified,
+        "sendable_recipients": sendable_recipients,
         "batch_size": batch_size,
         "configured_batch_size": configured,
         "config": config,
@@ -1886,11 +1926,7 @@ async def admin_outbound_send(
     O worker assincrono e' quem envia, respeitando tetos e quiet hours.
     """
     city = (payload.city or "").strip().upper()
-    config = (
-        await db_service.get_outbound_config(city)
-        if city in SERVED_CITIES
-        else await db_service.get_outbound_config()
-    )
+    config = await db_service.get_outbound_config(city or None)
     if config.get("send_enabled") != "1":
         raise HTTPException(
             status_code=409,
