@@ -195,11 +195,20 @@ class Settings(BaseSettings):
     EMAILLISTVERIFY_API_KEY: str = ""
     EMAILLISTVERIFY_TIMEOUT_SECONDS: float = 20.0
     # Custo unitario por credito (usado na telemetria/orcamento do lote).
-    EMAILLISTVERIFY_PER_CREDIT_USD: float = 0.00699
+    EMAILLISTVERIFY_PER_CREDIT_USD: float = 0.0027
     # Creditos por operacao: verifyEmail=1, findContact (nome)=5, (dominio)=10.
     EMAILLISTVERIFY_VERIFY_CREDITS: int = 1
     EMAILLISTVERIFY_FIND_CREDITS_NAMED: int = 5
     EMAILLISTVERIFY_FIND_CREDITS_DOMAIN: int = 10
+
+    # ---------------------------------------------------------------- Discovery (Descoberta)
+    # Motor de descoberta automatica de e-mails corporativos (OpenStreetMap,
+    # heuristica de dominio, permutacao e validacao SMTP RCPT $0 com ELV fallback).
+    DISCOVERY_ENABLED: bool = True
+    DISCOVERY_DAILY_CAP_PER_CITY: int = 200
+    DISCOVERY_PER_LEAD_TIMEOUT: float = 30.0
+    DISCOVERY_WORKERS: int = 4
+    DISCOVERY_CACHE_MAX_AGE_HOURS: float = 24.0
 
     # Gmail API (Google Workspace OAuth2). Cada caixa pode guardar as suas
     # credenciais em `sending_mailboxes.auth_ref` (JSON); estas env vars sao o
