@@ -649,7 +649,9 @@ def test_outbound_config_lists_served_cities_with_send_disabled(admin_client):
     r = client.get("/api/admin/outbound/config", headers=headers)
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["cities"] == ["NYC", "CHICAGO", "DALLAS", "BOSTON"]
+    # Cidades sao auto-descobertas (seed + base) e devolvidas por ordem alfabetica.
+    assert {"NYC", "CHICAGO", "DALLAS", "BOSTON"}.issubset(set(body["cities"]))
+    assert body["cities"] == sorted(body["cities"])
     assert body["send_enabled"] is False
     for city in body["cities"]:
         assert city in body["per_city"]
