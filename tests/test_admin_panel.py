@@ -924,7 +924,7 @@ def test_outbound_build_context_personalization_fallbacks():
     assert c["contact_name"] == "there"
     body = ot.render(ot.get_template("roofing")["body"], c)
     assert "Would your team be open" in body
-    assert "Hi there," in body
+    assert "Hi," in body
 
     # Empresa generica -> "your team".
     assert _ctx(company="your company")["company_name"] == "your team"
@@ -933,26 +933,20 @@ def test_outbound_build_context_personalization_fallbacks():
     assert _ctx(company="5 Star Plumbing LLC")["company_name"] == "5 Star Plumbing LLC"
 
 
-def test_outbound_copy_count_floor_and_rounding():
-    """{count} do copy: piso 40+ e arredondamento para multiplos de 10."""
+def test_outbound_copy_count_is_exact():
+    """{count} do copy mostra o numero real, sem piso 40+ nem arredondamento."""
     from backend.services import outbound_templates as ot
 
-    # Abaixo do piso -> "40+".
-    assert ot.copy_count(0) == "40+"
-    assert ot.copy_count(1) == "40+"
-    assert ot.copy_count(3) == "40+"
-    assert ot.copy_count(39) == "40+"
-    # No piso e acima (ate' 99) -> numero real.
+    assert ot.copy_count(0) == "0"
+    assert ot.copy_count(1) == "1"
+    assert ot.copy_count(3) == "3"
+    assert ot.copy_count(39) == "39"
     assert ot.copy_count(40) == "40"
     assert ot.copy_count(47) == "47"
-    assert ot.copy_count(63) == "63"
-    assert ot.copy_count(99) == "99"
-    # 100+ -> arredonda para baixo ao multiplo de 10.
-    assert ot.copy_count(100) == "100"
-    assert ot.copy_count(203) == "200"
-    # Entradas invalidas nunca rebentam e caem no piso.
-    assert ot.copy_count(None) == "40+"
-    assert ot.copy_count("nope") == "40+"
+    assert ot.copy_count(203) == "203"
+    # Entradas invalidas nunca rebentam: caem em "0".
+    assert ot.copy_count(None) == "0"
+    assert ot.copy_count("nope") == "0"
 
 
 def test_outbound_address_tail_is_conditional():
@@ -966,7 +960,7 @@ def test_outbound_address_tail_is_conditional():
         50,
     )
     assert with_addr["address_tail"] == (
-        ", including a verified project near 329 BERRY STREET"
+        ", including an active public record notice near 329 BERRY STREET"
     )
     body = ot.render(ot.get_template("roofing")["body"], with_addr)
     assert "near 329 BERRY STREET" in body
@@ -978,7 +972,7 @@ def test_outbound_address_tail_is_conditional():
         "roofing",
         50,
     )
-    assert no_addr["address_tail"] == ", including verified projects across New York City"
+    assert no_addr["address_tail"] == ", including active public record notices across New York City"
     body2 = ot.render(ot.get_template("roofing")["body"], no_addr)
     assert "across New York City" in body2
     assert "a property in your area" not in body2
@@ -1103,9 +1097,9 @@ def test_outbound_preview_falls_back_to_lead_owner_without_enrichment(admin_clie
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["sample_source"] == "lead_owner_fallback"
-    # Owner utilizavel vira saudacao "<Empresa> team" (a empresa so' entra na
-    # saudacao; o corpo endurecido nao cita o nome da empresa).
-    assert "Hi LONE STAR BUILDERS LLC team," in body["preview"]["body"]
+    # F6 aprovado: sem contacto nominal a saudacao e' limpa ("Hi,"), sem
+    # interpolar o nome da empresa.
+    assert body["preview"]["body"].startswith("Hi,")
 
 
 def test_outbound_preview_uses_enriched_contact_when_available(admin_client):

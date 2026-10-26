@@ -59,16 +59,11 @@ def test_infer_category_ex_flags_generic_fallback():
         assert cat == IssueCategory.STRUCTURE
 
 
-def test_infer_category_ex_known_false_positive_indoor():
-    """Limitacao CONHECIDA: "indoor" contem "door" -> classifica como porta.
-
-    Match por substring, nao por palavra. Medido: 23 registos por ciclo no
-    311 de NYC (~1,5% da fonte). O impacto e' pequeno demais para justificar
-    mexer no classificador nuclear neste momento — fica documentado.
-    """
+def test_infer_category_ex_indoor_is_not_door():
+    """F1: "Indoor Air Quality" NAO deve casar com "door" (word boundary)."""
     cat, matched = socrata_scraper._infer_category_ex("Indoor Air Quality")
-    assert matched is True
-    assert cat == IssueCategory.DOOR_WINDOW
+    assert matched is False
+    assert cat == IssueCategory.STRUCTURE
 
 
 def test_infer_category_ex_legal_source_is_always_a_trade():

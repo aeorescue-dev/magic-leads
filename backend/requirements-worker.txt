@@ -1,0 +1,7 @@
+# Dependencias do micro-worker SMTP (VPS dedicado com porta 25 aberta).
+# Instalar no VPS: pip install -r backend/requirements-worker.txt
+# NAO e' necessaria no Railway: o backend apenas chama o worker por HTTP.
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+dnspython==2.8.0

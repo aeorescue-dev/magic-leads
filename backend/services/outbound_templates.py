@@ -127,7 +127,7 @@ TEMPLATES: dict[str, dict[str, str]] = {
     "general_contractors": {
         "subject": "New project opportunities in {city} this week",
         "body": (
-            "Hi {contact_name},\n\n"
+            "{greeting}\n\n"
             "We connect licensed general contractors in {city} with active, "
             "exclusive job opportunities - homeowners who need work done right "
             "now.\n\n"
@@ -146,7 +146,7 @@ TEMPLATES: dict[str, dict[str, str]] = {
     "roofing": {
         "subject": "New roofing projects in {city} this week",
         "body": (
-            "Hi {contact_name},\n\n"
+            "{greeting}\n\n"
             "We connect licensed roofing contractors in {city} with active, "
             "exclusive job opportunities - homeowners who need work done right "
             "now.\n\n"
@@ -165,7 +165,7 @@ TEMPLATES: dict[str, dict[str, str]] = {
     "remodeling": {
         "subject": "New remodeling projects in {city} this week",
         "body": (
-            "Hi {contact_name},\n\n"
+            "{greeting}\n\n"
             "We connect licensed remodeling contractors in {city} with active, "
             "exclusive job opportunities - homeowners who need work done right "
             "now.\n\n"
@@ -184,7 +184,7 @@ TEMPLATES: dict[str, dict[str, str]] = {
     "plumbing": {
         "subject": "New plumbing projects in {city} this week",
         "body": (
-            "Hi {contact_name},\n\n"
+            "{greeting}\n\n"
             "We connect licensed plumbing contractors in {city} with active, "
             "exclusive job opportunities - homeowners who need work done right "
             "now.\n\n"
@@ -203,7 +203,7 @@ TEMPLATES: dict[str, dict[str, str]] = {
     "electrical": {
         "subject": "New electrical projects in {city} this week",
         "body": (
-            "Hi {contact_name},\n\n"
+            "{greeting}\n\n"
             "We connect licensed electrical contractors in {city} with active, "
             "exclusive job opportunities - homeowners who need work done right "
             "now.\n\n"
@@ -222,7 +222,7 @@ TEMPLATES: dict[str, dict[str, str]] = {
     "hvac": {
         "subject": "New heating and HVAC projects in {city} this week",
         "body": (
-            "Hi {contact_name},\n\n"
+            "{greeting}\n\n"
             "We connect licensed HVAC contractors in {city} with active, "
             "exclusive job opportunities - homeowners who need work done right "
             "now.\n\n"
@@ -241,7 +241,7 @@ TEMPLATES: dict[str, dict[str, str]] = {
     "restoration": {
         "subject": "New restoration projects in {city} this week",
         "body": (
-            "Hi {contact_name},\n\n"
+            "{greeting}\n\n"
             "We connect licensed restoration contractors in {city} with active, "
             "exclusive job opportunities - homeowners who need work done right "
             "now.\n\n"
@@ -284,7 +284,7 @@ SEQUENCE_TEMPLATES: dict[str, dict[str, str]] = {
     "step2_offer": {
         "subject": "{count} {category} jobs in {city} - one contractor each",
         "body": (
-            "Hi {contact_name},\n\n"
+            "{greeting}\n\n"
             "I wanted to follow up on my last note with the straightforward part.\n\n"
             "Magic Leads gives you 300 verified opportunities a week in {city} - "
             "each one exclusive to a single contractor, with the owner's contact "
@@ -354,32 +354,17 @@ CITY_STATE: dict[str, str] = {
 _PLACEHOLDER = re.compile(r"\{([a-z_]+)\}")
 
 
-# Business rule: the copy must never show a small or zero opportunity count
-# (it destroys commercial credibility). Anything under the floor is shown as
-# "<floor>+"; 40-99 shows the real number; 100+ is floored to a round ten so a
-# large city reads as an approximate weekly volume, not a fake-precise figure.
-COPY_COUNT_FLOOR = 40
-COPY_COUNT_ROUND_AT = 100
-COPY_COUNT_STEP = 10
-
-
 def copy_count(count: Any) -> str:
-    """Opportunity count for the copy, with a consistency floor.
+    """Opportunity count for the copy, showing exact number without artificial floor.
 
-    Rules (business-approved):
-      * 0..(floor-1)      -> "<floor>+"          (e.g. 3 -> "40+")
-      * floor..99         -> the real number     (e.g. 47 -> "47")
-      * >= 100            -> floor to a ten      (e.g. 203 -> "200")
+    Rules:
+      * returns str(int(count)) if valid, else "0"
     """
     try:
         n = int(count)
+        return str(max(0, n))
     except (TypeError, ValueError):
-        n = 0
-    if n < COPY_COUNT_FLOOR:
-        return f"{COPY_COUNT_FLOOR}+"
-    if n < COPY_COUNT_ROUND_AT:
-        return str(n)
-    return str(n - (n % COPY_COUNT_STEP))
+        return "0"
 
 
 def niche_options() -> list[dict[str, Any]]:
@@ -525,22 +510,28 @@ def build_context(
     contact_name = (contact.get("contact_name") or "").strip()
     if contact_name:
         greeting_name = contact_name
+        greeting = f"Hi {contact_name},"
     elif company_usable:
         greeting_name = f"{company} team"
+        greeting = "Hi,"
     else:
         greeting_name = "there"
+        greeting = "Hi,"
 
     # Conditional opportunity clause: a real address reads naturally; with no
-    # address we fall back to the city so the sentence never repeats "your area".
+    # address or an intersection, we fall back to the city so the sentence
+    # describes the active public record notice accurately.
+    from backend.utils.address import is_intersection
     real_address = (sample.get("address") or "").strip()
-    if real_address:
-        address_tail = f", including a verified project near {real_address}"
+    if real_address and not is_intersection(real_address):
+        address_tail = f", including an active public record notice near {real_address}"
     else:
-        address_tail = f", including verified projects across {display_city}"
+        address_tail = f", including active public record notices across {display_city}"
 
     return {
         "company_name": company if company_usable else "your team",
         "contact_name": greeting_name,
+        "greeting": greeting,
         "city": display_city,
         "state": (contact.get("state") or "").strip() or CITY_STATE.get(city, ""),
         "category": humanize_category(sample.get("issue_category")),

@@ -4857,6 +4857,17 @@ async def contact_lead(
     lead_id: int, payload: ContactLeadRequest,
     user: dict = Depends(_get_current_user),
 ):
+    lead = await db_service.get_lead_by_id(lead_id)
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead não encontrado")
+    if payload.channel in ("sms", "whatsapp", "phone") and not (lead.get("owner_phone") or "").strip():
+        raise HTTPException(status_code=400, detail="Canal exige telefone cadastrado")
+    if payload.channel == "email" and not (lead.get("owner_email") or "").strip():
+        raise HTTPException(status_code=400, detail="Canal exige e-mail cadastrado")
+    if payload.channel in ("visit", "mail"):
+        from backend.utils.address import is_intersection
+        if is_intersection(lead.get("address")):
+            raise HTTPException(status_code=400, detail="Visita ou carta exige endereço predial e não esquina")
     result = await db_service.record_contact(lead_id, user["id"], payload.channel)
     if not result:
         raise HTTPException(status_code=404, detail="Lead não encontrado")

@@ -1,4 +1,5 @@
 import asyncio
+import html
 import random
 import re
 from datetime import datetime, timedelta
@@ -616,11 +617,11 @@ class Socrata311Scraper:
             return IssueCategory.RODENT, True
         if any(k in desc for k in ["mold", "mildew", "fungus", "water damage"]):
             return IssueCategory.MOLD, True
-        if any(k in desc for k in ["lead", "lead paint", "lead hazard"]):
+        if any(re.search(r'\b' + k + r'(?:s)?\b', desc) for k in ["lead paint", "lead hazard", "lead inspection"]):
             return IssueCategory.LEAD, True
         if any(k in desc for k in ["unsanitary", "sanitary", "filth", "sewage backup", "unsatisfactory living conditions", "hoarding", "sewage", "septic", "raw sewage", "bad odor", "foul odor", "squalid"]):
             return IssueCategory.UNSANITARY, True
-        if any(k in desc for k in ["door", "window", "frame", "sash", "jamb", "broken window", "stuck window"]):
+        if any(re.search(r'\b' + k + r'(?:s|es)?\b', desc) for k in ["door", "window", "frame", "sash", "jamb", "broken window", "stuck window"]):
             return IssueCategory.DOOR_WINDOW, True
         if any(k in desc for k in ["debris", "garbage", "trash", "rubbish", "litter", "dumping", "junk", "dumpster", "bulk removal", "overflowing garbage"]):
             return IssueCategory.DEBRIS, True
@@ -777,17 +778,19 @@ class Socrata311Scraper:
                 # Só a rua: cidade/estado/zip vivem em colunas próprias. O
                 # `full_addr` continua a ser usado acima para extrair
                 # componentes, mas não é o que se persiste no `address`.
-                address=(addr or "").strip(),
+                address=html.unescape((addr or "").strip()),
                 city=city,
                 state=state,
                 zip_code=str(zipc) if zipc else None,
                 bbl=bbl,
                 source_type=source_type,
-                issue_description=str(row.get(cols["desc"]) or ""),
+                issue_description=html.unescape(str(row.get(cols["desc"]) or "")),
                 created_at=created_at,
                 lat=lat,
                 lng=lng,
-                issue_category=self._infer_category(str(row.get(cols["desc"]) or ""), source_type),
+                issue_category=self._infer_category(
+                    html.unescape(str(row.get(cols["desc"]) or "")), source_type
+                ),
                 case_title=case_title,
                 subject=_val("subject"),
                 reason=_val("reason"),

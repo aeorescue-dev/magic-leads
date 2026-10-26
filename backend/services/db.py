@@ -76,7 +76,7 @@ def _not_junk_where(alias: str = "") -> str:
 # Status de e-mail aceitos no envio e origens confiaveis (import/manual).
 # Fonte unica: o motor (`outbound_engine.is_sendable_contact`) e o diagnostico
 # do admin leem daqui, para nunca divergirem.
-SENDABLE_EMAIL_STATUSES: tuple[str, ...] = ("valid", "verified", "catch_all", "catch-all")
+SENDABLE_EMAIL_STATUSES: tuple[str, ...] = ("valid", "verified")
 TRUSTED_EMAIL_SOURCES: tuple[str, ...] = ("import", "manual")
 
 # As 16 categorias de ofícios da plataforma (modelo de negócio).
