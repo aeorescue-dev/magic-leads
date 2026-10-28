@@ -564,9 +564,19 @@ def build_context(
     # address or an intersection, we fall back to the city so the sentence
     # describes the active public record notice accurately.
     from backend.utils.address import is_intersection
-    real_address = (sample.get("address") or "").strip()
+    raw_address = (sample.get("address") or "").strip()
+    # Leads B2B importados nao tem endereco: `import_b2b_lead` grava um
+    # placeholder unico ("B2B contact - <email>") para satisfazer o
+    # UNIQUE(address, city). Sem isto, o copy sairia com
+    # "...near B2B contact - info@empresa.com", que parece spam quebrado.
+    is_b2b_placeholder = raw_address.lower().startswith(("b2b contact", "b2b:"))
+    real_address = "" if is_b2b_placeholder else raw_address
+
     if real_address and not is_intersection(real_address):
         address_tail = f", including an active public record notice near {real_address}"
+    elif is_b2b_placeholder:
+        # A frase ja' diz "in {city}"; nao vale repetir "across {city}".
+        address_tail = ""
     else:
         address_tail = f", including active public record notices across {display_city}"
 
