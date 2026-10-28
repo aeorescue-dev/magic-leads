@@ -2316,6 +2316,11 @@ class DatabaseService:
         # antigo omitia os tres, rebentava e o except silencioso devolvia None:
         # nenhum lead B2B entrava na BD (lote saia sempre com 0 e-mails).
         external_id = f"b2b:{clean_email}"
+        # `leads` tem UNIQUE(address, city): com address='' todos os imports da
+        # mesma cidade colidiam e o INSERT OR IGNORE silenciava o erro — so' o
+        # PRIMEIRO contacto B2B de cada cidade entrava. O endereco passa a ser
+        # unico por contacto.
+        b2b_address = f"B2B contact · {clean_email}"
 
         conn = get_connection()
         try:
@@ -2324,10 +2329,11 @@ class DatabaseService:
                 "(external_id, source_type, address, city, state, issue_category, "
                 "issue_description, owner_name, owner_email, case_status, date_reported, "
                 "lead_status, created_at, updated_at) "
-                "VALUES (?, 'import_b2b', '', ?, ?, ?, ?, ?, ?, 'open', CURRENT_TIMESTAMP, "
+                "VALUES (?, 'import_b2b', ?, ?, ?, ?, ?, ?, ?, 'open', CURRENT_TIMESTAMP, "
                 "'available', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
                 (
                     external_id,
+                    b2b_address,
                     clean_city,
                     st,
                     category,

@@ -511,6 +511,41 @@ export function triggerAdminOutboundWorker(limit?: number): Promise<AdminOutboun
   return adminFetch<AdminOutboundWorkerResult>(`/outbound/worker${qs}`, { method: "POST" });
 }
 
+export interface AdminEnrichmentEnqueueResult {
+  city: string;
+  niche: string;
+  candidates_found: number;
+  jobs_created: number;
+  pending_total: number;
+}
+
+export interface AdminEnrichmentQueueStatus {
+  city: string | null;
+  by_status: Record<string, number>;
+  total: number;
+  outbound_contacts: number;
+}
+
+/** Enfileira enriquecimento (descoberta + validacao RCPT via VPS). Nao bloqueia. */
+export function enqueueAdminEnrichment(
+  city: string,
+  niche?: string,
+  limit = 200
+): Promise<AdminEnrichmentEnqueueResult> {
+  const qs = new URLSearchParams({ city, limit: String(limit) });
+  if (niche) qs.set("nicho", niche);
+  return adminFetch<AdminEnrichmentEnqueueResult>(`/outbound/enrich/jobs?${qs}`, {
+    method: "POST",
+  });
+}
+
+export function fetchAdminEnrichmentStatus(
+  city?: string
+): Promise<AdminEnrichmentQueueStatus> {
+  const qs = city ? `?city=${encodeURIComponent(city)}` : "";
+  return adminFetch<AdminEnrichmentQueueStatus>(`/outbound/enrich/jobs/status${qs}`);
+}
+
 export function generateAdminOutboundPreview(
   city: string,
   niche?: string

@@ -41,6 +41,7 @@ import {
     AdminCreditLedgerResponse,
     AdminCreditReconcileResponse,
   fetchAdminAlerts,
+  fetchAdminEnrichmentStatus,
   fetchAdminOutboundConfig,
   fetchAdminOutboundStatus,
   fetchAdminOverview,
@@ -55,6 +56,7 @@ import {
     fetchAdminCreditLedger,
     fetchAdminCreditReconcile,
   generateAdminOutboundPreview,
+  enqueueAdminEnrichment,
   sendAdminOutbound,
   sendAdminTestPush,
   simulateAdminOutbound,
@@ -163,6 +165,8 @@ function OutboundPanel() {
   }>({ state: "idle" });
   const [status, setStatus] = useState<AdminOutboundStatus | null>(null);
   const [toggling, setToggling] = useState(false);
+  const [enriching, setEnriching] = useState(false);
+  const [enrichMsg, setEnrichMsg] = useState<string | null>(null);
 
   const loadConfig = useCallback(async () => {
     setLoading(true);
@@ -277,6 +281,44 @@ function OutboundPanel() {
       setToggling(false);
     }
   }, []);
+
+  const runEnrich = useCallback(async () => {
+    if (!city) return;
+    setEnriching(true);
+    setError(null);
+    setEnrichMsg(null);
+    try {
+      const queued = await enqueueAdminEnrichment(city, niche || undefined, 200);
+      setEnrichMsg(
+        `Enfileirados ${queued.jobs_created} lead(s) de ${queued.candidates_found} candidato(s). Fila total: ${queued.pending_total}.`
+      );
+
+      // Polling: a fila corre em background (descoberta + RCPT na VPS).
+      let last: Awaited<ReturnType<typeof fetchAdminEnrichmentStatus>> | null = null;
+      for (let i = 0; i < 36; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+        last = await fetchAdminEnrichmentStatus(city);
+        const pending = last.by_status?.pending ?? 0;
+        const running = last.by_status?.running ?? 0;
+        if (pending + running === 0) break;
+      }
+
+      setEnrichMsg(
+        `Fila concluida - validados: ${last?.by_status?.done ?? 0}, sem e-mail: ${
+          last?.by_status?.no_email ?? 0
+        }, falhas: ${last?.by_status?.failed ?? 0}. Contactos na base: ${
+          last?.outbound_contacts ?? "?"
+        }.`
+      );
+
+      // Refrescar o KPI "Com e-mail" do painel com os contactos novos.
+      await runSimulation();
+    } catch (e) {
+      setError(e instanceof AdminApiError ? e.message : "Falha ao enfileirar o enriquecimento.");
+    } finally {
+      setEnriching(false);
+    }
+  }, [city, niche, runSimulation]);
 
   const cityConfig = city && config ? config.per_city[city] : null;
   const sendEnabled = cityConfig ? cityConfig.send_enabled === "1" : false;
@@ -433,6 +475,23 @@ function OutboundPanel() {
               )}
               Rodar worker
             </button>
+            <button
+              onClick={() => void runEnrich()}
+              disabled={!city || enriching}
+              title={
+                globalEnrichEnabled
+                  ? "Descobre dominios e valida e-mails na VPS (nao bloqueia a API)"
+                  : "Liga o Enriquecimento para permitir a descoberta"
+              }
+              className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-3 py-1.5 text-xs font-semibold text-indigo-300 hover:bg-indigo-500/20 disabled:opacity-40"
+            >
+              {enriching ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Database className="h-3.5 w-3.5" />
+              )}
+              Enriquecer cidade
+            </button>
             {status ? (
               <span className="ml-auto text-[11px] text-slate-500">
                 fila {status.queued} · enviados hoje {status.sent_today} · enriquecidos{" "}
@@ -448,6 +507,11 @@ function OutboundPanel() {
               ? " Sem caixas de envio configuradas — o envio fica em espera."
               : ""}
           </p>
+          {enrichMsg ? (
+            <p className="rounded border border-indigo-500/30 bg-indigo-500/5 px-2 py-1 text-[10px] text-indigo-300">
+              {enrichMsg}
+            </p>
+          ) : null}
         </div>
 
         {/* gerar prévia + simular */}

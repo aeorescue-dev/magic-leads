@@ -71,7 +71,8 @@ def _read_csv(path: str) -> tuple[list[dict], list[dict]]:
                 continue
             ok.append(
                 {"company": company, "website": website, "domain": domain,
-                 "city": city, "state": state}
+                 "city": city, "state": state,
+                 "category": (raw.get("category") or "").strip() or None}
             )
     return ok, bad
 
@@ -100,7 +101,9 @@ async def _run(items: list[dict], dry_run: bool) -> tuple[dict, list[dict]]:
         domain, company = item["domain"], item["company"]
         lead = {"owner_name": company, "city": item["city"]}
 
-        # Confirma MX; sem MX nao ha' SMTP possivel.
+        # Confirma que o dominio tem destino SMTP. Sem MX, aceita-se o A do
+        # proprio dominio (MX implicito, RFC 5321 5.1); so' se nao existir
+        # nenhum dos dois e' que se descarta sem gastar sondagem.
         website = item["website"]
         if "://" not in website:
             website = f"https://{website}"
@@ -110,10 +113,12 @@ async def _run(items: list[dict], dry_run: bool) -> tuple[dict, list[dict]]:
             info = None
             print(f"[ERR] {company}: {exc}")
         if not info:
-            stats["no_mx"] += 1
-            misses.append({**item, "reason": "sem MX / dominio invalido"})
-            print(f"[--]  {company}: sem MX em {domain}")
-            continue
+            has_a = await asyncio.to_thread(discovery._resolver.a_record, domain)
+            if not has_a:
+                stats["no_mx"] += 1
+                misses.append({**item, "reason": "sem MX e sem A"})
+                print(f"[--]  {company}: sem MX nem A em {domain}")
+                continue
         stats["with_mx"] += 1
 
         found = None
@@ -140,11 +145,14 @@ async def _run(items: list[dict], dry_run: bool) -> tuple[dict, list[dict]]:
             stats["saved"] += 1
             continue
 
-        contact = await db_service.upsert_outbound_contact(
-            lead_id=None, email=found, city=item["city"], state=item["state"],
-            company_name=company, contact_name=None,
-            email_source="licensed_registry", email_status="valid",
-            company_domain=domain,
+        contact = await db_service.import_b2b_lead(
+            email=found,
+            company_name=company,
+            city=item["city"],
+            category=item.get("category") or "General Contractors",
+            contact_name=None,
+            domain=domain,
+            state=item["state"],
         )
         if contact:
             stats["saved"] += 1

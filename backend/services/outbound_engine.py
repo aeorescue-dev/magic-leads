@@ -217,6 +217,7 @@ class OutboundEngine:
         queued = 0
         skipped = 0
         no_email = 0
+        pending_enrich = 0
         spend_total = 0.0
         billed_batch = 0
 
@@ -231,51 +232,16 @@ class OutboundEngine:
             if is_sendable_contact(contact):
                 pass  # reaproveita contacto validado
             elif enrich_enabled and enrichment_left > 0 and spend_total < max_spend:
-                result = await emaillistverify_service.find_and_verify(
-                    owner_email=lead.get("owner_email"),
-                    company_name=lead.get("owner_name"),
-                    contact_name=(contact or {}).get("contact_name"),
-                    city=city,
-                )
-                billed_batch += result.billed_calls
-                spend_total += result.spend_usd
-                enrichment_left -= result.billed_calls
-                if result.success and result.status == "valid" and result.email:
-                    contact = await db_service.upsert_outbound_contact(
-                        lead_id=lead["id"],
-                        email=result.email,
-                        city=city,
-                        state=lead.get("state"),
-                        company_name=lead.get("owner_name"),
-                        contact_name=(contact or {}).get("contact_name"),
-                        email_source="emaillistverify",
-                        email_status="valid",
-                    )
-                elif not emaillistverify_service.configured:
-                    # Fallback sem ELV: descoberta + validacao RCPT via worker VPS.
-                    # Reaproveita o motor de descoberta (slug + corroboracao do
-                    # site) em vez de adivinhar dominios soltos, para nao casar
-                    # "JAMES WALKER" com james.com e enviar para a empresa errada.
-                    try:
-                        from . import discovery_engine
+                # NAO enriquecer dentro do request HTTP (200 leads x ~4 candidatos
+                # x ~2s = ~27 min: o proxy do Railway cortava o pedido a meio).
+                # Enfileira o lead e devolve de imediato; o loop de background
+                # (`enrichment_queue.worker_loop`) faz descoberta + validacao RCPT
+                # via worker VPS, com retry/backoff, e grava em outbound_contacts.
+                from . import enrichment_queue
 
-                        found = await discovery_engine.enrich_lead_email(db_service, lead)
-                        if found.get("status") == "success":
-                            contact = await db_service.get_outbound_contact_by_lead(
-                                lead["id"]
-                            )
-                    except Exception as exc:  # noqa: BLE001
-                        logger.warning(
-                            "[OUTBOUND] fallback VPS falhou lead=%s: %s",
-                            lead.get("id"),
-                            exc,
-                        )
-                    if not contact or not contact.get("email"):
-                        no_email += 1
-                        continue
-                else:
-                    no_email += 1
-                    continue
+                await enrichment_queue.enqueue_leads([lead["id"]], city, niche)
+                pending_enrich += 1
+                continue
             else:
                 no_email += 1
                 continue
@@ -337,6 +303,7 @@ class OutboundEngine:
             "queued": queued,
             "skipped": skipped,
             "no_email": no_email,
+            "pending_enrich": pending_enrich,
             "spend_usd": round(spend_total, 4),
             "total_leads": len(leads),
         }

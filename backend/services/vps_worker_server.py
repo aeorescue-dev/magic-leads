@@ -61,11 +61,19 @@ def _mx_host(domain: str) -> str:
     # dnspython so' para importar o modulo nos testes.
     import dns.resolver
 
-    answers = dns.resolver.resolve(domain, "MX", lifetime=4.0)
-    hosts = sorted((r.preference, str(r.exchange).rstrip(".")) for r in answers)
-    if not hosts:
-        raise dns.resolver.NoAnswer
-    return hosts[0][1]
+    try:
+        answers = dns.resolver.resolve(domain, "MX", lifetime=4.0)
+        hosts = sorted((r.preference, str(r.exchange).rstrip(".")) for r in answers)
+        if hosts:
+            return hosts[0][1]
+    except Exception:
+        pass
+
+    # RFC 5321 5.1: sem registo MX, o A do proprio dominio e' o MX implicito.
+    # Sem isto, empresas com mail no proprio host eram descartadas ("no_mx")
+    # sem sequer se tentar o RCPT.
+    dns.resolver.resolve(domain, "A", lifetime=4.0)
+    return domain
 
 
 def _throttle(domain: str) -> None:
