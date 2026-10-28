@@ -40,6 +40,7 @@ import os
 import sys
 import time
 
+from ..services import outbound_templates
 from ..services import vps_prober
 from ..services.company_discovery import (
     CompanyDiscovery,
@@ -90,7 +91,7 @@ def _candidates(company: str, domain: str) -> list[str]:
     return out
 
 
-async def _run(items: list[dict], dry_run: bool) -> tuple[dict, list[dict]]:
+async def _run(items: list[dict], dry_run: bool, niche_label: str) -> tuple[dict, list[dict]]:
     stats = {"companies": len(items), "with_mx": 0, "validated": 0,
              "saved": 0, "no_mx": 0, "no_valid_email": 0}
     misses: list[dict] = []
@@ -149,7 +150,7 @@ async def _run(items: list[dict], dry_run: bool) -> tuple[dict, list[dict]]:
             email=found,
             company_name=company,
             city=item["city"],
-            category=item.get("category") or "General Contractors",
+            category=item.get("category") or niche_label,
             contact_name=None,
             domain=domain,
             state=item["state"],
@@ -168,6 +169,12 @@ async def _run(items: list[dict], dry_run: bool) -> tuple[dict, list[dict]]:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Importa contractors com website e valida via VPS")
     ap.add_argument("--csv", required=True)
+    ap.add_argument(
+        "--nicho",
+        default=outbound_templates.DEFAULT_NICHE,
+        choices=sorted(outbound_templates.NICHES),
+        help="Nicho do painel ao qual estes contactos pertencem (default: general_contractors)",
+    )
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--report", help="CSV de saida com as empresas sem e-mail valido")
     args = ap.parse_args()
@@ -183,8 +190,9 @@ def main() -> int:
         print("Nada a importar.")
         return 1
 
-    print(f"Empresas a processar: {len(items)}")
-    stats, misses = asyncio.run(_run(items, args.dry_run))
+    niche_label = outbound_templates.NICHES[args.nicho]["label"]
+    print(f"Empresas a processar: {len(items)} | nicho: {niche_label}")
+    stats, misses = asyncio.run(_run(items, args.dry_run, niche_label))
     print("\n=== RESUMO ===")
     for k, v in stats.items():
         print(f"{k}: {v}")

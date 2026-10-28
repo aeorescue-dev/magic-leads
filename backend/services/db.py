@@ -1938,7 +1938,7 @@ class DatabaseService:
             clean = [c for c in (categories or []) if c]
             if clean:
                 marks = ", ".join("?" for _ in clean)
-                cat_clause = f"AND (source_type = 'import_b2b' OR issue_category IN ({marks})) "
+                cat_clause = f"AND issue_category IN ({marks}) "
                 params.extend(clean)
             q = (
                 "SELECT COUNT(*) AS c FROM leads "
@@ -2050,7 +2050,7 @@ class DatabaseService:
             clean = [c for c in (categories or []) if c]
             if clean:
                 marks = ", ".join("?" for _ in clean)
-                cat_clause = f"AND (source_type = 'import_b2b' OR issue_category IN ({marks})) "
+                cat_clause = f"AND issue_category IN ({marks}) "
                 params.extend(clean)
             q = (
                 "SELECT owner_name, address, city, COALESCE(state, '') AS state, "
@@ -2178,7 +2178,7 @@ class DatabaseService:
             clean = [c for c in (categories or []) if c]
             if clean:
                 marks = ", ".join("?" for _ in clean)
-                cat_clause = f"AND (source_type = 'import_b2b' OR issue_category IN ({marks})) "
+                cat_clause = f"AND issue_category IN ({marks}) "
                 params.extend(clean)
             params.append(int(limit))
             q = (
@@ -2320,7 +2320,7 @@ class DatabaseService:
         # mesma cidade colidiam e o INSERT OR IGNORE silenciava o erro — so' o
         # PRIMEIRO contacto B2B de cada cidade entrava. O endereco passa a ser
         # unico por contacto.
-        b2b_address = f"B2B contact · {clean_email}"
+        b2b_address = f"B2B contact - {clean_email}"
 
         conn = get_connection()
         try:

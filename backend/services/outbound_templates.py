@@ -52,10 +52,19 @@ def assert_english_only(text: str) -> None:
 # `label` is shown in the panel (English, since it names a US segment).
 # `categories` are the IssueCategory values the niche targets; the simulator
 # counts and samples only those leads for the niche.
+#
+# REGRA: nenhum nicho inclui categorias fora do seu oficio. Em particular,
+# "General Contractors" NAO e' "todos os 16 oficios": e' construcao
+# (Structure/Roof/Paint/Door_Window/Debris/Permit_Rejected). Pragas (Rodent),
+# saneamento (Unsanitary) e vegetacao (Grass) pertencem a outros nichos —
+# antes, GC herdava `_TRADE_CATEGORIES` inteiro e a previa mostrava
+# "Categoria: Rodent" para um cliente de GC.
 NICHES: dict[str, dict[str, Any]] = {
     "general_contractors": {
         "label": "General Contractors",
-        "categories": list(_TRADE_CATEGORIES),
+        "categories": [
+            "Structure", "Roof", "Paint", "Door_Window", "Debris", "Permit_Rejected",
+        ],
         "audience": "general contractors",
     },
     "roofing": {
@@ -70,7 +79,7 @@ NICHES: dict[str, dict[str, Any]] = {
     },
     "plumbing": {
         "label": "Plumbing",
-        "categories": ["Plumbing", "Unsanitary", "Lead"],
+        "categories": ["Plumbing", "Lead"],
         "audience": "plumbing companies",
     },
     "electrical": {
@@ -80,13 +89,18 @@ NICHES: dict[str, dict[str, Any]] = {
     },
     "hvac": {
         "label": "Heating & HVAC",
-        "categories": ["Heating", "Gas", "Mold"],
+        "categories": ["Heating", "Gas"],
         "audience": "HVAC companies",
     },
     "restoration": {
         "label": "Restoration & Cleanup",
-        "categories": ["Mold", "Unsanitary", "Rodent", "Debris", "Lead"],
+        "categories": ["Mold", "Unsanitary", "Rodent", "Lead", "Debris"],
         "audience": "restoration companies",
+    },
+    "landscaping": {
+        "label": "Landscaping & Grounds",
+        "categories": ["Grass"],
+        "audience": "landscaping and groundskeeping companies",
     },
 }
 
@@ -257,6 +271,25 @@ TEMPLATES: dict[str, dict[str, str]] = {
             'To stop receiving these emails, reply "unsubscribe".'
         ),
     },
+    "landscaping": {
+        "subject": "New groundskeeping work in {city} this week",
+        "body": (
+            "{greeting}\n\n"
+            "We connect licensed landscaping and groundskeeping companies in {city} "
+            "with active, exclusive job opportunities - properties that need work "
+            "done right now.\n\n"
+            "Instead of chasing shared or cold leads, each opportunity is matched "
+            "to a single contractor and includes the property contact details, "
+            "the address, and the exact service needed.\n\n"
+            "We currently have {count} active groundskeeping opportunities in {city}"
+            "{address_tail}.\n\n"
+            "Would your team be open to reviewing this week's list?\n\n"
+            "Best regards,\n"
+            "Magic Leads\n\n"
+            "https://www.magicleads.app/\n\n"
+            'To stop receiving these emails, reply "unsubscribe".'
+        ),
+    },
 }
 
 
@@ -376,10 +409,21 @@ def niche_options() -> list[dict[str, Any]]:
 
 
 def niche_categories(niche: Optional[str]) -> Optional[list[str]]:
-    """Trade categories for a niche (None => all trades, i.e. no filter)."""
+    """Categorias de oficio de um nicho (None => sem filtro).
+
+    Inclui tambem o `label` do nicho: leads B2B importados sao gravados com
+    `issue_category` = label (ex.: "General Contractors"), e sem isto ficavam
+    invisiveis ao filtro do painel (ou apareciam em todos os nichos).
+    """
     spec = NICHES.get(niche or DEFAULT_NICHE) or NICHES[DEFAULT_NICHE]
     categories = spec.get("categories")
-    return list(categories) if categories else None
+    if not categories:
+        return None
+    out = list(categories)
+    label = spec.get("label")
+    if label and label not in out:
+        out.append(label)
+    return out
 
 
 def get_template(niche: Optional[str]) -> dict[str, str]:

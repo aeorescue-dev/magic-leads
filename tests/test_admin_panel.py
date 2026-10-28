@@ -1132,10 +1132,12 @@ def test_outbound_preview_uses_enriched_contact_when_available(admin_client):
 
 
 def test_outbound_niche_filters_inventory(admin_client):
-    """O nicho restringe a contagem: telhados não incluem canalização.
+    """O nicho restringe a contagem e NAO transborda para outros oficios.
 
-    Roof/Structure e Plumbing/Unsanitary/Lead são conjuntos disjuntos, logo o
-    total (general contractors) é >= soma dos dois nichos e maior que cada um.
+    Regra de produto: "General Contractors" e' construcao civil
+    (Structure/Roof/Paint/Door_Window/Debris/Permit_Rejected) e NUNCA puxa
+    categorias de servicos urbanos ou de outros oficios (Plumbing, Rodent,
+    Grass...). Este teste falha se alguem voltar a mapear GC para os 16 oficios.
     """
     client, headers, _ = admin_client
     _seed_outbound_lead(
@@ -1160,9 +1162,13 @@ def test_outbound_niche_filters_inventory(admin_client):
     roof = _count_for("roofing")
     plumb = _count_for("plumbing")
 
-    assert roof >= 1 and plumb >= 1
-    assert roof + plumb <= total
-    assert roof < total and plumb < total
+    assert roof >= 1, "Roofing deve encontrar o lead de Roof"
+    assert plumb >= 1, "Plumbing deve encontrar o lead de Plumbing"
+    # GC inclui construcao civil -> conta o lead de Roof...
+    assert total >= roof
+    # ...e NAO conta o de Plumbing (o bug que mostrava "Categoria: Rodent").
+    assert total == roof, f"GC nao pode incluir Plumbing (gc={total}, roof={roof})"
+    assert plumb > 0 and total >= 0
 
 
 # ------------------------------------------------------- Prioridade A/D (admin)
