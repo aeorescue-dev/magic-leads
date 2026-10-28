@@ -52,7 +52,13 @@ from .models.schemas import (
 )
 from .scrapers.socrata_311 import socrata_scraper
 from .scrapers.socrata_discovery import socrata_discovery
-from .services import alert_planner, notifier, outbound_templates, security
+from .services import (
+    alert_planner,
+    enrichment_queue,
+    notifier,
+    outbound_templates,
+    security,
+)
 from .services.db import (  # noqa: F401  — usados nos filtros de qualificação
     _OPEN_STATUSES,
     _TRADE_CATEGORIES,
@@ -65,7 +71,6 @@ from .services.db import (  # noqa: F401  — usados nos filtros de qualificaç�
     db_service,
 )
 from .services.enrichment import owner_enrichment
-from .services import enrichment_queue
 from .services.lead_rules import (
     charges_credit,
     classify,

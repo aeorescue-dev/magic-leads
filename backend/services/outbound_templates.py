@@ -23,8 +23,6 @@ from __future__ import annotations
 import re
 from typing import Any, Mapping, Optional
 
-from .db import _TRADE_CATEGORIES
-
 # --------------------------------------------------------------- language
 
 # Accented characters and a few Portuguese/business-EU words that would signal

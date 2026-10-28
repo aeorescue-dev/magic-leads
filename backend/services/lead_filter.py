@@ -87,8 +87,8 @@ def parse_person(name: str) -> tuple[str, str]:
     if "," in n:
         last, _, first = n.partition(",")
         f = [t for t in first.split() if len(t) > 1]
-        l = [t for t in last.split() if len(t) > 1]
-        return (f[0] if f else ""), (l[0] if l else "")
+        last_parts = [t for t in last.split() if len(t) > 1]
+        return (f[0] if f else ""), (last_parts[0] if last_parts else "")
     toks = [t for t in n.split() if len(t) > 1]
     if len(toks) >= 2:
         return toks[0], toks[-1]

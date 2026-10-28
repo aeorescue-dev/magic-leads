@@ -12,15 +12,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Optional
 
 from ..config import settings
 from .company_discovery import (
     CompanyDiscovery,
     registrable_domain,
-    ValidationResult,
 )
-from .lead_filter import classify_owner_name, should_skip_discovery
+from .lead_filter import should_skip_discovery
 
 logger = logging.getLogger(__name__)
 

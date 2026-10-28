@@ -25,9 +25,8 @@ import os
 import sys
 import time
 
-from ..services import outbound_templates
+from ..services import discovery_engine, outbound_templates
 from ..services.db import db_service
-from ..services import discovery_engine
 from ..services.lead_filter import classify_owner_name
 
 

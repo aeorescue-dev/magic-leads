@@ -40,8 +40,7 @@ import os
 import sys
 import time
 
-from ..services import outbound_templates
-from ..services import vps_prober
+from ..services import outbound_templates, vps_prober
 from ..services.company_discovery import (
     CompanyDiscovery,
     email_patterns,

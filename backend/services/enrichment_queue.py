@@ -31,8 +31,7 @@ from typing import Any, Optional
 
 from ..utils.logger import logger
 from . import db as dbmod
-from . import discovery_engine
-from . import outbound_templates
+from . import discovery_engine, outbound_templates
 from .db import db_service
 
 # Backoff por tentativa falhada (minutos).
