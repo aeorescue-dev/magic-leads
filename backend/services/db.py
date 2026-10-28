@@ -880,6 +880,7 @@ _OUTBOUND_CONFIG_DEFAULTS = {
     "per_mailbox_daily_cap": "25",
     "warmup_enabled": "1",
     "min_warmup_days": "14",
+    "warmup_ramp": "1,1,1,2,3,5,8,12",
     "quiet_hours_start": "22:00",
     "quiet_hours_end": "07:00",
 }
@@ -1104,6 +1105,26 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE leads ADD COLUMN mailing_address TEXT")
     if "revealed_at" not in cols:
         conn.execute("ALTER TABLE leads ADD COLUMN revealed_at TEXT")
+
+    # Nicho classificado automaticamente (niche_classifier). Aditivo: bases
+    # antigas ficam com 'unknown' e o motor de envio recusa-as ate' serem
+    # reclassificadas (nunca se adivinha o nicho de um destinatario).
+    if "niche_key" not in cols:
+        conn.execute("ALTER TABLE leads ADD COLUMN niche_key TEXT")
+    if "niche_status" not in cols:
+        conn.execute("ALTER TABLE leads ADD COLUMN niche_status TEXT DEFAULT 'unknown'")
+    if "niche_score" not in cols:
+        conn.execute("ALTER TABLE leads ADD COLUMN niche_score REAL DEFAULT 0")
+    if "niche_evidence" not in cols:
+        conn.execute("ALTER TABLE leads ADD COLUMN niche_evidence TEXT")
+
+    ccols = {r["name"] for r in conn.execute("PRAGMA table_info(outbound_contacts)").fetchall()}
+    if "niche_key" not in ccols:
+        conn.execute("ALTER TABLE outbound_contacts ADD COLUMN niche_key TEXT")
+    if "niche_status" not in ccols:
+        conn.execute(
+            "ALTER TABLE outbound_contacts ADD COLUMN niche_status TEXT DEFAULT 'unknown'"
+        )
     if "refund_blocked" not in cols:
         conn.execute("ALTER TABLE leads ADD COLUMN refund_blocked INTEGER DEFAULT 0")
     extra_cols = {
@@ -1914,6 +1935,74 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def set_contact_niche(
+        self, contact_id: int, niche_key: Optional[str], niche_status: str
+    ) -> None:
+        """Grava o nicho classificado num contacto (gate de envio)."""
+        conn = get_connection()
+        try:
+            conn.execute(
+                "UPDATE outbound_contacts SET niche_key=?, niche_status=? WHERE id=?",
+                (niche_key, niche_status, contact_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def set_lead_niche(
+        self,
+        lead_id: int,
+        niche_key: Optional[str],
+        niche_status: str,
+        score: float = 0.0,
+        evidence: Optional[str] = None,
+    ) -> None:
+        conn = get_connection()
+        try:
+            conn.execute(
+                "UPDATE leads SET niche_key=?, niche_status=?, niche_score=?, "
+                "niche_evidence=? WHERE id=?",
+                (niche_key, niche_status, score, evidence, lead_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def outbound_category_mix(
+        self, city: str, categories: Optional[List[str]] = None, limit: int = 3
+    ) -> List[tuple[str, int]]:
+        """Top categorias (categoria, contagem) do inventario cidade+nicho.
+
+        Usado para derivar a clausula "including X and Y" do copy a partir de
+        dados reais. Devolve [] quando nao ha inventario.
+        """
+        if not city:
+            return []
+        conn = get_connection()
+        try:
+            where = _qualified_where()
+            not_inst = institutional_owner_name_where()
+            params: List[Any] = [city]
+            cat_clause = ""
+            clean = [c for c in (categories or []) if c]
+            if clean:
+                marks = ", ".join("?" for _ in clean)
+                cat_clause = f"AND issue_category IN ({marks}) "
+                params.extend(clean)
+            q = (
+                "SELECT issue_category, COUNT(1) AS c FROM leads "
+                f"WHERE ({where} OR source_type = 'import_b2b') "
+                "AND UPPER(TRIM(city)) = UPPER(TRIM(?)) "
+                "AND (lead_status IS NULL OR lead_status = 'available') "
+                f"AND NOT ({not_inst}) "
+                f"{cat_clause}"
+                "GROUP BY issue_category ORDER BY c DESC LIMIT ?"
+            )
+            params.append(int(limit))
+            return [(r["issue_category"], int(r["c"])) for r in conn.execute(q, params)]
+        finally:
+            conn.close()
+
     def count_qualified_contractors_in_city(
         self, city: str, categories: Optional[List[str]] = None
     ) -> int:
@@ -2302,6 +2391,11 @@ class DatabaseService:
         contact_name: Optional[str] = None,
         domain: Optional[str] = None,
         state: Optional[str] = None,
+        niche_key: Optional[str] = None,
+        niche_status: str = "confirmed",
+        niche_score: float = 0.0,
+        niche_evidence: Optional[str] = None,
+        create_contact: bool = True,
     ) -> Optional[dict]:
         if not email or not company_name or not city:
             return None
@@ -2328,9 +2422,10 @@ class DatabaseService:
                 "INSERT OR IGNORE INTO leads "
                 "(external_id, source_type, address, city, state, issue_category, "
                 "issue_description, owner_name, owner_email, case_status, date_reported, "
-                "lead_status, created_at, updated_at) "
+                "lead_status, created_at, updated_at, niche_key, niche_status, "
+                "niche_score, niche_evidence) "
                 "VALUES (?, 'import_b2b', ?, ?, ?, ?, ?, ?, ?, 'open', CURRENT_TIMESTAMP, "
-                "'available', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                "'available', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?)",
                 (
                     external_id,
                     b2b_address,
@@ -2340,6 +2435,10 @@ class DatabaseService:
                     f"B2B contact import ({category})",
                     company_name,
                     clean_email,
+                    niche_key,
+                    niche_status,
+                    niche_score,
+                    niche_evidence,
                 ),
             )
             lead_row = conn.execute(
@@ -2355,11 +2454,19 @@ class DatabaseService:
                 return None
             lead_id = lead_row["id"]
 
+            if not create_contact:
+                # Quarentena: o lead existe (visivel no painel) mas NAO ha
+                # contacto enviavel, portanto o motor de envio nunca o apanha.
+                conn.commit()
+                return {"id": None, "lead_id": lead_id, "email": None,
+                        "quarantined": True}
+
             conn.execute(
                 "INSERT INTO outbound_contacts "
                 "(lead_id, kind, company_name, contact_name, email, email_source, "
-                "email_status, city, state, company_domain, enriched_at, last_verified_at) "
-                "VALUES (?, 'business', ?, ?, ?, 'import', 'valid', ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) "
+                "email_status, city, state, company_domain, enriched_at, last_verified_at, "
+                "niche_key, niche_status) "
+                "VALUES (?, 'business', ?, ?, ?, 'import', 'valid', ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?) "
                 "ON CONFLICT(email) DO UPDATE SET "
                 "email_status='valid', "
                 "email_source='import', "
@@ -2367,6 +2474,9 @@ class DatabaseService:
                 "company_name=COALESCE(excluded.company_name, outbound_contacts.company_name), "
                 "contact_name=COALESCE(excluded.contact_name, outbound_contacts.contact_name), "
                 "company_domain=COALESCE(excluded.company_domain, outbound_contacts.company_domain), "
+                "niche_key=COALESCE(excluded.niche_key, outbound_contacts.niche_key), "
+                "niche_status=CASE WHEN excluded.niche_status='confirmed' THEN 'confirmed' "
+                "                  ELSE COALESCE(outbound_contacts.niche_status, 'unknown') END, "
                 "lead_id=excluded.lead_id",
                 (
                     lead_id,
@@ -2376,6 +2486,8 @@ class DatabaseService:
                     clean_city,
                     st,
                     domain or (clean_email.split('@')[1] if '@' in clean_email else None),
+                    niche_key,
+                    niche_status,
                 ),
             )
             conn.commit()
@@ -8704,6 +8816,13 @@ class AsyncDatabaseService:
     async def mark_outbound_contact_replied(self, contact_id: int) -> bool:
         return await anyio.to_thread.run_sync(
             self._service.mark_outbound_contact_replied, contact_id
+        )
+
+    async def outbound_category_mix(
+        self, city: str, categories: Optional[List[str]] = None, limit: int = 3
+    ) -> List[tuple[str, int]]:
+        return await anyio.to_thread.run_sync(
+            self._service.outbound_category_mix, city, categories, limit
         )
 
     async def count_qualified_contractors_in_city(

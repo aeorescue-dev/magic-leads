@@ -17,7 +17,7 @@ from typing import Any, Optional
 
 from ..config import settings
 from ..utils.logger import logger
-from . import outbound_templates
+from . import niche_classifier, outbound_templates
 from .db import (
     SENDABLE_EMAIL_STATUSES,
     SERVED_CITIES,
@@ -139,22 +139,54 @@ def warmup_days(started_at: Optional[str], now: datetime) -> int:
     return 0
 
 
-def effective_mailbox_cap(mailbox: dict, config: dict, now: datetime) -> int:
-    """Teto efetivo da caixa: min(caixa, config) com rampa de warm-up.
+# Rampa conservadora aprovada: dia 0-2 -> 1/dia, dia 3 -> 2, dia 4 -> 3,
+# dia 5 -> 5, dia 6 -> 8, dia 7+ -> 12 (por caixa).
+DEFAULT_WARMUP_RAMP: tuple[int, ...] = (1, 1, 1, 2, 3, 5, 8, 12)
 
-    Sem warm-up (ou apos `min_warmup_days`), devolve o teto cheio. Durante o
-    warm-up, cresce linearmente de 1 ate' ao teto ao longo dos dias minimos.
+
+def warmup_ramp(config: dict) -> tuple[int, ...]:
+    """Le `warmup_ramp` ("1,1,1,2,3,5,8,12") com fallback seguro."""
+    raw = str(config.get("warmup_ramp") or "").strip()
+    if not raw:
+        return DEFAULT_WARMUP_RAMP
+    parsed: list[int] = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            parsed.append(max(1, int(part)))
+        except ValueError:
+            continue
+    return tuple(parsed) or DEFAULT_WARMUP_RAMP
+
+
+def effective_mailbox_cap(mailbox: dict, config: dict, now: datetime) -> int:
+    """Teto efetivo da caixa para hoje.
+
+    Com warm-up ativo, a RAMPA manda: dia N -> ramp[min(N, len-1)], limitado
+    apenas por `per_mailbox_daily_cap`. Isto substitui a formula linear antiga,
+    que com `daily_cap=1` nunca subia acima de 1 (a caixa ficava presa para
+    sempre no primeiro escalao).
+
+    Sem warm-up (ou depois de a rampa terminar), vale o menor entre
+    `daily_cap` da caixa e `per_mailbox_daily_cap`.
     """
     mailbox_cap = _int(mailbox.get("daily_cap"), _int(config.get("per_mailbox_daily_cap"), 25))
     config_cap = _int(config.get("per_mailbox_daily_cap"), 25)
-    cap = max(0, min(mailbox_cap, config_cap)) if config_cap > 0 else max(0, mailbox_cap)
+    ceiling = max(0, min(mailbox_cap, config_cap)) if config_cap > 0 else max(0, mailbox_cap)
+
     if config.get("warmup_enabled") != "1":
-        return cap
-    min_days = _int(config.get("min_warmup_days"), 14)
+        return ceiling
+
     days = warmup_days(mailbox.get("warmup_started_at"), now)
-    if min_days <= 0 or days >= min_days:
-        return cap
-    return max(1, int(cap * (days + 1) / min_days))
+    ramp = warmup_ramp(config)
+    if days >= len(ramp):
+        return ceiling
+    day_cap = ramp[days]
+    if config_cap > 0:
+        day_cap = min(day_cap, config_cap)
+    return max(0, day_cap)
 
 
 def _mailbox_warmup_state(mailbox: dict, config: dict, now: datetime) -> str:
@@ -214,8 +246,32 @@ class OutboundEngine:
         if count_for_copy <= 0:
             count_for_copy = len(leads)
 
+        # BLOQUEIO DURO: sem inventario qualificado nao se cria nem promove lote.
+        # Antes disto, um lote vazio saia da mesma forma e o copy dizia "0 ...".
+        if count_for_copy <= 0:
+            logger.warning(
+                "[OUTBOUND] lote %s bloqueado: sem inventario para %s/%s",
+                batch.get("id"), city, niche,
+            )
+            return {
+                "status": "blocked",
+                "reason": "no_inventory",
+                "queued": 0,
+                "skipped": 0,
+                "no_email": 0,
+                "pending_enrich": 0,
+                "skipped_niche": 0,
+                "spend_usd": 0.0,
+                "total_leads": 0,
+            }
+
+        # Numero DIVULGADO = o que conseguimos mesmo entregar (CAN-SPAM safe).
+        copy_count = max(1, min(count_for_copy, limit))
+        mix_cache: dict[str, list[tuple[str, int]]] = {}
+
         queued = 0
         skipped = 0
+        skipped_niche = 0
         no_email = 0
         pending_enrich = 0
         spend_total = 0.0
@@ -255,11 +311,29 @@ class OutboundEngine:
                 skipped += 1
                 continue
 
+            # GATE: o copy segue o nicho do DESTINATARIO, nunca o do lote.
+            lead_niche = (contact or {}).get("niche_key") or lead.get("niche_key")
+            lead_niche_status = (contact or {}).get("niche_status") or lead.get(
+                "niche_status"
+            )
+            if not niche_classifier.is_sendable(lead_niche, lead_niche_status):
+                skipped_niche += 1
+                logger.info(
+                    "[OUTBOUND] lead=%s sem nicho confirmado (key=%s status=%s) - nao enviado",
+                    lead.get("id"), lead_niche, lead_niche_status,
+                )
+                continue
+            if lead_niche not in mix_cache:
+                mix_cache[lead_niche] = await db_service.outbound_category_mix(
+                    city, outbound_templates.niche_categories(lead_niche)
+                )
+
             try:
                 context = outbound_templates.build_context(
-                    lead, city, niche, count_for_copy, contact=contact
+                    lead, city, lead_niche, copy_count, contact=contact,
+                    top_categories=mix_cache.get(lead_niche),
                 )
-                rendered = outbound_templates.render_email(niche, context)
+                rendered = outbound_templates.render_email(lead_niche, context)
             except Exception as e:
                 # Copy tem de ser en-US: um lead com dados non-ASCII e' excluido,
                 # nunca derruba o lote inteiro.
@@ -303,6 +377,7 @@ class OutboundEngine:
             "queued": queued,
             "skipped": skipped,
             "no_email": no_email,
+            "skipped_niche": skipped_niche,
             "pending_enrich": pending_enrich,
             "spend_usd": round(spend_total, 4),
             "total_leads": len(leads),

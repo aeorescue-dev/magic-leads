@@ -64,45 +64,74 @@ NICHES: dict[str, dict[str, Any]] = {
             "Structure", "Roof", "Paint", "Door_Window", "Debris", "Permit_Rejected",
         ],
         "audience": "general contractors",
+        "subject_trade": "GC",
+        "hook_trade": "construction",
     },
     "roofing": {
         "label": "Roofing",
         "categories": ["Roof", "Structure"],
         "audience": "roofing companies",
+        "subject_trade": "roofing",
+        "hook_trade": "roofing",
     },
     "remodeling": {
         "label": "Remodeling & Renovation",
         "categories": ["Paint", "Structure", "Door_Window", "Debris", "Permit_Rejected"],
         "audience": "remodeling companies",
+        "subject_trade": "remodeling",
+        "hook_trade": "remodeling",
     },
     "plumbing": {
         "label": "Plumbing",
         "categories": ["Plumbing", "Lead"],
         "audience": "plumbing companies",
+        "subject_trade": "plumbing",
+        "hook_trade": "plumbing",
     },
     "electrical": {
         "label": "Electrical",
         "categories": ["Electrical", "Elevator", "Gas"],
         "audience": "electrical contractors",
+        "subject_trade": "electrical",
+        "hook_trade": "electrical",
     },
     "hvac": {
         "label": "Heating & HVAC",
         "categories": ["Heating", "Gas"],
         "audience": "HVAC companies",
+        "subject_trade": "HVAC",
+        "hook_trade": "heating and HVAC",
     },
     "restoration": {
         "label": "Restoration & Cleanup",
         "categories": ["Mold", "Unsanitary", "Rodent", "Lead", "Debris"],
         "audience": "restoration companies",
+        "subject_trade": "restoration",
+        "hook_trade": "restoration",
     },
     "landscaping": {
         "label": "Landscaping & Grounds",
         "categories": ["Grass"],
         "audience": "landscaping and groundskeeping companies",
+        "subject_trade": "landscaping",
+        "hook_trade": "groundskeeping",
     },
 }
 
 DEFAULT_NICHE = "general_contractors"
+
+# Nome curto para o assunto (limite duro de 38 caracteres, para nao cortar no
+# telemovel). O corpo usa sempre `display_city`.
+CITY_SHORT: dict[str, str] = {
+    "NYC": "NYC",
+    "NEW YORK": "NYC",
+    "BROOKLYN": "Brooklyn",
+    "CHICAGO": "Chicago",
+    "DALLAS": "Dallas",
+    "BOSTON": "Boston",
+}
+
+SUBJECT_MAX = 38
 
 
 # --------------------------------------------------------------- templates
@@ -137,18 +166,14 @@ DEFAULT_NICHE = "general_contractors"
 # not reference them.
 TEMPLATES: dict[str, dict[str, str]] = {
     "general_contractors": {
-        "subject": "New project opportunities in {city} this week",
+        "subject": "{subject}",
         "body": (
             "{greeting}\n\n"
-            "We connect licensed general contractors in {city} with active, "
-            "exclusive job opportunities - homeowners who need work done right "
-            "now.\n\n"
-            "Instead of chasing shared or cold leads, each opportunity is matched "
-            "to a single contractor and includes the homeowner's contact details, "
-            "the address, and the exact service needed.\n\n"
-            "We currently have {count} active project opportunities in {city}"
-            "{address_tail}.\n\n"
-            "Would your team be open to reviewing this week's list?\n\n"
+            "{hook}\n\n"
+            "Each one is matched to a single contractor: the address, the "
+            "homeowner's details and the exact service needed - never shared "
+            "with other {audience}.\n\n"
+            "{cta}\n\n"
             "Best regards,\n"
             "Magic Leads\n\n"
             "https://www.magicleads.app/\n\n"
@@ -156,18 +181,14 @@ TEMPLATES: dict[str, dict[str, str]] = {
         ),
     },
     "roofing": {
-        "subject": "New roofing projects in {city} this week",
+        "subject": "{subject}",
         "body": (
             "{greeting}\n\n"
-            "We connect licensed roofing contractors in {city} with active, "
-            "exclusive job opportunities - homeowners who need work done right "
-            "now.\n\n"
-            "Instead of chasing shared or cold leads, each opportunity is matched "
-            "to a single contractor and includes the homeowner's contact details, "
-            "the address, and the exact service needed.\n\n"
-            "We currently have {count} active roofing opportunities in {city}"
-            "{address_tail}.\n\n"
-            "Would your team be open to reviewing this week's list?\n\n"
+            "{hook}\n\n"
+            "Each one is matched to a single contractor: the address, the "
+            "homeowner's details and the exact service needed - never shared "
+            "with other {audience}.\n\n"
+            "{cta}\n\n"
             "Best regards,\n"
             "Magic Leads\n\n"
             "https://www.magicleads.app/\n\n"
@@ -175,18 +196,14 @@ TEMPLATES: dict[str, dict[str, str]] = {
         ),
     },
     "remodeling": {
-        "subject": "New remodeling projects in {city} this week",
+        "subject": "{subject}",
         "body": (
             "{greeting}\n\n"
-            "We connect licensed remodeling contractors in {city} with active, "
-            "exclusive job opportunities - homeowners who need work done right "
-            "now.\n\n"
-            "Instead of chasing shared or cold leads, each opportunity is matched "
-            "to a single contractor and includes the homeowner's contact details, "
-            "the address, and the exact service needed.\n\n"
-            "We currently have {count} active remodeling opportunities in {city}"
-            "{address_tail}.\n\n"
-            "Would your team be open to reviewing this week's list?\n\n"
+            "{hook}\n\n"
+            "Each one is matched to a single contractor: the address, the "
+            "homeowner's details and the exact service needed - never shared "
+            "with other {audience}.\n\n"
+            "{cta}\n\n"
             "Best regards,\n"
             "Magic Leads\n\n"
             "https://www.magicleads.app/\n\n"
@@ -194,18 +211,14 @@ TEMPLATES: dict[str, dict[str, str]] = {
         ),
     },
     "plumbing": {
-        "subject": "New plumbing projects in {city} this week",
+        "subject": "{subject}",
         "body": (
             "{greeting}\n\n"
-            "We connect licensed plumbing contractors in {city} with active, "
-            "exclusive job opportunities - homeowners who need work done right "
-            "now.\n\n"
-            "Instead of chasing shared or cold leads, each opportunity is matched "
-            "to a single contractor and includes the homeowner's contact details, "
-            "the address, and the exact service needed.\n\n"
-            "We currently have {count} active plumbing opportunities in {city}"
-            "{address_tail}.\n\n"
-            "Would your team be open to reviewing this week's list?\n\n"
+            "{hook}\n\n"
+            "Each one is matched to a single contractor: the address, the "
+            "homeowner's details and the exact service needed - never shared "
+            "with other {audience}.\n\n"
+            "{cta}\n\n"
             "Best regards,\n"
             "Magic Leads\n\n"
             "https://www.magicleads.app/\n\n"
@@ -213,18 +226,14 @@ TEMPLATES: dict[str, dict[str, str]] = {
         ),
     },
     "electrical": {
-        "subject": "New electrical projects in {city} this week",
+        "subject": "{subject}",
         "body": (
             "{greeting}\n\n"
-            "We connect licensed electrical contractors in {city} with active, "
-            "exclusive job opportunities - homeowners who need work done right "
-            "now.\n\n"
-            "Instead of chasing shared or cold leads, each opportunity is matched "
-            "to a single contractor and includes the homeowner's contact details, "
-            "the address, and the exact service needed.\n\n"
-            "We currently have {count} active electrical opportunities in {city}"
-            "{address_tail}.\n\n"
-            "Would your team be open to reviewing this week's list?\n\n"
+            "{hook}\n\n"
+            "Each one is matched to a single contractor: the address, the "
+            "homeowner's details and the exact service needed - never shared "
+            "with other {audience}.\n\n"
+            "{cta}\n\n"
             "Best regards,\n"
             "Magic Leads\n\n"
             "https://www.magicleads.app/\n\n"
@@ -232,18 +241,14 @@ TEMPLATES: dict[str, dict[str, str]] = {
         ),
     },
     "hvac": {
-        "subject": "New heating and HVAC projects in {city} this week",
+        "subject": "{subject}",
         "body": (
             "{greeting}\n\n"
-            "We connect licensed HVAC contractors in {city} with active, "
-            "exclusive job opportunities - homeowners who need work done right "
-            "now.\n\n"
-            "Instead of chasing shared or cold leads, each opportunity is matched "
-            "to a single contractor and includes the homeowner's contact details, "
-            "the address, and the exact service needed.\n\n"
-            "We currently have {count} active heating and HVAC opportunities in "
-            "{city}{address_tail}.\n\n"
-            "Would your team be open to reviewing this week's list?\n\n"
+            "{hook}\n\n"
+            "Each one is matched to a single contractor: the address, the "
+            "homeowner's details and the exact service needed - never shared "
+            "with other {audience}.\n\n"
+            "{cta}\n\n"
             "Best regards,\n"
             "Magic Leads\n\n"
             "https://www.magicleads.app/\n\n"
@@ -251,18 +256,14 @@ TEMPLATES: dict[str, dict[str, str]] = {
         ),
     },
     "restoration": {
-        "subject": "New restoration projects in {city} this week",
+        "subject": "{subject}",
         "body": (
             "{greeting}\n\n"
-            "We connect licensed restoration contractors in {city} with active, "
-            "exclusive job opportunities - homeowners who need work done right "
-            "now.\n\n"
-            "Instead of chasing shared or cold leads, each opportunity is matched "
-            "to a single contractor and includes the homeowner's contact details, "
-            "the address, and the exact service needed.\n\n"
-            "We currently have {count} active restoration opportunities in {city}"
-            "{address_tail}.\n\n"
-            "Would your team be open to reviewing this week's list?\n\n"
+            "{hook}\n\n"
+            "Each one is matched to a single contractor: the address, the "
+            "homeowner's details and the exact service needed - never shared "
+            "with other {audience}.\n\n"
+            "{cta}\n\n"
             "Best regards,\n"
             "Magic Leads\n\n"
             "https://www.magicleads.app/\n\n"
@@ -270,18 +271,14 @@ TEMPLATES: dict[str, dict[str, str]] = {
         ),
     },
     "landscaping": {
-        "subject": "New groundskeeping work in {city} this week",
+        "subject": "{subject}",
         "body": (
             "{greeting}\n\n"
-            "We connect licensed landscaping and groundskeeping companies in {city} "
-            "with active, exclusive job opportunities - properties that need work "
-            "done right now.\n\n"
-            "Instead of chasing shared or cold leads, each opportunity is matched "
-            "to a single contractor and includes the property contact details, "
-            "the address, and the exact service needed.\n\n"
-            "We currently have {count} active groundskeeping opportunities in {city}"
-            "{address_tail}.\n\n"
-            "Would your team be open to reviewing this week's list?\n\n"
+            "{hook}\n\n"
+            "Each one is matched to a single contractor: the address, the "
+            "homeowner's details and the exact service needed - never shared "
+            "with other {audience}.\n\n"
+            "{cta}\n\n"
             "Best regards,\n"
             "Magic Leads\n\n"
             "https://www.magicleads.app/\n\n"
@@ -517,6 +514,76 @@ def is_usable_company(name: Optional[str]) -> bool:
     return bool(n) and not is_generic_company(n) and not is_address_company(n)
 
 
+# Apenas SERVICOS COMERCIAIS ATRATIVOS entram na clausula dinamica.
+# Categorias internas de origem municipal (Lead, Debris, Permit_Rejected) ficam
+# de fora de proposito: sao verdadeiras na base mas nao vendem nada e expoem
+# vocabulario interno.
+_ATTRACTIVE_SERVICES: dict[str, str] = {
+    "Structure": "structural repairs",
+    "Roof": "roof replacements",
+    "Paint": "interior painting",
+    "Door_Window": "window and door replacements",
+    "Plumbing": "burst pipes and sewer backups",
+    "Electrical": "panel upgrades",
+    "Elevator": "elevator repairs",
+    "Gas": "gas line work",
+    "Heating": "no-heat emergencies",
+    "Mold": "mold remediation",
+    "Unsanitary": "sanitation cleanups",
+    "Rodent": "pest control",
+    "Grass": "groundskeeping",
+}
+
+# Fracao minima do inventario que as categorias escolhidas tem de representar.
+COMPOSITION_MIN_SHARE = 0.4
+
+
+def _fmt_count(value: int) -> str:
+    """12521 -> '12,521' (leitura imediata e sem ambiguidade)."""
+    try:
+        return f"{int(value):,}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def composition_clause(
+    top_categories: Optional[list[tuple[str, int]]],
+    total: int,
+    exclude: str = "",
+) -> str:
+    """Clausula " - including X and Y." derivada dos dados reais da cidade+nicho.
+
+    Regras (nunca inventa composicao):
+      * so' entram servicos comerciais atrativos (_ATTRACTIVE_SERVICES);
+      * descarta a categoria que repete a palavra do proprio nicho;
+      * exige que as categorias escolhidas representem >=40% do total;
+      * devolve "" caso contrario.
+    """
+    if not top_categories or total <= 0:
+        return ""
+    ex = (exclude or "").lower()
+    picked: list[tuple[str, int]] = []
+    for cat, n in top_categories:
+        if n <= 0:
+            continue
+        word = _ATTRACTIVE_SERVICES.get(cat)
+        if not word:
+            continue
+        if ex and ex in word.lower():
+            continue
+        picked.append((word, n))
+        if len(picked) == 2:
+            break
+    if not picked:
+        return ""
+    if sum(n for _, n in picked) / total < COMPOSITION_MIN_SHARE:
+        return ""
+    words = [w for w, _ in picked]
+    if len(words) == 1:
+        return f" - including {words[0]}."
+    return f" - including {words[0]} and {words[1]}."
+
+
 def build_context(
     sample: Optional[Mapping[str, Any]],
     city: str,
@@ -524,6 +591,7 @@ def build_context(
     count: int,
     sender_name: str = "MagicLeads Outreach",
     contact: Optional[Mapping[str, Any]] = None,
+    top_categories: Optional[list[tuple[str, int]]] = None,
 ) -> dict[str, str]:
     """Merge REAL data (contact + lead row + niche + city) into placeholders.
 
@@ -580,7 +648,30 @@ def build_context(
     else:
         address_tail = f", including active public record notices across {display_city}"
 
+    spec = NICHES.get(niche or DEFAULT_NICHE) or NICHES[DEFAULT_NICHE]
+    trade_short = spec.get("subject_trade") or spec["label"]
+    hook_trade = spec.get("hook_trade") or trade_short
+    audience = spec.get("audience") or "contractors"
+    city_short = CITY_SHORT.get((city or "").upper(), display_city)
+
+    count_txt = _fmt_count(count)
+    # Assunto: nunca perder a palavra do nicho (e' o teste de relevancia).
+    # Cadeia de fallback: "open in" -> "in" -> sem nicho (ultimo recurso).
+    subject = f"{count_txt} {trade_short} projects open in {city_short}"
+    if len(subject) > SUBJECT_MAX:
+        subject = f"{count_txt} {trade_short} projects in {city_short}"
+    if len(subject) > SUBJECT_MAX:
+        subject = f"{count_txt} projects in {city_short}"
+
+    composition = composition_clause(top_categories, count, exclude=hook_trade)
+    hook = f"{count_txt} active {hook_trade} projects in {display_city} this week"
+    hook = f"{hook}{composition}" if composition else f"{hook}."
+
     return {
+        "subject": subject,
+        "hook": hook,
+        "cta": 'Reply with "send" and I will forward this week\'s list.',
+        "audience": audience,
         "company_name": company if company_usable else "your team",
         "contact_name": greeting_name,
         "greeting": greeting,

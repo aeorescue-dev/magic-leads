@@ -722,6 +722,9 @@ def test_outbound_send_promotes_batch_and_enqueues_valid_contact(admin_client):
         email_status="valid",
     )
     assert contact and contact["email_status"] == "valid"
+    # Gate de nicho: o destinatario tem de ter nicho confirmado para ser enviado.
+    svc.set_contact_niche(contact["id"], "general_contractors", "confirmed")
+    svc.set_lead_niche(lead_id, "general_contractors", "confirmed")
 
     svc.set_outbound_config("send_enabled", "1", city="")
     before = _count("outbound_messages")
@@ -923,7 +926,7 @@ def test_outbound_build_context_personalization_fallbacks():
     assert c["company_name"] == "your team"
     assert c["contact_name"] == "there"
     body = ot.render(ot.get_template("roofing")["body"], c)
-    assert "Would your team be open" in body
+    assert 'Reply with "send"' in body
     assert "Hi," in body
 
     # Empresa generica -> "your team".
@@ -963,8 +966,9 @@ def test_outbound_address_tail_is_conditional():
         ", including an active public record notice near 329 BERRY STREET"
     )
     body = ot.render(ot.get_template("roofing")["body"], with_addr)
-    assert "near 329 BERRY STREET" in body
-    assert "across New York City" not in body
+    # Value-First: o corpo abre com o numero e nao interpola o endereco.
+    assert "near 329 BERRY STREET" not in body
+    assert "active roofing projects in New York City this week" in body
 
     no_addr = ot.build_context(
         {"owner_name": "", "address": "", "issue_category": "Roof"},
@@ -974,7 +978,7 @@ def test_outbound_address_tail_is_conditional():
     )
     assert no_addr["address_tail"] == ", including active public record notices across New York City"
     body2 = ot.render(ot.get_template("roofing")["body"], no_addr)
-    assert "across New York City" in body2
+    assert "across New York City" not in body2
     assert "a property in your area" not in body2
 
 
@@ -1075,7 +1079,8 @@ def test_outbound_preview_renders_real_data_in_english(admin_client):
     assert "{" not in subject and "}" not in subject
     assert "{" not in rendered and "}" not in rendered
     # Dados reais: o endereço aparece na clausula condicional.
-    assert "500 N MICHIGAN AVENUE" in rendered
+    assert "500 N MICHIGAN AVENUE" not in rendered
+    assert "active roofing projects in Chicago this week" in rendered
     # A prévia e' estritamente en-US (mesmo guard dos templates).
     outbound_templates.assert_english_only(subject)
     outbound_templates.assert_english_only(rendered)

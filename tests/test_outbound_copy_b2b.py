@@ -31,12 +31,18 @@ def test_b2b_placeholder_address_never_reaches_copy():
     body = _render(B2B_LEAD, contact={"company_name": "Skender"})
     assert "B2B contact" not in body
     assert "info@skender.com" not in body
-    # sem endereco nao ha clausula de endereco (evita "in Chicago ... across Chicago")
     assert "across Chicago" not in body
-    assert "10 active project opportunities in Chicago." in body
+    # Value-First: a primeira linha abre com o numero e o nicho.
+    assert "10 active construction projects in Chicago this week" in body
 
 
-def test_real_address_still_included():
+def test_real_address_is_not_injected_in_value_first_copy():
+    """A estrutura Value-First abre com o numero; nao interpola enderecos.
+
+    O endereco de um lead 311 identificaria a origem municipal do dado, que a
+    politica de copy proibe. `address_tail` continua no contexto para usos
+    futuros, mas nao faz parte do corpo.
+    """
     lead = {
         "id": 2,
         "address": "4400 KILBOURN",
@@ -46,4 +52,4 @@ def test_real_address_still_included():
         "owner_name": None,
     }
     body = _render(lead)
-    assert "near 4400 KILBOURN" in body
+    assert "4400 KILBOURN" not in body

@@ -82,6 +82,8 @@ def _import(email: str = "pamela@pamela-clark.com") -> dict:
         company_name="Pamela Clark Builders",
         city=CITY,
         category="General Contractors",
+        niche_key="general_contractors",
+        niche_status="confirmed",
     )
     assert contact is not None, "import_b2b_lead devolveu None (INSERT falhou)"
     return contact

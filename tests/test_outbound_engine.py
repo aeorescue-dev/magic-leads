@@ -266,7 +266,7 @@ def _seed_mailbox(city: str = "") -> dict:
 
 def _seed_contact(lead_id: int, email: str, city: str = "BOSTON") -> dict:
     svc = engine_module.db_service._service
-    return svc.upsert_outbound_contact(
+    contact = svc.upsert_outbound_contact(
         lead_id=lead_id,
         email=email,
         city=city,
@@ -275,6 +275,12 @@ def _seed_contact(lead_id: int, email: str, city: str = "BOSTON") -> dict:
         email_source="manual",
         email_status="valid",
     )
+    # Gate de nicho: sem nicho confirmado o motor nao envia.
+    if contact:
+        svc.set_contact_niche(contact["id"], "general_contractors", "confirmed")
+        if lead_id:
+            svc.set_lead_niche(lead_id, "general_contractors", "confirmed")
+    return contact
 
 
 def _seed_lead(city: str, external_id: str, address: str) -> int:

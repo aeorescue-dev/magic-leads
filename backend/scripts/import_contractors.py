@@ -27,7 +27,7 @@ Fluxo por linha:
   5. grava em `outbound_contacts` apenas `status == "valid"`.
 
 Uso:
-    python -m backend.scripts.import_contractors --csv data/imports/chicago_contractors.csv
+    python -m backend.scripts.import_contractors --csv backend/data/imports/chicago_contractors.csv
     python -m backend.scripts.import_contractors --csv lista.csv --dry-run
     python -m backend.scripts.import_contractors --csv lista.csv --report falhas.csv
 """
@@ -36,14 +36,17 @@ from __future__ import annotations
 import argparse
 import asyncio
 import csv
+import json
 import os
 import sys
 import time
 
-from ..services import outbound_templates, vps_prober
+from ..services import niche_classifier, outbound_templates, vps_prober
 from ..services.company_discovery import (
     CompanyDiscovery,
+    default_fetch,
     email_patterns,
+    extract_text,
     registrable_domain,
 )
 from ..services.db import db_service
@@ -92,7 +95,7 @@ def _candidates(company: str, domain: str) -> list[str]:
 
 async def _run(items: list[dict], dry_run: bool, niche_label: str) -> tuple[dict, list[dict]]:
     stats = {"companies": len(items), "with_mx": 0, "validated": 0,
-             "saved": 0, "no_mx": 0, "no_valid_email": 0}
+             "saved": 0, "no_mx": 0, "no_valid_email": 0, "quarantined": 0}
     misses: list[dict] = []
     discovery = CompanyDiscovery()
     started = time.time()
@@ -121,6 +124,50 @@ async def _run(items: list[dict], dry_run: bool, niche_label: str) -> tuple[dict
                 continue
         stats["with_mx"] += 1
 
+        # --- 1. nicho por EMPRESA (nunca pelo lote) ----------------------
+        verdict = niche_classifier.classify(company, domain=domain)
+        if verdict["status"] != "confirmed":
+            # segundo sinal: texto do site (1 fetch). Sem isto, GCs cujo nome
+            # nao contem "construction" (Skender, Walsh) ficavam unknown.
+            page = await asyncio.to_thread(default_fetch, f"https://{domain}/", 6.0)
+            if page and page.get("html"):
+                try:
+                    title, body_text = extract_text(page["html"])
+                except Exception:  # noqa: BLE001
+                    title, body_text = "", ""
+                site = f"{title} {body_text[:6000]}".strip()
+                if site:
+                    verdict = niche_classifier.classify(
+                        company, domain=domain, text=site
+                    )
+
+        niche_key = verdict["niche"]
+        niche_status = verdict["status"]
+        evidence = json.dumps(verdict, ensure_ascii=False)
+        print(f"   nicho: {niche_key or '-'} ({niche_status}, "
+              f"score={verdict['score']}, margin={verdict['margin']})")
+
+        if niche_status != "confirmed" or not niche_key:
+            if not dry_run:
+                await db_service.import_b2b_lead(
+                    email=f"quarantine+{domain}@local.invalid",
+                    company_name=company,
+                    city=item["city"],
+                    category=item.get("category") or niche_label,
+                    domain=domain,
+                    state=item["state"],
+                    niche_key=None,
+                    niche_status="ambiguous" if niche_status == "ambiguous" else "unknown",
+                    niche_score=verdict["score"],
+                    niche_evidence=evidence,
+                    create_contact=False,
+                )
+            stats["quarantined"] += 1
+            misses.append({**item, "reason": f"nicho {niche_status}"})
+            print(f"   QUARENTENA ({niche_status}) - sem contacto, sem sondagem SMTP")
+            continue
+
+        # --- 2. validacao SMTP so' para nicho confirmado -----------------
         found = None
         for email in _candidates(company, domain):
             try:
@@ -141,7 +188,8 @@ async def _run(items: list[dict], dry_run: bool, niche_label: str) -> tuple[dict
             continue
 
         if dry_run:
-            print(f"[DRY] salvaria {company} <{found}> ({item['city']})")
+            print(f"[DRY] salvaria {company} <{found}> ({item['city']}) "
+                  f"nicho={niche_key}")
             stats["saved"] += 1
             continue
 
@@ -149,14 +197,19 @@ async def _run(items: list[dict], dry_run: bool, niche_label: str) -> tuple[dict
             email=found,
             company_name=company,
             city=item["city"],
-            category=item.get("category") or niche_label,
+            category=outbound_templates.NICHES[niche_key]["label"],
             contact_name=None,
             domain=domain,
             state=item["state"],
+            niche_key=niche_key,
+            niche_status="confirmed",
+            niche_score=verdict["score"],
+            niche_evidence=evidence,
         )
         if contact:
             stats["saved"] += 1
-            print(f"[OK]  {found} salvo (contact_id={contact.get('id')})")
+            print(f"[OK]  {found} salvo (contact_id={contact.get('id')}, "
+                  f"nicho={niche_key})")
 
         if idx % 5 == 0 or idx == len(items):
             print(f"--- {idx}/{len(items)} | salvos={stats['saved']} "
