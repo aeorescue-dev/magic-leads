@@ -8866,16 +8866,27 @@ class AsyncDatabaseService:
         contact_name: Optional[str] = None,
         domain: Optional[str] = None,
         state: Optional[str] = None,
+        niche_key: Optional[str] = None,
+        niche_status: str = "confirmed",
+        niche_score: float = 0.0,
+        niche_evidence: Optional[str] = None,
+        create_contact: bool = True,
     ) -> Optional[dict]:
         return await anyio.to_thread.run_sync(
-            self._service.import_b2b_lead,
-            email,
-            company_name,
-            city,
-            category,
-            contact_name,
-            domain,
-            state,
+            lambda: self._service.import_b2b_lead(
+                email,
+                company_name,
+                city,
+                category,
+                contact_name,
+                domain,
+                state,
+                niche_key=niche_key,
+                niche_status=niche_status,
+                niche_score=niche_score,
+                niche_evidence=niche_evidence,
+                create_contact=create_contact,
+            )
         )
 
     async def get_available_outbound_cities(self) -> List[str]:
