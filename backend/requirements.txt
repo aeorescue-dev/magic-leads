@@ -10,3 +10,11 @@ slowapi==0.1.10
 pywebpush==2.5.0
 anyio>=3.7.1,<5.0.0
 stripe>=7.0.0,<13.0.0
+
+# Descoberta de e-mail (company_discovery). Sem estes, `extract_text` e o
+# resolvedor DNS falham em silencio e a heuristica nunca aceita um dominio:
+# o pipeline devolve "no_email_found" para tudo, sem erro visivel.
+beautifulsoup4>=4.12.0,<5.0.0
+lxml>=5.2.0,<6.0.0
+dnspython>=2.6.0,<3.0.0
+requests>=2.31.0,<3.0.0
