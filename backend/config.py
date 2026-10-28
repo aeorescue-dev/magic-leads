@@ -231,6 +231,9 @@ class Settings(BaseSettings):
     # Fail-closed: sem VPS_WORKER_URL cada job termina em no_email/failed.
     ENRICH_QUEUE_ENABLED: bool = True
 
+    # Control Tower: saude do motor (15 min), backup off-site e digest diario.
+    CONTROL_TOWER_ENABLED: bool = True
+
     # Sequencia de e-mails (Prioridade D). Passo 1 = amostra (sem preco),
     # passo 2 = oferta ($120/semana). O passo 2 so' e' agendado para quem
     # recebeu o passo 1 e nao respondeu, se nao se desinscreveu e nao foi

@@ -637,6 +637,26 @@ CREATE TABLE IF NOT EXISTS outbound_config (
 
 CREATE INDEX IF NOT EXISTS idx_outbound_config_scope_city ON outbound_config (scope, city);
 
+-- Control Tower: historico de verificacoes de saude do motor.
+-- status: ok | warn | fail
+CREATE TABLE IF NOT EXISTS health_checks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  checked_at TEXT NOT NULL,
+  check_name TEXT NOT NULL,
+  status TEXT NOT NULL,
+  detail TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_health_checks_at ON health_checks (checked_at);
+
+-- Pequeno armazem chave/valor para estado operacional (heartbeat do worker,
+-- data do ultimo backup, ultimo digest). Nao e' cache de dados de negocio.
+CREATE TABLE IF NOT EXISTS system_kv (
+  key TEXT PRIMARY KEY,
+  value TEXT,
+  updated_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS sending_mailboxes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   email TEXT NOT NULL UNIQUE,

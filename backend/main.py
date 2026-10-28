@@ -54,6 +54,7 @@ from .scrapers.socrata_311 import socrata_scraper
 from .scrapers.socrata_discovery import socrata_discovery
 from .services import (
     alert_planner,
+    control_tower,
     enrichment_queue,
     notifier,
     outbound_templates,
@@ -1829,6 +1830,27 @@ async def admin_enrich_jobs_create(
     return result
 
 
+@app.get("/api/admin/outbound/health")
+async def admin_outbound_health(_admin: dict = Depends(_require_admin_user)):
+    """Ultimo snapshot de saude do motor + digest textual (sem enviar)."""
+    return {
+        "checks": control_tower.latest_health(),
+        "digest": control_tower.build_digest(),
+    }
+
+
+@app.post("/api/admin/outbound/backup")
+async def admin_outbound_backup_now(_admin: dict = Depends(_require_admin_user)):
+    """Forca backup + teste de restauro (uso manual)."""
+    result = await control_tower.backup_database()
+    verify = (
+        await control_tower.verify_latest_backup()
+        if result.get("status") == "ok"
+        else None
+    )
+    return {"backup": result, "verify": verify}
+
+
 @app.get("/api/admin/outbound/enrich/jobs/status")
 async def admin_enrich_jobs_status(
     city: str | None = None,
@@ -3090,6 +3112,12 @@ async def _lifespan(app):
     else:
         logger.info("[OUTBOUND] Worker desativado por OUTBOUND_WORKER_ENABLED=0")
 
+    # Control Tower (Etapa 1): saude a cada 15 min, backup diario off-site e
+    # digest diario. Fail-soft: qualquer falha aqui nunca derruba a app.
+    if getattr(settings, "CONTROL_TOWER_ENABLED", True):
+        _health_task = asyncio.create_task(_control_tower_loop())
+        logger.info("Control Tower ativa (saude 15min, backup+digest diarios)")
+
     # Fila de enriquecimento (Fase 1): tira a descoberta/validacao do request
     # HTTP. Fail-closed: sem VPS configurada cada job fica `no_email`/`failed`.
     if getattr(settings, "ENRICH_QUEUE_ENABLED", True):
@@ -3209,6 +3237,33 @@ async def _hold_watchdog_loop():
             logger.error(f"Erro no watchdog de holds: {e}", exc_info=True)
 
 
+async def _control_tower_loop():
+    """Saude a cada 15 min; backup + digest no maximo 1x/dia.
+
+    `maybe_backup` so' corre se o ultimo backup tiver >20h, portanto um deploy
+    a meio do dia nao gera copias extra.
+    """
+    await asyncio.sleep(30)
+    while True:
+        try:
+            res = await control_tower.maybe_backup()
+            if res:
+                logger.info("[CONTROL-TOWER] backup: %s", res)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[CONTROL-TOWER] backup falhou: %s", exc)
+        try:
+            await control_tower.run_health_checks()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[CONTROL-TOWER] health falhou: %s", exc)
+        try:
+            res = await control_tower.maybe_send_digest()
+            if res:
+                logger.info("[CONTROL-TOWER] digest: %s", res)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[CONTROL-TOWER] digest falhou: %s", exc)
+        await asyncio.sleep(15 * 60)
+
+
 async def _outbound_worker_loop():
     """Tick periodico do motor de envio real (Outbound Frio - Fase 2).
 
@@ -3223,6 +3278,14 @@ async def _outbound_worker_loop():
             # Dorme primeiro: evita disparos na arrancagem e nos testes.
             await asyncio.sleep(interval_s)
             result = await outbound_engine.process_queue()
+            # Heartbeat: a Control Tower usa isto para detectar worker morto.
+            try:
+                control_tower.kv_set(
+                    control_tower.KV_LAST_TICK,
+                    control_tower._iso(control_tower._now()),
+                )
+            except Exception:  # noqa: BLE001
+                pass
             if result.get("sent") or result.get("failed") or result.get("skipped"):
                 logger.info("[OUTBOUND] Worker tick: %s", result)
             elif result.get("status") not in ("idle", "disabled", "quiet_hours"):
