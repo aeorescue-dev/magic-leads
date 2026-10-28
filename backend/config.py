@@ -226,6 +226,11 @@ class Settings(BaseSettings):
     OUTBOUND_WORKER_INTERVAL_SECONDS: int = 60
     OUTBOUND_WORKER_CHUNK: int = 10
 
+    # Fila de enriquecimento (Fase 1). Tira a descoberta/validacao do request
+    # HTTP para uma tarefa de background com estado em SQLite e retry/backoff.
+    # Fail-closed: sem VPS_WORKER_URL cada job termina em no_email/failed.
+    ENRICH_QUEUE_ENABLED: bool = True
+
     # Sequencia de e-mails (Prioridade D). Passo 1 = amostra (sem preco),
     # passo 2 = oferta ($120/semana). O passo 2 so' e' agendado para quem
     # recebeu o passo 1 e nao respondeu, se nao se desinscreveu e nao foi

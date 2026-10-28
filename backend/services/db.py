@@ -702,6 +702,29 @@ CREATE TABLE IF NOT EXISTS outbound_enrichment_calls (
 CREATE INDEX IF NOT EXISTS idx_outbound_enrichment_calls_at ON outbound_enrichment_calls (called_at);
 CREATE INDEX IF NOT EXISTS idx_outbound_enrichment_calls_outcome ON outbound_enrichment_calls (outcome);
 
+-- Fila persistente de enriquecimento (Fase 1): tira o trabalho do request HTTP,
+-- da' retry com backoff e sobrevive a deploys/reinicios.
+-- status: pending | running | done | no_email | failed
+CREATE TABLE IF NOT EXISTS outbound_enrichment_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  lead_id INTEGER,
+  city TEXT,
+  niche TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  max_attempts INTEGER NOT NULL DEFAULT 3,
+  last_error TEXT,
+  next_attempt_at TEXT,
+  result_email TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_enrich_jobs_status_due
+  ON outbound_enrichment_jobs (status, next_attempt_at);
+CREATE INDEX IF NOT EXISTS idx_enrich_jobs_lead
+  ON outbound_enrichment_jobs (lead_id);
+
 CREATE TABLE IF NOT EXISTS outbound_batches (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   city TEXT,

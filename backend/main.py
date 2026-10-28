@@ -65,6 +65,7 @@ from .services.db import (  # noqa: F401  — usados nos filtros de qualificaç�
     db_service,
 )
 from .services.enrichment import owner_enrichment
+from .services import enrichment_queue
 from .services.lead_rules import (
     charges_credit,
     classify,
@@ -1799,6 +1800,48 @@ async def admin_outbound_worker(
     return await outbound_engine.process_queue(limit=limit)
 
 
+@app.post("/api/admin/outbound/enrich/jobs")
+async def admin_enrich_jobs_create(
+    city: str,
+    nicho: str = "general_contractors",
+    limit: int = 200,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Enfileira enriquecimento de e-mails para uma cidade (nao bloqueia).
+
+    Grava jobs `pending`; o loop de background drena-os com retry/backoff.
+    Devolve contadores imediatos — o progresso consulta-se em
+    `GET /api/admin/outbound/enrich/jobs/status`.
+    """
+    if nicho not in outbound_templates.NICHES:
+        raise HTTPException(status_code=400, detail="Nicho invalido")
+    result = await enrichment_queue.enqueue_city(city, nicho, limit)
+    logger.info(
+        "[ENRICH-QUEUE] city=%s niche=%s limit=%s -> created=%s pending=%s",
+        result.get("city"), nicho, limit,
+        result.get("jobs_created"), result.get("pending_total"),
+    )
+    return result
+
+
+@app.get("/api/admin/outbound/enrich/jobs/status")
+async def admin_enrich_jobs_status(
+    city: str | None = None,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Estado da fila de enriquecimento + total de contactos com e-mail."""
+    return await enrichment_queue.stats(city)
+
+
+@app.post("/api/admin/outbound/enrich/run")
+async def admin_enrich_run_once(
+    batch: int | None = None,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Processa um punhado de jobs agora (util para testar sem esperar o loop)."""
+    return await enrichment_queue.run_worker_once(batch or enrichment_queue.CLAIM_BATCH)
+
+
 @app.post("/api/admin/outbound/preview")
 async def admin_outbound_preview(
     payload: OutboundPreviewRequest,
@@ -3041,6 +3084,13 @@ async def _lifespan(app):
         )
     else:
         logger.info("[OUTBOUND] Worker desativado por OUTBOUND_WORKER_ENABLED=0")
+
+    # Fila de enriquecimento (Fase 1): tira a descoberta/validacao do request
+    # HTTP. Fail-closed: sem VPS configurada cada job fica `no_email`/`failed`.
+    if getattr(settings, "ENRICH_QUEUE_ENABLED", True):
+        _enrich_task = asyncio.create_task(enrichment_queue.worker_loop())
+    else:
+        logger.info("[ENRICH-QUEUE] Desativada por ENRICH_QUEUE_ENABLED=0")
 
     # Recuperacao de checkout abandonado (Prioridade A). Fail-closed: sem
     # EMAIL_API_KEY/EMAIL_FROM nao envia nada; so' actua sobre utilizadores que

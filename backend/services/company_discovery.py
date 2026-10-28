@@ -417,7 +417,47 @@ def probe_rcpt(mx_host: str, recipients: list[str],
 
 
 def default_prober() -> SmtpProber:
+    """Prefere o micro-worker VPS: a porta 25 de saida esta' bloqueada no Railway.
+
+    Sem `VPS_WORKER_URL`/`VPS_WORKER_SECRET` mantem o probe local (dev/CI).
+    """
+    import os
+
+    if (os.getenv("VPS_WORKER_URL") or "").strip() and (
+        os.getenv("VPS_WORKER_SECRET") or ""
+    ).strip():
+        return SmtpProber(vps_probe_rcpt)
     return SmtpProber(probe_rcpt)
+
+
+def vps_probe_rcpt(mx_host: str, recipients: list[str],
+                   sender: str = "postmaster@magicleads.app",
+                   timeout: float = 10.0) -> dict:
+    """RCPT TO real delegado ao micro-worker VPS (Railway bloqueia porta 25).
+
+    Mantem o mesmo contrato de `probe_rcpt`: {"error", "codes"}.
+    `catch_all` NAO prova a existencia da caixa: entra como "greylisted" para
+    nunca promover um e-mail nao comprovado a contacto enviavel.
+    """
+    from . import vps_prober
+
+    codes = {r: "unknown" for r in recipients}
+    failure: Optional[str] = None
+    for r in recipients:
+        domain = r.rsplit("@", 1)[-1].strip().lower()
+        res = vps_prober.probe_smtp_via_vps(r, domain, timeout=timeout)
+        status = (res or {}).get("status")
+        if status == "valid":
+            codes[r] = "accepted"
+        elif status == "invalid":
+            codes[r] = "rejected"
+        elif status == "catch_all":
+            codes[r] = "greylisted"
+        else:
+            failure = failure or (res or {}).get("error") or str(status)
+    if all(v == "unknown" for v in codes.values()):
+        return {"error": failure or "VPS_PROBE_FAILED", "codes": codes}
+    return {"error": None, "codes": codes}
 
 
 def extract_text(html: bytes) -> tuple[str, str]:

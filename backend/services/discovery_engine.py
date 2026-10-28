@@ -9,6 +9,7 @@ Gerencia o ciclo de vida da descoberta por lead:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Optional
@@ -38,7 +39,12 @@ async def enrich_lead_email(db_service, lead: dict) -> dict:
 
     discovery = CompanyDiscovery()
     t0 = time.time()
-    res = discovery.discover(lead, timeout=settings.DISCOVERY_PER_LEAD_TIMEOUT)
+    # `discover` faz DNS + HTTP + SMTP de forma sincrona: corre num thread para
+    # nao bloquear o event loop do uvicorn (antes, um unico lead podia congelar
+    # a API inteira durante 5-30s).
+    res = await asyncio.to_thread(
+        discovery.discover, lead, settings.DISCOVERY_PER_LEAD_TIMEOUT
+    )
     elapsed = round(time.time() - t0, 3)
 
     domain = res.get("domain")

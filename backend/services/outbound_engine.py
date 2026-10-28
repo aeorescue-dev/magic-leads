@@ -251,6 +251,28 @@ class OutboundEngine:
                         email_source="emaillistverify",
                         email_status="valid",
                     )
+                elif not emaillistverify_service.configured:
+                    # Fallback sem ELV: descoberta + validacao RCPT via worker VPS.
+                    # Reaproveita o motor de descoberta (slug + corroboracao do
+                    # site) em vez de adivinhar dominios soltos, para nao casar
+                    # "JAMES WALKER" com james.com e enviar para a empresa errada.
+                    try:
+                        from . import discovery_engine
+
+                        found = await discovery_engine.enrich_lead_email(db_service, lead)
+                        if found.get("status") == "success":
+                            contact = await db_service.get_outbound_contact_by_lead(
+                                lead["id"]
+                            )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(
+                            "[OUTBOUND] fallback VPS falhou lead=%s: %s",
+                            lead.get("id"),
+                            exc,
+                        )
+                    if not contact or not contact.get("email"):
+                        no_email += 1
+                        continue
                 else:
                     no_email += 1
                     continue
