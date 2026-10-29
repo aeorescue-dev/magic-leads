@@ -396,6 +396,60 @@ async def maybe_send_red_alert(checks: list[dict]) -> Optional[dict]:
     return await send_alert(checks)
 
 
+def _check_push_health() -> dict:
+    """Saude das entregas de push nas ultimas 24h.
+
+    `accepted` nao prova entrega; o que importa aqui e' a ausencia de entregas
+    com subscricoes ativas, VAPID em falta e uma explosao de subscriptions
+    mortas (404/410/401/403) que indica aparelhos a receber para o vazio.
+    """
+    try:
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                """SELECT
+                     COUNT(*) AS deliveries,
+                     SUM(CASE WHEN outcome = 'accepted' THEN 1 ELSE 0 END) AS accepted,
+                     SUM(CASE WHEN outcome = 'expired' THEN 1 ELSE 0 END) AS expired,
+                     SUM(CASE WHEN outcome = 'rejected_dead' THEN 1 ELSE 0 END) AS dead,
+                     SUM(CASE WHEN outcome = 'not_configured' THEN 1 ELSE 0 END) AS not_configured
+                   FROM push_deliveries
+                   WHERE sent_at >= datetime('now', '-24 hours')"""
+            ).fetchone()
+            subs = conn.execute("SELECT COUNT(*) FROM push_subscriptions").fetchone()[0]
+        finally:
+            conn.close()
+    except sqlite3.OperationalError as exc:
+        return {"name": "push_health", "status": "warn", "detail": f"indisponivel: {exc}"}
+
+    deliveries = int(row["deliveries"] or 0)
+    accepted = int(row["accepted"] or 0)
+    expired = int(row["expired"] or 0)
+    dead = int(row["dead"] or 0)
+    not_configured = int(row["not_configured"] or 0)
+
+    if not_configured:
+        return {
+            "name": "push_health", "status": "fail",
+            "detail": f"{not_configured} entrega(s) com VAPID em falta",
+        }
+    if subs > 0 and deliveries == 0:
+        return {
+            "name": "push_health", "status": "warn",
+            "detail": f"{subs} subscription(s) sem entregas em 24h",
+        }
+    bad = expired + dead
+    if deliveries >= 10 and bad / deliveries > 0.2:
+        return {
+            "name": "push_health", "status": "warn",
+            "detail": f"{bad}/{deliveries} subscriptions mortas em 24h",
+        }
+    return {
+        "name": "push_health", "status": "ok",
+        "detail": f"{accepted}/{deliveries} aceites · {subs} subscription(s)",
+    }
+
+
 async def run_health_checks() -> list[dict]:
     checks: list[dict] = [_check_db(), _check_worker()]
     checks.extend(_check_queue())
@@ -403,6 +457,7 @@ async def run_health_checks() -> list[dict]:
     checks.append(await _check_vps())
     checks.append(await _check_tokens())
     checks.append(_check_searchbug_cost())
+    checks.append(_check_push_health())
     _record(checks)
     worst = max(
         (c["status"] for c in checks),

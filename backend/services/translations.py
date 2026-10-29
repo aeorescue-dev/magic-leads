@@ -99,17 +99,17 @@ TRANSLATIONS = {
     "digest": {
         "pt": {
             "title": "Resumo diário de alertas",
-            "main_msg": "Mais {n} oportunidades chegaram hoje — o limite de {limit} renova amanhã.",
+            "main_msg": "{n} oportunidades nos seus ofícios hoje. O limite de {limit} renova amanhã.",
             "push_tag": "digest",
         },
         "en": {
             "title": "Daily digest",
-            "main_msg": "More {n} new opportunities today — the limit of {limit} resets tomorrow.",
+            "main_msg": "{n} opportunities in your trades today. The limit of {limit} resets tomorrow.",
             "push_tag": "digest",
         },
         "es": {
             "title": "Resumen diario",
-            "main_msg": "Hoy llegaron {n} oportunidades más — el límite de {limit} se renueva mañana.",
+            "main_msg": "{n} oportunidades en sus oficios hoy. El límite de {limit} se renueva mañana.",
             "push_tag": "digest",
         },
     },
@@ -209,3 +209,96 @@ def render(group_key: str, locale: Optional[str] = None, **params) -> Optional[d
 
 
 _LAST_KNOWN: dict = {}
+
+
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Alert Engine v2 — etiquetas de categoria e sinal para o payload de push.
+# O push nao pode mostrar chaves internas ("Door_Window") nem prometer
+# "alta probabilidade" sem numero.
+# ---------------------------------------------------------------------------
+
+CATEGORY_LABELS = {
+    "Roof": {"pt": "Telhado & Estrutura", "en": "Roofing & Structure", "es": "Tejado y Estructura"},
+    "Structure": {"pt": "Estrutura", "en": "Structure", "es": "Estructura"},
+    "Plumbing": {"pt": "Encanamento", "en": "Plumbing", "es": "Fontanería"},
+    "Grass": {"pt": "Mato & Entulho", "en": "Lawn & Debris", "es": "Maleza y Escombros"},
+    "Paint": {"pt": "Pintura", "en": "Painting", "es": "Pintura"},
+    "Permit_Rejected": {"pt": "Obras & Permissões", "en": "Permits & Works", "es": "Obras y Permisos"},
+    "Heating": {"pt": "Aquecimento & Água Quente", "en": "Heating & Hot Water", "es": "Calefacción y Agua Caliente"},
+    "Electrical": {"pt": "Elétrica", "en": "Electrical", "es": "Eléctrica"},
+    "Elevator": {"pt": "Elevadores", "en": "Elevators", "es": "Ascensores"},
+    "Gas": {"pt": "Gás & Vazamentos", "en": "Gas & Leaks", "es": "Gas y Fugas"},
+    "Rodent": {"pt": "Roedores & Pragas", "en": "Rodents & Pests", "es": "Roedores y Plagas"},
+    "Mold": {"pt": "Mofo & Umidade", "en": "Mold & Moisture", "es": "Moho y Humedad"},
+    "Lead": {"pt": "Chumbo & Tinta", "en": "Lead & Paint", "es": "Plomo y Pintura"},
+    "Unsanitary": {"pt": "Insanitário & Esgoto", "en": "Unsanitary & Sewage", "es": "Insalubre y Alcantarillado"},
+    "Door_Window": {"pt": "Portas & Janelas", "en": "Doors & Windows", "es": "Puertas y Ventanas"},
+    "Debris": {"pt": "Entulho & Lixo", "en": "Debris & Trash", "es": "Escombros y Basura"},
+}
+
+SIGNAL_LABELS = {
+    "legal_obligation": {"pt": "Obrigação legal", "en": "Legal obligation", "es": "Obligación legal"},
+    "authorized_work": {"pt": "Obra autorizada", "en": "Authorized work", "es": "Obra autorizada"},
+    "open_request": {"pt": "Chamado aberto", "en": "Open request", "es": "Solicitud abierta"},
+}
+
+
+def category_label(category: Optional[str], locale: Optional[str] = None) -> str:
+    loc = normalize(locale)
+    entry = CATEGORY_LABELS.get(str(category or "").strip())
+    if not entry:
+        return str(category or "").replace("_", " ")
+    return entry.get(loc) or entry.get(DEFAULT_LOCALE) or str(category)
+
+
+def signal_label(signal: Optional[str], locale: Optional[str] = None) -> str:
+    loc = normalize(locale)
+    entry = SIGNAL_LABELS.get(str(signal or "").strip())
+    if not entry:
+        return ""
+    return entry.get(loc) or entry.get(DEFAULT_LOCALE) or ""
+
+
+def alert_why_now(
+    signal: Optional[str],
+    locale: Optional[str],
+    oldest_open_days: Optional[int] = None,
+    repeat_365: int = 0,
+) -> str:
+    """Frase curta de contexto para o corpo do push (sem dados sensiveis)."""
+    loc = normalize(locale)
+    days = int(oldest_open_days or 0)
+    repeat = int(repeat_365 or 0)
+    if signal == "authorized_work":
+        return {"pt": "licença emitida", "en": "permit issued", "es": "licencia emitida"}[loc]
+    if days > 0:
+        if loc == "en":
+            return f"open for {days} day" + ("s" if days != 1 else "")
+        if loc == "es":
+            return f"abierto hace {days} día" + ("s" if days != 1 else "")
+        return f"aberto há {days} dia" + ("s" if days != 1 else "")
+    if repeat > 1:
+        if loc == "en":
+            return f"{repeat} reports in 12 months"
+        if loc == "es":
+            return f"{repeat} reportes en 12 meses"
+        return f"{repeat} ocorrências em 12 meses"
+    if signal == "legal_obligation":
+        return {"pt": "obrigação em aberto", "en": "open obligation", "es": "obligación abierta"}[loc]
+    return {"pt": "disponível agora", "en": "available now", "es": "disponible ahora"}[loc]
+
+
+def alert_confidence_label(
+    locale: Optional[str], phone_verified: bool = False, success_pct: Optional[int] = None
+) -> str:
+    loc = normalize(locale)
+    if phone_verified:
+        return {"pt": "telefone verificado", "en": "verified phone", "es": "teléfono verificado"}[loc]
+    if success_pct is not None:
+        if loc == "en":
+            return f"phone: {success_pct}% findable"
+        if loc == "es":
+            return f"teléfono: {success_pct}% localizable"
+        return f"telefone: {success_pct}% encontrável"
+    return {"pt": "telefone sob consulta", "en": "phone on request", "es": "teléfono bajo consulta"}[loc]

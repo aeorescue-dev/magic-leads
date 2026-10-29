@@ -327,6 +327,24 @@ class UserResponse(BaseModel):
     locale: str = "en"
     is_admin: bool = False
     created_at: Optional[str] = None
+    cities_filter: Optional[str] = None
+    # Base do empreiteiro (opcional): apenas para mostrar a distância.
+    base_lat: Optional[float] = None
+    base_lng: Optional[float] = None
+    base_source: Optional[str] = None
+    base_label: Optional[str] = None
+    show_address_in_push: bool = True
+
+
+class BaseLocationUpdate(BaseModel):
+    lat: float
+    lng: float
+    source: str = "gps"  # gps | manual | city
+    label: Optional[str] = None
+
+
+class PushPreferencesUpdate(BaseModel):
+    show_address_in_push: Optional[bool] = None
 
 
 class AuthResponse(BaseModel):

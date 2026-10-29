@@ -260,6 +260,14 @@ CREATE TABLE IF NOT EXISTS users (
   cities_filter TEXT DEFAULT NULL,
   push_enabled INTEGER DEFAULT 0,
   locale TEXT DEFAULT 'en',
+  -- Base do empreiteiro para distancia (opcional). source: gps | manual | city.
+  base_lat REAL,
+  base_lng REAL,
+  base_source TEXT,
+  base_label TEXT,
+  geo_updated_at TEXT,
+  -- Privacidade: mostrar a morada no alerta (default ligado).
+  show_address_in_push INTEGER DEFAULT 1,
   alert_rotation_cursor INTEGER DEFAULT 0,
   welcome_popup_shown INTEGER DEFAULT 0,
   refund_count_today INTEGER DEFAULT 0,
@@ -1413,6 +1421,14 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0")
     if user_cols and "alert_rotation_cursor" not in user_cols:
         conn.execute("ALTER TABLE users ADD COLUMN alert_rotation_cursor INTEGER DEFAULT 0")
+    if user_cols and "base_lat" not in user_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN base_lat REAL")
+        conn.execute("ALTER TABLE users ADD COLUMN base_lng REAL")
+        conn.execute("ALTER TABLE users ADD COLUMN base_source TEXT")
+        conn.execute("ALTER TABLE users ADD COLUMN base_label TEXT")
+        conn.execute("ALTER TABLE users ADD COLUMN geo_updated_at TEXT")
+    if user_cols and "show_address_in_push" not in user_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN show_address_in_push INTEGER DEFAULT 1")
 
     event_cols = {r["name"] for r in conn.execute("PRAGMA table_info(lead_events)").fetchall()}
     if event_cols:
@@ -4171,33 +4187,48 @@ class DatabaseService:
         finally:
             conn.close()
 
-    def get_users_interested_in(self, category: str, city: Optional[str] = None) -> List[dict]:
+    def get_users_interested_in(
+        self, category: str, city: Optional[str] = None, strict: bool = False
+    ) -> List[dict]:
         """Usuários elegíveis a receber alerta de uma categoria.
 
         Elegibilidade (nesta ordem):
           1. ACESSO VIGENTE — decidido por services.access.is_access_active()
              (fonte única de verdade; nada de whitelist local de status aqui).
-          2. RECORTE DE CATEGORIA — usuários que marcaram a categoria OU que NÃO
-             têm nenhum interesse gravado (fallback inteligente: sem configuração
-             = todas as categorias, para nunca zerar o despacho por lacuna).
+          2. RECORTE DE CATEGORIA — `strict=False` mantém o fallback antigo
+             (sem interesses = todas as categorias); `strict=True` exige a
+             categoria gravada em `user_interests`. O Alert Engine usa
+             `strict=True`: sem escolha explícita não há alerta individual.
           3. RECORTE DE CIDADE — se `city` informado e o usuário tiver
              `cities_filter`, a cidade precisa estar na lista.
         """
         conn = get_connection()
         try:
-            rows = conn.execute(
-                """
-                SELECT u.* FROM users u
-                WHERE EXISTS (
-                    SELECT 1 FROM user_interests ui
-                    WHERE ui.user_id = u.id AND ui.category = ?
-                )
-                OR NOT EXISTS (
-                    SELECT 1 FROM user_interests ui2 WHERE ui2.user_id = u.id
-                )
-                """,
-                (category,),
-            ).fetchall()
+            if strict:
+                rows = conn.execute(
+                    """
+                    SELECT u.* FROM users u
+                    WHERE EXISTS (
+                        SELECT 1 FROM user_interests ui
+                        WHERE ui.user_id = u.id AND ui.category = ?
+                    )
+                    """,
+                    (category,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT u.* FROM users u
+                    WHERE EXISTS (
+                        SELECT 1 FROM user_interests ui
+                        WHERE ui.user_id = u.id AND ui.category = ?
+                    )
+                    OR NOT EXISTS (
+                        SELECT 1 FROM user_interests ui2 WHERE ui2.user_id = u.id
+                    )
+                    """,
+                    (category,),
+                ).fetchall()
             candidates = [dict(r) for r in rows]
         finally:
             conn.close()
@@ -4329,6 +4360,51 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def set_user_base_location(
+        self, user_id: int, lat: float, lng: float, source: str, label: Optional[str] = None
+    ) -> bool:
+        """Guarda a base do empreiteiro usada para mostrar a distancia.
+
+        A distancia e' apenas informativa/ordenacao: nunca filtra leads.
+        Coordenadas arredondadas a 3 casas (~110 m) por privacidade.
+        """
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE users SET base_lat = ?, base_lng = ?, base_source = ?, "
+                "base_label = ?, geo_updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (round(float(lat), 3), round(float(lng), 3), source, label, user_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def clear_user_base_location(self, user_id: int) -> bool:
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE users SET base_lat = NULL, base_lng = NULL, base_source = NULL, "
+                "base_label = NULL, geo_updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (user_id,),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def set_show_address_in_push(self, user_id: int, enabled: bool) -> bool:
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE users SET show_address_in_push = ? WHERE id = ?",
+                (1 if enabled else 0, user_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
     def is_push_enabled(self, user_id: int) -> bool:
         """Verifica se push_enabled está ativo para o usuário."""
         conn = get_connection()
@@ -4340,6 +4416,7 @@ class DatabaseService:
             return bool(row["push_enabled"]) if row else False
         finally:
             conn.close()
+
 
     # ---------------------------------------------------------------
     # User Sessions (Concurrent login control - max 2 per user)
@@ -5382,18 +5459,61 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def get_leads_for_alert(self, lead_ids: List[int]) -> List[dict]:
+        """Contexto completo dos leads para o Alert Engine (P0-B + P2).
+
+        `insert_lead_new` devolve apenas um subconjunto e é anterior ao
+        enriquecimento do proprietário; o planner precisa do estado
+        semântico (`signal_type/status`), contacto e histórico de
+        reincidência para decidir e para escrever o payload com honestidade.
+        """
+        if not lead_ids:
+            return []
+        conn = get_connection()
+        try:
+            rows: list = []
+            # SQLite tem limite de variaveis por statement; runs grandes podem
+            # ter milhares de leads novos.
+            for start in range(0, len(lead_ids), 500):
+                chunk = lead_ids[start:start + 500]
+                ph = ",".join("?" * len(chunk))
+                part = conn.execute(
+                    f"""
+                    SELECT l.id, l.external_id, l.source_type, l.address, l.city,
+                           l.state, l.zip_code, l.lat, l.lng, l.issue_category,
+                           l.issue_description, l.date_reported, l.signal_type,
+                           l.signal_status, l.case_status, l.owner_name,
+                           l.owner_phone, l.phone_verified, l.urgency_level,
+                           l.department, l.resolution_description,
+                           COALESCE(h.repeat_365, 0) AS repeat_365,
+                           h.oldest_open_days, h.last_case_at
+                    FROM leads l
+                    LEFT JOIN lead_history h ON h.lead_id = l.id
+                    WHERE l.id IN ({ph})
+                    """,
+                    chunk,
+                ).fetchall()
+                rows.extend(part)
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
     def get_alerted_pairs_for_leads(self, lead_ids: List[int]) -> List[dict]:
         """Retorna [{user_id, lead_id}] de alertas new_lead já criados para os leads informados."""
         if not lead_ids:
             return []
         conn = get_connection()
         try:
-            ph = ",".join("?" * len(lead_ids))
-            rows = conn.execute(
-                f"SELECT DISTINCT user_id, lead_id FROM notifications "
-                f"WHERE type = 'new_lead' AND user_id IS NOT NULL AND lead_id IN ({ph})",
-                lead_ids,
-            ).fetchall()
+            rows: list = []
+            for start in range(0, len(lead_ids), 500):
+                chunk = lead_ids[start:start + 500]
+                ph = ",".join("?" * len(chunk))
+                part = conn.execute(
+                    f"SELECT DISTINCT user_id, lead_id FROM notifications "
+                    f"WHERE type = 'new_lead' AND user_id IS NOT NULL AND lead_id IN ({ph})",
+                    chunk,
+                ).fetchall()
+                rows.extend(part)
             return [dict(r) for r in rows]
         finally:
             conn.close()
@@ -9121,6 +9241,23 @@ class AsyncDatabaseService:
     async def is_push_enabled(self, user_id: int) -> bool:
         return await anyio.to_thread.run_sync(self._service.is_push_enabled, user_id)
 
+    async def set_user_base_location(
+        self, user_id: int, lat: float, lng: float, source: str, label: str | None = None
+    ) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.set_user_base_location, user_id, lat, lng, source, label
+        )
+
+    async def clear_user_base_location(self, user_id: int) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.clear_user_base_location, user_id
+        )
+
+    async def set_show_address_in_push(self, user_id: int, enabled: bool) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.set_show_address_in_push, user_id, enabled
+        )
+
     # ===== ADMIN (painel /admin) =====
     async def set_user_admin(self, email: str, is_admin: bool = True) -> bool:
         return await anyio.to_thread.run_sync(self._service.set_user_admin, email, is_admin)
@@ -9186,8 +9323,17 @@ class AsyncDatabaseService:
     async def get_user_active_sessions(self, user_id: int) -> List[dict]:
         return await anyio.to_thread.run_sync(self._service.get_user_active_sessions, user_id)
 
-    async def get_users_interested_in(self, category: str, city: Optional[str] = None) -> List[dict]:
-        return await anyio.to_thread.run_sync(self._service.get_users_interested_in, category, city)
+    async def get_users_interested_in(
+        self, category: str, city: Optional[str] = None, strict: bool = False
+    ) -> List[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.get_users_interested_in, category, city, strict
+        )
+
+    async def get_leads_for_alert(self, lead_ids: List[int]) -> List[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.get_leads_for_alert, lead_ids
+        )
 
     async def get_all_users(self) -> List[dict]:
         return await anyio.to_thread.run_sync(self._service.get_all_users)

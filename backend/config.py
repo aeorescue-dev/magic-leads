@@ -290,6 +290,24 @@ class Settings(BaseSettings):
     # O digest diário do excedente é extra e NÃO conta para o teto.
     ALERT_DIGEST_COUNTS_TOWARD_LIMIT: bool = False
 
+    # ---------------------------------------------------------------- Alert Engine v2
+    # Gate de elegibilidade: idade máxima de um lead "novo" (reincidência
+    # bypassa) e sinais que podem gerar alerta. `closed` nunca passa.
+    PUSH_MAX_AGE_HOURS: int = 48
+    PUSH_ALERT_SIGNALS: str = "legal_obligation,authorized_work,open_request"
+    # Silêncio local: 21:00-08:00 em Nova Iorque. `legal_obligation` fica
+    # isenta (obrigação com prazo). Fora da janela, o push é suprimido mas a
+    # notificação in-app é criada na mesma.
+    PUSH_QUIET_START: str = "21:00"
+    PUSH_QUIET_END: str = "08:00"
+    PUSH_QUIET_TZ: str = "America/New_York"
+    # TTL no serviço de push (store-and-forward). Sem isto, um telemóvel
+    # offline no momento do envio perde a notificação para sempre.
+    PUSH_TTL_LEAD_S: int = 14400   # 4 h
+    PUSH_TTL_DIGEST_S: int = 43200  # 12 h
+    # Distância: apenas informativa/ordenação. NUNCA filtra por raio.
+    PUSH_DISTANCE_ENABLED: bool = True
+
     @field_validator("PUSH_DAILY_LIMIT")
     @classmethod
     def _clamp_push_daily_limit(cls, v: int) -> int:

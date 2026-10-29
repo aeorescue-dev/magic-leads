@@ -3,11 +3,25 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Check, CreditCard, Loader2, LogOut, Pencil, X } from "lucide-react";
+import { ArrowLeft, Check, CreditCard, Loader2, LogOut, MapPin, Pencil, ShieldCheck, X } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
-import { updateCompanyName } from "@/lib/api-client";
+import {
+  clearBaseLocation,
+  setBaseLocation,
+  setPushPreferences,
+  updateCompanyName,
+} from "@/lib/api-client";
 import CheckoutModal from "@/components/CheckoutModal";
+
+// Centroides estaticos (sem APIs de mapas): fallback para quando o utilizador
+// nao quer partilhar a localizacao GPS. A distancia fica "na sua cidade".
+const CITY_CENTROIDS: Record<string, { lat: number; lng: number }> = {
+  NYC: { lat: 40.7128, lng: -74.006 },
+  Chicago: { lat: 41.8781, lng: -87.6298 },
+  Boston: { lat: 42.3601, lng: -71.0589 },
+  Dallas: { lat: 32.7767, lng: -96.797 },
+};
 
 export default function DashboardSettingsPage() {
   const { user, loading, signOut, updateUser } = useAuth();
@@ -19,6 +33,9 @@ export default function DashboardSettingsPage() {
   const [companyDraft, setCompanyDraft] = useState("");
   const [companyError, setCompanyError] = useState("");
   const [savingCompany, setSavingCompany] = useState(false);
+  const [geoBusy, setGeoBusy] = useState(false);
+  const [geoMsg, setGeoMsg] = useState("");
+  const [geoError, setGeoError] = useState("");
 
   const planLabel = (plan: string) => t(`plan.${plan}`);
 
@@ -56,6 +73,94 @@ export default function DashboardSettingsPage() {
       setCompanyError(e?.message || t("dashboard.settings.company_error"));
     } finally {
       setSavingCompany(false);
+    }
+  };
+
+  const applyGpsBase = () => {
+    if (!user) return;
+    if (!navigator.geolocation) {
+      setGeoError(t("dashboard.settings.base_error"));
+      return;
+    }
+    setGeoBusy(true);
+    setGeoMsg("");
+    setGeoError("");
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          const updated = await setBaseLocation(user.id, {
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            source: "gps",
+            label: t("dashboard.settings.base_gps_label"),
+          });
+          updateUser(updated);
+          setGeoMsg(t("dashboard.settings.base_saved"));
+        } catch (e: any) {
+          setGeoError(e?.message || t("dashboard.settings.base_error"));
+        } finally {
+          setGeoBusy(false);
+        }
+      },
+      () => {
+        setGeoError(t("dashboard.settings.base_denied"));
+        setGeoBusy(false);
+      },
+      { timeout: 10000, maximumAge: 300000 }
+    );
+  };
+
+  const applyCityBase = async (city: string) => {
+    if (!user) return;
+    const c = CITY_CENTROIDS[city];
+    if (!c) return;
+    setGeoBusy(true);
+    setGeoMsg("");
+    setGeoError("");
+    try {
+      const updated = await setBaseLocation(user.id, {
+        lat: c.lat,
+        lng: c.lng,
+        source: "city",
+        label: city,
+      });
+      updateUser(updated);
+      setGeoMsg(t("dashboard.settings.base_saved"));
+    } catch (e: any) {
+      setGeoError(e?.message || t("dashboard.settings.base_error"));
+    } finally {
+      setGeoBusy(false);
+    }
+  };
+
+  const removeBase = async () => {
+    if (!user) return;
+    setGeoBusy(true);
+    setGeoError("");
+    try {
+      const updated = await clearBaseLocation(user.id);
+      updateUser(updated);
+      setGeoMsg("");
+    } catch (e: any) {
+      setGeoError(e?.message || t("dashboard.settings.base_error"));
+    } finally {
+      setGeoBusy(false);
+    }
+  };
+
+  const toggleShowAddress = async () => {
+    if (!user) return;
+    setGeoBusy(true);
+    setGeoError("");
+    try {
+      const updated = await setPushPreferences(user.id, {
+        show_address_in_push: user.show_address_in_push === false,
+      });
+      updateUser(updated);
+    } catch (e: any) {
+      setGeoError(e?.message || t("dashboard.settings.base_error"));
+    } finally {
+      setGeoBusy(false);
     }
   };
 
@@ -144,6 +249,84 @@ export default function DashboardSettingsPage() {
                 <p className="font-medium">
                   {user.plan_until ? new Date(user.plan_until.replace(" ", "T")).toLocaleDateString(lang === "en" ? "en-US" : lang === "es" ? "es-ES" : "pt-BR") : "—"}
                 </p>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-white/10 bg-[#14161d] p-5 space-y-4">
+              <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide">{t("dashboard.settings.alerts")}</h2>
+
+              {/* Base para distancia (informativa, sem filtro de raio) */}
+              <div className="rounded-xl bg-white/5 border border-white/10 p-3 space-y-2">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <MapPin className="w-4 h-4 text-emerald-400" /> {t("dashboard.settings.base_title")}
+                </div>
+                <p className="text-xs text-slate-400 leading-relaxed">{t("dashboard.settings.base_hint")}</p>
+                <p className="text-xs text-slate-300">
+                  {user.base_lat !== null && user.base_lat !== undefined
+                    ? `${t("dashboard.settings.base_current")}: ${user.base_label || "GPS"}`
+                    : t("dashboard.settings.base_none")}
+                </p>
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <button
+                    onClick={applyGpsBase}
+                    disabled={geoBusy}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-900 text-xs font-semibold disabled:opacity-50"
+                  >
+                    {geoBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MapPin className="w-3.5 h-3.5" />}
+                    {t("dashboard.settings.base_gps")}
+                  </button>
+                  {Object.keys(CITY_CENTROIDS).map((city) => (
+                    <button
+                      key={city}
+                      onClick={() => applyCityBase(city)}
+                      disabled={geoBusy}
+                      className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 text-xs font-medium disabled:opacity-50"
+                    >
+                      {city}
+                    </button>
+                  ))}
+                  {user.base_lat !== null && user.base_lat !== undefined && (
+                    <button
+                      onClick={removeBase}
+                      disabled={geoBusy}
+                      className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-rose-500/10 text-slate-400 hover:text-rose-300 text-xs font-medium disabled:opacity-50"
+                    >
+                      {t("dashboard.settings.base_clear")}
+                    </button>
+                  )}
+                </div>
+                <p className="text-[11px] text-emerald-300/80 leading-relaxed">
+                  {t("dashboard.settings.distance_note")}
+                </p>
+                {geoMsg && <p className="text-[11px] text-emerald-400">{geoMsg}</p>}
+                {geoError && <p className="text-[11px] text-red-400">{geoError}</p>}
+              </div>
+
+              {/* Quiet hours (politica fixa) */}
+              <div className="rounded-xl bg-white/5 border border-white/10 p-3">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <ShieldCheck className="w-4 h-4 text-indigo-400" /> {t("dashboard.settings.quiet_title")}
+                </div>
+                <p className="text-xs text-slate-400 leading-relaxed mt-1">{t("dashboard.settings.quiet_body")}</p>
+              </div>
+
+              {/* Privacidade da morada */}
+              <div className="rounded-xl bg-white/5 border border-white/10 p-3 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">{t("dashboard.settings.show_address")}</p>
+                  <p className="text-xs text-slate-400 leading-relaxed mt-0.5">{t("dashboard.settings.show_address_hint")}</p>
+                </div>
+                <button
+                  onClick={toggleShowAddress}
+                  disabled={geoBusy}
+                  aria-pressed={user.show_address_in_push !== false}
+                  aria-label={t("dashboard.settings.show_address")}
+                  className={`relative h-6 w-11 shrink-0 rounded-full transition disabled:opacity-50 ${user.show_address_in_push !== false ? "bg-emerald-500" : "bg-white/15"}`}
+                >
+                  <span
+                    className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${user.show_address_in_push !== false ? "left-[22px]" : "left-0.5"}`}
+                  />
+                </button>
               </div>
             </div>
 

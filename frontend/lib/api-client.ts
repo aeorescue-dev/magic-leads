@@ -570,6 +570,14 @@ export interface AuthUser {
   welcome_popup_shown?: boolean;
   is_admin?: boolean;
   created_at?: string;
+  locale?: string;
+  cities_filter?: string | null;
+  // Alert Engine v2: base para distância (opcional) + privacidade da morada.
+  base_lat?: number | null;
+  base_lng?: number | null;
+  base_source?: string | null;
+  base_label?: string | null;
+  show_address_in_push?: boolean;
 }
 
 export interface AuthResponse {
@@ -734,6 +742,47 @@ export async function fetchPushEnabled(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// ------------------------------------------------------------------
+// Alert Engine v2: base geográfica (distância informativa) + privacidade
+// ------------------------------------------------------------------
+export async function setBaseLocation(
+  userId: number,
+  data: { lat: number; lng: number; source: "gps" | "manual" | "city"; label?: string }
+): Promise<AuthUser> {
+  return handle<AuthUser>(
+    await fetch(`${API_URL}/api/users/${userId}/base-location`, {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(data),
+    })
+  );
+}
+
+export async function clearBaseLocation(userId: number): Promise<AuthUser> {
+  return handle<AuthUser>(
+    await fetch(`${API_URL}/api/users/${userId}/base-location`, {
+      method: "DELETE",
+      credentials: "include",
+      headers: { ...authHeaders() },
+    })
+  );
+}
+
+export async function setPushPreferences(
+  userId: number,
+  prefs: { show_address_in_push?: boolean }
+): Promise<AuthUser> {
+  return handle<AuthUser>(
+    await fetch(`${API_URL}/api/users/${userId}/push-preferences`, {
+      method: "PATCH",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(prefs),
+    })
+  );
 }
 
 // ------------------------------------------------------------------

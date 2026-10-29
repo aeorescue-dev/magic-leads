@@ -24,6 +24,7 @@ from starlette.responses import Response as StarletteResponse
 from .config import settings
 from .models.schemas import (
     AuthResponse,
+    BaseLocationUpdate,
     ContactLeadRequest,
     EnrichedLead,
     HistoryEvent,
@@ -39,6 +40,7 @@ from .models.schemas import (
     NoteResponse,
     NotificationResponse,
     PushEnabledUpdate,
+    PushPreferencesUpdate,
     PushSubscribeRequest,
     PushUnsubscribeRequest,
     RejectLeadRequest,
@@ -4120,6 +4122,36 @@ async def enrich_single_lead(lead_id: int, user: dict = Depends(_get_current_use
 # ------------------------------------------------------------------
 # Autenticação e usuários
 # ------------------------------------------------------------------
+def _user_response(u: dict) -> UserResponse:
+    """Serializa o utilizador com todas as preferências (fonte única).
+
+    Existe para que login, registo, /auth/me e updates devolvam exatamente o
+    mesmo contrato — sem isto, editar a empresa apagava no cliente a base
+    geográfica e as preferências de privacidade até ao próximo reload.
+    """
+    return UserResponse(
+        id=u["id"],
+        email=u["email"],
+        company_name=u.get("company_name"),
+        plan=u.get("plan"),
+        subscription_status=u.get("subscription_status"),
+        plan_until=u.get("plan_until"),
+        score=u.get("score") or 0,
+        leads_taken=u.get("leads_taken") or 0,
+        conversions=u.get("conversions") or 0,
+        push_enabled=bool(u.get("push_enabled")),
+        locale=u.get("locale") or "en",
+        is_admin=bool(u.get("is_admin")),
+        created_at=u.get("created_at"),
+        cities_filter=u.get("cities_filter"),
+        base_lat=u.get("base_lat"),
+        base_lng=u.get("base_lng"),
+        base_source=u.get("base_source"),
+        base_label=u.get("base_label"),
+        show_address_in_push=bool(u.get("show_address_in_push", 1)),
+    )
+
+
 @app.post("/api/auth/register", response_model=AuthResponse)
 @limiter.limit("3/minute")
 async def register_user(request: Request, payload: UserCreate, response: Response = None):
@@ -4151,21 +4183,7 @@ async def register_user(request: Request, payload: UserCreate, response: Respons
 
         return AuthResponse(
             token=token,
-            user=UserResponse(
-                id=user["id"],
-                email=user["email"],
-                company_name=user.get("company_name"),
-                plan=user.get("plan"),
-                subscription_status=user.get("subscription_status"),
-                plan_until=user.get("plan_until"),
-                score=user.get("score") or 0,
-                leads_taken=user.get("leads_taken") or 0,
-                conversions=user.get("conversions") or 0,
-                push_enabled=bool(user.get("push_enabled")),
-                locale=user.get("locale") or "en",
-                is_admin=bool(user.get("is_admin")),
-                created_at=user.get("created_at"),
-            ),
+            user=_user_response(user),
         )
     except HTTPException:
         raise
@@ -4205,21 +4223,7 @@ async def login_user(request: Request, payload: UserLogin, response: Response = 
 
         return AuthResponse(
             token=token,
-            user=UserResponse(
-                id=user["id"],
-                email=user["email"],
-                company_name=user.get("company_name"),
-                plan=user.get("plan"),
-                subscription_status=user.get("subscription_status"),
-                plan_until=user.get("plan_until"),
-                score=user.get("score") or 0,
-                leads_taken=user.get("leads_taken") or 0,
-                conversions=user.get("conversions") or 0,
-                push_enabled=bool(user.get("push_enabled")),
-                locale=user.get("locale") or "en",
-                is_admin=bool(user.get("is_admin")),
-                created_at=user.get("created_at"),
-            ),
+            user=_user_response(user),
         )
     except HTTPException:
         raise
@@ -4233,21 +4237,7 @@ async def me(user: dict = Depends(_get_current_user)):
     full = await db_service.get_user_by_id(user["id"])
     if not full:
         raise HTTPException(status_code=401, detail="Usuário não encontrado")
-    return UserResponse(
-        id=full["id"],
-        email=full["email"],
-        company_name=full.get("company_name"),
-        plan=full.get("plan"),
-        subscription_status=full.get("subscription_status"),
-        plan_until=full.get("plan_until"),
-        score=full.get("score") or 0,
-        leads_taken=full.get("leads_taken") or 0,
-        conversions=full.get("conversions") or 0,
-        push_enabled=bool(full.get("push_enabled")),
-        locale=full.get("locale") or "en",
-        is_admin=bool(full.get("is_admin")),
-        created_at=full.get("created_at"),
-    )
+    return _user_response(full)
 
 
 @app.patch("/api/users/{user_id}/company", response_model=UserResponse)
@@ -4263,15 +4253,7 @@ async def update_user_company(user_id: int, payload: UserUpdate, user: dict = De
         full = await db_service.update_user_company(int(user_id), name)
         if not full:
             raise HTTPException(status_code=404, detail="Usuário não encontrado")
-        return UserResponse(
-            id=full["id"],
-            email=full["email"],
-            company_name=full.get("company_name"),
-            plan=full.get("plan"),
-            subscription_status=full.get("subscription_status"),
-            locale=full.get("locale"),
-            created_at=full.get("created_at"),
-        )
+        return _user_response(full)
     except HTTPException:
         raise
     except Exception as e:
@@ -4290,18 +4272,7 @@ async def update_user_locale(user_id: int, payload: UserUpdate, user: dict = Dep
         full = await db_service.update_user_locale(int(user_id), locale)
         if not full:
             raise HTTPException(status_code=404, detail="Usuário não encontrado")
-        return UserResponse(
-            id=full["id"],
-            email=full["email"],
-            company_name=full.get("company_name"),
-            plan=full.get("plan"),
-            subscription_status=full.get("subscription_status"),
-            plan_until=full.get("plan_until"),
-            score=full.get("score") or 0,
-            leads_taken=full.get("leads_taken") or 0,
-            conversions=full.get("conversions") or 0,
-            created_at=full.get("created_at"),
-        )
+        return _user_response(full)
     except HTTPException:
         raise
     except Exception as e:
@@ -4392,21 +4363,8 @@ async def demo_login(request: Request, response: Response = None):
     logger.info(f"Demo login successful for user {user['id']}")
     return AuthResponse(
         token=token,
-        user=UserResponse(
-            id=user["id"],
-            email=user["email"],
-            company_name=user.get("company_name"),
-            plan=user.get("plan"),
-            subscription_status=user.get("subscription_status"),
-            plan_until=user.get("plan_until"),
-                score=user.get("score") or 0,
-                leads_taken=user.get("leads_taken") or 0,
-                conversions=user.get("conversions") or 0,
-                locale=user.get("locale") or "en",
-                is_admin=bool(user.get("is_admin")),
-                created_at=user.get("created_at"),
-            ),
-        )
+        user=_user_response(user),
+    )
 
 
 # ===== PASSWORD RESET =====
@@ -4878,6 +4836,57 @@ async def set_cities_filter(
     if not ok:
         raise HTTPException(status_code=500, detail="Erro ao salvar cidades")
     return {"cities": await db_service.get_user_cities_filter(user_id)}
+
+
+@app.put("/api/users/{user_id}/base-location")
+async def set_base_location(
+    user_id: int, payload: BaseLocationUpdate,
+    user: dict = Depends(_get_current_user),
+):
+    """Guarda a base para mostrar a distância nos alertas.
+
+    A distância é apenas informativa/ordenação: NÃO cria raio de exclusão.
+    Fonte `city` usa o centroide da cidade (distância omitida no push).
+    """
+    if user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Sem permissão")
+    source = (payload.source or "gps").strip().lower()
+    if source not in ("gps", "manual", "city"):
+        raise HTTPException(status_code=422, detail="source inválido")
+    if not (-90 <= payload.lat <= 90 and -180 <= payload.lng <= 180):
+        raise HTTPException(status_code=422, detail="Coordenadas inválidas")
+    ok = await db_service.set_user_base_location(
+        user_id, payload.lat, payload.lng, source, payload.label
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail="Utilizador não encontrado")
+    full = await db_service.get_user_by_id(user_id)
+    return _user_response(full) if full else {"status": "ok"}
+
+
+@app.delete("/api/users/{user_id}/base-location")
+async def delete_base_location(user_id: int, user: dict = Depends(_get_current_user)):
+    if user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Sem permissão")
+    await db_service.clear_user_base_location(user_id)
+    full = await db_service.get_user_by_id(user_id)
+    return _user_response(full) if full else {"status": "ok"}
+
+
+@app.patch("/api/users/{user_id}/push-preferences")
+async def set_push_preferences(
+    user_id: int, payload: PushPreferencesUpdate,
+    user: dict = Depends(_get_current_user),
+):
+    """Preferências de privacidade do push (morada visível por defeito)."""
+    if user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Sem permissão")
+    if payload.show_address_in_push is not None:
+        await db_service.set_show_address_in_push(
+            user_id, payload.show_address_in_push
+        )
+    full = await db_service.get_user_by_id(user_id)
+    return _user_response(full) if full else {"status": "ok"}
 
 
 # ------------------------------------------------------------------

@@ -9,6 +9,8 @@ import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from backend.services.alert_planner import plan_and_dispatch, select_fair
 from backend.services.db import db_service, get_connection
 from backend.services.push_service import push_service
@@ -16,6 +18,14 @@ from backend.services.push_service import push_service
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+@pytest.fixture(autouse=True)
+def _daytime(monkeypatch):
+    """Testes deterministicos: o planner nunca corre em quiet hours por acaso."""
+    monkeypatch.setattr(
+        "backend.services.alert_planner._is_quiet_hours", lambda now=None: False
+    )
 
 
 def _future(days: int = 5) -> str:
@@ -199,7 +209,7 @@ def test_combined_budget_counts_once_with_push_disabled(monkeypatch):
 
     calls = []
 
-    async def fake_push(user_id, payload, kind="custom"):
+    async def fake_push(user_id, payload, kind="custom", **kwargs):
         calls.append(user_id)
         return 1
 
@@ -222,7 +232,7 @@ def test_push_sent_once_when_enabled(monkeypatch):
 
     calls = []
 
-    async def fake_push(user_id, payload, kind="custom"):
+    async def fake_push(user_id, payload, kind="custom", **kwargs):
         calls.append((user_id, kind))
         return 1
 
@@ -242,7 +252,7 @@ def test_digest_push_only_once_per_day(monkeypatch):
 
     calls = []
 
-    async def fake_push(user_id, payload, kind="custom"):
+    async def fake_push(user_id, payload, kind="custom", **kwargs):
         calls.append(kind)
         return 1
 

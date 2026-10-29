@@ -397,6 +397,38 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   à telemetria P0-C1). A percentagem aparece quando houver ≥30 consultas novas do
   segmento; até lá o selo fica qualitativo, sem número inventado.
 
+### Alert Engine v2 — Fase A (2026-10-29)
+
+- **Gate semântico**: o planner deixou de usar o dict do insert e passou a
+  buscar `get_leads_for_alert` (signal_type/status, owner, phone, repeat_365,
+  coords). Exclui `closed`, institucional, morada não resolvível e leads com
+  mais de 48 h sem reincidência.
+- **Nicho estrito**: `get_users_interested_in(..., strict=True)` no planner.
+  Sem interesses gravados = sem alerta individual (o onboarding in-app já
+  existe). Fim do fallback "sem interesses = todas".
+- **Quiet hours**: 21:00–08:00 `America/New_York`; 311/obra suprimidos (in-app
+  criado na mesma), `legal_obligation` passa sempre. Digest não é criado no
+  silêncio (o primeiro run da manhã cria e envia).
+- **Distância**: informativa e critério de ordenação (sinal > estado >
+  frescura > distância). **Nunca filtra**: o default é toda a cidade, sem raio.
+  Base do utilizador: GPS/manual (mostra "a X mi") ou centroide da cidade
+  (mostra "na sua cidade"). Haversine local, zero APIs pagas.
+- **Payload v2**: labels PT/EN/ES, "Porquê agora", confiança (≥30 amostras ou
+  "sob consulta"), ações "Ver lead"/"Dispensar", `timestamp` epoch,
+  `renotify`, vibração, `requireInteraction` em legal.
+- **Entrega**: TTL 4 h (lead) / 12 h (digest) — antes era 0; `Urgency` high em
+  legal e normal nos restantes; broadcast admin respeita `push_enabled`.
+- **Privacidade**: `show_address_in_push` (default ligado) + toggle em
+  Definições; API `PUT/DELETE /api/users/{id}/base-location` e
+  `PATCH /api/users/{id}/push-preferences`.
+- **Observabilidade**: `push_health` no Control Tower (VAPID em falta, 0
+  entregas com subs, explosão de subs mortas).
+- **765 testes**, 11 e2e, tsc limpo.
+- **Limitação assumida**: Web Push não suporta som personalizado por ficheiro;
+  usam-se padrões de vibração + (fase B) um chime in-app quando a app está
+  aberta. DOB de NYC não tem lat/lng no dataset → sem distância até ao
+  enriquecimento BIN→PLUTO (gratuito).
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

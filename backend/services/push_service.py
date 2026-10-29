@@ -159,7 +159,8 @@ class PushService:
         return self._configured
 
     async def _send_single(self, subscription: Dict, payload: Dict, kind: str = "custom",
-                           user_id: Optional[int] = None):
+                           user_id: Optional[int] = None, ttl: int = 14400,
+                           urgency: str = "high"):
         """Envia push para uma única subscription com retry exponencial.
 
         `kind` é apenas rótulo para telemetria (lead_alert, status_change,
@@ -216,7 +217,8 @@ class PushService:
                         data=json.dumps(payload),
                         vapid_private_key=self._vapid_private_key,
                         vapid_claims=dict(self._vapid_claims),
-                        headers={"Urgency": "high"},
+                        ttl=int(ttl),
+                        headers={"Urgency": urgency},
                     )
                 )
                 _record("accepted", attempt + 1)
@@ -278,7 +280,8 @@ class PushService:
         )
         return False
 
-    async def send_to_user(self, user_id: int, payload: Dict, kind: str = "custom") -> int:
+    async def send_to_user(self, user_id: int, payload: Dict, kind: str = "custom",
+                           ttl: int = 14400, urgency: str = "high") -> int:
         """Envia push para todas as subscriptions de um usuário."""
         if not self.is_configured():
             # Registado aqui e não em _send_single: este early return
@@ -323,7 +326,9 @@ class PushService:
         expired_endpoints = []
 
         for sub in subscriptions:
-            result = await self._send_single(sub, payload, kind, user_id=user_id)
+            result = await self._send_single(
+                sub, payload, kind, user_id=user_id, ttl=ttl, urgency=urgency
+            )
             if result is True:
                 sent += 1
             elif result in ("expired", "rejected_dead"):
@@ -344,8 +349,12 @@ class PushService:
 
         return sent
 
-    async def send_to_all(self, payload: Dict) -> int:
-        """Envia push para todas as subscriptions ativas (broadcast)."""
+    async def send_to_all(self, payload: Dict, ttl: int = 3600, urgency: str = "normal") -> int:
+        """Envia push para todas as subscriptions ativas (broadcast).
+
+        Respeita `push_enabled`: um broadcast administrativo nunca pode
+        contornar o opt-out do utilizador.
+        """
         if not self.is_configured():
             push_metrics.record(
                 outcome="not_configured", attempts=0, kind="broadcast",
@@ -364,10 +373,18 @@ class PushService:
 
         total_sent = 0
         for user_id, subs in by_user.items():
+            if not await db_service.is_push_enabled(user_id):
+                push_metrics.record(
+                    outcome="push_disabled", attempts=0, user_id=user_id,
+                    kind="broadcast", error="push_enabled is false",
+                )
+                continue
             sent = 0
             expired_endpoints = []
             for sub in subs:
-                result = await self._send_single(sub, payload, "broadcast", user_id=user_id)
+                result = await self._send_single(
+                    sub, payload, "broadcast", user_id=user_id, ttl=ttl, urgency=urgency
+                )
                 if result is True:
                     sent += 1
                 elif result in ("expired", "rejected_dead"):

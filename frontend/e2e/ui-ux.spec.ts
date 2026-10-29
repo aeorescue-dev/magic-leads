@@ -57,4 +57,21 @@ test.describe("UI/UX — tema, teclado e gaveta", () => {
       { timeout: 20000 }
     );
   });
+
+  test("a privacidade da morada no push persiste", async ({ page }) => {
+    await page.goto("/pt/dashboard/settings");
+    const toggle = page.getByRole("button", { name: /morada no alerta/i });
+    await expect(toggle).toBeVisible({ timeout: 20000 });
+
+    const before = (await toggle.getAttribute("aria-pressed")) === "true";
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-pressed", String(!before));
+
+    await page.reload();
+    await expect(page.getByRole("button", { name: /morada no alerta/i })).toHaveAttribute(
+      "aria-pressed",
+      String(!before),
+      { timeout: 20000 }
+    );
+  });
 });

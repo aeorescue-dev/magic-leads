@@ -32,6 +32,18 @@ Contexto completo e números medidos: **`docs/PROJECT-MEMORY.md`**. Ler antes de
 12. **Fatura**: `no_results` pode ser cobrado. Preço real confirmado: **$0,20/chamada**
     (`SEARCHBUG_PRICE_PER_CALL_USD`). Reconciliar semanalmente; `credit_ledger.amount=0`
     não é auditoria de custo.
+13. **Alertas — gate**: só `signal_type` permitido, nunca `closed`, nunca institucional,
+    morada resolvível e ≤48 h **ou** `repeat_365 ≥ 2`. O planner lê o contexto por
+    `get_leads_for_alert` (não o dict do insert).
+14. **Alertas — nicho estrito**: `get_users_interested_in(..., strict=True)`.
+    **Sem `user_interests` não há alerta individual** (só onboarding/digest).
+15. **Alertas — distância**: é **informativa/ordenação**, nunca filtro. O default é
+    **toda a cidade / sem limite**; um lead a 28 mi é notificado. Não criar raio bloqueante.
+16. **Alertas — quiet hours**: 21:00–08:00 `America/New_York`. 311/obra não geram push
+    (in-app sim); `legal_obligation` passa. Digest não nasce no silêncio.
+17. **Alertas — entrega**: TTL **nunca 0** (lead 4 h, digest 12 h), `Urgency` por sinal e
+    `send_to_all` respeita `push_enabled`. Web Push não suporta som personalizado por
+    ficheiro: usar vibração (payload) e, no máximo, chime in-app.
 
 ## Verificação mínima antes de deploy
 ```bash
