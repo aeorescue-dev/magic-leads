@@ -1470,12 +1470,20 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     for col, ddl in (
         ("user_agent", "TEXT"),
         ("device_label", "TEXT"),
-        ("last_seen_at", "TEXT DEFAULT CURRENT_TIMESTAMP"),
+        # SQLite nao aceita DEFAULT CURRENT_TIMESTAMP num ALTER TABLE
+        # ("Cannot add a column with non-constant default"). A coluna nasce
+        # sem default e o backfill abaixo usa created_at.
+        ("last_seen_at", "TEXT"),
         ("last_success_at", "TEXT"),
         ("disabled_at", "TEXT"),
     ):
         if push_sub_cols and col not in push_sub_cols:
             conn.execute(f"ALTER TABLE push_subscriptions ADD COLUMN {col} {ddl}")
+    if push_sub_cols:
+        conn.execute(
+            "UPDATE push_subscriptions SET last_seen_at = created_at "
+            "WHERE last_seen_at IS NULL"
+        )
 
     # B1: atribuicao de clique por entrega.
     delivery_cols = {
