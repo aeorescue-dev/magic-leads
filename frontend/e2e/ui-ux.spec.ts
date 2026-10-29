@@ -60,18 +60,56 @@ test.describe("UI/UX — tema, teclado e gaveta", () => {
 
   test("a privacidade da morada no push persiste", async ({ page }) => {
     await page.goto("/pt/dashboard/settings");
-    const toggle = page.getByRole("button", { name: /morada no alerta/i });
+    const toggle = page.getByRole("switch", { name: /morada no alerta/i });
     await expect(toggle).toBeVisible({ timeout: 20000 });
 
-    const before = (await toggle.getAttribute("aria-pressed")) === "true";
+    const before = (await toggle.getAttribute("aria-checked")) === "true";
     await toggle.click();
-    await expect(toggle).toHaveAttribute("aria-pressed", String(!before));
+    await expect(toggle).toHaveAttribute("aria-checked", String(!before));
 
     await page.reload();
-    await expect(page.getByRole("button", { name: /morada no alerta/i })).toHaveAttribute(
-      "aria-pressed",
+    await expect(page.getByRole("switch", { name: /morada no alerta/i })).toHaveAttribute(
+      "aria-checked",
       String(!before),
       { timeout: 20000 }
     );
+  });
+
+  test("resumo diário e avisos de reserva são interruptores persistentes", async ({
+    page,
+  }) => {
+    await page.goto("/pt/dashboard/settings");
+    const digest = page.getByRole("switch", { name: /resumo diário/i });
+    await expect(digest).toBeVisible({ timeout: 20000 });
+    // Default ligado (B2).
+    await expect(digest).toHaveAttribute("aria-checked", "true");
+
+    await digest.click();
+    await expect(digest).toHaveAttribute("aria-checked", "false");
+    await page.reload();
+    await expect(page.getByRole("switch", { name: /resumo diário/i })).toHaveAttribute(
+      "aria-checked",
+      "false",
+      { timeout: 20000 }
+    );
+
+    const life = page.getByRole("switch", { name: /avisos de reserva/i });
+    await expect(life).toHaveAttribute("aria-checked", "false");
+    await life.click();
+    await expect(life).toHaveAttribute("aria-checked", "true");
+  });
+
+  test("o sino de push por ofício desliga sem esconder o in-app", async ({ page }) => {
+    await page.goto("/pt/dashboard/settings");
+    const trades = page.getByRole("switch", { name: /^Roof$/ });
+    await expect(trades.first()).toBeVisible({ timeout: 20000 });
+
+    const first = trades.first();
+    const before = (await first.getAttribute("aria-checked")) === "true";
+    await first.click();
+    await expect(first).toHaveAttribute("aria-checked", String(!before));
+
+    // O cartão continua a explicar que o in-app fica intacto.
+    await expect(page.getByText(/só no in-app/i)).toBeVisible();
   });
 });

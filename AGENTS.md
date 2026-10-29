@@ -51,6 +51,14 @@ Contexto completo e números medidos: **`docs/PROJECT-MEMORY.md`**. Ler antes de
     mas só aceita assinatura válida. Nunca expor dados no endpoint.
 20. **Devices**: máx. **5** push subscriptions ativas por utilizador; desativar (não
     apagar) as antigas; poda >90 d mantém sempre a mais recente.
+21. **Alertas — preferências**: `user_interests.push_enabled` desliga só o push daquele
+    ofício (in-app completo); `digest_enabled` default **1**; `lifecycle_push_enabled`
+    default **0**. Editar a seleção de ofícios **preserva** o estado dos sinos.
+22. **Alertas — digest sem ofícios**: quem não escolheu nicho recebe **um** digest diário
+    (nunca alerta individual), fora do silêncio e depois do onboarding.
+23. **Lifecycle push**: opt-in; só `reveal_*`/`stage_*` com <45 min; o aviso crítico
+    (`reveal_urgent`) é o único autorizado a furar as quiet hours. `pushed_at` garante
+    idempotência; sem acesso vigente não há push.
 
 ## Verificação mínima antes de deploy
 ```bash

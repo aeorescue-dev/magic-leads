@@ -140,7 +140,7 @@ def test_click_signature_and_endpoint():
 
 def test_two_leads_become_one_batch_push(monkeypatch):
     _reset()
-    uid = _user(("Roof", "Plumbing"))
+    _user(("Roof", "Plumbing"))
     calls = []
     monkeypatch.setattr(push_service, "send_to_user", _fake_push(calls))
 

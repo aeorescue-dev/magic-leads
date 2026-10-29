@@ -78,6 +78,19 @@ def build(db_path: str) -> str:
         finally:
             conn.close()
 
+        # B2: um oficio configurado para o sino de push por categoria poder
+        # ser exercitado no E2E (sem interesses nao haveria lista).
+        conn_i = get_connection()
+        try:
+            conn_i.execute(
+                "INSERT OR IGNORE INTO user_interests (user_id, category, push_enabled) "
+                "VALUES (?, 'Roof', 1)",
+                (user_id,),
+            )
+            conn_i.commit()
+        finally:
+            conn_i.close()
+
         now = datetime.now(timezone.utc)
         leads = [
             ("E2E-INCOMPLETO", "John Doe", None, None, "1 INCOMPLETO ST"),

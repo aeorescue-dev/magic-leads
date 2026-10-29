@@ -450,6 +450,27 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   preenchida com `created_at`; o erro foi detetado no smoke de produção e corrigido
   no mesmo dia (`3f00916`). Migrações novas devem usar defaults constantes + backfill.
 
+### Sprint B2 — preferências, onboarding e lifecycle (2026-10-29)
+
+- **Push por ofício**: `user_interests.push_enabled` (default 1) + sino nas Definições.
+  Desligar remove só o push desse nicho; o **in-app fica completo**. Editar a seleção
+  de ofícios preserva o estado dos sinos (antes um `DELETE`+`INSERT` reiniciava tudo).
+  Endpoints: `GET /api/users/{id}/interests/push`, `PATCH .../{category}/push`.
+- **Digest**: `users.digest_enabled` default **1**, toggle nas Definições. O digest do
+  excedente continua a ser 1/dia; **novo**: quem não tem ofícios recebe um digest diário
+  genérico (`dispatch_unconfigured_digest`) — antes 101/122 utilizadores ficavam sem
+  qualquer sinal, porque a audiência estrita nunca os incluía.
+- **Onboarding**: `dispatch_interests_onboarding` envia **um** push instructivo
+  (“Escolha os seus ofícios”) a quem tem push ativo, subscrição viva, acesso vigente e
+  zero interesses. Uma vez por utilizador (`notifications.interests_onboarding`), fora
+  do orçamento e nunca no silêncio.
+- **Lifecycle**: `users.lifecycle_push_enabled` default **0**. `lifecycle_push.py` promove
+  `reveal_followup/reveal_urgent/stage_warning/stage_urgent` (<45 min) a push, com
+  `pushed_at` para idempotência. O `reveal_urgent` (15 min para perder a reserva) é o
+  **único** que fura as quiet hours; `urgency=high` + `requireInteraction`.
+  Corre no watchdog de 15 min e em `/api/cron/expire-holds`.
+- **794 testes**, 13 e2e, tsc limpo, build ok.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

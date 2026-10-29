@@ -578,6 +578,8 @@ export interface AuthUser {
   base_source?: string | null;
   base_label?: string | null;
   show_address_in_push?: boolean;
+  digest_enabled?: boolean;
+  lifecycle_push_enabled?: boolean;
 }
 
 export interface AuthResponse {
@@ -785,7 +787,11 @@ export async function clearBaseLocation(userId: number): Promise<AuthUser> {
 
 export async function setPushPreferences(
   userId: number,
-  prefs: { show_address_in_push?: boolean }
+  prefs: {
+    show_address_in_push?: boolean;
+    digest_enabled?: boolean;
+    lifecycle_push_enabled?: boolean;
+  }
 ): Promise<AuthUser> {
   return handle<AuthUser>(
     await fetch(`${API_URL}/api/users/${userId}/push-preferences`, {
@@ -795,6 +801,42 @@ export async function setPushPreferences(
       body: JSON.stringify(prefs),
     })
   );
+}
+
+export interface InterestPushSetting {
+  category: string;
+  push_enabled: boolean;
+}
+
+export async function fetchInterestPushSettings(
+  userId: number
+): Promise<InterestPushSetting[]> {
+  const r = await handle<{ settings: InterestPushSetting[] }>(
+    await fetch(`${API_URL}/api/users/${userId}/interests/push`, {
+      credentials: "include",
+      headers: { ...authHeaders() },
+    })
+  );
+  return r.settings || [];
+}
+
+export async function setInterestPush(
+  userId: number,
+  category: string,
+  enabled: boolean
+): Promise<InterestPushSetting[]> {
+  const r = await handle<{ settings: InterestPushSetting[] }>(
+    await fetch(
+      `${API_URL}/api/users/${userId}/interests/${encodeURIComponent(category)}/push`,
+      {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ enabled }),
+      }
+    )
+  );
+  return r.settings || [];
 }
 
 // ------------------------------------------------------------------

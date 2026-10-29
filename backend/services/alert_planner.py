@@ -29,6 +29,7 @@ from zoneinfo import ZoneInfo
 
 from ..config import settings
 from ..utils.logger import logger
+from .access import is_access_active
 from .db import db_service
 from .lead_rules import (
     address_is_resolvable,
@@ -81,6 +82,9 @@ class PlanReport:
     quiet_suppressed: int = 0    # pushes adiados pelo silêncio
     gap_suppressed: int = 0      # pushes adiados pelo min-gap
     batched: int = 0             # pushes agrupados (1 por run)
+    cat_push_suppressed: int = 0 # categorias com sino de push desligado
+    onboarding: int = 0          # pushes de onboarding enviados
+    unconfigured_digest: int = 0 # digests para quem nao tem oficios
 
 
 # ---------------------------------------------------------------------------
@@ -558,6 +562,166 @@ async def _create_inapp(uid: int, lead_id: int, params: dict, title: str, messag
     return None
 
 
+async def dispatch_interests_onboarding(limit: int = 20) -> int:
+    """Push unico para quem tem push ativo e nenhum interesse configurado.
+
+    Sem isto, os utilizadores que nunca escolheram oficios deixam de receber
+    alertas (nicho estrito) sem saber por que. Uma vez por utilizador, fora do
+    orcamento diario, e nunca durante o silencio.
+    """
+    from .push_service import push_service
+
+    if _is_quiet_hours():
+        return 0
+
+    users = await db_service.get_users_for_interests_onboarding(limit)
+    sent = 0
+    for u in users:
+        if not is_access_active(u.get("subscription_status"), u.get("plan_until")):
+            continue
+        locale = normalize(u.get("locale"))
+        title, body = {
+            "pt": (
+                "Escolha os seus ofícios",
+                "Só enviamos alertas das categorias que escolher. Leva 30 segundos.",
+            ),
+            "en": (
+                "Choose your trades",
+                "We only send alerts for the categories you pick. Takes 30 seconds.",
+            ),
+            "es": (
+                "Elige tus oficios",
+                "Solo enviamos alertas de las categorías que elijas. Tarda 30 segundos.",
+            ),
+        }[locale]
+        try:
+            row = await db_service.add_notification_for_user(
+                user_id=u["id"],
+                type="interests_onboarding",
+                title=title,
+                message=body,
+            )
+            if not row:
+                continue
+            click = _click_fields(row.get("id"))
+            url = "/dashboard"
+            if click:
+                url += f"?nid={click['nid']}&sig={click['sig']}"
+            url += "#interests-config"
+            payload = {
+                "title": title,
+                "body": body,
+                "icon": _PUSH_ICON,
+                "badge": _PUSH_ICON,
+                "tag": f"onboarding_{u['id']}",
+                "renotify": True,
+                "silent": False,
+                "url": url,
+                "actions": [
+                    {
+                        "action": "open",
+                        "title": {"pt": "Escolher ofícios", "en": "Choose trades", "es": "Elegir oficios"}[locale],
+                    },
+                    {
+                        "action": "dismiss",
+                        "title": {"pt": "Dispensar", "en": "Dismiss", "es": "Descartar"}[locale],
+                    },
+                ],
+                "vibrate": [120, 80, 120],
+                "timestamp": int(_now_utc().timestamp() * 1000),
+            }
+            payload.update(click)
+            ok = await push_service.send_to_user(
+                u["id"], payload, "onboarding", ttl=settings.PUSH_TTL_DIGEST_S,
+                urgency="normal",
+            )
+            if ok:
+                await db_service.mark_notification_pushed(row["id"])
+                sent += 1
+        except Exception as e:
+            logger.error("Onboarding push user=%s falhou: %s", u.get("id"), e)
+    return sent
+
+
+async def dispatch_unconfigured_digest(by_cat: dict, quiet: bool, limit: int) -> int:
+    """Um resumo diario para quem nao escolheu oficios (nicho estrito).
+
+    Estes utilizadores nunca recebem alerta individual. Sem digest, ficavam
+    completamente sem sinal. O texto e' generico (nao ha oficio preferido) e o
+    contador conta apenas os leads elegiveis deste run na cidade deles.
+    """
+    from .push_service import push_service
+
+    if quiet:
+        return 0
+    try:
+        users = await db_service.get_users_pending_unconfigured_digest()
+    except Exception as e:
+        logger.warning("[DIGEST] candidatos falharam: %s", e)
+        return 0
+
+    all_leads = [ld for leads in by_cat.values() for ld in leads]
+    if not all_leads:
+        return 0
+
+    sent = 0
+    for u in users:
+        uid = u["id"]
+        if not is_access_active(u.get("subscription_status"), u.get("plan_until")):
+            continue
+        if not await db_service.is_push_enabled(uid):
+            continue
+        try:
+            count = sum(
+                1 for ld in all_leads if _city_allows(u, ld.get("city") or "")
+            )
+            if count <= 0:
+                continue
+            locale = normalize(u.get("locale"))
+            res = await db_service.upsert_daily_digest(uid, count, locale=locale)
+            if not res or not res.get("_is_new"):
+                continue
+            total_n = count
+            try:
+                total_n = int(
+                    json.loads(res.get("msg_params") or "{}").get("n", count)
+                )
+            except (ValueError, TypeError):
+                total_n = count
+            rendered = render("digest", locale, n=total_n, limit=limit) or {}
+            click = _click_fields(res.get("id"))
+            url = "/dashboard?src=push&digest=1"
+            if click:
+                url += f"&nid={click['nid']}&sig={click['sig']}"
+            payload = {
+                "title": rendered.get("title") or tr("digest.title", locale),
+                "body": rendered.get("message")
+                or tr("digest.main_msg", locale, n=total_n, limit=limit),
+                "icon": _PUSH_ICON,
+                "badge": _PUSH_ICON,
+                "tag": f"digest_{locale}",
+                "renotify": True,
+                "silent": False,
+                "url": url,
+                "actions": [
+                    {"action": "open", "title": "Ver oportunidades"},
+                    {"action": "dismiss", "title": "Dispensar"},
+                ],
+                "vibrate": [120, 80, 120],
+                "timestamp": int(_now_utc().timestamp() * 1000),
+            }
+            payload.update(click)
+            ok = await push_service.send_to_user(
+                uid, payload, "digest", ttl=settings.PUSH_TTL_DIGEST_S,
+                urgency="normal",
+            )
+            if ok:
+                sent += 1
+        except Exception as e:
+            logger.error("[DIGEST] user=%s falhou: %s", uid, e)
+    return sent
+
+
 async def plan_and_dispatch(leads: list) -> PlanReport:
     """Planeia e executa o despacho de alertas para os leads recém-inseridos."""
     from .push_service import push_service
@@ -604,6 +768,8 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
     user_base_source: dict = {}
     user_show_address: dict = {}
     user_gap: dict = {}
+    user_digest: dict = {}
+    user_cat_push: dict = {}
     saw_users = False
     for cat, cat_leads in by_cat.items():
         users = await db_service.get_users_interested_in(cat, strict=True)
@@ -627,6 +793,8 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
                 user_show_address[uid] = bool(u.get("show_address_in_push", 1))
                 gap = u.get("push_min_gap_min")
                 user_gap[uid] = 30 if gap is None else int(gap)
+                user_digest[uid] = bool(u.get("digest_enabled", 1))
+                user_cat_push[(uid, cat)] = bool(u.get("interest_push_enabled", 1))
 
     city_filtered = len(audience) == 0 and saw_users
     report = PlanReport(
@@ -670,7 +838,10 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
             if created:
                 await db_service.increment_alert_usage(uid, cat)
                 report.created += 1
-                push_jobs.setdefault(uid, []).append((ld, cat, created.get("id")))
+                if user_cat_push.get((uid, cat), True):
+                    push_jobs.setdefault(uid, []).append((ld, cat, created.get("id")))
+                else:
+                    report.cat_push_suppressed += 1
 
         if overflow > 0:
             digest_jobs.append((uid, overflow, user_locale.get(uid)))
@@ -682,6 +853,8 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
     # (se criássemos agora, `_is_new` seria falso de manhã e o push morria).
     for uid, count, locale in digest_jobs:
         if quiet:
+            continue
+        if not user_digest.get(uid, True):
             continue
         try:
             res = await db_service.upsert_daily_digest(uid, count, locale=locale)
@@ -819,10 +992,26 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
         except Exception as e:
             logger.error(f"Push error user={uid}: {e}")
 
+    # 4c) Digest de quem nao escolheu oficios (nicho estrito). Sem isto,
+    # 101/122 utilizadores ficariam sem qualquer sinal alem do onboarding.
+    unconfigured = await dispatch_unconfigured_digest(by_cat, quiet, limit)
+    if unconfigured:
+        report.unconfigured_digest = unconfigured
+
     logger.info(
         f"Alert Planner: {report.created} in-app, {report.digest} digest, "
         f"{report.pushed} push ({report.batched} lote(s), "
-        f"{report.quiet_suppressed} em silêncio, {report.gap_suppressed} em min-gap), "
+        f"{report.quiet_suppressed} em silêncio, {report.gap_suppressed} em min-gap, "
+        f"{report.cat_push_suppressed} categoria(s) mudas), "
         f"audiência {report.audience} ({report.candidates} candidato(s), teto {limit})"
     )
+
+    # B2: onboarding unico de nicho (fora do orcamento e do silencio).
+    try:
+        report.onboarding = await dispatch_interests_onboarding()
+        if report.onboarding:
+            logger.info("Onboarding: %s push(es) de escolha de oficios", report.onboarding)
+    except Exception as e:
+        logger.error("Onboarding push falhou: %s", e)
+
     return report

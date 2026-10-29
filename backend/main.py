@@ -28,6 +28,7 @@ from .models.schemas import (
     ContactLeadRequest,
     EnrichedLead,
     HistoryEvent,
+    InterestPushUpdate,
     InterestsUpdate,
     IssueCategory,
     LeadHoldResponse,
@@ -61,6 +62,7 @@ from .services import (
     enrichment_queue,
     freshness,
     inbox_sync,
+    lifecycle_push,
     notifier,
     outbound_templates,
     security,
@@ -3605,6 +3607,13 @@ async def _hold_watchdog_loop():
                     "Watchdog de holds: %s hold(s) expirado(s), %s reveal(s) processado(s)",
                     expired, reveals,
                 )
+            # B2: promove os avisos de ciclo de vida a push (opt-in).
+            try:
+                pushed_life = await lifecycle_push.dispatch_lifecycle_pushes()
+                if pushed_life:
+                    logger.info("Lifecycle push: %s aviso(s) enviado(s)", pushed_life)
+            except Exception as e:
+                logger.warning("Lifecycle push falhou: %s", e)
             else:
                 logger.debug("Watchdog de holds: nada a expirar")
         except asyncio.CancelledError:
@@ -4213,6 +4222,8 @@ def _user_response(u: dict) -> UserResponse:
         base_source=u.get("base_source"),
         base_label=u.get("base_label"),
         show_address_in_push=bool(u.get("show_address_in_push", 1)),
+        digest_enabled=bool(u.get("digest_enabled", 1)),
+        lifecycle_push_enabled=bool(u.get("lifecycle_push_enabled", 0)),
     )
 
 
@@ -4881,6 +4892,28 @@ async def set_interests(
     return {"categories": await db_service.get_user_interests(user_id)}
 
 
+@app.get("/api/users/{user_id}/interests/push")
+async def get_interests_push(user_id: int, user: dict = Depends(_get_current_user)):
+    """Estado do sino de push por oficio (B2)."""
+    if user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Sem permissão")
+    return {"settings": await db_service.get_user_interest_settings(user_id)}
+
+
+@app.patch("/api/users/{user_id}/interests/{category}/push")
+async def set_interest_push(
+    user_id: int, category: str, payload: InterestPushUpdate,
+    user: dict = Depends(_get_current_user),
+):
+    """Liga/desliga o push de uma categoria; o in-app continua sempre."""
+    if user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Sem permissão")
+    ok = await db_service.set_user_interest_push(user_id, category, payload.enabled)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Interesse não encontrado")
+    return {"settings": await db_service.get_user_interest_settings(user_id)}
+
+
 @app.get("/api/users/{user_id}/cities-filter")
 async def get_cities_filter(user_id: int, user: dict = Depends(_get_current_user)):
     if user["id"] != user_id:
@@ -4942,12 +4975,18 @@ async def set_push_preferences(
     user_id: int, payload: PushPreferencesUpdate,
     user: dict = Depends(_get_current_user),
 ):
-    """Preferências de privacidade do push (morada visível por defeito)."""
+    """Preferências de comunicação: morada, digest e ciclo de vida (B2)."""
     if user["id"] != user_id:
         raise HTTPException(status_code=403, detail="Sem permissão")
     if payload.show_address_in_push is not None:
         await db_service.set_show_address_in_push(
             user_id, payload.show_address_in_push
+        )
+    if payload.digest_enabled is not None:
+        await db_service.set_user_digest_enabled(user_id, payload.digest_enabled)
+    if payload.lifecycle_push_enabled is not None:
+        await db_service.set_user_lifecycle_push_enabled(
+            user_id, payload.lifecycle_push_enabled
         )
     full = await db_service.get_user_by_id(user_id)
     return _user_response(full) if full else {"status": "ok"}
@@ -5646,10 +5685,12 @@ async def cron_expire_holds(x_cron_secret: str | None = Header(None)):
     try:
         expired = await db_service.expire_holds()
         reveals = await db_service.check_reveal_watchdogs()
+        lifecycle = await lifecycle_push.dispatch_lifecycle_pushes()
         return {
             "status": "ok",
             "expired_holds": expired,
             "reveals_processed": reveals,
+            "lifecycle_pushed": lifecycle,
             "at": utcnow().isoformat(),
         }
     except Exception as e:

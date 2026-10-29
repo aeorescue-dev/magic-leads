@@ -274,6 +274,9 @@ CREATE TABLE IF NOT EXISTS users (
   show_address_in_push INTEGER DEFAULT 1,
   -- Ritmo minimo entre pushes (0 = sem pausa). B1.
   push_min_gap_min INTEGER DEFAULT 30,
+  -- B2: resumo diario (default ligado) e push de ciclo de vida (default off).
+  digest_enabled INTEGER DEFAULT 1,
+  lifecycle_push_enabled INTEGER DEFAULT 0,
   alert_rotation_cursor INTEGER DEFAULT 0,
   welcome_popup_shown INTEGER DEFAULT 0,
   refund_count_today INTEGER DEFAULT 0,
@@ -385,6 +388,7 @@ CREATE TABLE IF NOT EXISTS notifications (
   msg_key TEXT,
   msg_params TEXT,
   clicked_at TEXT,
+  pushed_at TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -405,6 +409,7 @@ CREATE TABLE IF NOT EXISTS user_interests (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   category TEXT NOT NULL,
+  push_enabled INTEGER DEFAULT 1,
   UNIQUE(user_id, category)
 );
 
@@ -1445,6 +1450,10 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN show_address_in_push INTEGER DEFAULT 1")
     if user_cols and "push_min_gap_min" not in user_cols:
         conn.execute("ALTER TABLE users ADD COLUMN push_min_gap_min INTEGER DEFAULT 30")
+    if user_cols and "digest_enabled" not in user_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN digest_enabled INTEGER DEFAULT 1")
+    if user_cols and "lifecycle_push_enabled" not in user_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN lifecycle_push_enabled INTEGER DEFAULT 0")
 
     event_cols = {r["name"] for r in conn.execute("PRAGMA table_info(lead_events)").fetchall()}
     if event_cols:
@@ -1462,6 +1471,16 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE notifications ADD COLUMN msg_params TEXT")
     if notif_cols and "clicked_at" not in notif_cols:
         conn.execute("ALTER TABLE notifications ADD COLUMN clicked_at TEXT")
+    if notif_cols and "pushed_at" not in notif_cols:
+        conn.execute("ALTER TABLE notifications ADD COLUMN pushed_at TEXT")
+
+    interest_cols = {
+        r["name"] for r in conn.execute("PRAGMA table_info(user_interests)").fetchall()
+    }
+    if interest_cols and "push_enabled" not in interest_cols:
+        conn.execute(
+            "ALTER TABLE user_interests ADD COLUMN push_enabled INTEGER DEFAULT 1"
+        )
 
     # B1: higiene de dispositivos (last_seen/last_success/disabled).
     push_sub_cols = {
@@ -4193,12 +4212,22 @@ class DatabaseService:
     def set_user_interests(self, user_id: int, categories: List[str]) -> bool:
         conn = get_connection()
         try:
-            _cur = conn.execute("DELETE FROM user_interests WHERE user_id = ?", (user_id,))
+            # Preserva o sino de push por categoria ao editar a selecao. Sem
+            # isto, marcar/desmarcar um oficio reiniciava todos os toggles.
+            prev = {
+                r["category"]: int(r["push_enabled"] if r["push_enabled"] is not None else 1)
+                for r in conn.execute(
+                    "SELECT category, push_enabled FROM user_interests WHERE user_id = ?",
+                    (user_id,),
+                ).fetchall()
+            }
+            conn.execute("DELETE FROM user_interests WHERE user_id = ?", (user_id,))
             for cat in categories:
                 if cat:
                     conn.execute(
-                        "INSERT OR IGNORE INTO user_interests (user_id, category) VALUES (?, ?)",
-                        (user_id, cat),
+                        "INSERT OR IGNORE INTO user_interests (user_id, category, push_enabled) "
+                        "VALUES (?, ?, ?)",
+                        (user_id, cat, prev.get(cat, 1)),
                     )
             conn.commit()
             return True
@@ -4212,6 +4241,35 @@ class DatabaseService:
                 "SELECT category FROM user_interests WHERE user_id = ?", (user_id,)
             ).fetchall()
             return [r["category"] for r in rows]
+        finally:
+            conn.close()
+
+    def get_user_interest_settings(self, user_id: int) -> List[dict]:
+        """Interesses com o estado do sino de push (B2)."""
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT category, COALESCE(push_enabled, 1) AS push_enabled "
+                "FROM user_interests WHERE user_id = ? ORDER BY category",
+                (user_id,),
+            ).fetchall()
+            return [
+                {"category": r["category"], "push_enabled": bool(r["push_enabled"])}
+                for r in rows
+            ]
+        finally:
+            conn.close()
+
+    def set_user_interest_push(self, user_id: int, category: str, enabled: bool) -> bool:
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE user_interests SET push_enabled = ? "
+                "WHERE user_id = ? AND category = ?",
+                (1 if enabled else 0, user_id, category),
+            )
+            conn.commit()
+            return cur.rowcount > 0
         finally:
             conn.close()
 
@@ -4264,13 +4322,18 @@ class DatabaseService:
             if strict:
                 rows = conn.execute(
                     """
-                    SELECT u.* FROM users u
+                    SELECT u.*,
+                           COALESCE((
+                             SELECT ui.push_enabled FROM user_interests ui
+                             WHERE ui.user_id = u.id AND ui.category = ?
+                           ), 1) AS interest_push_enabled
+                    FROM users u
                     WHERE EXISTS (
-                        SELECT 1 FROM user_interests ui
-                        WHERE ui.user_id = u.id AND ui.category = ?
+                        SELECT 1 FROM user_interests ui2
+                        WHERE ui2.user_id = u.id AND ui2.category = ?
                     )
                     """,
-                    (category,),
+                    (category, category),
                 ).fetchall()
             else:
                 rows = conn.execute(
@@ -4636,6 +4699,136 @@ class DatabaseService:
             cur = conn.execute(
                 "UPDATE users SET show_address_in_push = ? WHERE id = ?",
                 (1 if enabled else 0, user_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def set_user_digest_enabled(self, user_id: int, enabled: bool) -> bool:
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE users SET digest_enabled = ? WHERE id = ?",
+                (1 if enabled else 0, user_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def set_user_lifecycle_push_enabled(self, user_id: int, enabled: bool) -> bool:
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE users SET lifecycle_push_enabled = ? WHERE id = ?",
+                (1 if enabled else 0, user_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def get_users_for_interests_onboarding(self, limit: int = 50) -> List[dict]:
+        """Utilizadores com push ativo, subscricao viva e zero interesses.
+
+        Candidatos ao push unico de onboarding (B2). Exclui quem ja recebeu.
+        """
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                """
+                SELECT u.* FROM users u
+                WHERE u.push_enabled = 1
+                  AND EXISTS (
+                    SELECT 1 FROM push_subscriptions s
+                    WHERE s.user_id = u.id AND s.disabled_at IS NULL
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1 FROM user_interests i WHERE i.user_id = u.id
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1 FROM notifications n
+                    WHERE n.user_id = u.id AND n.type = 'interests_onboarding'
+                  )
+                LIMIT ?
+                """,
+                (int(limit),),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def get_users_pending_unconfigured_digest(self, limit: int = 500) -> List[dict]:
+        """Quem nao escolheu oficios mas aceita o resumo diario (B2).
+
+        A audiencia estrita nunca cria alertas individuais para estes
+        utilizadores; o digest e' o unico canal diario. Exclui quem ja recebeu
+        o digest de hoje para o contador nao inflar a cada run.
+        """
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                """
+                SELECT u.* FROM users u
+                WHERE u.push_enabled = 1
+                  AND COALESCE(u.digest_enabled, 1) = 1
+                  AND NOT EXISTS (
+                    SELECT 1 FROM user_interests i WHERE i.user_id = u.id
+                  )
+                  AND EXISTS (
+                    SELECT 1 FROM push_subscriptions s
+                    WHERE s.user_id = u.id AND s.disabled_at IS NULL
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1 FROM notifications n
+                    WHERE n.user_id = u.id AND n.type = 'digest'
+                      AND DATE(n.created_at) = DATE('now')
+                  )
+                ORDER BY u.id LIMIT ?
+                """,
+                (int(limit),),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def get_unpushed_lifecycle_notifications(self, limit: int = 50) -> List[dict]:
+        """Avisos de ciclo de vida ainda sem push, para utilizadores opt-in."""
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                """
+                SELECT n.id, n.user_id, n.type, n.title, n.message, n.lead_id,
+                       n.created_at, u.locale, u.subscription_status, u.plan_until
+                FROM notifications n
+                JOIN users u ON u.id = n.user_id
+                WHERE n.pushed_at IS NULL
+                  AND n.user_id IS NOT NULL
+                  AND u.lifecycle_push_enabled = 1
+                  AND u.push_enabled = 1
+                  AND n.type IN ('reveal_followup', 'reveal_urgent',
+                                 'stage_warning', 'stage_urgent')
+                  AND n.created_at >= datetime('now', '-45 minutes')
+                  AND EXISTS (
+                    SELECT 1 FROM push_subscriptions s
+                    WHERE s.user_id = n.user_id AND s.disabled_at IS NULL
+                  )
+                ORDER BY n.id ASC LIMIT ?
+                """,
+                (int(limit),),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def mark_notification_pushed(self, notification_id: int) -> bool:
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE notifications SET pushed_at = COALESCE(pushed_at, CURRENT_TIMESTAMP) "
+                "WHERE id = ?",
+                (notification_id,),
             )
             conn.commit()
             return cur.rowcount > 0
@@ -9471,6 +9664,18 @@ class AsyncDatabaseService:
     async def get_user_interests(self, user_id: int) -> List[str]:
         return await anyio.to_thread.run_sync(self._service.get_user_interests, user_id)
 
+    async def get_user_interest_settings(self, user_id: int) -> List[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.get_user_interest_settings, user_id
+        )
+
+    async def set_user_interest_push(
+        self, user_id: int, category: str, enabled: bool
+    ) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.set_user_interest_push, user_id, category, enabled
+        )
+
     async def set_user_cities_filter(self, user_id: int, cities: Optional[List[str]]) -> bool:
         return await anyio.to_thread.run_sync(self._service.set_user_cities_filter, user_id, cities)
 
@@ -9544,6 +9749,38 @@ class AsyncDatabaseService:
     async def set_show_address_in_push(self, user_id: int, enabled: bool) -> bool:
         return await anyio.to_thread.run_sync(
             self._service.set_show_address_in_push, user_id, enabled
+        )
+
+    async def set_user_digest_enabled(self, user_id: int, enabled: bool) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.set_user_digest_enabled, user_id, enabled
+        )
+
+    async def set_user_lifecycle_push_enabled(self, user_id: int, enabled: bool) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.set_user_lifecycle_push_enabled, user_id, enabled
+        )
+
+    async def get_users_for_interests_onboarding(self, limit: int = 50) -> List[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.get_users_for_interests_onboarding, limit
+        )
+
+    async def get_users_pending_unconfigured_digest(
+        self, limit: int = 500
+    ) -> List[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.get_users_pending_unconfigured_digest, limit
+        )
+
+    async def get_unpushed_lifecycle_notifications(self, limit: int = 50) -> List[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.get_unpushed_lifecycle_notifications, limit
+        )
+
+    async def mark_notification_pushed(self, notification_id: int) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.mark_notification_pushed, notification_id
         )
 
     # ===== ADMIN (painel /admin) =====

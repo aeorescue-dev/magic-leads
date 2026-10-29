@@ -1,18 +1,40 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Check, CreditCard, Loader2, LogOut, MapPin, Pencil, ShieldCheck, X } from "lucide-react";
+import { ArrowLeft, Bell, BellOff, Check, CreditCard, Loader2, LogOut, MapPin, Pencil, ShieldCheck, X } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 import {
   clearBaseLocation,
+  fetchInterestPushSettings,
+  InterestPushSetting,
   setBaseLocation,
+  setInterestPush,
   setPushPreferences,
   updateCompanyName,
 } from "@/lib/api-client";
 import CheckoutModal from "@/components/CheckoutModal";
+
+const CATEGORY_LABEL_KEYS: Record<string, string> = {
+  Roof: "dashboard.cat.telhado",
+  Structure: "dashboard.cat.estrutura",
+  Plumbing: "dashboard.cat.encanamento",
+  Grass: "dashboard.cat.mato",
+  Paint: "dashboard.cat.pintura",
+  Permit_Rejected: "dashboard.cat.obras",
+  Heating: "dashboard.cat.heating",
+  Electrical: "dashboard.cat.electrical",
+  Elevator: "dashboard.cat.elevator",
+  Gas: "dashboard.cat.gas",
+  Rodent: "dashboard.cat.rodent",
+  Mold: "dashboard.cat.mold",
+  Lead: "dashboard.cat.lead",
+  Unsanitary: "dashboard.cat.unsanitary",
+  Door_Window: "dashboard.cat.door_window",
+  Debris: "dashboard.cat.debris",
+};
 
 // Centroides estaticos (sem APIs de mapas): fallback para quando o utilizador
 // nao quer partilhar a localizacao GPS. A distancia fica "na sua cidade".
@@ -22,6 +44,36 @@ const CITY_CENTROIDS: Record<string, { lat: number; lng: number }> = {
   Boston: { lat: 42.3601, lng: -71.0589 },
   Dallas: { lat: 32.7767, lng: -96.797 },
 };
+
+// Toggle acessivel reutilizavel (B2). Mantem o mesmo aspeto do interruptor de
+// privacidade, para a pagina nao acumular variantes visuais.
+function Toggle({
+  on,
+  disabled,
+  label,
+  onToggle,
+}: {
+  on: boolean;
+  disabled?: boolean;
+  label: string;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      disabled={disabled}
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      className={`relative h-6 w-11 shrink-0 rounded-full transition disabled:opacity-50 ${on ? "bg-emerald-500" : "bg-white/15"}`}
+    >
+      <span
+        className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${on ? "left-[22px]" : "left-0.5"}`}
+      />
+    </button>
+  );
+}
 
 export default function DashboardSettingsPage() {
   const { user, loading, signOut, updateUser } = useAuth();
@@ -36,6 +88,23 @@ export default function DashboardSettingsPage() {
   const [geoBusy, setGeoBusy] = useState(false);
   const [geoMsg, setGeoMsg] = useState("");
   const [geoError, setGeoError] = useState("");
+  const [interestPush, setInterestPushState] = useState<InterestPushSetting[]>([]);
+  const [pushBusyCat, setPushBusyCat] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    fetchInterestPushSettings(user.id)
+      .then((settings) => {
+        if (!cancelled) setInterestPushState(settings);
+      })
+      .catch(() => {
+        /* preferencias sao secundarias; a pagina continua utilizavel */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
 
   const planLabel = (plan: string) => t(`plan.${plan}`);
 
@@ -161,6 +230,52 @@ export default function DashboardSettingsPage() {
       setGeoError(e?.message || t("dashboard.settings.base_error"));
     } finally {
       setGeoBusy(false);
+    }
+  };
+
+  const toggleDigest = async () => {
+    if (!user) return;
+    setGeoBusy(true);
+    setGeoError("");
+    try {
+      const updated = await setPushPreferences(user.id, {
+        digest_enabled: user.digest_enabled === false,
+      });
+      updateUser(updated);
+    } catch (e: any) {
+      setGeoError(e?.message || t("dashboard.settings.base_error"));
+    } finally {
+      setGeoBusy(false);
+    }
+  };
+
+  const toggleLifecycle = async () => {
+    if (!user) return;
+    setGeoBusy(true);
+    setGeoError("");
+    try {
+      const updated = await setPushPreferences(user.id, {
+        lifecycle_push_enabled: user.lifecycle_push_enabled !== true,
+      });
+      updateUser(updated);
+    } catch (e: any) {
+      setGeoError(e?.message || t("dashboard.settings.base_error"));
+    } finally {
+      setGeoBusy(false);
+    }
+  };
+
+  const toggleCategoryPush = async (category: string, enabled: boolean) => {
+    if (!user) return;
+    setPushBusyCat(category);
+    setGeoError("");
+    try {
+      const settings = await setInterestPush(user.id, category, !enabled);
+      setInterestPushState(settings);
+    } catch (e: any) {
+      setGeoError(e?.message || t("dashboard.settings.base_error"));
+    } finally {
+      setPushBusyCat(null);
     }
   };
 
@@ -316,17 +431,76 @@ export default function DashboardSettingsPage() {
                   <p className="text-sm font-medium">{t("dashboard.settings.show_address")}</p>
                   <p className="text-xs text-slate-400 leading-relaxed mt-0.5">{t("dashboard.settings.show_address_hint")}</p>
                 </div>
-                <button
-                  onClick={toggleShowAddress}
+                <Toggle
+                  on={user.show_address_in_push !== false}
                   disabled={geoBusy}
-                  aria-pressed={user.show_address_in_push !== false}
-                  aria-label={t("dashboard.settings.show_address")}
-                  className={`relative h-6 w-11 shrink-0 rounded-full transition disabled:opacity-50 ${user.show_address_in_push !== false ? "bg-emerald-500" : "bg-white/15"}`}
-                >
-                  <span
-                    className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${user.show_address_in_push !== false ? "left-[22px]" : "left-0.5"}`}
-                  />
-                </button>
+                  label={t("dashboard.settings.show_address")}
+                  onToggle={toggleShowAddress}
+                />
+              </div>
+
+              {/* Resumo diario (B2, default ligado) */}
+              <div className="rounded-xl bg-white/5 border border-white/10 p-3 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">{t("dashboard.settings.digest_title")}</p>
+                  <p className="text-xs text-slate-400 leading-relaxed mt-0.5">{t("dashboard.settings.digest_hint")}</p>
+                </div>
+                <Toggle
+                  on={user.digest_enabled !== false}
+                  disabled={geoBusy}
+                  label={t("dashboard.settings.digest_title")}
+                  onToggle={toggleDigest}
+                />
+              </div>
+
+              {/* Avisos de reserva (B2, opt-in; 60 min fura o silencio) */}
+              <div className="rounded-xl bg-white/5 border border-white/10 p-3 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">{t("dashboard.settings.lifecycle_title")}</p>
+                  <p className="text-xs text-slate-400 leading-relaxed mt-0.5">{t("dashboard.settings.lifecycle_hint")}</p>
+                </div>
+                <Toggle
+                  on={user.lifecycle_push_enabled === true}
+                  disabled={geoBusy}
+                  label={t("dashboard.settings.lifecycle_title")}
+                  onToggle={toggleLifecycle}
+                />
+              </div>
+
+              {/* Push por oficio (B2): o sino desliga so o push, o in-app fica */}
+              <div className="rounded-xl bg-white/5 border border-white/10 p-3 space-y-2">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <Bell className="w-4 h-4 text-emerald-400" /> {t("dashboard.settings.trades_title")}
+                </div>
+                <p className="text-xs text-slate-400 leading-relaxed">{t("dashboard.settings.trades_hint")}</p>
+                {interestPush.length === 0 ? (
+                  <p className="text-xs text-slate-400 italic">{t("dashboard.settings.trades_empty")}</p>
+                ) : (
+                  <ul className="divide-y divide-white/5">
+                    {interestPush.map((s) => (
+                      <li key={s.category} className="flex items-center justify-between gap-3 py-2">
+                        <span className="flex items-center gap-2 text-sm text-slate-200 min-w-0">
+                          {s.push_enabled ? (
+                            <Bell className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          ) : (
+                            <BellOff className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                          )}
+                          <span className="truncate">
+                            {CATEGORY_LABEL_KEYS[s.category]
+                              ? t(CATEGORY_LABEL_KEYS[s.category])
+                              : s.category}
+                          </span>
+                        </span>
+                        <Toggle
+                          on={s.push_enabled}
+                          disabled={pushBusyCat === s.category}
+                          label={s.category}
+                          onToggle={() => toggleCategoryPush(s.category, s.push_enabled)}
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             </div>
 

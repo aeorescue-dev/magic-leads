@@ -334,6 +334,8 @@ class UserResponse(BaseModel):
     base_source: Optional[str] = None
     base_label: Optional[str] = None
     show_address_in_push: bool = True
+    digest_enabled: bool = True
+    lifecycle_push_enabled: bool = False
 
 
 class BaseLocationUpdate(BaseModel):
@@ -345,6 +347,12 @@ class BaseLocationUpdate(BaseModel):
 
 class PushPreferencesUpdate(BaseModel):
     show_address_in_push: Optional[bool] = None
+    digest_enabled: Optional[bool] = None
+    lifecycle_push_enabled: Optional[bool] = None
+
+
+class InterestPushUpdate(BaseModel):
+    enabled: bool
 
 
 class AuthResponse(BaseModel):
