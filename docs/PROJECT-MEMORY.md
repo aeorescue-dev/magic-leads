@@ -368,6 +368,11 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   text-slate-600` no claro) em vez de opacidade 50%.
 - Auditoria de contraste no browser (WCAG por elemento): sem falhas de texto
   normal; só os números KPI grandes, agora acima de 3:1.
+- **KPIs**: as cores vinham em `style={{ color: "#f59e0b" }}` (inline), imunes a
+  overrides CSS. Passam a escolher `-700` no claro.
+- **CTAs coloridos**: "Contactar" era branco sobre `sky-500` (3:1) → `sky-700`;
+  "Negociar" branco sobre âmbar (2:1) → texto `slate-950`; chips de cidade e
+  botões indigo passam a `indigo-600` (6,3:1 com branco).
 
 ### P2 — percentagem de confiança (2026-10-29)
 
@@ -381,6 +386,12 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   "Alta probabilidade · 72%" com tooltip "n consultas"; sem amostras suficientes
   não há número inventado — o selo qualitativo mantém-se.
 - **751 testes**, tsc limpo, build ok.
+- **Smoke em produção:** `/api/leads/today` devolve `phone_success_pct=50` e
+  `phone_sample_size=38` no segmento `unknown` (311 sem nome, onde a amostra já
+  passa de 30). Para leads com nome a amostra ainda é 0: os 65 registos
+  históricos de `searchbug_calls` têm `owner_class NULL` e `lead_id 0` (anteriores
+  à telemetria P0-C1). A percentagem aparece quando houver ≥30 consultas novas do
+  segmento; até lá o selo fica qualitativo, sem número inventado.
 
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
