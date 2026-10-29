@@ -2522,6 +2522,9 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
 
         # 4. Executa fetch por cidade com Circuit Breaker isolado
         all_raw = []
+        # P0-A: watermarks so' sao aplicados DEPOIS dos inserts; se o run cair a
+        # meio, o proximo volta a buscar a mesma janela (idempotente).
+        pending_watermarks: dict[str, str] = {}
         city_results = {}  # {city: {"leads": [...], "error": None/str, "skipped": bool}}
         city_ok: dict[str, int] = {}   # fontes que responderam por cidade
         city_err: dict[str, list] = {} # fontes que falharam por cidade
@@ -2785,7 +2788,7 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                         meta.get("truncated"), wm,
                     )
                     if not meta.get("truncated") and meta.get("max_date"):
-                        await db_service.set_scraper_watermark(wm_key, meta["max_date"])
+                        pending_watermarks[wm_key] = meta["max_date"]
 
                 # Boston (CKAN) - caso especial
                 if city == "Boston":
@@ -2908,9 +2911,7 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                             len(records), len(out), truncated,
                         )
                         if not truncated and max_open is not None:
-                            await db_service.set_scraper_watermark(
-                                wm_key, max_open.date().isoformat()
-                            )
+                            pending_watermarks[wm_key] = max_open.date().isoformat()
                     except Exception as e:
                         logger.warning(f"Boston CKAN fetch error: {e}")
                         # Propagar: antes Boston ficava verde no city_health
@@ -3023,6 +3024,13 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                         f"(address={raw_lead.address!r}, city={raw_lead.city!r}, "
                         f"has_bbl={bool(getattr(raw_lead, 'bbl', None))}): {e}"
                     )
+
+        # P0-A: so' agora, com todos os inserts do run concluidos, os
+        # watermarks avancam. Uma falha a meio nao salta a janela.
+        if pending_watermarks:
+            for wm_key, wm_date in pending_watermarks.items():
+                await db_service.set_scraper_watermark(wm_key, wm_date)
+            logger.info("[P0-A] watermarks aplicados: %s", pending_watermarks)
 
         # 6. Fan-out + Anomalia detection por categoria
         notified_total = 0
