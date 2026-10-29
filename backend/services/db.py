@@ -3175,7 +3175,7 @@ class DatabaseService:
                 where.append("l.urgency_level IN (%s)" % ",".join("?" * len(urg)))
                 params.extend(urg)
         if days:
-            where.append("date(l.date_reported) >= date('now', ?)")
+            where.append("l.date_reported >= datetime('now', ?)")
             params.append(f"-{int(days)} days")
         if not include_closed:
             where.append("COALESCE(l.signal_status, 'unknown') != 'closed'")
@@ -6297,7 +6297,7 @@ class DatabaseService:
             # varredura reescreve e inflacionava o KPI).
             base_where = f"""
                 WHERE date_reported IS NOT NULL
-                  AND date(date_reported) >= date('now', '-7 days')
+                  AND date_reported >= datetime('now', '-7 days')
                   AND {_qualified_where()}
             """
             params: list = []
