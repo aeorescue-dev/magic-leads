@@ -1003,6 +1003,7 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
         f"{report.pushed} push ({report.batched} lote(s), "
         f"{report.quiet_suppressed} em silêncio, {report.gap_suppressed} em min-gap, "
         f"{report.cat_push_suppressed} categoria(s) mudas), "
+        f"{report.unconfigured_digest} digest sem ofícios, "
         f"audiência {report.audience} ({report.candidates} candidato(s), teto {limit})"
     )
 
