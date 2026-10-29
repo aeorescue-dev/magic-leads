@@ -1,9 +1,0 @@
-{
-  "user_id": 1,
-  "type": "new_lead",
-  "title": "Novos leads capturados",
-  "message": "1692 novo(s) lead(s) 311 adicionado(s) via Socrata",
-  "lead_id": null,
-  "error": "database is locked",
-  "saved_at": "2026-10-29T23:22:36.603702"
-}
