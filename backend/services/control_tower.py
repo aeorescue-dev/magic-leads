@@ -158,6 +158,80 @@ def _check_worker() -> dict:
     return {"name": "worker", "status": "ok", "detail": f"tick ha {age_min:.0f} min"}
 
 
+def _check_searchbug_cost() -> dict:
+    """Anomalias de custo/qualidade da Searchbug (sem cap global).
+
+    Nao bloqueia chamadas: apenas classifica para o alerta RED.
+      * custo da ultima hora > max($1, 3x media horaria das 24h) -> warn
+      * transport_error > 50% (>=5 chamadas/15min) -> fail
+      * ghost charges > 30% das pagas em 24h (>=10) -> warn
+      * name_mismatch > 50% dos resultados resolvidos (>=10) -> warn
+    """
+    try:
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                """SELECT
+                     COALESCE(SUM(CASE WHEN called_at >= datetime('now','-1 hour')
+                                       THEN cost_usd ELSE 0 END), 0) AS cost_1h,
+                     COALESCE(SUM(cost_usd), 0) AS cost_24h,
+                     SUM(CASE WHEN called_at >= datetime('now','-15 minutes')
+                              THEN 1 ELSE 0 END) AS calls_15m,
+                     SUM(CASE WHEN called_at >= datetime('now','-15 minutes')
+                              AND outcome = 'transport_error' THEN 1 ELSE 0 END) AS transport_15m,
+                     SUM(CASE WHEN billed = 1 THEN 1 ELSE 0 END) AS billed_24h,
+                     SUM(CASE WHEN billed = 1 AND outcome != 'success'
+                              THEN 1 ELSE 0 END) AS ghost_24h,
+                     SUM(CASE WHEN outcome IN ('success', 'name_mismatch')
+                              THEN 1 ELSE 0 END) AS resolved_24h,
+                     SUM(CASE WHEN outcome = 'name_mismatch' THEN 1 ELSE 0 END) AS mismatch_24h
+                   FROM searchbug_calls
+                   WHERE called_at >= datetime('now', '-24 hours')"""
+            ).fetchone()
+        finally:
+            conn.close()
+    except sqlite3.OperationalError as exc:
+        return {"name": "searchbug_cost", "status": "warn", "detail": f"indisponivel: {exc}"}
+
+    cost_1h = float(row["cost_1h"] or 0)
+    cost_24h = float(row["cost_24h"] or 0)
+    avg_hourly = cost_24h / 24.0
+    if cost_1h > max(1.0, avg_hourly * 3):
+        return {
+            "name": "searchbug_cost", "status": "warn",
+            "detail": f"${cost_1h:.2f}/h vs media ${avg_hourly:.2f}/h",
+        }
+
+    calls_15m = int(row["calls_15m"] or 0)
+    transport_15m = int(row["transport_15m"] or 0)
+    if calls_15m >= 5 and transport_15m / calls_15m > 0.5:
+        return {
+            "name": "searchbug_cost", "status": "fail",
+            "detail": f"{transport_15m}/{calls_15m} transport_error em 15min",
+        }
+
+    billed = int(row["billed_24h"] or 0)
+    ghost = int(row["ghost_24h"] or 0)
+    if billed >= 10 and ghost / billed > 0.3:
+        return {
+            "name": "searchbug_cost", "status": "warn",
+            "detail": f"{ghost}/{billed} pagas sem telefone em 24h",
+        }
+
+    resolved = int(row["resolved_24h"] or 0)
+    mismatch = int(row["mismatch_24h"] or 0)
+    if resolved >= 10 and mismatch / resolved > 0.5:
+        return {
+            "name": "searchbug_cost", "status": "warn",
+            "detail": f"{mismatch}/{resolved} name_mismatch em 24h",
+        }
+
+    return {
+        "name": "searchbug_cost", "status": "ok",
+        "detail": f"${cost_24h:.2f}/24h · {billed} pagas",
+    }
+
+
 def _check_queue() -> list[dict]:
     out = []
     conn = get_connection()
@@ -328,6 +402,7 @@ async def run_health_checks() -> list[dict]:
     checks.extend(_check_backup())
     checks.append(await _check_vps())
     checks.append(await _check_tokens())
+    checks.append(_check_searchbug_cost())
     _record(checks)
     worst = max(
         (c["status"] for c in checks),

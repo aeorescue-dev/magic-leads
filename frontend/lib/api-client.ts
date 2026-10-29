@@ -1162,7 +1162,7 @@ export async function fetchCreditLedger(userId: number, limit = 100, offset = 0)
 // Admin: Searchbug Telemetry (Phase 4)
 // ------------------------------------------------------------------
 export interface SearchbugMetrics {
-  today: { calls: number; billed_calls: number; ghost_charges: number };
+  today: { calls: number; billed_calls: number; ghost_charges: number; cost_usd: number };
   totals: {
     calls: number;
     billed_calls: number;
@@ -1170,11 +1170,16 @@ export interface SearchbugMetrics {
     ghost_charges: number;
     timeouts: number;
     saved_calls: number;
+    cost_usd: number;
+    transport_errors: number;
+    name_mismatches: number;
   };
   success_rate: number | null;
+  billed_rate: number | null;
+  cost_per_success: number | null;
   latency: { avg_ms: number | null; p50_ms: number | null; p95_ms: number | null; max_ms: number | null; samples: number };
   by_outcome: Array<{ outcome: string; n: number; billed_n: number }>;
-  by_city: Array<{ city: string; calls: number; billed_calls: number; ghost_charges: number }>;
+  by_city: Array<{ city: string; calls: number; billed_calls: number; ghost_charges: number; cost_usd: number }>;
   recent: Array<{
     id: number;
     called_at: string;
@@ -1184,6 +1189,12 @@ export interface SearchbugMetrics {
     http_status: number | null;
     city: string | null;
     error: string | null;
+    cost_usd: number;
+    lead_id: number | null;
+    owner_class: string | null;
+    layer: string | null;
+    name_match: number | null;
+    transport_error: number;
   }>;
 }
 

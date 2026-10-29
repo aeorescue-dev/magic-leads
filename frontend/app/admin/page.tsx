@@ -1227,11 +1227,25 @@ export default function AdminPage() {
           </p>
         ) : (
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
               <Kpi
                 label="Consultas pagas"
                 value={searchbug.totals.billed_calls}
                 sub={`hoje: ${searchbug.today.billed_calls}`}
+              />
+              <Kpi
+                label="Custo (7d)"
+                value={`$${Number(searchbug.totals.cost_usd ?? 0).toFixed(2)}`}
+                sub={`hoje: $${Number(searchbug.today.cost_usd ?? 0).toFixed(2)}`}
+              />
+              <Kpi
+                label="Custo/telefone"
+                value={
+                  searchbug.cost_per_success === null
+                    ? "—"
+                    : `$${searchbug.cost_per_success.toFixed(2)}`
+                }
+                sub={`${searchbug.totals.successes} telefones`}
               />
               <Kpi
                 label="Cobranças fantasma"
@@ -1266,6 +1280,13 @@ export default function AdminPage() {
                 sub="por guard/cache"
               />
             </div>
+
+            {searchbug.totals.transport_errors > 0 || searchbug.totals.name_mismatches > 0 ? (
+              <p className="rounded-lg border border-sky-500/30 bg-sky-500/5 px-3 py-2 text-[11px] text-sky-300">
+                {searchbug.totals.transport_errors} falha(s) de transporte (não faturadas) ·{" "}
+                {searchbug.totals.name_mismatches} nome(s) não correspondido(s) — telefone não entregue.
+              </p>
+            ) : null}
 
             {searchbug.buffer.dropped > 0 || searchbug.buffer.flush_errors > 0 ? (
               <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-300">
@@ -1311,6 +1332,7 @@ export default function AdminPage() {
                         <th className="py-1">Cidade</th>
                         <th className="py-1">Pagas</th>
                         <th className="py-1">Sem telefone</th>
+                        <th className="py-1">Custo</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5">
@@ -1324,6 +1346,9 @@ export default function AdminPage() {
                             }
                           >
                             {c.ghost_charges}
+                          </td>
+                          <td className="py-1.5 text-slate-400">
+                            ${Number(c.cost_usd ?? 0).toFixed(2)}
                           </td>
                         </tr>
                       ))}
@@ -1350,6 +1375,8 @@ export default function AdminPage() {
                         <th className="py-1">Quando</th>
                         <th className="py-1">Resultado</th>
                         <th className="py-1">Cidade</th>
+                        <th className="py-1">Custo</th>
+                        <th className="py-1">Match</th>
                         <th className="py-1">Latência</th>
                         <th className="py-1">Erro</th>
                       </tr>
@@ -1370,6 +1397,12 @@ export default function AdminPage() {
                             {r.outcome}
                           </td>
                           <td className="py-1 text-slate-400">{r.city ?? "—"}</td>
+                          <td className="py-1 text-slate-400">
+                            ${Number(r.cost_usd ?? 0).toFixed(2)}
+                          </td>
+                          <td className="py-1 text-slate-400">
+                            {r.name_match === null ? "—" : r.name_match.toFixed(2)}
+                          </td>
                           <td className="py-1 text-slate-400">
                             {r.latency_ms === null ? "—" : `${r.latency_ms} ms`}
                           </td>

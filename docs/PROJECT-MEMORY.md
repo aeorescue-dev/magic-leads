@@ -124,6 +124,13 @@ Custo por telefone (9 sucessos em 25 tentativas): **$0,42** sobre as 19 chamadas
 faturáveis (ou **$0,56** se se imputarem as 25 tentativas).
 Com cache: ~$0,36. Com portfólio: ~$0,31.
 
+**C2 (custo observável):** `searchbug_calls.cost_usd` = `0.20` quando `billed=1`,
+`0` caso contrário; backfill histórico `billed=1 -> 0.20`. Painel admin: custo 7d/hoje,
+custo/telefone, ghost charges, `transport_errors`, `name_mismatches`, custo por cidade.
+Alerta no Control Tower (`searchbug_cost`): custo/hora > max($1, 3× média 24h) → warn;
+`transport_error` > 50% em 15 min (≥5 chamadas) → fail; ghost > 30% das pagas em 24h
+(≥10) → warn; `name_mismatch` > 50% dos resolvidos (≥10) → warn. Sem cap global.
+
 ### 2.6 Preservação funcional
 19. Ciclo de vida: reserva **60 min**, contacto **48 h**, negociação **48 h**, conversão
     terminal. Watchdog em processo a cada 15 min.
@@ -227,7 +234,7 @@ não-JSON** (~150 ms) marcadas como pagas — falha de transporte/faturação a 
 **Fora do P0-C:** decisão de produto sobre cobrar cota em L3 (telefone sem nome).
 Bloqueia o P1 (desbloquear 23.017 leads sem nome), não o C1.
 
-**Estado C1-A+B (2026-10-29, código local, não deployado):** ZIP `zfill(5)`;
+**Estado C1-A+B (2026-10-29, deployado `c73e33f`):** ZIP `zfill(5)`;
 `transport_error` não faturado + retry 1× + circuit breaker; `name_match >= 0.6`
 com `phone_verified`; inversão condicional LAST FIRST; L3 atrás de
 `PHONE_L3_UNNAMED_ENABLED=0`; telemetria `lead_id/owner_class/layer/name_match/
@@ -236,7 +243,12 @@ transport_error`; placeholders `UNAVAILABLE/TAXPAYER/CITY OF` em guard;
 pré-verificação antes da Searchbug (cota esgotada entrega sem telefone),
 orçamento de tentativas 30/dia + 3/min (`phone_attempts`), fluxo `consent=False`
 sem chamada paga, rate limit 20/min. **719 testes verdes**, ruff limpo.
-Pendente C2: `cost_usd` + painel de reconciliação.
+**Deploy 2026-10-29:** commit `c73e33f`, Railway SUCCESS, `/health` ok,
+backup pré-deploy verificado (82.560 leads), smoke: `phone_verified` +
+5 colunas de telemetria + `phone_attempts`; 0 chamadas Searchbug novas.
+**C2 (2026-10-29):** `cost_usd` real + painel + alerta `searchbug_cost`;
+**727 testes verdes**; commit/deploy de C2 no mesmo dia.
+Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 
 ### P1 (dia seguinte)
 Re-verificação diária de violações abertas; fechar as resolvidas; remover do feed.

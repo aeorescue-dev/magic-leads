@@ -130,7 +130,7 @@ export interface AdminAlert {
 // custaram nada por terem sido cortadas por guard ou cache.
 export interface AdminSearchbugMetrics {
   days: number;
-  today: { calls: number; billed_calls: number; ghost_charges: number };
+  today: { calls: number; billed_calls: number; ghost_charges: number; cost_usd: number };
   totals: {
     calls: number;
     billed_calls: number;
@@ -138,8 +138,13 @@ export interface AdminSearchbugMetrics {
     ghost_charges: number;
     timeouts: number;
     saved_calls: number;
+    cost_usd: number;
+    transport_errors: number;
+    name_mismatches: number;
   };
   success_rate: number | null;
+  billed_rate: number | null;
+  cost_per_success: number | null;
   latency: {
     avg_ms: number | null;
     p50_ms: number | null;
@@ -148,7 +153,7 @@ export interface AdminSearchbugMetrics {
     samples: number;
   };
   by_outcome: { outcome: string; n: number; billed_n: number }[];
-  by_city: { city: string; calls: number; billed_calls: number; ghost_charges: number }[];
+  by_city: { city: string; calls: number; billed_calls: number; ghost_charges: number; cost_usd: number }[];
   recent: {
     id: number;
     called_at: string;
@@ -158,6 +163,12 @@ export interface AdminSearchbugMetrics {
     http_status: number | null;
     city: string | null;
     error: string | null;
+    cost_usd: number;
+    lead_id: number | null;
+    owner_class: string | null;
+    layer: string | null;
+    name_match: number | null;
+    transport_error: number;
   }[];
   buffer: { buffered: number; flushed: number; dropped: number; flush_errors: number };
 }

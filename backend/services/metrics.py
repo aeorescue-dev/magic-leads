@@ -62,6 +62,8 @@ _SEARCHBUG_COLUMNS = (
     "outcome", "billed", "latency_ms", "http_status", "city", "error",
     # P0-C1: telemetria por lead/classe/camada + validacao + transporte.
     "lead_id", "owner_class", "layer", "name_match", "transport_error",
+    # C2: custo real por chamada ($0,20 da fatura).
+    "cost_usd",
 )
 _PUSH_COLUMNS = ("outcome", "attempts", "latency_ms", "http_status", "user_id", "kind", "error")
 
@@ -326,6 +328,7 @@ def _searchbug_cost_audit(conn: sqlite3.Connection, row: Dict[str, Any], call_id
             "outcome": row.get("outcome"),
             "city": row.get("city"),
             "latency_ms": row.get("latency_ms"),
+            "cost_usd": row.get("cost_usd"),
         },
     )
 

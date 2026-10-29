@@ -835,6 +835,7 @@ class PhoneLookupService:
         # ser auditavel. `billed` distingue o que custou dinheiro do que foi
         # cortado antes da rede ou falhou no transporte.
         started = time.monotonic()
+        price = float(getattr(settings, "SEARCHBUG_PRICE_PER_CALL_USD", 0.20) or 0.20)
 
         def _record(result: "PhoneLookupResult", *, billed: bool, http_status: Optional[int] = None) -> "PhoneLookupResult":
             try:
@@ -842,6 +843,7 @@ class PhoneLookupService:
                 searchbug_metrics.record(
                     outcome=outcome,
                     billed=1 if billed else 0,
+                    cost_usd=round(price, 4) if billed else 0.0,
                     latency_ms=int((time.monotonic() - started) * 1000),
                     http_status=http_status,
                     city=city,

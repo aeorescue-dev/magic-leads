@@ -596,6 +596,7 @@ CREATE TABLE IF NOT EXISTS searchbug_calls (
   called_at TEXT DEFAULT CURRENT_TIMESTAMP,
   outcome TEXT NOT NULL,
   billed INTEGER DEFAULT 0,
+  cost_usd REAL DEFAULT 0,
   latency_ms INTEGER,
   http_status INTEGER,
   city TEXT,
@@ -1337,10 +1338,19 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
             "layer": "TEXT",
             "name_match": "REAL",
             "transport_error": "INTEGER DEFAULT 0",
+            "cost_usd": "REAL DEFAULT 0",
         }
         for name, ctype in sb_extra.items():
             if name not in sb_cols:
                 conn.execute(f"ALTER TABLE searchbug_calls ADD COLUMN {name} {ctype}")
+        # Backfill conservador: chamadas historicas com billed=1 passam a ter o
+        # custo da fatura. A reconciliacao real substitui isto se a fatura diferir.
+        price = float(getattr(settings, "SEARCHBUG_PRICE_PER_CALL_USD", 0.20) or 0.20)
+        conn.execute(
+            "UPDATE searchbug_calls SET cost_usd = ? "
+            "WHERE billed = 1 AND COALESCE(cost_usd, 0) = 0",
+            (price,),
+        )
         try:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_searchbug_calls_lead "
@@ -4416,7 +4426,10 @@ class DatabaseService:
                   SUM(CASE WHEN billed = 1 AND outcome != 'success' THEN 1 ELSE 0 END) AS ghost_charges,
                   SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) AS successes,
                   SUM(CASE WHEN outcome IN ('guard_skipped', 'cache_hit', 'cache_negative') THEN 1 ELSE 0 END) AS saved_calls,
-                  SUM(CASE WHEN billed = 1 AND outcome = 'timeout' THEN 1 ELSE 0 END) AS timeouts
+                  SUM(CASE WHEN billed = 1 AND outcome = 'timeout' THEN 1 ELSE 0 END) AS timeouts,
+                  COALESCE(SUM(cost_usd), 0) AS cost_usd,
+                  SUM(CASE WHEN outcome = 'transport_error' THEN 1 ELSE 0 END) AS transport_errors,
+                  SUM(CASE WHEN outcome = 'name_mismatch' THEN 1 ELSE 0 END) AS name_mismatches
                 FROM searchbug_calls WHERE called_at >= ?
                 """,
                 (cutoff,),
@@ -4449,7 +4462,8 @@ class DatabaseService:
                 SELECT
                   COUNT(*) AS calls,
                   SUM(CASE WHEN billed = 1 THEN 1 ELSE 0 END) AS billed_calls,
-                  SUM(CASE WHEN billed = 1 AND outcome != 'success' THEN 1 ELSE 0 END) AS ghost_charges
+                  SUM(CASE WHEN billed = 1 AND outcome != 'success' THEN 1 ELSE 0 END) AS ghost_charges,
+                  COALESCE(SUM(cost_usd), 0) AS cost_usd
                 FROM searchbug_calls WHERE called_at >= ?
                 """,
                 (datetime.now(timezone.utc).strftime("%Y-%m-%d 00:00:00"),),
@@ -4457,7 +4471,8 @@ class DatabaseService:
 
             recent = conn.execute(
                 """
-                SELECT id, called_at, outcome, billed, latency_ms, http_status, city, error
+                SELECT id, called_at, outcome, billed, latency_ms, http_status, city, error,
+                       cost_usd, lead_id, owner_class, layer, name_match, transport_error
                 FROM searchbug_calls ORDER BY id DESC LIMIT ?
                 """,
                 (recent_limit,),
@@ -4468,7 +4483,8 @@ class DatabaseService:
                 SELECT COALESCE(city, '(desconhecida)') AS city,
                        COUNT(*) AS calls,
                        SUM(CASE WHEN billed = 1 THEN 1 ELSE 0 END) AS billed_calls,
-                       SUM(CASE WHEN billed = 1 AND outcome != 'success' THEN 1 ELSE 0 END) AS ghost_charges
+                       SUM(CASE WHEN billed = 1 AND outcome != 'success' THEN 1 ELSE 0 END) AS ghost_charges,
+                       COALESCE(SUM(cost_usd), 0) AS cost_usd
                 FROM searchbug_calls WHERE called_at >= ? AND billed = 1
                 GROUP BY city ORDER BY billed_calls DESC LIMIT 15
                 """,
@@ -4482,6 +4498,7 @@ class DatabaseService:
                     "calls": today["calls"] or 0,
                     "billed_calls": today["billed_calls"] or 0,
                     "ghost_charges": today["ghost_charges"] or 0,
+                    "cost_usd": round(float(today["cost_usd"] or 0), 4),
                 },
                 "totals": {
                     "calls": totals["calls"] or 0,
@@ -4490,8 +4507,16 @@ class DatabaseService:
                     "ghost_charges": totals["ghost_charges"] or 0,
                     "timeouts": totals["timeouts"] or 0,
                     "saved_calls": totals["saved_calls"] or 0,
+                    "cost_usd": round(float(totals["cost_usd"] or 0), 4),
+                    "transport_errors": totals["transport_errors"] or 0,
+                    "name_mismatches": totals["name_mismatches"] or 0,
                 },
                 "success_rate": _ratio(totals["successes"], totals["billed_calls"]),
+                "billed_rate": _ratio(totals["billed_calls"], totals["calls"]),
+                "cost_per_success": (
+                    round(float(totals["cost_usd"] or 0) / totals["successes"], 4)
+                    if totals["successes"] else None
+                ),
                 "latency": _percentiles(latencies),
                 "by_outcome": [dict(r) for r in by_outcome],
                 "by_city": [dict(r) for r in by_city],
@@ -4504,12 +4529,15 @@ class DatabaseService:
                 raise
             return {
                 "days": days,
-                "today": {"calls": 0, "billed_calls": 0, "ghost_charges": 0},
+                "today": {"calls": 0, "billed_calls": 0, "ghost_charges": 0, "cost_usd": 0.0},
                 "totals": {
                     "calls": 0, "billed_calls": 0, "successes": 0,
                     "ghost_charges": 0, "timeouts": 0, "saved_calls": 0,
+                    "cost_usd": 0.0, "transport_errors": 0, "name_mismatches": 0,
                 },
                 "success_rate": None,
+                "billed_rate": None,
+                "cost_per_success": None,
                 "latency": {"avg_ms": None, "p50_ms": None, "p95_ms": None, "max_ms": None, "samples": 0},
                 "by_outcome": [],
                 "by_city": [],
