@@ -261,6 +261,33 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - Índice `idx_leads_feed (city, lead_status, date_reported DESC)`.
 - Teste live NYC 96 h: **34.915 linhas em 7 páginas, 28,9 s, 34.128 leads**
   (antes: 5.000). Testes: **733 verdes**.
+- **Deploy P0-A:** commits `e3a4f1f` + `ff90220`; `/health` ok; `scraper_watermarks`
+  e `idx_leads_feed` criados.
+- **Correção crítica:** a primeira versão avançava o watermark no fetch. Se o run
+  caísse antes dos inserts, a janela era saltada. Agora os watermarks ficam em
+  `pending_watermarks` e só são aplicados **depois** de todos os inserts; os 5
+  watermarks foram resetados para 2026-10-26 e o run `c7a24e5528d0` confirmou que
+  não avançam durante o fetch.
+- **Smoke:** leads 82.560 → **84.026** (+1.466) com o run em curso; feed NYC
+  `limit=20` **p50 1,2 ms / p95 1,5 ms / max 1,7 ms**.
+- **Nota de modelo:** `leads` tem `UNIQUE(address, city)`. A paginação recupera
+  muitos registos, mas a maioria atualiza moradas já existentes; o crescimento
+  visível é menor. Histórico/portfólio por ocorrência é P0-B/P1.
+
+### P0-B — semântica, contadores e histórico (2026-10-29)
+
+- `signal_type` (`legal_obligation` / `authorized_work` / `open_request`) e
+  `signal_status` (`open` / `closed` / `unknown`) + backfill dos 84k+ leads.
+  311 nunca é obrigação legal; `closed` sai do feed por defeito; HPD
+  `violationstatus`/`currentstatus` passa a ser mapeado para `case_status`.
+- `/api/leads` e `/api/leads/today` usam `get_leads_feed` (SQL): filtros, busy,
+  paginação e **total real** no mesmo WHERE; o resumo do dashboard usa a mesma
+  janela (`date_reported` 7d) e o mesmo `_qualified_where`.
+- `lead_case_history` recebe uma ocorrência por registo no ingest (UNIQUE
+  lead_id+external_id); `lead_history` calcula `repeat_365`, `open_cases`,
+  `oldest_open_days`, `last_case_at` e o feed expõe esses campos.
+- Testes: **739 verdes**; tsc limpo. Frontend: filtro "Tipo" usa `signal_type`;
+  badges por sinal; `include_closed` no toggle.
 
 ### P1 (dia seguinte)
 Re-verificação diária de violações abertas; fechar as resolvidas; remover do feed.

@@ -517,7 +517,10 @@ class Socrata311Scraper:
             "queue": find("queue", "work_queue", "assignment_group"),
             "department": find_prio("agency_name", "owner_department", "department", "agency", "responsible_department"),
             "closure_reason": find("closure_reason", "close_reason", "resolution_note"),
-            "case_status": find("status", "case_status", "service_request_status", "request_status"),
+            "case_status": find_prio(
+                "violationstatus", "currentstatus",
+                "status", "case_status", "service_request_status", "request_status",
+            ),
             "on_time": find("on_time", "on_finalize_ontime", "met_sla"),
             "sla_target_dt": find(
                 "overall_service_request_due_date", "sla_target_dt", "due_date",

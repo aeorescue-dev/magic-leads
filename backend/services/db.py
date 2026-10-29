@@ -24,6 +24,7 @@ from .access import (
     parse_dt,
 )
 from .lead_rules import (
+    derive_signal,
     institutional_owner_name_matches,
     institutional_owner_name_where,
     is_institutional_name,
@@ -139,13 +140,22 @@ def _category_where(alias: str = "") -> str:
 
 
 def _trigger_where(alias: str = "") -> str:
-    """Gatilho preditivo: obrigação legal (violação/multa/permisção) OU chamado 311
-    aberto/em andamento (intenção direta de resolução)."""
+    """Gatilho preditivo (P0-B): sinal classificado e nao fechado.
+
+    311 e' `open_request`; permissoes `authorized_work`; HPD/DOB/multa
+    `legal_obligation`. `closed` sai do feed por defeito; `unknown` entra
+    (nao ha prova de que esteja fechado) mas nao recebe selo de aberto.
+    O fallback por `case_status`/`source_type` cobre linhas antigas ou
+    inseridas por scripts antes do backfill.
+    """
     prefix = f"{alias}." if alias else ""
     statuses = ", ".join(f"'{s}'" for s in _OPEN_STATUSES)
     return (
-        f"(LOWER({prefix}case_status) IN ({statuses}) "
-        f"OR {prefix}source_type IN ('permit', 'dob_violation', 'hpd_violation', 'tax_delinquency'))"
+        f"(({prefix}signal_type IS NOT NULL "
+        f"AND COALESCE({prefix}signal_status, 'unknown') != 'closed') "
+        f"OR ({prefix}signal_type IS NULL AND ("
+        f"LOWER({prefix}case_status) IN ({statuses}) "
+        f"OR {prefix}source_type IN ('permit', 'dob_violation', 'hpd_violation', 'tax_delinquency'))))"
     )
 
 
@@ -290,6 +300,8 @@ CREATE TABLE IF NOT EXISTS leads (
   status TEXT DEFAULT 'new',
   favorited INTEGER DEFAULT 0,
   lead_status TEXT DEFAULT 'available',
+  signal_type TEXT,
+  signal_status TEXT DEFAULT 'unknown',
   reserved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
   reserved_until TEXT,
   stage_expires_at TEXT,
@@ -484,6 +496,7 @@ CREATE TABLE IF NOT EXISTS lead_case_history (
   subject TEXT,
   reason TEXT,
   case_status TEXT,
+  issue_category TEXT,
   department TEXT,
   opened_at TEXT,
   closed_at TEXT,
@@ -496,6 +509,17 @@ CREATE TABLE IF NOT EXISTS lead_case_history (
 );
 
 CREATE INDEX IF NOT EXISTS idx_case_history_lead ON lead_case_history (lead_id);
+
+-- P0-B: metricas derivadas por imovel, para o briefing "Porque agora?".
+-- Recalculadas depois de cada ingestao a partir de `lead_case_history`.
+CREATE TABLE IF NOT EXISTS lead_history (
+  lead_id INTEGER PRIMARY KEY REFERENCES leads(id) ON DELETE CASCADE,
+  repeat_365 INTEGER DEFAULT 0,
+  open_cases INTEGER DEFAULT 0,
+  oldest_open_days INTEGER,
+  last_case_at TEXT,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 
 CREATE INDEX IF NOT EXISTS idx_leads_city_reported ON leads (city, date_reported);
 CREATE INDEX IF NOT EXISTS idx_leads_city_type_reported ON leads (city, source_type, date_reported DESC);
@@ -1158,6 +1182,65 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         )
     except sqlite3.OperationalError:
         pass
+
+    # P0-B: classificacao semantica do sinal + backfill dos 84k+ leads.
+    if "signal_type" not in cols:
+        conn.execute("ALTER TABLE leads ADD COLUMN signal_type TEXT")
+    if "signal_status" not in cols:
+        conn.execute("ALTER TABLE leads ADD COLUMN signal_status TEXT DEFAULT 'unknown'")
+    conn.execute(
+        """
+        UPDATE leads SET
+          signal_type = CASE source_type
+            WHEN '311' THEN 'open_request'
+            WHEN 'permit' THEN 'authorized_work'
+            WHEN 'hpd_violation' THEN 'legal_obligation'
+            WHEN 'dob_violation' THEN 'legal_obligation'
+            WHEN 'tax_delinquency' THEN 'legal_obligation'
+            ELSE NULL END,
+          signal_status = CASE
+            WHEN source_type NOT IN (
+              '311','permit','hpd_violation','dob_violation','tax_delinquency'
+            ) THEN 'unknown'
+            WHEN LOWER(COALESCE(case_status, '')) IN (
+              'closed','close','completed','complete','resolved','solved',
+              'canceled','cancelled','dismissed','archived','rejected',
+              'closed (transferred)','closed (duplicate)',
+              'in progress (duplicate)','new (duplicate)','expired','final',
+              'signed off','void'
+            ) THEN 'closed'
+            WHEN LOWER(COALESCE(case_status, '')) IN (
+              'open','new','in progress','in_progress','assigned','active',
+              'approved','issued','pending','acknowledged','referred','scheduled',
+              'investigation','awaiting','awaiting assignment','violation open',
+              'nov sent out','permit issued'
+            ) THEN 'open'
+            WHEN LOWER(COALESCE(case_status, '')) LIKE '%close%'
+              OR LOWER(COALESCE(case_status, '')) LIKE '%complet%'
+              OR LOWER(COALESCE(case_status, '')) LIKE '%resolv%'
+              OR LOWER(COALESCE(case_status, '')) LIKE '%cancel%'
+              OR LOWER(COALESCE(case_status, '')) LIKE '%dismiss%'
+              OR LOWER(COALESCE(case_status, '')) LIKE '%duplicate%'
+              OR LOWER(COALESCE(case_status, '')) LIKE '%expired%'
+            THEN 'closed'
+            WHEN LOWER(COALESCE(case_status, '')) LIKE '%open%'
+              OR LOWER(COALESCE(case_status, '')) LIKE '%progress%'
+              OR LOWER(COALESCE(case_status, '')) LIKE '%assign%'
+              OR LOWER(COALESCE(case_status, '')) LIKE '%pending%'
+              OR LOWER(COALESCE(case_status, '')) LIKE '%approved%'
+              OR LOWER(COALESCE(case_status, '')) LIKE '%issued%'
+            THEN 'open'
+            ELSE 'unknown' END
+        WHERE signal_type IS NULL OR signal_status IS NULL
+        """
+    )
+    try:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_leads_signal "
+            "ON leads (city, signal_type, signal_status, date_reported DESC)"
+        )
+    except sqlite3.OperationalError:
+        pass
     if "stage_expires_at" not in cols:
         conn.execute("ALTER TABLE leads ADD COLUMN stage_expires_at TEXT")
     if "mailing_address" not in cols:
@@ -1326,6 +1409,13 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
             )
         except sqlite3.OperationalError:
             pass
+
+    # P0-B: categoria por ocorrencia (reincidencia por oficio no mesmo imovel).
+    hist_cols = {
+        r["name"] for r in conn.execute("PRAGMA table_info(lead_case_history)").fetchall()
+    }
+    if hist_cols and "issue_category" not in hist_cols:
+        conn.execute("ALTER TABLE lead_case_history ADD COLUMN issue_category TEXT")
 
     # Fase 2 outbound: `outbound_contacts.company_domain` guarda o dominio da
     # empresa (para o Snov.io). Adicionado a bancos antigos de forma idempotente.
@@ -1558,6 +1648,7 @@ def _record_credit_event_connection(
 _LEAD_DATA_COLS = (
     "state", "zip_code", "lat", "lng", "county",
     "issue_category", "issue_description", "urgency_level",
+    "signal_type", "signal_status",
     "owner_name", "owner_phone", "owner_email", "owner_status", "mailing_address",
     "date_reported", "image_url", "source_url", "is_validated", "created_at",
     "address_unit", "address_type", "address_street", "address_city",
@@ -1581,6 +1672,7 @@ def _lead_insert_values(lead) -> dict:
     src = lead.source_type.value if hasattr(lead.source_type, "value") else str(lead.source_type)
     cat = lead.issue_category.value if hasattr(lead.issue_category, "value") else str(lead.issue_category)
     urg = lead.urgency_level.value if hasattr(lead.urgency_level, "value") else str(lead.urgency_level)
+    signal_type, signal_status = derive_signal(src, getattr(lead, "case_status", None))
     return {
         "external_id": lead.external_id,
         "source_type": src,
@@ -1593,6 +1685,8 @@ def _lead_insert_values(lead) -> dict:
         "county": lead.county,
         "issue_category": cat,
         "issue_description": lead.issue_description,
+        "signal_type": signal_type,
+        "signal_status": signal_status,
         "urgency_level": urg,
         "owner_name": lead.owner_name,
         "owner_phone": lead.owner_phone,
@@ -3036,6 +3130,83 @@ class DatabaseService:
         except Exception as e:
             logger.error(f"Erro ao atualizar histórico do lead {external_id}: {e}")
             return False
+        finally:
+            conn.close()
+
+    def get_leads_feed(
+        self,
+        city: Optional[str] = None,
+        signal_type: Optional[str] = None,
+        category: Optional[str] = None,
+        urgency: Optional[str] = None,
+        include_closed: bool = False,
+        days: Optional[int] = None,
+        user_id: Optional[int] = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple[List[dict], int]:
+        """Feed qualificado com filtros/total em SQL (P0-B).
+
+        O `total` e' o COUNT do MESMO WHERE — o cartao e a lista deixam de
+        divergir. `closed` fica fora por defeito; `include_closed=True` mostra-o.
+        """
+        limit = max(1, min(int(limit), 200))
+        offset = max(0, int(offset))
+        where = [
+            _address_where("l"),
+            _category_where("l"),
+            _not_junk_where("l"),
+            "l.signal_type IS NOT NULL",
+            "l.lead_status != 'converted'",
+        ]
+        params: list = []
+        if city and str(city).strip().lower() != "all":
+            where.append("l.city = ?")
+            params.append(city)
+        if signal_type:
+            where.append("l.signal_type = ?")
+            params.append(signal_type)
+        if category:
+            where.append("l.issue_category = ?")
+            params.append(category)
+        if urgency:
+            urg = [t.strip() for t in str(urgency).split(",") if t.strip()]
+            if urg:
+                where.append("l.urgency_level IN (%s)" % ",".join("?" * len(urg)))
+                params.extend(urg)
+        if days:
+            where.append("date(l.date_reported) >= date('now', ?)")
+            params.append(f"-{int(days)} days")
+        if not include_closed:
+            where.append("COALESCE(l.signal_status, 'unknown') != 'closed'")
+        if user_id is not None:
+            where.append("(l.lead_status = 'available' OR l.reserved_by = ?)")
+            params.append(user_id)
+        else:
+            where.append("l.lead_status = 'available'")
+        where_sql = " AND ".join(where)
+
+        conn = get_connection()
+        try:
+            total = conn.execute(
+                f"SELECT COUNT(*) AS c FROM leads l WHERE {where_sql}", params
+            ).fetchone()["c"]
+            rows = conn.execute(
+                f"""
+                SELECT l.*,
+                       COALESCE(h.repeat_365, 0) AS repeat_365,
+                       COALESCE(h.open_cases, 0) AS open_cases,
+                       h.oldest_open_days AS oldest_open_days,
+                       h.last_case_at AS last_case_at
+                  FROM leads l
+                  LEFT JOIN lead_history h ON h.lead_id = l.id
+                 WHERE {where_sql}
+                 ORDER BY l.date_reported DESC, l.id DESC
+                 LIMIT ? OFFSET ?
+                """,
+                params + [limit, offset],
+            ).fetchall()
+            return [dict(r) for r in rows], int(total)
         finally:
             conn.close()
 
@@ -5482,9 +5653,9 @@ class DatabaseService:
                 conn.execute(
                     """INSERT OR IGNORE INTO lead_case_history
                        (lead_id, external_id, case_title, descriptor, subject, reason,
-                        case_status, department, opened_at, closed_at,
+                        case_status, issue_category, department, opened_at, closed_at,
                         resolution_description, closure_reason, source, source_url)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (
                         lead_id,
                         o.get("external_id"),
@@ -5493,6 +5664,7 @@ class DatabaseService:
                         o.get("subject"),
                         o.get("reason"),
                         o.get("case_status"),
+                        o.get("issue_category"),
                         o.get("department"),
                         o.get("opened_at"),
                         o.get("closed_at"),
@@ -5517,6 +5689,107 @@ class DatabaseService:
                 (lead_id,),
             ).fetchall()
             return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def get_lead_id_by_address(self, address: str, city: str) -> Optional[int]:
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT id FROM leads WHERE address = ? AND city = ? LIMIT 1",
+                (address, city),
+            ).fetchone()
+            return int(row["id"]) if row else None
+        finally:
+            conn.close()
+
+    def append_case_occurrences(self, rows: List[dict]) -> int:
+        """Append idempotente de ocorrencias (UNIQUE lead_id+external_id)."""
+        if not rows:
+            return 0
+        conn = get_connection()
+        try:
+            conn.executemany(
+                """INSERT OR IGNORE INTO lead_case_history
+                   (lead_id, external_id, case_title, descriptor, subject, reason,
+                    case_status, issue_category, department, opened_at, closed_at,
+                    resolution_description, closure_reason, source, source_url)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                [
+                    (
+                        r.get("lead_id"),
+                        r.get("external_id"),
+                        r.get("case_title"),
+                        r.get("descriptor"),
+                        r.get("subject"),
+                        r.get("reason"),
+                        r.get("case_status"),
+                        r.get("issue_category"),
+                        r.get("department"),
+                        r.get("opened_at"),
+                        r.get("closed_at"),
+                        r.get("resolution_description"),
+                        r.get("closure_reason"),
+                        r.get("source"),
+                        r.get("source_url"),
+                    )
+                    for r in rows
+                ],
+            )
+            conn.commit()
+            return len(rows)
+        finally:
+            conn.close()
+
+    def refresh_lead_history(self, lead_ids: List[int]) -> int:
+        """Recalcula repeat_365/open_cases/oldest_open_days/last_case_at."""
+        ids = sorted({int(i) for i in lead_ids if i is not None})
+        if not ids:
+            return 0
+        open_statuses = (
+            "open", "new", "in progress", "in_progress", "assigned", "active",
+            "approved", "issued", "pending", "acknowledged", "referred",
+            "scheduled", "investigation", "awaiting", "awaiting assignment",
+            "violation open", "nov sent out", "permit issued",
+        )
+        placeholders = ",".join("?" * len(open_statuses))
+        conn = get_connection()
+        try:
+            for start in range(0, len(ids), 500):
+                chunk = ids[start:start + 500]
+                marks = ",".join("?" * len(chunk))
+                conn.execute(
+                    f"""
+                    INSERT INTO lead_history
+                      (lead_id, repeat_365, open_cases, oldest_open_days, last_case_at, updated_at)
+                    SELECT l.id,
+                      COALESCE(SUM(CASE
+                        WHEN h.opened_at >= datetime('now', '-365 days')
+                         AND h.issue_category = l.issue_category
+                        THEN 1 ELSE 0 END), 0),
+                      COALESCE(SUM(CASE
+                        WHEN LOWER(COALESCE(h.case_status, '')) IN ({placeholders})
+                        THEN 1 ELSE 0 END), 0),
+                      CAST(MAX(CASE
+                        WHEN LOWER(COALESCE(h.case_status, '')) IN ({placeholders})
+                        THEN julianday('now') - julianday(h.opened_at) END) AS INTEGER),
+                      MAX(h.opened_at),
+                      CURRENT_TIMESTAMP
+                    FROM leads l
+                    LEFT JOIN lead_case_history h ON h.lead_id = l.id
+                    WHERE l.id IN ({marks})
+                    GROUP BY l.id
+                    ON CONFLICT(lead_id) DO UPDATE SET
+                      repeat_365 = excluded.repeat_365,
+                      open_cases = excluded.open_cases,
+                      oldest_open_days = excluded.oldest_open_days,
+                      last_case_at = excluded.last_case_at,
+                      updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (*open_statuses, *open_statuses, *chunk),
+                )
+            conn.commit()
+            return len(ids)
         finally:
             conn.close()
 
@@ -6019,11 +6292,12 @@ class DatabaseService:
 
         conn = get_connection()
         try:
-            # Base query com filtro de 7 dias em updated_at (cada varredura toca os leads)
-            # date_reported mantido apenas como validação secundária
+            # Base query alinhada com o feed (`/api/leads/today`): janela por
+            # `date_reported` (data do facto), nao por `updated_at` (que cada
+            # varredura reescreve e inflacionava o KPI).
             base_where = f"""
-                WHERE updated_at IS NOT NULL
-                  AND datetime(updated_at) >= datetime('now', '-7 days')
+                WHERE date_reported IS NOT NULL
+                  AND date(date_reported) >= date('now', '-7 days')
                   AND {_qualified_where()}
             """
             params: list = []
@@ -8310,6 +8584,24 @@ class AsyncDatabaseService:
     async def update_lead_historical(self, external_id: str, city: str, lead: EnrichedLead) -> bool:
         return await anyio.to_thread.run_sync(self._service.update_lead_historical, external_id, city, lead)
 
+    async def get_leads_feed(
+        self,
+        city: Optional[str] = None,
+        signal_type: Optional[str] = None,
+        category: Optional[str] = None,
+        urgency: Optional[str] = None,
+        include_closed: bool = False,
+        days: Optional[int] = None,
+        user_id: Optional[int] = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple[List[dict], int]:
+        return await anyio.to_thread.run_sync(
+            self._service.get_leads_feed,
+            city, signal_type, category, urgency, include_closed, days,
+            user_id, limit, offset,
+        )
+
     async def get_leads_by_city(self, city: str, limit: int = 100, source_type: Optional[str] = None, category: Optional[str] = None) -> List[dict]:
         return await anyio.to_thread.run_sync(self._service.get_leads_by_city, city, limit, source_type, category)
 
@@ -8793,6 +9085,21 @@ class AsyncDatabaseService:
 
     async def save_lead_case_history(self, lead_id: int, occurrences: list) -> int:
         return await anyio.to_thread.run_sync(self._service.save_lead_case_history, lead_id, occurrences)
+
+    async def get_lead_id_by_address(self, address: str, city: str) -> Optional[int]:
+        return await anyio.to_thread.run_sync(
+            self._service.get_lead_id_by_address, address, city
+        )
+
+    async def append_case_occurrences(self, rows: list) -> int:
+        return await anyio.to_thread.run_sync(
+            self._service.append_case_occurrences, rows
+        )
+
+    async def refresh_lead_history(self, lead_ids: list) -> int:
+        return await anyio.to_thread.run_sync(
+            self._service.refresh_lead_history, lead_ids
+        )
 
     async def get_lead_case_history(self, lead_id: int) -> list:
         return await anyio.to_thread.run_sync(self._service.get_lead_case_history, lead_id)

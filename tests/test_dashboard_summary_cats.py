@@ -78,8 +78,9 @@ def _qualified_lead(category: str) -> None:
     try:
         conn.execute(
             "INSERT INTO leads (external_id, source_type, address, city, state, "
-            "issue_category, case_status, date_reported) "
-            "VALUES (?, '311', ?, 'NYC', 'NY', ?, 'open', '2026-01-01T00:00:00')",
+            "issue_category, case_status, date_reported, signal_type, signal_status) "
+            "VALUES (?, '311', ?, 'NYC', 'NY', ?, 'open', datetime('now','-1 day'), "
+            "'open_request', 'open')",
             (uuid.uuid4().hex, f"{uuid.uuid4().hex[:8]} Main Street", category),
         )
         conn.commit()
@@ -92,8 +93,9 @@ def _qualified_lead_in(city: str, category: str = "Roof") -> None:
     try:
         conn.execute(
             "INSERT INTO leads (external_id, source_type, address, city, state, "
-            "issue_category, case_status, date_reported) "
-            "VALUES (?, '311', ?, ?, 'NY', ?, 'open', '2026-01-01T00:00:00')",
+            "issue_category, case_status, date_reported, signal_type, signal_status) "
+            "VALUES (?, '311', ?, ?, 'NY', ?, 'open', datetime('now','-1 day'), "
+            "'open_request', 'open')",
             (uuid.uuid4().hex, f"{uuid.uuid4().hex[:8]} Main Street", city, category),
         )
         conn.commit()

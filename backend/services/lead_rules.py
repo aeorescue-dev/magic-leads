@@ -218,6 +218,58 @@ def is_complete_delivery(lead: Mapping[str, Any]) -> bool:
     return bool(_present(lead.get("owner_name")) and _present(lead.get("owner_phone")))
 
 
+SIGNAL_LEGAL_OBLIGATION = "legal_obligation"
+SIGNAL_AUTHORIZED_WORK = "authorized_work"
+SIGNAL_OPEN_REQUEST = "open_request"
+
+# Status que contam como "fechado" para o feed default. normalizado em lower.
+_SIGNAL_CLOSED_STATUSES = frozenset({
+    "closed", "close", "completed", "complete", "resolved", "solved",
+    "canceled", "cancelled", "dismissed", "archived", "rejected",
+    "closed (transferred)", "closed (duplicate)", "in progress (duplicate)",
+    "new (duplicate)", "expired", "final", "signed off", "void",
+})
+_SIGNAL_OPEN_STATUSES = frozenset({
+    "open", "new", "in progress", "in_progress", "assigned", "active",
+    "approved", "issued", "pending", "acknowledged", "referred", "scheduled",
+    "investigation", "awaiting", "awaiting assignment", "violation open",
+    "nov sent out", "permit issued",
+})
+
+
+def normalize_case_status(status: Optional[str]) -> str:
+    """Canoniza o estado da fonte em open | closed | unknown."""
+    value = str(status or "").strip().lower()
+    if not value:
+        return "unknown"
+    if value in _SIGNAL_CLOSED_STATUSES:
+        return "closed"
+    if value in _SIGNAL_OPEN_STATUSES:
+        return "open"
+    if any(token in value for token in ("close", "complet", "resolv", "cancel", "dismiss", "duplicate", "expired")):
+        return "closed"
+    if any(token in value for token in ("open", "progress", "assign", "pending", "approved", "issued", "sent out")):
+        return "open"
+    return "unknown"
+
+
+def derive_signal(source_type: Optional[str], case_status: Optional[str]) -> tuple[Optional[str], str]:
+    """Mapeia a fonte num dos 3 tipos de sinal + estado canonico.
+
+    P0-B: 311 e' `open_request` (nunca `legal_obligation`); permissoes sao
+    `authorized_work`; HPD/DOB/multa sao `legal_obligation`. `import_b2b` nao
+    e' oportunidade de obra e fica com signal_type NULL.
+    """
+    src = str(source_type or "").strip().lower()
+    if src in ("hpd_violation", "dob_violation", "tax_delinquency"):
+        return SIGNAL_LEGAL_OBLIGATION, normalize_case_status(case_status)
+    if src == "permit":
+        return SIGNAL_AUTHORIZED_WORK, normalize_case_status(case_status)
+    if src in ("311", "service_311"):
+        return SIGNAL_OPEN_REQUEST, normalize_case_status(case_status)
+    return None, "unknown"
+
+
 def will_charge_if_phone_found(lead: Mapping[str, Any]) -> bool:
     """True se, encontrando telefone, o lead passa a ser cobravel.
 

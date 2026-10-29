@@ -50,6 +50,13 @@ export interface LeadResponse {
   id: string;
   external_id: string;
   source_type?: string;
+  signal_type?: string | null;
+  signal_status?: string;
+  repeat_365?: number;
+  open_cases?: number;
+  oldest_open_days?: number | null;
+  last_case_at?: string | null;
+  phone_verified?: boolean;
   address: string;
   city: string;
   issue_category: string;
@@ -211,6 +218,7 @@ export async function fetchLeads(params: {
   type?: string;
   page?: number;
   per_page?: number;
+  include_closed?: boolean;
 }): Promise<LeadsListResponse> {
   const q = new URLSearchParams();
   q.append("city", params.city);
@@ -218,6 +226,7 @@ export async function fetchLeads(params: {
   if (params.type) q.append("type", params.type);
   q.append("page", String(params.page || 1));
   q.append("per_page", String(params.per_page || 20));
+  if (params.include_closed) q.append("include_closed", "true");
 
   return handle<LeadsListResponse>(await fetch(`${API_URL}/api/leads?${q}`, { credentials: "include", headers: { ...authHeaders() } }));
 }
@@ -225,7 +234,7 @@ export async function fetchLeads(params: {
 export async function fetchTodayLeads(
   limit: number = 60,
   city?: string,
-  includeIncomplete: boolean = false,
+  includeClosed: boolean = false,
   page: number = 1,
   type?: string,
   category?: string,
@@ -233,7 +242,7 @@ export async function fetchTodayLeads(
 ): Promise<LeadsListResponse> {
   const q = new URLSearchParams({ limit: String(limit), page: String(page) });
   if (city && city !== "Todas") q.set("city", city);
-  if (includeIncomplete) q.set("include_incomplete", "true");
+  if (includeClosed) q.set("include_closed", "true");
   if (type && type !== "all") q.set("type", type);
   // Filtros de Categoria/Urigencia passam agora ao SERVIDOR: antes eram
   // aplicados so em cliente, pelo que o total do header (total da API) e o

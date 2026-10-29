@@ -146,6 +146,12 @@ class LeadResponse(BaseModel):
     id: str
     external_id: str
     source_type: Optional[str] = None
+    signal_type: Optional[str] = None
+    signal_status: str = "unknown"
+    repeat_365: int = 0
+    open_cases: int = 0
+    oldest_open_days: Optional[int] = None
+    last_case_at: Optional[str] = None
     address: str
     city: str
     issue_category: str

@@ -267,12 +267,10 @@ const URGENCIES = ["all", "high", "medium", "low"];
 
   const LEAD_TYPES = [
     { value: "all", labelKey: "dashboard.filter.all_types" },
-    // "Obrigacao legal" e um grupo: violacoes do DOB e do HPD sao a mesma categoria
-    { value: "dob_violation,hpd_violation,311", labelKey: "dashboard.lead_type.obligation" },
-    { value: "permit", labelKey: "dashboard.lead_type.permit" },
-    { value: "311", labelKey: "dashboard.lead_type.open" },
+    { value: "legal_obligation", labelKey: "dashboard.lead_type.obligation" },
+    { value: "authorized_work", labelKey: "dashboard.lead_type.permit" },
+    { value: "open_request", labelKey: "dashboard.lead_type.open" },
   ];
-  const OBLIGATION_TYPES: readonly string[] = ["dob_violation", "hpd_violation", "311"];
 
   // Filtro rapido Privado vs Institucional/Governamental. O veredito
   // `institutional` vem calculado do backend (lead_rules.py) e e lido aqui
@@ -1208,10 +1206,10 @@ const URGENCIES = ["all", "high", "medium", "low"];
         }
       }
 
-      // Type filter
+      // Type filter (P0-B: signal_type, nao source_type)
       if (selectedType !== "all") {
         const typeList = selectedType.split(",");
-        const st = lead.source_type;
+        const st = lead.signal_type;
         if (!st || !typeList.includes(st)) {
           return false;
         }
@@ -2229,10 +2227,10 @@ const URGENCIES = ["all", "high", "medium", "low"];
                             <CatIcon className="h-3 w-3" /> {t(cat.labelKey)}
                           </span>
 
-                          {(lead.source_type && (() => {
-                            const st = lead.source_type;
-                            if (OBLIGATION_TYPES.includes(st)) return <span className="text-[10px] font-semibold uppercase tracking-wider bg-amber-500/15 text-amber-400 px-2.5 py-1 rounded-full flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> {t("dashboard.lead_type.obligation")}</span>;
-                            if (st === "permit") return <span className="text-[10px] font-semibold uppercase tracking-wider bg-sky-500/15 text-sky-400 px-2.5 py-1 rounded-full flex items-center gap-1"><HardHat className="h-3 w-3" /> {t("dashboard.lead_type.permit")}</span>;
+                          {(lead.signal_type && (() => {
+                            const st = lead.signal_type;
+                            if (st === "legal_obligation") return <span className="text-[10px] font-semibold uppercase tracking-wider bg-amber-500/15 text-amber-400 px-2.5 py-1 rounded-full flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> {t("dashboard.lead_type.obligation")}</span>;
+                            if (st === "authorized_work") return <span className="text-[10px] font-semibold uppercase tracking-wider bg-sky-500/15 text-sky-400 px-2.5 py-1 rounded-full flex items-center gap-1"><HardHat className="h-3 w-3" /> {t("dashboard.lead_type.permit")}</span>;
                             return <span className="text-[10px] font-semibold uppercase tracking-wider bg-slate-500/15 text-slate-400 px-2.5 py-1 rounded-full flex items-center gap-1"><FolderOpen className="h-3 w-3" /> {t("dashboard.lead_type.open")}</span>;
                           })())}
 
@@ -2439,14 +2437,14 @@ const URGENCIES = ["all", "high", "medium", "low"];
                               <CatIcon className="h-3 w-3" /> {t(cat.labelKey)}
                             </span>
 
-                            {(lead.source_type && (() => {
-                              const st = lead.source_type;
-                              if (OBLIGATION_TYPES.includes(st)) return <span className="text-[10px] font-semibold uppercase tracking-wider bg-amber-500/15 text-amber-400 px-2.5 py-1 rounded-full flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> {t("dashboard.lead_type.obligation")}</span>;
-                              if (st === "permit") return <span className="text-[10px] font-semibold uppercase tracking-wider bg-sky-500/15 text-sky-400 px-2.5 py-1 rounded-full flex items-center gap-1"><HardHat className="h-3 w-3" /> {t("dashboard.lead_type.permit")}</span>;
+                            {(lead.signal_type && (() => {
+                              const st = lead.signal_type;
+                              if (st === "legal_obligation") return <span className="text-[10px] font-semibold uppercase tracking-wider bg-amber-500/15 text-amber-400 px-2.5 py-1 rounded-full flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> {t("dashboard.lead_type.obligation")}</span>;
+                              if (st === "authorized_work") return <span className="text-[10px] font-semibold uppercase tracking-wider bg-sky-500/15 text-sky-400 px-2.5 py-1 rounded-full flex items-center gap-1"><HardHat className="h-3 w-3" /> {t("dashboard.lead_type.permit")}</span>;
                               return <span className="text-[10px] font-semibold uppercase tracking-wider bg-slate-500/15 text-slate-400 px-2.5 py-1 rounded-full flex items-center gap-1"><FolderOpen className="h-3 w-3" /> {t("dashboard.lead_type.open")}</span>;
                             })())}
 
-                            {isClosedCase(lead.case_status) && (
+                            {(lead.signal_status === "closed" || isClosedCase(lead.case_status)) && (
                               <span
                                 className="text-[10px] font-semibold uppercase tracking-wider bg-slate-500/20 text-slate-300 px-2.5 py-1 rounded-full flex items-center gap-1"
                                 title={t("dashboard.badge.closed_hint")}
@@ -3102,8 +3100,8 @@ const URGENCIES = ["all", "high", "medium", "low"];
                     {t("dashboard.reveal.title")}
                   </h2>
                     {(() => {
-                      const isObligation = !!revealTarget.source_type && OBLIGATION_TYPES.includes(revealTarget.source_type);
-                      const isPermit = revealTarget.source_type === "permit";
+                      const isObligation = revealTarget.signal_type === "legal_obligation";
+                      const isPermit = revealTarget.signal_type === "authorized_work";
                       return (
                         <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${isObligation ? "bg-amber-500/15 text-amber-400" : isPermit ? "bg-sky-500/15 text-sky-400" : "bg-slate-500/15 text-slate-400"}`}>
                           {isObligation ? t("dashboard.lead_type.obligation") : isPermit ? t("dashboard.lead_type.permit") : t("dashboard.lead_type.open")}

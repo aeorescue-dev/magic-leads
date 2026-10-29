@@ -183,6 +183,12 @@ def _to_lead_response(lead: dict) -> LeadResponse:
         id=str(lead["id"]),
         external_id=lead["external_id"],
         source_type=lead.get("source_type"),
+        signal_type=lead.get("signal_type"),
+        signal_status=lead.get("signal_status") or "unknown",
+        repeat_365=int(lead.get("repeat_365") or 0),
+        open_cases=int(lead.get("open_cases") or 0),
+        oldest_open_days=lead.get("oldest_open_days"),
+        last_case_at=lead.get("last_case_at"),
         address=lead["address"],
         city=lead["city"],
         issue_category=lead["issue_category"],
@@ -669,6 +675,22 @@ async def health_check():
 
 
 # Endpoint para Frontend puxar leads
+def _signal_type_from_filter(value) -> str | None:
+    """Mapeia o filtro 'Tipo' (novo sinal ou valores legados) para signal_type."""
+    if not value:
+        return None
+    raw = str(value).strip().lower()
+    if raw in ("legal_obligation", "authorized_work", "open_request"):
+        return raw
+    if "hpd_violation" in raw or "dob_violation" in raw or "tax_delinquency" in raw:
+        return "legal_obligation"
+    if "permit" in raw:
+        return "authorized_work"
+    if "311" in raw:
+        return "open_request"
+    return None
+
+
 @app.get("/api/leads", response_model=LeadsListResponse)
 async def get_leads(
     city: str = "NYC",
@@ -676,27 +698,29 @@ async def get_leads(
     type: str = None,
     page: int = 1,
     per_page: int = 20,
+    include_closed: bool = False,
     user: dict | None = Depends(_get_optional_user)
 ):
-    """Retorna leads da cidade especificada com filtros opcionais"""
+    """Retorna o feed qualificado com filtros e total reais em SQL (P0-B)."""
     try:
-        # O filtro "Obrigacao legal" e um grupo: pode chegar "dob_violation,hpd_violation"
-        type_filter = [t.strip() for t in str(type).split(",") if t.strip()] if type else None
-        leads = await db_service.get_leads_by_city(
-            city,
-            limit=per_page * page,
-            source_type=type_filter,
-            category=category
+        signal_type = _signal_type_from_filter(type)
+        user_id = user["id"] if user and user.get("id") else None
+        leads, total = await db_service.get_leads_feed(
+            city=city,
+            signal_type=signal_type,
+            category=category,
+            include_closed=include_closed,
+            user_id=user_id,
+            limit=per_page,
+            offset=(max(1, page) - 1) * per_page,
         )
-
-        leads = _filter_public_leads(leads, user)
         await _annotate_visibility(leads, user)
 
         return LeadsListResponse(
-            total=len(leads),
+            total=total,
             page=page,
             per_page=per_page,
-            leads=[_to_lead_response(lead) for lead in leads[:per_page]]
+            leads=[_to_lead_response(lead) for lead in leads],
         )
 
     except Exception as e:
@@ -769,79 +793,35 @@ async def leads_today(
     type: str = None,
     category: str = None,
     urgency: str = None,
-    include_incomplete: bool = False,
+    include_closed: bool = False,
     user: dict | None = Depends(_get_optional_user),
 ):
-    """Retorna demandas dos últimos 7 dias.
+    """Feed dos últimos 7 dias — filtros, total e exclusão de fechados em SQL.
 
-    REGRA FIXA por default: apenas leads QUALIFICADOS (endereço + 16 ofícios +
-    gatilho preditivo: obrigação legal OU chamado aberto/em andamento).
-    Não exige mais department/descriptor/neighborhood (campos que descartavam
-    chamados válidos dos 16 ofícios).
-    include_incomplete=true libera os leads fora desse critério.
+    P0-B: usa o MESMO predicado do `/api/leads`; `total` == linhas que o feed
+    pode mostrar. `include_closed=True` (toggle do painel) mostra encerrados.
     """
     try:
-        from backend.services import db as dbmod
-        conn = dbmod.get_connection()
-        try:
-            sql = """
-                SELECT * FROM leads
-                WHERE date_reported IS NOT NULL
-                  AND date(date_reported) >= date('now', '-7 days')
-            """
-            params: list = []
-            if city:
-                sql += " AND city = ?"
-                params.append(city)
-            if type:
-                # O filtro "Obrigacao legal" da UI e um grupo e envia uma lista
-                # separada por virgulas ("dob_violation,hpd_violation").
-                # Comparar a string inteira com "=" nunca casava com nenhuma linha
-                # e devolvia 0 resultados com HTTP 200 — falha silenciosa que
-                # deixava a aba Oportunidades vazia. O mesmo agrupamento ja e
-                # tratado em services/db.py (aceita lista); aqui fazemos o split.
-                wanted = [t.strip() for t in str(type).split(",") if t.strip()]
-                if wanted:
-                    sql += " AND source_type IN (%s)" % ",".join("?" * len(wanted))
-                    params.extend(wanted)
-            # Filtros "Categoria" e "Urgencia" do dashboard. Antes existiam
-            # apenas no cliente (page.tsx), pelo que cada pagina/polling voltava
-            # a trazer a lista inteira e a filtragem local mostrava contagens
-            # (header = total da API) diferentes das linhas visiveis.
-            if category:
-                cats = [t.strip() for t in str(category).split(",") if t.strip()]
-                if cats:
-                    sql += " AND issue_category IN (%s)" % ",".join("?" * len(cats))
-                    params.extend(cats)
-            if urgency:
-                urg = [t.strip() for t in str(urgency).split(",") if t.strip()]
-                if urg:
-                    sql += " AND urgency_level IN (%s)" % ",".join("?" * len(urg))
-                    params.extend(urg)
-            if not include_incomplete:
-                sql += f" AND {_qualified_where()}"
-
-            # Conta total para paginação
-            count_sql = sql.replace("SELECT *", "SELECT COUNT(*) as total")
-            total = conn.execute(count_sql, params).fetchone()["total"]
-
-            # Aplica paginação
-            offset = (page - 1) * limit
-            sql += " ORDER BY date_reported DESC, id DESC LIMIT ? OFFSET ?"
-            params.extend([limit, offset])
-            results = conn.execute(sql, params).fetchall()
-        finally:
-            conn.close()
-        results = [dict(r) for r in results]
-
-        results = _filter_public_leads(results, user)
-        await _annotate_visibility(results, user)
+        signal_type = _signal_type_from_filter(type)
+        user_id = user["id"] if user and user.get("id") else None
+        leads, total = await db_service.get_leads_feed(
+            city=city,
+            signal_type=signal_type,
+            category=category,
+            urgency=urgency,
+            include_closed=include_closed,
+            days=7,
+            user_id=user_id,
+            limit=limit,
+            offset=(max(1, page) - 1) * limit,
+        )
+        await _annotate_visibility(leads, user)
 
         return LeadsListResponse(
             total=total,
             page=page,
             per_page=limit,
-            leads=[_to_lead_response(lead) for lead in results],
+            leads=[_to_lead_response(lead) for lead in leads],
         )
     except Exception as e:
         logger.error(f"Erro ao buscar demandas do dia: {e}", exc_info=True)
@@ -2962,6 +2942,10 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
         # 5. Inserção com DLQ fallback
         inserted = 0
         newly_added: list[dict] = []
+        # P0-B: historico por ocorrencia + reincidencia por imovel.
+        history_batch: list[dict] = []
+        history_lead_ids: set[int] = set()
+        addr_to_id: dict[tuple[str, str], int] = {}
 
         for raw_lead in all_raw:
             enriched = EnrichedLead(
@@ -3007,6 +2991,44 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                 bbl=getattr(raw_lead, "bbl", None),
             )
             new_lead = await db_service.insert_lead_new(enriched)
+
+            # P0-B: guarda a ocorrencia (mesmo quando a morada ja' existe e o
+            # lead foi atualizado). O `lead_id` vem do insert novo ou da morada.
+            lead_id = new_lead["id"] if new_lead else None
+            if not lead_id:
+                addr_key = ((raw_lead.address or "").upper(), raw_lead.city or "")
+                lead_id = addr_to_id.get(addr_key)
+                if not lead_id:
+                    lead_id = await db_service.get_lead_id_by_address(
+                        raw_lead.address, raw_lead.city
+                    )
+                    if lead_id:
+                        addr_to_id[addr_key] = lead_id
+            if lead_id:
+                history_batch.append({
+                    "lead_id": lead_id,
+                    "external_id": raw_lead.external_id,
+                    "case_title": getattr(raw_lead, "case_title", None),
+                    "descriptor": getattr(raw_lead, "descriptor", None),
+                    "subject": getattr(raw_lead, "subject", None),
+                    "reason": getattr(raw_lead, "reason", None),
+                    "case_status": getattr(raw_lead, "case_status", None),
+                    "issue_category": getattr(
+                        raw_lead.issue_category, "value", str(raw_lead.issue_category)
+                    ),
+                    "department": getattr(raw_lead, "department", None),
+                    "opened_at": raw_lead.created_at.isoformat() if raw_lead.created_at else None,
+                    "closed_at": getattr(raw_lead, "closed_dt", None),
+                    "resolution_description": getattr(raw_lead, "resolution_description", None),
+                    "closure_reason": getattr(raw_lead, "closure_reason", None),
+                    "source": getattr(raw_lead, "source", None),
+                    "source_url": None,
+                })
+                history_lead_ids.add(lead_id)
+                if len(history_batch) >= 500:
+                    await db_service.append_case_occurrences(history_batch)
+                    history_batch.clear()
+
             if new_lead:
                 inserted += 1
                 newly_added.append(new_lead)
@@ -3024,6 +3046,16 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                         f"(address={raw_lead.address!r}, city={raw_lead.city!r}, "
                         f"has_bbl={bool(getattr(raw_lead, 'bbl', None))}): {e}"
                     )
+
+        # P0-B: flush do historico + recalculo da reincidencia dos leads tocados.
+        if history_batch:
+            await db_service.append_case_occurrences(history_batch)
+        if history_lead_ids:
+            refreshed = await db_service.refresh_lead_history(sorted(history_lead_ids))
+            logger.info(
+                "[P0-B] historico: %s leads com reincidencia recalculada",
+                refreshed,
+            )
 
         # P0-A: so' agora, com todos os inserts do run concluidos, os
         # watermarks avancam. Uma falha a meio nao salta a janela.
