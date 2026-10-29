@@ -265,6 +265,22 @@ export default function DashboardSettingsPage() {
     }
   };
 
+  const toggleChime = async () => {
+    if (!user) return;
+    setGeoBusy(true);
+    setGeoError("");
+    try {
+      const updated = await setPushPreferences(user.id, {
+        chime_enabled: user.chime_enabled === false,
+      });
+      updateUser(updated);
+    } catch (e: any) {
+      setGeoError(e?.message || t("dashboard.settings.base_error"));
+    } finally {
+      setGeoBusy(false);
+    }
+  };
+
   const toggleCategoryPush = async (category: string, enabled: boolean) => {
     if (!user) return;
     setPushBusyCat(category);
@@ -464,6 +480,20 @@ export default function DashboardSettingsPage() {
                   disabled={geoBusy}
                   label={t("dashboard.settings.lifecycle_title")}
                   onToggle={toggleLifecycle}
+                />
+              </div>
+
+              {/* Chime in-app (B3, default ligado) */}
+              <div className="rounded-xl bg-white/5 border border-white/10 p-3 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">{t("dashboard.settings.chime_title")}</p>
+                  <p className="text-xs text-slate-400 leading-relaxed mt-0.5">{t("dashboard.settings.chime_hint")}</p>
+                </div>
+                <Toggle
+                  on={user.chime_enabled !== false}
+                  disabled={geoBusy}
+                  label={t("dashboard.settings.chime_title")}
+                  onToggle={toggleChime}
                 />
               </div>
 

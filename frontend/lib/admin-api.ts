@@ -348,6 +348,24 @@ export function fetchAdminPhoneSampleProgress(days = 90): Promise<AdminPhoneSamp
   return adminFetch(`/phone-sample-progress?days=${days}`);
 }
 
+export interface AdminDigestAb {
+  days: number;
+  min_samples: number;
+  arms: {
+    variant: string;
+    sent: number;
+    pushed: number;
+    clicks: number;
+    ctr: number | null;
+    sample_ok: boolean;
+  }[];
+  leader: string | null;
+}
+
+export function fetchAdminDigestAb(days = 30): Promise<AdminDigestAb> {
+  return adminFetch(`/digest-ab?days=${days}`);
+}
+
 export function fetchAdminPush(days = 7, recentLimit = 50): Promise<AdminPushMetrics> {
   return adminFetch(`/push?days=${days}&recent_limit=${recentLimit}`);
 }

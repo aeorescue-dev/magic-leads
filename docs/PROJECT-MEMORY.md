@@ -471,6 +471,30 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   Corre no watchdog de 15 min e em `/api/cron/expire-holds`.
 - **794 testes**, 13 e2e, tsc limpo, build ok.
 
+### Sprint B3 — geo BBL→PLUTO, chime e A/B (2026-10-29)
+
+- **Geolocalização DOB**: os 6.101 leads de NYC DOB não tinham lat/lng (o dataset
+  `3h2n-5cm9` só publica `boro`/`block`/`lot`/`bin`). O scraper passou a pedir
+  `block`/`lot`, compõe o **BBL** de 10 dígitos (`geo_lookup.compose_bbl`) e resolve no
+  **PLUTO** (`64uk-42ks`) via `latitude`/`longitude`. Cache local `bbl_coords` (hit e
+  miss; miss expira em 30 d). **Custo zero** (dados abertos, lotes de 200 BBL).
+  Os leads antigos recuperam o BBL por `violation_number` (`backfill_dob_bbl_from_source`)
+  antes da resolução. Endpoints: `GET /api/admin/geo-coverage`,
+  `POST /api/admin/backfill-dob-coords` (idempotente, cursor por id).
+  O PLUTO devolve BBL como `3074130059.00000000` — a normalização para 10 dígitos é
+  obrigatória, senão nenhuma chave casava.
+- **Chime in-app**: `frontend/public/sounds/alert-chime.mp3` (13 KB, sintetizado para a
+  Magic Leads: arpejo A5–C#6–E6, sem licenças). O dashboard compara o unread a cada 30 s
+  e toca o chime **só quando aumenta** e a app está visível. Autoplay desbloqueado no
+  primeiro gesto (`primeAlertChime`). Preferência `users.chime_enabled` (default **1**)
+  com toggle nas Definições. O Web Push continua a usar o som do SO.
+- **A/B do digest**: bucket determinístico pelo id (`par`=A, `ímpar`=B), gravado no
+  primeiro digest do dia em `notifications.ab_variant` (não muda a meio do dia). A usa o
+  copy neutro; B usa `digest_b` (“N novas oportunidades perto de si… os melhores leads
+  são reservados primeiro”). `GET /api/admin/digest-ab` + cartão no Control Tower com
+  CTR por braço; **vencedor só com ≥30 envios com push por braço**.
+- **820 testes**, 14 e2e, tsc limpo, build ok.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

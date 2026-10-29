@@ -113,6 +113,25 @@ TRANSLATIONS = {
             "push_tag": "digest",
         },
     },
+    # B3: variante B do digest (A/B de copy). Mensagem mais concreta e com
+    # prazo — o objetivo e' medir CTR contra a variante A (neutra).
+    "digest_b": {
+        "pt": {
+            "title": "{n} novas oportunidades perto de si",
+            "main_msg": "{n} chamados e obras na sua cidade. Os Melhores leads são reservados primeiro.",
+            "push_tag": "digest",
+        },
+        "en": {
+            "title": "{n} new opportunities near you",
+            "main_msg": "{n} requests and permits in your city. The best leads get booked first.",
+            "push_tag": "digest",
+        },
+        "es": {
+            "title": "{n} nuevas oportunidades cerca de ti",
+            "main_msg": "{n} solicitudes y obras en tu ciudad. Los mejores leads se reservan primero.",
+            "push_tag": "digest",
+        },
+    },
     "owner_enriched": {
         "pt": {
             "title": "Novos proprietários identificados",

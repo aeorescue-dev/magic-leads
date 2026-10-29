@@ -61,6 +61,7 @@ from .services import (
     control_tower,
     enrichment_queue,
     freshness,
+    geo_lookup,
     inbox_sync,
     lifecycle_push,
     notifier,
@@ -1634,6 +1635,48 @@ async def admin_searchbug(
     return data
 
 
+@app.get("/api/admin/digest-ab")
+async def admin_digest_ab(
+    days: int = 30,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """B3: CTR do digest por variante de copy (A/B)."""
+    return await db_service.admin_get_digest_ab(days)
+
+
+@app.get("/api/admin/geo-coverage")
+async def admin_geo_coverage(_admin: dict = Depends(_require_admin_user)):
+    """B3: cobertura de coordenadas no feed (com/sem BBL resolvível)."""
+    return await db_service.count_leads_missing_coords()
+
+
+@app.post("/api/admin/backfill-dob-coords")
+async def admin_backfill_dob_coords(
+    batch: int = 500,
+    max_batches: int = 40,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """B3: preenche lat/lng dos leads com BBL via PLUTO (idempotente).
+
+    Duas fases: (1) recupera o BBL dos leads DOB antigos a partir do dataset de
+    origem; (2) resolve BBL -> coordenadas no PLUTO. Sem custo (dados abertos) e
+    com cache local. Chamadas repetidas continuam de onde pararam.
+    """
+    bbl = await geo_lookup.backfill_dob_bbl_from_source(
+        batch=max(50, min(int(batch), 1000)),
+        max_batches=max(1, min(int(max_batches), 200)),
+    )
+    coords = await geo_lookup.backfill_missing_coords(
+        batch=max(50, min(int(batch), 2000)),
+        max_batches=max(1, min(int(max_batches), 200)),
+    )
+    return {
+        "bbl": bbl,
+        "coords": coords,
+        "coverage": await db_service.count_leads_missing_coords(),
+    }
+
+
 @app.get("/api/admin/phone-sample-progress")
 async def admin_phone_sample_progress(
     days: int = 90,
@@ -2738,7 +2781,7 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                     logger.info(f"DOB Violations: fetching from {domain}/{dataset}")
                     rows = await _s._fetch_all_pages(
                         domain=domain, dataset=dataset,
-                        select="violation_number, issue_date, house_number, street, boro, description, violation_type, violation_category, ecb_number, disposition_date, disposition_comments",
+                        select="violation_number, issue_date, house_number, street, boro, block, lot, bin, description, violation_type, violation_category, ecb_number, disposition_date, disposition_comments",
                         where=where, order="issue_date DESC",
                         page_size=5000, max_pages=10, date_col="issue_date",
                     )
@@ -2747,6 +2790,7 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                         f"({_s.last_meta})"
                     )
                     out = []
+                    bbl_by_external: dict = {}
                     for row in rows:
                         try:
                             number = str(row.get("violation_number") or "").strip() or str(row.get("ecb_number") or "").strip()
@@ -2759,6 +2803,10 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                             street = str(row.get("street") or "").strip()
                             boro = boro_map.get(str(row.get("boro") or "").strip(), str(row.get("boro") or "").strip())
                             addr = f"{house} {street}".strip()
+                            # B3: BBL a partir de boro/block/lot (o dataset nao traz lat/lng).
+                            bbl = geo_lookup.compose_bbl(
+                                row.get("boro"), row.get("block"), row.get("lot")
+                            )
                             issue = row.get("issue_date")
                             created = None
                             try:
@@ -2785,10 +2833,33 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                                 source=f"{domain}/{dataset}",
                                 neighborhood=boro or None,
                                 resolution_description=row.get("disposition_comments") or None,
+                                bbl=bbl,
                             ))
+                            if bbl:
+                                bbl_by_external[number] = bbl
                         except Exception as e:
                             logger.warning(f"DOB Violations row error: {e}")
                             continue
+
+                    # B3: coordenadas via BBL -> PLUTO (custo zero, cache local).
+                    if bbl_by_external:
+                        try:
+                            coords = await geo_lookup.resolve_bbl_coords(
+                                list(set(bbl_by_external.values()))
+                            )
+                            filled = 0
+                            for lead in out:
+                                bbl = bbl_by_external.get(lead.external_id)
+                                coord = coords.get(bbl) if bbl else None
+                                if coord:
+                                    lead.lat, lead.lng = coord
+                                    filled += 1
+                            logger.info(
+                                "DOB Violations GEO: %s/%s lead(s) com coordenadas via PLUTO",
+                                filled, len(out),
+                            )
+                        except Exception as e:
+                            logger.warning("DOB Violations GEO falhou: %s", e)
                     leads = out
 
                 elif entry.get("type") == "dob_permits":
@@ -4224,6 +4295,7 @@ def _user_response(u: dict) -> UserResponse:
         show_address_in_push=bool(u.get("show_address_in_push", 1)),
         digest_enabled=bool(u.get("digest_enabled", 1)),
         lifecycle_push_enabled=bool(u.get("lifecycle_push_enabled", 0)),
+        chime_enabled=bool(u.get("chime_enabled", 1)),
     )
 
 
@@ -4988,6 +5060,8 @@ async def set_push_preferences(
         await db_service.set_user_lifecycle_push_enabled(
             user_id, payload.lifecycle_push_enabled
         )
+    if payload.chime_enabled is not None:
+        await db_service.set_user_chime_enabled(user_id, payload.chime_enabled)
     full = await db_service.get_user_by_id(user_id)
     return _user_response(full) if full else {"status": "ok"}
 

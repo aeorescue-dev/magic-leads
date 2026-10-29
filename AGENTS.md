@@ -59,6 +59,13 @@ Contexto completo e números medidos: **`docs/PROJECT-MEMORY.md`**. Ler antes de
 23. **Lifecycle push**: opt-in; só `reveal_*`/`stage_*` com <45 min; o aviso crítico
     (`reveal_urgent`) é o único autorizado a furar as quiet hours. `pushed_at` garante
     idempotência; sem acesso vigente não há push.
+24. **Geo**: distância de NYC vem de **BBL → PLUTO** (`geo_lookup`), nunca de APIs pagas.
+    `bbl_coords` é cache (hit e miss); não inventar coordenadas quando o BBL falha.
+    O PLUTO devolve BBL como número com decimais — normalizar para 10 dígitos.
+25. **Chime**: só in-app, no máximo 1 vez por aumento de unread, nunca com a aba oculta.
+    Ficheiro próprio em `public/sounds/`; o Web Push não escolhe som.
+26. **A/B do digest**: bucket estável (paridade do id), variante fixada no primeiro digest
+    do dia. Não declarar vencedor com <30 envios com push por braço.
 
 ## Verificação mínima antes de deploy
 ```bash

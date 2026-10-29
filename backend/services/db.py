@@ -277,6 +277,8 @@ CREATE TABLE IF NOT EXISTS users (
   -- B2: resumo diario (default ligado) e push de ciclo de vida (default off).
   digest_enabled INTEGER DEFAULT 1,
   lifecycle_push_enabled INTEGER DEFAULT 0,
+  -- B3: chime in-app (default ligado).
+  chime_enabled INTEGER DEFAULT 1,
   alert_rotation_cursor INTEGER DEFAULT 0,
   welcome_popup_shown INTEGER DEFAULT 0,
   refund_count_today INTEGER DEFAULT 0,
@@ -360,6 +362,16 @@ CREATE TABLE IF NOT EXISTS leads (
   UNIQUE(address, city)
 );
 
+-- B3: cache BBL -> coordenadas (PLUTO). Hit e miss ficam registados para nao
+-- repetir consultas; miss expira em 30 dias.
+CREATE TABLE IF NOT EXISTS bbl_coords (
+  bbl TEXT PRIMARY KEY,
+  lat REAL,
+  lng REAL,
+  source TEXT,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS lead_notes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
@@ -389,6 +401,7 @@ CREATE TABLE IF NOT EXISTS notifications (
   msg_params TEXT,
   clicked_at TEXT,
   pushed_at TEXT,
+  ab_variant TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -1454,6 +1467,8 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN digest_enabled INTEGER DEFAULT 1")
     if user_cols and "lifecycle_push_enabled" not in user_cols:
         conn.execute("ALTER TABLE users ADD COLUMN lifecycle_push_enabled INTEGER DEFAULT 0")
+    if user_cols and "chime_enabled" not in user_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN chime_enabled INTEGER DEFAULT 1")
 
     event_cols = {r["name"] for r in conn.execute("PRAGMA table_info(lead_events)").fetchall()}
     if event_cols:
@@ -1473,6 +1488,8 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE notifications ADD COLUMN clicked_at TEXT")
     if notif_cols and "pushed_at" not in notif_cols:
         conn.execute("ALTER TABLE notifications ADD COLUMN pushed_at TEXT")
+    if notif_cols and "ab_variant" not in notif_cols:
+        conn.execute("ALTER TABLE notifications ADD COLUMN ab_variant TEXT")
 
     interest_cols = {
         r["name"] for r in conn.execute("PRAGMA table_info(user_interests)").fetchall()
@@ -4729,6 +4746,18 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def set_user_chime_enabled(self, user_id: int, enabled: bool) -> bool:
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE users SET chime_enabled = ? WHERE id = ?",
+                (1 if enabled else 0, user_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
     def get_users_for_interests_onboarding(self, limit: int = 50) -> List[dict]:
         """Utilizadores com push ativo, subscricao viva e zero interesses.
 
@@ -4756,6 +4785,139 @@ class DatabaseService:
                 (int(limit),),
             ).fetchall()
             return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def get_bbl_coords(self, bbls: List[str]) -> dict:
+        """Cache de coordenadas por BBL (hit OU miss, com updated_at)."""
+        if not bbls:
+            return {}
+        conn = get_connection()
+        try:
+            out: dict = {}
+            for start in range(0, len(bbls), 500):
+                chunk = bbls[start:start + 500]
+                ph = ",".join("?" * len(chunk))
+                for r in conn.execute(
+                    f"SELECT bbl, lat, lng, updated_at FROM bbl_coords WHERE bbl IN ({ph})",
+                    chunk,
+                ):
+                    out[str(r["bbl"])] = dict(r)
+            return out
+        finally:
+            conn.close()
+
+    def upsert_bbl_coords(self, rows: List[dict]) -> int:
+        if not rows:
+            return 0
+        conn = get_connection()
+        try:
+            conn.executemany(
+                """
+                INSERT INTO bbl_coords (bbl, lat, lng, source, updated_at)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(bbl) DO UPDATE SET
+                    lat = excluded.lat,
+                    lng = excluded.lng,
+                    source = excluded.source,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                [
+                    (r["bbl"], r.get("lat"), r.get("lng"), r.get("source"))
+                    for r in rows
+                ],
+            )
+            conn.commit()
+            return len(rows)
+        finally:
+            conn.close()
+
+    def get_leads_missing_coords_with_bbl(
+        self, limit: int = 500, after_id: int = 0
+    ) -> List[dict]:
+        """Leads com BBL mas sem coordenadas, por ordem de id (cursor)."""
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                """
+                SELECT id, bbl FROM leads
+                WHERE id > ? AND bbl IS NOT NULL AND TRIM(bbl) <> ''
+                  AND (lat IS NULL OR lng IS NULL)
+                ORDER BY id ASC LIMIT ?
+                """,
+                (int(after_id), int(limit)),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def set_leads_coords(self, updates: List[tuple]) -> int:
+        """Aplica (lat, lng, lead_id) em lote."""
+        if not updates:
+            return 0
+        conn = get_connection()
+        try:
+            conn.executemany(
+                "UPDATE leads SET lat = ?, lng = ? WHERE id = ? AND (lat IS NULL OR lng IS NULL)",
+                updates,
+            )
+            conn.commit()
+            return len(updates)
+        finally:
+            conn.close()
+
+    def get_dob_leads_missing_bbl(
+        self, limit: int = 150, after_id: int = 0
+    ) -> List[dict]:
+        """Leads DOB sem BBL (gravados antes de o scraper pedir block/lot)."""
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                """
+                SELECT id, external_id FROM leads
+                WHERE id > ? AND source_type = 'dob_violation'
+                  AND (bbl IS NULL OR TRIM(bbl) = '')
+                ORDER BY id ASC LIMIT ?
+                """,
+                (int(after_id), int(limit)),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def set_leads_bbl(self, updates: List[tuple]) -> int:
+        """Aplica (bbl, lead_id) em lote, sem tocar em quem ja tem BBL."""
+        if not updates:
+            return 0
+        conn = get_connection()
+        try:
+            conn.executemany(
+                "UPDATE leads SET bbl = ? WHERE id = ? AND (bbl IS NULL OR TRIM(bbl) = '')",
+                updates,
+            )
+            conn.commit()
+            return len(updates)
+        finally:
+            conn.close()
+
+    def count_leads_missing_coords(self) -> dict:
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                """
+                SELECT
+                  SUM(CASE WHEN lat IS NULL OR lng IS NULL THEN 1 ELSE 0 END) AS missing,
+                  SUM(CASE WHEN (lat IS NULL OR lng IS NULL)
+                            AND bbl IS NOT NULL AND TRIM(bbl) <> '' THEN 1 ELSE 0 END) AS missing_with_bbl,
+                  COUNT(*) AS total
+                FROM leads
+                """
+            ).fetchone()
+            return {
+                "missing": int(row["missing"] or 0),
+                "missing_with_bbl": int(row["missing_with_bbl"] or 0),
+                "total": int(row["total"] or 0),
+            }
         finally:
             conn.close()
 
@@ -5393,6 +5555,63 @@ class DatabaseService:
             }
         except sqlite3.OperationalError:
             return {"days": int(days), "segments": [], "by_class": []}
+        finally:
+            conn.close()
+
+    def admin_get_digest_ab(self, days: int = 30) -> dict:
+        """B3: CTR do digest por variante A/B (amostra minima 30 por braco).
+
+        `sent` = digests in-app criados; `pushed` = com push aceite; `clicks` =
+        abertos. Um vencedor so aparece com >=30 envios em ambos os bracos —
+        abaixo disso e' ruido, e a UI nao deve sugerir decisao.
+        """
+        days = max(1, min(int(days), 180))
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(days=days)
+        ).strftime("%Y-%m-%d %H:%M:%S")
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                """
+                SELECT COALESCE(NULLIF(ab_variant, ''), '?') AS variant,
+                       COUNT(*) AS sent,
+                       SUM(CASE WHEN pushed_at IS NOT NULL THEN 1 ELSE 0 END) AS pushed,
+                       SUM(CASE WHEN clicked_at IS NOT NULL THEN 1 ELSE 0 END) AS clicks
+                FROM notifications
+                WHERE type = 'digest' AND created_at >= ?
+                GROUP BY variant ORDER BY variant
+                """,
+                (cutoff,),
+            ).fetchall()
+            arms = []
+            for r in rows:
+                sent = int(r["sent"] or 0)
+                clicks = int(r["clicks"] or 0)
+                pushed = int(r["pushed"] or 0)
+                arms.append(
+                    {
+                        "variant": r["variant"],
+                        "sent": sent,
+                        "pushed": pushed,
+                        "clicks": clicks,
+                        "ctr": (clicks / pushed) if pushed else None,
+                        "sample_ok": pushed >= 30,
+                    }
+                )
+            eligible = [a for a in arms if a["sample_ok"]]
+            leader = None
+            if len(eligible) >= 2:
+                leader = max(eligible, key=lambda a: (a["ctr"] or 0))["variant"]
+            return {
+                "days": days,
+                "min_samples": 30,
+                "arms": arms,
+                "leader": leader,
+            }
+        except sqlite3.OperationalError as exc:
+            if "ab_variant" not in str(exc):
+                raise
+            return {"days": days, "min_samples": 30, "arms": [], "leader": None}
         finally:
             conn.close()
 
@@ -6064,18 +6283,30 @@ class DatabaseService:
         finally:
             conn.close()
 
-    def upsert_daily_digest(self, user_id: int, extra_count: int, locale: Optional[str] = None) -> Optional[dict]:
+    def upsert_daily_digest(
+        self,
+        user_id: int,
+        extra_count: int,
+        locale: Optional[str] = None,
+        variant: Optional[str] = None,
+    ) -> Optional[dict]:
         """Insere/atualiza o resumo diário localizável (msg_key='digest').
 
         O digest NÃO conta no teto (tipo 'digest'). O texto é renderizado por
         utilizador na leitura via `msg_key`/`msg_params`. O texto gravado é
         localizado no idioma do utilizador quando `locale` é fornecido (senão
         usa o default como fallback).
+
+        B3 (A/B): `variant` ('a'|'b') fica gravado no primeiro digest do dia e
+        nao muda depois — senao o grupo medido mudava a meio do dia. A variante
+        escolhe o copy (`digest` vs `digest_b`).
         """
+        variant = (variant or "a").lower()
+        render_key = "digest_b" if variant == "b" else "digest"
         conn = get_connection()
         try:
             existing = conn.execute(
-                "SELECT id, msg_params FROM notifications "
+                "SELECT id, msg_params, ab_variant FROM notifications "
                 "WHERE user_id = ? AND type = 'digest' AND DATE(created_at) = DATE('now')",
                 (user_id,),
             ).fetchone()
@@ -6091,16 +6322,19 @@ class DatabaseService:
             # novos leads reenviava a mesma notificação genérica; os aumentos
             # seguintes do dia ficam apenas no in-app.
             is_new = existing is None
+            if existing and existing["ab_variant"]:
+                variant = str(existing["ab_variant"]).lower()
+                render_key = "digest_b" if variant == "b" else "digest"
             params = {"n": total, "limit": settings.PUSH_DAILY_LIMIT}
-            rendered = _render_i18n("digest", locale or DEFAULT_LOCALE, **params) or {}
+            rendered = _render_i18n(render_key, locale or DEFAULT_LOCALE, **params) or {}
             title = rendered.get("title") or "Daily digest"
             message = rendered.get("message") or f"More {total} new leads today."
             payload = json.dumps(params, ensure_ascii=False)
             if existing:
                 conn.execute(
                     "UPDATE notifications SET title = ?, message = ?, "
-                    "msg_key = 'digest', msg_params = ? WHERE id = ?",
-                    (title, message, payload, existing["id"]),
+                    "msg_key = ?, msg_params = ? WHERE id = ?",
+                    (title, message, render_key, payload, existing["id"]),
                 )
                 conn.commit()
                 row = conn.execute(
@@ -6112,9 +6346,9 @@ class DatabaseService:
                 out["_is_new"] = is_new
                 return out
             conn.execute(
-                "INSERT INTO notifications (user_id, type, title, message, lead_id, msg_key, msg_params) "
-                "VALUES (?, 'digest', ?, ?, NULL, 'digest', ?)",
-                (user_id, title, message, payload),
+                "INSERT INTO notifications (user_id, type, title, message, lead_id, msg_key, msg_params, ab_variant) "
+                "VALUES (?, 'digest', ?, ?, NULL, ?, ?, ?)",
+                (user_id, title, message, render_key, payload, variant),
             )
             conn.commit()
             row = conn.execute(
@@ -9761,6 +9995,11 @@ class AsyncDatabaseService:
             self._service.set_user_lifecycle_push_enabled, user_id, enabled
         )
 
+    async def set_user_chime_enabled(self, user_id: int, enabled: bool) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.set_user_chime_enabled, user_id, enabled
+        )
+
     async def get_users_for_interests_onboarding(self, limit: int = 50) -> List[dict]:
         return await anyio.to_thread.run_sync(
             self._service.get_users_for_interests_onboarding, limit
@@ -9772,6 +10011,35 @@ class AsyncDatabaseService:
         return await anyio.to_thread.run_sync(
             self._service.get_users_pending_unconfigured_digest, limit
         )
+
+    async def get_bbl_coords(self, bbls: List[str]) -> dict:
+        return await anyio.to_thread.run_sync(self._service.get_bbl_coords, bbls)
+
+    async def upsert_bbl_coords(self, rows: List[dict]) -> int:
+        return await anyio.to_thread.run_sync(self._service.upsert_bbl_coords, rows)
+
+    async def get_leads_missing_coords_with_bbl(
+        self, limit: int = 500, after_id: int = 0
+    ) -> List[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.get_leads_missing_coords_with_bbl, limit, after_id
+        )
+
+    async def set_leads_coords(self, updates: List[tuple]) -> int:
+        return await anyio.to_thread.run_sync(self._service.set_leads_coords, updates)
+
+    async def count_leads_missing_coords(self) -> dict:
+        return await anyio.to_thread.run_sync(self._service.count_leads_missing_coords)
+
+    async def get_dob_leads_missing_bbl(
+        self, limit: int = 150, after_id: int = 0
+    ) -> List[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.get_dob_leads_missing_bbl, limit, after_id
+        )
+
+    async def set_leads_bbl(self, updates: List[tuple]) -> int:
+        return await anyio.to_thread.run_sync(self._service.set_leads_bbl, updates)
 
     async def get_unpushed_lifecycle_notifications(self, limit: int = 50) -> List[dict]:
         return await anyio.to_thread.run_sync(
@@ -9819,6 +10087,9 @@ class AsyncDatabaseService:
         return await anyio.to_thread.run_sync(
             self._service.admin_get_push_metrics, days, recent_limit
         )
+
+    async def admin_get_digest_ab(self, days: int = 30) -> dict:
+        return await anyio.to_thread.run_sync(self._service.admin_get_digest_ab, days)
 
     async def admin_get_alert_planner_metrics(self, day: Optional[str] = None) -> dict:
         return await anyio.to_thread.run_sync(
@@ -10188,8 +10459,11 @@ class AsyncDatabaseService:
     async def get_alerted_pairs_for_leads(self, lead_ids: List[int]) -> List[dict]:
         return await anyio.to_thread.run_sync(self._service.get_alerted_pairs_for_leads, lead_ids)
 
-    async def upsert_daily_digest(self, user_id: int, extra_count: int, locale: Optional[str] = None) -> Optional[dict]:
-        return await anyio.to_thread.run_sync(self._service.upsert_daily_digest, user_id, extra_count, locale)
+    async def upsert_daily_digest(self, user_id: int, extra_count: int, locale: Optional[str] = None,
+                                  variant: Optional[str] = None) -> Optional[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.upsert_daily_digest, user_id, extra_count, locale, variant
+        )
 
     async def get_alert_usage_today(self, day: Optional[str] = None) -> dict:
         return await anyio.to_thread.run_sync(self._service.get_alert_usage_today, day)

@@ -580,6 +580,7 @@ export interface AuthUser {
   show_address_in_push?: boolean;
   digest_enabled?: boolean;
   lifecycle_push_enabled?: boolean;
+  chime_enabled?: boolean;
 }
 
 export interface AuthResponse {
@@ -791,6 +792,7 @@ export async function setPushPreferences(
     show_address_in_push?: boolean;
     digest_enabled?: boolean;
     lifecycle_push_enabled?: boolean;
+    chime_enabled?: boolean;
   }
 ): Promise<AuthUser> {
   return handle<AuthUser>(

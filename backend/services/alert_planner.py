@@ -305,6 +305,18 @@ async def _confidence_pct(lead: dict, cache: dict) -> int | None:
     return pct
 
 
+def _digest_variant(user_id: int) -> str:
+    """Bucket A/B estavel do digest (B3).
+
+    Paridade do id e' deterministica e gratuita: o mesmo utilizador fica sempre
+    no mesmo braco, mesmo entre deploys, sem tabela de atribuicao.
+    """
+    try:
+        return "b" if int(user_id) % 2 else "a"
+    except (TypeError, ValueError):
+        return "a"
+
+
 def _click_fields(notification_id: int | None) -> dict:
     if not notification_id:
         return {}
@@ -678,7 +690,9 @@ async def dispatch_unconfigured_digest(by_cat: dict, quiet: bool, limit: int) ->
             if count <= 0:
                 continue
             locale = normalize(u.get("locale"))
-            res = await db_service.upsert_daily_digest(uid, count, locale=locale)
+            res = await db_service.upsert_daily_digest(
+                uid, count, locale=locale, variant=_digest_variant(uid)
+            )
             if not res or not res.get("_is_new"):
                 continue
             total_n = count
@@ -688,7 +702,10 @@ async def dispatch_unconfigured_digest(by_cat: dict, quiet: bool, limit: int) ->
                 )
             except (ValueError, TypeError):
                 total_n = count
-            rendered = render("digest", locale, n=total_n, limit=limit) or {}
+            rendered = render(
+                "digest_b" if res.get("ab_variant") == "b" else "digest",
+                locale, n=total_n, limit=limit,
+            ) or {}
             click = _click_fields(res.get("id"))
             url = "/dashboard?src=push&digest=1"
             if click:
@@ -857,7 +874,9 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
         if not user_digest.get(uid, True):
             continue
         try:
-            res = await db_service.upsert_daily_digest(uid, count, locale=locale)
+            res = await db_service.upsert_daily_digest(
+                uid, count, locale=locale, variant=_digest_variant(uid)
+            )
             report.digest += 1
             if res and res.get("_is_new"):
                 total_n = count

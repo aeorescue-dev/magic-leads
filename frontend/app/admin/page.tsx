@@ -8,6 +8,7 @@ import {
   BellRing,
   CheckCircle2,
   Database,
+  FlaskConical,
   Languages,
   Loader2,
   Mail,
@@ -33,6 +34,7 @@ import {
   AdminOutboundStatus,
   AdminOverview,
   AdminPlannerMetrics,
+  AdminDigestAb,
   AdminPushMetrics,
   AdminReveal,
   AdminScraperRun,
@@ -53,6 +55,7 @@ import {
   fetchAdminOverview,
   fetchAdminPlanner,
   fetchAdminPush,
+  fetchAdminDigestAb,
   fetchAdminReveals,
   fetchAdminScraperRuns,
   fetchAdminSearchbug,
@@ -1028,6 +1031,7 @@ export default function AdminPage() {
   const [searchbug, setSearchbug] = useState<AdminSearchbugMetrics | null>(null);
   const [phoneSamples, setPhoneSamples] = useState<AdminPhoneSampleProgress | null>(null);
   const [push, setPush] = useState<AdminPushMetrics | null>(null);
+  const [digestAb, setDigestAb] = useState<AdminDigestAb | null>(null);
   const [planner, setPlanner] = useState<AdminPlannerMetrics | null>(null);
   const [creditLedger, setCreditLedger] = useState<AdminCreditLedgerResponse | null>(null);
   const [creditBalance, setCreditBalance] = useState<AdminCreditBalance | null>(null);
@@ -1044,10 +1048,11 @@ export default function AdminPage() {
       const sb = fetchAdminSearchbug(7, 25).catch(() => null);
       const ps = fetchAdminPhoneSampleProgress(90).catch(() => null);
       const pu = fetchAdminPush(7, 25).catch(() => null);
+      const ab = fetchAdminDigestAb(30).catch(() => null);
       const pl = fetchAdminPlanner().catch(() => null);
       const cl = fetchAdminCreditLedger(1, 50).catch(() => null);
       const cb = fetchAdminCreditBalance(1).catch(() => null);
-      const [ov, src, rn, rv, al, sbm, psm, pum, plm, clm, cbm] = await Promise.all([
+      const [ov, src, rn, rv, al, sbm, psm, pum, abm, plm, clm, cbm] = await Promise.all([
         fetchAdminOverview(),
         fetchAdminSources(),
         fetchAdminScraperRuns(15),
@@ -1056,6 +1061,7 @@ export default function AdminPage() {
         sb,
         ps,
         pu,
+        ab,
         pl,
         cl,
         cb,
@@ -1068,6 +1074,7 @@ export default function AdminPage() {
       setSearchbug(sbm);
       setPhoneSamples(psm);
       setPush(pum);
+      setDigestAb(abm);
       setPlanner(plm);
       setCreditLedger(clm);
       setCreditBalance(cbm);
@@ -1769,6 +1776,71 @@ export default function AdminPage() {
                 </div>
               </details>
             ) : null}
+          </div>
+        )}
+      </Card>
+
+      {/* ------------------------------------------------ digest A/B (B3) */}
+      <Card
+        title="Digest · teste A/B"
+        icon={<FlaskConical className="h-4 w-4" />}
+        hint={digestAb ? `últimos ${digestAb.days} dias` : undefined}
+      >
+        {!digestAb || digestAb.arms.length === 0 ? (
+          <p className="text-xs text-slate-500">
+            Sem digests suficientes para comparar variantes.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="text-[10px] uppercase tracking-wider text-slate-500">
+                  <tr>
+                    <th className="py-1">Variante</th>
+                    <th className="py-1">Criados</th>
+                    <th className="py-1">Com push</th>
+                    <th className="py-1">Cliques</th>
+                    <th className="py-1">CTR</th>
+                    <th className="py-1">Amostra</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {digestAb.arms.map((a) => (
+                    <tr key={a.variant}>
+                      <td className="py-1 font-mono uppercase text-slate-300">
+                        {a.variant}
+                        {digestAb.leader === a.variant ? (
+                          <span className="ml-2 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-300">
+                            líder
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="py-1 text-slate-400">{a.sent}</td>
+                      <td className="py-1 text-slate-400">{a.pushed}</td>
+                      <td className="py-1 text-slate-400">{a.clicks}</td>
+                      <td className="py-1 text-indigo-300">
+                        {a.ctr === null ? "—" : `${Math.round(a.ctr * 100)}%`}
+                      </td>
+                      <td className="py-1">
+                        {a.sample_ok ? (
+                          <span className="text-emerald-400">ok</span>
+                        ) : (
+                          <span className="text-amber-400">
+                            {a.pushed}/{digestAb.min_samples}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-[11px] text-slate-500">
+              {digestAb.leader
+                ? `Variante ${digestAb.leader.toUpperCase()} à frente com amostra suficiente.`
+                : `Sem vencedor declarado: são necessários ${digestAb.min_samples} envios com push por braço.`}{" "}
+              CTR = cliques / digests com push entregue.
+            </p>
           </div>
         )}
       </Card>

@@ -336,6 +336,7 @@ class UserResponse(BaseModel):
     show_address_in_push: bool = True
     digest_enabled: bool = True
     lifecycle_push_enabled: bool = False
+    chime_enabled: bool = True
 
 
 class BaseLocationUpdate(BaseModel):
@@ -349,6 +350,7 @@ class PushPreferencesUpdate(BaseModel):
     show_address_in_push: Optional[bool] = None
     digest_enabled: Optional[bool] = None
     lifecycle_push_enabled: Optional[bool] = None
+    chime_enabled: Optional[bool] = None
 
 
 class InterestPushUpdate(BaseModel):

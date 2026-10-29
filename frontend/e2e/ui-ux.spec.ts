@@ -99,8 +99,27 @@ test.describe("UI/UX — tema, teclado e gaveta", () => {
     await expect(life).toHaveAttribute("aria-checked", "true");
   });
 
-  test("o sino de push por ofício desliga sem esconder o in-app", async ({ page }) => {
+  test("o chime de alerta está disponível e o toggle persiste", async ({ page }) => {
+    const asset = await page.request.get("/sounds/alert-chime.mp3");
+    expect(asset.status()).toBe(200);
+    expect(asset.headers()["content-type"]).toContain("audio");
+
     await page.goto("/pt/dashboard/settings");
+    const chime = page.getByRole("switch", { name: /som de alerta/i });
+    await expect(chime).toBeVisible({ timeout: 20000 });
+    await expect(chime).toHaveAttribute("aria-checked", "true"); // default ligado
+
+    await chime.click();
+    await expect(chime).toHaveAttribute("aria-checked", "false");
+    await page.reload();
+    await expect(page.getByRole("switch", { name: /som de alerta/i })).toHaveAttribute(
+      "aria-checked",
+      "false",
+      { timeout: 20000 }
+    );
+  });
+
+  test("o sino de push por ofício desliga sem esconder o in-app", async ({ page }) => {    await page.goto("/pt/dashboard/settings");
     const trades = page.getByRole("switch", { name: /^Roof$/ });
     await expect(trades.first()).toBeVisible({ timeout: 20000 });
 

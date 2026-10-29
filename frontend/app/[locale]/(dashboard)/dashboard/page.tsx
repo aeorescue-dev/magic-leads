@@ -42,6 +42,7 @@ import { LeadLocationMap } from "@/components/LeadLocationMap";
 import { StageBadge } from "@/components/ui/StageBadge";
 import { StageGuidePanel } from "@/components/ui/StageGuidePanel";
 import { ReserveGuideModal } from "@/components/ui/ReserveGuideModal";
+import { playAlertChime, primeAlertChime } from "@/lib/alert-chime";
 import {
   LeadResponse, LeadStats, Notification, Note, HistoryEvent,
   ContractorMetrics,
@@ -523,6 +524,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
   }, [userId]);
 
   // Refresh notifications and unread count
+  const lastUnreadRef = useRef<number | null>(null);
   const refreshNotifications = useCallback(async () => {
     if (!userId) return;
     try {
@@ -531,11 +533,24 @@ const URGENCIES = ["all", "high", "medium", "low"];
         fetchUserUnreadCount(userId),
       ]);
       setNotifications(list || []);
-      setUnreadCount(unread || 0);
+      const nextUnread = unread || 0;
+      const prevUnread = lastUnreadRef.current;
+      lastUnreadRef.current = nextUnread;
+      setUnreadCount(nextUnread);
+      // B3: chime quando chega um alerta novo com a app aberta.
+      if (
+        prevUnread !== null &&
+        nextUnread > prevUnread &&
+        typeof document !== "undefined" &&
+        document.visibilityState === "visible" &&
+        user?.chime_enabled !== false
+      ) {
+        playAlertChime();
+      }
     } catch (e) {
       console.error(e);
     }
-  }, [userId]);
+  }, [userId, user?.chime_enabled]);
 
   useEffect(() => {
     if (userId) {
@@ -544,6 +559,11 @@ const URGENCIES = ["all", "high", "medium", "low"];
       return () => clearInterval(interval);
     }
   }, [userId, refreshNotifications]);
+
+  // B3: arma o chime no primeiro gesto (autoplay policy dos browsers).
+  useEffect(() => {
+    primeAlertChime();
+  }, []);
 
   // Load penalty metrics (Phase 4.2)
   useEffect(() => {
