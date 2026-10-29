@@ -109,3 +109,36 @@ def test_l3_unnamed_consumes_attempt_budget_but_not_quota():
     # (sem nome) -> nao consome cota.
     assert will_call_provider(unnamed, l3_unnamed_enabled=True) is True
     assert will_call_provider(named, l3_unnamed_enabled=True) is True
+
+
+def test_confidence_badge_does_not_leak_phone_before_reveal():
+    from backend.main import _to_lead_response
+
+    lead = {
+        "id": 1,
+        "external_id": "conf-1",
+        "source_type": "311",
+        "address": "123 MAIN STREET",
+        "city": "NYC",
+        "state": "NY",
+        "zip_code": "11201",
+        "issue_category": "Roof",
+        "issue_description": "roof leak",
+        "date_reported": "2026-10-01T00:00:00",
+        "urgency_level": "medium",
+        "owner_name": "JOHN SMITH",
+        "owner_phone": "+17185550100",
+        "phone_verified": 1,
+        "lead_status": "available",
+        "_revealed": False,
+    }
+
+    hidden = _to_lead_response(dict(lead))
+    assert hidden.owner_phone is None
+    assert hidden.phone_verified is False
+    # Sem reveal o selo nao pode dizer "verificado" (revelaria o numero).
+    assert hidden.phone_confidence == "high"
+
+    shown = _to_lead_response({**lead, "_revealed": True})
+    assert shown.owner_phone == "+17185550100"
+    assert shown.phone_confidence == "verified"

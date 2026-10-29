@@ -199,7 +199,12 @@ def _to_lead_response(lead: dict) -> LeadResponse:
         owner_name=lead.get("owner_name") if show_owner else None,
         owner_phone=lead.get("owner_phone") if show_owner else None,
         phone_verified=bool(lead.get("phone_verified")) if show_owner else False,
-        phone_confidence=phone_confidence(lead),
+        # O selo nunca pode denunciar um telefone que o utilizador ainda nao
+        # revelou: sem reveal, avalia-se a resolubilidade (high/medium), nao a
+        # existencia do numero em cache.
+        phone_confidence=phone_confidence(
+            lead if show_owner else {**lead, "owner_phone": None}
+        ),
         owner_email=lead.get("owner_email") if show_owner else None,
         date_reported=lead["date_reported"],
         urgency_level=lead["urgency_level"],
