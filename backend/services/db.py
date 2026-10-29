@@ -1693,6 +1693,52 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def create_or_reuse_draft_batch(
+        self,
+        city: Optional[str] = None,
+        name: Optional[str] = None,
+        filters_json: Optional[str] = None,
+        created_by: Optional[int] = None,
+        kind: str = "email",
+    ) -> Optional[dict]:
+        """Devolve o rascunho do mesmo (city, filtros) ou cria um novo.
+
+        A simulacao do painel chamava `create_outbound_batch` a cada clique e
+        deixou 20+ lotes `previewed` sem uso. Reutilizar mantem a BD limpa e o
+        comportamento identico para quem usa o painel.
+        """
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT * FROM outbound_batches "
+                "WHERE COALESCE(city,'') = COALESCE(?, '') "
+                "  AND COALESCE(filters_json,'') = COALESCE(?, '') "
+                "  AND status IN ('draft', 'previewed') "
+                "ORDER BY id DESC LIMIT 1",
+                (city, filters_json),
+            ).fetchone()
+            if row:
+                if name and row["name"] != name:
+                    conn.execute(
+                        "UPDATE outbound_batches SET name=? WHERE id=?", (name, row["id"])
+                    )
+                    conn.commit()
+                return dict(row)
+
+            cur = conn.execute(
+                "INSERT INTO outbound_batches (city, name, kind, filters_json, status, dry_run, created_by) "
+                "VALUES (?, ?, ?, ?, 'draft', 1, ?)",
+                (city, name, kind, filters_json, created_by),
+            )
+            conn.commit()
+            bid = cur.lastrowid
+            r = conn.execute("SELECT * FROM outbound_batches WHERE id=?", (bid,)).fetchone()
+            return dict(r) if r else None
+        except Exception:
+            return None
+        finally:
+            conn.close()
+
     def mark_outbound_batch_previewed(
         self,
         batch_id: int,
@@ -1716,6 +1762,56 @@ class DatabaseService:
             return dict(r) if r else None
         except Exception:
             return None
+        finally:
+            conn.close()
+
+    def list_outbound_batches_with_counts(self, limit: int = 10) -> List[dict]:
+        """Lotes recentes + contagem de mensagens por estado (para o painel)."""
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                """
+                SELECT b.id, b.city, b.name, b.status, b.dry_run, b.contact_count,
+                       b.created_at, b.previewed_at,
+                       SUM(CASE WHEN m.status='queued'  THEN 1 ELSE 0 END) AS queued,
+                       SUM(CASE WHEN m.status='sent'    THEN 1 ELSE 0 END) AS sent,
+                       SUM(CASE WHEN m.status='skipped' THEN 1 ELSE 0 END) AS skipped,
+                       SUM(CASE WHEN m.status='failed'  THEN 1 ELSE 0 END) AS failed,
+                       SUM(CASE WHEN m.status='sending' THEN 1 ELSE 0 END) AS sending,
+                       COUNT(m.id) AS total
+                FROM outbound_batches b
+                LEFT JOIN outbound_messages m ON m.batch_id = b.id
+                GROUP BY b.id
+                ORDER BY b.id DESC
+                LIMIT ?
+                """,
+                (int(limit),),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def list_batch_messages(self, batch_id: int, limit: int = 100) -> List[dict]:
+        """Mensagens de um lote com destinatario, estado, provider_id e erro."""
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                """
+                SELECT m.id, m.to_email, m.subject, m.status, m.provider_id,
+                       m.queued_at, m.sent_at, COALESCE(m.error,'') AS error,
+                       m.sequence_step, m.next_step_at,
+                       COALESCE(mb.email,'') AS from_addr,
+                       COALESCE(oc.company_name,'') AS company_name
+                FROM outbound_messages m
+                LEFT JOIN sending_mailboxes mb ON mb.id = m.mailbox_id
+                LEFT JOIN outbound_contacts oc ON oc.id = m.contact_id
+                WHERE m.batch_id = ?
+                ORDER BY m.id
+                LIMIT ?
+                """,
+                (int(batch_id), int(limit)),
+            ).fetchall()
+            return [dict(r) for r in rows]
         finally:
             conn.close()
 
@@ -8753,6 +8849,23 @@ class AsyncDatabaseService:
             batch_id,
             contact_count,
             est_cost_usd,
+        )
+
+    async def create_or_reuse_draft_batch(
+        self,
+        city: Optional[str] = None,
+        name: Optional[str] = None,
+        filters_json: Optional[str] = None,
+        created_by: Optional[int] = None,
+        kind: str = "email",
+    ) -> Optional[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.create_or_reuse_draft_batch,
+            city,
+            name,
+            filters_json,
+            created_by,
+            kind,
         )
 
     async def list_outbound_batches(self, limit: int = 50) -> List[dict]:

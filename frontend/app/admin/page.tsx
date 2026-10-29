@@ -24,7 +24,9 @@ import {
 import {
   AdminAlert,
   AdminApiError,
+  AdminOutboundBatchRow,
   AdminOutboundConfigResponse,
+  AdminOutboundMessageRow,
   AdminOutboundPreview,
   AdminOutboundSimulation,
   AdminOutboundStatus,
@@ -42,7 +44,9 @@ import {
     AdminCreditReconcileResponse,
   fetchAdminAlerts,
   fetchAdminEnrichmentStatus,
+  fetchAdminOutboundBatches,
   fetchAdminOutboundConfig,
+  fetchAdminOutboundMessages,
   fetchAdminOutboundStatus,
   fetchAdminOverview,
   fetchAdminPlanner,
@@ -60,6 +64,7 @@ import {
   sendAdminOutbound,
   sendAdminTestPush,
   simulateAdminOutbound,
+  triggerAdminInboxSync,
   triggerAdminOutboundWorker,
   updateAdminOutboundConfig,
 } from "@/lib/admin-api";
@@ -132,6 +137,7 @@ const OUTBOUND_LABELS: Record<string, string> = {
   daily_send_cap: "Teto diário de envio",
   per_mailbox_daily_cap: "Teto diário por caixa",
   warmup_enabled: "Warm-up ligado",
+  warmup_ramp: "Rampa de warm-up (x/dia por dia)",
   min_warmup_days: "Dias mínimos de warm-up",
   quiet_hours_start: "Hora de silêncio (início)",
   quiet_hours_end: "Hora de silêncio (fim)",
@@ -166,6 +172,10 @@ function OutboundPanel() {
   const [status, setStatus] = useState<AdminOutboundStatus | null>(null);
   const [toggling, setToggling] = useState(false);
   const [enriching, setEnriching] = useState(false);
+  const [batches, setBatches] = useState<AdminOutboundBatchRow[]>([]);
+  const [openBatch, setOpenBatch] = useState<number | null>(null);
+  const [batchMsgs, setBatchMsgs] = useState<AdminOutboundMessageRow[]>([]);
+  const [inboxBusy, setInboxBusy] = useState(false);
   const [enrichMsg, setEnrichMsg] = useState<string | null>(null);
 
   const loadConfig = useCallback(async () => {
@@ -188,9 +198,61 @@ function OutboundPanel() {
     }
   }, []);
 
+  const loadBatches = useCallback(async () => {
+    try {
+      const res = await fetchAdminOutboundBatches(8);
+      setBatches(res.batches ?? []);
+    } catch {
+      /* silencioso: nao bloqueia o painel */
+    }
+  }, []);
+
   useEffect(() => {
     void loadConfig();
-  }, [loadConfig]);
+    void loadBatches();
+  }, [loadConfig, loadBatches]);
+
+  // Auto-refresh leve: fila e caixas mudam sem interaccao do utilizador.
+  useEffect(() => {
+    const id = setInterval(() => {
+      fetchAdminOutboundStatus().then(setStatus).catch(() => undefined);
+      void loadBatches();
+    }, 30000);
+    return () => clearInterval(id);
+  }, [loadBatches]);
+
+  const toggleBatch = useCallback(
+    async (batchId: number) => {
+      if (openBatch === batchId) {
+        setOpenBatch(null);
+        setBatchMsgs([]);
+        return;
+      }
+      setOpenBatch(batchId);
+      setBatchMsgs([]);
+      try {
+        const res = await fetchAdminOutboundMessages(batchId, 100);
+        setBatchMsgs(res.messages ?? []);
+      } catch {
+        setBatchMsgs([]);
+      }
+    },
+    [openBatch]
+  );
+
+  const runInboxSync = useCallback(async () => {
+    setInboxBusy(true);
+    setError(null);
+    try {
+      const res = await triggerAdminInboxSync();
+      setEnrichMsg(`Inbox sync: ${JSON.stringify(res)}`);
+      void loadBatches();
+    } catch (e) {
+      setError(e instanceof AdminApiError ? e.message : "Falha no inbox sync.");
+    } finally {
+      setInboxBusy(false);
+    }
+  }, [loadBatches]);
 
   const runPreview = useCallback(async () => {
     if (!city) return;
@@ -512,6 +574,157 @@ function OutboundPanel() {
               {enrichMsg}
             </p>
           ) : null}
+        </div>
+
+        {/* caixas de envio: dados reais de /outbound/status */}
+        {status && status.mailboxes.length > 0 ? (
+          <div className="space-y-2 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[10px] uppercase tracking-wider text-slate-500">
+                Caixas de envio
+              </span>
+              <button
+                onClick={() => void runInboxSync()}
+                disabled={inboxBusy}
+                className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-white/10 px-2 py-1 text-[10px] font-semibold text-slate-300 hover:bg-white/5 disabled:opacity-40"
+              >
+                {inboxBusy ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Mail className="h-3 w-3" />
+                )}
+                Sincronizar inbox
+              </button>
+            </div>
+            <table className="w-full text-left text-[11px]">
+              <thead className="text-[10px] uppercase tracking-wider text-slate-500">
+                <tr>
+                  <th className="py-1">Conta</th>
+                  <th className="py-1">Estado</th>
+                  <th className="py-1">Hoje / cap</th>
+                  <th className="py-1">Warm-up</th>
+                </tr>
+              </thead>
+              <tbody className="text-slate-300">
+                {status.mailboxes.map((mb) => (
+                  <tr key={mb.id} className="border-t border-white/5">
+                    <td className="py-1">{mb.email}</td>
+                    <td className="py-1">
+                      {mb.enabled ? (
+                        <span className="text-emerald-400">ligada</span>
+                      ) : (
+                        <span className="text-slate-500">desligada</span>
+                      )}
+                    </td>
+                    <td className="py-1">
+                      {mb.sent_today} / {mb.effective_cap}
+                    </td>
+                    <td className="py-1">
+                      dia {mb.warmup_days} · {mb.warmup_state}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+
+        {/* fila e lotes: o que esta' realmente a sair e quando */}
+        <div className="rounded-lg border border-white/10">
+          <div className="flex flex-wrap items-center gap-2 border-b border-white/10 px-3 py-2">
+            <span className="text-[10px] uppercase tracking-wider text-slate-500">
+              Fila e lotes
+            </span>
+            <span className="text-[10px] text-slate-600">
+              clica num lote para ver as mensagens
+            </span>
+            <button
+              onClick={() => void loadBatches()}
+              className="ml-auto inline-flex items-center gap-1 rounded border border-white/10 px-2 py-1 text-[10px] font-semibold text-slate-300 hover:bg-white/5"
+            >
+              <RefreshCcw className="h-3 w-3" /> Actualizar
+            </button>
+          </div>
+          {batches.length === 0 ? (
+            <p className="px-3 py-3 text-[11px] text-slate-500">Sem lotes.</p>
+          ) : (
+            <table className="w-full text-left text-[11px]">
+              <thead className="text-[10px] uppercase tracking-wider text-slate-500">
+                <tr>
+                  <th className="px-3 py-1.5">#</th>
+                  <th className="py-1.5">Cidade</th>
+                  <th className="py-1.5">Estado</th>
+                  <th className="py-1.5">Fila</th>
+                  <th className="py-1.5">Enviados</th>
+                  <th className="py-1.5">Saltados</th>
+                  <th className="py-1.5">Falhas</th>
+                  <th className="py-1.5">Total</th>
+                </tr>
+              </thead>
+              {batches.map((b) => (
+                <tbody key={b.id} className="text-slate-300">
+                  <tr
+                    onClick={() => void toggleBatch(b.id)}
+                    className="cursor-pointer border-t border-white/5 hover:bg-white/[0.03]"
+                  >
+                    <td className="px-3 py-1.5 font-mono">{b.id}</td>
+                    <td className="py-1.5">{b.city}</td>
+                    <td className="py-1.5">
+                      <span className={b.status === "sending" ? "text-indigo-300" : "text-slate-400"}>
+                        {b.status}
+                      </span>
+                      {b.dry_run ? <span className="ml-1 text-slate-600">(dry)</span> : null}
+                    </td>
+                    <td className="py-1.5">{b.queued}</td>
+                    <td className="py-1.5">{b.sent}</td>
+                    <td className="py-1.5">{b.skipped}</td>
+                    <td className={`py-1.5 ${b.failed ? "text-rose-400" : ""}`}>{b.failed}</td>
+                    <td className="py-1.5">{b.total}</td>
+                  </tr>
+                  {openBatch === b.id ? (
+                    <tr className="border-t border-white/5 bg-black/20">
+                      <td colSpan={8} className="px-3 py-2">
+                        {batchMsgs.length === 0 ? (
+                          <span className="text-[10px] text-slate-500">
+                            (sem mensagens — lote ainda nao promovido)
+                          </span>
+                        ) : (
+                          <table className="w-full text-left text-[10px]">
+                            <thead className="text-slate-500">
+                              <tr>
+                                <th className="py-1">#</th>
+                                <th className="py-1">Destinatario</th>
+                                <th className="py-1">Estado</th>
+                                <th className="py-1">De</th>
+                                <th className="py-1">provider_id</th>
+                                <th className="py-1">Enviado</th>
+                                <th className="py-1">Erro</th>
+                              </tr>
+                            </thead>
+                            <tbody className="text-slate-400">
+                              {batchMsgs.map((m) => (
+                                <tr key={m.id} className="border-t border-white/5">
+                                  <td className="py-0.5 font-mono">{m.id}</td>
+                                  <td className="py-0.5">{m.to_email}</td>
+                                  <td className={`py-0.5 ${m.status === "sent" ? "text-emerald-400" : m.status === "failed" ? "text-rose-400" : ""}`}>
+                                    {m.status}
+                                  </td>
+                                  <td className="py-0.5">{m.from_addr || "—"}</td>
+                                  <td className="py-0.5 font-mono">{m.provider_id || "—"}</td>
+                                  <td className="py-0.5">{m.sent_at || "—"}</td>
+                                  <td className="py-0.5 text-rose-400">{m.error || ""}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              ))}
+            </table>
+          )}
         </div>
 
         {/* gerar prévia + simular */}

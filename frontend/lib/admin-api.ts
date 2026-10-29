@@ -502,6 +502,55 @@ export function updateAdminOutboundConfig(payload: {
   });
 }
 
+export interface AdminOutboundBatchRow {
+  id: number;
+  city: string;
+  name: string;
+  status: string;
+  dry_run: number;
+  contact_count: number;
+  queued: number;
+  sent: number;
+  skipped: number;
+  failed: number;
+  sending: number;
+  total: number;
+  created_at: string;
+  previewed_at: string | null;
+}
+
+export interface AdminOutboundMessageRow {
+  id: number;
+  to_email: string;
+  subject: string;
+  status: string;
+  provider_id: string | null;
+  queued_at: string;
+  sent_at: string | null;
+  error: string;
+  from_addr: string;
+  company_name: string;
+  sequence_step: number;
+  next_step_at: string | null;
+}
+
+export function fetchAdminOutboundBatches(limit = 10): Promise<{ batches: AdminOutboundBatchRow[] }> {
+  return adminFetch<{ batches: AdminOutboundBatchRow[] }>(`/outbound/batches?limit=${limit}`);
+}
+
+export function fetchAdminOutboundMessages(
+  batchId: number,
+  limit = 100
+): Promise<{ batch_id: number; messages: AdminOutboundMessageRow[] }> {
+  return adminFetch<{ batch_id: number; messages: AdminOutboundMessageRow[] }>(
+    `/outbound/messages?batch_id=${batchId}&limit=${limit}`
+  );
+}
+
+export function triggerAdminInboxSync(): Promise<Record<string, unknown>> {
+  return adminFetch<Record<string, unknown>>("/outbound/inbox/sync", { method: "POST" });
+}
+
 export function fetchAdminOutboundStatus(): Promise<AdminOutboundStatus> {
   return adminFetch<AdminOutboundStatus>("/outbound/status");
 }

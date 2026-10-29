@@ -52,6 +52,8 @@ KV_LAST_BACKUP = "last_backup_at"
 KV_LAST_BACKUP_BYTES = "last_backup_bytes"
 KV_LAST_VERIFY = "last_backup_verify_at"
 KV_LAST_DIGEST = "last_digest_date"
+KV_LAST_RED_ALERT = "last_red_alert_at"
+RED_ALERT_COOLDOWN_MIN = 60
 
 
 # ------------------------------------------------------------------ helpers
@@ -282,6 +284,44 @@ async def _check_tokens() -> dict:
     return {"name": "gmail_tokens", "status": "ok", "detail": f"{len(mailboxes)} caixa(s) OK"}
 
 
+async def send_alert(checks: list[dict]) -> dict:
+    """Envia um alerta imediato quando o estado fica VERMELHO (1x/hora)."""
+    if not DIGEST_TO:
+        return {"status": "skipped", "reason": "CONTROL_TOWER_EMAIL ausente"}
+    mailbox = _load_mailbox()
+    if not mailbox:
+        return {"status": "skipped", "reason": "sem caixa ativa"}
+
+    from .gmail import gmail_sender
+
+    failing = [c for c in checks if c["status"] == "fail"]
+    lines = [
+        "ALERTA — Magic Leads Control Tower",
+        "",
+        f"{len(failing)} verificacao(oes) em FALHA:",
+    ]
+    for c in failing:
+        lines.append(f"  - {c['name']}: {c['detail']}")
+    lines += ["", "--- estado completo ---", build_digest()]
+    result = await gmail_sender.send(
+        mailbox, DIGEST_TO, "[ALERTA] Magic Leads — motor em VERMELHO", "\n".join(lines)
+    )
+    if getattr(result, "success", False):
+        kv_set(KV_LAST_RED_ALERT, _iso(_now()))
+        return {"status": "ok", "to": DIGEST_TO, "failing": len(failing)}
+    return {"status": "error", "reason": getattr(result, "error", "unknown")}
+
+
+async def maybe_send_red_alert(checks: list[dict]) -> Optional[dict]:
+    """Dispara no maximo 1x/hora, so' quando ha pelo menos um `fail`."""
+    if not any(c["status"] == "fail" for c in checks):
+        return None
+    last = _parse(kv_get(KV_LAST_RED_ALERT))
+    if last and (_now() - last) < timedelta(minutes=RED_ALERT_COOLDOWN_MIN):
+        return None
+    return await send_alert(checks)
+
+
 async def run_health_checks() -> list[dict]:
     checks: list[dict] = [_check_db(), _check_worker()]
     checks.extend(_check_queue())
@@ -294,7 +334,15 @@ async def run_health_checks() -> list[dict]:
         key=lambda s: {"ok": 0, "warn": 1, "fail": 2}.get(s, 0),
     )
     if worst != "ok":
-        logger.warning("[CONTROL-TOWER] %s", [(c["name"], c["status"], c["detail"]) for c in checks if c["status"] != "ok"])
+        logger.warning(
+            "[CONTROL-TOWER] %s",
+            [(c["name"], c["status"], c["detail"]) for c in checks if c["status"] != "ok"],
+        )
+    if worst == "fail":
+        try:
+            await maybe_send_red_alert(checks)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[CONTROL-TOWER] alerta falhou: %s", exc)
     return checks
 
 

@@ -56,6 +56,7 @@ from .services import (
     alert_planner,
     control_tower,
     enrichment_queue,
+    inbox_sync,
     notifier,
     outbound_templates,
     security,
@@ -1806,6 +1807,36 @@ async def admin_outbound_worker(
     return await outbound_engine.process_queue(limit=limit)
 
 
+@app.get("/api/admin/outbound/batches")
+async def admin_outbound_batches(
+    limit: int = 10,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Lotes recentes com contagem por estado (visibilidade da fila)."""
+    svc = db_service._service
+    return {
+        "batches": await anyio.to_thread.run_sync(
+            svc.list_outbound_batches_with_counts, limit
+        )
+    }
+
+
+@app.get("/api/admin/outbound/messages")
+async def admin_outbound_messages(
+    batch_id: int,
+    limit: int = 100,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Mensagens de um lote: destinatario, estado, provider_id e erro."""
+    svc = db_service._service
+    return {
+        "batch_id": batch_id,
+        "messages": await anyio.to_thread.run_sync(
+            svc.list_batch_messages, batch_id, limit
+        ),
+    }
+
+
 @app.post("/api/admin/outbound/enrich/jobs")
 async def admin_enrich_jobs_create(
     city: str,
@@ -1828,6 +1859,12 @@ async def admin_enrich_jobs_create(
         result.get("jobs_created"), result.get("pending_total"),
     )
     return result
+
+
+@app.post("/api/admin/outbound/inbox/sync")
+async def admin_outbound_inbox_sync(_admin: dict = Depends(_require_admin_user)):
+    """Forca uma leitura da caixa (respostas/bounces) - uso manual."""
+    return await inbox_sync.sync_inbox()
 
 
 @app.get("/api/admin/outbound/health")
@@ -1938,7 +1975,9 @@ async def admin_outbound_simulate(
     contact = await db_service.get_outbound_sample_contact(city)
     preview = _build_outbound_preview(city, niche, qualified, sample, contact)
 
-    batch = await db_service.create_outbound_batch(
+    # Reutiliza o rascunho do mesmo (city, filtros): antes cada clique criava
+    # um lote novo e a BD acumulava lotes `previewed` sem uso.
+    batch = await db_service.create_or_reuse_draft_batch(
         city=city,
         name=f"[DRY-RUN] {city} - {niche} - {batch_size} leads",
         filters_json=json.dumps(
@@ -3118,6 +3157,12 @@ async def _lifespan(app):
         _health_task = asyncio.create_task(_control_tower_loop())
         logger.info("Control Tower ativa (saude 15min, backup+digest diarios)")
 
+    # Inbox sync (gmail.readonly): respostas, bounces e reclamacoes ->
+    # supressao automatica. Fail-soft: sem o scope devolve no_permission.
+    if getattr(settings, "INBOX_SYNC_ENABLED", True):
+        _inbox_task = asyncio.create_task(_inbox_sync_loop())
+        logger.info("Inbox sync ativa (5min) — requer scope gmail.readonly")
+
     # Fila de enriquecimento (Fase 1): tira a descoberta/validacao do request
     # HTTP. Fail-closed: sem VPS configurada cada job fica `no_email`/`failed`.
     if getattr(settings, "ENRICH_QUEUE_ENABLED", True):
@@ -3235,6 +3280,21 @@ async def _hold_watchdog_loop():
         except Exception as e:
             # Uma falha aqui nao pode matar o loop: o proximo ciclo volta a tentar.
             logger.error(f"Erro no watchdog de holds: {e}", exc_info=True)
+
+
+async def _inbox_sync_loop():
+    """Le a inbox a cada 5 min; nunca derruba a app."""
+    await asyncio.sleep(120)
+    while True:
+        try:
+            res = await inbox_sync.sync_inbox()
+            if res.get("status") != "ok" or any(
+                res.get(k) for k in ("replies", "bounces", "complaints")
+            ):
+                logger.info("[INBOX] %s", res)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[INBOX] sync falhou: %s", exc)
+        await asyncio.sleep(5 * 60)
 
 
 async def _control_tower_loop():
