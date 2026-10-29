@@ -2143,19 +2143,19 @@ const URGENCIES = ["all", "high", "medium", "low"];
           {/* KPI CARDS - Real stats from Dashboard Summary */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
             {[
-              { label: t("dashboard.kpi.interested") || "No seu interesse", value: dashboardSummary?.total_interested ?? 0, delta: t("dashboard.kpi.opportunities") || "oportunidades reais", icon: Building2, color: "#6366f1" },
+              { label: t("dashboard.kpi.interested") || "No seu interesse", value: dashboardSummary?.total_interested ?? 0, delta: t("dashboard.kpi.opportunities") || "oportunidades reais", icon: Building2, color: isDark ? "#6366f1" : "#4338ca" },
               // Card "Última varredura": número canónico e ESTÁVEL do último lote
               // concluído do scraper — a MESMA fonte da landing
               // (`/api/metrics/public` → last_scrape.novas_oportunidades).
               // Antes usava `recent_count` (janela móvel de 2h sobre `updated_at`,
               // reescrito por cada re-scrape) e oscilava >5000 ↔ 1100 ↔ 1.
               // Agora ambos (dashboard e landing) exibem exatamente o mesmo valor.
-              { label: t("dashboard.kpi.last_scrape"), value: publicMetrics?.last_scrape?.novas_oportunidades ?? dashboardSummary?.recent_count ?? scrapeCount, delta: t("dashboard.kpi.updated_now"), icon: TrendingUp, color: "#22c55e" },
+              { label: t("dashboard.kpi.last_scrape"), value: publicMetrics?.last_scrape?.novas_oportunidades ?? dashboardSummary?.recent_count ?? scrapeCount, delta: t("dashboard.kpi.updated_now"), icon: TrendingUp, color: isDark ? "#22c55e" : "#15803d" },
               // `with_contact` conta leads COM PROPRIETÁRIO IDENTIFICADO — não
               // telefone (as validações de ligações só acontecem na reserva, de
               // propósito: o número é pago). "prontas p/ ligar" era mentira.
-              { label: t("dashboard.kpi.with_contact") || "Com contato", value: dashboardSummary?.with_contact ?? 0, delta: t("dashboard.kpi.owner_identified") || "com proprietário identificado", icon: Phone, color: "#f59e0b" },
-              { label: t("dashboard.kpi.urgent") || "Urgentes", value: dashboardSummary?.urgent ?? 0, delta: t("dashboard.kpi.need_action") || "precisam ação", icon: AlertCircle, color: "#ef4444" },
+              { label: t("dashboard.kpi.with_contact") || "Com contato", value: dashboardSummary?.with_contact ?? 0, delta: t("dashboard.kpi.owner_identified") || "com proprietário identificado", icon: Phone, color: isDark ? "#f59e0b" : "#b45309" },
+              { label: t("dashboard.kpi.urgent") || "Urgentes", value: dashboardSummary?.urgent ?? 0, delta: t("dashboard.kpi.need_action") || "precisam ação", icon: AlertCircle, color: isDark ? "#ef4444" : "#b91c1c" },
             ].map((k) => (
               <div key={k.label} className={`border rounded-xl p-4 transition-colors ${theme === "dark" ? "bg-[#10121a] border-white/5" : "bg-white border-slate-200 shadow-sm"}`}>
                 <div className="flex items-center gap-2">
