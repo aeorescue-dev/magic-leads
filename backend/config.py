@@ -52,6 +52,28 @@ class Settings(BaseSettings):
     SEARCHBUG_TIMEOUT_SECONDS: float = 10.0
     # Timeout de ligacao (TCP+TLS). Fixo e baixo porque o host e sempre o mesmo.
     SEARCHBUG_CONNECT_TIMEOUT_SECONDS: float = 5.0
+    # Custo REAL por consulta, confirmado na fatura Searchbug (2026-10): $0.20.
+    # E a unica fonte de verdade para o orcamento (SEARCHBUG_DAILY_CALL_CAP /
+    # SEARCHBUG_MONTHLY_BUDGET_USD) e para a reconciliacao do painel. Nao
+    # assumir valores de terceiros: se a fatura mudar, muda-se aqui e em
+    # docs/PROJECT-MEMORY.md no mesmo PR.
+    SEARCHBUG_PRICE_PER_CALL_USD: float = 0.20
+    # P0-C1: validacao e resiliencia do telefone.
+    # `verified` so com name_match >= este limiar; abaixo disso o telefone e'
+    # descartado (pode ser outra pessoa).
+    PHONE_NAME_MATCH_MIN: float = 0.6
+    # L3 sem nome: desligado por defeito (custo sem possibilidade de cobranca).
+    # Quando ligado, entrega "sob consulta": telefone gratuito, sem selo.
+    PHONE_L3_UNNAMED_ENABLED: bool = False
+    # Retry unico em transport_error, com backoff curto.
+    PHONE_TRANSPORT_RETRY_DELAY_S: float = 1.5
+    # Circuit breaker: N falhas de transporte consecutivas -> pausa.
+    PHONE_CIRCUIT_FAILURES: int = 3
+    PHONE_CIRCUIT_COOLDOWN_S: int = 60
+    # P0-C1B: orcamento de tentativas pagas por utilizador (anti-bot).
+    # 30/dia = 3x a cota de 10; uma rajada de 3/min trava scripts.
+    PHONE_ATTEMPTS_PER_USER_DAY: int = 30
+    PHONE_ATTEMPTS_PER_USER_MINUTE: int = 3
 
     # Scraper Config
     SOCRATA_APP_TOKEN: str = ""  # App Token Socrata (pool dedicado, cota maior)

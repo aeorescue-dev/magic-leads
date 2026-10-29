@@ -45,7 +45,13 @@ class _FakeResponse:
     def __init__(self, status_code: int = 200, payload: dict | None = None, text: str = ""):
         self.status_code = status_code
         self._payload = payload or {}
-        self._text = text
+        if text:
+            self._text = text
+        elif payload is not None:
+            import json
+            self._text = json.dumps(payload)
+        else:
+            self._text = ""
 
     def json(self):
         return self._payload
@@ -144,7 +150,7 @@ def _configured_service(monkeypatch):
 async def test_successful_call_is_billed_and_recorded(monkeypatch):
     payload = {
         "Status": "OK",
-        "Data": {"RECORD": [{"PHONE": "2125551234"}]},
+        "Data": {"RECORD": [{"FNAME": "JOHN", "LNAME": "SMITH", "PHONE": "2125551234"}]},
     }
     _patch_client(monkeypatch, response=_FakeResponse(200, payload))
 
@@ -198,7 +204,7 @@ async def test_http_error_records_status(monkeypatch):
     assert result.success is False
     row = (await _rows_after_flush())[0]
     assert row["outcome"] == "http_error"
-    assert row["billed"] == 1
+    assert row["billed"] == 0, "5xx e transporte, nao busca faturavel"
     assert row["http_status"] == 503
 
 
@@ -218,7 +224,8 @@ async def test_no_phone_in_records_is_NOT_billed(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_timeout_is_billed(monkeypatch):
+async def test_timeout_is_transport_and_not_billed(monkeypatch):
+    """P0-C1: timeout e' transporte; nao se assume faturacao."""
     _patch_client(monkeypatch, raises=TimeoutError("Read timed out"))
 
     service = _configured_service(monkeypatch)
@@ -226,8 +233,9 @@ async def test_timeout_is_billed(monkeypatch):
 
     assert result.success is False
     row = (await _rows_after_flush())[0]
-    assert row["outcome"] == "timeout"
-    assert row["billed"] == 1
+    assert row["outcome"] == "transport_error"
+    assert row["billed"] == 0
+    assert row["transport_error"] == 1
 
 
 @pytest.mark.asyncio
@@ -268,7 +276,7 @@ async def test_cache_hit_is_success_but_not_billed(monkeypatch):
     """Cache hit devolve success=True e mesmo assim custo zero."""
     payload = {
         "Status": "OK",
-        "Data": {"RECORD": [{"PHONE": "2125551234"}]},
+        "Data": {"RECORD": [{"FNAME": "JOHN", "LNAME": "SMITH", "PHONE": "2125551234"}]},
     }
     _patch_client(monkeypatch, response=_FakeResponse(200, payload))
 
@@ -323,7 +331,7 @@ async def test_metrics_failure_does_not_break_lookup(monkeypatch):
     """O contrato mais importante: telemetria rota nao pode falhar o pedido."""
     payload = {
         "Status": "OK",
-        "Data": {"RECORD": [{"PHONE": "2125551234"}]},
+        "Data": {"RECORD": [{"FNAME": "JOHN", "LNAME": "SMITH", "PHONE": "2125551234"}]},
     }
     _patch_client(monkeypatch, response=_FakeResponse(200, payload))
 
@@ -342,7 +350,7 @@ async def test_one_event_per_provider_call(monkeypatch):
     """Nao pode haver contagem dupla: 1 chamada = 1 linha."""
     payload = {
         "Status": "OK",
-        "Data": {"RECORD": [{"PHONE": "2125551234"}]},
+        "Data": {"RECORD": [{"FNAME": "JOHN", "LNAME": "SMITH", "PHONE": "2125551234"}]},
     }
     _patch_client(monkeypatch, response=_FakeResponse(200, payload))
 
@@ -361,7 +369,7 @@ async def test_billed_call_records_system_cost_event(monkeypatch):
     """Chamada que chegou ao provider = evento de custo, user 0 (sistema)."""
     payload = {
         "Status": "OK",
-        "Data": {"RECORD": [{"PHONE": "2125551234"}]},
+        "Data": {"RECORD": [{"FNAME": "JOHN", "LNAME": "SMITH", "PHONE": "2125551234"}]},
     }
     _patch_client(monkeypatch, response=_FakeResponse(200, payload))
 
@@ -409,7 +417,7 @@ async def test_cache_hit_records_no_cost_event(monkeypatch):
     """Cache hit nao custa: nem telemetria billed nem evento de custo."""
     payload = {
         "Status": "OK",
-        "Data": {"RECORD": [{"PHONE": "2125551234"}]},
+        "Data": {"RECORD": [{"FNAME": "JOHN", "LNAME": "SMITH", "PHONE": "2125551234"}]},
     }
     _patch_client(monkeypatch, response=_FakeResponse(200, payload))
 

@@ -260,6 +260,7 @@ CREATE TABLE IF NOT EXISTS leads (
   urgency_level TEXT DEFAULT 'medium',
   owner_name TEXT,
   owner_phone TEXT,
+  phone_verified INTEGER DEFAULT 0,
   owner_email TEXT,
   owner_status TEXT DEFAULT 'unknown',
   mailing_address TEXT,
@@ -425,6 +426,18 @@ CREATE TABLE IF NOT EXISTS user_daily_stats (
   PRIMARY KEY (user_id, date)
 );
 
+-- P0-C1B: orcamento de tentativas pagas por utilizador (anti-bot).
+-- Cada linha = uma tentativa que chegou a Searchbug. O limite e' por
+-- utilizador/dia (30) e por rajada (3/min). Nao e' um cap global.
+CREATE TABLE IF NOT EXISTS phone_attempts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  attempted_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_phone_attempts_user_time
+  ON phone_attempts (user_id, attempted_at);
+
 CREATE TABLE IF NOT EXISTS lead_reveals (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
@@ -586,12 +599,19 @@ CREATE TABLE IF NOT EXISTS searchbug_calls (
   latency_ms INTEGER,
   http_status INTEGER,
   city TEXT,
-  error TEXT
+  error TEXT,
+  lead_id INTEGER,
+  owner_class TEXT,
+  layer TEXT,
+  name_match REAL,
+  transport_error INTEGER DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_searchbug_calls_at ON searchbug_calls (called_at);
 CREATE INDEX IF NOT EXISTS idx_searchbug_calls_outcome ON searchbug_calls (outcome);
 CREATE INDEX IF NOT EXISTS idx_searchbug_calls_billed ON searchbug_calls (billed, called_at);
+-- idx_searchbug_calls_lead e' criado em _migrate_schema (a coluna lead_id nao
+-- existe em bases antigas; criar o indice aqui abortaria o executescript).
 
 -- Fase 2: telemetria das entregas de push notification.
 --
@@ -1119,6 +1139,8 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE leads ADD COLUMN converted_by INTEGER")
     if "converted_at" not in cols:
         conn.execute("ALTER TABLE leads ADD COLUMN converted_at TEXT")
+    if "phone_verified" not in cols:
+        conn.execute("ALTER TABLE leads ADD COLUMN phone_verified INTEGER DEFAULT 0")
     if "stage_expires_at" not in cols:
         conn.execute("ALTER TABLE leads ADD COLUMN stage_expires_at TEXT")
     if "mailing_address" not in cols:
@@ -1301,6 +1323,31 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     # `gmail.readonly`), este campo e' a fonte de verdade manual.
     if contact_cols and "replied_at" not in contact_cols:
         conn.execute("ALTER TABLE outbound_contacts ADD COLUMN replied_at TEXT")
+
+    # P0-C1: telemetria do telefone por lead/classe/camada. Aditivo e
+    # idempotente; o painel de reconciliacao passa a poder medir hit rate por
+    # owner_class/layer e separar transporte de no_results.
+    sb_cols = {
+        r["name"] for r in conn.execute("PRAGMA table_info(searchbug_calls)").fetchall()
+    }
+    if sb_cols:
+        sb_extra = {
+            "lead_id": "INTEGER",
+            "owner_class": "TEXT",
+            "layer": "TEXT",
+            "name_match": "REAL",
+            "transport_error": "INTEGER DEFAULT 0",
+        }
+        for name, ctype in sb_extra.items():
+            if name not in sb_cols:
+                conn.execute(f"ALTER TABLE searchbug_calls ADD COLUMN {name} {ctype}")
+        try:
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_searchbug_calls_lead "
+                "ON searchbug_calls (lead_id)"
+            )
+        except sqlite3.OperationalError:
+            pass
 
     # Sprint 1: `stripe_events.granted` distingue "evento visto" de "acesso ja'
     # concedido". Sem esta coluna, um webhook que falhasse a meio era visto
@@ -3120,12 +3167,15 @@ class DatabaseService:
         finally:
             conn.close()
 
-    def update_owner_phone(self, lead_id: int, owner_phone: Optional[str]) -> bool:
+    def update_owner_phone(
+        self, lead_id: int, owner_phone: Optional[str], verified: bool = False
+    ) -> bool:
         conn = get_connection()
         try:
             cur = conn.execute(
-                "UPDATE leads SET owner_phone = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (owner_phone, lead_id),
+                "UPDATE leads SET owner_phone = ?, phone_verified = ?, "
+                "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (owner_phone, 1 if verified else 0, lead_id),
             )
             conn.commit()
             return cur.rowcount > 0
@@ -6547,34 +6597,88 @@ class DatabaseService:
         finally:
             conn.close()
 
-    def increment_daily_leads(self, user_id: int) -> bool:
-        """Incrementa contador. Retorna True se dentro do limite (10). Reset em meia-noite UTC."""
+    def reserve_daily_quota(self, user_id: int) -> bool:
+        """Reserva atomica de 1 unidade da cota diaria.
+
+        P0-C1B: `UPDATE ... WHERE leads_used < leads_limit` numa transacao
+        IMMEDIATE. Dois pedidos concorrentes em 9/10 resultam em 10/10, nunca
+        11/10. Devolve False quando a cota esta esgotada.
+        """
         conn = get_connection()
         try:
             today = utcnow().date().isoformat()
             reset_at = self._utc_tomorrow_midnight().isoformat()
-
-            record = conn.execute(
-                "SELECT leads_used FROM user_daily_stats WHERE user_id = ? AND date = ?",
-                (user_id, today)
-            ).fetchone()
-
-            if record and record["leads_used"] >= 10:
-                return False  # Limite atingido
-
-            if record:
-                conn.execute(
-                    "UPDATE user_daily_stats SET leads_used = leads_used + 1 WHERE user_id = ? AND date = ?",
-                    (user_id, today)
-                )
-            else:
-                conn.execute(
-                    "INSERT INTO user_daily_stats (user_id, date, leads_used, leads_limit, reset_at) VALUES (?, ?, 1, 10, ?)",
-                    (user_id, today, reset_at)
-                )
-
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                """INSERT INTO user_daily_stats (user_id, date, leads_used, leads_limit, reset_at)
+                   VALUES (?, ?, 0, 10, ?) ON CONFLICT(user_id, date) DO NOTHING""",
+                (user_id, today, reset_at),
+            )
+            cur = conn.execute(
+                """UPDATE user_daily_stats
+                      SET leads_used = leads_used + 1
+                    WHERE user_id = ? AND date = ? AND leads_used < leads_limit""",
+                (user_id, today),
+            )
             conn.commit()
-            return True
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def refund_daily_quota(self, user_id: int) -> None:
+        """Devolve 1 unidade da cota (falha da Searchbug = tentativa gratis)."""
+        conn = get_connection()
+        try:
+            today = utcnow().date().isoformat()
+            conn.execute(
+                """UPDATE user_daily_stats
+                      SET leads_used = MAX(0, leads_used - 1)
+                    WHERE user_id = ? AND date = ?""",
+                (user_id, today),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def increment_daily_leads(self, user_id: int) -> bool:
+        """Compatibilidade: reserva atomica de 1 unidade da cota diaria."""
+        return self.reserve_daily_quota(user_id)
+
+    def reserve_phone_attempt(self, user_id: int) -> dict:
+        """Orcamento de tentativas pagas POR UTILIZADOR (anti-bot).
+
+        Nao existe cap global: cada utilizador tem 30 tentativas/dia e 3/min.
+        Uma tentativa e' registada antes da chamada; um `no_results` conta como
+        tentativa (o custo existe), mas nao consome a cota de revelacoes.
+        """
+        daily_limit = int(getattr(settings, "PHONE_ATTEMPTS_PER_USER_DAY", 30) or 30)
+        minute_limit = int(getattr(settings, "PHONE_ATTEMPTS_PER_USER_MINUTE", 3) or 3)
+        conn = get_connection()
+        try:
+            today = utcnow().date().isoformat()
+            conn.execute("BEGIN IMMEDIATE")
+            daily = conn.execute(
+                "SELECT COUNT(*) AS c FROM phone_attempts WHERE user_id = ? AND attempted_at >= ?",
+                (user_id, today),
+            ).fetchone()["c"]
+            if daily >= daily_limit:
+                conn.rollback()
+                return {"ok": False, "reason": "daily_attempts", "used": daily, "limit": daily_limit}
+
+            minute = conn.execute(
+                """SELECT COUNT(*) AS c FROM phone_attempts
+                   WHERE user_id = ? AND attempted_at >= datetime('now', '-60 seconds')""",
+                (user_id,),
+            ).fetchone()["c"]
+            if minute >= minute_limit:
+                conn.rollback()
+                return {"ok": False, "reason": "burst", "used": minute, "limit": minute_limit}
+
+            conn.execute("INSERT INTO phone_attempts (user_id) VALUES (?)", (user_id,))
+            # Limpeza barata: a tabela nunca cresce mais de 2 dias.
+            conn.execute("DELETE FROM phone_attempts WHERE attempted_at < datetime('now', '-2 days')")
+            conn.commit()
+            return {"ok": True, "used": daily + 1, "limit": daily_limit}
         finally:
             conn.close()
 
@@ -6683,15 +6787,21 @@ class DatabaseService:
         conn = get_connection()
         try:
             self._expire_lead_holds(conn)
+            conn.commit()
+            # P0-C1B: transacao IMMEDIATE para a reserva de cota + reveal serem
+            # atomicas entre processos/pedidos concorrentes.
+            conn.execute("BEGIN IMMEDIATE")
             today = utcnow().date().isoformat()
 
             # 1. Lead existe?
             lead = conn.execute("SELECT * FROM leads WHERE id = ?", (lead_id,)).fetchone()
             if not lead:
+                conn.rollback()
                 return {"error": "not_found"}
 
             # 2. Reservado por outro? (já expirado via _expire_lead_holds acima)
             if lead["lead_status"] == "reserved" and lead["reserved_by"] != user_id:
+                conn.rollback()
                 return {"error": "already_reserved", "lead": dict(lead)}
 
             # 3. Idempotência: reveal ativo (não devolvido) para este (user, lead)?
@@ -6708,6 +6818,7 @@ class DatabaseService:
             if active:
                 # Re-clique no mesmo lead com reveal ativo: no-op de estado,
                 # NÃO conta 2x, NÃO estica o prazo (anti-abuso).
+                conn.rollback()
                 result = dict(conn.execute("SELECT * FROM leads WHERE id = ?", (lead_id,)).fetchone())
                 return {
                     "lead": result,
@@ -6716,21 +6827,33 @@ class DatabaseService:
                     "idempotent": True,
                 }
 
-            # 4. Limite diário só é aplicado a reservas que consomem crédito.
-            #    Lead corporativo (charge_credit=False) fica isento da cota do dia.
+            # 4. Reserva ATOMICA da cota ANTES do insert do reveal.
+            #    `UPDATE ... WHERE leads_used < leads_limit` dentro de
+            #    BEGIN IMMEDIATE garante no maximo 10 por utilizador/dia,
+            #    mesmo com 20 pedidos concorrentes.
             stat = None
-            used = 0
-            limit = 0
-            reset_at = None
+            limit = 10
+            reset_at = self._utc_tomorrow_midnight().isoformat()
             if charge_credit:
+                conn.execute(
+                    """INSERT INTO user_daily_stats (user_id, date, leads_used, leads_limit, reset_at)
+                       VALUES (?, ?, 0, 10, ?) ON CONFLICT(user_id, date) DO NOTHING""",
+                    (user_id, today, reset_at),
+                )
+                cur = conn.execute(
+                    """UPDATE user_daily_stats
+                          SET leads_used = leads_used + 1
+                        WHERE user_id = ? AND date = ? AND leads_used < leads_limit""",
+                    (user_id, today),
+                )
+                if cur.rowcount == 0:
+                    conn.rollback()
+                    return {"error": "limit_reached"}
                 stat = conn.execute(
                     "SELECT leads_used, leads_limit FROM user_daily_stats WHERE user_id = ? AND date = ?",
                     (user_id, today),
                 ).fetchone()
-                used = stat["leads_used"] if stat else 0
                 limit = (stat["leads_limit"] if stat and stat["leads_limit"] else 10) or 10
-                if used >= limit:
-                    return {"error": "limit_reached"}
 
             # 5. Cria o reveal (idempotency_key único protege contra submit duplo).
             key = idempotency_key or f"{user_id}:{lead_id}:{today}"
@@ -6759,20 +6882,7 @@ class DatabaseService:
                     return {"lead": result, "revealed": True, "counted_again": False, "idempotent": True}
                 raise
 
-            # 6. Incrementa daily stats do dia (só quando a reserva consome crédito).
-            if charge_credit:
-                reset_at = self._utc_tomorrow_midnight().isoformat()
-                if stat:
-                    conn.execute(
-                        "UPDATE user_daily_stats SET leads_used = leads_used + 1 WHERE user_id = ? AND date = ?",
-                        (user_id, today),
-                    )
-                else:
-                    conn.execute(
-                        """INSERT INTO user_daily_stats (user_id, date, leads_used, leads_limit, reset_at)
-                           VALUES (?, ?, 1, 10, ?)""",
-                        (user_id, today, reset_at),
-                    )
+            # 6. (A cota ja' foi reservada atomicamente no passo 4.)
 
             # 7. Reserva o lead por 60 minutos (padrão). stage_expires_at = prazo da fase.
             conn.execute(
@@ -6792,7 +6902,7 @@ class DatabaseService:
 
             result = dict(conn.execute("SELECT * FROM leads WHERE id = ?", (lead_id,)).fetchone())
             if charge_credit:
-                new_used = used + 1
+                new_used = int(stat["leads_used"]) if stat else 0
                 remaining = max(0, limit - new_used)
             else:
                 # Reserva corporativa: cota do dia permanece intacta.
@@ -8191,8 +8301,12 @@ class AsyncDatabaseService:
     async def get_notification_dlq_stats(self) -> dict:
         return await anyio.to_thread.run_sync(self._service.get_notification_dlq_stats)
 
-    async def update_owner_phone(self, lead_id: int, owner_phone: Optional[str]) -> bool:
-        return await anyio.to_thread.run_sync(self._service.update_owner_phone, lead_id, owner_phone)
+    async def update_owner_phone(
+        self, lead_id: int, owner_phone: Optional[str], verified: bool = False
+    ) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.update_owner_phone, lead_id, owner_phone, verified
+        )
 
     async def update_owner_email(self, lead_id: int, owner_email: Optional[str]) -> bool:
         return await anyio.to_thread.run_sync(self._service.update_owner_email, lead_id, owner_email)
@@ -8521,7 +8635,10 @@ class AsyncDatabaseService:
         phone_result: Optional[PhoneLookupResult] = None
         if address and city and state:
             try:
-                phone_result = await searchbug_service.lookup_phone(address, city, state, owner_name=owner_name, zip_code=zip_code)
+                phone_result = await searchbug_service.lookup_phone(
+                    address, city, state,
+                    owner_name=owner_name, zip_code=zip_code, lead_id=lead_id,
+                )
             except Exception as exc:
                 logger.warning(f"Phone lookup erro inesperado no lead {lead_id}: {exc}")
                 phone_result = None
@@ -8535,7 +8652,10 @@ class AsyncDatabaseService:
 
         if phone_ok:
             await anyio.to_thread.run_sync(
-                self._service.update_owner_phone, lead_id, phone_result.phone
+                self._service.update_owner_phone,
+                lead_id,
+                phone_result.phone,
+                getattr(phone_result, "verified", False),
             )
         else:
             phone_error = (
@@ -8634,6 +8754,25 @@ class AsyncDatabaseService:
 
     async def increment_daily_leads(self, user_id: int) -> bool:
         return await anyio.to_thread.run_sync(self._service.increment_daily_leads, user_id)
+
+    async def reserve_daily_quota(self, user_id: int) -> bool:
+        return await anyio.to_thread.run_sync(self._service.reserve_daily_quota, user_id)
+
+    async def refund_daily_quota(self, user_id: int) -> None:
+        await anyio.to_thread.run_sync(self._service.refund_daily_quota, user_id)
+
+    async def reserve_phone_attempt(self, user_id: int) -> dict:
+        return await anyio.to_thread.run_sync(self._service.reserve_phone_attempt, user_id)
+
+    async def reserve_lead_only(
+        self, lead_id: int, user_id: int, minutes: int = 60
+    ) -> Optional[dict]:
+        """Reserva simples (sem enriquecimento pago, sem consumir cota)."""
+        return await anyio.to_thread.run_sync(
+            lambda: self._service.reserve_lead(
+                lead_id, user_id, minutes, skip_daily_increment=True
+            )
+        )
 
     async def precheck_reveal(self, user_id: int, lead_id: int) -> dict:
         return await anyio.to_thread.run_sync(self._service.precheck_reveal, user_id, lead_id)

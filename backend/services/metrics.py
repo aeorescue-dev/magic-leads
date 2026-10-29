@@ -58,14 +58,21 @@ _METRICS_BUSY_TIMEOUT_MS = 1500
 # Cada buffer declara o seu proprio esquema. Uma lista global de colunas
 # foi o que primeiro deu problema: `push_deliveries` tem `sent_at`,
 # `attempts`, `user_id` e `kind`, e nao tem `called_at` nem `billed`.
-_SEARCHBUG_COLUMNS = ("outcome", "billed", "latency_ms", "http_status", "city", "error")
+_SEARCHBUG_COLUMNS = (
+    "outcome", "billed", "latency_ms", "http_status", "city", "error",
+    # P0-C1: telemetria por lead/classe/camada + validacao + transporte.
+    "lead_id", "owner_class", "layer", "name_match", "transport_error",
+)
 _PUSH_COLUMNS = ("outcome", "attempts", "latency_ms", "http_status", "user_id", "kind", "error")
 
 # Coercao por nome de coluna, partilhada pelas tabelas. `record()` e
 # chamado com dados de codigo que nao controla (excecoes de bibliotecas),
 # por isso normalizar aqui e mais barato do que validar em cada caller.
-_INT_COLUMNS = frozenset({"billed", "attempts", "latency_ms", "http_status", "user_id"})
-_STR_COLUMNS = frozenset({"outcome", "city", "kind"})
+_INT_COLUMNS = frozenset({
+    "billed", "attempts", "latency_ms", "http_status", "user_id",
+    "lead_id", "transport_error",
+})
+_STR_COLUMNS = frozenset({"outcome", "city", "kind", "owner_class", "layer"})
 _MAX_ERROR_LEN = 300
 
 

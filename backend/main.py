@@ -76,7 +76,9 @@ from .services.enrichment import owner_enrichment
 from .services.lead_rules import (
     charges_credit,
     classify,
+    get_owner_class,
     missing_critical_fields,
+    will_charge_if_phone_found,
 )
 from .services.lead_rules import (
     is_corporate as is_corporate_lead,
@@ -187,6 +189,7 @@ def _to_lead_response(lead: dict) -> LeadResponse:
         issue_description=lead["issue_description"] or "",
         owner_name=lead.get("owner_name") if show_owner else None,
         owner_phone=lead.get("owner_phone") if show_owner else None,
+        phone_verified=bool(lead.get("phone_verified")) if show_owner else False,
         owner_email=lead.get("owner_email") if show_owner else None,
         date_reported=lead["date_reported"],
         urgency_level=lead["urgency_level"],
@@ -4691,8 +4694,9 @@ async def lead_status(lead_id: int, user: dict = Depends(_get_current_user)):
 
 
 @app.post("/api/leads/{lead_id}/reserve", response_model=LeadHoldResponse)
+@limiter.limit("20/minute")
 async def reserve_lead(
-    lead_id: int, payload: ReserverLeadRequest,
+    request: Request, lead_id: int, payload: ReserverLeadRequest,
     user: dict = Depends(_get_current_user),
 ):
     user_id = user["id"]
@@ -4713,6 +4717,7 @@ async def reserve_lead(
     await db_service.flag_reveal_contact(user_id, lead_id)
 
     minutes = payload.minutes or 60
+    quota_exhausted = False
 
     # 2. COM CONSENTIMENTO => REVEAL (reserva 60min + conta 1/10 com idempotência)
     #
@@ -4760,6 +4765,19 @@ async def reserve_lead(
                 detail="Limite de 10 leads/dia atingido. Volte amanhã e abra seus 10+ potenciais clientes."
             )
 
+        # P0-C1B: pre-verificacao de cota ANTES da Searchbug. Se a cota
+        # acabou, o lead e' entregue na MESMA sem telefone e sem custo (a
+        # reserva gratis nao pode ser fechada), mas nenhuma chamada paga e'
+        # feita. Leads gratuitos (sem nome) nao passam por aqui.
+        if will_charge_if_phone_found(pre_lead):
+            _daily = await db_service.get_daily_leads_used(user_id)
+            if int(_daily.get("remaining", 1)) <= 0:
+                quota_exhausted = True
+                logger.info(
+                    "[RESERVE] cota esgotada para user %s — lookup pago saltado, "
+                    "lead entregue sem telefone", user_id,
+                )
+
         # 2.1 ENRIQUECIMENTO / ENTREGA
         # Regra A: o lead e SEMPRE entregue. Nao existe mais bloqueio por dados
         # (o antigo 422 escondia a oportunidade e negava a "reserva gratis"
@@ -4802,39 +4820,73 @@ async def reserve_lead(
 
                 # Busca de telefone (Searchbug em prod, mock em dev)
                 if not owner_phone:
-                    logger.info(f"[RESERVE] Calling searchbug_service.lookup_phone for lead_id={lead_id}")
-                    phone_result = await searchbug_service.lookup_phone(
-                        lead.get("address", ""),
-                        lead.get("city", ""),
-                        lead.get("state", ""),
-                        owner_name=owner_name,
-                        zip_code=lead.get("zip_code") or lead.get("zip"),
-                    )
-                    logger.info(f"[RESERVE] searchbug_service result: success={phone_result.success} phone={phone_result.phone} error={phone_result.error}")
-                    if phone_result.success and phone_result.phone:
-                        owner_phone = phone_result.phone
-                        await db_service.update_owner_phone(lead_id, owner_phone)
+                    # Re-checa a cota DEPOIS do enriquecimento gratuito: um
+                    # lead sem nome pode ganhar nome (e passar a cobravel) aqui.
+                    if will_charge_if_phone_found(lead) and not quota_exhausted:
+                        _daily = await db_service.get_daily_leads_used(user_id)
+                        if int(_daily.get("remaining", 1)) <= 0:
+                            quota_exhausted = True
+                    if quota_exhausted:
+                        logger.info(
+                            "[RESERVE] cota esgotada para user %s — lookup pago "
+                            "saltado, lead entregue sem telefone", user_id,
+                        )
                     else:
-                        # Distinguir quem consultou o provider (custo real) de quem o
-                        # guard impediu (custo zero). Antes dizia "Searchbug phone
-                        # lookup sem resultado" nos dois casos, o que levava um
-                        # operador a concluir que tinha havido chamada paga.
-                        _err = str(phone_result.error or "")
-                        if _err.startswith("guard_skipped:"):
-                            logger.info(
-                                f"[PHONE][guard_skipped] lead {lead_id}: {_err} — "
-                                f"Searchbug NAO foi consultado, custo zero"
-                            )
-                        elif phone_result.provider == "cache":
-                            logger.info(
-                                f"[PHONE][cache_hit] lead {lead_id}: {_err} — "
-                                f"servido do cache, sem nova chamada"
+                        # P0-C1B: orcamento de tentativas POR UTILIZADOR
+                        # (30/dia, 3/min). Nao existe cap global.
+                        if will_charge_if_phone_found(lead):
+                            _attempt = await db_service.reserve_phone_attempt(user_id)
+                            if not _attempt.get("ok"):
+                                raise HTTPException(
+                                    status_code=429,
+                                    detail=(
+                                        "Limite de tentativas de telefone atingido "
+                                        f"({_attempt.get('reason')}). Tente novamente mais tarde."
+                                    ),
+                                )
+                        logger.info(f"[RESERVE] Calling searchbug_service.lookup_phone for lead_id={lead_id}")
+                        phone_result = await searchbug_service.lookup_phone(
+                            lead.get("address", ""),
+                            lead.get("city", ""),
+                            lead.get("state", ""),
+                            owner_name=owner_name,
+                            zip_code=lead.get("zip_code") or lead.get("zip"),
+                            owner_class=get_owner_class(owner_name),
+                            lead_id=lead_id,
+                        )
+                        logger.info(
+                            f"[RESERVE] searchbug result: success={phone_result.success} "
+                            f"phone={phone_result.phone} verified={phone_result.verified} "
+                            f"match={phone_result.name_match} error={phone_result.error}"
+                        )
+                        if phone_result.success and phone_result.phone:
+                            owner_phone = phone_result.phone
+                            await db_service.update_owner_phone(
+                                lead_id, owner_phone, verified=phone_result.verified
                             )
                         else:
-                            logger.warning(
-                                f"[PHONE][provider_no_results] lead {lead_id}: {_err} — "
-                                f"Searchbug foi consultado e nao devolveu telefone"
-                            )
+                            # Distinguir quem consultou o provider (custo real) de quem o
+                            # guard impediu (custo zero). Antes dizia "Searchbug phone
+                            # lookup sem resultado" nos dois casos, o que levava um
+                            # operador a concluir que tinha havido chamada paga.
+                            _err = str(phone_result.error or "")
+                            if _err.startswith("guard_skipped:"):
+                                logger.info(
+                                    f"[PHONE][guard_skipped] lead {lead_id}: {_err} — "
+                                    f"Searchbug NAO foi consultado, custo zero"
+                                )
+                            elif phone_result.provider == "cache":
+                                logger.info(
+                                    f"[PHONE][cache_hit] lead {lead_id}: {_err} — "
+                                    f"servido do cache, sem nova chamada"
+                                )
+                            else:
+                                logger.warning(
+                                    f"[PHONE][provider_no_results] lead {lead_id}: {_err} — "
+                                    f"Searchbug foi consultado e nao devolveu telefone"
+                                )
+            except HTTPException:
+                raise
             except Exception as e:
                 logger.warning(f"Enriquecimento on-demand falhou para lead {lead_id}: {e}")
 
@@ -4956,26 +5008,17 @@ async def reserve_lead(
         },
         )
 
-    # 3. SEM CONSENTIMENTO: fluxo antigo (reserva simples, contando no limite)
-    # 3.1 VALIDA DAILY LIMIT (10 leads/dia)
+    # 3. SEM CONSENTIMENTO: reserva simples, SEM dados do proprietario e SEM
+    # chamada paga. O fluxo antigo chamava a Searchbug e consumia cota antes de
+    # saber se havia telefone; a chamada paga foi removida. A reserva simples
+    # continua a consumir 1 unidade de cota (anti-abuso de holds), de forma
+    # atomica.
     if not await db_service.increment_daily_leads(user_id):
-        daily_stats = await db_service.get_daily_leads_used(user_id)
-        reset_at = daily_stats.get("reset_at")
-        reset_str = ""
-        if reset_at:
-            try:
-                reset_dt = datetime.fromisoformat(reset_at.replace("Z", "+00:00"))
-                hours_left = int((reset_dt - utcnow()).total_seconds() / 3600)
-                reset_str = f" Reset em {hours_left}h."
-            except Exception:
-                pass
         raise HTTPException(
             status_code=429,
-            detail=f"Limite de 10 leads/dia atingido. Volte amanhã e abra seus 10+ potenciais clientes.{reset_str}"
+            detail="Limite de 10 leads/dia atingido. Volte amanhã e abra seus 10+ potenciais clientes.",
         )
-
-    # 3.2 RESERVA LEAD
-    result = await db_service.reserve_lead(lead_id, user["id"], minutes=minutes)
+    result = await db_service.reserve_lead_only(lead_id, user["id"], minutes=minutes)
     if not result:
         raise HTTPException(status_code=404, detail="Lead não encontrado")
     if result.get("error") == "already_reserved":
@@ -5060,7 +5103,9 @@ async def contact_lead(
 
 
 @app.post("/api/leads/{lead_id}/reveal-phone")
+@limiter.limit("20/minute")
 async def reveal_phone_endpoint(
+    request: Request,
     lead_id: int,
     user: dict = Depends(_get_current_user),
 ):
@@ -5104,16 +5149,24 @@ async def reveal_phone_endpoint(
         if not pre_lead.get("owner_name"):
             return {"success": False, "error": "owner_name_missing"}
 
-        # Cota diaria (10/dia): sem isto o reveal-phone seria um bypass da
-        # quota aplicada em reveal_lead. `get_daily_leads_used` devolve
-        # {used, limit, remaining, reset_at}.
-        daily = await db_service.get_daily_leads_used(user_id)
-        if int(daily.get("remaining", 0)) <= 0:
+        # P0-C1B: reserva atomica da cota ANTES da chamada paga. Se a busca
+        # falhar, o `finally` devolve a unidade — "falha e' gratis".
+        reserved = await db_service.reserve_daily_quota(user_id)
+        if not reserved:
             return {"success": False, "error": "daily_limit_reached"}
+
+        attempt = await db_service.reserve_phone_attempt(user_id)
+        if not attempt.get("ok"):
+            await db_service.refund_daily_quota(user_id)
+            return {
+                "success": False,
+                "error": f"attempt_limit_{attempt.get('reason', 'unknown')}",
+            }
 
         phone = None
         provider = None
         owner_name = pre_lead.get("owner_name")
+        keep = False
         try:
             enrich_result = await owner_enrichment.enrich(
                 pre_lead.get("address", ""),
@@ -5131,11 +5184,15 @@ async def reveal_phone_endpoint(
                         pre_lead.get("state", ""),
                         owner_name=owner_name,
                         zip_code=pre_lead.get("zip_code") or pre_lead.get("zip"),
+                        owner_class=get_owner_class(owner_name),
+                        lead_id=lead_id,
                     )
                     if phone_result.success and phone_result.phone:
                         phone = phone_result.phone
                         provider = getattr(phone_result, "provider", None)
-                        await db_service.update_owner_phone(lead_id, phone)
+                        await db_service.update_owner_phone(
+                            lead_id, phone, verified=phone_result.verified
+                        )
                     else:
                         # guarda_skipped:* = custo zero (o guard de custo
                         # recusou); nao e o mesmo que provider sem resultados.
@@ -5145,20 +5202,19 @@ async def reveal_phone_endpoint(
                         )
         except Exception as e:
             logger.warning(f"reveal-phone: enriquecimento falhou lead {lead_id}: {e}")
-
-        if not phone:
-            refreshed = await db_service.get_lead_by_id(lead_id)
-            if refreshed:
-                phone = dict(refreshed).get("owner_phone") or None
+        finally:
+            if not phone:
+                refreshed = await db_service.get_lead_by_id(lead_id)
+                if refreshed:
+                    phone = dict(refreshed).get("owner_phone") or None
+            if phone:
+                keep = True
+            if not keep:
+                await db_service.refund_daily_quota(user_id)
 
         if not phone:
             return {"success": False, "error": "phone_not_found"}
 
-        # Conta na cota diaria so quando ha telefone real a entregar.
-        try:
-            await db_service.increment_daily_leads(user_id)
-        except Exception:
-            pass
         await db_service.record_event(lead_id, "revealed")
         return {"success": True, "phone": phone, "provider": provider or "searchbug"}
     except HTTPException:

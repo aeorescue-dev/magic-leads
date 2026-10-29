@@ -32,7 +32,7 @@ async def test_lookup_phone_forwards_owner_name_and_zip(monkeypatch):
     """owner_name e zip_code chegam ao provider sem alteracao (L2)."""
     captured = {}
 
-    async def _fake_provider(address, city, state, owner_name=None, zip_code=None, use_api_contact=False):
+    async def _fake_provider(address, city, state, owner_name=None, zip_code=None, use_api_contact=False, **kwargs):
         captured.update(
             address=address,
             city=city,
@@ -66,7 +66,7 @@ async def test_lookup_phone_normalizes_owner_name_before_forwarding(monkeypatch)
     """O owner_name e normalizado: espacos e pontuacao de datasets publicos (L2)."""
     captured = {}
 
-    async def _fake_provider(address, city, state, owner_name=None, zip_code=None, use_api_contact=False):
+    async def _fake_provider(address, city, state, owner_name=None, zip_code=None, use_api_contact=False, **kwargs):
         captured.update(owner_name=owner_name, zip_code=zip_code)
         return _ok_result()
 
@@ -91,7 +91,7 @@ async def test_lookup_phone_strips_trailing_comma_from_owner_name(monkeypatch):
     """'BIG BEAR,' (observado em producao) nao pode virar LNAME='BEAR,' (L2)."""
     captured = {}
 
-    async def _fake_provider(address, city, state, owner_name=None, zip_code=None, use_api_contact=False):
+    async def _fake_provider(address, city, state, owner_name=None, zip_code=None, use_api_contact=False, **kwargs):
         captured.update(owner_name=owner_name)
         return _ok_result()
 
@@ -110,7 +110,7 @@ async def test_provider_is_called_when_contract_is_satisfied(monkeypatch):
     """Guarda estrutural: com nome e endereco validos, o provider e chamado (L2)."""
     captured = {}
 
-    async def _strict_provider(address, city, state, owner_name=None, zip_code=None, use_api_contact=False):
+    async def _strict_provider(address, city, state, owner_name=None, zip_code=None, use_api_contact=False, **kwargs):
         captured["chamada"] = True
         return _ok_result()
 
@@ -201,7 +201,7 @@ async def test_no_paid_call_without_usable_input(monkeypatch, owner_name, addres
     """Nenhum provider e chamado sem dados utilizaveis: o credito fica intacto."""
     chamado = False
 
-    async def _provider(address, city, state, owner_name=None, zip_code=None, use_api_contact=False):
+    async def _provider(address, city, state, owner_name=None, zip_code=None, use_api_contact=False, **kwargs):
         nonlocal chamado
         chamado = True
         return _ok_result()
@@ -226,7 +226,7 @@ async def test_corporate_owner_is_allowed(monkeypatch):
     """
     captured = {}
 
-    async def _provider(address, city, state, owner_name=None, zip_code=None, use_api_contact=False):
+    async def _provider(address, city, state, owner_name=None, zip_code=None, use_api_contact=False, **kwargs):
         captured.update(owner_name=owner_name)
         return _ok_result()
 
@@ -252,7 +252,7 @@ async def test_second_call_is_served_from_cache(monkeypatch):
     """Duas reservas do mesmo imivel: uma so chamada paga (L2 cache)."""
     chamadas = []
 
-    async def _provider(address, city, state, owner_name=None, zip_code=None, use_api_contact=False):
+    async def _provider(address, city, state, owner_name=None, zip_code=None, use_api_contact=False, **kwargs):
         chamadas.append(address)
         return _ok_result()
 
@@ -272,7 +272,7 @@ async def test_negative_result_is_cached_too(monkeypatch):
     """Um 'No results' tambem fica em cache: clicar outra vez nao re-paga (L2 cache)."""
     chamadas = []
 
-    async def _provider(address, city, state, owner_name=None, zip_code=None, use_api_contact=False):
+    async def _provider(address, city, state, owner_name=None, zip_code=None, use_api_contact=False, **kwargs):
         chamadas.append(address)
         return PhoneLookupResult(success=False, error="No results", provider="Searchbug")
 
@@ -296,7 +296,7 @@ async def test_negative_cache_expires_so_lead_can_retry(monkeypatch):
     """
     chamadas = []
 
-    async def _provider(address, city, state, owner_name=None, zip_code=None, use_api_contact=False):
+    async def _provider(address, city, state, owner_name=None, zip_code=None, use_api_contact=False, **kwargs):
         chamadas.append(address)
         return PhoneLookupResult(success=False, error="No results", provider="Searchbug")
 
@@ -323,7 +323,7 @@ async def test_cache_key_separates_different_properties(monkeypatch):
     """Imoveis diferentes nao partilham cache (L2 keys include ZIP and layer)."""
     chamadas = []
 
-    async def _provider(address, city, state, owner_name=None, zip_code=None, use_api_contact=False):
+    async def _provider(address, city, state, owner_name=None, zip_code=None, use_api_contact=False, **kwargs):
         chamadas.append(address)
         return _ok_result()
 

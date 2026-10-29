@@ -216,7 +216,7 @@ async def test_negative_cache_does_not_leak_across_zips(service):
     """
     paid_calls = []
 
-    async def _no_results(address, city, state, owner_name=None, zip_code=None, use_api_contact=False):
+    async def _no_results(address, city, state, owner_name=None, zip_code=None, use_api_contact=False, **kwargs):
         paid_calls.append(zip_code)
         return PhoneLookupResult(success=False, error="No results", provider="Searchbug")
 

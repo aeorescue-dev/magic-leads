@@ -22,7 +22,7 @@ Separacao Privado vs Institucional/Governamental:
   * Entidades publicas (AUTHORITY, DEPARTMENT, BOARD, EDUCATION, HOUSING,
     PARKS, COMMISSION, AGENCY...) nunca tem telefone de pessoa para vender.
     Uma consulta paga contra "NYC HOUSING AUTHORITY" devolve "No results" e
-    custa $0.45. `is_institutional_name` deteta-as com antecedencia para o
+    custa $0.20. `is_institutional_name` deteta-as com antecedencia para o
     backend saltar a chamada paga (billed=0) e ainda entregar o lead com o
     nome + morada recolhidos pelas fontes gratuitas (carta ou visita).
 """
@@ -218,6 +218,21 @@ def is_complete_delivery(lead: Mapping[str, Any]) -> bool:
     return bool(_present(lead.get("owner_name")) and _present(lead.get("owner_phone")))
 
 
+def will_charge_if_phone_found(lead: Mapping[str, Any]) -> bool:
+    """True se, encontrando telefone, o lead passa a ser cobravel.
+
+    P0-C1: usado na pre-verificacao de cota ANTES da chamada paga. Nao vale a
+    pena gastar Searchbug num lead que continuara' gratuito (sem nome,
+    institucional ou endereco nao resolvivel).
+    """
+    name = lead.get("owner_name")
+    return bool(
+        _present(name)
+        and address_is_resolvable(lead.get("address"))
+        and not is_institutional_name(name)
+    )
+
+
 def missing_critical_fields(lead: Mapping[str, Any]) -> list[str]:
     """Campos em falta para o lead contar como entrega completa.
 
@@ -281,11 +296,11 @@ def charges_credit(lead: Mapping[str, Any]) -> bool:
 # ---------- Deteção de entidades governamentais/institucionais ----------
 # Proprietários que são entidades públicas (agências, autarquias, escolas,
 # universidades) NÃO têm telefone de pessoa para vender: uma consulta paga à
-# Searchbug contra "NYC HOUSING AUTHORITY" devolve "No results" e custa $0.45.
+# Searchbug contra "NYC HOUSING AUTHORITY" devolve "No results" e custa $0.20.
 # Detetá-los com antecedência permite entregar o lead (nome + morada das fontes
 # gratuitas) sem gastar dinheiro nem créditos. A regra é deliberadamente
 # generosa (enviesa para "institucional"): um falso positivo custa $0 (a chamada
-# paga é saltada); um falso negativo custa $0.45 numa consulta que, na prática,
+# paga é saltada); um falso negativo custa $0.20 numa consulta que, na prática,
 # não tem telefone para devolver.
 
 _INSTITUTIONAL_PREFIXES = (
@@ -325,7 +340,7 @@ def is_institutional_name(name: Optional[str]) -> bool:
 
     A regra é generosa de propósito (ver discussão no fim do módulo): erros
     para o lado institucional custam $0; erros para o lado privado custam
-    $0.45 de uma consulta que quase nunca tem telefone para devolver.
+    $0.20 de uma consulta que quase nunca tem telefone para devolver.
     """
     if not name:
         return False

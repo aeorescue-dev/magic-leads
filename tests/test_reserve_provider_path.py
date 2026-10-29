@@ -68,13 +68,15 @@ class _PhoneFound:
         self.phone = phone
         self.calls = []
 
-    async def lookup_phone(self, address, city, state, owner_name=None, zip_code=None):
+    async def lookup_phone(self, address, city, state, owner_name=None, zip_code=None, **kwargs):
         self.calls.append(
             {"address": address, "city": city, "state": state, "owner_name": owner_name}
         )
 
         class R:
             success = True
+            verified = True
+            name_match = 1.0
 
         R.phone = self.phone
         R.error = None
