@@ -445,6 +445,10 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   `last_success_at`, `device_label` (UA), poda de inativos >90 d mantendo
   sempre um; broadcast respeita `push_enabled` e só usa subs ativas.
 - **777 testes**, 11 e2e, tsc limpo.
+- **Lição de migração**: SQLite não aceita `DEFAULT CURRENT_TIMESTAMP` num `ALTER TABLE`
+  (“Cannot add a column with non-constant default”). `last_seen_at` nasce `TEXT` e é
+  preenchida com `created_at`; o erro foi detetado no smoke de produção e corrigido
+  no mesmo dia (`3f00916`). Migrações novas devem usar defaults constantes + backfill.
 
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
