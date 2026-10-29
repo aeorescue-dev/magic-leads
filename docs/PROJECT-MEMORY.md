@@ -444,7 +444,7 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Higiene de dispositivos**: máx. 5 ativos (`disabled_at`), `last_seen_at`,
   `last_success_at`, `device_label` (UA), poda de inativos >90 d mantendo
   sempre um; broadcast respeita `push_enabled` e só usa subs ativas.
-- **776 testes**, 11 e2e, tsc limpo.
+- **777 testes**, 11 e2e, tsc limpo.
 
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.

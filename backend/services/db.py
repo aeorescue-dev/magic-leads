@@ -9494,8 +9494,10 @@ class AsyncDatabaseService:
     async def prune_push_subscriptions(self, days: int = 90) -> int:
         return await anyio.to_thread.run_sync(self._service.prune_push_subscriptions, days)
 
-    async def enforce_push_device_limit(self) -> int:
-        return await anyio.to_thread.run_sync(self._service.enforce_push_device_limit)
+    async def enforce_push_device_limit(self, max_devices: int = MAX_PUSH_DEVICES) -> int:
+        return await anyio.to_thread.run_sync(
+            self._service.enforce_push_device_limit, max_devices
+        )
 
     async def get_last_alert_times(self, user_ids: List[int]) -> dict:
         return await anyio.to_thread.run_sync(self._service.get_last_alert_times, user_ids)
