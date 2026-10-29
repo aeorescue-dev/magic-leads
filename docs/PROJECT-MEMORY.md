@@ -494,6 +494,16 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   são reservados primeiro”). `GET /api/admin/digest-ab` + cartão no Control Tower com
   CTR por braço; **vencedor só com ≥30 envios com push por braço**.
 - **820 testes**, 14 e2e, tsc limpo, build ok.
+- **Produção (medido)**: backfill 6.101 leads DOB em 62 s → **6.060 com coordenadas**
+  (99,3%); BBL preenchido em 6.092. `bbl_coords` com **4.981 hits / 25 misses**
+  (99,5% de acerto no PLUTO). Cobertura global: 1.659 de 85.873 sem coordenadas (1,9%),
+  quase tudo 311 sem BBL + 40 permits + 41 DOB fora do PLUTO.
+- **A/B — realidade da amostra**: só 2 utilizadores com push e o digest exige
+  excedente do teto; chegar a 30 envios com push por braço leva semanas. O cartão
+  mostra `n/30` por braço e **não declara vencedor** abaixo disso (evita decidir com
+  ruído). Os 135 digests históricos ficam no braço `?` (pré-B3) e não contam.
+- **Horário do digest**: medido de forma **observacional** (o run que cria o digest do
+  dia), não por mudança de agenda — evitar mexer num cron saudável sem amostra.
 
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
