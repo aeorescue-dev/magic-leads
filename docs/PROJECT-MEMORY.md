@@ -423,7 +423,7 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   `PATCH /api/users/{id}/push-preferences`.
 - **Observabilidade**: `push_health` no Control Tower (VAPID em falta, 0
   entregas com subs, explosão de subs mortas).
-- **765 testes**, 11 e2e, tsc limpo.
+- **766 testes**, 11 e2e, tsc limpo.
 - **Limitação assumida**: Web Push não suporta som personalizado por ficheiro;
   usam-se padrões de vibração + (fase B) um chime in-app quando a app está
   aberta. DOB de NYC não tem lat/lng no dataset → sem distância até ao
