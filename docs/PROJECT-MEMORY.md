@@ -352,8 +352,39 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Testes**: 746 backend, 73 vitest, tsc limpo; 10 e2e (3 novos em
   `e2e/ui-ux.spec.ts`; corrigido o label "Ver fluxo completo" no lifecycle).
 
+### Verificação visual em produção (2026-10-29)
+
+- **Tokens `muted` no claro:** `--muted`, `--border`, `--card` e `--foreground`
+  só existiam na paleta escura. Os blocos "Detalhes da ocorrência"/"Detalhes do
+  chamado" ficavam cinzentos com texto cinzento. Passam a ter equivalentes
+  claros em `[data-theme="light"]`.
+- **Texto quase invisível:** eventos do histórico em `text-slate-300` (1,4:1) e
+  KPI em `text-*-500` (2,1–3,7:1). Os overrides de contraste passam a apanhar
+  `-300/-400/-500/-600` e variantes com opacidade.
+- **404 em cada poll:** `/api/users/{id}/credit-balance` e `/credit-ledger` não
+  existiam (só a versão admin). Adicionados com verificação de posse; a resposta
+  inclui `counts` (nome que o frontend já usava).
+- **Botão "Salvar"** das notas com estado disabled legível (`bg-slate-200
+  text-slate-600` no claro) em vez de opacidade 50%.
+- Auditoria de contraste no browser (WCAG por elemento): sem falhas de texto
+  normal; só os números KPI grandes, agora acima de 3:1.
+
+### P2 — percentagem de confiança (2026-10-29)
+
+- `get_phone_success_stats(city, owner_class, 90d)` em `db.py`: denominador =
+  `success`/`no_results`/`name_mismatch`; cache, guard e erros de transporte
+  ficam fora (não são tentativas reais).
+- `_phone_confidence_stats` em `main.py`: hierarquia (cidade, classe) →
+  (classe, todas as cidades); **só devolve percentagem com ≥30 amostras**;
+  cache em memória de 10 min por segmento (o feed repete o mesmo segmento).
+- `LeadResponse.phone_success_pct` + `phone_sample_size`; o cartão mostra
+  "Alta probabilidade · 72%" com tooltip "n consultas"; sem amostras suficientes
+  não há número inventado — o selo qualitativo mantém-se.
+- **751 testes**, tsc limpo, build ok.
+
 ### P1 (a seguir)
-- Percentagem de confiança só a partir de ≥30 amostras reais; até lá "sob consulta".
+- Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
+- Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
 
 ---
 

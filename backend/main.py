@@ -5,6 +5,7 @@ import json
 import os
 import secrets
 import sqlite3
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -128,6 +129,48 @@ def _to_iso_utc(value):
     return raw
 
 
+PHONE_STATS_MIN_SAMPLES = 30
+PHONE_STATS_TTL_S = 600
+# Cache por (cidade, classe de proprietario). O feed repete o mesmo segmento em
+# dezenas de cartoes: sem isto eram N consultas iguais por pedido.
+_phone_stats_cache: dict[tuple[str, str], tuple[float, dict]] = {}
+
+
+def _phone_confidence_stats(city, owner_class) -> dict:
+    """Percentagem real de sucesso do telefone, com >=30 amostras (P2).
+
+    Hierarquia: (cidade, classe) -> (classe, todas as cidades). Nunca mistura
+    classes diferentes: a taxa de uma pessoa privada nao se aplica a uma
+    corporativa. Sem 30 amostras devolve `pct=None` e o numero de amostras
+    disponiveis (a UI mostra "sob consulta", sem inventar uma percentagem).
+    """
+    key = ((city or "").strip().upper(), (owner_class or "unknown"))
+    now = time.monotonic()
+    cached = _phone_stats_cache.get(key)
+    if cached and cached[0] > now:
+        return cached[1]
+
+    result = {"pct": None, "samples": 0, "scope": "none"}
+    try:
+        svc = db_service._service
+        for scope_city, scope_name in ((city, "city"), (None, "class")):
+            stats = svc.get_phone_success_stats(scope_city, owner_class)
+            if result["samples"] == 0:
+                result["samples"] = stats["samples"]
+            if stats["samples"] >= PHONE_STATS_MIN_SAMPLES:
+                result = {
+                    "pct": round(stats["successes"] * 100 / stats["samples"]),
+                    "samples": stats["samples"],
+                    "scope": scope_name,
+                }
+                break
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[PHONE-STATS] falhou: %s", exc)
+
+    _phone_stats_cache[key] = (now + PHONE_STATS_TTL_S, result)
+    return result
+
+
 def _to_lead_response(lead: dict) -> LeadResponse:
     """Converte linha do SQLite (id int) para LeadResponse (id str)."""
     # Build visibility fields
@@ -181,6 +224,9 @@ def _to_lead_response(lead: dict) -> LeadResponse:
     # (e bloquearia a reserva com a cota diaria esgotada) num lead cuja reserva e
     # gratuita. Nao expoe dados do proprietario, so o veredito.
     rules = classify(lead)
+    phone_stats = _phone_confidence_stats(
+        lead.get("city"), get_owner_class(lead.get("owner_name"))
+    )
 
     return LeadResponse(
         id=str(lead["id"]),
@@ -205,6 +251,8 @@ def _to_lead_response(lead: dict) -> LeadResponse:
         phone_confidence=phone_confidence(
             lead if show_owner else {**lead, "owner_phone": None}
         ),
+        phone_success_pct=phone_stats["pct"],
+        phone_sample_size=phone_stats["samples"],
         owner_email=lead.get("owner_email") if show_owner else None,
         date_reported=lead["date_reported"],
         urgency_level=lead["urgency_level"],

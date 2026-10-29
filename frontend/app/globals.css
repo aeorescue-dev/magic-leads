@@ -520,6 +520,25 @@
 [data-theme="light"] [class*="text-violet-400"] { color: #6d28d9; }
 [data-theme="light"] [class*="text-slate-400"] { color: #64748b; }
 [data-theme="light"] [class*="text-slate-300"] { color: #334155; }
+/* Numeros de KPI e etiquetas usam os tons -500/-600: em branco ficam abaixo
+   de 3:1 mesmo em texto grande (30px). Passam a -700. */
+[data-theme="light"] [class*="text-green-500"] { color: #15803d; }
+[data-theme="light"] [class*="text-emerald-500"] { color: #047857; }
+[data-theme="light"] [class*="text-emerald-600"] { color: #047857; }
+[data-theme="light"] [class*="text-amber-500"] { color: #b45309; }
+[data-theme="light"] [class*="text-red-500"] { color: #b91c1c; }
+[data-theme="light"] [class*="text-sky-500"] { color: #0369a1; }
+[data-theme="light"] [class*="text-indigo-500"] { color: #4338ca; }
+[data-theme="light"] [class*="text-violet-500"] { color: #6d28d9; }
+[data-theme="light"] [class*="text-purple-500"] { color: #7e22ce; }
+[data-theme="light"] [class*="text-rose-500"] { color: #be123c; }
+
+/* O painel do modal recebe foco programatico ao abrir (leitor de ecra). Nao
+   deve desenhar o anel de foco a volta da caixa inteira. */
+[role="dialog"]:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
 
 /* Selection */
 ::selection {

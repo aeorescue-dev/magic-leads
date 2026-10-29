@@ -58,6 +58,8 @@ export interface LeadResponse {
   last_case_at?: string | null;
   phone_verified?: boolean;
   phone_confidence?: string;
+  phone_success_pct?: number | null;
+  phone_sample_size?: number;
   address: string;
   city: string;
   issue_category: string;

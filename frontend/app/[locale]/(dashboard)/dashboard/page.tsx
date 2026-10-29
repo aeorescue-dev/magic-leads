@@ -2730,8 +2730,21 @@ const URGENCIES = ["all", "high", "medium", "low"];
                               </span>
                             )}
                             {lead.phone_confidence === "high" && (
-                              <span className="text-[10px] font-semibold uppercase tracking-wider bg-sky-500/15 text-sky-400 px-2.5 py-1 rounded-full flex items-center gap-1">
+                              <span
+                                className="text-[10px] font-semibold uppercase tracking-wider bg-sky-500/15 text-sky-400 px-2.5 py-1 rounded-full flex items-center gap-1"
+                                title={
+                                  lead.phone_success_pct != null
+                                    ? t("dashboard.phone.pct_hint").replace(
+                                        "{n}",
+                                        String(lead.phone_sample_size ?? 0)
+                                      )
+                                    : undefined
+                                }
+                              >
                                 <Phone className="h-3 w-3" /> {t("dashboard.phone.high")}
+                                {lead.phone_success_pct != null && (
+                                  <span className="font-bold"> · {lead.phone_success_pct}%</span>
+                                )}
                               </span>
                             )}
 

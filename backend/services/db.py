@@ -4800,6 +4800,46 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def get_phone_success_stats(
+        self, city: Optional[str], owner_class: Optional[str], days: int = 90
+    ) -> dict:
+        """Taxa real de sucesso do telefone para um segmento (P2).
+
+        Denominador = consultas ao provider que podiam devolver telefone
+        (`success`, `no_results`, `name_mismatch`). Cache, guard e erros de
+        transporte ficam fora: nao sao tentativas reais de encontrar o numero.
+        """
+        conn = get_connection()
+        try:
+            where = [
+                "called_at >= datetime('now', ?)",
+                "outcome IN ('success', 'no_results', 'name_mismatch')",
+            ]
+            params: list = [f"-{int(days)} days"]
+            if city:
+                where.append("city = ? COLLATE NOCASE")
+                params.append(city)
+            if owner_class:
+                where.append("COALESCE(owner_class, 'unknown') = ?")
+                params.append(owner_class)
+            row = conn.execute(
+                f"""
+                SELECT COUNT(*) AS samples,
+                       SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) AS successes
+                FROM searchbug_calls
+                WHERE {' AND '.join(where)}
+                """,
+                params,
+            ).fetchone()
+            samples = int(row["samples"] or 0) if row else 0
+            successes = int(row["successes"] or 0) if row else 0
+            return {"samples": samples, "successes": successes}
+        except sqlite3.OperationalError:
+            # BD anterior a telemetria P0-C1: sem amostras, sem percentagem.
+            return {"samples": 0, "successes": 0}
+        finally:
+            conn.close()
+
     def admin_get_push_metrics(self, days: int = 7, recent_limit: int = 50) -> dict:
         """Saúde das entregas de push notification.
 
@@ -9050,6 +9090,13 @@ class AsyncDatabaseService:
     async def admin_get_searchbug_metrics(self, days: int = 7, recent_limit: int = 50) -> dict:
         return await anyio.to_thread.run_sync(
             self._service.admin_get_searchbug_metrics, days, recent_limit
+        )
+
+    async def get_phone_success_stats(
+        self, city: Optional[str], owner_class: Optional[str], days: int = 90
+    ) -> dict:
+        return await anyio.to_thread.run_sync(
+            self._service.get_phone_success_stats, city, owner_class, days
         )
 
     async def admin_get_push_metrics(self, days: int = 7, recent_limit: int = 50) -> dict:

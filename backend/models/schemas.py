@@ -160,6 +160,10 @@ class LeadResponse(BaseModel):
     owner_phone: Optional[str]
     phone_verified: bool = False
     phone_confidence: str = "unknown"
+    # P2: percentagem real de sucesso (>=30 amostras). `None` quando a amostra
+    # do segmento e' insuficiente — a UI nao inventa numeros.
+    phone_success_pct: Optional[int] = None
+    phone_sample_size: int = 0
     owner_email: Optional[str] = None
     date_reported: datetime
     urgency_level: str
