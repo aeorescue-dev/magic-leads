@@ -2444,6 +2444,17 @@ const URGENCIES = ["all", "high", "medium", "low"];
                               return <span className="text-[10px] font-semibold uppercase tracking-wider bg-slate-500/15 text-slate-400 px-2.5 py-1 rounded-full flex items-center gap-1"><FolderOpen className="h-3 w-3" /> {t("dashboard.lead_type.open")}</span>;
                             })())}
 
+                            {lead.phone_confidence === "verified" && (
+                              <span className="text-[10px] font-semibold uppercase tracking-wider bg-emerald-500/15 text-emerald-400 px-2.5 py-1 rounded-full flex items-center gap-1">
+                                <Phone className="h-3 w-3" /> {t("dashboard.phone.verified")}
+                              </span>
+                            )}
+                            {lead.phone_confidence === "high" && (
+                              <span className="text-[10px] font-semibold uppercase tracking-wider bg-sky-500/15 text-sky-400 px-2.5 py-1 rounded-full flex items-center gap-1">
+                                <Phone className="h-3 w-3" /> {t("dashboard.phone.high")}
+                              </span>
+                            )}
+
                             {(lead.signal_status === "closed" || isClosedCase(lead.case_status)) && (
                               <span
                                 className="text-[10px] font-semibold uppercase tracking-wider bg-slate-500/20 text-slate-300 px-2.5 py-1 rounded-full flex items-center gap-1"
@@ -2562,6 +2573,20 @@ const URGENCIES = ["all", "high", "medium", "low"];
                               <p className={`text-xs mt-1 line-clamp-2 ${T.text2}`}>
                                 {lead.issue_description || lead.case_title || t("dashboard.feed.address_fallback")}
                               </p>
+                              {((lead.repeat_365 ?? 0) > 1 || (lead.oldest_open_days ?? 0) > 0) && (
+                                <div className="flex items-center gap-2 text-[11px] mt-1 text-slate-400 flex-wrap">
+                                  {(lead.repeat_365 ?? 0) > 1 && (
+                                    <span>
+                                      {t("dashboard.why.repeat").replace("{count}", String(lead.repeat_365))}
+                                    </span>
+                                  )}
+                                  {(lead.oldest_open_days ?? 0) > 0 && (
+                                    <span>
+                                      {t("dashboard.why.open").replace("{days}", String(lead.oldest_open_days))}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
                               <div className={`flex items-center gap-3 text-[11px] mt-2 flex-wrap ${T.text2}`}>
                                 {lead.owner_name && (
                                   <>

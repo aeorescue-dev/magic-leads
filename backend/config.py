@@ -74,6 +74,10 @@ class Settings(BaseSettings):
     # 30/dia = 3x a cota de 10; uma rajada de 3/min trava scripts.
     PHONE_ATTEMPTS_PER_USER_DAY: int = 30
     PHONE_ATTEMPTS_PER_USER_MINUTE: int = 3
+    # P1: frescura diaria HPD/DOB + consolidacao da reincidencia.
+    FRESHNESS_ENABLED: bool = True
+    FRESHNESS_INITIAL_DELAY_MIN: int = 30
+    FRESHNESS_INTERVAL_HOURS: int = 24
 
     # Scraper Config
     SOCRATA_APP_TOKEN: str = ""  # App Token Socrata (pool dedicado, cota maior)

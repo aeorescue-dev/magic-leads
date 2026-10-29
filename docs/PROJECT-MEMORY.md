@@ -288,6 +288,25 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   `oldest_open_days`, `last_case_at` e o feed expõe esses campos.
 - Testes: **739 verdes**; tsc limpo. Frontend: filtro "Tipo" usa `signal_type`;
   badges por sinal; `include_closed` no toggle.
+- **Deploy `4770046` + `d2e7984`; smoke:** `legal_obligation` + 311 = **0**;
+  51.488 `open_request/open`, 16.182 `closed`, 6.220 `legal/open`;
+  `/api/leads/today?type=legal_obligation` total **1.325**; feed legal NYC
+  **p95 169 ms**; `lead_history` backfill 1.445 leads; run `9eeb1268961b`
+  a acrescentar ocorrências (+7.500) com watermarks parados em 26 (deferral ok).
+
+### P1 — frescura e confiança (2026-10-29)
+
+- `backend/services/freshness.py`: re-verifica HPD (`wvxf-dwi5`) e DOB
+  (`3h2n-5cm9`) por `external_id` em lotes de 200, atualiza
+  `case_status`/`signal_status`; fechados saem do feed. Registo em `freshness_runs`.
+- Loop diário (`FRESHNESS_ENABLED`, atraso inicial 30 min, cada 24 h) +
+  `POST /api/cron/freshness` com `X-Cron-Secret`.
+- Consolidação `lead_history` (repeat_365/open_cases/oldest_open_days/last_case_at)
+  no fim de cada run de frescura.
+- `phone_confidence` (verified/high/medium/none) exposto no `LeadResponse`;
+  cartão mostra selo "Telefone verificado"/"Alta probabilidade" e a linha
+  "Porquê agora" (reincidência/idade do aberto).
+- **741 testes**, tsc limpo.
 
 ### P1 (dia seguinte)
 Re-verificação diária de violações abertas; fechar as resolvidas; remover do feed.

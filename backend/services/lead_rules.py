@@ -270,6 +270,28 @@ def derive_signal(source_type: Optional[str], case_status: Optional[str]) -> tup
     return None, "unknown"
 
 
+def phone_confidence(lead: Mapping[str, Any]) -> str:
+    """Nivel de confianca do telefone para o badge do cartao (P1).
+
+    verified -> telefone em cache/BD validado por name_match
+    high     -> pessoa com nome + endereco + ZIP; L2 deve resolver
+    medium   -> empresa/LLC ou falta ZIP
+    none     -> sem nome/institucional (nao se paga chamada)
+    """
+    phone = str(lead.get("owner_phone") or "").strip()
+    if phone:
+        return "verified" if lead.get("phone_verified") else "unverified"
+    name = lead.get("owner_name")
+    if not _present(name) or is_institutional_name(name):
+        return "none"
+    if is_corporate_name(name):
+        return "medium"
+    zip_code = str(lead.get("zip_code") or lead.get("zip") or "").strip()
+    if address_is_resolvable(lead.get("address")) and len(zip_code) >= 5:
+        return "high"
+    return "medium"
+
+
 def will_charge_if_phone_found(lead: Mapping[str, Any]) -> bool:
     """True se, encontrando telefone, o lead passa a ser cobravel.
 

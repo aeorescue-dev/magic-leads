@@ -550,6 +550,19 @@ CREATE TABLE IF NOT EXISTS scraper_runs (
   UNIQUE(run_id)
 );
 
+CREATE TABLE IF NOT EXISTS freshness_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  started_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  finished_at TEXT,
+  hpd_checked INTEGER DEFAULT 0,
+  hpd_closed INTEGER DEFAULT 0,
+  dob_checked INTEGER DEFAULT 0,
+  dob_closed INTEGER DEFAULT 0,
+  history_refreshed INTEGER DEFAULT 0,
+  status TEXT,
+  errors TEXT
+);
+
 CREATE TABLE IF NOT EXISTS city_health (
   city TEXT PRIMARY KEY,
   failure_count INTEGER DEFAULT 0,
@@ -6915,6 +6928,95 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def list_leads_for_freshness(self, source_types: List[str]) -> List[dict]:
+        """Leads legais abertos/desconhecidos que precisam de re-verificacao."""
+        if not source_types:
+            return []
+        marks = ",".join("?" * len(source_types))
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                f"""SELECT id, external_id, source_type FROM leads
+                    WHERE source_type IN ({marks})
+                      AND COALESCE(external_id, '') <> ''
+                      AND COALESCE(signal_status, 'unknown') != 'closed'
+                      AND COALESCE(lead_status, 'available') != 'converted'""",
+                tuple(source_types),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def update_lead_freshness(
+        self,
+        lead_id: int,
+        case_status: Optional[str],
+        signal_status: str,
+        closed_dt: Optional[str] = None,
+        resolution: Optional[str] = None,
+    ) -> bool:
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                """UPDATE leads SET
+                     case_status = ?,
+                     signal_status = ?,
+                     closed_dt = COALESCE(?, closed_dt),
+                     resolution_description = COALESCE(?, resolution_description),
+                     updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ?""",
+                (case_status, signal_status, closed_dt, resolution, lead_id),
+            )
+            conn.commit()
+            if cur.rowcount:
+                clear_dashboard_summary_cache()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def record_freshness_run(self, result: dict) -> None:
+        conn = get_connection()
+        try:
+            conn.execute(
+                """INSERT INTO freshness_runs
+                   (started_at, finished_at, hpd_checked, hpd_closed,
+                    dob_checked, dob_closed, history_refreshed, status, errors)
+                   VALUES (?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    result.get("started_at"),
+                    int(result.get("hpd_checked") or 0),
+                    int(result.get("hpd_closed") or 0),
+                    int(result.get("dob_checked") or 0),
+                    int(result.get("dob_closed") or 0),
+                    int(result.get("history_refreshed") or 0),
+                    result.get("status") or "ok",
+                    result.get("errors") or None,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def list_lead_ids_with_history(self) -> List[int]:
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT DISTINCT lead_id FROM lead_case_history WHERE lead_id IS NOT NULL"
+            ).fetchall()
+            return [int(r["lead_id"]) for r in rows]
+        finally:
+            conn.close()
+
+    def get_last_freshness_run(self) -> Optional[dict]:
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT * FROM freshness_runs ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
     def get_scraper_watermark(self, key: str) -> Optional[str]:
         """Ultima data (YYYY-MM-DD) ja' ingerida para um dataset."""
         conn = get_connection()
@@ -9148,6 +9250,29 @@ class AsyncDatabaseService:
 
     async def set_scraper_watermark(self, key: str, last_date: Optional[str]) -> None:
         await anyio.to_thread.run_sync(self._service.set_scraper_watermark, key, last_date)
+
+    async def list_leads_for_freshness(self, source_types: list) -> list:
+        return await anyio.to_thread.run_sync(
+            self._service.list_leads_for_freshness, source_types
+        )
+
+    async def update_lead_freshness(self, *args, **kwargs) -> bool:
+        return await anyio.to_thread.run_sync(
+            lambda: self._service.update_lead_freshness(*args, **kwargs)
+        )
+
+    async def record_freshness_run(self, result: dict) -> None:
+        await anyio.to_thread.run_sync(self._service.record_freshness_run, result)
+
+    async def list_lead_ids_with_history(self) -> list:
+        return await anyio.to_thread.run_sync(
+            self._service.list_lead_ids_with_history
+        )
+
+    async def get_last_freshness_run(self) -> Optional[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.get_last_freshness_run
+        )
 
     async def reserve_lead_only(
         self, lead_id: int, user_id: int, minutes: int = 60

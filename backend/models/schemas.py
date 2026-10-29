@@ -159,6 +159,7 @@ class LeadResponse(BaseModel):
     owner_name: Optional[str]
     owner_phone: Optional[str]
     phone_verified: bool = False
+    phone_confidence: str = "unknown"
     owner_email: Optional[str] = None
     date_reported: datetime
     urgency_level: str

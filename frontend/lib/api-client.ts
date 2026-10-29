@@ -57,6 +57,7 @@ export interface LeadResponse {
   oldest_open_days?: number | null;
   last_case_at?: string | null;
   phone_verified?: boolean;
+  phone_confidence?: string;
   address: string;
   city: string;
   issue_category: string;

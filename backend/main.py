@@ -56,6 +56,7 @@ from .services import (
     alert_planner,
     control_tower,
     enrichment_queue,
+    freshness,
     inbox_sync,
     notifier,
     outbound_templates,
@@ -78,6 +79,7 @@ from .services.lead_rules import (
     classify,
     get_owner_class,
     missing_critical_fields,
+    phone_confidence,
     will_charge_if_phone_found,
 )
 from .services.lead_rules import (
@@ -196,6 +198,7 @@ def _to_lead_response(lead: dict) -> LeadResponse:
         owner_name=lead.get("owner_name") if show_owner else None,
         owner_phone=lead.get("owner_phone") if show_owner else None,
         phone_verified=bool(lead.get("phone_verified")) if show_owner else False,
+        phone_confidence=phone_confidence(lead),
         owner_email=lead.get("owner_email") if show_owner else None,
         date_reported=lead["date_reported"],
         urgency_level=lead["urgency_level"],
@@ -3215,6 +3218,7 @@ async def _lifespan(app):
     _scheduler_task = None
     _watchdog_task = None
     _outbound_task = None
+    _freshness_task = None
 
     # Fase 2: o writer de telemetria arranca com o processo. Sem isto o
     # buffer acumula em memoria ate limite e perde eventos sem nunca
@@ -3255,6 +3259,16 @@ async def _lifespan(app):
     # falhar de forma sistematica (cancelado antes de correr um passo), portanto
     # esta e agora a cobertura garantida, independente de trafego e de terceiros.
     _watchdog_task = asyncio.create_task(_hold_watchdog_loop())
+
+    # P1: frescura diaria HPD/DOB + reincidencia. Dorme primeiro para nao
+    # competir com o arranque/deploy.
+    if getattr(settings, "FRESHNESS_ENABLED", True):
+        _freshness_task = asyncio.create_task(_freshness_loop())
+        logger.info(
+            "Frescor HPD/DOB ativo (atraso inicial %s min, cada %sh)",
+            settings.FRESHNESS_INITIAL_DELAY_MIN,
+            settings.FRESHNESS_INTERVAL_HOURS,
+        )
 
     # Worker do Outbound Frio (Fase 2). Dorme primeiro para nao disparar durante
     # os testes nem na arrancagem. Fail-closed por dentro: com `send_enabled=0`
@@ -3334,6 +3348,7 @@ async def _lifespan(app):
         ("scheduler", _scheduler_task),
         ("watchdog", _watchdog_task),
         ("outbound", _outbound_task),
+        ("freshness", _freshness_task),
     ):
         if task:
             task.cancel()
@@ -3397,6 +3412,18 @@ async def _hold_watchdog_loop():
         except Exception as e:
             # Uma falha aqui nao pode matar o loop: o proximo ciclo volta a tentar.
             logger.error(f"Erro no watchdog de holds: {e}", exc_info=True)
+
+
+async def _freshness_loop():
+    """P1: re-verificacao diaria HPD/DOB + consolidacao da reincidencia."""
+    await asyncio.sleep(max(60, int(settings.FRESHNESS_INITIAL_DELAY_MIN) * 60))
+    while True:
+        try:
+            result = await freshness.run_freshness()
+            logger.info("[FRESHNESS] %s", result)
+        except Exception as e:  # noqa: BLE001
+            logger.error("[FRESHNESS] falhou: %s", e, exc_info=True)
+        await asyncio.sleep(max(3600, int(settings.FRESHNESS_INTERVAL_HOURS) * 3600))
 
 
 async def _inbox_sync_loop():
@@ -5392,6 +5419,13 @@ async def report_invalid_number(lead_id: int, user: dict = Depends(_get_current_
         "refunds_remaining_today": refund_result["remaining"],
         "refund_count_today": refund_result["refund_count_today"],
     }
+
+
+@app.post("/api/cron/freshness")
+async def cron_freshness(x_cron_secret: str | None = Header(None)):
+    """P1: dispara a re-verificacao HPD/DOB (o loop diario e' o caminho normal)."""
+    _check_cron_secret(x_cron_secret)
+    return await freshness.run_freshness()
 
 
 # Cron: expira holds vencidos + watchdog de reveals (chamado por GitHub Actions a cada hora)
