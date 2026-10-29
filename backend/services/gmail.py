@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import os
 import time
 from dataclasses import dataclass
 from email.message import EmailMessage
@@ -87,10 +88,20 @@ class GmailSender:
 
     def _credentials(self, mailbox: dict) -> dict:
         auth = parse_auth_ref(mailbox.get("auth_ref"))
+        # O refresh token por caixa no AMBIENTE manda sobre o `auth_ref` da BD.
+        # Caso contrario, rotacionar o token no Railway nao tinha efeito nenhum:
+        # o codigo continuava a usar a copia antiga guardada na base (foi o que
+        # aconteceu ao adicionar o scope gmail.readonly).
+        local = (mailbox.get("email") or "").split("@")[0].upper()
+        env_token = (os.getenv(f"GMAIL_REFRESH_TOKEN_{local}") or "").strip()
         return {
             "client_id": auth.get("client_id") or getattr(settings, "GMAIL_CLIENT_ID", ""),
             "client_secret": auth.get("client_secret") or getattr(settings, "GMAIL_CLIENT_SECRET", ""),
-            "refresh_token": auth.get("refresh_token") or getattr(settings, "GMAIL_REFRESH_TOKEN", ""),
+            "refresh_token": (
+                env_token
+                or auth.get("refresh_token")
+                or getattr(settings, "GMAIL_REFRESH_TOKEN", "")
+            ),
         }
 
     async def _access_token(self, creds: dict) -> Optional[str]:

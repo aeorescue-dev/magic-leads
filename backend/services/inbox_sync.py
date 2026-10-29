@@ -130,9 +130,12 @@ def _credentials(mailbox: dict) -> Optional[dict]:
             pass
     cid = cid or (os.getenv("GMAIL_CLIENT_ID") or "").strip()
     csec = csec or (os.getenv("GMAIL_CLIENT_SECRET") or "").strip()
-    if not rt:
-        local = str(mailbox.get("email") or "").split("@")[0].upper()
-        rt = (os.getenv(f"GMAIL_REFRESH_TOKEN_{local}") or "").strip()
+    # Ambiente > auth_ref (ver gmail._credentials): permite rotacionar tokens
+    # sem reescrever a BD.
+    local = str(mailbox.get("email") or "").split("@")[0].upper()
+    env_rt = (os.getenv(f"GMAIL_REFRESH_TOKEN_{local}") or "").strip()
+    if env_rt:
+        rt = env_rt
     if not (cid and csec and rt):
         return None
     return {"client_id": cid, "client_secret": csec, "refresh_token": rt}
