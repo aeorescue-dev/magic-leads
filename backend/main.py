@@ -901,6 +901,37 @@ async def user_subscription_status(user_id: int, user: dict = Depends(_get_curre
         raise HTTPException(status_code=500, detail="Erro ao buscar status da subscription")
 
 
+# Credit balance/ledger do próprio utilizador (sidebar e settings). O frontend
+# já chamava estes caminhos mas só existia a versão /api/admin/*: cada poll
+# gerava 404 no console e o saldo da sidebar ficava vazio.
+@app.get("/api/users/{user_id}/credit-balance")
+async def user_credit_balance(user_id: int, user: dict = Depends(_get_current_user)):
+    if user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Sem permissão")
+    balance = await db_service.get_credit_balance(user_id)
+    by_type = balance.get("by_type", {})
+    return {
+        "user_id": user_id,
+        "balance": balance.get("balance", 0),
+        # `counts` é o nome usado pelo frontend; `by_type` mantém paridade com
+        # o endpoint admin.
+        "counts": by_type,
+        "by_type": by_type,
+    }
+
+
+@app.get("/api/users/{user_id}/credit-ledger")
+async def user_credit_ledger(
+    user_id: int,
+    limit: int = 100,
+    offset: int = 0,
+    user: dict = Depends(_get_current_user),
+):
+    if user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Sem permissão")
+    return await db_service.get_credit_ledger(user_id, limit, offset)
+
+
 # Daily Stats (limit 10/day)
 @app.get("/api/users/{user_id}/daily-stats")
 async def user_daily_stats(user_id: int, user: dict = Depends(_get_current_user)):

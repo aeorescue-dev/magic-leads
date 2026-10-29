@@ -142,3 +142,32 @@ def test_confidence_badge_does_not_leak_phone_before_reveal():
     shown = _to_lead_response({**lead, "_revealed": True})
     assert shown.owner_phone == "+17185550100"
     assert shown.phone_confidence == "verified"
+
+
+def test_user_credit_balance_endpoints():
+    from fastapi.testclient import TestClient
+
+    from backend.main import _hash_token, app
+    from backend.services.db import db_service
+
+    svc = db_service._service
+    email = "pytest-credit@magicleads.app"
+    user = svc.get_user_by_email(email) or svc.create_user(email, "pass", "Pytest Credit")
+    token = "pytest_credit_token_123"
+    svc.create_user_session(user["id"], _hash_token(token), "Pytest", None)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    client = TestClient(app)
+    ok = client.get(f"/api/users/{user['id']}/credit-balance", headers=headers)
+    assert ok.status_code == 200
+    body = ok.json()
+    assert body["user_id"] == user["id"]
+    assert "balance" in body
+    assert "counts" in body
+
+    other = client.get("/api/users/999999/credit-balance", headers=headers)
+    assert other.status_code == 403
+
+    ledger = client.get(f"/api/users/{user['id']}/credit-ledger", headers=headers)
+    assert ledger.status_code == 200
+    assert isinstance(ledger.json(), list)

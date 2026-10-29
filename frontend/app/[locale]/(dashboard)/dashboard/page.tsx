@@ -3352,7 +3352,13 @@ const URGENCIES = ["all", "high", "medium", "low"];
                 <button
                   onClick={handleAddNote}
                   disabled={!noteDraft.trim()}
-                  className="px-4 py-2 rounded-xl bg-indigo-500 text-white text-xs font-bold hover:bg-indigo-400 transition disabled:opacity-50"
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition disabled:cursor-not-allowed ${
+                    noteDraft.trim()
+                      ? "bg-indigo-500 text-white hover:bg-indigo-400"
+                      : isDark
+                        ? "bg-white/10 text-slate-400"
+                        : "bg-slate-200 text-slate-600"
+                  }`}
                 >
                   {t("dashboard.detail.save")}
                 </button>

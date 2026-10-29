@@ -465,6 +465,35 @@
    claro (dropdown do <select> preto e ring-offset escuro). */
 [data-theme="light"] {
   color-scheme: light;
+  /* Os tokens shadcn (--muted, --border, --card, --foreground...) só existiam
+     na paleta escura. Componentes como ui/Badge, ui/Card e as linhas
+     "Detalhes da ocorrência" do modal usavam bg-muted/text-muted-foreground e
+     ficavam cinzentos sobre branco. Aqui ficam os equivalentes claros. */
+  --background: 210 40% 98%;
+  --foreground: 222 47% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --card-border: 214 32% 91%;
+  --primary: 158 64% 40%;
+  --primary-foreground: 0 0% 100%;
+  --primary-glow: 158 64% 45%;
+  --secondary: 210 40% 96%;
+  --secondary-foreground: 222 47% 11%;
+  --muted: 210 40% 96%;
+  --muted-foreground: 215 19% 35%;
+  --accent: 210 40% 94%;
+  --accent-foreground: 222 47% 11%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+  --success: 158 64% 40%;
+  --success-glow: 158 64% 45%;
+  --warning: 32 95% 44%;
+  --info: 199 89% 40%;
+  --border: 214 32% 91%;
+  --input: 214 32% 91%;
+  --ring: 243 75% 59%;
+  --gradient-card: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+  --gradient-hero: linear-gradient(180deg, #ffffff 0%, #f8fafc 50%, #ffffff 100%);
 }
 [data-theme="light"] *:focus-visible {
   outline: 2px solid #4f46e5;
@@ -475,19 +504,22 @@
   color-scheme: dark;
 }
 
-/* Contraste no modo claro: os tons -400 do Tailwind foram escolhidos para
+/* Contraste no modo claro: os tons -300/-400 do Tailwind foram escolhidos para
    fundos escuros e ficam abaixo de AA sobre branco. Em fundo claro passam a
-   -700 (>=4.5:1). Cobre selos, icones e metadados de uma so vez. */
-[data-theme="light"] .text-emerald-400 { color: #047857; }
-[data-theme="light"] .text-sky-400 { color: #0369a1; }
-[data-theme="light"] .text-amber-400 { color: #b45309; }
-[data-theme="light"] .text-cyan-400 { color: #0e7490; }
-[data-theme="light"] .text-purple-400 { color: #7e22ce; }
-[data-theme="light"] .text-rose-400 { color: #be123c; }
-[data-theme="light"] .text-indigo-400 { color: #4338ca; }
-[data-theme="light"] .text-green-400 { color: #15803d; }
-[data-theme="light"] .text-violet-400 { color: #6d28d9; }
-[data-theme="light"] .text-slate-400 { color: #64748b; }
+   -700 (>=4.5:1). Cobre selos, icones, metadados, texto de eventos e variantes
+   com opacidade (`text-amber-300/80`) de uma so vez. */
+[data-theme="light"] [class*="text-emerald-400"] { color: #047857; }
+[data-theme="light"] [class*="text-sky-400"] { color: #0369a1; }
+[data-theme="light"] [class*="text-amber-400"] { color: #b45309; }
+[data-theme="light"] [class*="text-amber-300"] { color: #b45309; }
+[data-theme="light"] [class*="text-cyan-400"] { color: #0e7490; }
+[data-theme="light"] [class*="text-purple-400"] { color: #7e22ce; }
+[data-theme="light"] [class*="text-rose-400"] { color: #be123c; }
+[data-theme="light"] [class*="text-indigo-400"] { color: #4338ca; }
+[data-theme="light"] [class*="text-green-400"] { color: #15803d; }
+[data-theme="light"] [class*="text-violet-400"] { color: #6d28d9; }
+[data-theme="light"] [class*="text-slate-400"] { color: #64748b; }
+[data-theme="light"] [class*="text-slate-300"] { color: #334155; }
 
 /* Selection */
 ::selection {
