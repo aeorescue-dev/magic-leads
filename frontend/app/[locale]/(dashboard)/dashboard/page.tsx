@@ -1444,7 +1444,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
         </a>
         <a
           href={`tel:${selectedLead.owner_phone!}`}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-500 text-white text-xs font-bold hover:bg-sky-400 transition"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-700 text-white text-xs font-bold hover:bg-sky-600 transition"
         >
           <Phone className="h-3.5 w-3.5" /> Ligar
         </a>
@@ -2180,7 +2180,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
               onClick={() => setSelectedCity("all")}
               className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 transition border ${
                 selectedCity === "all"
-                  ? "bg-indigo-500 text-white border-indigo-500"
+                  ? "bg-indigo-600 text-white border-indigo-600"
                   : `${T.border} ${T.navHover} ${T.text2}`
               }`}
             >
@@ -2203,7 +2203,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
                     onClick={() => setSelectedCity(city)}
                     className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 transition border ${
                       selectedCity.toLowerCase() === key
-                        ? "bg-indigo-500 text-white border-indigo-500"
+                        ? "bg-indigo-600 text-white border-indigo-600"
                         : `${T.border} ${T.navHover} ${T.text2}`
                     }`}
                   >
@@ -2365,7 +2365,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
                       onClick={() => setHistoryStatus(opt.value)}
                       className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 transition border ${
                         historyStatus === opt.value
-                          ? "bg-indigo-500 text-white border-indigo-500"
+                          ? "bg-indigo-600 text-white border-indigo-600"
                           : `${T.border} ${T.navHover} ${T.text2}`
                       }`}
                     >
@@ -3318,14 +3318,14 @@ const URGENCIES = ["all", "high", "medium", "low"];
                 <button
                   onClick={() => handleLeadAction(() => contactLead(selectedLead.id, "sms"), t("dashboard.action.contact_ok"))}
                   disabled={busyAction}
-                  className="flex items-center gap-1.5 text-xs font-bold bg-sky-500 hover:bg-sky-400 text-white px-3.5 py-2 rounded-xl transition shadow-sm disabled:opacity-50"
+                  className="flex items-center gap-1.5 text-xs font-bold bg-sky-700 hover:bg-sky-600 text-white px-3.5 py-2 rounded-xl transition shadow-sm disabled:opacity-50"
                 >
                   <Phone className="h-3.5 w-3.5" /> {t("dashboard.action.contact")}
                 </button>
                 <button
                   onClick={() => handleLeadAction(() => negotiateLead(selectedLead.id), t("dashboard.action.negotiate_ok"))}
                   disabled={busyAction}
-                  className="flex items-center gap-1.5 text-xs font-bold bg-amber-500 hover:bg-amber-400 text-white px-3.5 py-2 rounded-xl transition shadow-sm disabled:opacity-50"
+                  className="flex items-center gap-1.5 text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 px-3.5 py-2 rounded-xl transition shadow-sm disabled:opacity-50"
                 >
                   <MessageSquare className="h-3.5 w-3.5" /> {t("dashboard.action.negotiate")}
                 </button>

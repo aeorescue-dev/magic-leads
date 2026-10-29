@@ -533,6 +533,10 @@
 [data-theme="light"] [class*="text-purple-500"] { color: #7e22ce; }
 [data-theme="light"] [class*="text-rose-500"] { color: #be123c; }
 
+/* Fundos indigo-500 com texto branco ficavam em 4,47:1 (limite). Um tom
+   abaixo garante AA em botoes pequenos e no badge de notificacoes. */
+[data-theme="light"] .bg-indigo-500 { background-color: #4f46e5; }
+
 /* O painel do modal recebe foco programatico ao abrir (leitor de ecra). Nao
    deve desenhar o anel de foco a volta da caixa inteira. */
 [role="dialog"]:focus-visible {
