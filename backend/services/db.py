@@ -1781,6 +1781,7 @@ class DatabaseService:
                        COUNT(m.id) AS total
                 FROM outbound_batches b
                 LEFT JOIN outbound_messages m ON m.batch_id = b.id
+                WHERE b.status <> 'abandoned'
                 GROUP BY b.id
                 ORDER BY b.id DESC
                 LIMIT ?
