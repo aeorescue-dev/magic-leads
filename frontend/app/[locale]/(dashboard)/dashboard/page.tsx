@@ -3212,12 +3212,6 @@ const URGENCIES = ["all", "high", "medium", "low"];
               </p>
 
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
-                {selectedLead.department && (
-                  <span>
-                    <Building2 className="h-3.5 w-3.5 inline mr-1" />
-                    {selectedLead.department}
-                  </span>
-                )}
                 {selectedLead.case_status && (
                   <span>
                     <Tag className="h-3.5 w-3.5 inline mr-1" />
@@ -3284,7 +3278,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
               </div>
             )}
 
-            {/* Ocorrências do imóvel (histórico 311 - Parte B) */}
+            {/* Ocorrências do imóvel (histórico registado) */}
             {leadOccurrences.length > 0 && (
               <div className={`space-y-3 pt-2 border-t ${T.border}`}>
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
@@ -3514,12 +3508,6 @@ const URGENCIES = ["all", "high", "medium", "low"];
                   {t("dashboard.reveal.section_occ")}
                 </h4>
                 <div className="rounded-lg border bg-muted/40 p-3 space-y-1.5 text-sm">
-                  {revealTarget.department && (
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground">{t("dashboard.field.department")}</span>
-                      <span className="font-medium truncate">{revealTarget.department}</span>
-                    </div>
-                  )}
                   {revealTarget.case_status && (
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-muted-foreground">{t("dashboard.field.case_status")}</span>

@@ -26,8 +26,30 @@ test.describe("UI/UX — tema, teclado e gaveta", () => {
     await expect(page.getByRole("dialog").first()).toBeVisible({ timeout: 20000 });
   });
 
-  test("a gaveta de filtros abre, fecha com Escape e devolve o foco", async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
+  test("a UI do cliente nao mostra termos internos das fontes", async ({ page }) => {
+    await page.goto("/pt/dashboard/settings");
+    await expect(page.getByText(/silêncio noturno/i).first()).toBeVisible({ timeout: 20000 });
+    const settings = (await page.locator("body").innerText()).toLowerCase();
+    for (const term of ["311", "socrata", "ckan", "dob", "hpd", "scraper", "open data"]) {
+      expect(settings, `Definições mostram "${term}"`).not.toContain(term);
+    }
+
+    await page.goto("/pt/dashboard");
+    const card = page.locator('[data-testid="lead-card"]').first();
+    await expect(card).toBeVisible({ timeout: 20000 });
+    await card.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("dialog").first()).toBeVisible({ timeout: 20000 });
+
+    // "Origem" era o campo que expunha o dominio/dataset da fonte.
+    await expect(page.getByText("Origem", { exact: true })).toHaveCount(0);
+    const detail = (await page.getByRole("dialog").first().innerText()).toLowerCase();
+    for (const term of ["311", "socrata", "ckan", "dob", "hpd", "scraper", "open data"]) {
+      expect(detail, `detalhe do lead mostra "${term}"`).not.toContain(term);
+    }
+  });
+
+  test("a gaveta de filtros abre, fecha com Escape e devolve o foco", async ({ page }) => {    await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/pt/dashboard");
 
     const trigger = page.getByRole("button", { name: /Filtros/ }).first();

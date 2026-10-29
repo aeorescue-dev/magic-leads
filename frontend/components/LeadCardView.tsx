@@ -102,9 +102,7 @@ export function LeadCardView({ leads, onLeadUpdated }: Props) {
                 </span>
               </div>
             )}
-            {lead.source && (
-              <InfoRow label="Origem" value={lead.source} />
-            )}
+            {/* Regra de ouro: a marca da fonte nao aparece ao utilizador. */}
           </div>
 
           <div className="text-sm space-y-1 mt-auto">

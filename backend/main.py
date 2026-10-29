@@ -94,6 +94,7 @@ from .services.lead_rules import (
 )
 from .services.metrics import push_metrics, searchbug_metrics
 from .services.outbound_engine import outbound_engine
+from .services.privacy import sanitize_lead, scrub
 from .services.push_click import verify_click
 from .services.push_service import push_service
 from .services.searchbug import searchbug_service
@@ -234,10 +235,15 @@ def _to_lead_response(lead: dict) -> LeadResponse:
         lead.get("city"), get_owner_class(lead.get("owner_name"))
     )
 
+    # Regra de ouro de IP: nada da fonte/arquitetura chega ao cliente. Os campos
+    # de texto sao limpos e `source`/`department` sao anulados; o admin le os
+    # dados crus por endpoints proprios.
+    safe = sanitize_lead(lead)
+
     return LeadResponse(
         id=str(lead["id"]),
-        external_id=lead["external_id"],
-        source_type=lead.get("source_type"),
+        external_id=safe.get("external_id") or lead["external_id"],
+        source_type=safe.get("source_type"),
         signal_type=lead.get("signal_type"),
         signal_status=lead.get("signal_status") or "unknown",
         repeat_365=int(lead.get("repeat_365") or 0),
@@ -247,7 +253,7 @@ def _to_lead_response(lead: dict) -> LeadResponse:
         address=lead["address"],
         city=lead["city"],
         issue_category=lead["issue_category"],
-        issue_description=lead["issue_description"] or "",
+        issue_description=safe.get("issue_description") or "",
         owner_name=lead.get("owner_name") if show_owner else None,
         owner_phone=lead.get("owner_phone") if show_owner else None,
         phone_verified=bool(lead.get("phone_verified")) if show_owner else False,
@@ -277,25 +283,25 @@ def _to_lead_response(lead: dict) -> LeadResponse:
         address_state=lead.get("address_state"),
         address_zip=lead.get("address_zip"),
         # Historical details from 311 systems
-        case_title=lead.get("case_title"),
-        subject=lead.get("subject"),
-        reason=lead.get("reason"),
-        type=lead.get("type"),
-        queue=lead.get("queue"),
-        department=lead.get("department"),
-        closure_reason=lead.get("closure_reason"),
-        case_status=lead.get("case_status"),
+        case_title=safe.get("case_title"),
+        subject=safe.get("subject"),
+        reason=safe.get("reason"),
+        type=safe.get("type"),
+        queue=safe.get("queue"),
+        department=safe.get("department"),
+        closure_reason=safe.get("closure_reason"),
+        case_status=safe.get("case_status"),
         on_time=lead.get("on_time"),
         sla_target_dt=lead.get("sla_target_dt"),
         closed_dt=lead.get("closed_dt"),
         submitted_photo=lead.get("submitted_photo"),
         closed_photo=lead.get("closed_photo"),
-        source=lead.get("source"),
+        source=safe.get("source"),
         neighborhood=lead.get("neighborhood"),
         ward=lead.get("ward"),
         precinct=lead.get("precinct"),
-        descriptor=lead.get("descriptor"),
-        resolution_description=lead.get("resolution_description"),
+        descriptor=safe.get("descriptor"),
+        resolution_description=safe.get("resolution_description"),
         resolution_action_updated_date=lead.get("resolution_action_updated_date"),
         # Owner mailing address (protegido até o reveal)
         mailing_address=lead.get("mailing_address") if show_owner else None,
@@ -1253,8 +1259,10 @@ async def list_notifications(
             out.append(NotificationResponse(
                 id=item["id"],
                 type=item["type"],
-                title=item["title"],
-                message=item["message"],
+                # Regra de ouro: o sino nunca mostra a marca da fonte. Cobre
+                # tambem notificacoes antigas gravadas antes desta politica.
+                title=scrub(item["title"]) or item["title"],
+                message=scrub(item["message"]) or item["message"],
                 lead_id=item.get("lead_id"),
                 created_at=item["created_at"],
                 read=bool(item.get("read")),
@@ -5841,7 +5849,7 @@ async def lead_history(lead_id: int, user: dict = Depends(_get_current_user)):
             id=r["id"],
             lead_id=r["lead_id"],
             event_type=r["event_type"],
-            detail=r.get("detail"),
+            detail=scrub(r.get("detail")),
             created_at=r["created_at"],
             user_id=r.get("user_id"),
         )
@@ -5859,7 +5867,7 @@ async def lead_occurrences(lead_id: int, user: dict = Depends(_get_current_user)
     """
     await _require_lead_possession(user, lead_id)
     rows = await db_service.get_lead_case_history(lead_id)
-    return rows
+    return [sanitize_lead(r) for r in rows]
 
 
 @app.get("/api/me/taken-leads", response_model=LeadsListResponse)

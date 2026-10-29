@@ -505,6 +505,21 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Horário do digest**: medido de forma **observacional** (o run que cria o digest do
   dia), não por mudança de agenda — evitar mexer num cron saudável sem amostra.
 
+### Hotfix de confidencialidade (2026-10-29, pós-B3)
+
+- **Regra de ouro**: nenhum termo da fonte/arquitetura na UI, push, e-mail, sino ou docs de
+  cliente. O gatilho foi o cartão “Silêncio noturno” a dizer “chamados 311”.
+- `backend/services/privacy.py`: `scrub` (remove `311`, Socrata, CKAN, Open Data, DOB, HPD,
+  scraper, dataset, API, BBL/BIN e URLs de portais) + `sanitize_lead` (texto limpo,
+  `source`/`department` = `None`, `source_type` neutro). Aplicado em `_to_lead_response`,
+  ocorrências, histórico (`detail`) e sino in-app (cobre notificações antigas).
+- Frontend: `Origem`/`Source` removidos do cartão/tabela; `department` removido do detalhe
+  e da secção de revelação; texto do silêncio reescrito em PT/EN/ES.
+- `tests/test_privacy_terms.py` (25 testes) varre i18n, `translations.py`, o sanitizador e a
+  resposta de API; novo e2e garante que Definições e detalhe do lead não mostram os termos.
+- **845 testes**, 15 e2e, tsc limpo, build ok.
+- Nota: o painel `/admin` mantém linguagem técnica (é consola interna, não cliente).
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

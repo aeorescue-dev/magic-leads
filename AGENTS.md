@@ -66,6 +66,12 @@ Contexto completo e números medidos: **`docs/PROJECT-MEMORY.md`**. Ler antes de
     Ficheiro próprio em `public/sounds/`; o Web Push não escolhe som.
 26. **A/B do digest**: bucket estável (paridade do id), variante fixada no primeiro digest
     do dia. Não declarar vencedor com <30 envios com push por braço.
+27. **Regra de ouro de IP**: nenhum termo das fontes/arquitetura (`311`, Socrata, CKAN,
+    DOB, HPD, scraper, API, Open Data, dataset, BBL/BIN) pode aparecer em UI, push,
+    e-mail, sino in-app ou docs de cliente. Toda a limpeza passa por
+    `backend/services/privacy.py` (`scrub`/`sanitize_lead`); `source`/`department`
+    saem `None` para o cliente e `source_type` é mapeado para token neutro. O admin
+    (interno) continua a ver os dados crus. `tests/test_privacy_terms.py` é o guarda.
 
 ## Verificação mínima antes de deploy
 ```bash
