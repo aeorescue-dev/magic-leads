@@ -4415,6 +4415,43 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def enforce_push_device_limit(self, max_devices: int = MAX_PUSH_DEVICES) -> int:
+        """Aplica o limite de dispositivos a TODOS os utilizadores (startup).
+
+        A higiene no subscribe so corrige quem volta a inscrever-se; este
+        sweep corrige o estado legado (ex.: 9 dispositivos) sem esperar.
+        """
+        conn = get_connection()
+        disabled = 0
+        try:
+            users = conn.execute(
+                """
+                SELECT user_id, COUNT(*) AS active FROM push_subscriptions
+                WHERE disabled_at IS NULL GROUP BY user_id HAVING COUNT(*) > ?
+                """,
+                (int(max_devices),),
+            ).fetchall()
+            for u in users:
+                rows = conn.execute(
+                    """
+                    SELECT id FROM push_subscriptions
+                    WHERE user_id = ? AND disabled_at IS NULL
+                    ORDER BY COALESCE(last_success_at, last_seen_at, created_at) DESC, id DESC
+                    """,
+                    (u["user_id"],),
+                ).fetchall()
+                for row in rows[int(max_devices):]:
+                    conn.execute(
+                        "UPDATE push_subscriptions SET disabled_at = CURRENT_TIMESTAMP "
+                        "WHERE id = ?",
+                        (row["id"],),
+                    )
+                    disabled += 1
+            conn.commit()
+            return disabled
+        finally:
+            conn.close()
+
     def prune_push_subscriptions(self, days: int = 90) -> int:
         """Desativa dispositivos inativos, mantendo sempre o mais recente.
 
@@ -9456,6 +9493,9 @@ class AsyncDatabaseService:
 
     async def prune_push_subscriptions(self, days: int = 90) -> int:
         return await anyio.to_thread.run_sync(self._service.prune_push_subscriptions, days)
+
+    async def enforce_push_device_limit(self) -> int:
+        return await anyio.to_thread.run_sync(self._service.enforce_push_device_limit)
 
     async def get_last_alert_times(self, user_ids: List[int]) -> dict:
         return await anyio.to_thread.run_sync(self._service.get_last_alert_times, user_ids)

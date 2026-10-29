@@ -317,3 +317,23 @@ def test_admin_push_metrics_has_clicks_and_ctr():
     assert metrics["totals"]["clicks"] == 1
     assert metrics["ctr"] is not None
     assert metrics["live_subscriptions"] >= 0
+
+
+def test_enforce_device_limit_sweeps_legacy_state():
+    _reset()
+    uid = _user()
+    conn = get_connection()
+    try:
+        for i in range(7):
+            conn.execute(
+                "INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, "
+                "last_seen_at, created_at) VALUES (?, ?, 'p', 'a', "
+                "datetime('now', ?), datetime('now', ?))",
+                (uid, f"https://push.example/legacy-{i}", f"-{i} hours", f"-{i} hours"),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert db_service._service.enforce_push_device_limit() == 2
+    assert len(db_service._service.get_user_push_subscriptions(uid)) == 5

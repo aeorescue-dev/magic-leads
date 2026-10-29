@@ -3427,6 +3427,15 @@ async def _lifespan(app):
     except Exception as e:
         logger.warning(f"Falha no seed do orçamento de alertas: {e}")
 
+    # B1: higiene de dispositivos push (limite de 5). Corrige o estado legado
+    # (utilizadores com 9 browsers) sem esperar por um novo subscribe.
+    try:
+        trimmed = await db_service.enforce_push_device_limit()
+        if trimmed:
+            logger.info("Push: %s dispositivo(s) desativado(s) (limite de 5)", trimmed)
+    except Exception as e:
+        logger.warning("Falha na higiene de dispositivos push: %s", e)
+
     # Validação de VAPID keys no startup
     if not settings.VAPID_PUBLIC_KEY or not settings.VAPID_PRIVATE_KEY:
         logger.critical("[ERRO] VAPID keys NÃO CONFIGURADAS — Push notifications DESABILITADAS!")
