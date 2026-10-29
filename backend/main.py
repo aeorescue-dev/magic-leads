@@ -2557,12 +2557,16 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                     keywords_or = " OR ".join([f"lower(description) like '%{kw.lower()}%'" for kw in settings.SCRAPER_KEYWORDS])
                     where = f"(disposition_date IS NULL OR disposition_date = '') AND ({keywords_or})"
                     logger.info(f"DOB Violations: fetching from {domain}/{dataset}")
-                    rows = await _s._fetch_soql(
+                    rows = await _s._fetch_all_pages(
                         domain=domain, dataset=dataset,
                         select="violation_number, issue_date, house_number, street, boro, description, violation_type, violation_category, ecb_number, disposition_date, disposition_comments",
-                        where=where, limit=5000, order="issue_date DESC",
+                        where=where, order="issue_date DESC",
+                        page_size=5000, max_pages=10, date_col="issue_date",
                     )
-                    logger.info(f"DOB Violations: got {len(rows)} raw rows from Socrata")
+                    logger.info(
+                        f"DOB Violations: got {len(rows)} raw rows from Socrata "
+                        f"({_s.last_meta})"
+                    )
                     out = []
                     for row in rows:
                         try:
@@ -2616,12 +2620,16 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                     dataset = "rbx6-tga4"
                     logger.info(f"DOB Permits: fetching from {domain}/{dataset}")
                     try:
-                        rows = await _s._fetch_soql(
+                        rows = await _s._fetch_all_pages(
                             domain=domain, dataset=dataset,
                             select="job_filing_number, work_permit, house_no, street_name, borough, zip_code, latitude, longitude, approved_date, issued_date, job_description, work_type, permit_status, applicant_first_name, applicant_last_name, applicant_business_name, owner_name, owner_business_name, nta, council_district",
-                            where=None, limit=5000, order="approved_date DESC",
+                            where=None, order="approved_date DESC",
+                            page_size=5000, max_pages=6, date_col="approved_date",
                         )
-                        logger.info(f"DOB Permits: got {len(rows)} raw rows from Socrata")
+                        logger.info(
+                            f"DOB Permits: got {len(rows)} raw rows from Socrata "
+                            f"({_s.last_meta})"
+                        )
                     except Exception as e:
                         logger.error(f"DOB Permits: fetch failed: {e}")
                         # Propagar: engolir aqui registava NYC como sucesso com 0
@@ -2763,80 +2771,146 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                     # Fonte que nao e 311 (ex: HPD violations) precisa de source_type
                     # proprio, senao cai em "311" e some do filtro de obrigacao legal.
                     src_type = _SOURCE_TYPE_BY_ENTRY.get(entry.get("type"))
+                    wm_key = f"{entry['domain']}/{entry['dataset']}"
+                    wm = await db_service.get_scraper_watermark(wm_key)
                     leads = await socrata_scraper.fetch_from_dataset(
                         entry["domain"], entry["dataset"], entry["city"], entry["state"],
                         field_names=fields, hours=city_hours, limit=entry.get("limit", 2000),
-                        source_type=src_type,
+                        source_type=src_type, watermark=wm, overlap_hours=6, max_pages=10,
                     )
+                    meta = dict(socrata_scraper.last_meta or {})
+                    logger.info(
+                        "[P0-A] %s: %s linhas, %s pagina(s), truncado=%s, wm=%s",
+                        wm_key, meta.get("rows"), meta.get("pages"),
+                        meta.get("truncated"), wm,
+                    )
+                    if not meta.get("truncated") and meta.get("max_date"):
+                        await db_service.set_scraper_watermark(wm_key, meta["max_date"])
 
                 # Boston (CKAN) - caso especial
                 if city == "Boston":
                     from backend.scrapers.socrata_311 import socrata_scraper as _s
                     try:
                         import httpx as _h
-                        async with _h.AsyncClient(timeout=60) as client:
-                            resp = await client.get(
-                                "https://data.boston.gov/api/3/action/datastore_search",
-                                params={
-                                    "resource_id": "1a0b420d-99f1-4887-9851-990b2a5a6e17",
-                                    "limit": 5000,
-                                    "sort": "open_dt DESC",
-                                },
-                            )
-                            logger.info(f"Boston CKAN: HTTP {resp.status_code}, bytes={len(resp.text)}")
-                            data = resp.json()
-                            if not data.get("success"):
-                                logger.warning(f"Boston CKAN: success=FALSE -> {str(data.get('error'))[:300]}")
-                                leads = []
-                            else:
+
+                        resource_id = "1a0b420d-99f1-4887-9851-990b2a5a6e17"
+                        wm_key = f"data.boston.gov/{resource_id}"
+                        wm = await db_service.get_scraper_watermark(wm_key)
+                        if wm:
+                            try:
+                                since = datetime.fromisoformat(str(wm)[:10]) - timedelta(hours=6)
+                            except (ValueError, TypeError):
                                 since = datetime.now() - timedelta(hours=entry["hours"])
-                                records = data["result"]["records"]
-                                out = []
-                                for rec in records:
-                                    od = rec.get("open_dt")
-                                    if not od:
-                                        continue
-                                    try:
-                                        odo = datetime.fromisoformat(str(od).replace("Z", "+00:00").replace("T", " "))
-                                    except Exception:
-                                        continue
-                                    if odo < since:
-                                        continue
-                                    eid = str(rec.get("case_enquiry_id") or rec.get("_id") or "")
-                                    if not eid:
-                                        continue
-                                    address = rec.get("location") or rec.get("location_street_name") or "Boston, MA"
-                                    desc = rec.get("case_title") or rec.get("reason") or rec.get("type") or ""
-                                    import backend.models.schemas as _sch
-                                    out.append(_sch.RawLead311(
-                                        external_id=eid,
-                                        address=f"{address}, Boston, MA" if address else "Boston, MA",
-                                        city="Boston",
-                                        state="MA",
-                                        zip_code=str(rec.get("location_zipcode")) if rec.get("location_zipcode") else None,
-                                        issue_description=desc,
-                                        created_at=odo,
-                                        lat=rec.get("latitude"),
-                                        lng=rec.get("longitude"),
-                                        issue_category=_s._infer_category(desc),
-                                        case_title=rec.get("case_title") or None,
-                                        subject=rec.get("subject") or None,
-                                        reason=rec.get("reason") or None,
-                                        type=rec.get("type") or None,
-                                        queue=rec.get("queue") or None,
-                                        department=rec.get("department") or None,
-                                        closure_reason=rec.get("closure_reason") or None,
-                                        case_status=rec.get("case_status") or None,
-                                        on_time=rec.get("on_time") or None,
-                                        sla_target_dt=rec.get("sla_target_dt") or None,
-                                        closed_dt=rec.get("closed_dt") or None,
-                                        source=rec.get("source") or None,
-                                        neighborhood=rec.get("neighborhood") or None,
-                                        ward=rec.get("ward") or None,
-                                        precinct=rec.get("precinct") or None,
-                                        resolution_description=rec.get("closure_reason") or None,
-                                    ))
-                                leads = out
+                        else:
+                            since = datetime.now() - timedelta(hours=entry["hours"])
+
+                        def _parse_open(value):
+                            parsed = datetime.fromisoformat(
+                                str(value).replace("Z", "+00:00").replace("T", " ")
+                            )
+                            return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
+
+                        page_size = 5000
+                        max_pages = 5
+                        records = []
+                        truncated = False
+                        async with _h.AsyncClient(timeout=60) as client:
+                            for page in range(max_pages):
+                                resp = await client.get(
+                                    "https://data.boston.gov/api/3/action/datastore_search",
+                                    params={
+                                        "resource_id": resource_id,
+                                        "limit": page_size,
+                                        "offset": page * page_size,
+                                        "sort": "open_dt DESC",
+                                    },
+                                )
+                                logger.info(
+                                    "Boston CKAN: page %s HTTP %s, bytes=%s",
+                                    page + 1, resp.status_code, len(resp.text),
+                                )
+                                data = resp.json()
+                                if not data.get("success"):
+                                    logger.warning(
+                                        f"Boston CKAN: success=FALSE -> {str(data.get('error'))[:300]}"
+                                    )
+                                    records = []
+                                    break
+                                chunk = data["result"]["records"]
+                                records.extend(chunk)
+                                if len(chunk) < page_size:
+                                    break
+                                # Ordenado DESC: se a pagina ja' passou do `since`,
+                                # nao vale a pena pedir mais.
+                                try:
+                                    oldest = _parse_open(chunk[-1].get("open_dt"))
+                                    if oldest < since:
+                                        break
+                                except Exception:
+                                    pass
+                            else:
+                                truncated = True
+
+                        out = []
+                        max_open = None
+                        for rec in records:
+                            od = rec.get("open_dt")
+                            if not od:
+                                continue
+                            try:
+                                odo = _parse_open(od)
+                            except Exception:
+                                continue
+                            if odo < since:
+                                continue
+                            eid = str(rec.get("case_enquiry_id") or rec.get("_id") or "")
+                            if not eid:
+                                continue
+                            address = rec.get("location") or rec.get("location_street_name") or "Boston, MA"
+                            desc = rec.get("case_title") or rec.get("reason") or rec.get("type") or ""
+                            raw_zip = str(rec.get("location_zipcode") or "").strip()
+                            if raw_zip.isdigit() and len(raw_zip) == 4:
+                                raw_zip = raw_zip.zfill(5)
+                            import backend.models.schemas as _sch
+                            out.append(_sch.RawLead311(
+                                external_id=eid,
+                                address=f"{address}, Boston, MA" if address else "Boston, MA",
+                                city="Boston",
+                                state="MA",
+                                zip_code=raw_zip or None,
+                                issue_description=desc,
+                                created_at=odo,
+                                lat=rec.get("latitude"),
+                                lng=rec.get("longitude"),
+                                issue_category=_s._infer_category(desc),
+                                case_title=rec.get("case_title") or None,
+                                subject=rec.get("subject") or None,
+                                reason=rec.get("reason") or None,
+                                type=rec.get("type") or None,
+                                queue=rec.get("queue") or None,
+                                department=rec.get("department") or None,
+                                closure_reason=rec.get("closure_reason") or None,
+                                case_status=rec.get("case_status") or None,
+                                on_time=rec.get("on_time") or None,
+                                sla_target_dt=rec.get("sla_target_dt") or None,
+                                closed_dt=rec.get("closed_dt") or None,
+                                source=rec.get("source") or None,
+                                neighborhood=rec.get("neighborhood") or None,
+                                ward=rec.get("ward") or None,
+                                precinct=rec.get("precinct") or None,
+                                resolution_description=rec.get("closure_reason") or None,
+                            ))
+                            if max_open is None or odo > max_open:
+                                max_open = odo
+                        leads = out
+                        logger.info(
+                            "[P0-A] Boston: %s registos, %s aceites, truncado=%s",
+                            len(records), len(out), truncated,
+                        )
+                        if not truncated and max_open is not None:
+                            await db_service.set_scraper_watermark(
+                                wm_key, max_open.date().isoformat()
+                            )
                     except Exception as e:
                         logger.warning(f"Boston CKAN fetch error: {e}")
                         # Propagar: antes Boston ficava verde no city_health

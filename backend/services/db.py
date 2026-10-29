@@ -438,6 +438,14 @@ CREATE TABLE IF NOT EXISTS phone_attempts (
 CREATE INDEX IF NOT EXISTS idx_phone_attempts_user_time
   ON phone_attempts (user_id, attempted_at);
 
+-- P0-A: watermark por dataset (ultima data ja' ingerida). O proximo ciclo
+-- pede `date > watermark - 6h`, em vez de uma janela fixa de 48/96h.
+CREATE TABLE IF NOT EXISTS scraper_watermarks (
+  key TEXT PRIMARY KEY,
+  last_date TEXT NOT NULL,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS lead_reveals (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
@@ -1142,6 +1150,14 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE leads ADD COLUMN converted_at TEXT")
     if "phone_verified" not in cols:
         conn.execute("ALTER TABLE leads ADD COLUMN phone_verified INTEGER DEFAULT 0")
+    # P0-A: indice do feed (filtro por cidade/estado + ordenacao por data).
+    try:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_leads_feed "
+            "ON leads (city, lead_status, date_reported DESC)"
+        )
+    except sqlite3.OperationalError:
+        pass
     if "stage_expires_at" not in cols:
         conn.execute("ALTER TABLE leads ADD COLUMN stage_expires_at TEXT")
     if "mailing_address" not in cols:
@@ -6625,6 +6641,34 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def get_scraper_watermark(self, key: str) -> Optional[str]:
+        """Ultima data (YYYY-MM-DD) ja' ingerida para um dataset."""
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT last_date FROM scraper_watermarks WHERE key = ?", (key,)
+            ).fetchone()
+            return row["last_date"] if row else None
+        finally:
+            conn.close()
+
+    def set_scraper_watermark(self, key: str, last_date: Optional[str]) -> None:
+        if not last_date:
+            return
+        conn = get_connection()
+        try:
+            conn.execute(
+                """INSERT INTO scraper_watermarks (key, last_date, updated_at)
+                   VALUES (?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(key) DO UPDATE SET
+                     last_date = excluded.last_date,
+                     updated_at = CURRENT_TIMESTAMP""",
+                (key, str(last_date)[:10]),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     def reserve_daily_quota(self, user_id: int) -> bool:
         """Reserva atomica de 1 unidade da cota diaria.
 
@@ -8791,6 +8835,12 @@ class AsyncDatabaseService:
 
     async def reserve_phone_attempt(self, user_id: int) -> dict:
         return await anyio.to_thread.run_sync(self._service.reserve_phone_attempt, user_id)
+
+    async def get_scraper_watermark(self, key: str) -> Optional[str]:
+        return await anyio.to_thread.run_sync(self._service.get_scraper_watermark, key)
+
+    async def set_scraper_watermark(self, key: str, last_date: Optional[str]) -> None:
+        await anyio.to_thread.run_sync(self._service.set_scraper_watermark, key, last_date)
 
     async def reserve_lead_only(
         self, lead_id: int, user_id: int, minutes: int = 60

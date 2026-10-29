@@ -250,6 +250,18 @@ backup pré-deploy verificado (82.560 leads), smoke: `phone_verified` +
 **727 testes verdes**; commit/deploy de C2 no mesmo dia.
 Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 
+### P0-A — paginação e watermark (implementado 2026-10-29)
+
+- `_fetch_soql(offset=...)` e `_fetch_all_pages` com `page_size`, `max_pages`,
+  `truncated` e `max_date`. NYC/Chicago/Dallas usam o caminho genérico; DOB
+  violações/permits e Boston CKAN também paginam.
+- Tabela `scraper_watermarks (key, last_date)`; `fetch_from_dataset` aceita
+  `watermark` e usa `watermark - 6 h` em vez da janela fixa. O watermark **não
+  avança** quando a paginação é truncada.
+- Índice `idx_leads_feed (city, lead_status, date_reported DESC)`.
+- Teste live NYC 96 h: **34.915 linhas em 7 páginas, 28,9 s, 34.128 leads**
+  (antes: 5.000). Testes: **733 verdes**.
+
 ### P1 (dia seguinte)
 Re-verificação diária de violações abertas; fechar as resolvidas; remover do feed.
 

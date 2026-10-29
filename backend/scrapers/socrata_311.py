@@ -69,14 +69,94 @@ class Socrata311Scraper:
         self.timeout = 30
         # Leads descartados por nao terem rua utilizavel no endereco.
         self._discarded_unresolvable = 0
+        # P0-A: metadados da ultima paginacao (lidos pelo caller para o watermark).
+        self.last_meta: dict = {}
+
+    @staticmethod
+    def _max_date(rows: list, date_col: str | None) -> str | None:
+        """Maior data ISO (YYYY-MM-DD) de uma coluna, para o watermark."""
+        if not date_col:
+            return None
+        best = None
+        for row in rows:
+            value = row.get(date_col)
+            if not value:
+                continue
+            raw = str(value)
+            day = raw[:10] if len(raw) >= 10 and raw[4] == "-" and raw[7] == "-" else None
+            if day and (best is None or day > best):
+                best = day
+        return best
+
+    async def _fetch_all_pages(
+        self,
+        *,
+        domain: str,
+        dataset: str,
+        select: str,
+        where: str,
+        order: str,
+        page_size: int = 5000,
+        max_pages: int = 10,
+        timeout: int | None = None,
+        date_col: str | None = None,
+    ) -> list:
+        """Pagina com `$offset` ate` uma pagina curta ou o tecto de `max_pages`.
+
+        P0-A: o limite fixo de 5.000 escondia 78% de NYC e 52% de Chicago.
+        `max_pages` e' um tecto duro de tempo/memoria; quando e' atingido,
+        `last_meta["truncated"]=True` e o caller NAO deve avancar o watermark.
+        """
+        rows: list = []
+        truncated = False
+        for page in range(max_pages):
+            chunk = await self._fetch_soql(
+                domain=domain,
+                dataset=dataset,
+                select=select,
+                where=where,
+                order=order,
+                limit=page_size,
+                offset=page * page_size,
+                timeout=timeout,
+            )
+            if not chunk:
+                break
+            rows.extend(chunk)
+            if len(chunk) < page_size:
+                break
+        else:
+            # Completou todas as paginas sem uma pagina curta: pode haver mais.
+            truncated = True
+
+        pages = (len(rows) + page_size - 1) // page_size if page_size else 0
+        self.last_meta = {
+            "domain": domain,
+            "dataset": dataset,
+            "rows": len(rows),
+            "pages": pages,
+            "truncated": truncated,
+            "max_date": self._max_date(rows, date_col),
+        }
+        logger.info(
+            "[PAGINATION] %s/%s: %s linhas em %s pagina(s)%s",
+            domain,
+            dataset,
+            len(rows),
+            pages,
+            " — TRUNCADO (max_pages)" if truncated else "",
+        )
+        return rows
 
     async def _fetch_soql(
         self, domain: str, dataset: str, select: str, where: str,
-        limit: int = 50000, order: str = None, timeout: int = None
+        limit: int = 50000, order: str = None, timeout: int = None,
+        offset: int = 0,
     ) -> list:
         """Consulta genérica via Socrata SoQL API (/resource/{id}.json), retorna lista de dicts.
 
         Inclui retry com backoff exponencial para falhas transitórias de rede.
+        `offset` (P0-A) pagina com `$offset`; a ordem tem de ser estável.
         """
         t = timeout or self.timeout
         url = f"https://{domain}/resource/{dataset}.json"
@@ -84,6 +164,8 @@ class Socrata311Scraper:
             "$select": select,
             "$limit": limit,
         }
+        if offset:
+            params["$offset"] = int(offset)
         if where:
             params["$where"] = where
         if order:
@@ -495,8 +577,10 @@ class Socrata311Scraper:
 
     async def fetch_from_dataset(
         self, domain: str, dataset_id: str, city: str, state: str,
-        field_names: List[str], hours: int = 48, limit: int = 50000,
+        field_names: List[str], hours: int = 48, limit: int = 5000,
         trade_filter: bool = True, source_type: Optional[str] = None,
+        watermark: Optional[str] = None, overlap_hours: int = 6,
+        max_pages: int = 10,
     ) -> List[RawLead311]:
         """Busca 311 genérico de qualquer cidade Socrata, detectando as colunas.
 
@@ -510,6 +594,11 @@ class Socrata311Scraper:
         trade_filter=False -> traz todos os registos da janela (usado no backfill).
         source_type        -> classifica o lead (ex: "hpd_violation"). Sem isto
             tudo cai em "311" e os filtros da UI ficam vazios.
+
+        P0-A: `watermark` (YYYY-MM-DD) substitui a janela `hours` por
+        `watermark - overlap_hours`; `limit` e' o tamanho da pagina e
+        `max_pages` o tecto duro. `self.last_meta` fica com rows/pages/truncated/
+        max_date para o caller atualizar o watermark.
         """
         cols = self._guess_columns(field_names)
         if not cols["_has_date"] or not cols["_has_desc"]:
@@ -547,18 +636,30 @@ class Socrata311Scraper:
         if not select_fields:
             select_fields = ["*"]
 
-        since = (datetime.now() - timedelta(hours=hours)).strftime("%Y-%m-%d")
+        # P0-A: watermark - overlap substitui a janela fixa quando existe.
+        if watermark:
+            try:
+                base = datetime.fromisoformat(str(watermark)[:10])
+                since_dt = base - timedelta(hours=max(0, int(overlap_hours)))
+            except (ValueError, TypeError):
+                since_dt = datetime.now() - timedelta(hours=hours)
+        else:
+            since_dt = datetime.now() - timedelta(hours=hours)
+        since = since_dt.strftime("%Y-%m-%d")
 
         # keyword filtering done in Python (post-fetch) to avoid SQL lower() issues
         where = f"{cols['date']} > '{since}'"
 
-        rows = await self._fetch_soql(
+        page_size = max(1, min(int(limit or 5000), 5000))
+        rows = await self._fetch_all_pages(
             domain=domain,
             dataset=dataset_id,
             select=", ".join(select_fields),
             where=where,
             order=f"{cols['date']} DESC",
-            limit=limit,
+            page_size=page_size,
+            max_pages=max(1, int(max_pages)),
+            date_col=cols["date"],
         )
 
         leads = []
