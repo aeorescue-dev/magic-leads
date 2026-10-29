@@ -24,16 +24,27 @@ export function PushNotificationButton() {
 
   if (permission === "denied") {
     return (
-      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
-        <span className="flex items-center gap-1.5 text-xs text-amber-400">
-          <ShieldAlert className="h-3.5 w-3.5" />
-          {t("push.permission_denied") || "Notificações bloqueadas no navegador"}
+      <>
+        {/* Mobile: icone compacto. O texto completo rebentava a topbar e
+            empurrava o CTA de assinatura para fora do ecra. */}
+        <span
+          className="sm:hidden flex items-center justify-center p-2 rounded-xl text-amber-500"
+          title={t("push.permission_denied") || "Notificações bloqueadas no navegador"}
+          aria-label={t("push.permission_denied") || "Notificações bloqueadas no navegador"}
+        >
+          <ShieldAlert className="h-4 w-4" />
         </span>
-        <span className="text-[11px] text-slate-400">
-          {t("push.permission_instructions") ||
-            "Habilite no cadeado/escudo da barra de endereço > Notificações > Permitir e recarregue a página."}
-        </span>
-      </div>
+        <div className="hidden sm:flex flex-col sm:flex-row items-start sm:items-center gap-2">
+          <span className="flex items-center gap-1.5 text-xs text-amber-400">
+            <ShieldAlert className="h-3.5 w-3.5" />
+            {t("push.permission_denied") || "Notificações bloqueadas no navegador"}
+          </span>
+          <span className="hidden lg:inline text-[11px] text-slate-400">
+            {t("push.permission_instructions") ||
+              "Habilite no cadeado/escudo da barra de endereço > Notificações > Permitir e recarregue a página."}
+          </span>
+        </div>
+      </>
     );
   }
 

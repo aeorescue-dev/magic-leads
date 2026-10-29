@@ -85,7 +85,7 @@ test("reservar abre o guia do ciclo: 4 etapas, status ATIVO/PRÓXIMO/BLOQUEADO e
   await expect(timer).toHaveText(/^59:\d{2}$/);
 
   // Fechar guia abre o pipeline completo (painel sticky no modal analítico)
-  await dialog.getByRole("button", { name: "Ver pipeline completo" }).click();
+  await dialog.getByRole("button", { name: "Ver fluxo completo" }).click();
   await expect(page.getByText("Guia rápido — como aproveitar este lead")).toBeVisible();
 });
 
@@ -94,7 +94,7 @@ test("transições de fase na UI: Contactar e Negociar reabrem 48h; Converter sa
   await ensureAvailable(request, cycle);
 
   const dialog = await reserveViaUiAndGetGuide(page, CYCLE_ADDRESS);
-  await dialog.getByRole("button", { name: "Ver pipeline completo" }).click();
+  await dialog.getByRole("button", { name: "Ver fluxo completo" }).click();
 
   // Painel do ciclo visível no modal analítico com countdown ~1h.
   const panelTimer = page.getByTestId("stage-countdown");

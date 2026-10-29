@@ -123,6 +123,21 @@ const DARK = {
   card: "#10121a",
   sidebar: "#0f1117",
   border: "border-white/10",
+  // Divisor mais discreto que a borda de cartao.
+  divider: "border-white/5",
+  // Superficie de painel/seccao (cartao elevado).
+  panel: "bg-[#10121a] border-white/5",
+  // Superficie secundaria (faixas, chips, blocos internos).
+  subtle: "bg-white/5 border-white/10",
+  // Track de barras de progresso.
+  track: "bg-white/10",
+  // Chip/botao selecionado (nao-primario).
+  chipActive: "bg-white/10 text-slate-100 border-white/20",
+  // Botao secundario (mapa, copiar).
+  ghost: "bg-slate-500/15 text-slate-300 hover:bg-slate-500/25",
+  // Botao destrutivo/neutro (largar lead).
+  ghostDanger: "bg-white/10 text-slate-300 hover:bg-rose-500/20 hover:text-rose-400",
+  // Texto secundario com contraste AA.
   text: "text-slate-100",
   text2: "text-slate-400",
   input: "bg-white/5",
@@ -137,8 +152,17 @@ const LIGHT = {
   card: "#ffffff",
   sidebar: "#ffffff",
   border: "border-slate-200",
+  divider: "border-slate-200",
+  panel: "bg-white border-slate-200 shadow-sm",
+  subtle: "bg-slate-50 border-slate-200",
+  track: "bg-slate-200",
+  chipActive: "bg-slate-200 text-slate-900 border-slate-300",
+  ghost: "bg-slate-100 text-slate-700 hover:bg-slate-200",
+  ghostDanger: "bg-slate-100 text-slate-700 hover:bg-rose-100 hover:text-rose-600",
+  // slate-600 (7:1 sobre branco) em vez de slate-500, que ficava abaixo de AA
+  // em superficies cinzentas.
   text: "text-slate-900",
-  text2: "text-slate-500",
+  text2: "text-slate-600",
   input: "bg-slate-100",
   navHover: "hover:bg-slate-100",
   section: "bg-white border-slate-200",
@@ -238,6 +262,8 @@ function DashboardPageInner() {
   const [selectedUrgency, setSelectedUrgency] = useState<string>("all");
   const [selectedType, setSelectedType] = useState<string>("all");
   const [selectedOwnerType, setSelectedOwnerType] = useState<string>("all");
+  // Gaveta de filtros em mobile (<lg). Em desktop os filtros ficam inline.
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
   const [publicMetrics, setPublicMetrics] = useState<PublicMetrics>(EMPTY_PUBLIC_METRICS);
   const [scraperState, setScraperState] = useState<ScraperRunState | null>(null);
@@ -392,15 +418,41 @@ const URGENCIES = ["all", "high", "medium", "low"];
     }
   }, []);
 
-  // Theme loading
+  // Theme loading. O primeiro efeito le a preferencia; o segundo so grava
+  // DEPOIS dessa leitura. Sem esta guarda, o efeito de gravacao corria com o
+  // estado inicial ("dark") e apagava a escolha do utilizador antes de o
+  // setTheme chegar ao render (visivel com StrictMode: o tema voltava a dark).
+  const [themeLoaded, setThemeLoaded] = useState(false);
   useEffect(() => {
     const saved = localStorage.getItem("pro.theme") as Theme | null;
     if (saved === "light" || saved === "dark") setTheme(saved);
+    setThemeLoaded(true);
   }, []);
 
   useEffect(() => {
+    if (!themeLoaded) return;
     localStorage.setItem("pro.theme", theme);
-  }, [theme]);
+  }, [theme, themeLoaded]);
+
+  // Gaveta de filtros (mobile): bloqueia scroll do fundo, fecha com Escape,
+  // move o foco para a folha ao abrir e devolve-o ao botao ao fechar.
+  const filtersSheetRef = useRef<HTMLDivElement | null>(null);
+  const filtersTriggerRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (!filtersOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFiltersOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    filtersSheetRef.current?.focus();
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = previousOverflow;
+      filtersTriggerRef.current?.focus();
+    };
+  }, [filtersOpen]);
 
   // Route protection
   useEffect(() => {
@@ -1025,6 +1077,31 @@ const URGENCIES = ["all", "high", "medium", "low"];
     setGuideLead(null);
     if (openAnalytic && l) setSelectedLead(l as LeadResponse);
   };
+
+  // Modais do dashboard: foco no painel ao abrir e Escape para fechar. Sem
+  // isto, o teclado ficava preso atras do overlay e o Escape nao fazia nada.
+  const detailDialogRef = useRef<HTMLDivElement | null>(null);
+  const revealDialogRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (selectedLead) detailDialogRef.current?.focus();
+  }, [selectedLead]);
+  useEffect(() => {
+    if (revealTarget) revealDialogRef.current?.focus();
+  }, [revealTarget]);
+  useEffect(() => {
+    if (!selectedLead && !revealTarget) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (revealTarget) {
+        closeRevealModal();
+      } else if (selectedLead) {
+        setSelectedLead(null);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLead, revealTarget, busyAction]);
   const confirmReveal = async () => {
     if (!revealTarget || busyAction) return;
     if (subscription && !subscription.can_access) {
@@ -1398,7 +1475,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
           </a>
           <button
             onClick={() => copyToClipboard(selectedLead.owner_phone!, "phone")}
-          className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-white/10 text-xs text-slate-300 hover:bg-white/5 transition"
+          className={`flex items-center gap-1 px-3 py-1.5 rounded-lg border text-xs transition ${T.border} ${T.text} ${T.navHover}`}
         >
           {copiedField === "phone" ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
           Copiar telefone
@@ -1409,8 +1486,157 @@ const URGENCIES = ["all", "high", "medium", "low"];
 
   const modalActionButtons = selectedLead ? getModalActionButtons() : null;
 
+  // ---- Filtros: uma unica definicao usada inline (desktop) e na gaveta mobile.
+  const selectCls = `px-3 py-1.5 rounded-lg text-sm border outline-none transition ${
+    isDark
+      ? "bg-[#0b0d1a] border-white/10 text-white"
+      : "bg-white border-slate-200 text-slate-900"
+  }`;
+  const activeFilterCount = [
+    selectedCity !== "all",
+    selectedCategory !== "all",
+    selectedUrgency !== "all",
+    selectedOwnerType !== "all",
+    selectedType !== "all",
+    includeClosed,
+  ].filter(Boolean).length;
+  const clearFilters = () => {
+    setSelectedCity("all");
+    setSelectedCategory("all");
+    setSelectedUrgency("all");
+    setSelectedOwnerType("all");
+    setSelectedType("all");
+    setIncludeClosed(false);
+  };
+
+  const filterControls = (
+    <>
+      <label className="flex items-center gap-2 min-w-0">
+        <span className={`text-xs font-medium whitespace-nowrap ${T.text2}`}>
+          {t("dashboard.filter.city") || "📍 Cidade:"}
+        </span>
+        <select
+          value={selectedCity}
+          onChange={(e) => setSelectedCity(e.target.value)}
+          className={`${selectCls} flex-1 lg:flex-none`}
+        >
+          {CITIES.map((c) => (
+            <option key={c} value={c}>
+              {c === "all" ? t("dashboard.filter.all_cities") || "Todas" : c}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="flex items-center gap-2 min-w-0">
+        <span className={`text-xs font-medium whitespace-nowrap ${T.text2}`}>
+          {t("dashboard.filter.category") || "🔧 Categoria:"}
+        </span>
+        <select
+          value={selectedCategory}
+          onChange={(e) => setSelectedCategory(e.target.value)}
+          className={`${selectCls} flex-1 lg:flex-none`}
+        >
+          {CATEGORIES_FILTER.map((c) => (
+            <option key={c} value={c}>
+              {c === "all"
+                ? t("dashboard.filter.all_categories") || "Todas"
+                : t(CATEGORIES.find((x) => x.key === c)?.labelKey || c)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="flex items-center gap-2 min-w-0">
+        <span className={`text-xs font-medium whitespace-nowrap ${T.text2}`}>
+          {t("dashboard.filter.urgency") || "⚡ Urgência:"}
+        </span>
+        <select
+          value={selectedUrgency}
+          onChange={(e) => setSelectedUrgency(e.target.value)}
+          className={`${selectCls} flex-1 lg:flex-none`}
+        >
+          {URGENCIES.map((u) => (
+            <option key={u} value={u}>
+              {u === "all"
+                ? t("dashboard.filter.all_urgency") || "Todas"
+                : t(`dashboard.feed.urgency.${u}`) || u.charAt(0).toUpperCase() + u.slice(1)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="flex items-center gap-2 min-w-0">
+        <span className={`text-xs font-medium whitespace-nowrap ${T.text2}`}>
+          {t("dashboard.filter.owner_type") || "👤 Proprietário:"}
+        </span>
+        <select
+          value={selectedOwnerType}
+          onChange={(e) => setSelectedOwnerType(e.target.value)}
+          className={`${selectCls} flex-1 lg:flex-none`}
+        >
+          {OWNER_TYPES.map((ot) => {
+            const count =
+              ot.value === "all"
+                ? realTotalLeads
+                : ot.value === "institutional"
+                  ? (dashboardSummary?.by_owner_type?.institutional ?? 0)
+                  : ot.value === "private"
+                    ? (dashboardSummary?.by_owner_type?.private ?? 0)
+                    : (dashboardSummary?.by_owner_type as any)?.unknown ?? 0;
+            return (
+              <option key={ot.value} value={ot.value}>
+                {t(ot.labelKey) || ot.value}
+                {ot.value !== "all" ? ` (${count})` : ""}
+              </option>
+            );
+          })}
+        </select>
+      </label>
+      <label className="flex items-center gap-2 min-w-0">
+        <span className={`text-xs font-medium whitespace-nowrap ${T.text2}`}>
+          {t("dashboard.filter.type") || "Tipo:"}
+        </span>
+        <select
+          value={selectedType}
+          onChange={(e) => {
+            const newType = e.target.value;
+            setSelectedType(newType);
+            if (newType !== "all") {
+              setSelectedCategory("all");
+            }
+          }}
+          className={`${selectCls} flex-1 lg:flex-none`}
+        >
+          {LEAD_TYPES.map((lt) => (
+            <option key={lt.value} value={lt.value}>
+              {t(lt.labelKey)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <button
+        onClick={() => setIncludeClosed((v) => !v)}
+        aria-pressed={includeClosed}
+        title={t("dashboard.badge.closed_hint")}
+        className={`flex items-center justify-center gap-1.5 text-[11px] font-semibold px-2.5 py-2 rounded-lg border transition ${
+          includeClosed
+            ? isDark
+              ? "bg-slate-500/20 border-slate-400/40 text-slate-200"
+              : "bg-slate-200 border-slate-300 text-slate-900"
+            : isDark
+              ? "bg-transparent border-white/10 text-slate-400 hover:text-slate-200"
+              : "bg-white border-slate-200 text-slate-600 hover:text-slate-900"
+        }`}
+      >
+        <Archive className="h-3.5 w-3.5" /> {t("dashboard.filter.include_closed")}
+      </button>
+    </>
+  );
+
   return (
-    <div className="flex min-h-screen transition-colors duration-200" style={{ backgroundColor: T.bg, color: isDark ? "#f8fafc" : "#0f172a" }}>
+    <div
+      data-theme={theme}
+      className="flex min-h-screen transition-colors duration-200"
+      style={{ backgroundColor: T.bg, color: isDark ? "#f8fafc" : "#0f172a" }}
+    >
       {sidebarOpen && (
         <div className="fixed inset-0 z-40 bg-black/60 lg:hidden backdrop-blur-sm" onClick={() => setSidebarOpen(false)} />
       )}
@@ -1461,7 +1687,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
                 <span className="flex-1 text-left">{item.label}</span>
                 {item.badge && (
                   <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                    active ? "bg-indigo-500 text-white" : "bg-white/10 text-slate-400"
+                    active ? "bg-indigo-500 text-white" : `${T.chipActive}`
                   }`}>
                     {item.badge}
                   </span>
@@ -1470,7 +1696,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
             );
           })}
 
-          <div className="pt-4 mt-4 border-t border-white/5 space-y-1">
+          <div className={`pt-4 mt-4 border-t space-y-1 ${T.divider}`}>
             <button
               onClick={() => setShowCheckout(true)}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition ${T.text2} ${T.navHover}`}
@@ -1556,7 +1782,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
           style={{ backgroundColor: isDark ? "rgba(11,13,18,0.85)" : "rgba(255,255,255,0.85)" }}
         >
           <button
-            className="lg:hidden p-2 rounded-lg text-slate-400 hover:bg-white/5"
+            className={`lg:hidden p-2 rounded-lg transition ${T.text2} ${T.navHover}`}
             onClick={() => setSidebarOpen(true)}
             aria-label="Abrir menu"
           >
@@ -1585,6 +1811,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
           <div className="ml-auto flex items-center gap-2 md:gap-3">
             {/* Theme Toggle */}
             <button
+              data-testid="theme-toggle"
               onClick={() => setTheme((p) => (p === "dark" ? "light" : "dark"))}
               className={`p-2 rounded-xl border ${T.border} ${T.text2} ${T.navHover} transition`}
               title={t("dashboard.topbar.theme")}
@@ -1676,7 +1903,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
               {/* Trial CTA button */}
             <button
               onClick={() => setShowCheckout(true)}
-              className="flex items-center gap-1.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-semibold text-xs md:text-sm px-3.5 py-2 rounded-xl shadow-md shadow-emerald-500/20 transition"
+              className="flex items-center gap-1.5 shrink-0 whitespace-nowrap bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-semibold text-xs md:text-sm px-3.5 py-2 rounded-xl shadow-md shadow-emerald-500/20 transition"
             >
               <CreditCard className="h-4 w-4" />
               <span>{t("dashboard.trial.scribe")}</span>
@@ -1758,7 +1985,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
           </div>
 
           {/* DAILY LIMIT BAR (10 leads/dia) */}
-          <div className="rounded-xl border bg-white/5 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className={`rounded-xl border p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${T.subtle}`}>
             <div className="flex items-center gap-3">
               <div className="h-10 w-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
                 <BarChart3 className="h-5 w-5" />
@@ -1767,7 +1994,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
                 <p className="text-sm font-semibold text-amber-400">
                   {t("dashboard.trial.daily_limit_label", { used: dailyStats?.used ?? 0, limit: dailyStats?.limit ?? 10 })}
                 </p>
-                <div className="w-full max-w-xs h-2 bg-white/10 rounded-full overflow-hidden mt-1">
+                <div className={`w-full max-w-xs h-2 rounded-full overflow-hidden mt-1 ${T.track}`}>
                   <div 
                     className="h-full bg-amber-500 transition-all duration-300" 
                     style={{ width: dailyStats && dailyStats.limit > 0 ? `${Math.min(100, (dailyStats.used / dailyStats.limit) * 100)}%` : '0%' }}
@@ -1778,106 +2005,118 @@ const URGENCIES = ["all", "high", "medium", "low"];
             {dailyStats && dailyStats.remaining === 0 && (
               <div className="text-xs text-red-400 font-medium">
                 {t("dashboard.trial.daily_limit_exceeded").replace("{reset_at}", dailyStats.reset_at ? formatRelativeTime(dailyStats.reset_at, t) : "breve")}
-                <div className="text-slate-400 font-normal mt-0.5">
+                <div className={`text-xs font-normal mt-0.5 ${T.text2}`}>
                   {t("dashboard.trial.corporate_still_free")}
                 </div>
               </div>
             )}
           </div>
 
-          {/* FILTER BAR */}
-          <div className={`flex flex-wrap items-center gap-3 p-4 rounded-xl border ${theme === "dark" ? "bg-[#10121a] border-white/5" : "bg-white border-slate-200 shadow-sm"}`}>
-            <div className="flex items-center gap-2">
-              <span className={`text-xs font-medium ${T.text2}`}>{t("dashboard.filter.city") || "📍 Cidade:"}</span>
-              <select
-                value={selectedCity}
-                onChange={(e) => setSelectedCity(e.target.value)}
-                className={`px-3 py-1.5 rounded-lg text-sm border ${theme === "dark" ? "bg-[#0b0d1a] border-white/10 text-white" : "bg-white border-slate-200"}`}
-              >
-                {CITIES.map((c) => <option key={c} value={c}>{c === "all" ? t("dashboard.filter.all_cities") || "Todas" : c}</option>)}
-              </select>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className={`text-xs font-medium ${T.text2}`}>{t("dashboard.filter.category") || "🔧 Categoria:"}</span>
-              <select
-                value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
-                className={`px-3 py-1.5 rounded-lg text-sm border ${theme === "dark" ? "bg-[#0b0d1a] border-white/10 text-white" : "bg-white border-slate-200"}`}
-              >
-                {CATEGORIES_FILTER.map((c) => <option key={c} value={c}>{c === "all" ? t("dashboard.filter.all_categories") || "Todas" : t(CATEGORIES.find(x => x.key === c)?.labelKey || c)}</option>)}
-              </select>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className={`text-xs font-medium ${T.text2}`}>{t("dashboard.filter.urgency") || "⚡ Urgência:"}</span>
-              <select
-                value={selectedUrgency}
-                onChange={(e) => setSelectedUrgency(e.target.value)}
-                className={`px-3 py-1.5 rounded-lg text-sm border ${theme === "dark" ? "bg-[#0b0d1a] border-white/10 text-white" : "bg-white border-slate-200"}`}
-              >
-                {URGENCIES.map((u) => <option key={u} value={u}>{u === "all" ? t("dashboard.filter.all_urgency") || "Todas" : t(`dashboard.feed.urgency.${u}`) || u.charAt(0).toUpperCase() + u.slice(1)}</option>)}
-              </select>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className={`text-xs font-medium ${T.text2}`}>{t("dashboard.filter.owner_type") || "👤 Proprietário:"}</span>
-              <select
-                value={selectedOwnerType}
-                onChange={(e) => setSelectedOwnerType(e.target.value)}
-                className={`px-3 py-1.5 rounded-lg text-sm border ${theme === "dark" ? "bg-[#0b0d1a] border-white/10 text-white" : "bg-white border-slate-200"}`}
-              >
-                {OWNER_TYPES.map((ot) => {
-                  const count =
-                    ot.value === "all"
-                      ? realTotalLeads
-                      : ot.value === "institutional"
-                        ? (dashboardSummary?.by_owner_type?.institutional ?? 0)
-                        : ot.value === "private"
-                          ? (dashboardSummary?.by_owner_type?.private ?? 0)
-                          : (dashboardSummary?.by_owner_type as any)?.unknown ?? 0;
-                  return (
-                    <option key={ot.value} value={ot.value}>
-                      {t(ot.labelKey) || ot.value}{ot.value !== "all" ? ` (${count})` : ""}
-                    </option>
-                  );
-                })}
-              </select>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className={`text-xs font-medium ${T.text2}`}>{t("dashboard.filter.type") || "Tipo:"}</span>
-              <select
-                value={selectedType}
-                onChange={(e) => {
-                  const newType = e.target.value;
-                  setSelectedType(newType);
-                  if (newType !== "all") {
-                    setSelectedCategory("all");
-                  }
-                }}
-                className={`px-3 py-1.5 rounded-lg text-sm border ${theme === "dark" ? "bg-[#0b0d1a] border-white/10 text-white" : "bg-white border-slate-200"}`}
-              >
-                {LEAD_TYPES.map((lt) => <option key={lt.value} value={lt.value}>{t(lt.labelKey)}</option>)}
-              </select>
-            </div>
-            <button
-              onClick={() => setIncludeClosed((v) => !v)}
-              aria-pressed={includeClosed}
-              title={t("dashboard.badge.closed_hint")}
-              className={`flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border transition ${
-                includeClosed
-                  ? "bg-slate-500/20 border-slate-400/40 text-slate-200"
-                  : theme === "dark"
-                    ? "bg-transparent border-white/10 text-slate-400 hover:text-slate-200"
-                    : "bg-white border-slate-200 text-slate-500 hover:text-slate-700"
-              }`}
-            >
-              <Archive className="h-3.5 w-3.5" /> {t("dashboard.filter.include_closed")}
-            </button>
+          {/* FILTER BAR — inline em desktop, gaveta (sheet) em mobile */}
+          <div className={`hidden lg:flex flex-wrap items-center gap-3 p-4 rounded-xl border ${T.panel}`}>
+            {filterControls}
             <div className="flex-1" />
-            <div className="flex items-center gap-2 text-xs" style={{ color: theme === "dark" ? "#94a3b8" : "#64748b" }}>
+            <div className={`flex items-center gap-2 text-xs ${T.text2}`}>
               <span>{filteredLeads.length} {t("dashboard.filter.showing") || "oportunidades"}</span>
               <span>·</span>
               <span>{newAlerts.length} {t("dashboard.filter.new") || "novas"}</span>
             </div>
           </div>
+
+          <div className="lg:hidden flex items-center gap-2">
+            <button
+              ref={filtersTriggerRef}
+              type="button"
+              onClick={() => setFiltersOpen(true)}
+              aria-haspopup="dialog"
+              aria-controls="filters-sheet"
+              aria-expanded={filtersOpen}
+              className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border text-sm font-semibold transition ${T.panel} ${T.text}`}
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+              {t("dashboard.filter.open") || "Filtros"}
+              {activeFilterCount > 0 && (
+                <span className="inline-flex items-center justify-center h-5 min-w-5 px-1.5 rounded-full bg-indigo-500 text-white text-[10px] font-bold">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
+            <span className={`ml-auto text-xs ${T.text2}`}>
+              {filteredLeads.length} {t("dashboard.filter.showing") || "oportunidades"}
+            </span>
+          </div>
+
+          {filtersOpen && (
+            <div
+              className="lg:hidden fixed inset-0 z-[80]"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="filters-sheet-title"
+            >
+              <div
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                onClick={() => setFiltersOpen(false)}
+              />
+              <div
+                ref={filtersSheetRef}
+                id="filters-sheet"
+                tabIndex={-1}
+                onKeyDown={(e) => {
+                  // Focus trap simples: Tab circula apenas dentro da folha.
+                  if (e.key !== "Tab") return;
+                  const nodes = filtersSheetRef.current?.querySelectorAll<HTMLElement>(
+                    'button, select, a[href], input, [tabindex]:not([tabindex="-1"])'
+                  );
+                  if (!nodes || nodes.length === 0) return;
+                  const first = nodes[0];
+                  const last = nodes[nodes.length - 1];
+                  if (e.shiftKey && document.activeElement === first) {
+                    e.preventDefault();
+                    last.focus();
+                  } else if (!e.shiftKey && document.activeElement === last) {
+                    e.preventDefault();
+                    first.focus();
+                  }
+                }}
+                className={`absolute bottom-0 left-0 right-0 max-h-[85vh] overflow-y-auto rounded-t-2xl border-t p-5 pb-8 space-y-4 animate-slide-up outline-none ${
+                  isDark
+                    ? "bg-[#14161d] border-white/10 text-slate-100"
+                    : "bg-white border-slate-200 text-slate-900 shadow-2xl"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <h3 id="filters-sheet-title" className="text-sm font-bold">
+                    {t("dashboard.filter.open") || "Filtros"}
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setFiltersOpen(false)}
+                    aria-label={t("dashboard.filter.close") || "Fechar"}
+                    className={`p-1.5 rounded-lg transition ${isDark ? "hover:bg-white/10 text-slate-400" : "hover:bg-slate-100 text-slate-600"}`}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className="flex flex-col gap-3">{filterControls}</div>
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={clearFilters}
+                    className={`flex-1 px-4 py-2.5 rounded-xl border text-sm font-semibold transition ${T.border} ${T.text2} ${T.navHover}`}
+                  >
+                    {t("dashboard.filter.clear") || "Limpar"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFiltersOpen(false)}
+                    className="flex-1 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+                  >
+                    {t("dashboard.filter.apply") || "Aplicar"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* DATA FRESHNESS BADGE */}
           <div className="flex items-center justify-end mb-3">
@@ -2148,7 +2387,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
                         onClick={() => setHistoryPeriod(opt.value)}
                         className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold shrink-0 transition border ${
                           historyPeriod === opt.value
-                            ? "bg-white/10 text-slate-100 border-white/20"
+                            ? `${T.chipActive}`
                             : `${T.border} ${T.navHover} ${T.text2}`
                         }`}
                       >
@@ -2211,18 +2450,28 @@ const URGENCIES = ["all", "high", "medium", "low"];
                         : lead.my_status === "negotiating"
                           ? { label: t("dashboard.status.negotiation"), cls: "bg-amber-500/15 text-amber-400", icon: <MessageSquare className="h-3 w-3" /> }
                           : lead.my_status === "hold_expired"
-                            ? { label: t("dashboard.history.filter_hold_expired"), cls: "bg-slate-500/15 text-slate-400", icon: <Clock className="h-3 w-3" /> }
+                            ? { label: t("dashboard.history.filter_hold_expired"), cls: `${isDark ? "bg-slate-500/15 text-slate-400" : "bg-slate-200 text-slate-600"}`, icon: <Clock className="h-3 w-3" /> }
                             : lead.my_status === "converted"
                               ? { label: t("dashboard.status.converted"), cls: "bg-emerald-500/15 text-emerald-400", icon: <BadgeCheck className="h-3 w-3" /> }
                               : lead.my_status === "released"
-                                ? { label: t("dashboard.history.filter_released"), cls: "bg-slate-500/15 text-slate-400", icon: <RefreshCcw className="h-3 w-3" /> }
+                                ? { label: t("dashboard.history.filter_released"), cls: `${isDark ? "bg-slate-500/15 text-slate-400" : "bg-slate-200 text-slate-600"}`, icon: <RefreshCcw className="h-3 w-3" /> }
                                 : { label: t("dashboard.status.available"), cls: "bg-sky-500/15 text-sky-400", icon: <CheckCircle2 className="h-3 w-3" /> };
                     return (
                       <div
                         key={lead.id}
                         data-testid="history-row"
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`${lead.address}, ${lead.city}`}
                         onClick={() => openLeadDetail(lead)}
-                        className={`px-5 py-4 cursor-pointer transition ${T.navHover}`}
+                        onKeyDown={(e) => {
+                          if (e.target !== e.currentTarget) return;
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            openLeadDetail(lead);
+                          }
+                        }}
+                        className={`px-5 py-4 cursor-pointer transition ${T.navHover} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/70 focus-visible:ring-inset`}
                       >
                         <div className="flex items-center gap-2 mb-2 flex-wrap">
                           <span className="text-[10px] font-semibold uppercase tracking-wider flex items-center gap-1.5 px-2.5 py-1 rounded-full" style={{ backgroundColor: `${cat.color}1a`, color: cat.color }}>
@@ -2233,7 +2482,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
                             const st = lead.signal_type;
                             if (st === "legal_obligation") return <span className="text-[10px] font-semibold uppercase tracking-wider bg-amber-500/15 text-amber-400 px-2.5 py-1 rounded-full flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> {t("dashboard.lead_type.obligation")}</span>;
                             if (st === "authorized_work") return <span className="text-[10px] font-semibold uppercase tracking-wider bg-sky-500/15 text-sky-400 px-2.5 py-1 rounded-full flex items-center gap-1"><HardHat className="h-3 w-3" /> {t("dashboard.lead_type.permit")}</span>;
-                            return <span className="text-[10px] font-semibold uppercase tracking-wider bg-slate-500/15 text-slate-400 px-2.5 py-1 rounded-full flex items-center gap-1"><FolderOpen className="h-3 w-3" /> {t("dashboard.lead_type.open")}</span>;
+                            return <span className={`text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-full flex items-center gap-1 ${isDark ? "bg-slate-500/15 text-slate-400" : "bg-slate-100 text-slate-600"}`}><FolderOpen className="h-3 w-3" /> {t("dashboard.lead_type.open")}</span>;
                           })())}
 
                           <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full flex items-center gap-1 ${badge.cls}`}>
@@ -2269,7 +2518,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
                               )}
                             </div>
                             {lead.release_reason && (
-                              <div className="text-[11px] mt-1 text-slate-500">
+                              <div className={`text-[11px] mt-1 ${T.text2}`}>
                                 {t("dashboard.field.reason")}:{" "}
                                 {releaseReasonLabel(lead.release_reason)}
                               </div>
@@ -2281,7 +2530,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
                               <button
                                 onClick={(e) => { e.stopPropagation(); openReleaseModal(lead); }}
                                 disabled={busyAction}
-                                className="inline-flex items-center gap-1.5 text-[11px] font-semibold bg-white/10 hover:bg-rose-500/20 text-slate-300 hover:text-rose-400 px-3 py-1.5 rounded-lg transition disabled:opacity-50"
+                                className={`inline-flex items-center gap-1.5 text-[11px] font-semibold ${T.ghostDanger} px-3 py-1.5 rounded-lg transition disabled:opacity-50`}
                               >
                                 <RefreshCcw className="h-3 w-3" /> {t("dashboard.action.drop")}
                               </button>
@@ -2387,9 +2636,26 @@ const URGENCIES = ["all", "high", "medium", "low"];
 
               <div className={`flex-1 overflow-y-auto max-h-[640px] divide-y ${T.border}`}>
                 {loadingLeads ? (
-                  <div className="flex flex-col items-center justify-center py-16 gap-2">
-                    <Loader2 className="h-6 w-6 animate-spin text-indigo-500" />
-                    <span className={`text-xs ${T.text2}`}>{t("dashboard.feed.loading")}</span>
+                  // Skeletons: preservam a altura dos cartoes reais para evitar
+                  // salto de layout quando os dados chegam.
+                  <div aria-busy="true" aria-live="polite">
+                    <span className="sr-only">{t("dashboard.feed.loading")}</span>
+                    {[0, 1, 2, 3].map((i) => (
+                      <div
+                        key={i}
+                        aria-hidden="true"
+                        className={`px-5 py-4 animate-pulse ${i > 0 ? `border-t ${T.border}` : ""}`}
+                      >
+                        <div className="flex items-center gap-2 mb-3 flex-wrap">
+                          <div className={`h-5 w-24 rounded-full ${T.track}`} />
+                          <div className={`h-5 w-20 rounded-full ${T.track}`} />
+                          <div className={`h-5 w-16 rounded-full ${T.track}`} />
+                        </div>
+                        <div className={`h-4 w-2/3 rounded ${T.track}`} />
+                        <div className={`h-3 w-1/2 rounded mt-2 ${T.track}`} />
+                        <div className={`h-8 w-28 rounded-lg mt-4 ${T.track}`} />
+                      </div>
+                    ))}
                   </div>
                 ) : filteredLeads.length === 0 ? (
                   <div className="p-12 text-center">
@@ -2428,8 +2694,20 @@ const URGENCIES = ["all", "high", "medium", "low"];
                           key={lead.id}
                           data-testid="lead-card"
                           data-lead-id={lead.id}
+                          role="button"
+                          tabIndex={0}
+                          aria-label={`${lead.address}, ${lead.city}`}
                           onClick={() => openLeadDetail(lead)}
-                          className={`px-5 py-4 cursor-pointer transition ${T.navHover} group ${vis === "reserved_by_other" ? "opacity-60" : ""}`}
+                          onKeyDown={(e) => {
+                            // Só quando o foco está no próprio cartão: Enter num
+                            // botão/anchor filho não pode abrir o detalhe.
+                            if (e.target !== e.currentTarget) return;
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              openLeadDetail(lead);
+                            }
+                          }}
+                          className={`px-5 py-4 cursor-pointer transition ${T.navHover} group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/70 focus-visible:ring-inset ${vis === "reserved_by_other" ? "opacity-60" : ""}`}
                         >
                           <div className="flex items-center gap-2 mb-2 flex-wrap">
                             <span
@@ -2443,7 +2721,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
                               const st = lead.signal_type;
                               if (st === "legal_obligation") return <span className="text-[10px] font-semibold uppercase tracking-wider bg-amber-500/15 text-amber-400 px-2.5 py-1 rounded-full flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> {t("dashboard.lead_type.obligation")}</span>;
                               if (st === "authorized_work") return <span className="text-[10px] font-semibold uppercase tracking-wider bg-sky-500/15 text-sky-400 px-2.5 py-1 rounded-full flex items-center gap-1"><HardHat className="h-3 w-3" /> {t("dashboard.lead_type.permit")}</span>;
-                              return <span className="text-[10px] font-semibold uppercase tracking-wider bg-slate-500/15 text-slate-400 px-2.5 py-1 rounded-full flex items-center gap-1"><FolderOpen className="h-3 w-3" /> {t("dashboard.lead_type.open")}</span>;
+                              return <span className={`text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-full flex items-center gap-1 ${isDark ? "bg-slate-500/15 text-slate-400" : "bg-slate-100 text-slate-600"}`}><FolderOpen className="h-3 w-3" /> {t("dashboard.lead_type.open")}</span>;
                             })())}
 
                             {lead.phone_confidence === "verified" && (
@@ -2459,7 +2737,11 @@ const URGENCIES = ["all", "high", "medium", "low"];
 
                             {(lead.signal_status === "closed" || isClosedCase(lead.case_status)) && (
                               <span
-                                className="text-[10px] font-semibold uppercase tracking-wider bg-slate-500/20 text-slate-300 px-2.5 py-1 rounded-full flex items-center gap-1"
+                                className={`text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-full flex items-center gap-1 ${
+                                  isDark
+                                    ? "bg-slate-500/20 text-slate-300"
+                                    : "bg-slate-200 text-slate-600"
+                                }`}
                                 title={t("dashboard.badge.closed_hint")}
                               >
                                 <Archive className="h-3 w-3" /> {t("dashboard.badge.closed")}
@@ -2488,23 +2770,15 @@ const URGENCIES = ["all", "high", "medium", "low"];
                                   <span className="text-[10px] font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-400 px-2.5 py-1 rounded-full flex items-center gap-1">
                                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" /> {t("dashboard.status.available")}
                                   </span>
-                                  {/* Reveal Phone button - for leads with owner_name but no owner_phone */}
                                   {lead.owner_name && !lead.owner_phone && (
                                     <button
                                       onClick={(e) => { e.stopPropagation(); revealPhoneForLead(lead); }}
                                       disabled={busyAction || phoneRevealing?.loading || phoneRevealing?.leadId === lead.id}
-                                      className="flex items-center gap-1.5 text-[11px] font-bold bg-violet-500 hover:bg-violet-400 text-white px-3 py-1.5 rounded-lg transition shadow-sm disabled:opacity-50"
+                                      className="flex items-center gap-1.5 text-[11px] font-bold border border-violet-500/40 text-violet-400 hover:bg-violet-500/10 px-3 py-1.5 rounded-lg transition disabled:opacity-50"
                                     >
                                       <Smartphone className="h-3 w-3" /> {t("dashboard.action.reveal_phone") || "Revelar Telefone"}
                                     </button>
                                   )}
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); handleQuickReserve(lead); }}
-                                    disabled={busyAction || (subscription && !subscription.can_access) || isBlockedByQuota(lead, dailyStats?.remaining)}
-                                    className="flex items-center gap-1.5 text-[11px] font-bold bg-indigo-500 hover:bg-indigo-400 text-white px-3 py-1.5 rounded-lg transition shadow-sm disabled:opacity-50"
-                                  >
-                                    <Lock className="h-3 w-3" /> {isFreeLead(lead) ? t("dashboard.action.reserve_corporate") : t("dashboard.action.reserve_1h")}
-                                  </button>
                                   {shouldShowAddressWarning(lead) && (
                                     <span className="text-[10px] text-amber-500/90 flex items-center gap-1">
                                       <AlertTriangle className="h-3 w-3" /> {t("dashboard.badge.address_unresolvable")}
@@ -2556,13 +2830,13 @@ const URGENCIES = ["all", "high", "medium", "low"];
                                   )}
                                   <button
                                     onClick={(e) => { e.stopPropagation(); openMaps(lead.address); }}
-                                    className="flex items-center gap-1.5 text-[11px] font-semibold bg-slate-500/15 text-slate-300 px-3 py-1.5 rounded-lg hover:bg-slate-500/25 transition"
+                                    className={`flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-lg transition ${T.ghost}`}
                                   >
                                     <Navigation className="h-3.5 w-3.5" /> {t("dashboard.action.map")}
                                   </button>
                                   <button
                                     onClick={(e) => { e.stopPropagation(); copyToClipboard(lead.owner_phone || '', 'phone'); }}
-                                    className="flex items-center gap-1.5 text-[11px] font-semibold bg-slate-500/15 text-slate-300 px-3 py-1.5 rounded-lg hover:bg-slate-500/25 transition"
+                                    className={`flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-lg transition ${T.ghost}`}
                                   >
                                     <Copy className="h-3.5 w-3.5" /> {t("dashboard.detail.copy_phone")}
                                   </button>
@@ -2582,7 +2856,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
                                 {lead.issue_description || lead.case_title || t("dashboard.feed.address_fallback")}
                               </p>
                               {((lead.repeat_365 ?? 0) > 1 || (lead.oldest_open_days ?? 0) > 0) && (
-                                <div className="flex items-center gap-2 text-[11px] mt-1 text-slate-400 flex-wrap">
+                                <div className={`flex items-center gap-2 text-[11px] mt-1 ${T.text2} flex-wrap`}>
                                   {(lead.repeat_365 ?? 0) > 1 && (
                                     <span>
                                       {t("dashboard.why.repeat").replace("{count}", String(lead.repeat_365))}
@@ -2598,11 +2872,11 @@ const URGENCIES = ["all", "high", "medium", "low"];
                               <div className={`flex items-center gap-3 text-[11px] mt-2 flex-wrap ${T.text2}`}>
                                 {lead.owner_name && (
                                   <>
-                                    <span className="font-medium text-slate-300">
+                                    <span className={`font-medium ${T.text}`}>
                                       {t("dashboard.field.owner")}: {lead.owner_name}
                                     </span>
                                     {lead.mailing_address && (
-                                      <span className="text-slate-400">📬 {lead.mailing_address}</span>
+                                      <span className={T.text2}>📬 {lead.mailing_address}</span>
                                     )}
                                   </>
                                 )}
@@ -2621,13 +2895,13 @@ const URGENCIES = ["all", "high", "medium", "low"];
                                   <button
                                     onClick={(e) => { e.stopPropagation(); handleQuickReserve(lead); }}
                                     disabled={busyAction || (subscription && !subscription.can_access) || isBlockedByQuota(lead, dailyStats?.remaining)}
-                                    className={`flex items-center gap-1.5 text-[11px] font-bold bg-indigo-500 hover:bg-indigo-400 text-white px-3 py-1.5 rounded-lg transition shadow-sm disabled:opacity-50 ${
+                                    className={`flex items-center gap-1.5 text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2.5 rounded-xl transition shadow-md shadow-indigo-600/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 disabled:opacity-50 ${
                                       (subscription && !subscription.can_access) || isBlockedByQuota(lead, dailyStats?.remaining) ? "opacity-30 cursor-not-allowed" : ""
                                     }`}
                                   >
-                                    <Lock className="h-3 w-3" /> {isFreeLead(lead) ? t("dashboard.action.reserve_corporate") : t("dashboard.action.reserve_1h")}
+                                    <Lock className="h-3.5 w-3.5" /> {isFreeLead(lead) ? t("dashboard.action.reserve_corporate") : t("dashboard.action.reserve_1h")}
                                   </button>
-                                  <span className="text-[10px] text-slate-500 flex items-center gap-1">
+                                  <span className={`text-[10px] flex items-center gap-1 ${T.text2}`}>
                                     <ShieldCheck className="h-3 w-3" /> {t("dashboard.data_protected")}
                                   </span>
                                   {shouldShowAddressWarning(lead) && (
@@ -2648,14 +2922,14 @@ const URGENCIES = ["all", "high", "medium", "low"];
                                     <button
                                       onClick={(e) => { e.stopPropagation(); revealPhoneForLead(lead); }}
                                       disabled={busyAction || phoneRevealing?.loading || phoneRevealing?.leadId === lead.id}
-                                      className="flex items-center gap-1.5 text-[11px] font-bold bg-violet-500 hover:bg-violet-400 text-white px-3 py-1.5 rounded-lg transition shadow-sm disabled:opacity-50"
+                                      className="flex items-center gap-1.5 text-[11px] font-bold border border-violet-500/40 text-violet-400 hover:bg-violet-500/10 px-3 py-1.5 rounded-lg transition disabled:opacity-50"
                                     >
                                       <Smartphone className="h-3 w-3" /> {t("dashboard.action.reveal_phone") || "Revelar Telefone"}
                                     </button>
                                   )}
                                   <button
                                     onClick={(e) => { e.stopPropagation(); openMaps(lead.address); }}
-                                    className="flex items-center gap-1.5 text-[11px] font-semibold bg-slate-500/15 text-slate-300 px-3 py-1.5 rounded-lg hover:bg-slate-500/25 transition"
+                                    className={`flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-lg transition ${T.ghost}`}
                                   >
                                     <Navigation className="h-3 w-3" /> {t("dashboard.action.map")}
                                   </button>
@@ -2688,7 +2962,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
                                   <button
                                     onClick={(e) => { e.stopPropagation(); openReleaseModal(lead); }}
                                     disabled={busyAction}
-                                    className="flex items-center gap-1.5 text-[11px] font-semibold bg-white/10 hover:bg-rose-500/20 text-slate-300 hover:text-rose-400 px-3 py-1.5 rounded-lg transition disabled:opacity-50"
+                                    className={`flex items-center gap-1.5 text-[11px] font-semibold ${T.ghostDanger} px-3 py-1.5 rounded-lg transition disabled:opacity-50`}
                                   >
 <RefreshCcw className="h-3 w-3" /> {t("dashboard.action.drop")}
                                   </button>
@@ -2730,11 +3004,11 @@ const URGENCIES = ["all", "high", "medium", "low"];
                       );
                     })}
                     {hasMoreLeads && (
-                      <div className="px-5 py-4 border-t border-white/5">
+                      <div className={`px-5 py-4 border-t ${T.divider}`}>
                         <button
                           onClick={loadMoreLeads}
                           disabled={loadingMore}
-                          className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-white/10 text-sm font-medium text-slate-300 hover:bg-white/5 transition disabled:opacity-50"
+                          className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl border text-sm font-medium transition disabled:opacity-50 ${T.border} ${T.text} ${T.navHover}`}
                         >
                           {loadingMore ? (
                             <>
@@ -2764,27 +3038,33 @@ const URGENCIES = ["all", "high", "medium", "low"];
       {selectedLead && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onClick={() => setSelectedLead(null)}>
           <div
-            className={`relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border p-6 shadow-2xl space-y-6 animate-scale-in ${
+            ref={detailDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="lead-detail-title"
+            tabIndex={-1}
+            className={`relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border p-6 shadow-2xl space-y-6 animate-scale-in outline-none ${
               isDark ? "bg-[#14161d] border-white/10 text-slate-100" : "bg-white border-slate-200 text-slate-900"
             }`}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="flex items-start justify-between gap-3 border-b pb-4 border-white/10">
+            <div className={`flex items-start justify-between gap-3 border-b pb-4 ${T.border}`}>
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-indigo-500/20 text-indigo-400">
                     {selectedLead.issue_category}
                   </span>
-                  <span className="text-xs text-slate-400 font-medium">
+                  <span className={`text-xs font-medium ${T.text2}`}>
                     {selectedLead.city}
                   </span>
                 </div>
-                <h2 className="text-xl font-bold mt-1.5">{selectedLead.address}</h2>
+                <h2 id="lead-detail-title" className="text-xl font-bold mt-1.5">{selectedLead.address}</h2>
               </div>
               <button
                 onClick={() => setSelectedLead(null)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition"
+                aria-label={t("dashboard.filter.close") || "Fechar"}
+                className={`p-1.5 rounded-lg transition ${isDark ? "text-slate-400 hover:text-white hover:bg-white/10" : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"}`}
               >
                 <X className="h-5 w-5" />
               </button>
@@ -2936,14 +3216,14 @@ const URGENCIES = ["all", "high", "medium", "low"];
 
             {/* Historical Events */}
             {leadHistory.length > 0 && (
-              <div className="space-y-3 pt-2 border-t border-white/10">
+              <div className={`space-y-3 pt-2 border-t ${T.border}`}>
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
                   <Clock className="h-3.5 w-3.5" />
                   {t("dashboard.detail.history")}
                 </h4>
                 <div className="space-y-2 max-h-48 overflow-y-auto">
                   {leadHistory.map((event) => (
-                    <div key={event.id} className="p-3 rounded-xl border border-white/5 bg-white/5 flex items-start gap-3">
+                    <div key={event.id} className={`p-3 rounded-xl border ${T.subtle} flex items-start gap-3`}>
                       <div className="h-8 w-8 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center shrink-0">
                         <Clock className="h-4 w-4" />
                       </div>
@@ -2962,14 +3242,14 @@ const URGENCIES = ["all", "high", "medium", "low"];
 
             {/* Ocorrências do imóvel (histórico 311 - Parte B) */}
             {leadOccurrences.length > 0 && (
-              <div className="space-y-3 pt-2 border-t border-white/10">
+              <div className={`space-y-3 pt-2 border-t ${T.border}`}>
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
                   <Building2 className="h-3.5 w-3.5" />
                   {t("dashboard.reveal.section_prop_history")}
                 </h4>
                 <div className="space-y-2 max-h-60 overflow-y-auto">
                   {leadOccurrences.map((oc) => (
-                    <div key={oc.id || oc.external_id || `${oc.case_title}-${oc.opened_at}`} className="p-3 rounded-xl border border-white/5 bg-white/5">
+                    <div key={oc.id || oc.external_id || `${oc.case_title}-${oc.opened_at}`} className={`p-3 rounded-xl border ${T.subtle}`}>
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-xs font-semibold text-slate-200">{oc.case_title || "Ocorrência"}</span>
                         {oc.case_status && (
@@ -3006,7 +3286,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
             )}
 
             {/* Pipeline Actions */}
-            <div className="space-y-3 pt-2 border-t border-white/10">
+            <div className={`space-y-3 pt-2 border-t ${T.border}`}>
               <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
                 {t("dashboard.detail.routing")}
               </h4>
@@ -3046,7 +3326,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
                 <button
                   onClick={() => openReleaseModal(selectedLead)}
                   disabled={busyAction}
-                  className="flex items-center gap-1.5 text-xs font-semibold bg-white/10 hover:bg-rose-500/20 text-slate-300 hover:text-rose-400 px-3 py-2 rounded-xl transition"
+                  className={`flex items-center gap-1.5 text-xs font-semibold ${T.ghostDanger} px-3 py-2 rounded-xl transition`}
                 >
                   <RefreshCcw className="h-3.5 w-3.5" /> {t("dashboard.action.release")}
                 </button>
@@ -3057,7 +3337,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
             </div>
 
             {/* Internal Notes Section */}
-            <div className="space-y-3 pt-2 border-t border-white/10">
+            <div className={`space-y-3 pt-2 border-t ${T.border}`}>
               <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
                 {t("dashboard.detail.notes")}
               </h4>
@@ -3083,7 +3363,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
                   <p className="text-xs text-slate-500 py-2">{t("dashboard.detail.no_notes")}</p>
                 ) : (
                   leadNotes.map((n) => (
-                    <div key={n.id} className="p-3 rounded-xl border border-white/5 bg-white/5 flex items-start justify-between gap-2">
+                    <div key={n.id} className={`p-3 rounded-xl border ${T.subtle} flex items-start justify-between gap-2`}>
                       <div>
                         <p className="text-xs text-slate-300">{n.note}</p>
                         <span className="text-[10px] text-slate-500 mt-1 block">
@@ -3123,9 +3403,21 @@ const URGENCIES = ["all", "high", "medium", "low"];
 
       {/* REVEAL CONSENT MODAL (dados do proprietário protegidos) */}
       {revealTarget && (
-        <div className="fixed inset-0 z-[85] flex items-center justify-center p-4" style={{ backgroundColor: isDark ? "rgba(11,13,18,0.85)" : "rgba(248,250,252,0.9)" }} onClick={closeRevealModal}>
+        <div
+          className="fixed inset-0 z-[85] flex items-center justify-center p-4"
+          style={{ backgroundColor: isDark ? "rgba(11,13,18,0.85)" : "rgba(248,250,252,0.9)" }}
+          onClick={closeRevealModal}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") closeRevealModal();
+          }}
+        >
           <div
-            className={`w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-2xl border p-6 shadow-2xl ${isDark ? "bg-[#10121a] border-white/10" : "bg-white border-slate-200"}`}
+            ref={revealDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reveal-modal-title"
+            tabIndex={-1}
+            className={`w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-2xl border p-6 shadow-2xl outline-none ${isDark ? "bg-[#10121a] border-white/10" : "bg-white border-slate-200"}`}
             onClick={(e) => e.stopPropagation()}
           >
             {/* HEADER */}
@@ -3135,14 +3427,14 @@ const URGENCIES = ["all", "high", "medium", "low"];
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap mb-1">
-                  <h2 className="text-lg font-bold" style={{ color: isDark ? "#fff" : "#0f172a" }}>
+                  <h2 id="reveal-modal-title" className="text-lg font-bold" style={{ color: isDark ? "#fff" : "#0f172a" }}>
                     {t("dashboard.reveal.title")}
                   </h2>
                     {(() => {
                       const isObligation = revealTarget.signal_type === "legal_obligation";
                       const isPermit = revealTarget.signal_type === "authorized_work";
                       return (
-                        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${isObligation ? "bg-amber-500/15 text-amber-400" : isPermit ? "bg-sky-500/15 text-sky-400" : "bg-slate-500/15 text-slate-400"}`}>
+                        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${isObligation ? "bg-amber-500/15 text-amber-400" : isPermit ? "bg-sky-500/15 text-sky-400" : isDark ? "bg-slate-500/15 text-slate-400" : "bg-slate-100 text-slate-600"}`}>
                           {isObligation ? t("dashboard.lead_type.obligation") : isPermit ? t("dashboard.lead_type.permit") : t("dashboard.lead_type.open")}
                         </span>
                       );
@@ -3155,7 +3447,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
             </div>
 
             {/* ENDEREÇO + CATEGORIA */}
-            <div className="mt-4 p-3 rounded-xl border border-white/10 bg-white/5">
+            <div className={`mt-4 p-3 rounded-xl border ${T.subtle}`}>
               <p className={`text-xs font-semibold ${T.text2}`}>
                 {buildFullAddress(revealTarget.address, revealTarget.city)}
               </p>
@@ -3274,7 +3566,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
                 </h4>
                 <div className="rounded-lg border bg-muted/40 p-3 space-y-2 max-h-48 overflow-y-auto">
                   {revealTarget._history.map((event) => (
-                    <div key={event.id} className="p-2 rounded border border-white/5 bg-white/5">
+                    <div key={event.id} className={`p-2 rounded border ${T.subtle}`}>
                       <p className="text-sm text-slate-300">{event.detail || event.event_type}</p>
                       <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-1">
                         <span>{formatRelativeTime(event.created_at, t)}</span>
@@ -3295,7 +3587,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
                 </h4>
                 <div className="rounded-lg border bg-muted/40 p-3 space-y-2 max-h-60 overflow-y-auto">
                   {revealTarget._occurrences.map((oc) => (
-                    <div key={oc.id || oc.external_id || `${oc.case_title}-${oc.opened_at}`} className="p-2 rounded border border-white/5 bg-white/5">
+                    <div key={oc.id || oc.external_id || `${oc.case_title}-${oc.opened_at}`} className={`p-2 rounded border ${T.subtle}`}>
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-xs font-semibold text-slate-200">{oc.case_title || "Ocorrência"}</span>
                         {oc.case_status && (
@@ -3327,7 +3619,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
 
             {/* CONSENT CHECKBOX + BOTÕES */}
             <div className="mt-4">
-              <div className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3">
+              <div className={`mt-3 rounded-xl border ${T.subtle} p-3`}>
                 <label className={`flex items-start gap-2.5 text-sm cursor-pointer ${isDark ? "text-slate-200" : "text-slate-700"}`}>
                   <input
                     type="checkbox"

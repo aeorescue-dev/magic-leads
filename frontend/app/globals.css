@@ -460,6 +460,35 @@
   @apply outline-none ring-2 ring-emerald-500/50 ring-offset-2 ring-offset-slate-950;
 }
 
+/* Light mode: o anel de foco e o color-scheme seguem o tema da dashboard.
+   Sem isto, seletores nativos e o anel de foco continuavam "dark" no modo
+   claro (dropdown do <select> preto e ring-offset escuro). */
+[data-theme="light"] {
+  color-scheme: light;
+}
+[data-theme="light"] *:focus-visible {
+  outline: 2px solid #4f46e5;
+  outline-offset: 2px;
+  box-shadow: none;
+}
+[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+/* Contraste no modo claro: os tons -400 do Tailwind foram escolhidos para
+   fundos escuros e ficam abaixo de AA sobre branco. Em fundo claro passam a
+   -700 (>=4.5:1). Cobre selos, icones e metadados de uma so vez. */
+[data-theme="light"] .text-emerald-400 { color: #047857; }
+[data-theme="light"] .text-sky-400 { color: #0369a1; }
+[data-theme="light"] .text-amber-400 { color: #b45309; }
+[data-theme="light"] .text-cyan-400 { color: #0e7490; }
+[data-theme="light"] .text-purple-400 { color: #7e22ce; }
+[data-theme="light"] .text-rose-400 { color: #be123c; }
+[data-theme="light"] .text-indigo-400 { color: #4338ca; }
+[data-theme="light"] .text-green-400 { color: #15803d; }
+[data-theme="light"] .text-violet-400 { color: #6d28d9; }
+[data-theme="light"] .text-slate-400 { color: #64748b; }
+
 /* Selection */
 ::selection {
   background-color: rgba(16, 185, 129, 0.3);

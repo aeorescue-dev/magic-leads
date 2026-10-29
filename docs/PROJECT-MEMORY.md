@@ -328,9 +328,32 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   chamadas pagas ilimitadas.
 - **744 testes**, tsc limpo.
 
+### Sprint UI/UX (2026-10-29)
+
+- **Tokens de tema**: `panel`, `subtle`, `track`, `chipActive`, `ghost`,
+  `ghostDanger`, `divider`; `data-theme` no root do dashboard. `color-scheme`
+  e anel de foco próprios no modo claro; overrides `text-*-400 → -700` e
+  `text2 = slate-600` (AA sobre branco).
+- **Bug de persistência do tema**: o efeito de gravação corria com o estado
+  inicial ("dark") e apagava a escolha guardada (visível com StrictMode). Passa
+  a gravar só depois da leitura (`themeLoaded`).
+- **6 classes hardcoded** substituídas por tokens (`page.tsx` nav badge,
+  divisor, barra de limite, track, chip "incluir encerrados", chip de período).
+- **Hierarquia de CTA**: removido o "Reservar" duplicado no topo do cartão; o
+  CTA principal passa a `indigo-600` maior com sombra e anel de foco;
+  "Revelar telefone" fica outline violeta (não compete).
+- **Mobile**: gaveta de filtros (sheet) com contagem de filtros ativos,
+  focus trap, `Escape`, scroll lock e devolução de foco; topbar deixa de
+  rebentar (mensagem de push compacta + CTA `whitespace-nowrap`).
+- **Skeletons** no feed (4 cartões com a altura real, `aria-busy`).
+- **Teclado**: cartões do feed e do histórico com `role=button`, `tabIndex`,
+  Enter/Espaço, `aria-label` e ring de foco; modais de reveal e detalhe com
+  `role=dialog`/`aria-modal`, foco inicial e fecho por `Escape`.
+- **Testes**: 746 backend, 73 vitest, tsc limpo; 10 e2e (3 novos em
+  `e2e/ui-ux.spec.ts`; corrigido o label "Ver fluxo completo" no lifecycle).
+
 ### P1 (a seguir)
 - Percentagem de confiança só a partir de ≥30 amostras reais; até lá "sob consulta".
-- Sprint UI/UX: light mode, CTA "Reservar", contraste, skeletons, filtros mobile.
 
 ---
 
