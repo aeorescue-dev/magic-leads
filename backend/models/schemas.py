@@ -167,7 +167,11 @@ class LeadResponse(BaseModel):
     status: str = "new"
     favorited: bool = False
 
-    # Address details
+    # Address details (fonte do mapa: address/city/state/zip_code + lat/lng)
+    state: Optional[str] = None
+    zip_code: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
     address_unit: Optional[str] = None
     address_type: Optional[str] = None
     address_street: Optional[str] = None

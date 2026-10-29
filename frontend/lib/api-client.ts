@@ -73,6 +73,10 @@ export interface LeadResponse {
   first_seen?: string;
   last_synced?: string;
   // Address details
+  state?: string;
+  zip_code?: string;
+  lat?: number | null;
+  lng?: number | null;
   address_unit?: string;
   address_type?: string;
   address_street?: string;

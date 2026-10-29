@@ -171,6 +171,33 @@ def _qualified_where(alias: str = "") -> str:
     return " AND ".join(parts)
 
 
+def _merge_city_counts(rows) -> List[dict]:
+    """Agrupa cidades sem distinguir maiusculas ("CHICAGO" + "Chicago").
+
+    A grafia escolhida para exibicao e' a variante com mais leads (em empate,
+    a que nao esta toda em maiusculas), e o count soma todas as variantes.
+    """
+    variants: dict = {}
+    for row in rows:
+        name = (row["city"] or "").strip()
+        if not name:
+            continue
+        key = name.lower()
+        entry = variants.setdefault(key, {"count": 0, "names": {}})
+        count = int(row["count"])
+        entry["count"] += count
+        entry["names"][name] = entry["names"].get(name, 0) + count
+    out = []
+    for entry in variants.values():
+        display = max(
+            entry["names"].items(),
+            key=lambda kv: (kv[1], not kv[0].isupper()),
+        )[0]
+        out.append({"city": display, "count": entry["count"]})
+    out.sort(key=lambda item: item["count"], reverse=True)
+    return out
+
+
 # ----- Cache in-process do resumo do dashboard (P0 de performance) -----
 # `get_dashboard_summary` fazia ~11 varreduras pesadas idênticas (≈290 ms cada
 # na base local, ≈3.8 s no total) e era recomputado a cada pedido: mount,
@@ -1256,6 +1283,24 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         pass
     if "stage_expires_at" not in cols:
         conn.execute("ALTER TABLE leads ADD COLUMN stage_expires_at TEXT")
+    # Reparacao: um lead em fase ativa sem prazo fica preso para sempre (nao
+    # expira, nao notifica, nao volta ao pool). Datas antigas (updated_at+48h
+    # no passado) recebem uma janela minima de 24h para nao desaparecerem de
+    # imediato no proximo sweep.
+    conn.execute(
+        """UPDATE leads
+              SET stage_expires_at = CASE
+                    WHEN lead_status = 'reserved'
+                      THEN COALESCE(reserved_until, datetime('now', '+60 minutes'))
+                    ELSE max(
+                      datetime(COALESCE(updated_at, CURRENT_TIMESTAMP), '+48 hours'),
+                      datetime('now', '+24 hours')
+                    )
+                  END,
+                  updated_at = CURRENT_TIMESTAMP
+            WHERE lead_status IN ('reserved', 'contacted', 'in_negotiation')
+              AND stage_expires_at IS NULL"""
+    )
     if "mailing_address" not in cols:
         conn.execute("ALTER TABLE leads ADD COLUMN mailing_address TEXT")
     if "revealed_at" not in cols:
@@ -2700,7 +2745,6 @@ class DatabaseService:
         clean_city = city.strip().upper()
         if clean_city == "NEW YORK":
             clean_city = "NYC"
-
         default_states = {"NYC": "NY", "CHICAGO": "IL", "DALLAS": "TX", "BOSTON": "MA"}
         st = (state or "").strip().upper() or default_states.get(clean_city, "NY")
         # `leads` exige external_id/address/date_reported (NOT NULL). O INSERT
@@ -2715,6 +2759,16 @@ class DatabaseService:
 
         conn = get_connection()
         try:
+            # Reutiliza a grafia ja existente na BD para a cidade. Sem isto o
+            # import B2B grava "CHICAGO" enquanto o scraper grava "Chicago" e
+            # os filtros por cidade deixam de encontrar metade dos leads.
+            existing_city = conn.execute(
+                "SELECT city FROM leads WHERE city = ? COLLATE NOCASE "
+                "GROUP BY city ORDER BY COUNT(*) DESC LIMIT 1",
+                (clean_city,),
+            ).fetchone()
+            if existing_city and existing_city["city"]:
+                clean_city = existing_city["city"]
             conn.execute(
                 "INSERT OR IGNORE INTO leads "
                 "(external_id, source_type, address, city, state, issue_category, "
@@ -3174,7 +3228,7 @@ class DatabaseService:
         ]
         params: list = []
         if city and str(city).strip().lower() != "all":
-            where.append("l.city = ?")
+            where.append("l.city = ? COLLATE NOCASE")
             params.append(city)
         if signal_type:
             where.append("l.signal_type = ?")
@@ -3227,7 +3281,7 @@ class DatabaseService:
         """Retorna leads mais recentes de uma cidade com filtros opcionais no SQL."""
         conn = get_connection()
         try:
-            sql = "SELECT * FROM leads WHERE city = ?"
+            sql = "SELECT * FROM leads WHERE city = ? COLLATE NOCASE"
             params = [city]
 
             if source_type:
@@ -3494,9 +3548,9 @@ class DatabaseService:
         conn = get_connection()
         try:
             rows = conn.execute(
-                "SELECT DISTINCT city, COUNT(*) AS c FROM leads GROUP BY city ORDER BY c DESC"
+                "SELECT city, COUNT(*) AS count FROM leads GROUP BY city"
             ).fetchall()
-            return [r["city"] for r in rows]
+            return [item["city"] for item in _merge_city_counts(rows)]
         finally:
             conn.close()
 
@@ -3505,9 +3559,9 @@ class DatabaseService:
         conn = get_connection()
         try:
             rows = conn.execute(
-                "SELECT city, COUNT(*) AS count FROM leads GROUP BY city ORDER BY count DESC"
+                "SELECT city, COUNT(*) AS count FROM leads GROUP BY city"
             ).fetchall()
-            return [{"city": r["city"], "count": r["count"]} for r in rows]
+            return _merge_city_counts(rows)
         finally:
             conn.close()
 
@@ -3520,10 +3574,10 @@ class DatabaseService:
                 f"""
                 SELECT city, COUNT(*) AS count FROM leads
                 WHERE {_qualified_where()}
-                GROUP BY city ORDER BY count DESC
+                GROUP BY city
                 """
             ).fetchall()
-            return [{"city": r["city"], "count": r["count"]} for r in rows]
+            return _merge_city_counts(rows)
         finally:
             conn.close()
 
@@ -3570,7 +3624,7 @@ class DatabaseService:
             """
             params: list = []
             if city:
-                sql += " AND city = ?"
+                sql += " AND city = ? COLLATE NOCASE"
                 params.append(city)
             rows = conn.execute(sql, params).fetchone()
             return rows["c"] if rows else 0
@@ -5709,7 +5763,7 @@ class DatabaseService:
         conn = get_connection()
         try:
             row = conn.execute(
-                "SELECT id FROM leads WHERE address = ? AND city = ? LIMIT 1",
+                "SELECT id FROM leads WHERE address = ? AND city = ? COLLATE NOCASE LIMIT 1",
                 (address, city),
             ).fetchone()
             return int(row["id"]) if row else None
@@ -5818,7 +5872,7 @@ class DatabaseService:
             )
             params: list = []
             if city:
-                q += " AND l.city = ?"
+                q += " AND l.city = ? COLLATE NOCASE"
                 params.append(city)
             if only_missing:
                 q += " AND NOT EXISTS (SELECT 1 FROM lead_case_history h WHERE h.lead_id = l.id)"

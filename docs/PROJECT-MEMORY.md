@@ -308,8 +308,29 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   "Porquê agora" (reincidência/idade do aberto).
 - **741 testes**, tsc limpo.
 
-### P1 (dia seguinte)
-Re-verificação diária de violações abertas; fechar as resolvidas; remover do feed.
+### P1 — fixes de produto (2026-10-29, mesmo dia)
+
+- `recordContact` ligado aos CTAs de WhatsApp/SMS do cartão (os 2 layouts) e do
+  modal: `POST /api/leads/{id}/contact` passa a marcar `contact_count` e a parar
+  o watchdog de reveals que ainda notificava o empreiteiro.
+- `/api/users/{id}/daily-stats` expira holds ANTES de correr
+  `check_reveal_watchdogs` (reveals órfãos deixam de ser notificados como vivos).
+- Reparação de migração: leads em `reserved`/`contacted`/`in_negotiation` com
+  `stage_expires_at NULL` passam a ter prazo (reserved = `reserved_until`, resto
+  = max(updated_at+48h, now+24h)); deixa de haver leads presos para sempre.
+- `LeadResponse` passa a expor `state`, `zip_code`, `lat`, `lng` (fonte do mapa,
+  invariante 7).
+- Cidade case-insensitive: filtros `COLLATE NOCASE`, import B2B reutiliza a
+  grafia existente e `get_cities*` funde "CHICAGO"+"Chicago" (count somado,
+  grafia da variante com mais leads).
+- L3 sem nome: não consome cota (entrega incompleta), mas consome o orçamento de
+  tentativas via `lead_rules.will_call_provider` — com a flag ligada não há
+  chamadas pagas ilimitadas.
+- **744 testes**, tsc limpo.
+
+### P1 (a seguir)
+- Percentagem de confiança só a partir de ≥30 amostras reais; até lá "sob consulta".
+- Sprint UI/UX: light mode, CTA "Reservar", contraste, skeletons, filtros mobile.
 
 ---
 

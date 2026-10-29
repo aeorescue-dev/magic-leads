@@ -1360,6 +1360,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
           href={waHref(selectedLead.owner_phone!, buildMsgs(selectedLead))}
           target="_blank"
           rel="noreferrer"
+          onClick={() => recordContact(selectedLead.id, "whatsapp").catch(() => {})}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 text-xs font-bold hover:bg-emerald-400 transition"
         >
           <MessageSquare className="h-3.5 w-3.5" /> WhatsApp
@@ -1372,6 +1373,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
         </a>
         <a
           href={smsHref(selectedLead.owner_phone!, buildMsgs(selectedLead))}
+          onClick={() => recordContact(selectedLead.id, "sms").catch(() => {})}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600 text-white text-xs font-bold hover:bg-green-500 transition"
         >
           <MessageSquare className="h-3.5 w-3.5" /> SMS
@@ -2522,7 +2524,10 @@ const URGENCIES = ["all", "high", "medium", "low"];
                                       href={waHref(lead.owner_phone, buildMsgs(lead))}
                                       target="_blank"
                                       rel="noopener noreferrer"
-                                      onClick={(e) => e.stopPropagation()}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        recordContact(lead.id, "whatsapp").catch(() => {});
+                                      }}
                                       className="flex items-center gap-1.5 text-[11px] font-semibold bg-emerald-500/15 text-emerald-400 px-3 py-1.5 rounded-lg hover:bg-emerald-500/25 transition"
                                     >
                                       <MessageSquare className="h-3.5 w-3.5" /> {t("dashboard.detail.whatsapp")}
@@ -2531,7 +2536,10 @@ const URGENCIES = ["all", "high", "medium", "low"];
                                   {lead.owner_phone && (
                                     <a
                                       href={smsHref(lead.owner_phone, buildMsgs(lead))}
-                                      onClick={(e) => e.stopPropagation()}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        recordContact(lead.id, "sms").catch(() => {});
+                                      }}
                                       className="flex items-center gap-1.5 text-[11px] font-semibold bg-green-500/15 text-green-400 px-3 py-1.5 rounded-lg hover:bg-green-500/25 transition"
                                     >
                                       <MessageSquare className="h-3.5 w-3.5" /> {t("dashboard.detail.sms")}
@@ -2656,7 +2664,10 @@ const URGENCIES = ["all", "high", "medium", "low"];
                                       href={waHref(lead.owner_phone, buildMsgs(lead))}
                                       target="_blank"
                                       rel="noopener noreferrer"
-                                      onClick={(e) => e.stopPropagation()}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        recordContact(lead.id, "whatsapp").catch(() => {});
+                                      }}
                                       className="flex items-center gap-1.5 text-[11px] font-semibold bg-emerald-500/15 text-emerald-400 px-3 py-1.5 rounded-lg hover:bg-emerald-500/25 transition"
                                     >
                                       {t("dashboard.detail.whatsapp")}
@@ -2665,7 +2676,10 @@ const URGENCIES = ["all", "high", "medium", "low"];
                                   {lead.owner_phone && (
                                     <a
                                       href={smsHref(lead.owner_phone, buildMsgs(lead))}
-                                      onClick={(e) => e.stopPropagation()}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        recordContact(lead.id, "sms").catch(() => {});
+                                      }}
                                       className="flex items-center gap-1.5 text-[11px] font-semibold bg-green-500/15 text-green-400 px-3 py-1.5 rounded-lg hover:bg-green-500/25 transition"
                                     >
                                       <MessageSquare className="h-3 w-3" /> {t("dashboard.detail.sms")}

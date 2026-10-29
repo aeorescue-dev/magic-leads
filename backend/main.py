@@ -80,6 +80,7 @@ from .services.lead_rules import (
     get_owner_class,
     missing_critical_fields,
     phone_confidence,
+    will_call_provider,
     will_charge_if_phone_found,
 )
 from .services.lead_rules import (
@@ -206,6 +207,10 @@ def _to_lead_response(lead: dict) -> LeadResponse:
         status=lead.get("status") or "new",
         favorited=bool(lead.get("favorited")),
         # Address details
+        state=lead.get("state"),
+        zip_code=lead.get("zip_code"),
+        lat=lead.get("lat"),
+        lng=lead.get("lng"),
         address_unit=lead.get("address_unit"),
         address_type=lead.get("address_type"),
         address_street=lead.get("address_street"),
@@ -897,7 +902,13 @@ async def user_daily_stats(user_id: int, user: dict = Depends(_get_current_user)
     if user["id"] != user_id:
         raise HTTPException(status_code=403, detail="Sem permissão")
     try:
-        # Sweep watchdog de reveals (notificação 30/45min, retorno ao pool 60min)
+        # Sweep watchdog de reveals (notificação 30/45min, retorno ao pool 60min).
+        # Expiram-se primeiro os holds: um reveal cujo hold ja morreu tem de ser
+        # fechado, nao notificado como se ainda estivesse vivo.
+        try:
+            await db_service.expire_holds()
+        except Exception as e:
+            logger.error(f"Erro a expirar holds: {e}")
         try:
             await db_service.check_reveal_watchdogs()
         except Exception as e:
@@ -4974,8 +4985,12 @@ async def reserve_lead(
                         )
                     else:
                         # P0-C1B: orcamento de tentativas POR UTILIZADOR
-                        # (30/dia, 3/min). Nao existe cap global.
-                        if will_charge_if_phone_found(lead):
+                        # (30/dia, 3/min). Nao existe cap global. Cobre qualquer
+                        # chamada paga, inclusive L3 sem nome (que nao consome
+                        # cota porque a entrega fica incompleta).
+                        if will_call_provider(
+                            lead, bool(getattr(settings, "PHONE_L3_UNNAMED_ENABLED", False))
+                        ):
                             _attempt = await db_service.reserve_phone_attempt(user_id)
                             if not _attempt.get("ok"):
                                 raise HTTPException(

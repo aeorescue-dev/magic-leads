@@ -307,6 +307,21 @@ def will_charge_if_phone_found(lead: Mapping[str, Any]) -> bool:
     )
 
 
+def will_call_provider(lead: Mapping[str, Any], l3_unnamed_enabled: bool = False) -> bool:
+    """True se a chamada paga vai mesmo acontecer (e deve gastar tentativa).
+
+    `will_charge_if_phone_found` cobre o caso normal (lead cobravel). O L3 sem
+    nome, quando ligado, tambem chama o provider mas entrega um lead incompleto
+    (sem nome) — nao consome cota, mas TEM de consumir orcamento de tentativas,
+    senao a flag abria um caminho de chamadas pagas sem qualquer limite.
+    """
+    if will_charge_if_phone_found(lead):
+        return True
+    return bool(
+        l3_unnamed_enabled and address_is_resolvable(lead.get("address"))
+    )
+
+
 def missing_critical_fields(lead: Mapping[str, Any]) -> list[str]:
     """Campos em falta para o lead contar como entrega completa.
 

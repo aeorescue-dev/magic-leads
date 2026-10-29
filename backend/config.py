@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     PHONE_NAME_MATCH_MIN: float = 0.6
     # L3 sem nome: desligado por defeito (custo sem possibilidade de cobranca).
     # Quando ligado, entrega "sob consulta": telefone gratuito, sem selo.
+    # DECISAO (P1): um telefone devolvido por L3 sem nome NAO consome cota
+    # (a entrega continua incompleta: falta o nome), mas CONSOME o orcamento de
+    # tentativas por utilizador — sem isso a flag abria chamadas pagas sem
+    # qualquer limite. Implementado em `lead_rules.will_call_provider`.
     PHONE_L3_UNNAMED_ENABLED: bool = False
     # Retry unico em transport_error, com backoff curto.
     PHONE_TRANSPORT_RETRY_DELAY_S: float = 1.5
