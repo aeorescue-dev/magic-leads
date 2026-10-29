@@ -173,6 +173,28 @@ export interface AdminSearchbugMetrics {
   buffer: { buffered: number; flushed: number; dropped: number; flush_errors: number };
 }
 
+// P2 — progresso da amostra por segmento ate' aos 30 que libertam a
+// percentagem publica no cartao.
+export interface AdminPhoneSampleRow {
+  city?: string;
+  owner_class: string;
+  samples: number;
+  successes: number;
+  pct: number | null;
+  ready: boolean;
+  needed: number;
+}
+
+export interface AdminPhoneSampleProgress {
+  days: number;
+  min_samples: number;
+  segments: AdminPhoneSampleRow[];
+  by_class: AdminPhoneSampleRow[];
+  ready_segments: number;
+  total_segments: number;
+  total_samples: number;
+}
+
 // Fase 2 — saúde das entregas de push notification.
 //
 // `accepted` NÃO é entrega: é o serviço de push a aceitar a mensagem.
@@ -314,6 +336,10 @@ export function fetchAdminAlerts(limit = 50): Promise<{ alerts: AdminAlert[]; co
 
 export function fetchAdminSearchbug(days = 7, recentLimit = 50): Promise<AdminSearchbugMetrics> {
   return adminFetch(`/searchbug?days=${days}&recent_limit=${recentLimit}`);
+}
+
+export function fetchAdminPhoneSampleProgress(days = 90): Promise<AdminPhoneSampleProgress> {
+  return adminFetch(`/phone-sample-progress?days=${days}`);
 }
 
 export function fetchAdminPush(days = 7, recentLimit = 50): Promise<AdminPushMetrics> {

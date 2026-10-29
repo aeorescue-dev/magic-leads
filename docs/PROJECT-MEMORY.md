@@ -385,7 +385,11 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - `LeadResponse.phone_success_pct` + `phone_sample_size`; o cartão mostra
   "Alta probabilidade · 72%" com tooltip "n consultas"; sem amostras suficientes
   não há número inventado — o selo qualitativo mantém-se.
-- **751 testes**, tsc limpo, build ok.
+- **752 testes**, tsc limpo, build ok.
+- **Painel admin** "Calibração da confiança": `/api/admin/phone-sample-progress`
+  (`days=90`) devolve, por (cidade, classe) e por classe global, amostras,
+  sucessos, `pct` (só quando pronto), `needed` e `ready`; a UI mostra barra de
+  progresso até 30 com estado pronto/pendente. É o mesmo denominador do cartão.
 - **Smoke em produção:** `/api/leads/today` devolve `phone_success_pct=50` e
   `phone_sample_size=38` no segmento `unknown` (311 sem nome, onde a amostra já
   passa de 30). Para leads com nome a amostra ainda é 0: os 65 registos

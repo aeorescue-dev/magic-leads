@@ -11,6 +11,7 @@ import {
   Languages,
   Loader2,
   Mail,
+  Phone,
   RefreshCcw,
   Search,
   Send,
@@ -36,6 +37,7 @@ import {
   AdminReveal,
   AdminScraperRun,
   AdminSearchbugMetrics,
+  AdminPhoneSampleProgress,
   AdminSources,
     AdminCreditBackfillResponse,
     AdminCreditBalance,
@@ -54,6 +56,7 @@ import {
   fetchAdminReveals,
   fetchAdminScraperRuns,
   fetchAdminSearchbug,
+  fetchAdminPhoneSampleProgress,
   fetchAdminSources,
     fetchAdminCreditBalance,
     fetchAdminCreditBackfill,
@@ -1023,6 +1026,7 @@ export default function AdminPage() {
   const [reveals, setReveals] = useState<AdminReveal[]>([]);
   const [alerts, setAlerts] = useState<AdminAlert[]>([]);
   const [searchbug, setSearchbug] = useState<AdminSearchbugMetrics | null>(null);
+  const [phoneSamples, setPhoneSamples] = useState<AdminPhoneSampleProgress | null>(null);
   const [push, setPush] = useState<AdminPushMetrics | null>(null);
   const [planner, setPlanner] = useState<AdminPlannerMetrics | null>(null);
   const [creditLedger, setCreditLedger] = useState<AdminCreditLedgerResponse | null>(null);
@@ -1038,17 +1042,19 @@ export default function AdminPage() {
       // searchbug falha isoladamente: a telemetria é secundária e não deve
       // apagar o resto do painel.
       const sb = fetchAdminSearchbug(7, 25).catch(() => null);
+      const ps = fetchAdminPhoneSampleProgress(90).catch(() => null);
       const pu = fetchAdminPush(7, 25).catch(() => null);
       const pl = fetchAdminPlanner().catch(() => null);
       const cl = fetchAdminCreditLedger(1, 50).catch(() => null);
       const cb = fetchAdminCreditBalance(1).catch(() => null);
-      const [ov, src, rn, rv, al, sbm, pum, plm, clm, cbm] = await Promise.all([
+      const [ov, src, rn, rv, al, sbm, psm, pum, plm, clm, cbm] = await Promise.all([
         fetchAdminOverview(),
         fetchAdminSources(),
         fetchAdminScraperRuns(15),
         fetchAdminReveals(50, true),
         fetchAdminAlerts(20),
         sb,
+        ps,
         pu,
         pl,
         cl,
@@ -1060,6 +1066,7 @@ export default function AdminPage() {
       setReveals(rv.reveals);
       setAlerts(al.alerts);
       setSearchbug(sbm);
+      setPhoneSamples(psm);
       setPush(pum);
       setPlanner(plm);
       setCreditLedger(clm);
@@ -1416,6 +1423,139 @@ export default function AdminPage() {
                 </div>
               </details>
             )}
+          </div>
+        )}
+      </Card>
+
+      {/* ------------------------------------------- calibração P2 */}
+      <Card
+        title="Calibração da confiança (telefone)"
+        icon={<Phone className="h-4 w-4" />}
+        hint={`amostras dos últimos ${phoneSamples?.days ?? 90} dias`}
+      >
+        {!phoneSamples ? (
+          <p className="text-xs text-slate-500">
+            Progresso indisponível. O cartão do cliente não mostra percentagem até
+            haver amostras suficientes.
+          </p>
+        ) : phoneSamples.segments.length === 0 ? (
+          <p className="text-xs text-slate-500">
+            Sem consultas reais no período. O cartão mostra a percentagem assim que um
+            segmento atingir {phoneSamples.min_samples} amostras.
+          </p>
+        ) : (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <Kpi
+                label="Segmentos prontos"
+                value={`${phoneSamples.ready_segments}/${phoneSamples.total_segments}`}
+                sub={`≥ ${phoneSamples.min_samples} amostras`}
+              />
+              <Kpi
+                label="Amostras (90d)"
+                value={phoneSamples.total_samples}
+                sub="tentativas reais"
+              />
+              <Kpi
+                label="Menor amostra"
+                value={
+                  phoneSamples.segments.length
+                    ? Math.min(...phoneSamples.segments.map((s) => s.samples))
+                    : 0
+                }
+                sub="por segmento"
+              />
+              <Kpi
+                label="Maior amostra"
+                value={
+                  phoneSamples.segments.length
+                    ? Math.max(...phoneSamples.segments.map((s) => s.samples))
+                    : 0
+                }
+                sub="por segmento"
+              />
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="text-[10px] uppercase tracking-wider text-slate-500">
+                  <tr>
+                    <th className="py-1">Segmento</th>
+                    <th className="py-1">Progresso</th>
+                    <th className="py-1">Amostras</th>
+                    <th className="py-1">%</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {phoneSamples.segments.map((s) => {
+                    const pct = Math.min(
+                      100,
+                      Math.round((s.samples / phoneSamples.min_samples) * 100)
+                    );
+                    return (
+                      <tr key={`${s.city}-${s.owner_class}`}>
+                        <td className="py-2 text-slate-300">
+                          {s.city} <span className="text-slate-500">· {s.owner_class}</span>
+                        </td>
+                        <td className="py-2 pr-3">
+                          <div className="h-1.5 w-32 overflow-hidden rounded-full bg-white/10">
+                            <div
+                              className={`h-full rounded-full ${
+                                s.ready ? "bg-emerald-500" : "bg-amber-500"
+                              }`}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                        </td>
+                        <td className="py-2 font-mono text-slate-400">
+                          {s.samples}/{phoneSamples.min_samples}
+                        </td>
+                        <td className="py-2">
+                          {s.ready ? (
+                            <span className="text-emerald-400">{s.pct}%</span>
+                          ) : (
+                            <span className="text-slate-500">faltam {s.needed}</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {phoneSamples.by_class.length > 0 ? (
+              <div>
+                <h3 className="mb-1.5 text-[10px] uppercase tracking-wider text-slate-500">
+                  Por classe (todas as cidades) — usado como fallback
+                </h3>
+                <div className="flex flex-wrap gap-1.5">
+                  {phoneSamples.by_class.map((c) => (
+                    <span
+                      key={c.owner_class}
+                      className={`rounded-md border px-2 py-1 font-mono text-[11px] ${
+                        c.ready
+                          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                          : "border-white/10 bg-white/[0.02] text-slate-400"
+                      }`}
+                    >
+                      {c.owner_class}{" "}
+                      <span className="opacity-70">
+                        {c.samples}/{phoneSamples.min_samples}
+                        {c.ready ? ` · ${c.pct}%` : ""}
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <p className="text-[11px] leading-relaxed text-slate-500">
+              A percentagem só é publicada no cartão quando o segmento
+              (cidade + classe) ou a classe global atinge {phoneSamples.min_samples}{" "}
+              consultas reais. Cache, guards e falhas de transporte não contam como
+              amostra.
+            </p>
           </div>
         )}
       </Card>

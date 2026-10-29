@@ -1575,6 +1575,45 @@ async def admin_searchbug(
     return data
 
 
+@app.get("/api/admin/phone-sample-progress")
+async def admin_phone_sample_progress(
+    days: int = 90,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """P2: progresso da amostra por segmento ate' aos 30 necessarios.
+
+    Mostra contagens mesmo abaixo do limiar (e' um painel de operacao), mas a
+    percentagem so aparece quando o segmento ja' e' publicavel — a mesma regra
+    que o cartao do cliente usa.
+    """
+    data = await db_service.admin_get_phone_sample_progress(days)
+
+    def _enrich(row: dict) -> dict:
+        samples = int(row.get("samples") or 0)
+        successes = int(row.get("successes") or 0)
+        ready = samples >= PHONE_STATS_MIN_SAMPLES
+        return {
+            **row,
+            "samples": samples,
+            "successes": successes,
+            "pct": round(successes * 100 / samples) if ready and samples else None,
+            "ready": ready,
+            "needed": max(0, PHONE_STATS_MIN_SAMPLES - samples),
+        }
+
+    segments = [_enrich(r) for r in data["segments"]]
+    by_class = [_enrich(r) for r in data["by_class"]]
+    return {
+        "days": data["days"],
+        "min_samples": PHONE_STATS_MIN_SAMPLES,
+        "segments": segments,
+        "by_class": by_class,
+        "ready_segments": sum(1 for s in segments if s["ready"]),
+        "total_segments": len(segments),
+        "total_samples": sum(s["samples"] for s in segments),
+    }
+
+
 @app.get("/api/admin/push")
 async def admin_push(
     days: int = 7,

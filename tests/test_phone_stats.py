@@ -32,7 +32,7 @@ def _clean():
     conn = get_connection()
     try:
         conn.execute(
-            "DELETE FROM searchbug_calls WHERE city = ? OR owner_class = ?", (CITY, CLASS)
+            "DELETE FROM searchbug_calls WHERE city LIKE 'P2%' OR owner_class = ?", (CLASS,)
         )
         conn.commit()
     finally:
@@ -121,3 +121,48 @@ def test_response_exposes_pct_only_with_enough_samples():
     resp = _to_lead_response(dict(lead))
     assert resp.phone_success_pct == 70  # 21/30
     assert resp.phone_sample_size == 30
+
+
+def test_admin_sample_progress_endpoint():
+    from fastapi.testclient import TestClient
+
+    from backend.main import _hash_token, app
+    from backend.services.db import db_service
+
+    for i in range(30):
+        _call("success" if i < 21 else "no_results", city="P2CITY", owner_class="private")
+    for _ in range(5):
+        _call("success", city="P2OTHER", owner_class="private")
+
+    svc = db_service._service
+    email = "pytest-p2-admin@magicleads.app"
+    user = svc.get_user_by_email(email) or svc.create_user(
+        email, "x", "P2 Admin", plan="pro", subscription_status="active"
+    )
+    token = "p2-admin-token"
+    svc.create_user_session(user["id"], _hash_token(token), "Pytest", None)
+    svc.extend_access(user["id"], days=7)
+    assert svc.set_user_admin(email, True) is True
+
+    client = TestClient(app)
+    r = client.get(
+        "/api/admin/phone-sample-progress?days=90",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["min_samples"] == 30
+    assert body["ready_segments"] >= 1
+
+    seg = {(s["city"], s["owner_class"]): s for s in body["segments"]}
+    ready = seg[("P2CITY", "private")]
+    assert ready["samples"] == 30
+    assert ready["ready"] is True
+    assert ready["pct"] == 70
+    assert ready["needed"] == 0
+
+    pending = seg[("P2OTHER", "private")]
+    assert pending["samples"] == 5
+    assert pending["ready"] is False
+    assert pending["pct"] is None
+    assert pending["needed"] == 25

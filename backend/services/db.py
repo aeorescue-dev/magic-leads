@@ -4840,6 +4840,55 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def admin_get_phone_sample_progress(self, days: int = 90) -> dict:
+        """Amostras reais por segmento (cidade/classe) para a calibracao P2.
+
+        Mesmo denominador de `get_phone_success_stats`: so consultas que podiam
+        devolver telefone. Devolve os contadores crus; o endpoint aplica o
+        limiar de 30 amostras e a percentagem.
+        """
+        conn = get_connection()
+        try:
+            cutoff = f"-{int(days)} days"
+            base_where = (
+                "called_at >= datetime('now', ?) "
+                "AND outcome IN ('success', 'no_results', 'name_mismatch')"
+            )
+            segments = conn.execute(
+                f"""
+                SELECT COALESCE(NULLIF(TRIM(city), ''), '(desconhecida)') AS city,
+                       COALESCE(NULLIF(TRIM(owner_class), ''), 'unknown') AS owner_class,
+                       COUNT(*) AS samples,
+                       SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) AS successes
+                FROM searchbug_calls
+                WHERE {base_where}
+                GROUP BY 1, 2
+                ORDER BY samples DESC, city ASC
+                """,
+                (cutoff,),
+            ).fetchall()
+            by_class = conn.execute(
+                f"""
+                SELECT COALESCE(NULLIF(TRIM(owner_class), ''), 'unknown') AS owner_class,
+                       COUNT(*) AS samples,
+                       SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) AS successes
+                FROM searchbug_calls
+                WHERE {base_where}
+                GROUP BY 1
+                ORDER BY samples DESC
+                """,
+                (cutoff,),
+            ).fetchall()
+            return {
+                "days": int(days),
+                "segments": [dict(r) for r in segments],
+                "by_class": [dict(r) for r in by_class],
+            }
+        except sqlite3.OperationalError:
+            return {"days": int(days), "segments": [], "by_class": []}
+        finally:
+            conn.close()
+
     def admin_get_push_metrics(self, days: int = 7, recent_limit: int = 50) -> dict:
         """Saúde das entregas de push notification.
 
@@ -9097,6 +9146,11 @@ class AsyncDatabaseService:
     ) -> dict:
         return await anyio.to_thread.run_sync(
             self._service.get_phone_success_stats, city, owner_class, days
+        )
+
+    async def admin_get_phone_sample_progress(self, days: int = 90) -> dict:
+        return await anyio.to_thread.run_sync(
+            self._service.admin_get_phone_sample_progress, days
         )
 
     async def admin_get_push_metrics(self, days: int = 7, recent_limit: int = 50) -> dict:
