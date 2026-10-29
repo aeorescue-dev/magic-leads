@@ -24,6 +24,7 @@ import smtplib
 import string
 import threading
 import time
+import uuid
 from typing import Dict
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
@@ -44,6 +45,7 @@ MAX_BACKUP_BYTES = int(os.getenv("VPS_BACKUP_MAX_BYTES", str(300 * 1024 * 1024))
 BACKUP_NAME_RE = re.compile(r"^leads-\d{4}-\d{2}-\d{2}\.db\.gz$")
 
 os.makedirs(BACKUP_DIR, exist_ok=True)
+_BACKUP_LOCK = threading.Lock()
 
 
 ACCEPT_CODES = frozenset({250, 251})
@@ -187,7 +189,10 @@ async def upload_backup(
 
     os.makedirs(BACKUP_DIR, exist_ok=True)
     final_path = os.path.join(BACKUP_DIR, name)
-    part_path = final_path + ".part"
+    # `.part` unico por pedido: dois uploads concorrentes do mesmo dia (loop da
+    # app + pedido manual) colidiam no mesmo ficheiro e um deles ficava sem
+    # origem no os.replace -> 500. O rename final e' atomico.
+    part_path = f"{final_path}.{uuid.uuid4().hex[:8]}.part"
 
     total = 0
     try:
@@ -212,7 +217,8 @@ async def upload_backup(
             pass
         raise HTTPException(status_code=500, detail=f"falha ao escrever: {exc}") from exc
 
-    os.replace(part_path, final_path)
+    with _BACKUP_LOCK:
+        os.replace(part_path, final_path)
 
     # retencao
     files = sorted(
