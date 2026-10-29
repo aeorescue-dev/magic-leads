@@ -65,14 +65,14 @@ _SEARCHBUG_COLUMNS = (
     # C2: custo real por chamada ($0,20 da fatura).
     "cost_usd",
 )
-_PUSH_COLUMNS = ("outcome", "attempts", "latency_ms", "http_status", "user_id", "kind", "error")
+_PUSH_COLUMNS = ("outcome", "attempts", "latency_ms", "http_status", "user_id", "kind", "error", "notification_id")
 
 # Coercao por nome de coluna, partilhada pelas tabelas. `record()` e
 # chamado com dados de codigo que nao controla (excecoes de bibliotecas),
 # por isso normalizar aqui e mais barato do que validar em cada caller.
 _INT_COLUMNS = frozenset({
     "billed", "attempts", "latency_ms", "http_status", "user_id",
-    "lead_id", "transport_error",
+    "lead_id", "transport_error", "notification_id",
 })
 _STR_COLUMNS = frozenset({"outcome", "city", "kind", "owner_class", "layer"})
 _MAX_ERROR_LEN = 300

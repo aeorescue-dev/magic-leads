@@ -307,6 +307,9 @@ class Settings(BaseSettings):
     PUSH_TTL_DIGEST_S: int = 43200  # 12 h
     # Distância: apenas informativa/ordenação. NUNCA filtra por raio.
     PUSH_DISTANCE_ENABLED: bool = True
+    # Segredo HMAC do clique de push (B1). Se vazio, usa CRON_SECRET ou um
+    # fallback estavel; definir PUSH_CLICK_SECRET e' recomendado.
+    PUSH_CLICK_SECRET: str = ""
 
     @field_validator("PUSH_DAILY_LIMIT")
     @classmethod

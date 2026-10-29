@@ -429,6 +429,23 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   aberta. DOB de NYC não tem lat/lng no dataset → sem distância até ao
   enriquecimento BIN→PLUTO (gratuito).
 
+### Sprint B1 — clique, coalescência e higiene (2026-10-29)
+
+- **Telemetria de clique**: payload leva `nid` + `sig` (HMAC de
+  `push_click.sign_click`). O SW regista `GET /api/push/click` antes de
+  navegar; o deep link leva os mesmos campos como fallback (dashboard).
+  `notifications.clicked_at` + `push_deliveries.clicked_at`; painel admin
+  mostra **Cliques** e **CTR**.
+- **Coalescência**: 1 push por execução. 1 lead → push individual; ≥2 →
+  resumo (“2 novas oportunidades — Chicago · 1 obrigação legal · 2 chamados”),
+  com “Ver oportunidades”. O digest não envia push no mesmo run de um lote.
+- **Min-gap**: 30 min por utilizador (lido antes de criar os in-app deste run;
+  senão o próprio alerta contava como anterior). In-app é criado sempre.
+- **Higiene de dispositivos**: máx. 5 ativos (`disabled_at`), `last_seen_at`,
+  `last_success_at`, `device_label` (UA), poda de inativos >90 d mantendo
+  sempre um; broadcast respeita `push_enabled` e só usa subs ativas.
+- **776 testes**, 11 e2e, tsc limpo.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

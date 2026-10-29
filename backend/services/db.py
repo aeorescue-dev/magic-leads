@@ -33,6 +33,10 @@ from .searchbug import PhoneLookupResult, searchbug_service
 from .translations import DEFAULT_LOCALE
 from .translations import render as _render_i18n
 
+# B1: no maximo 5 dispositivos ativos por utilizador. O excedente e' desativado
+# (nunca apagado) para manter a auditoria.
+MAX_PUSH_DEVICES = 5
+
 # Ruído urbano NÃO-serviço (não corresponde aos 16 ofícios da plataforma):
 # estacionamento, tráfego/sinalização, veículos abandonados, TPW, testes.
 # NÃO lista os ofícios (telhado, encanamento, pintura, pragas, lixo, esgoto
@@ -268,6 +272,8 @@ CREATE TABLE IF NOT EXISTS users (
   geo_updated_at TEXT,
   -- Privacidade: mostrar a morada no alerta (default ligado).
   show_address_in_push INTEGER DEFAULT 1,
+  -- Ritmo minimo entre pushes (0 = sem pausa). B1.
+  push_min_gap_min INTEGER DEFAULT 30,
   alert_rotation_cursor INTEGER DEFAULT 0,
   welcome_popup_shown INTEGER DEFAULT 0,
   refund_count_today INTEGER DEFAULT 0,
@@ -378,6 +384,7 @@ CREATE TABLE IF NOT EXISTS notifications (
   read INTEGER DEFAULT 0,
   msg_key TEXT,
   msg_params TEXT,
+  clicked_at TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -415,6 +422,11 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   endpoint TEXT NOT NULL UNIQUE,
   p256dh TEXT NOT NULL,
   auth TEXT NOT NULL,
+  user_agent TEXT,
+  device_label TEXT,
+  last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  last_success_at TEXT,
+  disabled_at TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(user_id, endpoint)
 );
@@ -716,7 +728,9 @@ CREATE TABLE IF NOT EXISTS push_deliveries (
   http_status INTEGER,
   user_id INTEGER,
   kind TEXT,
-  error TEXT
+  error TEXT,
+  notification_id INTEGER,
+  clicked_at TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_push_deliveries_sent ON push_deliveries (sent_at);
@@ -1429,6 +1443,8 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN geo_updated_at TEXT")
     if user_cols and "show_address_in_push" not in user_cols:
         conn.execute("ALTER TABLE users ADD COLUMN show_address_in_push INTEGER DEFAULT 1")
+    if user_cols and "push_min_gap_min" not in user_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN push_min_gap_min INTEGER DEFAULT 30")
 
     event_cols = {r["name"] for r in conn.execute("PRAGMA table_info(lead_events)").fetchall()}
     if event_cols:
@@ -1444,6 +1460,39 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE notifications ADD COLUMN msg_key TEXT")
     if notif_cols and "msg_params" not in notif_cols:
         conn.execute("ALTER TABLE notifications ADD COLUMN msg_params TEXT")
+    if notif_cols and "clicked_at" not in notif_cols:
+        conn.execute("ALTER TABLE notifications ADD COLUMN clicked_at TEXT")
+
+    # B1: higiene de dispositivos (last_seen/last_success/disabled).
+    push_sub_cols = {
+        r["name"] for r in conn.execute("PRAGMA table_info(push_subscriptions)").fetchall()
+    }
+    for col, ddl in (
+        ("user_agent", "TEXT"),
+        ("device_label", "TEXT"),
+        ("last_seen_at", "TEXT DEFAULT CURRENT_TIMESTAMP"),
+        ("last_success_at", "TEXT"),
+        ("disabled_at", "TEXT"),
+    ):
+        if push_sub_cols and col not in push_sub_cols:
+            conn.execute(f"ALTER TABLE push_subscriptions ADD COLUMN {col} {ddl}")
+
+    # B1: atribuicao de clique por entrega.
+    delivery_cols = {
+        r["name"] for r in conn.execute("PRAGMA table_info(push_deliveries)").fetchall()
+    }
+    if delivery_cols and "notification_id" not in delivery_cols:
+        conn.execute("ALTER TABLE push_deliveries ADD COLUMN notification_id INTEGER")
+    if delivery_cols and "clicked_at" not in delivery_cols:
+        conn.execute("ALTER TABLE push_deliveries ADD COLUMN clicked_at TEXT")
+    for index_sql in (
+        "CREATE INDEX IF NOT EXISTS idx_push_deliveries_nid ON push_deliveries (notification_id)",
+        "CREATE INDEX IF NOT EXISTS idx_push_subscriptions_active ON push_subscriptions (user_id, disabled_at)",
+    ):
+        try:
+            conn.execute(index_sql)
+        except sqlite3.OperationalError:
+            pass
     for index_sql in (
         "CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications (user_id, read)",
     ):
@@ -4259,21 +4308,49 @@ class DatabaseService:
     # ---------------------------------------------------------------
     # Push Subscriptions (Web Push)
     # ---------------------------------------------------------------
-    def add_push_subscription(self, user_id: int, endpoint: str, p256dh: str, auth: str) -> bool:
-        """Salva ou atualiza uma push subscription para o usuário."""
+    def add_push_subscription(
+        self, user_id: int, endpoint: str, p256dh: str, auth: str,
+        user_agent: Optional[str] = None, device_label: Optional[str] = None,
+    ) -> bool:
+        """Salva ou atualiza uma push subscription para o usuário.
+
+        B1: guarda a ultima vez que o dispositivo foi visto e mantem no maximo
+        5 dispositivos ativos por utilizador (desativa os mais antigos). Sem
+        isto, um unico utilizador com 9 browsers recebe 9 copias de cada alerta.
+        """
         conn = get_connection()
         try:
             conn.execute(
                 """
-                INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO push_subscriptions
+                    (user_id, endpoint, p256dh, auth, user_agent, device_label,
+                     last_seen_at, disabled_at)
+                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, NULL)
                 ON CONFLICT(endpoint) DO UPDATE SET
                     p256dh = excluded.p256dh,
                     auth = excluded.auth,
-                    user_id = excluded.user_id
+                    user_id = excluded.user_id,
+                    user_agent = COALESCE(excluded.user_agent, push_subscriptions.user_agent),
+                    device_label = COALESCE(excluded.device_label, push_subscriptions.device_label),
+                    last_seen_at = CURRENT_TIMESTAMP,
+                    disabled_at = NULL
                 """,
-                (user_id, endpoint, p256dh, auth),
+                (user_id, endpoint, p256dh, auth, user_agent, device_label),
             )
+            # Higiene: no maximo 5 dispositivos ativos, mantendo os mais usados.
+            active = conn.execute(
+                """
+                SELECT id, endpoint FROM push_subscriptions
+                WHERE user_id = ? AND disabled_at IS NULL
+                ORDER BY COALESCE(last_seen_at, created_at) DESC, id DESC
+                """,
+                (user_id,),
+            ).fetchall()
+            for row in active[MAX_PUSH_DEVICES:]:
+                conn.execute(
+                    "UPDATE push_subscriptions SET disabled_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (row["id"],),
+                )
             conn.commit()
             return True
         finally:
@@ -4293,20 +4370,134 @@ class DatabaseService:
             conn.close()
 
     def get_user_push_subscriptions(self, user_id: int) -> List[dict]:
-        """Retorna todas as push subscriptions de um usuário.
+        """Retorna as push subscriptions ATIVAS de um usuário.
 
-        Inclui `user_id` no resultado para que a telemetria de entrega
-        (push_deliveries) consiga gravar o destinatário explicitamente — sem
-        ele, cada evento de lead_alert/digest ficava com user_id NULL e era
-        impossível auditar por utilizador.
+        `disabled_at` marca dispositivos desativados pela higiene de 5 ou por
+        inatividade; nao voltam a receber push.
         """
         conn = get_connection()
         try:
             rows = conn.execute(
-                "SELECT user_id, endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ?",
+                "SELECT user_id, endpoint, p256dh, auth, user_agent, device_label, "
+                "last_seen_at, last_success_at, created_at FROM push_subscriptions "
+                "WHERE user_id = ? AND disabled_at IS NULL "
+                "ORDER BY COALESCE(last_seen_at, created_at) DESC",
                 (user_id,),
             ).fetchall()
             return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def mark_push_success(self, endpoint: str) -> None:
+        """Regista a ultima entrega aceite para o dispositivo."""
+        conn = get_connection()
+        try:
+            conn.execute(
+                "UPDATE push_subscriptions SET last_success_at = CURRENT_TIMESTAMP, "
+                "last_seen_at = CURRENT_TIMESTAMP WHERE endpoint = ?",
+                (endpoint,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def disable_push_subscription(self, endpoint: str) -> bool:
+        """Desativa (sem apagar) um dispositivo. Usado pela higiene/inatividade."""
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE push_subscriptions SET disabled_at = CURRENT_TIMESTAMP "
+                "WHERE endpoint = ? AND disabled_at IS NULL",
+                (endpoint,),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def prune_push_subscriptions(self, days: int = 90) -> int:
+        """Desativa dispositivos inativos, mantendo sempre o mais recente.
+
+        Um dispositivo sem sucesso ha >`days` dias (ou nunca usado e criado ha
+        >180 dias) deixa de receber. Nunca desativa o ultimo ativo do
+        utilizador — isso mataria o push de quem simplesmente nao recebeu
+        alertas no periodo.
+        """
+        cutoff = f"-{int(days)} days"
+        old_cutoff = "-180 days"
+        conn = get_connection()
+        disabled = 0
+        try:
+            users = conn.execute(
+                "SELECT DISTINCT user_id FROM push_subscriptions WHERE disabled_at IS NULL"
+            ).fetchall()
+            for u in users:
+                subs = conn.execute(
+                    "SELECT id, last_success_at, last_seen_at, created_at FROM push_subscriptions "
+                    "WHERE user_id = ? AND disabled_at IS NULL "
+                    "ORDER BY COALESCE(last_success_at, last_seen_at, created_at) DESC, id DESC",
+                    (u["user_id"],),
+                ).fetchall()
+                if len(subs) <= 1:
+                    continue
+                for sub in subs[1:]:  # mantem o mais recente
+                    stale = False
+                    if sub["last_success_at"]:
+                        stale = conn.execute(
+                            "SELECT ? < datetime('now', ?)", (sub["last_success_at"], cutoff)
+                        ).fetchone()[0] == 1
+                    else:
+                        stale = conn.execute(
+                            "SELECT ? < datetime('now', ?)", (sub["created_at"], old_cutoff)
+                        ).fetchone()[0] == 1
+                    if stale:
+                        conn.execute(
+                            "UPDATE push_subscriptions SET disabled_at = CURRENT_TIMESTAMP "
+                            "WHERE id = ?",
+                            (sub["id"],),
+                        )
+                        disabled += 1
+            conn.commit()
+            return disabled
+        finally:
+            conn.close()
+
+    def get_last_alert_times(self, user_ids: List[int]) -> dict:
+        """Ultimo alerta new_lead por utilizador (para o min-gap)."""
+        if not user_ids:
+            return {}
+        conn = get_connection()
+        try:
+            out: dict = {}
+            for start in range(0, len(user_ids), 500):
+                chunk = user_ids[start:start + 500]
+                ph = ",".join("?" * len(chunk))
+                for r in conn.execute(
+                    f"SELECT user_id, MAX(created_at) AS last_at FROM notifications "
+                    f"WHERE type = 'new_lead' AND user_id IN ({ph}) GROUP BY user_id",
+                    chunk,
+                ):
+                    out[int(r["user_id"])] = r["last_at"]
+            return out
+        finally:
+            conn.close()
+
+    def mark_notification_clicked(self, notification_id: int) -> bool:
+        """Marca o clique de um alerta (idempotente) e propaga as entregas."""
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE notifications SET clicked_at = COALESCE(clicked_at, CURRENT_TIMESTAMP) "
+                "WHERE id = ?",
+                (notification_id,),
+            )
+            conn.execute(
+                "UPDATE push_deliveries SET clicked_at = COALESCE(clicked_at, CURRENT_TIMESTAMP) "
+                "WHERE notification_id = ?",
+                (notification_id,),
+            )
+            conn.commit()
+            return cur.rowcount > 0
         finally:
             conn.close()
 
@@ -4322,7 +4513,7 @@ class DatabaseService:
         conn = get_connection()
         try:
             remaining = conn.execute(
-                "SELECT COUNT(*) FROM push_subscriptions WHERE user_id = ?",
+                "SELECT COUNT(*) FROM push_subscriptions WHERE user_id = ? AND disabled_at IS NULL",
                 (user_id,),
             ).fetchone()[0]
             if remaining:
@@ -4337,11 +4528,12 @@ class DatabaseService:
             conn.close()
 
     def get_all_push_subscriptions(self) -> List[dict]:
-        """Retorna todas as push subscriptions (para envio em lote)."""
+        """Retorna todas as push subscriptions ATIVAS (para envio em lote)."""
         conn = get_connection()
         try:
             rows = conn.execute(
-                "SELECT user_id, endpoint, p256dh, auth, created_at FROM push_subscriptions"
+                "SELECT user_id, endpoint, p256dh, auth, created_at FROM push_subscriptions "
+                "WHERE disabled_at IS NULL"
             ).fetchall()
             return [dict(r) for r in rows]
         finally:
@@ -4998,7 +5190,8 @@ class DatabaseService:
                   SUM(CASE WHEN outcome = 'error' THEN 1 ELSE 0 END) AS errors,
                   SUM(CASE WHEN outcome = 'not_configured' THEN 1 ELSE 0 END) AS not_configured,
                   SUM(CASE WHEN outcome = 'no_subscriptions' THEN 1 ELSE 0 END) AS no_subscriptions,
-                  SUM(CASE WHEN attempts > 1 THEN 1 ELSE 0 END) AS retried
+                  SUM(CASE WHEN attempts > 1 THEN 1 ELSE 0 END) AS retried,
+                  SUM(CASE WHEN clicked_at IS NOT NULL THEN 1 ELSE 0 END) AS clicks
                 FROM push_deliveries WHERE sent_at >= ?
                 """,
                 (cutoff,),
@@ -5017,7 +5210,8 @@ class DatabaseService:
                 SELECT COALESCE(kind, '(desconhecido)') AS kind,
                        COUNT(*) AS n,
                        SUM(CASE WHEN outcome = 'accepted' THEN 1 ELSE 0 END) AS accepted,
-                       SUM(CASE WHEN outcome = 'expired' THEN 1 ELSE 0 END) AS expired
+                       SUM(CASE WHEN outcome = 'expired' THEN 1 ELSE 0 END) AS expired,
+                       SUM(CASE WHEN clicked_at IS NOT NULL THEN 1 ELSE 0 END) AS clicks
                 FROM push_deliveries WHERE sent_at >= ?
                 GROUP BY kind ORDER BY n DESC LIMIT 15
                 """,
@@ -5050,12 +5244,23 @@ class DatabaseService:
 
             # Subscrições vivas vs. mortas: o denominador real do problema.
             live_subs = conn.execute(
+                "SELECT COUNT(*) FROM push_subscriptions WHERE disabled_at IS NULL"
+            ).fetchone()[0]
+            total_subs = conn.execute(
                 "SELECT COUNT(*) FROM push_subscriptions"
             ).fetchone()[0]
+            devices = conn.execute(
+                """
+                SELECT user_id, COUNT(*) AS active
+                FROM push_subscriptions WHERE disabled_at IS NULL
+                GROUP BY user_id ORDER BY active DESC LIMIT 10
+                """
+            ).fetchall()
 
             recent = conn.execute(
                 """
-                SELECT id, sent_at, outcome, attempts, latency_ms, http_status, user_id, kind, error
+                SELECT id, sent_at, outcome, attempts, latency_ms, http_status, user_id,
+                       kind, error, notification_id, clicked_at
                 FROM push_deliveries ORDER BY id DESC LIMIT ?
                 """,
                 (recent_limit,),
@@ -5081,9 +5286,13 @@ class DatabaseService:
                     "not_configured": totals["not_configured"] or 0,
                     "no_subscriptions": totals["no_subscriptions"] or 0,
                     "retried": totals["retried"] or 0,
+                    "clicks": totals["clicks"] or 0,
                 },
                 "accepted_rate": _ratio(totals["accepted"], totals["deliveries"]),
+                "ctr": _ratio(totals["clicks"], totals["accepted"]),
                 "live_subscriptions": live_subs,
+                "total_subscriptions": total_subs,
+                "devices": [dict(r) for r in devices],
                 "latency": _percentiles(latencies),
                 "by_outcome": [dict(r) for r in by_outcome],
                 "by_kind": [dict(r) for r in by_kind],
@@ -5101,9 +5310,13 @@ class DatabaseService:
                     "rejected_dead": 0,
                     "rate_limited": 0, "timeouts": 0, "errors": 0,
                     "not_configured": 0, "no_subscriptions": 0, "retried": 0,
+                    "clicks": 0,
                 },
                 "accepted_rate": None,
+                "ctr": None,
                 "live_subscriptions": 0,
+                "total_subscriptions": 0,
+                "devices": [],
                 "latency": {"avg_ms": None, "p50_ms": None, "p95_ms": None, "max_ms": None, "samples": 0},
                 "by_outcome": [],
                 "by_kind": [],
@@ -9220,8 +9433,14 @@ class AsyncDatabaseService:
         return await anyio.to_thread.run_sync(self._service.get_user_cities_filter, user_id)
 
     # Push Subscriptions
-    async def add_push_subscription(self, user_id: int, endpoint: str, p256dh: str, auth: str) -> bool:
-        return await anyio.to_thread.run_sync(self._service.add_push_subscription, user_id, endpoint, p256dh, auth)
+    async def add_push_subscription(
+        self, user_id: int, endpoint: str, p256dh: str, auth: str,
+        user_agent: str | None = None, device_label: str | None = None,
+    ) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.add_push_subscription, user_id, endpoint, p256dh, auth,
+            user_agent, device_label,
+        )
 
     async def remove_push_subscription(self, user_id: int, endpoint: str) -> bool:
         return await anyio.to_thread.run_sync(self._service.remove_push_subscription, user_id, endpoint)
@@ -9229,8 +9448,27 @@ class AsyncDatabaseService:
     async def get_user_push_subscriptions(self, user_id: int) -> List[dict]:
         return await anyio.to_thread.run_sync(self._service.get_user_push_subscriptions, user_id)
 
+    async def mark_push_success(self, endpoint: str) -> None:
+        return await anyio.to_thread.run_sync(self._service.mark_push_success, endpoint)
+
+    async def disable_push_subscription(self, endpoint: str) -> bool:
+        return await anyio.to_thread.run_sync(self._service.disable_push_subscription, endpoint)
+
+    async def prune_push_subscriptions(self, days: int = 90) -> int:
+        return await anyio.to_thread.run_sync(self._service.prune_push_subscriptions, days)
+
+    async def get_last_alert_times(self, user_ids: List[int]) -> dict:
+        return await anyio.to_thread.run_sync(self._service.get_last_alert_times, user_ids)
+
+    async def mark_notification_clicked(self, notification_id: int) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.mark_notification_clicked, notification_id
+        )
+
     async def disable_push_if_no_subscriptions(self, user_id: int) -> bool:
-        return await anyio.to_thread.run_sync(self._service.disable_push_if_no_subscriptions, user_id)
+        return await anyio.to_thread.run_sync(
+            self._service.disable_push_if_no_subscriptions, user_id
+        )
 
     async def get_all_push_subscriptions(self) -> List[dict]:
         return await anyio.to_thread.run_sync(self._service.get_all_push_subscriptions)

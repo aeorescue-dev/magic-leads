@@ -46,7 +46,7 @@ import {
   LeadResponse, LeadStats, Notification, Note, HistoryEvent,
   ContractorMetrics,
   fetchTodayLeads, fetchStats,
-  fetchLeadById, toggleFavorite, recordContact, fetchNotes, addNote, deleteNote,
+  fetchLeadById, toggleFavorite, recordContact, recordPushClick, fetchNotes, addNote, deleteNote,
   fetchUserNotifications, fetchUserUnreadCount, markUserNotificationRead, markAllUserNotificationsRead,
   fetchLeadStatus, reserveLead, releaseLead, contactLead, negotiateLead, convertLead,
   fetchLeadHistory, fetchUserInterests, updateUserInterests,
@@ -956,6 +956,17 @@ const URGENCIES = ["all", "high", "medium", "low"];
     url.searchParams.delete("lead");
     router.replace(url.pathname + url.search, { scroll: false });
   }, [searchParams, authLoading, user, leads, openLeadDetail, router]);
+
+  // B1: fallback de atribuicao de clique. O Service Worker ja tenta registar;
+  // se falhou (sem rede), o deep link traz nid/sig e a dashboard tenta de novo.
+  const pushClickHandled = useRef<string | null>(null);
+  useEffect(() => {
+    const nid = searchParams?.get("nid");
+    const sig = searchParams?.get("sig");
+    if (!nid || !sig || pushClickHandled.current === nid) return;
+    pushClickHandled.current = nid;
+    void recordPushClick(nid, sig);
+  }, [searchParams]);
 
   // Lead actions inside modal
   const handleLeadAction = async (fn: () => Promise<any>, successText: string) => {

@@ -1596,16 +1596,26 @@ export default function AdminPage() {
           </p>
         ) : (
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
               <Kpi
-                label=" subscrições mortas"
+                label="Subscrições mortas"
                 value={push.totals.expired}
-                sub={`hoje: ${push.today.expired} · ${push.live_subscriptions} vivas`}
+                sub={`hoje: ${push.today.expired} · ${push.live_subscriptions}/${push.total_subscriptions} ativas`}
               />
               <Kpi
                 label="Aceites (não entregues)"
                 value={push.totals.accepted}
                 sub={`hoje: ${push.today.accepted}`}
+              />
+              <Kpi
+                label="Cliques"
+                value={push.totals.clicks ?? 0}
+                sub="notificações abertas"
+              />
+              <Kpi
+                label="CTR"
+                value={push.ctr === null ? "—" : `${Math.round(push.ctr * 100)}%`}
+                sub="cliques / aceites"
               />
               <Kpi
                 label="Com retry"

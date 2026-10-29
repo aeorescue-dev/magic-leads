@@ -43,13 +43,23 @@ self.addEventListener('push', (event) => {
           title = payload.title || title;
           options.body = payload.body || options.body;
           if (payload.icon) options.icon = payload.icon;
+          if (payload.badge) options.badge = payload.badge;
           if (payload.tag) options.tag = payload.tag;
+          if (Array.isArray(payload.actions)) options.actions = payload.actions;
+          if (Array.isArray(payload.vibrate)) options.vibrate = payload.vibrate;
+          if (payload.requireInteraction) options.requireInteraction = true;
+          if (payload.renotify) options.renotify = true;
+          if (payload.timestamp) options.timestamp = payload.timestamp;
           // Preserva o destino para o notificationclick: sem isto o clique
           // abria sempre /dashboard e o leadId chegava undefined.
           if (payload.url) options.data.url = payload.url;
           if (payload.leadId !== undefined && payload.leadId !== null) {
             options.data.leadId = payload.leadId;
           }
+          if (payload.nid !== undefined && payload.nid !== null) {
+            options.data.nid = payload.nid;
+          }
+          if (payload.sig) options.data.sig = payload.sig;
         }
       } catch (e) {
         // Se falhar o parse do JSON (ex: texto puro do DevTools), usa o texto puro como body
@@ -77,6 +87,8 @@ self.addEventListener('notificationclick', (event) => {
 
   const rawUrl = event.notification.data?.url || '/dashboard';
   const leadId = event.notification.data?.leadId;
+  const nid = event.notification.data?.nid;
+  const sig = event.notification.data?.sig;
 
   // Resolve o destino para URL absoluto (o payload traz `/dashboard?lead=42`).
   let target;
@@ -87,6 +99,18 @@ self.addEventListener('notificationclick', (event) => {
   }
 
   event.waitUntil((async () => {
+    // B1: regista o clique (HMAC) antes de abrir. Nunca bloqueia a navegacao.
+    if (nid && sig) {
+      try {
+        await fetch(
+          `/api/push/click?nid=${encodeURIComponent(nid)}&sig=${encodeURIComponent(sig)}`,
+          { method: 'GET', keepalive: true, credentials: 'omit' }
+        );
+      } catch (e) {
+        // sem rede: o deep link leva nid/sig e a dashboard tenta de novo
+      }
+    }
+
     const clientList = await clients.matchAll({ type: 'window', includeUncontrolled: true });
 
     // Prefere uma janela já aberta no dashboard; senão, qualquer janela nossa.

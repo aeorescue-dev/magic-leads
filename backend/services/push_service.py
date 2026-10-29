@@ -198,6 +198,7 @@ class PushService:
                     user_id=recipient_id,
                     kind=kind,
                     error=None if outcome == "accepted" else (str(last_error) if last_error else outcome),
+                    notification_id=payload.get("nid"),
                 )
             except Exception:  # pragma: no cover - telemetria nunca quebra o envio
                 logger.debug("Falha ao registar telemetria de push", exc_info=True)
@@ -324,6 +325,7 @@ class PushService:
 
         sent = 0
         expired_endpoints = []
+        success_endpoints = []
 
         for sub in subscriptions:
             result = await self._send_single(
@@ -331,8 +333,16 @@ class PushService:
             )
             if result is True:
                 sent += 1
+                success_endpoints.append(sub["endpoint"])
             elif result in ("expired", "rejected_dead"):
                 expired_endpoints.append(sub["endpoint"])
+
+        # B1: marca a ultima entrega aceite para a higiene de dispositivos.
+        for endpoint in success_endpoints:
+            try:
+                await db_service.mark_push_success(endpoint)
+            except Exception:  # pragma: no cover - telemetria nunca quebra o envio
+                logger.debug("Falha a marcar last_success_at", exc_info=True)
 
         # Remove expired/dead subscriptions
         for endpoint in expired_endpoints:

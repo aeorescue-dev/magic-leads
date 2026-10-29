@@ -215,9 +215,13 @@ export interface AdminPushMetrics {
     not_configured: number;
     no_subscriptions: number;
     retried: number;
+    clicks: number;
   };
   accepted_rate: number | null;
+  ctr: number | null;
   live_subscriptions: number;
+  total_subscriptions: number;
+  devices: { user_id: number; active: number }[];
   dlq: { pending: number; dropped: number; oldest_age_seconds: number | null };
   latency: {
     avg_ms: number | null;
@@ -227,7 +231,7 @@ export interface AdminPushMetrics {
     samples: number;
   };
   by_outcome: { outcome: string; n: number }[];
-  by_kind: { kind: string; n: number; accepted: number; expired: number }[];
+  by_kind: { kind: string; n: number; accepted: number; expired: number; clicks: number }[];
   recent: {
     id: number;
     sent_at: string;
@@ -238,6 +242,8 @@ export interface AdminPushMetrics {
     kind: string | null;
     user_id: number | null;
     error: string | null;
+    notification_id: number | null;
+    clicked_at: string | null;
   }[];
   buffer: { buffered: number; flushed: number; dropped: number; flush_errors: number };
 }

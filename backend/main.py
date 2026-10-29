@@ -91,6 +91,7 @@ from .services.lead_rules import (
 )
 from .services.metrics import push_metrics, searchbug_metrics
 from .services.outbound_engine import outbound_engine
+from .services.push_click import verify_click
 from .services.push_service import push_service
 from .services.searchbug import searchbug_service
 from .services.translations import render as _render_notification
@@ -1295,14 +1296,55 @@ async def get_vapid_public_key():
     return {"public_key": public_key}
 
 
+def _push_device_label(user_agent: str) -> str:
+    """Rotulo legivel do dispositivo para o painel de higiene (B1)."""
+    ua = (user_agent or "").lower()
+    if "crios" in ua:
+        browser = "Chrome"
+    elif "edg" in ua:
+        browser = "Edge"
+    elif "firefox" in ua:
+        browser = "Firefox"
+    elif "chrome" in ua:
+        browser = "Chrome"
+    elif "safari" in ua:
+        browser = "Safari"
+    else:
+        browser = "Browser"
+    if "android" in ua:
+        os_name = "Android"
+    elif "iphone" in ua:
+        os_name = "iPhone"
+    elif "ipad" in ua:
+        os_name = "iPad"
+    elif "windows" in ua:
+        os_name = "Windows"
+    elif "mac os" in ua or "macintosh" in ua:
+        os_name = "macOS"
+    elif "linux" in ua:
+        os_name = "Linux"
+    else:
+        os_name = "Device"
+    return f"{browser} · {os_name}"
+
+
 @app.post("/api/push/subscribe")
 async def subscribe_push(
     payload: PushSubscribeRequest,
+    request: Request,
     user: dict = Depends(_get_current_user),
 ):
-    """Registra uma push subscription para o usuário."""
+    """Registra uma push subscription para o usuário.
+
+    B1: guarda o user-agent e um rotulo do dispositivo, atualiza `last_seen_at`
+    e mantem no maximo 5 dispositivos ativos (os mais antigos sao desativados).
+    """
     try:
-        ok = await db_service.add_push_subscription(user["id"], payload.endpoint, payload.p256dh, payload.auth)
+        ua = (request.headers.get("user-agent") or "")[:300]
+        label = _push_device_label(ua)
+        ok = await db_service.add_push_subscription(
+            user["id"], payload.endpoint, payload.p256dh, payload.auth, ua, label
+        )
         if ok:
             await db_service.set_user_push_enabled(user["id"], True)
         return {"status": "ok", "subscribed": ok}
@@ -1310,6 +1352,19 @@ async def subscribe_push(
         logger.error(f"Erro ao inscrever push: {e}")
         raise HTTPException(status_code=500, detail="Erro ao inscrever")
 
+
+@app.get("/api/push/click")
+@limiter.limit("120/minute")
+async def push_click(request: Request, nid: int, sig: str):
+    """Regista o clique num alerta (assinado por HMAC, sem sessao).
+
+    O Service Worker nao tem acesso ao token; a assinatura impede que um
+    terceiro infle o CTR. Idempotente: o primeiro clique conta.
+    """
+    if not verify_click(nid, sig):
+        raise HTTPException(status_code=403, detail="Assinatura inválida")
+    recorded = await db_service.mark_notification_clicked(nid)
+    return {"status": "ok", "recorded": recorded}
 
 @app.post("/api/push/unsubscribe")
 async def unsubscribe_push(

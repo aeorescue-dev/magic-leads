@@ -44,6 +44,13 @@ Contexto completo e números medidos: **`docs/PROJECT-MEMORY.md`**. Ler antes de
 17. **Alertas — entrega**: TTL **nunca 0** (lead 4 h, digest 12 h), `Urgency` por sinal e
     `send_to_all` respeita `push_enabled`. Web Push não suporta som personalizado por
     ficheiro: usar vibração (payload) e, no máximo, chime in-app.
+18. **Alertas — 1 push por run**: ≥2 leads do mesmo run são coalescidos num resumo
+    (“Ver oportunidades”); 1 lead vai individual. O digest não faz segundo push no
+    mesmo run. Min-gap default 30 min (in-app continua sempre).
+19. **Alertas — clique**: `nid` assinado por HMAC (`push_click`); o endpoint é público
+    mas só aceita assinatura válida. Nunca expor dados no endpoint.
+20. **Devices**: máx. **5** push subscriptions ativas por utilizador; desativar (não
+    apagar) as antigas; poda >90 d mantém sempre a mais recente.
 
 ## Verificação mínima antes de deploy
 ```bash

@@ -733,6 +733,18 @@ export async function setPushEnabled(enabled: boolean): Promise<{ status: string
   );
 }
 
+export async function recordPushClick(nid: string, sig: string): Promise<void> {
+  try {
+    // Endpoint publico assinado (HMAC): o SW nao tem o token da sessao.
+    await fetch(
+      `${API_URL}/api/push/click?nid=${encodeURIComponent(nid)}&sig=${encodeURIComponent(sig)}`,
+      { credentials: "omit", keepalive: true }
+    );
+  } catch {
+    /* analitica nunca bloqueia a navegacao */
+  }
+}
+
 export async function fetchPushEnabled(): Promise<boolean> {
   try {
     const r = await handle<{ subscriptions: { endpoint: string }[] }>(

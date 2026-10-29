@@ -36,6 +36,7 @@ from .lead_rules import (
     get_owner_class,
     is_institutional_name,
 )
+from .push_click import sign_click
 from .translations import (
     alert_confidence_label,
     alert_why_now,
@@ -78,6 +79,8 @@ class PlanReport:
     candidates: int = 0    # leads despacháveis (gate semântico)
     city_filtered: bool = False  # audiência zerada apenas pelo cities_filter
     quiet_suppressed: int = 0    # pushes adiados pelo silêncio
+    gap_suppressed: int = 0      # pushes adiados pelo min-gap
+    batched: int = 0             # pushes agrupados (1 por run)
 
 
 # ---------------------------------------------------------------------------
@@ -298,6 +301,17 @@ async def _confidence_pct(lead: dict, cache: dict) -> int | None:
     return pct
 
 
+def _click_fields(notification_id: int | None) -> dict:
+    if not notification_id:
+        return {}
+    try:
+        nid = int(notification_id)
+    except (TypeError, ValueError):
+        return {}
+    sig = sign_click(nid)
+    return {"nid": nid, "sig": sig}
+
+
 def _build_push_payload(
     lead: dict,
     category: str,
@@ -307,6 +321,7 @@ def _build_push_payload(
     show_distance: bool,
     confidence_pct: int | None,
     show_address: bool,
+    notification_id: int | None = None,
 ) -> dict:
     loc = normalize(locale)
     cat_label = category_label(category, loc)
@@ -356,6 +371,11 @@ def _build_push_payload(
     except (OverflowError, ValueError):
         stamp = None
 
+    click = _click_fields(notification_id)
+    url = f"/dashboard?lead={lead.get('id')}&occ={occurrence}&src=push"
+    if click:
+        url += f"&nid={click['nid']}&sig={click['sig']}"
+
     payload = {
         "title": title,
         "body": " · ".join(parts),
@@ -368,7 +388,7 @@ def _build_push_payload(
         "occurrence": occurrence,
         "signalType": signal,
         "category": category,
-        "url": f"/dashboard?lead={lead.get('id')}&occ={occurrence}&src=push",
+        "url": url,
         "actions": [
             {
                 "action": "open",
@@ -382,8 +402,124 @@ def _build_push_payload(
         "vibrate": [180, 90, 180, 90, 260] if signal == "legal_obligation" else [120, 80, 120],
         "requireInteraction": signal == "legal_obligation",
     }
+    payload.update(click)
     if stamp:
         payload["timestamp"] = stamp
+    return payload
+
+
+def _build_batch_payload(
+    jobs: list[tuple[dict, str]],
+    locale: str | None,
+    distances: dict[int, float] | None,
+    show_distance: bool,
+    notification_id: int | None = None,
+) -> dict:
+    """Um unico push para varios leads do mesmo run (coalescencia B1).
+
+    O in-app continua a listar cada lead; o push e' o resumo acionavel.
+    """
+    loc = normalize(locale)
+    n = len(jobs)
+    signals = [_signal_of(lead)[0] for lead, _cat in jobs]
+    has_legal = "legal_obligation" in signals
+    if all(s == "legal_obligation" for s in signals):
+        emoji = "⚖️"
+    elif all(s == "authorized_work" for s in signals):
+        emoji = "🏗️"
+    elif all(s == "open_request" for s in signals):
+        emoji = "🔧"
+    else:
+        emoji = "📋"
+
+    title = (
+        {"pt": f"{emoji} {n} novas oportunidades",
+         "en": f"{emoji} {n} new opportunities",
+         "es": f"{emoji} {n} nuevas oportunidades"}[loc]
+    )
+    cities = {(lead.get("city") or "").strip() for lead, _cat in jobs if lead.get("city")}
+    if len(cities) == 1 and len(title) + len(next(iter(cities))) + 3 <= 60:
+        title = f"{title} — {next(iter(cities))}"
+
+    counts = {
+        "legal_obligation": signals.count("legal_obligation"),
+        "authorized_work": signals.count("authorized_work"),
+        "open_request": signals.count("open_request"),
+    }
+    parts: list[str] = []
+    if counts["legal_obligation"]:
+        c = counts["legal_obligation"]
+        parts.append(
+            {
+                "pt": f"{c} obrigação legal" if c == 1 else f"{c} obrigações legais",
+                "en": f"{c} legal obligation" if c == 1 else f"{c} legal obligations",
+                "es": f"{c} obligación legal" if c == 1 else f"{c} obligaciones legales",
+            }[loc]
+        )
+    if counts["authorized_work"]:
+        c = counts["authorized_work"]
+        parts.append(
+            {
+                "pt": f"{c} obra autorizada" if c == 1 else f"{c} obras autorizadas",
+                "en": f"{c} authorized work",
+                "es": f"{c} obra autorizada" if c == 1 else f"{c} obras autorizadas",
+            }[loc]
+        )
+    if counts["open_request"]:
+        c = counts["open_request"]
+        parts.append(
+            {
+                "pt": f"{c} chamado" if c == 1 else f"{c} chamados",
+                "en": f"{c} request" if c == 1 else f"{c} requests",
+                "es": f"{c} solicitud" if c == 1 else f"{c} solicitudes",
+            }[loc]
+        )
+
+    if show_distance and distances:
+        nearest = min(distances.values())
+        miles = _fmt_miles(nearest, loc)
+        parts.append(
+            {"pt": f"a mais próxima a {miles} mi",
+             "en": f"nearest {miles} mi away",
+             "es": f"la más cercana a {miles} mi"}[loc]
+        )
+    parts.append(
+        {"pt": "telefones sob consulta",
+         "en": "phones on request",
+         "es": "teléfonos bajo consulta"}[loc]
+    )
+
+    click = _click_fields(notification_id)
+    url = "/dashboard?src=push&batch=1"
+    if click:
+        url += f"&nid={click['nid']}&sig={click['sig']}"
+
+    payload = {
+        "title": title,
+        "body": " · ".join(parts),
+        "icon": _PUSH_ICON,
+        "badge": _PUSH_ICON,
+        "tag": f"batch_{notification_id or n}",
+        "renotify": True,
+        "silent": False,
+        "signalType": "legal_obligation" if has_legal else "batch",
+        "batch": n,
+        "url": url,
+        "actions": [
+            {
+                "action": "open",
+                "title": {"pt": "Ver oportunidades", "en": "View opportunities", "es": "Ver oportunidades"}[loc],
+            },
+            {
+                "action": "dismiss",
+                "title": {"pt": "Dispensar", "en": "Dismiss", "es": "Descartar"}[loc],
+            },
+        ],
+        "vibrate": [180, 90, 180, 90, 260] if has_legal else [120, 80, 120],
+        "requireInteraction": has_legal,
+        "timestamp": int(_now_utc().timestamp() * 1000),
+    }
+    payload.update(click)
     return payload
 
 
@@ -467,6 +603,7 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
     user_base: dict = {}
     user_base_source: dict = {}
     user_show_address: dict = {}
+    user_gap: dict = {}
     saw_users = False
     for cat, cat_leads in by_cat.items():
         users = await db_service.get_users_interested_in(cat, strict=True)
@@ -488,6 +625,8 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
                 user_base[uid] = base
                 user_base_source[uid] = (u.get("base_source") or "").strip().lower()
                 user_show_address[uid] = bool(u.get("show_address_in_push", 1))
+                gap = u.get("push_min_gap_min")
+                user_gap[uid] = 30 if gap is None else int(gap)
 
     city_filtered = len(audience) == 0 and saw_users
     report = PlanReport(
@@ -496,7 +635,11 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
         city_filtered=city_filtered,
     )
 
-    push_jobs: list = []
+    # Min-gap: tem de ser lido ANTES de criar os in-app deste run, senao o
+    # proprio alerta acabado de criar contava como "ultimo alerta".
+    last_alerts = await db_service.get_last_alert_times(list(per_user.keys()))
+
+    push_jobs: dict = {}
     digest_jobs: list = []
     confidence_cache: dict = {}
 
@@ -527,7 +670,7 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
             if created:
                 await db_service.increment_alert_usage(uid, cat)
                 report.created += 1
-                push_jobs.append((uid, ld, cat, locale))
+                push_jobs.setdefault(uid, []).append((ld, cat, created.get("id")))
 
         if overflow > 0:
             digest_jobs.append((uid, overflow, user_locale.get(uid)))
@@ -550,18 +693,36 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
                 except (ValueError, TypeError):
                     total_n = count
                 if await db_service.is_push_enabled(uid):
+                    # Coalescencia B1: se este run ja vai enviar um alerta de
+                    # lead, o digest fica so no in-app. Nunca dois pushes no
+                    # mesmo run.
+                    if push_jobs.get(uid):
+                        continue
                     rendered = render("digest", locale, n=total_n, limit=limit) or {}
+                    click = _click_fields(res.get("id"))
+                    digest_url = "/dashboard?src=push"
+                    if click:
+                        digest_url += f"&nid={click['nid']}&sig={click['sig']}"
+                    digest_payload = {
+                        "title": rendered.get("title") or tr("digest.title", locale),
+                        "body": rendered.get("message")
+                        or tr("digest.main_msg", locale, n=total_n, limit=limit),
+                        "icon": _PUSH_ICON,
+                        "badge": _PUSH_ICON,
+                        "tag": f"digest_{normalize(locale)}",
+                        "url": digest_url,
+                        "actions": [
+                            {
+                                "action": "open",
+                                "title": "Ver oportunidades",
+                            },
+                            {"action": "dismiss", "title": "Dispensar"},
+                        ],
+                    }
+                    digest_payload.update(click)
                     await push_service.send_to_user(
                         uid,
-                        {
-                            "title": rendered.get("title") or tr("digest.title", locale),
-                            "body": rendered.get("message")
-                            or tr("digest.main_msg", locale, n=total_n, limit=limit),
-                            "icon": _PUSH_ICON,
-                            "badge": _PUSH_ICON,
-                            "tag": f"digest_{normalize(locale)}",
-                            "url": "/dashboard",
-                        },
+                        digest_payload,
                         "digest",
                         ttl=settings.PUSH_TTL_DIGEST_S,
                         urgency="normal",
@@ -569,49 +730,99 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
         except Exception as e:
             logger.error(f"Digest diário user={uid} falhou: {e}")
 
-    # 5) Push (orçamento combinado: não soma). Silêncio suprime 311/obra;
-    # legal_obligation passa sempre.
-    for uid, lead, cat, locale in push_jobs:
+    # 5) Push coalescido (1 por run) + min-gap + silêncio.
+    for uid, jobs in push_jobs.items():
         try:
             if not await db_service.is_push_enabled(uid):
                 continue
-            signal, _status = _signal_of(lead)
-            if quiet and signal != "legal_obligation":
-                report.quiet_suppressed += 1
-                continue
-            pct = await _confidence_pct(lead, confidence_cache)
+            locale = user_locale.get(uid)
             base = user_base.get(uid)
-            distance = _distance_miles(base, lead) if base else None
-            show_distance = (
-                distance is not None
-                and user_base_source.get(uid) in ("gps", "manual")
-                and bool(getattr(settings, "PUSH_DISTANCE_ENABLED", True))
-            )
-            payload = _build_push_payload(
-                lead,
-                cat,
-                signal,
-                locale,
-                distance,
-                show_distance,
-                pct,
-                user_show_address.get(uid, True),
-            )
-            sent = await push_service.send_to_user(
-                uid,
-                payload,
-                "lead_alert",
-                ttl=settings.PUSH_TTL_LEAD_S,
-                urgency="high" if signal == "legal_obligation" else "normal",
-            )
+            source = user_base_source.get(uid)
+            show_address = user_show_address.get(uid, True)
+
+            eligible: list = []
+            for lead, cat, nid in jobs:
+                signal, _status = _signal_of(lead)
+                if quiet and signal != "legal_obligation":
+                    report.quiet_suppressed += 1
+                    continue
+                eligible.append((lead, cat, nid, signal))
+            if not eligible:
+                continue
+
+            gap_min = int(user_gap.get(uid) or 0)
+            last_dt = _parse_dt(last_alerts.get(uid))
+            if gap_min > 0 and last_dt and (now - last_dt).total_seconds() < gap_min * 60:
+                report.gap_suppressed += len(eligible)
+                continue
+
+            if len(eligible) == 1:
+                lead, cat, nid, signal = eligible[0]
+                pct = await _confidence_pct(lead, confidence_cache)
+                distance = _distance_miles(base, lead) if base else None
+                show_distance = (
+                    distance is not None
+                    and source in ("gps", "manual")
+                    and bool(getattr(settings, "PUSH_DISTANCE_ENABLED", True))
+                )
+                payload = _build_push_payload(
+                    lead,
+                    cat,
+                    signal,
+                    locale,
+                    distance,
+                    show_distance,
+                    pct,
+                    show_address,
+                    notification_id=nid,
+                )
+                sent = await push_service.send_to_user(
+                    uid,
+                    payload,
+                    "lead_alert",
+                    ttl=settings.PUSH_TTL_LEAD_S,
+                    urgency="high" if signal == "legal_obligation" else "normal",
+                )
+            else:
+                distances: dict = {}
+                for lead, _cat, _nid, _signal in eligible:
+                    d = _distance_miles(base, lead) if base else None
+                    if d is not None:
+                        distances[lead["id"]] = d
+                show_distance = (
+                    bool(distances)
+                    and source in ("gps", "manual")
+                    and bool(getattr(settings, "PUSH_DISTANCE_ENABLED", True))
+                )
+                has_legal = any(
+                    sig == "legal_obligation"
+                    for (_lead, _cat, _nid, sig) in eligible
+                )
+                payload = _build_batch_payload(
+                    [(lead, cat) for (lead, cat, _nid, _sig) in eligible],
+                    locale,
+                    distances if show_distance else None,
+                    show_distance,
+                    eligible[0][2],
+                )
+                sent = await push_service.send_to_user(
+                    uid,
+                    payload,
+                    "lead_alert",
+                    ttl=settings.PUSH_TTL_LEAD_S,
+                    urgency="high" if has_legal else "normal",
+                )
+                if sent:
+                    report.batched += 1
             if sent:
                 report.pushed += 1
         except Exception as e:
-            logger.error(f"Push error user={uid} lead={lead.get('id')}: {e}")
+            logger.error(f"Push error user={uid}: {e}")
 
     logger.info(
         f"Alert Planner: {report.created} in-app, {report.digest} digest, "
-        f"{report.pushed} push ({report.quiet_suppressed} em silêncio), "
+        f"{report.pushed} push ({report.batched} lote(s), "
+        f"{report.quiet_suppressed} em silêncio, {report.gap_suppressed} em min-gap), "
         f"audiência {report.audience} ({report.candidates} candidato(s), teto {limit})"
     )
     return report
