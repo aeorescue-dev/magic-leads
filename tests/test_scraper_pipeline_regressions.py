@@ -29,6 +29,39 @@ from backend.scrapers.socrata_311 import SocrataFetchError, socrata_scraper
 from backend.services.db import db_service
 
 _EXT = {"n": 0}
+_AUTH: dict[str, dict] = {}
+
+
+def _headers() -> dict:
+    """Sessão de teste para as rotas de listagem (A1 exige conta)."""
+    if "h" in _AUTH:
+        return _AUTH["h"]
+    import uuid
+    from datetime import timedelta, timezone
+
+    from backend.main import _hash_token
+    from backend.services.db import get_connection
+
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            "INSERT INTO users (email, password_hash, company_name, plan, "
+            "subscription_status, plan_until, locale) "
+            "VALUES (?, 'x', 'Pipeline Co', 'pro', 'active', ?, 'pt')",
+            (
+                f"pipeline_{uuid.uuid4().hex[:8]}@test.com",
+                (datetime.now(timezone.utc) + timedelta(days=2)).isoformat(),
+            ),
+        )
+        uid = int(cur.lastrowid)
+        conn.commit()
+    finally:
+        conn.close()
+
+    token = f"pipeline-{uuid.uuid4().hex[:10]}"
+    db_service._service.create_user_session(uid, _hash_token(token), "pytest", None)
+    _AUTH["h"] = {"Authorization": f"Bearer {token}"}
+    return _AUTH["h"]
 
 
 def _insert(source_type: str, city: str, status: str = "Open") -> int:
@@ -128,7 +161,7 @@ def test_type_filter_accepts_comma_separated_values():
     other_id = _insert("permit", "CHICAGO")
 
     with TestClient(app) as client:
-        r = client.get("/api/leads/today?type=dob_violation,hpd_violation&include_incomplete=true")
+        r = client.get("/api/leads/today?type=dob_violation,hpd_violation&include_incomplete=true", headers=_headers())
         assert r.status_code == 200
         body = r.json()
         ids = {str(lead["id"]) for lead in body["leads"]}
@@ -141,8 +174,8 @@ def test_type_filter_accepts_comma_separated_values():
     # "=": com igualdade sobre a string inteira, o grouped devolvia 0 e o
     # teste passava por acidente se so verificassemos o status 200.
     with TestClient(app) as client:
-        part_dob = client.get("/api/leads/today?type=dob_violation&include_incomplete=true").json()["total"]
-        part_hpd = client.get("/api/leads/today?type=hpd_violation&include_incomplete=true").json()["total"]
+        part_dob = client.get("/api/leads/today?type=dob_violation&include_incomplete=true", headers=_headers()).json()["total"]
+        part_hpd = client.get("/api/leads/today?type=hpd_violation&include_incomplete=true", headers=_headers()).json()["total"]
         grouped = body["total"]
 
     assert grouped >= part_dob, (
@@ -158,14 +191,14 @@ def test_type_filter_accepts_comma_separated_values():
 def test_type_filter_single_value_still_works():
     _insert("hpd_violation", "CHICAGO")
     with TestClient(app) as client:
-        r = client.get("/api/leads/today?type=hpd_violation&include_incomplete=true")
+        r = client.get("/api/leads/today?type=hpd_violation&include_incomplete=true", headers=_headers())
         assert r.status_code == 200
         assert r.json()["total"] >= 1
 
 
 def test_type_filter_rejects_unknown_values_without_500():
     with TestClient(app) as client:
-        r = client.get("/api/leads/today?type=,,%20,&include_incomplete=true")
+        r = client.get("/api/leads/today?type=,,%20,&include_incomplete=true", headers=_headers())
         assert r.status_code == 200
         assert r.json()["total"] >= 0
 

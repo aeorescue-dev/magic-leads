@@ -827,9 +827,20 @@ async def get_leads(
 
 # Busca global por endereço/nome/telefone
 @app.get("/api/leads/search", response_model=LeadsListResponse)
-async def search_leads(q: str = "", per_page: int = 50, user: dict | None = Depends(_get_optional_user)):
-    """Busca leads por endereço, nome do dono ou telefone."""
+@limiter.limit("120/minute")
+async def search_leads(
+    request: Request,
+    q: str = "",
+    per_page: int = 50,
+    user: dict = Depends(_get_current_user),
+):
+    """Busca leads por endereço, nome do dono ou telefone — A1.
+
+    Exige conta: era o vetor mais direto para varrer a base (busca vazia +
+    `per_page`) sem rate limit.
+    """
     try:
+        per_page = max(1, min(int(per_page), 200))
         results = await db_service.search_leads(q, limit=per_page)
 
         results = _filter_public_leads(results, user)
@@ -891,7 +902,9 @@ async def recent_leads(
 
 # Demandas do dia (lote mais recente de todas as cidades) — feed "ver tudo"
 @app.get("/api/leads/today", response_model=LeadsListResponse)
+@limiter.limit("120/minute")
 async def leads_today(
+    request: Request,
     limit: int = 60,
     page: int = 1,
     city: str = None,
@@ -899,16 +912,20 @@ async def leads_today(
     category: str = None,
     urgency: str = None,
     include_closed: bool = False,
-    user: dict | None = Depends(_get_optional_user),
+    user: dict = Depends(_get_current_user),
 ):
     """Feed dos últimos 7 dias — filtros, total e exclusão de fechados em SQL.
 
     P0-B: usa o MESMO predicado do `/api/leads`; `total` == linhas que o feed
     pode mostrar. `include_closed=True` (toggle do painel) mostra encerrados.
+
+    A1: exige conta (antes era anónimo com `page` livre e 60/página).
     """
     try:
         signal_type = _signal_type_from_filter(type)
-        user_id = user["id"] if user and user.get("id") else None
+        user_id = user["id"]
+        limit = max(1, min(int(limit), 200))
+        page = max(1, int(page))
         leads, total = await db_service.get_leads_feed(
             city=city,
             signal_type=signal_type,

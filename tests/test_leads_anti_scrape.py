@@ -132,6 +132,19 @@ def test_recent_sample_is_public_but_capped_and_masked():
         assert not lead.get("owner_name")
 
 
+def test_today_and_search_require_account():
+    _reset()
+    _lead()
+    client = TestClient(app)
+    assert client.get("/api/leads/today?type=open_request").status_code == 401
+    assert client.get("/api/leads/search?q=a").status_code == 401
+
+    uid = _user()
+    headers = _session(uid, "a1-token-today")
+    assert client.get("/api/leads/today?type=open_request", headers=headers).status_code == 200
+    assert client.get("/api/leads/search?q=a", headers=headers).status_code == 200
+
+
 def test_recent_sample_respects_explicit_small_limit():
     _reset()
     for _ in range(5):

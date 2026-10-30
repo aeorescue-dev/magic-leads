@@ -72,10 +72,10 @@ Contexto completo e números medidos: **`docs/PROJECT-MEMORY.md`**. Ler antes de
     `backend/services/privacy.py` (`scrub`/`sanitize_lead`); `source`/`department`
     saem `None` para o cliente e `source_type` é mapeado para token neutro. O admin
     (interno) continua a ver os dados crus. `tests/test_privacy_terms.py` é o guarda.
-28. **Anti-raspagem (A1)**: `/api/leads` e `/api/leads/{id}` exigem sessão
-    (`_get_current_user`) e têm rate limit (120/min). `/api/leads/recent` é a única
-    amostra pública: 30/min, máx. 20 itens e dados do dono mascarados. Nunca
-    devolver a base paginável a anónimos (IDs são sequenciais).
+28. **Anti-raspagem (A1)**: `/api/leads`, `/api/leads/today`, `/api/leads/search` e
+    `/api/leads/{id}` exigem sessão (`_get_current_user`) e têm rate limit (120/min).
+    `/api/leads/recent` é a única amostra pública: 30/min, máx. 20 itens e dados do
+    dono mascarados. Nunca devolver a base paginável a anónimos (IDs são sequenciais).
 29. **Sessões (A2)**: TTL deslizante de `SESSION_TTL_DAYS` (30). `user_sessions.expires_at`
     é a fonte; token expirado é apagado e devolve 401 `session_expired`. O cookie usa
     o mesmo TTL. `prune_expired_sessions()` corre no arranque. Nunca aceitar token

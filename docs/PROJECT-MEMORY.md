@@ -522,12 +522,13 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 
 ### Segurança — A1 + A2 (2026-10-30)
 
-- **A1 anti-raspagem**: `/api/leads` e `/api/leads/{id}` passaram a exigir conta
-  (`_get_current_user`) e rate limit de 120/min. Antes o feed era anónimo, sem limite
-  e com `offset` livre: 85.873 leads percorríveis em ~425 pedidos; o detalhe permitia
-  enumerar IDs sequenciais. `/api/leads/recent` continua público (montra da landing),
-  mas limitado a 20 itens, 30/min e com o dono mascarado. `per_page` da lista é fixado
-  a 200 na resposta (não só no SQL).
+- **A1 anti-raspagem**: `/api/leads`, `/api/leads/today`, `/api/leads/search` e
+  `/api/leads/{id}` passaram a exigir conta (`_get_current_user`) e rate limit de
+  120/min. Antes o feed era anónimo, sem limite e com `offset` livre: 85.873 leads
+  percorríveis em ~425 pedidos; o detalhe permitia enumerar IDs sequenciais e a busca
+  varria a base com `per_page`. `/api/leads/recent` continua público (montra da
+  landing), mas limitado a 20 itens, 30/min e com o dono mascarado. `per_page` da lista
+  é fixado a 200 na resposta (não só no SQL).
 - **A2 TTL de sessão**: coluna `user_sessions.expires_at` (migração + backfill de 30 d
   para as sessões antigas, que eram eternas). `SESSION_TTL_DAYS=30` com expiração
   **deslizante** (cada uso renova; o limite real é inatividade). Token expirado é
