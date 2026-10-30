@@ -290,6 +290,16 @@ class Settings(BaseSettings):
     # O digest diário do excedente é extra e NÃO conta para o teto.
     ALERT_DIGEST_COUNTS_TOWARD_LIMIT: bool = False
 
+    # ---------------------------------------------------------------- Sessões
+    # TTL de sessão (idle timeout deslizante). O token deixa de valer após
+    # `SESSION_TTL_DAYS` sem atividade: roubo de token não é eterno.
+    SESSION_TTL_DAYS: int = 30
+
+    @field_validator("SESSION_TTL_DAYS")
+    @classmethod
+    def _clamp_session_ttl(cls, v: int) -> int:
+        return max(1, min(int(v), 365))
+
     # ---------------------------------------------------------------- Alert Engine v2
     # Gate de elegibilidade: idade máxima de um lead "novo" (reincidência
     # bypassa) e sinais que podem gerar alerta. `closed` nunca passa.

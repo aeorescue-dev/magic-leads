@@ -105,6 +105,7 @@ def test_rotas_publicas_nao_devolvem_texto_de_excecao(client):
     assert 'detail=f"Erro: {e' not in src, "handler volta a interpolar excecao no detail"
     assert 'detail=f"Erro ao processar reserva: {e}"' not in src
     r = client.get("/api/leads/999999999")
-    assert r.status_code in (200, 404)
+    # A1: o detalhe passou a exigir conta; 404 continua válido se autenticado.
+    assert r.status_code in (401, 404)
     assert "Traceback" not in r.text
     assert "sqlite3" not in r.text

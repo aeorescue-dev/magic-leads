@@ -76,18 +76,15 @@ def test_scraper_status_endpoint():
 
 
 def test_leads_endpoint():
-    """Valida se o endpoint de leads responde."""
+    """A listagem de leads exige conta (A1, anti-raspagem)."""
     from fastapi.testclient import TestClient
 
     from backend.main import app
 
     client = TestClient(app)
     resp = client.get("/api/leads?limit=1")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "total" in data
-    assert "leads" in data
-    assert isinstance(data["leads"], list)
+    assert resp.status_code == 401
+    assert "total" not in resp.text
 
 
 if __name__ == "__main__":

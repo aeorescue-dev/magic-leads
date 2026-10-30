@@ -193,9 +193,16 @@ async function handle<T>(res: Response): Promise<T> {
     } catch {
       detail = await res.text();
     }
-    // Sessão expirada por login concorrente (limite de 2 sessões por usuário)
-    if (detail && typeof detail === "object" && detail?.error === "session_expired_concurrent_login") {
-      handleSessionExpired();
+    // Sessão expirada (TTL) ou deslogado por login concorrente (limite de 2).
+    if (
+      detail &&
+      typeof detail === "object" &&
+      (detail?.error === "session_expired" ||
+        detail?.error === "session_expired_concurrent_login")
+    ) {
+      handleSessionExpired(
+        detail.error === "session_expired" ? "session_expired" : "fifo_evicted"
+      );
       throw new Error(toErrorMessage(detail));
     }
     const error = new Error(toErrorMessage(detail)) as Error & { responseBody?: any; status?: number };

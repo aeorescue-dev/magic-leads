@@ -490,6 +490,11 @@ async def _get_user_id_from_token(token: str) -> int | None:
     return await db_service.validate_user_session(token_hash)
 
 
+async def _resolve_session(token: str) -> dict:
+    """Estado da sessão: 'valid' | 'expired' | 'missing' (A2)."""
+    return await db_service.validate_session(_hash_token(token))
+
+
 async def _get_current_user(
     authorization: str | None = Header(None),
     garimpador_token: str | None = Cookie(None),
@@ -507,10 +512,19 @@ async def _get_current_user(
         )
 
     # Valida no banco de dados (fonte da verdade — a evicção FIFO de
-    # sessões concorrentes só tem efeito se a checagem for feita aqui)
-    user_id = await _get_user_id_from_token(token)
+    # sessões concorrentes só tem efeito se a checagem for feita aqui).
+    session = await _resolve_session(token)
 
-    if not user_id:
+    if session.get("status") == "expired":
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "error": "session_expired",
+                "message": "A sua sessão expirou. Entre novamente.",
+            },
+        )
+
+    if session.get("status") != "valid":
         raise HTTPException(
             status_code=401,
             detail={
@@ -518,7 +532,7 @@ async def _get_current_user(
                 "message": "Você foi deslogado pois sua conta foi acessada em outro dispositivo."
             }
         )
-    return {"id": user_id}
+    return {"id": session["user_id"]}
 
 
 async def _get_optional_user(
@@ -536,11 +550,11 @@ async def _get_optional_user(
     if not token:
         return None
 
-    user_id = await _get_user_id_from_token(token)
+    session = await _resolve_session(token)
 
-    if not user_id:
+    if session.get("status") != "valid":
         return None
-    return {"id": user_id}
+    return {"id": session["user_id"]}
 
 
 def _require_admin(x_admin_secret: str | None = Header(None)) -> bool:
@@ -765,19 +779,29 @@ def _signal_type_from_filter(value) -> str | None:
 
 
 @app.get("/api/leads", response_model=LeadsListResponse)
+@limiter.limit("120/minute")
 async def get_leads(
+    request: Request,
     city: str = "NYC",
     category: str = None,
     type: str = None,
     page: int = 1,
     per_page: int = 20,
     include_closed: bool = False,
-    user: dict | None = Depends(_get_optional_user)
+    user: dict = Depends(_get_current_user),
 ):
-    """Retorna o feed qualificado com filtros e total reais em SQL (P0-B)."""
+    """Retorna o feed qualificado com filtros e total reais em SQL (P0-B).
+
+    A1: exige conta. Antes era `_get_optional_user` sem rate limit e com
+    `offset` livre — a base inteira (85k leads) era percorrível em ~425
+    pedidos anónimos. O `per_page` é limitado a 200 em `get_leads_feed`.
+    """
     try:
         signal_type = _signal_type_from_filter(type)
-        user_id = user["id"] if user and user.get("id") else None
+        user_id = user["id"]
+        # Teto explícito também na resposta (o DB já limita as linhas a 200).
+        per_page = max(1, min(int(per_page), 200))
+        page = max(1, int(page))
         leads, total = await db_service.get_leads_feed(
             city=city,
             signal_type=signal_type,
@@ -824,9 +848,17 @@ async def search_leads(q: str = "", per_page: int = 50, user: dict | None = Depe
 
 # Leads recentes de todas as cidades (para prévia ao vivo na home)
 @app.get("/api/leads/recent", response_model=LeadsListResponse)
-async def recent_leads(limit: int = 12, user: dict | None = Depends(_get_optional_user)):
-    """Retorna os leads RECENTES e QUALIFICADOS (endereço + 16 ofícios + gatilho
-    preditivo), de todas as cidades/estados. Filtro feito em SQL para nunca zerar a lista."""
+@limiter.limit("30/minute")
+async def recent_leads(
+    request: Request, limit: int = 12, user: dict | None = Depends(_get_optional_user)
+):
+    """Amostra pública dos leads recentes (landing) — A1.
+
+    Continua pública de propósito (é a montra), mas com rate limit e teto de
+    20 itens: não serve para paginar a base. Os dados do proprietário já saem
+    mascarados sem sessão.
+    """
+    limit = max(1, min(int(limit), 20))
     try:
         from backend.services import db as dbmod
         conn = dbmod.get_connection()
@@ -1128,7 +1160,16 @@ async def public_metrics():
 
 # Detalhe de um lead
 @app.get("/api/leads/{lead_id}", response_model=LeadResponse)
-async def get_lead(lead_id: int, user: dict | None = Depends(_get_optional_user)):
+@limiter.limit("120/minute")
+async def get_lead(
+    request: Request, lead_id: int, user: dict = Depends(_get_current_user)
+):
+    """Detalhe do lead — exige conta (A1).
+
+    Os IDs são sequenciais: com acesso anónimo, a base inteira podia ser
+    enumerada (`/api/leads/1..85873`) sem rate limit. O frontend só usa esta
+    rota dentro do dashboard autenticado.
+    """
     lead = await db_service.get_lead_by_id(lead_id)
     if not lead:
         raise HTTPException(status_code=404, detail="Lead não encontrado")
@@ -3508,6 +3549,15 @@ async def _lifespan(app):
     except Exception as e:
         logger.warning(f"Falha no seed do orçamento de alertas: {e}")
 
+    # A2: limpeza de sessoes expiradas no arranque. O TTL e' aplicado em cada
+    # validacao; isto so evita acumular linhas mortas na BD.
+    try:
+        pruned = await db_service.prune_expired_sessions()
+        if pruned:
+            logger.info("Sessoes expiradas removidas: %s", pruned)
+    except Exception as e:
+        logger.warning("Falha ao limpar sessoes expiradas: %s", e)
+
     # B1: higiene de dispositivos push (limite de 5). Corrige o estado legado
     # (utilizadores com 9 browsers) sem esperar por um novo subscribe.
     try:
@@ -4332,7 +4382,7 @@ async def register_user(request: Request, payload: UserCreate, response: Respons
                 httponly=True,
                 secure=not settings.DEBUG,  # False em dev (HTTP), True em prod (HTTPS)
                 samesite="lax",
-                max_age=30 * 24 * 60 * 60,  # 30 dias
+                max_age=max(1, int(getattr(settings, "SESSION_TTL_DAYS", 30) or 30)) * 24 * 60 * 60,
                 path="/",
             )
 
@@ -4372,7 +4422,7 @@ async def login_user(request: Request, payload: UserLogin, response: Response = 
                 httponly=True,
                 secure=not settings.DEBUG,  # False em dev (HTTP), True em prod (HTTPS)
                 samesite="lax",
-                max_age=30 * 24 * 60 * 60,  # 30 dias
+                max_age=max(1, int(getattr(settings, "SESSION_TTL_DAYS", 30) or 30)) * 24 * 60 * 60,
                 path="/",
             )
 
@@ -4511,7 +4561,7 @@ async def demo_login(request: Request, response: Response = None):
             httponly=True,
             secure=True,
             samesite="none",
-            max_age=30 * 24 * 60 * 60,  # 30 dias
+            max_age=max(1, int(getattr(settings, "SESSION_TTL_DAYS", 30) or 30)) * 24 * 60 * 60,
             path="/",
         )
 

@@ -520,6 +520,23 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **845 testes**, 15 e2e, tsc limpo, build ok.
 - Nota: o painel `/admin` mantém linguagem técnica (é consola interna, não cliente).
 
+### Segurança — A1 + A2 (2026-10-30)
+
+- **A1 anti-raspagem**: `/api/leads` e `/api/leads/{id}` passaram a exigir conta
+  (`_get_current_user`) e rate limit de 120/min. Antes o feed era anónimo, sem limite
+  e com `offset` livre: 85.873 leads percorríveis em ~425 pedidos; o detalhe permitia
+  enumerar IDs sequenciais. `/api/leads/recent` continua público (montra da landing),
+  mas limitado a 20 itens, 30/min e com o dono mascarado. `per_page` da lista é fixado
+  a 200 na resposta (não só no SQL).
+- **A2 TTL de sessão**: coluna `user_sessions.expires_at` (migração + backfill de 30 d
+  para as sessões antigas, que eram eternas). `SESSION_TTL_DAYS=30` com expiração
+  **deslizante** (cada uso renova; o limite real é inatividade). Token expirado é
+  apagado, devolve 401 `session_expired` e o frontend limpa a sessão/redireciona.
+  `prune_expired_sessions()` no arranque. Cookie alinhado ao TTL.
+- **860 testes** (8 TTL + 7 anti-raspagem novos), 15 e2e, tsc/build/ruff limpos.
+- **Fora de âmbito (próximo bloco)**: gate de acesso em `contact/negotiate/convert`,
+  trial de 3 dias (função existe e nunca é chamada), coerência 402 vs 403.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

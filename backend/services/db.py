@@ -455,6 +455,8 @@ CREATE TABLE IF NOT EXISTS user_sessions (
   token_hash TEXT NOT NULL,
   device_info TEXT,
   ip_address TEXT,
+  -- A2: TTL da sessao. NULL apenas em linhas antigas (backfill no init_db).
+  expires_at TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   last_active_at TEXT DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(token_hash)
@@ -1583,6 +1585,27 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     }
     if hist_cols and "issue_category" not in hist_cols:
         conn.execute("ALTER TABLE lead_case_history ADD COLUMN issue_category TEXT")
+
+    # A2: TTL de sessao. Coluna nasce sem default (SQLite nao aceita
+    # CURRENT_TIMESTAMP em ALTER); o backfill da 30 dias as sessoes antigas,
+    # que antes eram eternas.
+    session_cols = {
+        r["name"] for r in conn.execute("PRAGMA table_info(user_sessions)").fetchall()
+    }
+    if session_cols and "expires_at" not in session_cols:
+        conn.execute("ALTER TABLE user_sessions ADD COLUMN expires_at TEXT")
+        conn.execute(
+            "UPDATE user_sessions SET expires_at = datetime(created_at, '+30 days') "
+            "WHERE expires_at IS NULL"
+        )
+    if session_cols:
+        try:
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_user_sessions_expires "
+                "ON user_sessions (expires_at)"
+            )
+        except sqlite3.OperationalError:
+            pass
 
     # Fase 2 outbound: `outbound_contacts.company_domain` guarda o dominio da
     # empresa (para o Snov.io). Adicionado a bancos antigos de forma idempotente.
@@ -5058,40 +5081,73 @@ class DatabaseService:
                     )
 
             # Insere a nova sessão
+            ttl_days = max(1, int(getattr(settings, "SESSION_TTL_DAYS", 30) or 30))
+            expires_at = (utcnow() + timedelta(days=ttl_days)).isoformat()
             conn.execute(
                 """
-                INSERT INTO user_sessions (user_id, token_hash, device_info, ip_address)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO user_sessions (user_id, token_hash, device_info, ip_address, expires_at)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (user_id, token_hash, device_info, ip_address),
+                (user_id, token_hash, device_info, ip_address, expires_at),
             )
             conn.commit()
             return True
         finally:
             conn.close()
 
-    def validate_user_session(self, token_hash: str) -> Optional[int]:
-        """
-        Verifica se o token_hash corresponde a uma sessão válida.
-        Retorna o user_id se válido, None caso contrário.
-        Atualiza last_active_at em caso de sucesso.
+    def validate_session(self, token_hash: str) -> dict:
+        """Valida a sessão e devolve o estado (A2).
+
+        Status: 'valid' | 'expired' | 'missing'. Um token expirado é apagado na
+        hora (auto-limpeza) e nunca mais é aceite. A expiração é **deslizante**:
+        cada uso renova `SESSION_TTL_DAYS`, portanto o limite real é inatividade
+        (não tempo desde o login) — e continua a ser finito.
         """
         conn = get_connection()
         try:
             row = conn.execute(
-                "SELECT user_id FROM user_sessions WHERE token_hash = ?",
+                "SELECT user_id, expires_at FROM user_sessions WHERE token_hash = ?",
                 (token_hash,),
             ).fetchone()
-            if row:
+            if not row:
+                return {"status": "missing", "user_id": None}
+
+            ttl_days = max(1, int(getattr(settings, "SESSION_TTL_DAYS", 30) or 30))
+            expires = self._parse_dt(row["expires_at"])
+            if expires is None or expires <= utcnow():
                 conn.execute(
-                    "UPDATE user_sessions SET last_active_at = CURRENT_TIMESTAMP WHERE token_hash = ?",
-                    (token_hash,),
+                    "DELETE FROM user_sessions WHERE token_hash = ?", (token_hash,)
                 )
                 conn.commit()
-                return row["user_id"]
-            return None
+                return {"status": "expired", "user_id": row["user_id"]}
+
+            conn.execute(
+                "UPDATE user_sessions SET last_active_at = CURRENT_TIMESTAMP, "
+                "expires_at = ? WHERE token_hash = ?",
+                ((utcnow() + timedelta(days=ttl_days)).isoformat(), token_hash),
+            )
+            conn.commit()
+            return {"status": "valid", "user_id": row["user_id"]}
         finally:
             conn.close()
+
+    def prune_expired_sessions(self) -> int:
+        """Remove sessões expiradas (chamado no arranque e no watchdog)."""
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "DELETE FROM user_sessions WHERE expires_at IS NOT NULL "
+                "AND datetime(expires_at) <= datetime('now')"
+            )
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
+
+    def validate_user_session(self, token_hash: str) -> Optional[int]:
+        """Compatibilidade: devolve o user_id apenas se a sessão for válida."""
+        result = self.validate_session(token_hash)
+        return result["user_id"] if result.get("status") == "valid" else None
 
     def remove_user_session(self, token_hash: str) -> bool:
         """Remove uma sessão específica pelo token_hash."""
@@ -10109,6 +10165,12 @@ class AsyncDatabaseService:
 
     async def validate_user_session(self, token_hash: str) -> Optional[int]:
         return await anyio.to_thread.run_sync(self._service.validate_user_session, token_hash)
+
+    async def validate_session(self, token_hash: str) -> dict:
+        return await anyio.to_thread.run_sync(self._service.validate_session, token_hash)
+
+    async def prune_expired_sessions(self) -> int:
+        return await anyio.to_thread.run_sync(self._service.prune_expired_sessions)
 
     async def remove_user_session(self, token_hash: str) -> bool:
         return await anyio.to_thread.run_sync(self._service.remove_user_session, token_hash)
