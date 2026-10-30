@@ -1764,7 +1764,10 @@ const URGENCIES = ["all", "high", "medium", "low"];
                     </span>
                   )}
                 </div>
-                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10">
+                <div
+                  className="mt-2 h-1.5 overflow-hidden rounded-full"
+                  style={{ backgroundColor: "hsl(var(--border))" }}
+                >
                   <div
                     className={`h-full rounded-full transition-all ${exhausted ? "bg-amber-400" : "bg-emerald-500"}`}
                     style={{ width: `${pct}%` }}
