@@ -535,6 +535,10 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   apagado, devolve 401 `session_expired` e o frontend limpa a sessão/redireciona.
   `prune_expired_sessions()` no arranque. Cookie alinhado ao TTL.
 - **860 testes** (8 TTL + 7 anti-raspagem novos), 15 e2e, tsc/build/ruff limpos.
+- **Verificado em produção (30/10)**: anónimo → 401 em `/api/leads`, `/api/leads/today`,
+  `/api/leads/search` e `/api/leads/{id}`; `recent` → 200 com `per_page=20` e dono
+  mascarado; sessão autenticada → 200 e `expires_at` a 30 dias; sessão forçada a expirar
+  → 401 `session_expired`; 11/11 sessões antigas ficaram com `expires_at` no backfill.
 - **Fora de âmbito (próximo bloco)**: gate de acesso em `contact/negotiate/convert`,
   trial de 3 dias (função existe e nunca é chamada), coerência 402 vs 403.
 
