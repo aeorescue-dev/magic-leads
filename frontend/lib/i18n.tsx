@@ -1163,14 +1163,14 @@ const PT: Dict = {
   "dashboard.reveal.remaining": "Você ainda tem {remaining} de {limit} revelações hoje.",
   "dashboard.lock.logout": "Sair da conta",
 
-  // Dashboard — Phase 4: Phone Reveal & Credit Balance
+  // Dashboard — Phase 4: Phone Reveal & cota diária (sem "créditos")
   "dashboard.action.reveal_phone": "Revelar Telefone",
   "dashboard.toast.phone_revealed": "Telefone revelado com sucesso",
   "dashboard.toast.phone_reveal_failed": "Não foi possível revelar o telefone",
   "dashboard.toast.phone_reveal_error": "Erro ao revelar telefone",
-  "dashboard.sidebar.credit_balance": "Saldo de Créditos",
-  "dashboard.sidebar.credits_available": "créditos disponíveis",
-  "dashboard.sidebar.today_used": "Hoje",
+  "dashboard.sidebar.daily_quota": "Revelações diárias",
+  "dashboard.sidebar.daily_quota_used": "usadas hoje",
+  "dashboard.sidebar.daily_quota_reset": "renova à meia-noite",
 
   // Plan labels
   "plan.free": "Grátis",
@@ -1579,6 +1579,9 @@ const EN: Dict = {
   "dashboard.sidebar.sub": "Zero competition 24/7",
   "dashboard.sidebar.plan": "Plan",
   "dashboard.sidebar.logout": "Sign out",
+  "dashboard.sidebar.daily_quota": "Daily reveals",
+  "dashboard.sidebar.daily_quota_used": "used today",
+  "dashboard.sidebar.daily_quota_reset": "resets at midnight",
   "dashboard.topbar.search_placeholder": "Search opportunity, streets, categories…",
   "dashboard.topbar.notifications": "Notifications",
   "dashboard.topbar.mark_all_read": "Mark all read",
@@ -2738,6 +2741,9 @@ const ES: Dict = {
   "dashboard.sidebar.sub": "Cero competencia 24/7",
   "dashboard.sidebar.plan": "Plan",
   "dashboard.sidebar.logout": "Salir",
+  "dashboard.sidebar.daily_quota": "Revelaciones diarias",
+  "dashboard.sidebar.daily_quota_used": "usadas hoy",
+  "dashboard.sidebar.daily_quota_reset": "se renueva a medianoche",
   "dashboard.topbar.search_placeholder": "Buscar oportunidad, calles, categorías…",
   "dashboard.topbar.notifications": "Notificaciones",
   "dashboard.topbar.mark_all_read": "Marcar todas leídas",

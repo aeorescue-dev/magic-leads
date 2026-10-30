@@ -542,6 +542,19 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Fora de âmbito (próximo bloco)**: gate de acesso em `contact/negotiate/convert`,
   trial de 3 dias (função existe e nunca é chamada), coerência 402 vs 403.
 
+### UI — cota diária na sidebar (2026-10-30)
+
+- O cartão inferior esquerdo mostrava **“SALDO DE CRÉDITOS / 0 créditos disponíveis”**, o
+  que sugere venda de créditos — o modelo é passe semanal de $120. Além disso lia o
+  ledger (`consume_reveal.count`), que não regista consumos, e por isso ficava sempre 0.
+- Passou a **“Revelações diárias”** com o consumo real de `dailyStats`:
+  `10 / 10`, `usadas hoje`, barra de progresso e aviso de renovação à meia-noite quando
+  esgota. Fonte única: `/api/users/{id}/daily-stats` (a mesma da trava de 10/dia).
+- Removidos `credit_balance`/`credits_available`/`today_used` (só existiam em PT; EN/ES
+  mostravam o fallback em português) e a chamada periódica a `/credit-balance`.
+- Novas chaves em PT/EN/ES. Guard: `tests/test_sidebar_quota_copy.py` (4) + e2e da
+  sidebar. **865 testes**, 16 e2e.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

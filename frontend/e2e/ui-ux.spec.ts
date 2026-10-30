@@ -49,6 +49,23 @@ test.describe("UI/UX — tema, teclado e gaveta", () => {
     }
   });
 
+  test("a barra lateral mostra a cota diária, não créditos", async ({ page }) => {
+    await page.goto("/pt/dashboard");
+    const quota = page.getByTestId("daily-quota");
+    await expect(quota).toBeVisible({ timeout: 20000 });
+
+    const text = (await quota.innerText()).toLowerCase();
+    expect(text).toContain("revelações diárias");
+    expect(text).toContain("usadas hoje");
+    expect(text).toMatch(/\d+\s*\/\s*\d+/);
+    expect(text).not.toContain("crédito");
+    expect(text).not.toContain("saldo");
+
+    const body = (await page.locator("body").innerText()).toLowerCase();
+    expect(body).not.toContain("créditos disponíveis");
+    expect(body).not.toContain("saldo de créditos");
+  });
+
   test("a gaveta de filtros abre, fecha com Escape e devolve o foco", async ({ page }) => {    await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/pt/dashboard");
 

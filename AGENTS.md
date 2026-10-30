@@ -80,6 +80,10 @@ Contexto completo e números medidos: **`docs/PROJECT-MEMORY.md`**. Ler antes de
     é a fonte; token expirado é apagado e devolve 401 `session_expired`. O cookie usa
     o mesmo TTL. `prune_expired_sessions()` corre no arranque. Nunca aceitar token
     sem `expires_at` válido.
+30. **Copy comercial**: o produto é passe semanal ($120), **nunca venda de créditos**.
+    Na UI diz-se “Revelações diárias” / “usadas hoje” e mostra-se `used / limit` de
+    `daily-stats`. Proibido “Saldo de Créditos”, “créditos disponíveis” ou equivalentes
+    em qualquer idioma (`tests/test_sidebar_quota_copy.py`).
 
 ## Verificação mínima antes de deploy
 ```bash

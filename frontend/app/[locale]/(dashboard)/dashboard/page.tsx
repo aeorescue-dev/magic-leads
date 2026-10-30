@@ -58,8 +58,6 @@ import {
   fetchScraperStatus, ScraperRunState,
   fetchPublicMetrics, PublicMetrics, EMPTY_PUBLIC_METRICS, RELEASE_REASONS,
   revealPhone, PhoneRevealResult,
-  fetchCreditBalance, CreditBalance,
-  fetchCreditLedger, CreditLedgerEntry,
 } from "@/lib/api-client";
 
 // Tipo enriquecido para o modal de revelação (com histórico e ocorrências)
@@ -381,10 +379,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
   
   // Phone Reveal (Phase 4)
   const [phoneRevealing, setPhoneRevealing] = useState<{ leadId: string | number; loading: boolean } | null>(null);
-  
-  // Credit Balance (Phase 4)
-  const [creditBalance, setCreditBalance] = useState<CreditBalance | null>(null);
-  
+
   // Toast notifications (fila empilhável + auto-dismiss 4s)
   const [toasts, setToasts] = useState<{ id: number; message: string; type: "success" | "error" | "warning" }[]>([]);
 
@@ -685,23 +680,6 @@ const URGENCIES = ["all", "high", "medium", "low"];
       };
       fetchDaily();
       const interval = setInterval(fetchDaily, 60000); // Refresh every minute
-      return () => clearInterval(interval);
-    }
-  }, [userId]);
-
-  // Fetch Credit Balance (Phase 4)
-  useEffect(() => {
-    if (userId) {
-      const fetchCredit = async () => {
-        try {
-          const balance = await fetchCreditBalance(userId);
-          setCreditBalance(balance);
-        } catch (e) {
-          console.error("Erro ao buscar saldo de créditos:", e);
-        }
-      };
-      fetchCredit();
-      const interval = setInterval(fetchCredit, 60000); // Refresh every minute
       return () => clearInterval(interval);
     }
   }, [userId]);
@@ -1748,37 +1726,54 @@ const URGENCIES = ["all", "high", "medium", "low"];
           </div>
         </nav>
 
-        {/* Credit Balance Display (Phase 4) */}
-          {creditBalance && (
-            <div className={`px-3 py-2 border-t ${T.border}`}>
-              <div className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "var(--text-muted)" }}>
-                {t("dashboard.sidebar.credit_balance") || "Saldo de Créditos"}
-              </div>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="h-7 w-7 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                    <TrendingUp className="h-3.5 w-3.5" />
-                  </div>
-                  <div>
-                    <div className="text-sm font-bold" style={{ color: "var(--text-primary)" }}>
-                      {creditBalance.balance}
+        {/* Daily reveal quota (modelo de passe semanal; sem "créditos") */}
+        <div data-testid="daily-quota" className={`px-3 py-2 border-t ${T.border}`}>
+          <div
+            className="text-[10px] font-semibold uppercase tracking-wider mb-1.5"
+            style={{ color: "var(--text-muted)" }}
+          >
+            {t("dashboard.sidebar.daily_quota")}
+          </div>
+          {(() => {
+            const used = dailyStats?.used ?? 0;
+            const limit = dailyStats?.limit ?? 10;
+            const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+            const exhausted = used >= limit;
+            return (
+              <>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <div className="h-7 w-7 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                      <TrendingUp className="h-3.5 w-3.5" />
                     </div>
-                    <div className="text-[10px]" style={{ color: "var(--text-muted)" }}>
-                      {t("dashboard.sidebar.credits_available") || "créditos disponíveis"}
+                    <div>
+                      <div
+                        className="text-sm font-bold tabular-nums"
+                        style={{ color: "var(--text-primary)" }}
+                      >
+                        {used} / {limit}
+                      </div>
+                      <div className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+                        {t("dashboard.sidebar.daily_quota_used")}
+                      </div>
                     </div>
                   </div>
+                  {exhausted && (
+                    <span className="text-[10px] font-semibold text-amber-400 text-right leading-tight">
+                      {t("dashboard.sidebar.daily_quota_reset")}
+                    </span>
+                  )}
                 </div>
-                <div className="text-right">
-                  <div className="text-[10px] font-medium" style={{ color: "var(--text-muted)" }}>
-                    {t("dashboard.sidebar.today_used") || "Hoje"}
-                  </div>
-                  <div className="text-sm font-bold text-amber-400">
-                    {creditBalance.counts?.consume_reveal?.count ?? 0} / {dailyStats?.limit ?? 10}
-                  </div>
+                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10">
+                  <div
+                    className={`h-full rounded-full transition-all ${exhausted ? "bg-amber-400" : "bg-emerald-500"}`}
+                    style={{ width: `${pct}%` }}
+                  />
                 </div>
-              </div>
-            </div>
-          )}
+              </>
+            );
+          })()}
+        </div>
 
           {/* User Card in Sidebar */}
         <div className={`p-3 border-t ${T.border}`}>
