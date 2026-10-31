@@ -70,7 +70,9 @@ async def _domain_stage(entity: dict) -> str:
                 "city": entity.get("city") or "",
             }
             found = await asyncio.to_thread(
-                _discovery.heuristic_domain, lead, time.monotonic() + 12.0
+                _discovery.heuristic_domain,
+                lead,
+                _discovery._clock() + 12.0,
             )
             if found:
                 resolved = {

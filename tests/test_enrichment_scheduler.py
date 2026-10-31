@@ -165,6 +165,34 @@ async def test_sem_dominio_duas_vezes_quarentena(clean_entities, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_fallback_heuristico_usa_o_relogio_do_motor(clean_entities, monkeypatch):
+    """O deadline do heuristico tem de estar no mesmo relogio do motor.
+
+    Regressao: o scheduler passava `time.monotonic()` e o heuristico compara
+    com `time.time()`, logo expirava sempre e nada chegava a `domain`.
+    """
+    import time as _time
+
+    _entity()
+    captured: dict[str, float] = {}
+
+    async def fake_resolve(name, city):
+        return None
+
+    def fake_heuristic(lead, deadline):
+        captured["deadline"] = deadline
+        return None
+
+    monkeypatch.setattr(enrichment_scheduler, "resolve_domain", fake_resolve)
+    monkeypatch.setattr(
+        enrichment_scheduler._discovery, "heuristic_domain", fake_heuristic
+    )
+    await enrichment_scheduler.run_once(now=NOW, cities_override=[CITY])
+    assert captured, "heuristico nao foi chamado"
+    assert abs(captured["deadline"] - _time.time()) < 60
+
+
+@pytest.mark.asyncio
 async def test_catch_all_quarentena_imediata(clean_entities, monkeypatch):
     row = _entity()
     db_service._service.set_contractor_entity_domain(row["id"], "wightco.com", 0.9)
