@@ -42,6 +42,10 @@ export default defineConfig({
       env: {
         LEADS_DB_PATH: path.resolve(__dirname, "e2e", "e2e.db"),
         LEADS_SEED_FILE: "",
+        // WebAuthn em E2E: RP ID tem de ser um domínio (não um IP), por isso
+        // o teste navega em localhost; o proxy E2E encaminha /api na mesma.
+        WEBAUTHN_RP_ID: "localhost",
+        ALLOWED_ORIGINS: `http://127.0.0.1:${FRONTEND_PORT},http://localhost:${FRONTEND_PORT}`,
       },
       url: `http://127.0.0.1:${BACKEND_PORT}/health`,
       reuseExistingServer: false,
