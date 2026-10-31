@@ -486,6 +486,10 @@ CREATE TABLE IF NOT EXISTS webauthn_challenges (
   user_id INTEGER,
   challenge TEXT NOT NULL UNIQUE,
   kind TEXT NOT NULL,
+  -- RP ID/origem em vigor no momento do options: o verify TEM de usar os
+  -- mesmos (um preview Vercel usa o próprio host como RP ID).
+  rp_id TEXT,
+  origin TEXT,
   expires_at TEXT NOT NULL,
   used INTEGER DEFAULT 0,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -1817,6 +1821,15 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
             logger.warning("[OUTBOUND] nao foi possivel recriar o indice de dedup: %s", e)
 
     _ensure_outbound_dedup_index()
+
+    # WebAuthn: bases criadas antes do multi-domínio não têm rp_id/origin no
+    # challenge. Sem estas colunas o verify teria de adivinhar o RP ID.
+    wa_cols = {
+        r["name"] for r in conn.execute("PRAGMA table_info(webauthn_challenges)")
+    }
+    for name in ("rp_id", "origin"):
+        if name not in wa_cols:
+            conn.execute(f"ALTER TABLE webauthn_challenges ADD COLUMN {name} TEXT")
 
 
 
@@ -5294,7 +5307,8 @@ class DatabaseService:
 
     def create_webauthn_challenge(
         self, challenge: str, kind: str, user_id: Optional[int] = None,
-        ttl_seconds: int = 300,
+        ttl_seconds: int = 300, rp_id: Optional[str] = None,
+        origin: Optional[str] = None,
     ) -> bool:
         conn = get_connection()
         try:
@@ -5302,9 +5316,10 @@ class DatabaseService:
             expires = now + timedelta(seconds=max(30, int(ttl_seconds)))
             conn.execute("DELETE FROM webauthn_challenges WHERE datetime(expires_at) <= datetime(?)", (now.isoformat(),))
             conn.execute(
-                "INSERT INTO webauthn_challenges (user_id, challenge, kind, expires_at) "
-                "VALUES (?, ?, ?, ?)",
-                (user_id, challenge, kind, expires.isoformat()),
+                "INSERT INTO webauthn_challenges "
+                "(user_id, challenge, kind, rp_id, origin, expires_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (user_id, challenge, kind, rp_id, origin, expires.isoformat()),
             )
             conn.commit()
             return True
@@ -10803,9 +10818,11 @@ class AsyncDatabaseService:
         return await anyio.to_thread.run_sync(self._service.remove_user_sessions, user_id)
 
     # WebAuthn
-    async def create_webauthn_challenge(self, challenge: str, kind: str, user_id=None, ttl_seconds: int = 300) -> bool:
+    async def create_webauthn_challenge(self, challenge: str, kind: str, user_id=None, ttl_seconds: int = 300, rp_id: str | None = None, origin: str | None = None) -> bool:
         return await anyio.to_thread.run_sync(
-            self._service.create_webauthn_challenge, challenge, kind, user_id, ttl_seconds
+            lambda: self._service.create_webauthn_challenge(
+                challenge, kind, user_id, ttl_seconds, rp_id, origin
+            )
         )
 
     async def consume_webauthn_challenge(self, challenge: str, kind: str):

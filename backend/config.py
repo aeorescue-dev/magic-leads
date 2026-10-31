@@ -109,8 +109,10 @@ class Settings(BaseSettings):
     # Fase E/incidente: uma varredura que exceda este limite é cancelada e
     # marcada como error (liberta o scheduler e gera alerta crítico).
     SCRAPER_MAX_HOURS: float = 3.0
-    # WebAuthn / Passkeys. RP ID é o domínio registável (cobre www e subdomínios).
-    # Em E2E é forçado para 127.0.0.1; previews Vercel não são RP válidos.
+    # WebAuthn / Passkeys. O RP ID é DERIVADO da origem de cada pedido:
+    # `magicleads.app` e `*.magicleads.app` usam o domínio canónico; qualquer
+    # outra origem na allowlist (`ALLOWED_ORIGINS`) usa o próprio host (é o que
+    # faz os previews Vercel funcionarem). Este valor é apenas fallback.
     WEBAUTHN_RP_ID: str = "magicleads.app"
     WEBAUTHN_RP_NAME: str = "Magic Leads"
     # Sweep de holds/reveals dentro do processo. Independe do GitHub Actions, que

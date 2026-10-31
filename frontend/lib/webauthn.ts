@@ -13,16 +13,116 @@ export type PasskeyErrorCode =
   | "unsupported"
   | "cancelled"
   | "no_credential"
+  | "origin"
+  | "already_registered"
   | "failed"
   | "server";
+
+/** Contexto técnico do browser/servidor, para o utilizador reportar suporte. */
+export interface PasskeyErrorDetail {
+  browserError?: string;
+  serverCode?: string;
+}
 
 export class PasskeyError extends Error {
   code: PasskeyErrorCode;
   status?: number;
-  constructor(code: PasskeyErrorCode, message: string, status?: number) {
+  detail?: PasskeyErrorDetail;
+  constructor(
+    code: PasskeyErrorCode,
+    message: string,
+    status?: number,
+    detail?: PasskeyErrorDetail
+  ) {
     super(message);
     this.code = code;
     this.status = status;
+    this.detail = detail;
+  }
+}
+
+/**
+ * Traduz a DOMException real do browser. Sem isto, um SecurityError (RP ID
+ * errado, ex.: preview Vercel) aparecia como "tente novamente" e escondia a
+ * causa. `phase` entra só no detalhe técnico.
+ */
+export function passkeyErrorFromException(
+  err: unknown,
+  phase: "register" | "login"
+): PasskeyError {
+  const e = err as { name?: string; message?: string } | null;
+  const name = e?.name || "Error";
+  const detail: PasskeyErrorDetail = {
+    browserError: `${name}: ${e?.message || "sem mensagem"}`,
+  };
+  switch (name) {
+    case "NotAllowedError":
+      // Pode ser cancelamento, timeout ou permissão negada pelo SO.
+      return new PasskeyError(
+        "cancelled",
+        "Operação cancelada ou não autorizada pelo dispositivo.",
+        undefined,
+        detail
+      );
+    case "InvalidStateError":
+      return new PasskeyError(
+        "already_registered",
+        "Este dispositivo já tem uma passkey registada nesta conta.",
+        undefined,
+        detail
+      );
+    case "SecurityError":
+      return new PasskeyError(
+        "origin",
+        "O domínio atual não corresponde ao domínio autorizado para Face ID.",
+        undefined,
+        detail
+      );
+    case "NotSupportedError":
+      return new PasskeyError(
+        "unsupported",
+        "Este dispositivo ou navegador não suporta Face ID.",
+        undefined,
+        detail
+      );
+    case "AbortError":
+      return new PasskeyError("cancelled", "Operação cancelada.", undefined, detail);
+    case "ConstraintError":
+      return new PasskeyError(
+        "failed",
+        "O dispositivo não cumpriu os requisitos de segurança.",
+        undefined,
+        detail
+      );
+    default:
+      return new PasskeyError(
+        "failed",
+        phase === "register"
+          ? "Não foi possível criar a passkey neste dispositivo."
+          : "Não foi possível confirmar a passkey.",
+        undefined,
+        detail
+      );
+  }
+}
+
+/** Chave i18n (`*.passkey.<key>`) para cada código de erro. */
+export function passkeyMessageKey(
+  code: PasskeyErrorCode
+): "unsupported" | "not_setup" | "cancelled" | "origin" | "already_registered" | "failed" {
+  switch (code) {
+    case "unsupported":
+      return "unsupported";
+    case "no_credential":
+      return "not_setup";
+    case "cancelled":
+      return "cancelled";
+    case "origin":
+      return "origin";
+    case "already_registered":
+      return "already_registered";
+    default:
+      return "failed";
   }
 }
 
@@ -79,6 +179,24 @@ function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+/**
+ * Falha antes de tocar no autenticador quando o servidor devolveu um RP ID
+ * que não cobre o host atual (ex.: backend configurado para magicleads.app e
+ * a página servida num preview). Mensagem clara em vez de SecurityError.
+ */
+function assertRpIdMatches(rpId?: string): void {
+  if (typeof window === "undefined" || !rpId) return;
+  const expected = String(rpId).toLowerCase();
+  const host = window.location.hostname.toLowerCase();
+  if (host === expected || host.endsWith(`.${expected}`)) return;
+  throw new PasskeyError(
+    "origin",
+    "O domínio atual não corresponde ao domínio autorizado para Face ID.",
+    undefined,
+    { browserError: `rpId "${expected}" ≠ host "${host}"` }
+  );
+}
+
 async function post<T>(
   path: string,
   body: unknown,
@@ -104,7 +222,9 @@ async function post<T>(
       typeof data?.detail === "string"
         ? data.detail
         : data?.detail?.message || "Não foi possível concluir o pedido.";
-    throw new PasskeyError("server", detail, res.status);
+    const serverCode =
+      typeof data?.detail?.error === "string" ? data.detail.error : undefined;
+    throw new PasskeyError("server", detail, res.status, { serverCode });
   }
   return data as T;
 }
@@ -150,6 +270,7 @@ export async function registerPasskey(): Promise<{ device_label: string }> {
     throw new PasskeyError("unsupported", "Este dispositivo não suporta Face ID.");
   }
   const options = await post<any>("/api/auth/webauthn/register/options", {});
+  assertRpIdMatches(options?.rp?.id);
   const publicKey: PublicKeyCredentialCreationOptions = {
     ...options,
     challenge: b64urlToBuf(options.challenge),
@@ -163,11 +284,8 @@ export async function registerPasskey(): Promise<{ device_label: string }> {
   let cred: Credential | null;
   try {
     cred = await navigator.credentials.create({ publicKey });
-  } catch (err: any) {
-    if (err?.name === "NotAllowedError") {
-      throw new PasskeyError("cancelled", "Registo cancelado.");
-    }
-    throw new PasskeyError("failed", "Não foi possível criar a passkey.");
+  } catch (err) {
+    throw passkeyErrorFromException(err, "register");
   }
   if (!cred) throw new PasskeyError("cancelled", "Registo cancelado.");
 
@@ -215,14 +333,8 @@ export async function loginWithPasskey(email?: string): Promise<AuthResponse> {
   let cred: Credential | null;
   try {
     cred = await navigator.credentials.get({ publicKey });
-  } catch (err: any) {
-    if (err?.name === "NotAllowedError") {
-      throw new PasskeyError("cancelled", "Face ID cancelado ou indisponível.");
-    }
-    if (err?.name === "SecurityError" || err?.name === "NotSupportedError") {
-      throw new PasskeyError("unsupported", "Este navegador não permite passkeys.");
-    }
-    throw new PasskeyError("failed", "Não foi possível confirmar a passkey.");
+  } catch (err) {
+    throw passkeyErrorFromException(err, "login");
   }
   if (!cred) throw new PasskeyError("no_credential", "Nenhuma passkey encontrada.");
 

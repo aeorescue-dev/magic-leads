@@ -53,11 +53,110 @@ def _headers() -> dict:
     return {"Authorization": f"Bearer {TOKEN}", "Origin": ORIGIN}
 
 
-def _client_data(challenge: str) -> str:
+def _client_data(challenge: str, origin: str = ORIGIN) -> str:
     raw = json.dumps(
-        {"type": "webauthn.create", "challenge": challenge, "origin": ORIGIN}
+        {"type": "webauthn.create", "challenge": challenge, "origin": origin}
     ).encode()
     return bytes_to_base64url(raw)
+
+
+def test_rp_id_oficial_e_www(client):
+    """O domínio oficial e o www usam o RP ID canónico (passkeys partilhadas)."""
+    for origin in ("https://magicleads.app", "https://www.magicleads.app"):
+        r = client.post(
+            "/api/auth/webauthn/login/options",
+            headers={"Origin": origin},
+            json={},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["rpId"] == "magicleads.app"
+
+
+def test_rp_id_preview_autorizado_usa_o_proprio_host(client):
+    """Preview Vercel na allowlist usa o host como RP ID (não magicleads.app).
+
+    Era esta a causa do SecurityError em produção: o RP ID fixo não é sufixo
+    de `*.vercel.app`, por isso `navigator.credentials.create` era rejeitado
+    antes de chegar ao servidor.
+    """
+    preview = "https://magicleads-oficial.vercel.app"
+    r = client.post(
+        "/api/auth/webauthn/login/options",
+        headers={"Origin": preview},
+        json={},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["rpId"] == "magicleads-oficial.vercel.app"
+
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT rp_id, origin FROM webauthn_challenges ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row["rp_id"] == "magicleads-oficial.vercel.app"
+    assert row["origin"] == preview
+
+
+def test_origem_nao_autorizada_recusa_com_codigo(client):
+    r = client.post(
+        "/api/auth/webauthn/login/options",
+        headers={"Origin": "https://evil.example.com"},
+        json={},
+    )
+    assert r.status_code == 403, r.text
+    assert r.json()["detail"]["error"] == "origin_not_allowed"
+
+
+def test_register_options_recusa_origem_nao_autorizada(client):
+    _user()
+    r = client.post(
+        "/api/auth/webauthn/register/options",
+        headers={"Authorization": f"Bearer {TOKEN}", "Origin": "https://evil.example.com"},
+    )
+    assert r.status_code == 403, r.text
+    assert r.json()["detail"]["error"] == "origin_not_allowed"
+
+
+def test_verify_usa_rp_e_origem_gravados_no_challenge(client, monkeypatch):
+    """O verify não pode usar o RP fixo: usa o que o options gravou."""
+    user_id = _user()
+    challenge = bytes_to_base64url(b"rp-from-challenge")
+    preview = "https://magicleads-oficial.vercel.app"
+    db_service._service.create_webauthn_challenge(
+        challenge, "register", user_id,
+        rp_id="magicleads-oficial.vercel.app", origin=preview,
+    )
+    seen: dict = {}
+
+    def fake_verify(**kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace(
+            credential_id=b"preview-cred",
+            credential_public_key=b"preview-pub",
+            sign_count=0,
+            aaguid="00000000-0000-0000-0000-000000000000",
+        )
+
+    monkeypatch.setattr(main_module, "verify_registration_response", fake_verify)
+    payload = {
+        "id": "preview-cred",
+        "response": {
+            "clientDataJSON": _client_data(challenge, preview),
+            "attestationObject": "att",
+            "transports": ["internal"],
+        },
+    }
+    r = client.post(
+        "/api/auth/webauthn/register/verify",
+        headers={"Authorization": f"Bearer {TOKEN}", "Origin": preview},
+        json=payload,
+    )
+    assert r.status_code == 200, r.text
+    assert seen["expected_rp_id"] == "magicleads-oficial.vercel.app"
+    assert seen["expected_origin"] == preview
+
 
 
 def test_register_options_requires_auth(client):
@@ -119,6 +218,7 @@ def test_register_options_and_verify_store_public_key(client, monkeypatch):
 def test_login_options_does_not_enumerate_accounts(client):
     r = client.post(
         "/api/auth/webauthn/login/options",
+        headers={"Origin": ORIGIN},
         json={"email": "ghost@magicleads.app"},
     )
     assert r.status_code == 200, r.text
@@ -149,6 +249,7 @@ def test_login_verify_creates_session(client, monkeypatch):
 
     r = client.post(
         "/api/auth/webauthn/login/verify",
+        headers={"Origin": ORIGIN},
         json={
             "id": credential_id,
             "rawId": credential_id,

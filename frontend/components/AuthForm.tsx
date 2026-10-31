@@ -8,7 +8,7 @@ import { useAuth } from '@/lib/auth';
 import { useI18n } from '@/lib/i18n';
 import { useStartCheckout } from '@/lib/billing';
 import { requestPasswordReset, setAuthCookie, setToken } from '@/lib/api-client';
-import { hasPasskeyHint, isPasskeySupported, loginWithPasskey, PasskeyError } from '@/lib/webauthn';
+import { hasPasskeyHint, isPasskeySupported, loginWithPasskey, PasskeyError, passkeyMessageKey } from '@/lib/webauthn';
 
 const subscribeNoop = () => () => {};
 
@@ -124,6 +124,7 @@ function AuthFormInner() {
   const [success, setSuccess] = useState(false);
   const [passkeyBusy, setPasskeyBusy] = useState(false);
   const [passkeyError, setPasskeyError] = useState<string | null>(null);
+  const [passkeyDetail, setPasskeyDetail] = useState<string | null>(null);
   // Só depois da hidratação: no servidor não há window/PublicKeyCredential.
   const passkeyReady = useSyncExternalStore(
     subscribeNoop,
@@ -134,6 +135,7 @@ function AuthFormInner() {
   const handlePasskeyLogin = async () => {
     setPasskeyBusy(true);
     setPasskeyError(null);
+    setPasskeyDetail(null);
     try {
       const out = await loginWithPasskey(email.trim() || undefined);
       setToken(out.token);
@@ -143,16 +145,15 @@ function AuthFormInner() {
       router.push(nextPath || localePath('/dashboard'));
       router.refresh();
     } catch (e) {
-      const code = e instanceof PasskeyError ? e.code : 'failed';
-      const message =
-        code === 'unsupported'
-          ? t('auth.passkey.unsupported')
-          : code === 'no_credential'
-            ? t('auth.passkey.not_setup')
-            : code === 'cancelled'
-              ? t('auth.passkey.cancelled')
-              : t('auth.passkey.failed');
+      const pe = e instanceof PasskeyError ? e : null;
+      const key = passkeyMessageKey(pe?.code ?? 'failed');
+      const message = t(`auth.passkey.${key}`);
       setPasskeyError(message || 'Não foi possível entrar com Face ID. Use a palavra-passe.');
+      setPasskeyDetail(
+        pe?.detail?.browserError ||
+          pe?.detail?.serverCode ||
+          (pe?.code === 'server' ? pe.message : null)
+      );
     } finally {
       setPasskeyBusy(false);
     }
@@ -324,6 +325,11 @@ function AuthFormInner() {
           {passkeyError && (
             <p role="alert" className="text-xs text-amber-400 text-center">
               {passkeyError}
+            </p>
+          )}
+          {passkeyDetail && (
+            <p className="text-[10px] text-slate-500 text-center break-words" data-testid="passkey-detail">
+              {passkeyDetail}
             </p>
           )}
           <p className="text-center text-[11px] text-muted-foreground">

@@ -12,6 +12,7 @@ import {
   isPasskeySupported,
   PasskeyError,
   PasskeyInfo,
+  passkeyMessageKey,
   registerPasskey,
   setPasskeyHint,
 } from "@/lib/webauthn";
@@ -96,6 +97,7 @@ function PasskeySettings() {
   const [passkeys, setPasskeys] = useState<PasskeyInfo[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
 
   const refresh = async () => {
@@ -129,6 +131,7 @@ function PasskeySettings() {
   const add = async () => {
     setBusy(true);
     setError(null);
+    setErrorDetail(null);
     setOk(null);
     try {
       const out = await registerPasskey();
@@ -139,13 +142,21 @@ function PasskeySettings() {
       );
       await refresh();
     } catch (e) {
-      const code = e instanceof PasskeyError ? e.code : "failed";
+      const pe = e instanceof PasskeyError ? e : null;
+      const code = pe?.code ?? "failed";
+      // `origin_not_allowed` é um 403 do servidor: a mensagem útil é a de
+      // domínio, não a genérica de "tente novamente".
+      const key =
+        pe?.detail?.serverCode === "origin_not_allowed"
+          ? "origin"
+          : passkeyMessageKey(code);
       setError(
-        code === "unsupported"
-          ? t("settings.passkey.unsupported")
-          : code === "cancelled"
-            ? t("settings.passkey.cancelled")
-            : t("settings.passkey.add_error")
+        key === "failed" ? t("settings.passkey.add_error") : t(`settings.passkey.${key}`)
+      );
+      setErrorDetail(
+        pe?.detail?.browserError ||
+          pe?.detail?.serverCode ||
+          (pe?.code === "server" ? pe.message : null)
       );
     } finally {
       setBusy(false);
@@ -155,6 +166,7 @@ function PasskeySettings() {
   const remove = async (credentialId: string) => {
     if (!window.confirm(t("settings.passkey.remove_confirm"))) return;
     setError(null);
+    setErrorDetail(null);
     setOk(null);
     try {
       await deleteMyPasskey(credentialId);
@@ -193,6 +205,11 @@ function PasskeySettings() {
 
       {ok && <p className="text-xs text-emerald-400" data-testid="passkey-ok">{ok}</p>}
       {error && <p role="alert" className="text-xs text-amber-400" data-testid="passkey-error">{error}</p>}
+      {errorDetail && (
+        <p className="text-[10px] leading-snug text-slate-500 break-words" data-testid="passkey-detail">
+          {t("settings.passkey.detail")}: {errorDetail}
+        </p>
+      )}
 
       {passkeys.length > 0 && (
         <ul className="divide-y divide-white/5 rounded-xl border border-white/10">

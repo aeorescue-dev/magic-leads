@@ -9,6 +9,7 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from urllib.parse import urlparse
 
 import anyio
 import httpx
@@ -4959,6 +4960,67 @@ def _wa_origins() -> list[str]:
     return sorted(origins)
 
 
+def _wa_origin(request: Request) -> str:
+    """Origem efetiva do pedido (Origin; Referer como fallback de proxy)."""
+    origin = (request.headers.get("origin") or "").strip().rstrip("/")
+    if origin:
+        return origin
+    referer = (request.headers.get("referer") or "").strip()
+    if referer:
+        parsed = urlparse(referer)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+    return ""
+
+
+def _wa_rp_id(origin: str) -> str:
+    """RP ID derivado da origem — nunca um valor fixo.
+
+    Um preview Vercel é servido em `*.vercel.app`, que NÃO é sufixo de
+    `magicleads.app`: usar o RP ID fixo fazia o browser rejeitar com
+    SecurityError ("invalid domain"). Regra:
+      - `magicleads.app` e `*.magicleads.app` → RP ID canónico `magicleads.app`;
+      - qualquer outra origem TEM de estar na allowlist exata e usa o próprio
+        host como RP ID (sem wildcards — um `*.vercel.app` é registável por
+        terceiros).
+    """
+    host = (urlparse(origin).hostname or "").lower()
+    if not host:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "origin_not_allowed",
+                "message": "Origem ausente: o browser tem de enviar o pedido com Origin.",
+            },
+        )
+    if host == "magicleads.app" or host.endswith(".magicleads.app"):
+        return "magicleads.app"
+    if origin.rstrip("/") not in _wa_origins():
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "origin_not_allowed",
+                "message": (
+                    f"Este domínio ({host}) não está autorizado para Face ID. "
+                    "Use magicleads.app ou adicione o domínio à allowlist."
+                ),
+            },
+        )
+    return host
+
+
+def _wa_verify_context(request: Request) -> tuple[str, str]:
+    origin = _wa_origin(request)
+    return _wa_rp_id(origin), origin
+
+
+def _wa_error(status_code: int, code: str, message: str) -> HTTPException:
+    """Erro com código estável para o cliente mapear em i18n."""
+    return HTTPException(
+        status_code=status_code, detail={"error": code, "message": message}
+    )
+
+
 def _wa_user_handle(user_id: int) -> bytes:
     """Handle opaco e estável (não expor o id sequencial ao autenticador)."""
     return hashlib.sha256(f"magic-leads-webauthn:{int(user_id)}".encode()).digest()
@@ -5028,11 +5090,10 @@ async def webauthn_register_options(
     request: Request, user: dict = Depends(_get_current_user)
 ):
     """Inicia o registo de uma passkey para o utilizador autenticado."""
-    if not _wa_origins():
-        raise HTTPException(status_code=503, detail="WebAuthn sem origem configurada")
+    rp_id, origin = _wa_verify_context(request)
     credentials = await db_service.list_webauthn_credentials(user["id"])
     options = generate_registration_options(
-        rp_id=settings.WEBAUTHN_RP_ID,
+        rp_id=rp_id,
         rp_name=settings.WEBAUTHN_RP_NAME,
         user_id=_wa_user_handle(user["id"]),
         user_name=user.get("email") or f"user-{user['id']}",
@@ -5045,7 +5106,11 @@ async def webauthn_register_options(
         ),
     )
     await db_service.create_webauthn_challenge(
-        bytes_to_base64url(options.challenge), "register", user["id"]
+        bytes_to_base64url(options.challenge),
+        "register",
+        user["id"],
+        rp_id=rp_id,
+        origin=origin,
     )
     return json.loads(options_to_json(options))
 
@@ -5063,25 +5128,39 @@ async def webauthn_register_verify(
         client_data = credential["response"]["clientDataJSON"]
         challenge = _wa_challenge_from_client_data(client_data)
     except Exception:
-        raise HTTPException(status_code=400, detail="Credencial inválida")
+        raise _wa_error(400, "invalid_credential", "Credencial inválida")
     if not challenge:
-        raise HTTPException(status_code=400, detail="Challenge ausente")
+        raise _wa_error(400, "challenge_invalid", "Challenge ausente")
 
     row = await db_service.consume_webauthn_challenge(challenge, "register")
     if not row or int(row.get("user_id") or 0) != int(user["id"]):
-        raise HTTPException(status_code=400, detail="Challenge inválido ou expirado")
+        raise _wa_error(400, "challenge_invalid", "Challenge inválido ou expirado")
+
+    # O verify usa SEMPRE o RP ID/origem gravados no options: é isso que faz
+    # o preview e o domínio oficial funcionarem sem adivinhar o host.
+    rp_id = (row.get("rp_id") or "").strip() or _wa_verify_context(request)[0]
+    origin = (row.get("origin") or "").strip() or _wa_origin(request)
 
     try:
         verified = verify_registration_response(
             credential=credential,
             expected_challenge=base64url_to_bytes(challenge),
-            expected_rp_id=settings.WEBAUTHN_RP_ID,
-            expected_origin=_wa_origins(),
+            expected_rp_id=rp_id,
+            expected_origin=origin or _wa_origins(),
             require_user_verification=True,
         )
     except Exception as e:  # noqa: BLE001
-        logger.warning("[WEBAUTHN] Registo rejeitado: %s", e)
-        raise HTTPException(status_code=400, detail="Não foi possível validar o dispositivo")
+        logger.warning(
+            "[WEBAUTHN] Registo rejeitado (rp=%s origin=%s): %s",
+            rp_id,
+            origin,
+            e,
+        )
+        raise _wa_error(
+            400,
+            "verification_failed",
+            "Não foi possível validar o dispositivo neste domínio.",
+        )
 
     try:
         transports = json.loads(credential["response"].get("transports") or "[]")
@@ -5097,7 +5176,7 @@ async def webauthn_register_verify(
         device_label=_wa_label(request),
     )
     if not ok:
-        raise HTTPException(status_code=409, detail="Este dispositivo já está registado")
+        raise _wa_error(409, "credential_exists", "Este dispositivo já está registado")
     return {"status": "ok", "device_label": _wa_label(request)}
 
 
@@ -5107,13 +5186,14 @@ async def webauthn_login_options(
     request: Request, payload: WebAuthnLoginOptionsRequest | None = None
 ):
     """Gera opções de autenticação; e-mail opcional (discoverable sem ele)."""
+    rp_id, origin = _wa_verify_context(request)
     email = str(payload.email).strip().lower() if payload and payload.email else ""
     user = await db_service.get_user_by_email(email) if email else None
     credentials = (
         await db_service.list_webauthn_credentials(user["id"]) if user else []
     )
     options = generate_authentication_options(
-        rp_id=settings.WEBAUTHN_RP_ID,
+        rp_id=rp_id,
         allow_credentials=_wa_descriptors(credentials),
         user_verification=UserVerificationRequirement.REQUIRED,
     )
@@ -5121,6 +5201,8 @@ async def webauthn_login_options(
         bytes_to_base64url(options.challenge),
         "auth",
         user["id"] if user else None,
+        rp_id=rp_id,
+        origin=origin,
     )
     return json.loads(options_to_json(options))
 
@@ -5140,37 +5222,46 @@ async def webauthn_login_verify(
         )
         credential_id = credential.get("id") or credential.get("rawId")
     except Exception:
-        raise HTTPException(status_code=400, detail="Credencial inválida")
+        raise _wa_error(400, "invalid_credential", "Credencial inválida")
     if not challenge or not credential_id:
-        raise HTTPException(status_code=400, detail="Credencial inválida")
+        raise _wa_error(400, "invalid_credential", "Credencial inválida")
 
     row = await db_service.consume_webauthn_challenge(challenge, "auth")
     if not row:
-        raise HTTPException(status_code=401, detail="Challenge inválido ou expirado")
+        raise _wa_error(401, "challenge_invalid", "Challenge inválido ou expirado")
 
     stored = await db_service.get_webauthn_credential(str(credential_id))
     if not stored:
-        raise HTTPException(status_code=401, detail="Passkey não reconhecida")
+        raise _wa_error(401, "passkey_not_recognized", "Passkey não reconhecida")
     if row.get("user_id") and int(row["user_id"]) != int(stored["user_id"]):
-        raise HTTPException(status_code=401, detail="Passkey não reconhecida")
+        raise _wa_error(401, "passkey_not_recognized", "Passkey não reconhecida")
 
     user = await db_service.get_user_by_id(int(stored["user_id"]))
     if not user:
-        raise HTTPException(status_code=401, detail="Conta indisponível")
+        raise _wa_error(401, "account_unavailable", "Conta indisponível")
+
+    rp_id = (row.get("rp_id") or "").strip() or _wa_verify_context(request)[0]
+    origin = (row.get("origin") or "").strip() or _wa_origin(request)
 
     try:
         verified = verify_authentication_response(
             credential=credential,
             expected_challenge=base64url_to_bytes(challenge),
-            expected_rp_id=settings.WEBAUTHN_RP_ID,
-            expected_origin=_wa_origins(),
+            expected_rp_id=rp_id,
+            expected_origin=origin or _wa_origins(),
             credential_public_key=base64url_to_bytes(stored["public_key"]),
             credential_current_sign_count=int(stored["sign_count"] or 0),
             require_user_verification=True,
         )
     except Exception as e:  # noqa: BLE001
-        logger.warning("[WEBAUTHN] Login rejeitado: %s", e)
-        raise HTTPException(status_code=401, detail="Não foi possível confirmar a passkey")
+        logger.warning(
+            "[WEBAUTHN] Login rejeitado (rp=%s origin=%s): %s", rp_id, origin, e
+        )
+        raise _wa_error(
+            401,
+            "verification_failed",
+            "Não foi possível confirmar a passkey neste domínio.",
+        )
 
     current_count = int(stored["sign_count"] or 0)
     new_count = int(verified.new_sign_count or 0)
