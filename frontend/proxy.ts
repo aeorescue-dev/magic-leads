@@ -7,7 +7,7 @@ const LOCALES = ["pt", "en", "es"] as const;
 const DEFAULT_LOCALE = "en";
 const PROTECTED_PATHS = ["/dashboard", "/onboarding"];
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   let { pathname } = request.nextUrl;
   pathname = pathname.replace(/\/+$/, "") || "/";
 
