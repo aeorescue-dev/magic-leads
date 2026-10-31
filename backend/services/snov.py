@@ -410,8 +410,10 @@ class SnovService:
                 error=result.error,
                 provider=result.provider,
             )
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001
+            # Nunca falhar o envio por telemetria, mas perder custo em silêncio
+            # impede a reconciliação. Logar sempre.
+            logger.warning("[SNOV] Falha ao registar custo de enriquecimento: %s", e)
 
 
 snov_service = SnovService()

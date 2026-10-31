@@ -409,8 +409,11 @@ class EmailListVerifyService:
                 error=result.error,
                 provider=result.provider,
             )
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001
+            # Mantém fail-soft, mas o custo perdido tem de aparecer nos logs.
+            logger.warning(
+                "[ELV] Falha ao registar custo de enriquecimento: %s", e
+            )
 
 
 emaillistverify_service = EmailListVerifyService()
