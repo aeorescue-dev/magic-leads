@@ -48,14 +48,24 @@ async function ensureAvailable(request: APIRequestContext, leadId: number): Prom
 /** Fluxo UI completo: abrir o card -> consentimento -> guia do ciclo. */
 async function reserveViaUiAndGetGuide(page: import("@playwright/test").Page, address: string) {
   await page.goto(DASHBOARD);
+  // Deixa a subscrição/cota assentarem: os botões nascem desativados e um
+  // clique durante a hidratação pode ser engolido (flake observado).
+  await page.waitForLoadState("networkidle").catch(() => undefined);
   const card = page.locator('[data-testid="lead-card"]').filter({ hasText: address });
   await expect(card.first()).toBeVisible({ timeout: 20000 });
 
-  await card.locator("button", { hasText: /Reservar 1 Hora/ }).first().click();
-  await page.getByRole("button", { name: /Reservar 1 Hora\W+Revelar/ }).click();
+  const reserve = card.locator("button", { hasText: /Reservar 1 Hora/ }).first();
+  await expect(reserve).toBeEnabled({ timeout: 20000 });
+  await reserve.click();
+
+  const confirm = page.getByRole("button", { name: /Reservar 1 Hora\W+Revelar/ });
+  await expect(confirm).toBeVisible({ timeout: 20000 });
+  await expect(confirm).toBeEnabled({ timeout: 20000 });
+  await confirm.click();
 
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible({ timeout: 20000 });
+  await expect(dialog.getByText(address).first()).toBeVisible({ timeout: 20000 });
   return dialog;
 }
 
