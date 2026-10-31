@@ -848,6 +848,27 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   “48 h (env/falha)”, “Último envio” e o último erro na tabela de caixas.
 - **Testes**: **950 pytest** (+6), tsc/ESLint/Ruff limpos (34 avisos antigos).
 
+### Fase 1 — Auto-Ramp, disjuntor e Admin segmentado (2026-10-31)
+
+- **Auto-Ramp** (`backend/services/auto_ramp.py`): escada 1→75, teto
+  `auto_ramp_max` (default 75, máx. 100), avaliação 1×/dia. Abaixo de 25 sobe
+  por warm-up; a partir de 25 exige ≥200 envios/30 d, bounce <1%, complaint
+  <0.1% e zero auth errors. Auditoria em `mailbox_ramp_log`; `hold_reason`
+  visível no Admin. Ao ligar a rampa, parte do cap efetivo atual (nunca salta
+  para 25).
+- **Disjuntor** (`mailbox_guard.py`): pausa com bounce >2% (≥20 envios),
+  2 bounces consecutivos, complaint >0.1% ou 401/403/invalid_grant; alerta
+  `MAILBOX_PAUSED`; retoma manual. Bounces passam a ser registados por caixa
+  (`mailbox_bounce_events`) no inbox sync.
+- **Admin**: cartão “Prontos para enviar” por cidade+nicho; switches
+  `send_enabled`/`enrich_enabled` **por cidade**; editor de `daily_cap`,
+  Auto-Ramp e teto por caixa; pausar/retomar. Endpoints `readiness`,
+  `mailboxes/{id}/controls|pause|resume|ramp-log`.
+- **Segurança**: `auth_ref` encriptado em repouso com `MAILBOX_SECRET_KEY`
+  (Fernet); migração re-encripta no arranque.
+- **Testes**: 18 pytest novos (auto-ramp, disjuntor, readiness/controles,
+  encriptação); suite **971 pytest**, 29 e2e, 34 avisos ESLint antigos.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

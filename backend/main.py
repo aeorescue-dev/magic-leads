@@ -2122,6 +2122,8 @@ class OutboundSendRequest(BaseModel):
 class OutboundConfigUpdateRequest(BaseModel):
     send_enabled: bool | None = None
     enrich_enabled: bool | None = None
+    batch_size: int | None = None
+    max_spend_per_batch_usd: float | None = None
     city: str | None = None
 
 
@@ -2257,7 +2259,12 @@ async def admin_outbound_update_config(
         available = await db_service.get_available_outbound_cities()
         if city not in available:
             raise HTTPException(status_code=400, detail="Cidade sem leads/contactos")
-    if payload.send_enabled is None and payload.enrich_enabled is None:
+    if (
+        payload.send_enabled is None
+        and payload.enrich_enabled is None
+        and payload.batch_size is None
+        and payload.max_spend_per_batch_usd is None
+    ):
         raise HTTPException(status_code=400, detail="Nada para atualizar")
 
     if payload.send_enabled is not None:
@@ -2267,6 +2274,14 @@ async def admin_outbound_update_config(
     if payload.enrich_enabled is not None:
         await db_service.set_outbound_config(
             "enrich_enabled", "1" if payload.enrich_enabled else "0", city
+        )
+    if payload.batch_size is not None:
+        size = max(1, min(int(payload.batch_size), 500))
+        await db_service.set_outbound_config("batch_size", str(size), city)
+    if payload.max_spend_per_batch_usd is not None:
+        spend = max(0.0, min(float(payload.max_spend_per_batch_usd), 500.0))
+        await db_service.set_outbound_config(
+            "max_spend_per_batch_usd", f"{spend:.2f}", city
         )
     logger.info(
         "[OUTBOUND] Config atualizada por admin=%s city=%s send=%s enrich=%s",

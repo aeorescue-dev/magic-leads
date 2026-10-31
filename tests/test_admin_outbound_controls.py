@@ -141,6 +141,22 @@ def test_switch_por_cidade_nao_altera_global(client):
     )
 
 
+def test_config_edita_batch_size_e_teto(client):
+    r = client.post(
+        "/api/admin/outbound/config",
+        headers=_headers(),
+        json={
+            "city": "NYC",
+            "batch_size": 25,
+            "max_spend_per_batch_usd": 8.5,
+        },
+    )
+    assert r.status_code == 200, r.text
+    cfg = client.get("/api/admin/outbound/config", headers=_headers()).json()
+    assert cfg["per_city"]["NYC"]["batch_size"] == "25"
+    assert cfg["per_city"]["NYC"]["max_spend_per_batch_usd"] == "8.50"
+
+
 def test_controls_caps_e_auto_ramp(client, mailbox):
     r = client.post(
         f"/api/admin/outbound/mailboxes/{mailbox['id']}/controls",

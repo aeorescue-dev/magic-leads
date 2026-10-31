@@ -581,6 +581,8 @@ export function fetchAdminOutboundConfig(): Promise<AdminOutboundConfigResponse>
 export function updateAdminOutboundConfig(payload: {
   send_enabled?: boolean;
   enrich_enabled?: boolean;
+  batch_size?: number;
+  max_spend_per_batch_usd?: number;
   city?: string | null;
 }): Promise<AdminOutboundConfigUpdateResult> {
   return adminFetch<AdminOutboundConfigUpdateResult>("/outbound/config", {

@@ -189,6 +189,15 @@ Contexto completo e números medidos: **`docs/PROJECT-MEMORY.md`**. Ler antes de
     O bloco de erro do login fica **fora** do bloco do botão: ao limpar o hint
     (`passkey_not_recognized`) o botão desaparece, mas a explicação e o detalhe
     técnico têm de continuar visíveis.
+45. **Auto-Ramp e disjuntor (outbound)**: a escada é
+    `1,1,1,2,3,5,8,12,20,25,35,50,75`, limitada por `auto_ramp_max` (default 75,
+    máx. 100). Abaixo de 25 sobe por warm-up (7 dias + amostra pequena); a
+    partir de 25 exige **≥200 envios/30 d**, bounce <1%, complaint <0.1% e zero
+    erros de auth. Nunca desce sozinho; cada subida vai para
+    `mailbox_ramp_log`. O disjuntor pausa a caixa com bounce >2% (≥20 envios),
+    2 bounces consecutivos, complaint >0.1% ou qualquer 401/403/invalid_grant;
+    a retoma é **manual** no Admin e gera `MAILBOX_PAUSED`. `auth_ref` é
+    encriptado em repouso quando `MAILBOX_SECRET_KEY` está definida.
 
 ## Verificação mínima antes de deploy
 ```bash

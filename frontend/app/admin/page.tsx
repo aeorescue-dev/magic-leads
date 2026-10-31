@@ -281,6 +281,58 @@ function MailboxControlRow({
   );
 }
 
+function BatchConfigRow({
+  batchSize,
+  maxSpend,
+  busy,
+  onSave,
+}: {
+  batchSize: number;
+  maxSpend: number;
+  busy: boolean;
+  onSave: (size: number, spend: number) => void;
+}) {
+  const [size, setSize] = useState(batchSize);
+  const [spend, setSpend] = useState(maxSpend);
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2 text-[11px]">
+      <span className="text-[10px] uppercase tracking-wider text-slate-500">
+        Lote
+      </span>
+      <label className="flex items-center gap-1 text-slate-500">
+        Tamanho
+        <input
+          type="number"
+          min={1}
+          max={500}
+          value={size}
+          onChange={(e) => setSize(Number(e.target.value))}
+          className="w-16 rounded border border-white/10 bg-[#0b0e14] px-1 py-0.5 text-slate-200"
+        />
+      </label>
+      <label className="flex items-center gap-1 text-slate-500">
+        Teto US$
+        <input
+          type="number"
+          min={0}
+          max={500}
+          step={0.5}
+          value={spend}
+          onChange={(e) => setSpend(Number(e.target.value))}
+          className="w-20 rounded border border-white/10 bg-[#0b0e14] px-1 py-0.5 text-slate-200"
+        />
+      </label>
+      <button
+        onClick={() => onSave(size, spend)}
+        disabled={busy}
+        className="rounded border border-indigo-500/40 bg-indigo-500/10 px-2 py-0.5 font-semibold text-indigo-300 hover:bg-indigo-500/20 disabled:opacity-40"
+      >
+        Guardar lote
+      </button>
+    </div>
+  );
+}
+
 function OutboundPanel() {
   const [config, setConfig] = useState<AdminOutboundConfigResponse | null>(null);
   const [city, setCity] = useState<string>("");
@@ -609,6 +661,29 @@ function OutboundPanel() {
     [city, loadConfig]
   );
 
+  const saveBatchConfig = useCallback(
+    async (size: number, spend: number) => {
+      if (!city) return;
+      setToggling(true);
+      setError(null);
+      try {
+        await updateAdminOutboundConfig({
+          city,
+          batch_size: size,
+          max_spend_per_batch_usd: spend,
+        });
+        await loadConfig();
+      } catch (e) {
+        setError(
+          e instanceof AdminApiError ? e.message : "Falha ao guardar o lote."
+        );
+      } finally {
+        setToggling(false);
+      }
+    },
+    [city, loadConfig]
+  );
+
   const markReplied = useCallback(async (message: AdminOutboundMessageRow) => {
     if (!message.contact_id) return;
     if (!window.confirm(`Marcar ${message.to_email} como tendo respondido?`)) return;
@@ -824,6 +899,16 @@ function OutboundPanel() {
               {cityConfig.enrich_enabled === "1" ? "ligado" : "desligado"}
             </button>
           </div>
+        ) : null}
+
+        {cityConfig ? (
+          <BatchConfigRow
+            key={`${city}-${cityConfig.batch_size}-${cityConfig.max_spend_per_batch_usd}`}
+            batchSize={Number(cityConfig.batch_size) || 10}
+            maxSpend={Number(cityConfig.max_spend_per_batch_usd) || 6}
+            busy={toggling}
+            onSave={saveBatchConfig}
+          />
         ) : null}
 
         {cityConfig ? (
