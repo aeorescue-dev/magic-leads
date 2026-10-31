@@ -715,6 +715,36 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - Testes: **937 pytest** (+6), **26 e2e** (+3 desde a Fase E), 83 vitest,
   Ruff/tsc/ESLint limpos (0 erros, 34 avisos antigos).
 
+### Incidente — ativação de Face ID falhava em preview (2026-10-31)
+
+- **Sintoma**: "Ativar Face ID neste dispositivo" devolvia sempre o genérico
+  “Não foi possível ativar o Face ID. Tente novamente” em
+  `magicleads-oficial.vercel.app` (report com screenshot).
+- **Causa raiz**: o RP ID era fixo (`WEBAUTHN_RP_ID=magicleads.app`). O browser
+  valida `rp.id` contra o host **antes** de chamar a rede:
+  `magicleads.app` não é sufixo de `magicleads-oficial.vercel.app` →
+  `SecurityError` em `navigator.credentials.create`. Nenhum pedido chegava ao
+  `/verify`; o cliente convertia tudo em "failed" genérico. Não era CORS nem
+  backend em baixo.
+- **Correção (servidor)**: `_wa_rp_id(origin)` deriva o RP ID por pedido —
+  `magicleads.app`/`*.magicleads.app` → canónico; outras origens só se estiverem
+  na allowlist exata e usam o próprio host (sem wildcards). `rp_id`/`origin`
+  ficam gravados no challenge e o `/verify` usa **esses** valores
+  (`_wa_verify_context`). Erros passam a devolver código estável
+  (`origin_not_allowed`, `verification_failed`, `challenge_invalid`,
+  `credential_exists`, `passkey_not_recognized`).
+- **Correção (cliente)**: `passkeyErrorFromException` mapeia o erro real do
+  browser (`SecurityError`→domínio, `InvalidStateError`→já registado,
+  `NotAllowedError`/`AbortError`→cancelado, `NotSupportedError`→sem suporte);
+  pré-check `rp.id` vs `window.location.hostname` falha antes do autenticador;
+  a UI mostra a mensagem certa **e** um “Detalhe técnico” com o erro original
+  (para suporte). A palavra-passe continua na mesma linha.
+- **Registo**: cada passkey fica ligada ao RP onde foi criada — uma passkey
+  criada no preview não serve no domínio oficial (limite do WebAuthn, não bug).
+- **Testes**: 5 pytest novos (RP oficial/www, preview Vercel, origem recusada
+  com 403, verify a usar o RP gravado) e 7 vitest de mapeamento de erros;
+  e2e de passkey continua verde em `localhost` (origem não-canónica real).
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

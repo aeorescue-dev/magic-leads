@@ -142,11 +142,17 @@ Contexto completo e números medidos: **`docs/PROJECT-MEMORY.md`**. Ler antes de
     sem `PUSH_CLICK_SECRET`/`CRON_SECRET` nenhum clique é assinado/aceite.
     Nunca reintroduzir fallback hardcoded de HMAC.
 41. **Passkeys (WebAuthn)**: a biometria nunca sai do dispositivo; a BD guarda
-    só a chave pública. Registo/login exigem `user_verification=required` e
-    `rp_id` = `WEBAUTHN_RP_ID`; o challenge é de uso único (5 min) e o login
-    emite a **mesma** sessão A2 (cookie + `user_sessions`). A palavra-passe
-    nunca é removida como alternativa. `proxy.ts` preserva `next` no redirect
-    para `/{locale}/auth` — sem isso os deep links de push perdem-se.
+    só a chave pública. Registo/login exigem `user_verification=required`. O
+    **RP ID é derivado da origem** (nunca fixo): `magicleads.app` e
+    `*.magicleads.app` → `magicleads.app`; qualquer outra origem só é aceite se
+    estiver na allowlist exata e usa o próprio host (é assim que os previews
+    Vercel funcionam). O challenge guarda `rp_id`/`origin` e o verify usa esses
+    valores. Challenge de uso único (5 min) e login emite a **mesma** sessão A2
+    (cookie + `user_sessions`). A palavra-passe nunca é removida como
+    alternativa. `proxy.ts` preserva `next` no redirect para `/{locale}/auth` —
+    sem isso os deep links de push perdem-se. O cliente mostra sempre o erro
+    real do browser (SecurityError, InvalidStateError, NotAllowedError) num
+    detalhe técnico — nunca só "tente novamente".
 
 ## Verificação mínima antes de deploy
 ```bash
