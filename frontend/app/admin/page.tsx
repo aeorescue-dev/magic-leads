@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   Database,
   FlaskConical,
+  KeyRound,
   Languages,
   Loader2,
   Mail,
@@ -19,6 +20,7 @@ import {
   SendHorizontal,
   ShieldAlert,
   Sparkles,
+  Undo2,
   Users,
   Wallet,
 } from "lucide-react";
@@ -76,7 +78,13 @@ import {
   fetchAdminSessions,
   revokeAdminSession,
   revokeAdminUserSessions,
+  lookupAdminUser,
+  grantAdminAccess,
+  revokeAdminAccess,
+  fetchAdminAccessAudit,
   type AdminSession,
+  type AdminAccessLookup,
+  type AdminAccessAuditEntry,
 } from "@/lib/admin-api";
 import { AUTH_TOKEN_KEY } from "@/lib/api-client";
 
@@ -997,6 +1005,432 @@ function OutboundPanel() {
             ) : null}
           </div>
         ) : null}
+      </div>
+    </Card>
+  );
+}
+
+// --------------------------------------------------------------- acesso
+
+const GRANT_REASONS: { value: string; label: string }[] = [
+  { value: "support", label: "Suporte" },
+  { value: "vip_test", label: "Teste VIP" },
+  { value: "compensation", label: "Compensação" },
+  { value: "partner", label: "Parceiro" },
+  { value: "other", label: "Outro" },
+];
+
+const GRANT_PRESETS = [3, 7, 30] as const;
+
+function newIdempotencyKey(): string {
+  try {
+    if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+      return crypto.randomUUID();
+    }
+  } catch {
+    /* fallback abaixo */
+  }
+  return `grant-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function AccessGrantPanel() {
+  const [email, setEmail] = useState("");
+  const [lookup, setLookup] = useState<AdminAccessLookup | null>(null);
+  const [lookupBusy, setLookupBusy] = useState(false);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+  const [days, setDays] = useState<number>(7);
+  const [customDays, setCustomDays] = useState("");
+  const [reason, setReason] = useState("support");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [audit, setAudit] = useState<AdminAccessAuditEntry[]>([]);
+  const idemRef = useRef<string>(newIdempotencyKey());
+
+  const refreshAudit = useCallback(async () => {
+    try {
+      const res = await fetchAdminAccessAudit(30);
+      setAudit(res.entries || []);
+    } catch {
+      /* auditoria é secundária; não bloqueia o formulário */
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshAudit();
+  }, [refreshAudit]);
+
+  const effectiveDays = customDays.trim() ? Number(customDays) : days;
+
+  const runLookup = async () => {
+    const value = email.trim().toLowerCase();
+    if (!value || !value.includes("@")) {
+      setLookupError("Introduza um e-mail válido.");
+      setLookup(null);
+      return;
+    }
+    setLookupBusy(true);
+    setLookupError(null);
+    setMessage(null);
+    try {
+      const res = await lookupAdminUser(value);
+      setLookup(res);
+    } catch (e) {
+      setLookup(null);
+      setLookupError(
+        e instanceof AdminApiError && e.status === 404
+          ? "Conta não encontrada. O utilizador tem de criar conta primeiro."
+          : "Não foi possível consultar a conta."
+      );
+    } finally {
+      setLookupBusy(false);
+    }
+  };
+
+  const submit = async () => {
+    if (!lookup) {
+      setMessage({ ok: false, text: "Consulte primeiro o e-mail da conta." });
+      return;
+    }
+    if (!Number.isInteger(effectiveDays) || effectiveDays < 1 || effectiveDays > 365) {
+      setMessage({ ok: false, text: "Duração inválida (1 a 365 dias)." });
+      return;
+    }
+    if (reason === "other" && !note.trim()) {
+      setMessage({ ok: false, text: "Indique a nota para o motivo 'Outro'." });
+      return;
+    }
+
+    const beforeText = lookup.access.expires_at
+      ? `atual: ${lookup.access.status} até ${fmtDt(lookup.access.expires_at)}`
+      : `atual: ${lookup.access.status}`;
+    let question = `Conceder ${effectiveDays} dia(s) a ${lookup.user.email}?\n\n${beforeText}\nO acesso será SOMADO à expiração existente.`;
+    if (lookup.user.is_admin) {
+      question += "\n\nATENÇÃO: esta é uma conta de ADMINISTRADOR. A ação gera alerta de segurança.";
+    }
+    if (!window.confirm(question)) return;
+    if (lookup.user.is_admin) {
+      // Confirmação extra exigida para contas administrativas.
+      if (
+        !window.confirm(
+          `Confirmar novamente: conceder ${effectiveDays} dia(s) a ${lookup.user.email} (ADMIN)?`
+        )
+      )
+        return;
+    }
+
+    setBusy(true);
+    setMessage(null);
+    try {
+      const res = await grantAdminAccess({
+        email: lookup.user.email,
+        days: effectiveDays,
+        reason,
+        note: note.trim() || undefined,
+        idempotency_key: idemRef.current,
+      });
+      idemRef.current = newIdempotencyKey();
+      setMessage({
+        ok: true,
+        text: res.duplicate
+          ? `Pedido já aplicado (auditoria #${res.audit_id}).`
+          : `Acesso concedido até ${fmtDt(res.after.plan_until)} (auditoria #${res.audit_id}).`,
+      });
+      setNote("");
+      const refreshed = await lookupAdminUser(lookup.user.email).catch(() => null);
+      if (refreshed) setLookup(refreshed);
+      await refreshAudit();
+    } catch (e) {
+      setMessage({
+        ok: false,
+        text:
+          e instanceof AdminApiError
+            ? e.status === 404
+              ? "Conta não encontrada."
+              : e.message
+            : "Não foi possível conceder o acesso.",
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const undo = async (entry: AdminAccessAuditEntry) => {
+    const target = entry.target_email || `#${entry.target_user_id}`;
+    if (
+      !window.confirm(
+        `Reverter a concessão #${entry.id} de ${target}? Só é possível se a expiração não tiver mudado.`
+      )
+    )
+      return;
+    try {
+      await revokeAdminAccess(entry.id, "reversão no painel");
+      setMessage({ ok: true, text: `Concessão #${entry.id} revertida.` });
+      setLookup(null);
+      await refreshAudit();
+    } catch (e) {
+      setMessage({
+        ok: false,
+        text:
+          e instanceof AdminApiError && e.status === 409
+            ? "A expiração mudou desde a concessão (pagamento posterior). Revisão manual."
+            : "Não foi possível reverter a concessão.",
+      });
+    }
+  };
+
+  return (
+    <Card
+      title="Concessão de acesso (cortesia)"
+      icon={<KeyRound className="h-4 w-4" />}
+      hint="soma dias ao plan_until; auditoria append-only"
+    >
+      <div className="space-y-3" data-testid="admin-access-grant">
+        {/* 1. identificar */}
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="flex-1 min-w-[220px]">
+            <span className="text-[10px] uppercase tracking-wider text-slate-500">
+              E-mail da conta
+            </span>
+            <input
+              value={email}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                setLookup(null);
+                setLookupError(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void runLookup();
+                }
+              }}
+              placeholder="cliente@exemplo.com"
+              data-testid="admin-access-email"
+              className="mt-1 w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500/50"
+            />
+          </label>
+          <button
+            onClick={() => void runLookup()}
+            disabled={lookupBusy}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/5 disabled:opacity-50"
+          >
+            {lookupBusy ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Search className="h-3.5 w-3.5" />
+            )}
+            Procurar
+          </button>
+        </div>
+
+        {lookupError ? (
+          <p className="text-[11px] text-rose-400">{lookupError}</p>
+        ) : null}
+
+        {lookup ? (
+          <div className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2 text-[11px] text-slate-300">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-semibold text-slate-100">{lookup.user.email}</span>
+              {lookup.user.is_admin ? (
+                <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold text-amber-400">
+                  ADMIN
+                </span>
+              ) : null}
+              <span className="text-slate-500">{lookup.user.company_name || "—"}</span>
+              <span className="ml-auto text-slate-500">id {lookup.user.id}</span>
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <span
+                className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                  lookup.access.can_access
+                    ? "bg-emerald-500/15 text-emerald-400"
+                    : "bg-rose-500/15 text-rose-400"
+                }`}
+              >
+                {lookup.access.can_access ? "COM ACESSO" : "SEM ACESSO"}
+              </span>
+              <span className="text-slate-400">{lookup.access.message}</span>
+              {lookup.access.expires_at ? (
+                <span className="text-slate-500">
+                  expira {fmtDt(lookup.access.expires_at)}
+                </span>
+              ) : null}
+              {lookup.access.access_source === "admin_grant" ? (
+                <span className="text-indigo-300">origem: cortesia</span>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
+        {/* 2. conceder */}
+        <div className="grid gap-3 md:grid-cols-3">
+          <div>
+            <span className="text-[10px] uppercase tracking-wider text-slate-500">
+              Duração
+            </span>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {GRANT_PRESETS.map((preset) => (
+                <button
+                  key={preset}
+                  onClick={() => {
+                    setDays(preset);
+                    setCustomDays("");
+                  }}
+                  data-testid={`admin-access-days-${preset}`}
+                  className={`rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold ${
+                    !customDays && days === preset
+                      ? "border-indigo-500/50 bg-indigo-500/15 text-indigo-300"
+                      : "border-white/10 text-slate-300 hover:bg-white/5"
+                  }`}
+                >
+                  {preset} dias
+                </button>
+              ))}
+              <input
+                value={customDays}
+                onChange={(e) => setCustomDays(e.target.value.replace(/[^0-9]/g, ""))}
+                placeholder="custom"
+                inputMode="numeric"
+                className="w-20 rounded-lg border border-white/10 bg-white/[0.03] px-2 py-1.5 text-[11px] text-slate-200 outline-none focus:border-indigo-500/50"
+              />
+            </div>
+          </div>
+
+          <label>
+            <span className="text-[10px] uppercase tracking-wider text-slate-500">
+              Motivo
+            </span>
+            <select
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-white/10 bg-[#10131a] px-2 py-1.5 text-[11px] text-slate-200"
+            >
+              {GRANT_REASONS.map((r) => (
+                <option key={r.value} value={r.value}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            <span className="text-[10px] uppercase tracking-wider text-slate-500">
+              Nota {reason === "other" ? "(obrigatória)" : "(opcional)"}
+            </span>
+            <input
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="ex.: ticket #1234"
+              className="mt-1 w-full rounded-lg border border-white/10 bg-white/[0.03] px-2 py-1.5 text-[11px] text-slate-200 outline-none focus:border-indigo-500/50"
+            />
+          </label>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[11px] text-slate-500">
+            Nova expiração:{" "}
+            <span className="text-slate-300">
+              {lookup?.access.expires_at
+                ? `soma ${effectiveDays || "?"} dia(s) a ${fmtDt(lookup.access.expires_at)}`
+                : `a partir de agora + ${effectiveDays || "?"} dia(s)`}
+            </span>
+          </span>
+          <button
+            onClick={() => void submit()}
+            disabled={busy || !lookup}
+            data-testid="admin-access-confirm"
+            className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-indigo-500 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-400 disabled:opacity-50"
+          >
+            {busy ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <KeyRound className="h-3.5 w-3.5" />
+            )}
+            Confirmar concessão
+          </button>
+        </div>
+
+        {message ? (
+          <p
+            className={`rounded border px-2 py-1.5 text-[11px] ${
+              message.ok
+                ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-300"
+                : "border-rose-500/30 bg-rose-500/5 text-rose-300"
+            }`}
+          >
+            {message.text}
+          </p>
+        ) : null}
+
+        {/* 3. auditoria */}
+        <div className="rounded-lg border border-white/10">
+          <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2">
+            <span className="text-[10px] uppercase tracking-wider text-slate-500">
+              Últimas concessões
+            </span>
+            <button
+              onClick={() => void refreshAudit()}
+              className="ml-auto inline-flex items-center gap-1 rounded border border-white/10 px-2 py-1 text-[10px] font-semibold text-slate-300 hover:bg-white/5"
+            >
+              <RefreshCcw className="h-3 w-3" /> Atualizar
+            </button>
+          </div>
+          {audit.length === 0 ? (
+            <p className="px-3 py-3 text-[11px] text-slate-500">Sem registos.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-[11px]">
+                <thead className="text-[10px] uppercase tracking-wider text-slate-500">
+                  <tr>
+                    <th className="px-3 py-1.5">Quando</th>
+                    <th className="py-1.5">Admin</th>
+                    <th className="py-1.5">Conta</th>
+                    <th className="py-1.5">Ação</th>
+                    <th className="py-1.5">Motivo</th>
+                    <th className="py-1.5 text-right">Ações</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {audit.map((entry) => (
+                    <tr key={entry.id}>
+                      <td className="px-3 py-1.5 text-slate-400">{fmtDt(entry.created_at)}</td>
+                      <td className="py-1.5 text-slate-400">{entry.admin_email || "—"}</td>
+                      <td className="py-1.5 text-slate-300">{entry.target_email || "—"}</td>
+                      <td className="py-1.5">
+                        {entry.action === "grant_access" ? (
+                          <span className="text-emerald-400">+{entry.days ?? "?"}d</span>
+                        ) : (
+                          <span className="text-rose-400">revertida</span>
+                        )}
+                      </td>
+                      <td className="py-1.5 text-slate-400">
+                        {entry.reason || "—"}
+                        {entry.note ? (
+                          <span className="ml-1 text-slate-600">· {entry.note}</span>
+                        ) : null}
+                      </td>
+                      <td className="py-1.5 text-right">
+                        {entry.action === "grant_access" && entry.reversible ? (
+                          <button
+                            onClick={() => void undo(entry)}
+                            className="inline-flex items-center gap-1 rounded-md border border-rose-500/30 px-2 py-1 text-[10px] font-semibold text-rose-300 hover:bg-rose-500/10"
+                          >
+                            <Undo2 className="h-3 w-3" /> Reverter
+                          </button>
+                        ) : (
+                          <span className="text-[10px] text-slate-600">
+                            {entry.action === "grant_access" ? "não reversível" : "—"}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </div>
     </Card>
   );
@@ -2083,6 +2517,9 @@ export default function AdminPage() {
           )}
         </Card>
       </div>
+
+      {/* -------------------------------------------------- concessão */}
+      <AccessGrantPanel />
 
       {/* -------------------------------------------------- sessões */}
       <Card

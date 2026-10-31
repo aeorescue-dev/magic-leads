@@ -102,6 +102,13 @@ Contexto completo e números medidos: **`docs/PROJECT-MEMORY.md`**. Ler antes de
     o motivo: cap/warm-up, quiet hours, cidade desligada ou motor off); fila
     velha com capacidade disponível é `fail`, sem capacidade é `warn` explicado.
     O reaper de `sending` corre mesmo com `send_enabled=0`.
+34. **Cortesia / override de assinatura**: só via `admin_grant_access`, que escreve
+    `subscription_status='active'` + `plan_until` (fonte única, sem novo campo) e
+    **soma** dias — nunca encurta. Toda a concessão/revogação vai para
+    `admin_audit_log` (append-only, com `before/after` e `idempotency_key`).
+    Revogação só restaura se `plan_until` não mudou desde o grant (senão 409).
+    A copy mostra “Acesso ativo até …” apenas quando a expiração em vigor veio
+    de um grant. Não reutilizar `credit_ledger` para isto.
 
 ## Verificação mínima antes de deploy
 ```bash

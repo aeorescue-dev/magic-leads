@@ -23,6 +23,9 @@ from starlette.responses import Response as StarletteResponse
 
 from .config import settings
 from .models.schemas import (
+    ALLOWED_ACCESS_GRANT_REASONS,
+    AccessGrantRequest,
+    AccessRevokeRequest,
     AuthResponse,
     BaseLocationUpdate,
     ContactLeadRequest,
@@ -1696,6 +1699,139 @@ async def admin_revoke_user_sessions(user_id: int, _admin: dict = Depends(_requi
     """Revoga todas as sessões de um utilizador (ex.: conta comprometida)."""
     count = await db_service.admin_revoke_user_sessions(user_id)
     return {"revoked_count": count, "user_id": user_id}
+
+
+# ---------------------------------------------------------------- acesso
+# Override de assinatura (cortesia). Escreve users.subscription_status +
+# users.plan_until — a mesma fonte que o Stripe — e audita em admin_audit_log.
+
+
+@app.get("/api/admin/users/lookup")
+async def admin_user_lookup(
+    email: str, _admin: dict = Depends(_require_admin_user)
+):
+    """Pré-visualização de uma conta pelo e-mail (para a concessão de acesso)."""
+    normalized = (email or "").strip().lower()
+    if not normalized or "@" not in normalized:
+        raise HTTPException(status_code=400, detail="E-mail inválido")
+    user = await db_service.get_user_by_email(normalized)
+    if not user:
+        raise HTTPException(status_code=404, detail="Conta não encontrada")
+    access = await db_service.get_user_subscription_status(user["id"])
+    return {
+        "user": {
+            "id": user["id"],
+            "email": user["email"],
+            "company_name": user.get("company_name"),
+            "plan": user.get("plan"),
+            "subscription_status": user.get("subscription_status"),
+            "plan_until": user.get("plan_until"),
+            "is_admin": bool(user.get("is_admin")),
+            "created_at": user.get("created_at"),
+        },
+        "access": access,
+    }
+
+
+@app.post("/api/admin/access/grant")
+@limiter.limit("30/hour")
+async def admin_grant_access(
+    request: Request,
+    payload: AccessGrantRequest,
+    admin: dict = Depends(_require_admin_user),
+):
+    """Concede (soma) `days` de acesso ativo a uma conta, com auditoria."""
+    if payload.reason not in ALLOWED_ACCESS_GRANT_REASONS:
+        raise HTTPException(status_code=400, detail="Motivo inválido")
+    if payload.reason == "other" and not (payload.note or "").strip():
+        raise HTTPException(
+            status_code=400, detail="Nota obrigatória quando o motivo é 'Outro'"
+        )
+
+    email = str(payload.email).strip().lower()
+    user = await db_service.get_user_by_email(email)
+    if not user:
+        raise HTTPException(status_code=404, detail="Conta não encontrada")
+
+    result = await db_service.admin_grant_access(
+        user["id"],
+        payload.days,
+        admin_id=admin["id"],
+        admin_email=admin.get("email") or "",
+        reason=payload.reason,
+        note=(payload.note or "").strip() or None,
+        idempotency_key=payload.idempotency_key,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+    if result.get("error") == "invalid_days":
+        raise HTTPException(status_code=400, detail="Dias inválidos")
+    if result.get("error") == "user_not_found":
+        raise HTTPException(status_code=404, detail="Conta não encontrada")
+
+    # Watchdog: concessões sensíveis ficam também nos alertas de auditoria.
+    is_sensitive = bool(user.get("is_admin")) or payload.days > 90
+    if is_sensitive and not result.get("duplicate"):
+        await db_service.record_system_alert(
+            level="warn",
+            code="ADMIN_ACCESS_GRANT",
+            message=(
+                f"Concessão manual de {payload.days} dia(s) a {user['email']} "
+                f"por {admin.get('email') or admin['id']} ({payload.reason})."
+            ),
+            context={
+                "audit_id": result.get("audit_id"),
+                "target_user_id": user["id"],
+                "target_is_admin": bool(user.get("is_admin")),
+                "days": payload.days,
+                "reason": payload.reason,
+                "before": result.get("before"),
+                "after": result.get("after"),
+            },
+        )
+    return result
+
+
+@app.post("/api/admin/access/revoke")
+async def admin_revoke_access(
+    request: Request,
+    payload: AccessRevokeRequest,
+    admin: dict = Depends(_require_admin_user),
+):
+    """Reverte uma concessão, se a expiração não mudou desde então."""
+    result = await db_service.admin_revoke_access(
+        payload.audit_id,
+        admin_id=admin["id"],
+        admin_email=admin.get("email") or "",
+        reason=(payload.reason or "").strip() or None,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+    error = result.get("error")
+    if error == "not_found":
+        raise HTTPException(status_code=404, detail="Concessão não encontrada")
+    if error == "already_revoked":
+        raise HTTPException(status_code=409, detail="Concessão já revertida")
+    if error == "changed_since_grant":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "A expiração mudou desde a concessão (pagamento ou outra concessão). "
+                "Revisão manual necessária."
+            ),
+        )
+    if error == "user_not_found":
+        raise HTTPException(status_code=404, detail="Conta não encontrada")
+    return result
+
+
+@app.get("/api/admin/access/audit")
+async def admin_access_audit(
+    limit: int = 50, _admin: dict = Depends(_require_admin_user)
+):
+    """Histórico append-only de concessões/revogações de acesso."""
+    entries = await db_service.admin_list_access_audit(limit)
+    return {"entries": entries, "count": len(entries)}
 
 
 @app.get("/api/admin/sources")

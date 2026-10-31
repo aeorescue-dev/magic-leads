@@ -373,6 +373,32 @@ class OnboardingUpdate(BaseModel):
     cities: Optional[List[str]] = None
 
 
+ALLOWED_ACCESS_GRANT_REASONS = (
+    "support",
+    "vip_test",
+    "compensation",
+    "partner",
+    "other",
+)
+
+
+class AccessGrantRequest(BaseModel):
+    """Concessão manual de acesso (cortesia) feita no painel admin."""
+
+    email: EmailStr
+    days: int = Field(ge=1, le=365)
+    reason: str
+    note: Optional[str] = Field(default=None, max_length=500)
+    idempotency_key: Optional[str] = Field(default=None, max_length=100)
+
+
+class AccessRevokeRequest(BaseModel):
+    """Reversão de uma concessão (undo seguro)."""
+
+    audit_id: int = Field(gt=0)
+    reason: Optional[str] = Field(default=None, max_length=500)
+
+
 class ReserverLeadRequest(BaseModel):
     minutes: int = 60
     consent: bool = False

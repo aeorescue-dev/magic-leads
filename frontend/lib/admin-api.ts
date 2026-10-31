@@ -789,3 +789,99 @@ export function revokeAdminUserSessions(
     { method: "DELETE" }
   );
 }
+
+// ------------------------------------------------------------------
+// Concessão manual de acesso (cortesia)
+// ------------------------------------------------------------------
+export interface AdminAccessLookup {
+  user: {
+    id: number;
+    email: string;
+    company_name?: string | null;
+    plan?: string | null;
+    subscription_status?: string | null;
+    plan_until?: string | null;
+    is_admin: boolean;
+    created_at?: string | null;
+  };
+  access: {
+    status: string;
+    is_active: boolean;
+    can_access: boolean;
+    days_remaining?: number;
+    hours_remaining?: number;
+    expires_at?: string | null;
+    message: string;
+    action?: string | null;
+    access_source?: "admin_grant" | "subscription";
+  };
+}
+
+export interface AdminAccessGrantResult {
+  audit_id: number;
+  duplicate?: boolean;
+  user: { id: number; email: string };
+  before: { plan?: string | null; subscription_status?: string | null; plan_until?: string | null };
+  after: { plan: string; subscription_status: string; plan_until: string };
+  days: number;
+  reason: string;
+}
+
+export interface AdminAccessAuditEntry {
+  id: number;
+  created_at: string;
+  admin_user_id: number;
+  admin_email: string | null;
+  action: "grant_access" | "revoke_access";
+  target_user_id: number;
+  target_email: string | null;
+  days: number | null;
+  reason: string | null;
+  note: string | null;
+  before_json: string | null;
+  after_json: string | null;
+  reversible: boolean;
+  revoked: number;
+}
+
+export function lookupAdminUser(email: string): Promise<AdminAccessLookup> {
+  return adminFetch<AdminAccessLookup>(
+    `/users/lookup?email=${encodeURIComponent(email)}`
+  );
+}
+
+export function grantAdminAccess(body: {
+  email: string;
+  days: number;
+  reason: string;
+  note?: string;
+  idempotency_key?: string;
+}): Promise<AdminAccessGrantResult> {
+  return adminFetch<AdminAccessGrantResult>("/access/grant", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export function revokeAdminAccess(
+  auditId: number,
+  reason?: string
+): Promise<{ audit_id: number; related_audit_id: number }> {
+  return adminFetch<{ audit_id: number; related_audit_id: number }>(
+    "/access/revoke",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ audit_id: auditId, reason }),
+    }
+  );
+}
+
+export function fetchAdminAccessAudit(
+  limit = 50
+): Promise<{ entries: AdminAccessAuditEntry[]; count: number }> {
+  return adminFetch<{ entries: AdminAccessAuditEntry[]; count: number }>(
+    `/access/audit?limit=${limit}`
+  );
+}

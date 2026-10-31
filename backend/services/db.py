@@ -691,6 +691,33 @@ CREATE TABLE IF NOT EXISTS system_alerts (
 CREATE INDEX IF NOT EXISTS idx_system_alerts_created ON system_alerts (created_at);
 CREATE INDEX IF NOT EXISTS idx_system_alerts_code ON system_alerts (code);
 
+-- Auditoria administrativa append-only (concessões/revogações de acesso).
+-- Fonte de rastreabilidade do override de assinatura; NÃO substitui
+-- users.plan_until (que continua a ser a única fonte de verdade do acesso).
+CREATE TABLE IF NOT EXISTS admin_audit_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  admin_user_id INTEGER NOT NULL,
+  admin_email TEXT,
+  action TEXT NOT NULL,
+  target_user_id INTEGER NOT NULL,
+  target_email TEXT,
+  days INTEGER,
+  reason TEXT,
+  note TEXT,
+  before_json TEXT,
+  after_json TEXT,
+  ip_address TEXT,
+  user_agent TEXT,
+  idempotency_key TEXT,
+  related_audit_id INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_admin_audit_created ON admin_audit_log (created_at);
+CREATE INDEX IF NOT EXISTS idx_admin_audit_target ON admin_audit_log (target_user_id, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_admin_audit_idem
+  ON admin_audit_log (admin_user_id, action, target_user_id, idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
+
 -- Contadores operacionais persistentes (ex.: descartes da DLQ de notificações).
 CREATE TABLE IF NOT EXISTS dlq_counters (
   name TEXT PRIMARY KEY,
@@ -5743,6 +5770,275 @@ class DatabaseService:
         finally:
             conn.close()
 
+    # ---------------------------------------------------------------- acesso
+    # Override de assinatura (cortesia). A fonte de verdade do acesso continua
+    # a ser users.subscription_status + users.plan_until; a auditoria vive em
+    # admin_audit_log (append-only) e guarda o antes/depois para undo seguro.
+
+    def admin_grant_access(
+        self,
+        user_id: int,
+        days: int,
+        *,
+        admin_id: int,
+        admin_email: str,
+        reason: str,
+        note: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ) -> dict:
+        """Soma `days` de acesso ativo, sem nunca encurtar o que já existe.
+
+        Transação BEGIN IMMEDIATE para não competir com o webhook Stripe
+        (read-then-write perdia renovações concorrentes).
+        """
+        days = int(days)
+        if days < 1 or days > 365:
+            return {"error": "invalid_days"}
+        conn = get_connection()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            user = conn.execute(
+                "SELECT id, email, plan, subscription_status, plan_until FROM users WHERE id = ?",
+                (int(user_id),),
+            ).fetchone()
+            if not user:
+                conn.rollback()
+                return {"error": "user_not_found"}
+
+            if idempotency_key:
+                dup = conn.execute(
+                    "SELECT * FROM admin_audit_log WHERE admin_user_id = ? "
+                    "AND action = 'grant_access' AND target_user_id = ? "
+                    "AND idempotency_key = ?",
+                    (int(admin_id), int(user_id), idempotency_key),
+                ).fetchone()
+                if dup:
+                    conn.rollback()
+                    after = json.loads(dup["after_json"] or "{}")
+                    return {
+                        "duplicate": True,
+                        "audit_id": dup["id"],
+                        "user": {"id": user["id"], "email": user["email"]},
+                        "after": after,
+                    }
+
+            before = {
+                "plan": user["plan"],
+                "subscription_status": user["subscription_status"],
+                "plan_until": user["plan_until"],
+            }
+            now = utcnow()
+            current = self._parse_dt(user["plan_until"])
+            base = max(now, current) if current else now
+            new_until = base + timedelta(days=days)
+            after = {
+                "plan": "pro",
+                "subscription_status": "active",
+                "plan_until": new_until.isoformat(),
+            }
+            conn.execute(
+                "UPDATE users SET plan = ?, subscription_status = ?, plan_until = ? WHERE id = ?",
+                (after["plan"], after["subscription_status"], after["plan_until"], int(user_id)),
+            )
+            cur = conn.execute(
+                "INSERT INTO admin_audit_log "
+                "(admin_user_id, admin_email, action, target_user_id, target_email, days, "
+                " reason, note, before_json, after_json, ip_address, user_agent, idempotency_key) "
+                "VALUES (?, ?, 'grant_access', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    int(admin_id),
+                    admin_email,
+                    int(user_id),
+                    user["email"],
+                    days,
+                    reason,
+                    note,
+                    json.dumps(before, ensure_ascii=False),
+                    json.dumps(after, ensure_ascii=False),
+                    ip_address,
+                    (user_agent or "")[:300] or None,
+                    idempotency_key,
+                ),
+            )
+            audit_id = cur.lastrowid
+            conn.commit()
+            return {
+                "audit_id": audit_id,
+                "user": {"id": user["id"], "email": user["email"]},
+                "before": before,
+                "after": after,
+                "days": days,
+                "reason": reason,
+            }
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            conn.close()
+
+    def admin_revoke_access(
+        self,
+        audit_id: int,
+        *,
+        admin_id: int,
+        admin_email: str,
+        reason: Optional[str] = None,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ) -> dict:
+        """Reverte uma concessão, apenas se a expiração não mudou desde então.
+
+        Se houve pagamento/outra concessão pelo meio, devolve
+        `changed_since_grant` (409) em vez de matar um plano pago.
+        """
+        conn = get_connection()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            grant = conn.execute(
+                "SELECT * FROM admin_audit_log WHERE id = ? AND action = 'grant_access'",
+                (int(audit_id),),
+            ).fetchone()
+            if not grant:
+                conn.rollback()
+                return {"error": "not_found"}
+            already = conn.execute(
+                "SELECT 1 FROM admin_audit_log WHERE action = 'revoke_access' "
+                "AND related_audit_id = ?",
+                (int(audit_id),),
+            ).fetchone()
+            if already:
+                conn.rollback()
+                return {"error": "already_revoked"}
+
+            user = conn.execute(
+                "SELECT id, email, plan, subscription_status, plan_until FROM users WHERE id = ?",
+                (grant["target_user_id"],),
+            ).fetchone()
+            if not user:
+                conn.rollback()
+                return {"error": "user_not_found"}
+
+            before_grant = json.loads(grant["before_json"] or "{}")
+            after_grant = json.loads(grant["after_json"] or "{}")
+            if self._parse_dt(user["plan_until"]) != self._parse_dt(
+                after_grant.get("plan_until")
+            ):
+                conn.rollback()
+                return {"error": "changed_since_grant"}
+
+            before = {
+                "plan": user["plan"],
+                "subscription_status": user["subscription_status"],
+                "plan_until": user["plan_until"],
+            }
+            restored = {
+                "plan": before_grant.get("plan"),
+                "subscription_status": before_grant.get("subscription_status"),
+                "plan_until": before_grant.get("plan_until"),
+            }
+            conn.execute(
+                "UPDATE users SET plan = ?, subscription_status = ?, plan_until = ? WHERE id = ?",
+                (restored["plan"], restored["subscription_status"], restored["plan_until"], user["id"]),
+            )
+            cur = conn.execute(
+                "INSERT INTO admin_audit_log "
+                "(admin_user_id, admin_email, action, target_user_id, target_email, days, "
+                " reason, note, before_json, after_json, ip_address, user_agent, related_audit_id) "
+                "VALUES (?, ?, 'revoke_access', ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    int(admin_id),
+                    admin_email,
+                    user["id"],
+                    user["email"],
+                    reason,
+                    "reversão da concessão #" + str(audit_id),
+                    json.dumps(before, ensure_ascii=False),
+                    json.dumps(restored, ensure_ascii=False),
+                    ip_address,
+                    (user_agent or "")[:300] or None,
+                    int(audit_id),
+                ),
+            )
+            revoke_id = cur.lastrowid
+            conn.commit()
+            return {
+                "audit_id": revoke_id,
+                "related_audit_id": int(audit_id),
+                "user": {"id": user["id"], "email": user["email"]},
+                "before": before,
+                "after": restored,
+            }
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            conn.close()
+
+    def admin_list_access_audit(self, limit: int = 50) -> List[dict]:
+        """Histórico de concessões/revogações com `reversible` calculado."""
+        limit = max(1, min(int(limit), 200))
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT a.*, u.plan_until AS current_plan_until, "
+                "  EXISTS(SELECT 1 FROM admin_audit_log r "
+                "         WHERE r.action = 'revoke_access' AND r.related_audit_id = a.id) AS revoked "
+                "FROM admin_audit_log a LEFT JOIN users u ON u.id = a.target_user_id "
+                "ORDER BY a.id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            out = []
+            for r in rows:
+                row = dict(r)
+                try:
+                    after = json.loads(row.get("after_json") or "{}")
+                except Exception:
+                    after = {}
+                row["reversible"] = bool(
+                    row["action"] == "grant_access"
+                    and not row["revoked"]
+                    and self._parse_dt(row.get("current_plan_until"))
+                    == self._parse_dt(after.get("plan_until"))
+                )
+                out.append(row)
+            return out
+        finally:
+            conn.close()
+
+    def _access_is_admin_granted(
+        self, conn: sqlite3.Connection, user_id: int, plan_until: object
+    ) -> bool:
+        """True quando a expiração ATUAL veio de uma concessão administrativa.
+
+        Deriva da auditoria (sem novo campo em `users`): a última ação de acesso
+        foi um grant e o `plan_until` gravado é o que está em vigor. Se o Stripe
+        renovou depois, o valor deixa de coincidir e a copy volta a "Renova em".
+        """
+        try:
+            row = conn.execute(
+                "SELECT action, after_json FROM admin_audit_log "
+                "WHERE target_user_id = ? AND action IN ('grant_access', 'revoke_access') "
+                "ORDER BY id DESC LIMIT 1",
+                (int(user_id),),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return False
+        if not row or row["action"] != "grant_access":
+            return False
+        try:
+            after = json.loads(row["after_json"] or "{}")
+        except Exception:
+            return False
+        return self._parse_dt(after.get("plan_until")) == self._parse_dt(plan_until)
+
     def admin_get_push_metrics(self, days: int = 7, recent_limit: int = 50) -> dict:
         """Saúde das entregas de push notification.
 
@@ -7891,13 +8187,22 @@ class DatabaseService:
             if sub_status == STATUS_ACTIVE:
                 if can_access:
                     days_left = (plan_until - now).days
+                    # Cortesia administrativa: "Renova em" seria falso — não há
+                    # cobrança agendada. A origem é derivada da auditoria.
+                    courtesy = self._access_is_admin_granted(conn, user_id, user["plan_until"])
+                    message = (
+                        f"Acesso ativo até {plan_until.strftime('%d/%m/%Y')}"
+                        if courtesy
+                        else f"Plano ativo. Renova em {days_left}d"
+                    )
                     return {
                         "status": "active",
                         "is_active": True,
                         "can_access": True,
                         "days_remaining": max(0, days_left),
                         "expires_at": plan_until.isoformat(),
-                        "message": f"Plano ativo. Renova em {days_left}d",
+                        "message": message,
+                        "access_source": "admin_grant" if courtesy else "subscription",
                         "action": None,
                     }
                 return {
@@ -10225,6 +10530,21 @@ class AsyncDatabaseService:
     async def admin_revoke_user_sessions(self, user_id: int) -> int:
         return await anyio.to_thread.run_sync(
             self._service.admin_revoke_user_sessions, user_id
+        )
+
+    async def admin_grant_access(self, user_id: int, days: int, **kwargs) -> dict:
+        return await anyio.to_thread.run_sync(
+            lambda: self._service.admin_grant_access(user_id, days, **kwargs)
+        )
+
+    async def admin_revoke_access(self, audit_id: int, **kwargs) -> dict:
+        return await anyio.to_thread.run_sync(
+            lambda: self._service.admin_revoke_access(audit_id, **kwargs)
+        )
+
+    async def admin_list_access_audit(self, limit: int = 50) -> List[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.admin_list_access_audit, limit
         )
 
     async def admin_get_digest_ab(self, days: int = 30) -> dict:

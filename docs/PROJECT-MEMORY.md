@@ -601,6 +601,34 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   O digest mostra `hoje x/cap` e `CAPACIDADE restam N`.
 - Testes: `tests/test_outbound_queue_resilience.py` (8).
 
+### Admin — Concessão manual de acesso (cortesia) (2026-10-31)
+
+- **Fonte única**: a concessão escreve `users.subscription_status='active'` e
+  `users.plan_until` — os mesmos campos que o Stripe. `is_access_active` passa a
+  devolver `can_access=True` e o gate A5 (402) abre sem ramos novos.
+- **Semântica**: soma dias a `max(agora, plan_until)`; **nunca encurta nem
+  reinicia** um plano pago. `BEGIN IMMEDIATE` evita perder uma renovação
+  concorrente do webhook.
+- **Auditoria**: tabela nova `admin_audit_log` (append-only) com admin, alvo,
+  dias, motivo, nota, `before_json`/`after_json`, IP e `idempotency_key`.
+  Não usa `credit_ledger` (razão de créditos) nem `system_alerts` (anomalias);
+  só concessões sensíveis (admin alvo ou >90 dias) geram `system_alert`
+  `ADMIN_ACCESS_GRANT`.
+- **API**: `GET /api/admin/users/lookup`, `POST /api/admin/access/grant`
+  (30/h), `POST /api/admin/access/revoke`, `GET /api/admin/access/audit`.
+- **Undo seguro**: restaura o `before` apenas se `plan_until` ainda for igual ao
+  `after` da concessão; se houve pagamento posterior devolve **409**.
+- **Copy**: `get_user_subscription_status` devolve `"Acesso ativo até dd/mm/aaaa"`
+  quando a expiração em vigor veio de um grant (derivado da auditoria) e
+  `"Plano ativo. Renova em Nd"` quando veio de assinatura. Depois de uma
+  renovação Stripe, a origem volta a `subscription` sozinha.
+- **UI**: `AccessGrantPanel` na Torre de Controlo, imediatamente acima de
+  "Sessões ativas". Fluxo em 3 passos (procurar → duração/motivo → confirmar),
+  preview do antes/depois, dupla confirmação para admins e tabela de auditoria
+  com botão Reverter.
+- Testes: `tests/test_admin_access_grant.py` (12) — soma, validação,
+  idempotência, revogação segura, gate A5 e copy.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
