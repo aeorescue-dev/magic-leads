@@ -869,6 +869,26 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Testes**: 18 pytest novos (auto-ramp, disjuntor, readiness/controles,
   encriptação); suite **971 pytest**, 29 e2e, 34 avisos ESLint antigos.
 
+### Fase 2.1 — Grafo de empreiteiros e resolver OSM (2026-10-31)
+
+- **Tabelas**: `contractor_entities` (empresa, licença, cidade/estado, papel,
+  domínio, nicho, e-mail, estado), `contractor_entity_sources` (proveniência
+  idempotente por fonte+registo) e `city_enrichment_state` (cursor/quota).
+- **Normalização**: remove sufixos legais (`LLC`, `INC`, `CORP`, …), acentos e
+  pontuação; `entity_key = sha256(nome+estado)`. Dedupe por **licença** quando
+  existe (chave forte) e por nome normalizado caso contrário. Placeholders
+  (`UNAVAILABLE OWNER`, `N/A`, …) nunca criam entidade.
+- **Ciclo**: `new → domain → ready` ou `quarantined` (e-mail `catch_all` ou
+  sem site). Fontes idempotentes (`UNIQUE(source, external_id, role)`).
+- **Resolver** (`domain_resolver.py`): Overpass por nome+cidade, tags
+  `website`/`contact:website`, `registrable_domain`, corroboração Jaccard
+  ≥0.5. Sem correspondência → `None` (quarentena), nunca adivinha.
+- **Testes**: 12 (normalização/dedupe/licença/fontes/ciclo + resolver/query).
+  Suite **984 pytest**.
+- **Ainda por ligar**: extração nos ingestores (NYC `applicant_*`, Chicago
+  `contact_*`, fontes de Dallas/Boston), estágio de e-mail, scheduler 24/7 e
+  UI de entidades.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
