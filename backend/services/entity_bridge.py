@@ -31,6 +31,13 @@ def _site_snippet(domain: str) -> str:
 async def bridge_entity(entity: dict) -> str:
     """Confirma nicho e cria o contacto. Devolve o resultado para o scheduler."""
     entity_id = int(entity["id"])
+    domain = entity.get("domain") or ""
+    # Um dominio partilhado por varias empresas e' diretorio/agregador, nunca
+    # o site de cada uma delas.
+    if domain and await db_service.count_entities_with_domain(domain, entity_id) > 0:
+        await db_service.quarantine_contractor_entity(entity_id, "shared_domain")
+        return "shared_domain"
+
     snippet = entity.get("site_snippet") or ""
     if not snippet and entity.get("domain"):
         snippet = await asyncio.to_thread(_site_snippet, entity["domain"])

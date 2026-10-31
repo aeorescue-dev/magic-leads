@@ -39,6 +39,27 @@ def test_domain_normalization():
     assert is_blocked_domain("kingsleyconstruction.com") is False
 
 
+def test_identity_gate_rejeita_diretorio_com_palavra_generica():
+    """`OZ CONTRACTING` nao pode aceitar `contractingnyc.com` (diretorio)."""
+    from backend.services.company_discovery import identity_ok
+
+    assert identity_ok(
+        {"owner_name": "OZ CONTRACTING LLC"}, "contractingnyc.com",
+        "Contracting NYC - Find local contractors",
+    ) is False
+    assert identity_ok(
+        {"owner_name": "Hogan Plumbing, Inc."}, "hoganplumbing.com",
+        "Hogan Plumbing | Chicago",
+    ) is True
+    assert identity_ok(
+        {"owner_name": "Walsh Group"}, "walshgroup.com",
+        "Walsh Group - Construction Management",
+    ) is True
+    assert identity_ok(
+        {"owner_name": "PMC Contracting"}, "pmcnyc.com", "PMC Contracting NYC"
+    ) is True
+
+
 def test_slug_candidates_keep_commercial_tokens():
     """`significant_tokens` remove GROUP/COMPANY; o slug tem de os reintroduzir."""
     assert "walshgroup" in slug_candidates("Walsh Group", "Chicago")

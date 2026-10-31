@@ -46,7 +46,8 @@ CONFIRM_MIN_MARGIN = 1.5
 NICHE_PATTERNS: dict[str, tuple[str, ...]] = {
     "plumbing": (
         r"plumb\w*", r"rooter", r"\bdrain\w*", r"\bsewer\w*", r"water\s*heater",
-        r"backflow", r"pipe\w*", r"leak\s*detect\w*",
+        r"backflow", r"\bpiping\b", r"\bpipework\b", r"\bpipefitting\b",
+        r"\bpipes?\b(?!\s*scaffold)", r"leak\s*detect\w*",
     ),
     "hvac": (
         r"\bhvac\b", r"\bheat(ing)?\b", r"\bcool(ing)?\b", r"air\s*condition\w*",
@@ -73,7 +74,8 @@ NICHE_PATTERNS: dict[str, tuple[str, ...]] = {
     ),
     "general_contractors": (
         r"general\s*contract\w*", r"construction", r"builders?", r"\bbuild\b",
-        r"contracting", r"contractors?",
+        r"contracting", r"contractors?", r"scaffold\w*", r"masonry",
+        r"tuckpoint\w*", r"\bsigns?\b", r"signage",
     ),
 }
 

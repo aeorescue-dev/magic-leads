@@ -277,6 +277,30 @@ async def test_ponte_confirma_nicho_pelo_texto_do_site(clean_entities, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_dominio_partilhado_vai_para_quarentena(clean_entities, monkeypatch):
+    """Duas empresas no mesmo dominio = diretorio, nunca site de cada uma."""
+    for name, email in (
+        ("Wight & Company", "info@wightco.com"),
+        ("Wight Partners", "hello@wightco.com"),
+    ):
+        row = _entity(name=name)
+        db_service._service.mark_contractor_domain_attempt(
+            row["id"], "wightco.com", 0.9, 2, "construction company"
+        )
+        db_service._service.mark_contractor_email_attempt(
+            row["id"], email, "valid", 2
+        )
+
+    rows = db_service._service.list_contractor_entities(CITY)
+    results = [await entity_bridge.bridge_entity(r) for r in rows]
+    assert results == ["shared_domain", "shared_domain"]
+    for row in db_service._service.list_contractor_entities(CITY):
+        assert row["status"] == "quarantined"
+        assert row["quarantine_reason"] == "shared_domain"
+    assert db_service._service.get_outbound_contact_by_email("info@wightco.com") is None
+
+
+@pytest.mark.asyncio
 async def test_cidade_desligada_nao_processa(clean_entities):
     _entity()
     db_service._service.set_outbound_config("enrich_enabled", "0", CITY)

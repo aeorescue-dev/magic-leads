@@ -219,6 +219,50 @@ def is_parking(mx: Iterable[tuple[int, str]], ns: Iterable[str],
 
 # --------------------------------------------------------------- corroboracao
 
+# Palavras que descrevem a actividade mas nao identificam a empresa. Um nome
+# feito so' disto ("OZ CONTRACTING") nao pode ser corroborado por um site que
+# fale de "contracting": e' assim que se enviava a um diretorio.
+GENERIC_NAME_TOKENS = {
+    "contracting", "construction", "contractor", "contractors", "builders",
+    "builder", "building", "build", "builds", "services", "service", "group",
+    "company", "companies", "enterprise", "enterprises", "solutions", "systems",
+    "system", "industries", "industry", "nyc", "chicago", "boston", "dallas",
+    "usa", "of", "and", "the", "management", "development", "design",
+}
+
+
+def distinctive_tokens(name: str) -> list[str]:
+    return [
+        t.lower() for t in significant_tokens(name)
+        if t.lower() not in GENERIC_NAME_TOKENS and len(t) >= 3
+    ]
+
+
+def _norm_for_match(value: str) -> str:
+    return re.sub(r"[^a-z0-9 ]+", " ", strip_accents(value or "").lower()).strip()
+
+
+def identity_ok(lead: dict, fqdn: str, title: str) -> bool:
+    """O site tem de nomear a empresa, nao apenas a actividade.
+
+    Sem isto, `ozcontracting.com` (ou um diretorio "Contracting NYC") passava
+    como site de "OZ CONTRACTING LLC" so' porque a palavra CONTRACTING existe
+    no titulo.
+    """
+    name = lead.get("owner_name") or ""
+    label = (fqdn or "").split(".")[0]
+    norm_label = _norm_for_match(label).replace(" ", "")
+    norm_title = _norm_for_match(title)
+    toks = distinctive_tokens(name)
+    if toks:
+        if any(t in norm_label for t in toks):
+            return True
+        return any(t in norm_title.split() for t in toks)
+    # Nome so' com termos genericos: exige o nome completo no titulo.
+    full = _norm_for_match(name)
+    return bool(full) and full in norm_title
+
+
 def corroborate(lead: dict, title: str, text: str) -> dict:
     """Mede se a pagina pertence de facto a empresa do lead."""
     toks = significant_tokens(lead.get("owner_name") or "")
@@ -600,7 +644,9 @@ class CompanyDiscovery:
                     if is_parking(mx, ns, title, text):
                         break
                     evidence = corroborate(lead, title, text)
-                    if is_corroborated(evidence):
+                    if is_corroborated(evidence) and identity_ok(
+                        lead, fqdn, title
+                    ):
                         return DomainResult(
                             domain=fqdn, source="heuristic", evidence=evidence,
                             title=title[:160], mx=mx, ns=ns, tried=tried,

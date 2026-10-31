@@ -3869,6 +3869,21 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def count_entities_with_domain(self, domain: str, exclude_id: int) -> int:
+        """Quantas OUTRAS entidades partilham o dominio (diretorio/agregador)."""
+        if not domain:
+            return 0
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) c FROM contractor_entities "
+                "WHERE lower(domain)=lower(?) AND id<>?",
+                (domain.strip(), int(exclude_id)),
+            ).fetchone()
+            return int((row["c"] if row else 0) or 0)
+        finally:
+            conn.close()
+
     def mark_contractor_bridged(
         self, entity_id: int, contact_id: Optional[int], lead_id: Optional[int]
     ) -> bool:
@@ -12616,6 +12631,11 @@ class AsyncDatabaseService:
     async def set_contractor_entity_snippet(self, entity_id: int, snippet: str) -> bool:
         return await anyio.to_thread.run_sync(
             self._service.set_contractor_entity_snippet, entity_id, snippet
+        )
+
+    async def count_entities_with_domain(self, domain: str, exclude_id: int) -> int:
+        return await anyio.to_thread.run_sync(
+            self._service.count_entities_with_domain, domain, exclude_id
         )
 
     async def mark_contractor_bridged(

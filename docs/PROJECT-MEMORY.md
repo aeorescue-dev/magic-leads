@@ -959,6 +959,20 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - Testes: snippet guardado e ponte a confirmar nicho pelo site; suite
   **1000 pytest**.
 
+### Fase 3.3 — Anti-falso-positivo de domínio (2026-10-31)
+
+- O ensaio apanhou um erro grave: `OZ CONTRACTING`, `P B CONTRACTING` e
+  `D.R. CONTRACTING` resolveram todos para `contractingnyc.com` (diretório),
+  porque só a palavra genérica CONTRACTING coincidia com o título.
+- `identity_ok()`: o site tem de conter um token **distintivo** do nome (no
+  domínio ou no título); nomes só com termos genéricos exigem o nome completo.
+- Domínio partilhado por duas empresas → `quarantined/shared_domain` (é
+  diretório, nunca o site de cada uma).
+- `pipe\w*` do nicho plumbing deixou de casar “pipe scaffolding” (falso
+  plumbing); `scaffold/masonry/tuckpoint/signs/signage` passam a contar para
+  general contractors.
+- Testes: identidade, diretório e domínio partilhado; suite **1002 pytest**.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
