@@ -14,6 +14,16 @@ from backend.services.push_click import sign_click, verify_click
 from backend.services.push_service import push_service
 
 
+@pytest.fixture(autouse=True)
+def _click_secret(monkeypatch):
+    """Todos os testes deste módulo assinam cliques com um segredo conhecido."""
+    from backend.config import settings
+
+    monkeypatch.setattr(
+        settings, "PUSH_CLICK_SECRET", "test-push-secret", raising=False
+    )
+
+
 def _run(coro):
     return asyncio.run(coro)
 
@@ -102,10 +112,13 @@ def _fake_push(calls, *, accepted=True):
 # Clique HMAC
 # ---------------------------------------------------------------------------
 
-def test_click_signature_and_endpoint():
+def test_click_signature_and_endpoint(monkeypatch):
     from fastapi.testclient import TestClient
 
+    from backend.config import settings
     from backend.main import app
+
+    monkeypatch.setattr(settings, "PUSH_CLICK_SECRET", "test-push-secret", raising=False)
 
     _reset()
     uid = _user()
@@ -132,6 +145,18 @@ def test_click_signature_and_endpoint():
     finally:
         conn.close()
     assert clicked
+
+
+def test_click_signature_fails_closed_without_secret(monkeypatch):
+    """Sem segredo no ambiente, nenhum clique é assinado nem aceite."""
+    from backend.config import settings
+    from backend.services.push_click import sign_click, verify_click
+
+    monkeypatch.setattr(settings, "PUSH_CLICK_SECRET", "", raising=False)
+    monkeypatch.setattr(settings, "CRON_SECRET", "", raising=False)
+    assert sign_click(1) == ""
+    assert verify_click(1, "") is False
+    assert verify_click(1, "deadbeef") is False
 
 
 # ---------------------------------------------------------------------------

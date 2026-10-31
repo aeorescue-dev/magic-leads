@@ -526,7 +526,14 @@ const URGENCIES = ["all", "high", "medium", "low"];
             router.replace(`/${lang}/onboarding`);
           }
         })
-        .catch(() => {});
+        .catch(() => {
+          // Falha ao ler interesses: sem isto o feed abria com "todas" e
+          // contornava o gate de onboarding. Encaminha para o wizard.
+          if (!interestsTouchedRef.current) {
+            router.replace(`/${lang}/onboarding`);
+          }
+        });
+
     }
     // `interestsTouchedRef` e' lido dentro do .then, mas nao pode ser
     // dependencia do efeito: mudar o efeito re-disparava o seed.

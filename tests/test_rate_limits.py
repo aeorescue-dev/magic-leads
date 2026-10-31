@@ -110,6 +110,13 @@ def test_reset_password_limita_apos_10(client):
     assert codes[10] == 429, "11a chamada a reset-password devia ser 429"
 
 
+def test_demo_login_disabled_without_password(client, monkeypatch):
+    """Sem DEMO_PASSWORD explícita a conta demo pública não existe."""
+    monkeypatch.delenv("DEMO_PASSWORD", raising=False)
+    r = client.post("/api/auth/demo")
+    assert r.status_code == 503
+
+
 def test_demo_login_limita_apos_10(client, monkeypatch):
     """10/hour — a sessão demo não pode ser martelada por scripts.
 
@@ -122,6 +129,7 @@ def test_demo_login_limita_apos_10(client, monkeypatch):
         raise RuntimeError("BD bloqueada em teste")
 
     monkeypatch.setattr(m.db_service, "get_user_by_email", _bloqueado)
+    monkeypatch.setenv("DEMO_PASSWORD", "test-demo-pass")
 
     codes = [client.post("/api/auth/demo").status_code for _ in range(11)]
     assert codes[:10] == [500] * 10, f"antes do limite: {codes}"

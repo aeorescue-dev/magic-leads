@@ -4753,7 +4753,13 @@ async def logout_user(authorization: str | None = Header(None), response: Respon
 async def demo_login(request: Request, response: Response = None):
     import os
     demo_email = os.getenv("DEMO_EMAIL", "demo@magicleads.app")
-    demo_password = os.getenv("DEMO_PASSWORD", "Demo2026#Magic")
+    demo_password = (os.getenv("DEMO_PASSWORD") or "").strip()
+    if not demo_password:
+        # Fail-closed: sem password explícita não há conta demo pública.
+        raise HTTPException(
+            status_code=503,
+            detail="Demo desativado: DEMO_PASSWORD não configurado no servidor",
+        )
     try:
         user = await db_service.get_user_by_email(demo_email.lower())
         if not user:
@@ -4786,7 +4792,7 @@ async def demo_login(request: Request, response: Response = None):
             value=token,
             httponly=True,
             secure=True,
-            samesite="none",
+            samesite="lax",
             max_age=max(1, int(getattr(settings, "SESSION_TTL_DAYS", 30) or 30)) * 24 * 60 * 60,
             path="/",
         )

@@ -18,3 +18,5 @@ os.environ["LEADS_DB_PATH"] = _TMP_DB
 os.environ.pop("LEADS_RESET_ON_BOOT", None)
 os.environ.pop("LEADS_SEED_FILE", None)
 os.environ.pop("DATA_DIR", None)
+# Segredo determinístico para assinatura de cliques push nos testes.
+os.environ.setdefault("PUSH_CLICK_SECRET", "pytest-push-click-secret")
