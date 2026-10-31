@@ -3577,11 +3577,18 @@ class DatabaseService:
                 "          AND NOT EXISTS (SELECT 1 FROM outbound_messages om "
                 "                          WHERE LOWER(om.to_email)=LOWER(oc.email) "
                 "                          AND om.status IN ('queued','sending','sent')) "
-                "     THEN 1 ELSE 0 END) ready, "
-                "SUM(CASE WHEN oc.niche_status IN ('unknown','ambiguous') THEN 1 ELSE 0 END) quarantined "
+                "     THEN 1 ELSE 0 END) ready "
                 + base,
                 params,
             ).fetchone()
+            # Quarentena é por cidade (contactos sem nicho confirmado não
+            # pertencem ao filtro de nicho, mas o operador tem de os ver).
+            quarantined = conn.execute(
+                "SELECT COUNT(*) c FROM outbound_contacts oc "
+                "WHERE UPPER(TRIM(oc.city))=? AND COALESCE(oc.email,'')<>'' "
+                "AND oc.niche_status IN ('unknown','ambiguous')",
+                (city,),
+            ).fetchone()["c"]
             by_niche = [
                 dict(r)
                 for r in conn.execute(
@@ -3599,7 +3606,7 @@ class DatabaseService:
                 "valid": int(row["valid"] or 0),
                 "confirmed": int(row["confirmed"] or 0),
                 "ready": int(row["ready"] or 0),
-                "quarantined": int(row["quarantined"] or 0),
+                "quarantined": int(quarantined or 0),
                 "by_niche": by_niche,
             }
         finally:

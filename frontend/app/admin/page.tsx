@@ -83,12 +83,17 @@ import {
   revokeAdminAccess,
   fetchAdminAccessAudit,
   fetchAdminOutboundHealth,
+  fetchAdminOutboundReadiness,
+  updateAdminMailboxControls,
+  pauseAdminMailbox,
+  resumeAdminMailbox,
   markAdminOutboundReplied,
   fetchAdminBillingFunnel,
   type AdminSession,
   type AdminAccessLookup,
   type AdminAccessAuditEntry,
   type AdminOutboundHealth,
+  type AdminOutboundReadiness,
   type AdminBillingFunnel,
 } from "@/lib/admin-api";
 import { AUTH_TOKEN_KEY } from "@/lib/api-client";
@@ -180,6 +185,102 @@ function fmtUsd(usd: number) {
   return `US$ ${(Number.isFinite(usd) ? usd : 0).toFixed(2)}`;
 }
 
+function MailboxControlRow({
+  mb,
+  busy,
+  onSave,
+  onPause,
+  onResume,
+}: {
+  mb: AdminOutboundStatus["mailboxes"][number];
+  busy: boolean;
+  onSave: (
+    id: number,
+    payload: { daily_cap: number; auto_ramp_enabled: boolean; auto_ramp_max: number }
+  ) => void;
+  onPause: (id: number) => void;
+  onResume: (id: number) => void;
+}) {
+  const [cap, setCap] = useState(mb.daily_cap);
+  const [max, setMax] = useState(mb.auto_ramp_max ?? 75);
+  const [auto, setAuto] = useState(Boolean(mb.auto_ramp_enabled));
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded border border-white/5 px-2 py-1.5 text-[11px]">
+      <span className="min-w-[150px] text-slate-300">{mb.email}</span>
+      <label className="flex items-center gap-1 text-slate-500">
+        Cap
+        <input
+          type="number"
+          min={0}
+          max={100}
+          value={cap}
+          onChange={(e) => setCap(Number(e.target.value))}
+          className="w-14 rounded border border-white/10 bg-[#0b0e14] px-1 py-0.5 text-slate-200"
+        />
+      </label>
+      <label className="flex items-center gap-1 text-slate-500">
+        <input
+          type="checkbox"
+          checked={auto}
+          onChange={(e) => setAuto(e.target.checked)}
+        />
+        Auto-Ramp
+      </label>
+      <label className="flex items-center gap-1 text-slate-500">
+        Teto
+        <input
+          type="number"
+          min={1}
+          max={100}
+          value={max}
+          onChange={(e) => setMax(Number(e.target.value))}
+          className="w-14 rounded border border-white/10 bg-[#0b0e14] px-1 py-0.5 text-slate-200"
+        />
+      </label>
+      <button
+        onClick={() =>
+          onSave(mb.id, {
+            daily_cap: cap,
+            auto_ramp_enabled: auto,
+            auto_ramp_max: max,
+          })
+        }
+        disabled={busy}
+        className="rounded border border-indigo-500/40 bg-indigo-500/10 px-2 py-0.5 font-semibold text-indigo-300 hover:bg-indigo-500/20 disabled:opacity-40"
+      >
+        Guardar
+      </button>
+      {mb.paused_at ? (
+        <button
+          onClick={() => onResume(mb.id)}
+          disabled={busy}
+          className="rounded border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 font-semibold text-emerald-300 disabled:opacity-40"
+        >
+          Retomar
+        </button>
+      ) : (
+        <button
+          onClick={() => onPause(mb.id)}
+          disabled={busy}
+          className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 font-semibold text-amber-300 disabled:opacity-40"
+        >
+          Pausar
+        </button>
+      )}
+      <span className="text-[10px] text-slate-500">
+        {mb.auto_ramp_enabled
+          ? `rampa ${mb.auto_ramp_cap}/${mb.auto_ramp_max}/dia · ${
+              mb.auto_ramp_hold_reason ?? "ok"
+            }`
+          : `manual ${mb.daily_cap}/dia`}
+      </span>
+      {mb.paused_reason ? (
+        <span className="text-[10px] text-rose-300">pausada: {mb.paused_reason}</span>
+      ) : null}
+    </div>
+  );
+}
+
 function OutboundPanel() {
   const [config, setConfig] = useState<AdminOutboundConfigResponse | null>(null);
   const [city, setCity] = useState<string>("");
@@ -208,6 +309,8 @@ function OutboundPanel() {
   const [batchMsgs, setBatchMsgs] = useState<AdminOutboundMessageRow[]>([]);
   const [inboxBusy, setInboxBusy] = useState(false);
   const [enrichMsg, setEnrichMsg] = useState<string | null>(null);
+  const [readiness, setReadiness] = useState<AdminOutboundReadiness | null>(null);
+  const [controlsBusy, setControlsBusy] = useState<number | null>(null);
 
   const loadConfig = useCallback(async () => {
     setLoading(true);
@@ -258,13 +361,7 @@ function OutboundPanel() {
   }, [loadConfig, loadBatches]);
 
   // Auto-refresh leve: fila e caixas mudam sem interaccao do utilizador.
-  useEffect(() => {
-    const id = setInterval(() => {
-      fetchAdminOutboundStatus().then(setStatus).catch(() => undefined);
-      void loadBatches(true);
-    }, 30000);
-    return () => clearInterval(id);
-  }, [loadBatches]);
+  // (o efeito vive depois de `loadReadiness`, para evitar uso antes da declaração)
 
   const toggleBatch = useCallback(
     async (batchId: number) => {
@@ -401,6 +498,117 @@ function OutboundPanel() {
     }
   }, []);
 
+  const loadReadiness = useCallback(async () => {
+    if (!city) {
+      setReadiness(null);
+      return;
+    }
+    try {
+      setReadiness(await fetchAdminOutboundReadiness(city, niche || undefined));
+    } catch {
+      setReadiness(null);
+    }
+  }, [city, niche]);
+
+  useEffect(() => {
+    if (!city) return;
+    let alive = true;
+    fetchAdminOutboundReadiness(city, niche || undefined)
+      .then((r) => {
+        if (alive) setReadiness(r);
+      })
+      .catch(() => {
+        if (alive) setReadiness(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [city, niche]);
+
+  // Auto-refresh leve: fila, caixas e prontos mudam sem interacção.
+  useEffect(() => {
+    const id = setInterval(() => {
+      fetchAdminOutboundStatus().then(setStatus).catch(() => undefined);
+      void loadBatches(true);
+      void loadReadiness();
+    }, 30000);
+    return () => clearInterval(id);
+  }, [loadBatches, loadReadiness]);
+
+  const saveMailbox = useCallback(
+    async (
+      id: number,
+      payload: { daily_cap: number; auto_ramp_enabled: boolean; auto_ramp_max: number }
+    ) => {
+      setControlsBusy(id);
+      setError(null);
+      try {
+        await updateAdminMailboxControls(id, payload);
+        await loadConfig();
+        await loadReadiness();
+      } catch (e) {
+        setError(
+          e instanceof AdminApiError
+            ? `Falha ao guardar caixa (${e.status}): ${e.message}`
+            : "Falha ao guardar a caixa."
+        );
+      } finally {
+        setControlsBusy(null);
+      }
+    },
+    [loadConfig, loadReadiness]
+  );
+
+  const pauseMailbox = useCallback(
+    async (id: number) => {
+      setControlsBusy(id);
+      try {
+        await pauseAdminMailbox(id, "manual");
+        await loadConfig();
+      } catch (e) {
+        setError(e instanceof AdminApiError ? e.message : "Falha ao pausar a caixa.");
+      } finally {
+        setControlsBusy(null);
+      }
+    },
+    [loadConfig]
+  );
+
+  const resumeMailbox = useCallback(
+    async (id: number) => {
+      setControlsBusy(id);
+      try {
+        await resumeAdminMailbox(id);
+        await loadConfig();
+        await loadReadiness();
+      } catch (e) {
+        setError(e instanceof AdminApiError ? e.message : "Falha ao retomar a caixa.");
+      } finally {
+        setControlsBusy(null);
+      }
+    },
+    [loadConfig, loadReadiness]
+  );
+
+  const toggleCityFlag = useCallback(
+    async (key: "send_enabled" | "enrich_enabled", next: boolean) => {
+      if (!city) return;
+      setToggling(true);
+      setError(null);
+      try {
+        await updateAdminOutboundConfig({ city, [key]: next });
+        await loadConfig();
+      } catch (e) {
+        setError(
+          e instanceof AdminApiError ? e.message : "Falha ao atualizar a cidade."
+        );
+      } finally {
+        setToggling(false);
+      }
+    },
+    [city, loadConfig]
+  );
+
   const markReplied = useCallback(async (message: AdminOutboundMessageRow) => {
     if (!message.contact_id) return;
     if (!window.confirm(`Marcar ${message.to_email} como tendo respondido?`)) return;
@@ -536,7 +744,88 @@ function OutboundPanel() {
           </p>
         ) : null}
 
-        {/* config efetiva da cidade */}
+        {/* prontos para envio: inventário real da cidade + nicho */}
+        {readiness ? (
+          <div
+            className="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.04] px-3 py-2.5"
+            data-testid="outbound-readiness"
+          >
+            <div className="flex flex-wrap items-baseline gap-3">
+              <span className="text-[10px] uppercase tracking-wider text-slate-500">
+                Prontos para enviar · {city}
+              </span>
+              <span className="text-2xl font-bold text-emerald-300">
+                {readiness.ready}
+              </span>
+              <span className="text-[11px] text-slate-400">
+                válidos {readiness.valid} · confirmados {readiness.confirmed} ·
+                quarentena {readiness.quarantined}
+              </span>
+              <span className="ml-auto text-[11px] text-slate-400">
+                capacidade hoje: {readiness.capacity_today}
+              </span>
+            </div>
+            {readiness.ready === 0 ? (
+              <p className="mt-1 text-[11px] text-amber-300">
+                Sem contactos novos prontos. O enriquecimento autónomo/importação
+                alimenta esta lista; um lote agora enfileira 0.
+              </p>
+            ) : null}
+            {readiness.by_niche.length > 0 ? (
+              <p className="mt-1 text-[10px] text-slate-500">
+                por nicho:{" "}
+                {readiness.by_niche
+                  .map((n) => `${n.niche_key} ${n.c}`)
+                  .join(" · ")}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
+        {/* config efetiva da cidade + switches desta cidade */}
+        {cityConfig ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() =>
+                void toggleCityFlag(
+                  "send_enabled",
+                  cityConfig.send_enabled !== "1"
+                )
+              }
+              disabled={toggling}
+              data-testid="city-send-toggle"
+              className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold disabled:opacity-50 ${
+                cityConfig.send_enabled === "1"
+                  ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-300"
+                  : "border-white/10 text-slate-400 hover:bg-white/5"
+              }`}
+            >
+              <Send className="h-3.5 w-3.5" />
+              Envio nesta cidade:{" "}
+              {cityConfig.send_enabled === "1" ? "ligado" : "desligado"}
+            </button>
+            <button
+              onClick={() =>
+                void toggleCityFlag(
+                  "enrich_enabled",
+                  cityConfig.enrich_enabled !== "1"
+                )
+              }
+              disabled={toggling}
+              data-testid="city-enrich-toggle"
+              className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold disabled:opacity-50 ${
+                cityConfig.enrich_enabled === "1"
+                  ? "border-indigo-500/50 bg-indigo-500/15 text-indigo-300"
+                  : "border-white/10 text-slate-400 hover:bg-white/5"
+              }`}
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              Enriquecimento nesta cidade:{" "}
+              {cityConfig.enrich_enabled === "1" ? "ligado" : "desligado"}
+            </button>
+          </div>
+        ) : null}
+
         {cityConfig ? (
           <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
             {configRows.map((k) => {
@@ -809,6 +1098,18 @@ function OutboundPanel() {
                 ))}
               </tbody>
             </table>
+            <div className="mt-2 space-y-1">
+              {status.mailboxes.map((mb) => (
+                <MailboxControlRow
+                  key={`${mb.id}-${mb.daily_cap}-${mb.auto_ramp_max}-${mb.auto_ramp_enabled}-${mb.paused_at ?? ""}`}
+                  mb={mb}
+                  busy={controlsBusy === mb.id}
+                  onSave={saveMailbox}
+                  onPause={pauseMailbox}
+                  onResume={resumeMailbox}
+                />
+              ))}
+            </div>
           </div>
         ) : null}
 

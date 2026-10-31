@@ -517,6 +517,14 @@ export interface AdminOutboundStatusMailbox {
   warmup_state: string;
   warmup_days: number;
   last_send_at?: string | null;
+  paused_at?: string | null;
+  paused_reason?: string | null;
+  auto_ramp_enabled?: number;
+  auto_ramp_cap?: number;
+  auto_ramp_max?: number;
+  auto_ramp_stage?: number;
+  auto_ramp_last_step_at?: string | null;
+  auto_ramp_hold_reason?: string | null;
   sent_48h?: number;
   failed_48h?: number;
   skipped_48h?: number;
@@ -677,6 +685,74 @@ export function fetchAdminBillingFunnel(): Promise<AdminBillingFunnel> {
 
 export function fetchAdminOutboundStatus(): Promise<AdminOutboundStatus> {
   return adminFetch<AdminOutboundStatus>("/outbound/status");
+}
+
+export interface AdminOutboundReadiness {
+  city: string;
+  niche: string;
+  total: number;
+  valid: number;
+  confirmed: number;
+  ready: number;
+  quarantined: number;
+  capacity_today: number;
+  queue_blocker?: AdminOutboundQueueBlocker | null;
+  by_niche: Array<{ niche_key: string; c: number }>;
+}
+
+export function fetchAdminOutboundReadiness(
+  city: string,
+  niche?: string | null
+): Promise<AdminOutboundReadiness> {
+  const qs = new URLSearchParams({ city });
+  if (niche) qs.set("niche", niche);
+  return adminFetch<AdminOutboundReadiness>(`/outbound/readiness?${qs.toString()}`);
+}
+
+export interface AdminMailboxControlsResult {
+  status: string;
+  mailbox: AdminOutboundStatusMailbox;
+}
+
+export function updateAdminMailboxControls(
+  mailboxId: number,
+  payload: {
+    daily_cap?: number;
+    auto_ramp_enabled?: boolean;
+    auto_ramp_max?: number;
+  }
+): Promise<AdminMailboxControlsResult> {
+  return adminFetch<AdminMailboxControlsResult>(
+    `/outbound/mailboxes/${mailboxId}/controls`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+}
+
+export function pauseAdminMailbox(
+  mailboxId: number,
+  reason = "manual"
+): Promise<{ status: string; paused_reason: string }> {
+  return adminFetch<{ status: string; paused_reason: string }>(
+    `/outbound/mailboxes/${mailboxId}/pause`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason }),
+    }
+  );
+}
+
+export function resumeAdminMailbox(
+  mailboxId: number
+): Promise<{ status: string }> {
+  return adminFetch<{ status: string }>(
+    `/outbound/mailboxes/${mailboxId}/resume`,
+    { method: "POST" }
+  );
 }
 
 export function triggerAdminOutboundWorker(limit?: number): Promise<AdminOutboundWorkerResult> {
