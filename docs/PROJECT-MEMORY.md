@@ -660,6 +660,32 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Testes**: `tests/test_ingestion_freshness.py` (8) + digest com motivo;
   **916 pytest**, 22 e2e, 83 vitest.
 
+### Fase E — polimento e hardening estrutural (2026-10-31)
+
+- **Next 16.4.3** (React 18 mantido): `npm audit --omit=dev` = **0 vulnerabilidades**
+  (antes 1 critical, 2 high). `viewport`/`themeColor` movidos para o export
+  `viewport`; `middleware.ts` migrado para **`proxy.ts`** (convenção Next 16),
+  com redirect 307 confirmado em produção para `/dashboard` sem cookie.
+- **Índices**: `lead_reveals(user_id, revealed_at)`, `(lead_id)`, `(revealed_date)`,
+  `(refunded, revealed_date)` e `notifications(user_id, read, created_at)`.
+- **Cidades canónicas**: `canonical_served_cities()` dedupa `CHICAGO`/`Chicago`;
+  `/api/metrics/public` passou de `cities_count: 5` para **4** em produção.
+- **Higiene**: removido `_SESSIONS` (dict morto sem leitura); `_scrape_runs` podado
+  a 50; `mark_stale_scraper_runs()` fecha runs presos em `running` no arranque.
+- **Custo**: falhas em `record_outbound_enrichment_call` (Snov/ELV) agora geram
+  `logger.warning` em vez de `pass`.
+- **Admin**: painel “Saúde do motor” (checks + digest), cartão “Funil de checkout”
+  e “marcar resposta” manual por contacto (trava a sequência). `fmtDt` trata UTC
+  naive como UTC.
+- **Segurança**: demo login fail-closed sem `DEMO_PASSWORD` e cookie `SameSite=Lax`;
+  HMAC de clique exige `PUSH_CLICK_SECRET`/`CRON_SECRET` (fallback hardcoded
+  removido); gate de onboarding cobre falha de `/interests`.
+- **Qualidade**: ESLint 9 flat config (`npm run lint` = 0 erros), `pytest-cov`
+  (baseline **66%** do backend), e2e do Admin com conta isolada
+  `e2e-admin@magicleads.app` (grant → auditoria → revoke). **23 e2e**, 83 vitest,
+  **928 pytest**, Ruff global limpo (23 avisos antigos de testes resolvidos,
+  incluindo um teste duplicado `F811` que nunca corria).
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

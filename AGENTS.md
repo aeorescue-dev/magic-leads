@@ -129,6 +129,18 @@ Contexto completo e números medidos: **`docs/PROJECT-MEMORY.md`**. Ler antes de
     último sucesso é **fail**; um `running` >2 h é **warn** (processo preso).
     O digest tem a linha `INGESTAO` com idade, inseridos e captura 24 h.
     Nunca deixar a ingestão falhar em silêncio.
+38. **Next 16 / proxy (Fase E)**: manter `frontend/proxy.ts` (não reintroduzir
+    `middleware.ts`), `viewport` fora de `metadata`, e `outputFileTracingRoot`
+    no `next.config.js`. `npm audit --omit=dev` tem de continuar em **0**.
+    `proxy.ts` protege `/dashboard|/onboarding` e faz rewrite de `/` para `/en`.
+39. **Qualidade (Fase E)**: `npm run lint` (ESLint 9) tem de sair com **0 erros**;
+    `ruff check backend tests --select=E,F,W,I --ignore=E501` tem de estar limpo.
+    Cobertura: `pytest --cov=backend` (baseline 66%). E2E Admin usa
+    `e2e-admin@magicleads.app` **apenas na BD isolada** — nunca criar admin em
+    produção para testes.
+40. **Segredos fail-closed**: sem `DEMO_PASSWORD` o login demo devolve 503;
+    sem `PUSH_CLICK_SECRET`/`CRON_SECRET` nenhum clique é assinado/aceite.
+    Nunca reintroduzir fallback hardcoded de HMAC.
 
 ## Verificação mínima antes de deploy
 ```bash
