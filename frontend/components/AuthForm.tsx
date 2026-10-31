@@ -343,19 +343,24 @@ function AuthFormInner() {
               ? t('auth.passkey.confirming') || 'A confirmar…'
               : t(passkeyLabelKey) || t('auth.passkey.login') || 'Entrar com chave de acesso'}
           </button>
-          {passkeyError && (
-            <p role="alert" className="text-xs text-amber-400 text-center">
-              {passkeyError}
-            </p>
-          )}
+          <p className="text-center text-[11px] text-muted-foreground">
+            {t('auth.passkey.or_password') || 'ou continue com a palavra-passe'}
+          </p>
+        </div>
+      )}
+
+      {/* Fora do bloco do botão: quando `passkey_not_recognized` limpa o hint,
+          o botão desaparece mas a explicação TEM de continuar visível. */}
+      {!isRegister && passkeyError && (
+        <div className="space-y-1">
+          <p role="alert" className="text-xs text-amber-400 text-center">
+            {passkeyError}
+          </p>
           {passkeyDetail && (
             <p className="text-[10px] text-slate-500 text-center break-words" data-testid="passkey-detail">
               {passkeyDetail}
             </p>
           )}
-          <p className="text-center text-[11px] text-muted-foreground">
-            {t('auth.passkey.or_password') || 'ou continue com a palavra-passe'}
-          </p>
         </div>
       )}
 

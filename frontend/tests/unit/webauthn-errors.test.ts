@@ -40,15 +40,18 @@ describe("passkeyErrorFromException", () => {
     );
   });
 
-  it("distingue timeout de cancelamento pelo texto do NotAllowedError", () => {
-    const err = new Error(
+  it("distingue cancelamento de timeout pelo tempo, não pelo texto", () => {
+    // O Chrome inclui sempre "timed out or was not allowed" na mensagem.
+    const boilerplate = new Error(
       "The operation either timed out or was not allowed. See: https://www.w3.org/TR/webauthn-2/"
     );
-    err.name = "NotAllowedError";
-    expect(passkeyErrorFromException(err, "register").code).toBe("timeout");
-    expect(
-      passkeyErrorFromException(domError("NotAllowedError"), "register").code
-    ).toBe("cancelled");
+    boilerplate.name = "NotAllowedError";
+    expect(passkeyErrorFromException(boilerplate, "login", 1200).code).toBe(
+      "cancelled"
+    );
+    expect(passkeyErrorFromException(boilerplate, "login", 60_000).code).toBe(
+      "timeout"
+    );
   });
 
   it("mapeia NotSupportedError para unsupported", () => {

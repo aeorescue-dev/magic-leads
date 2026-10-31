@@ -68,11 +68,13 @@ export class PasskeyError extends Error {
 /**
  * Traduz a DOMException real do browser. Sem isto, um SecurityError (RP ID
  * errado, ex.: preview Vercel) aparecia como "tente novamente" e escondia a
- * causa. `phase` entra só no detalhe técnico.
+ * causa. `elapsedMs` distingue cancelamento de timeout: o Chrome inclui sempre
+ * "timed out or was not allowed" na mensagem, por isso o texto não serve.
  */
 export function passkeyErrorFromException(
   err: unknown,
-  phase: "register" | "login"
+  phase: "register" | "login",
+  elapsedMs = 0
 ): PasskeyError {
   const e = err as { name?: string; message?: string } | null;
   const name = e?.name || "Error";
@@ -81,10 +83,9 @@ export function passkeyErrorFromException(
   };
   switch (name) {
     case "NotAllowedError": {
-      // "timed out" = o gestor de credenciais não respondeu a tempo (típico
-      // quando o telemóvel bloqueia ou já existe uma chave travada). Sem esta
-      // distinção o utilizador via "cancelado" sem ter cancelado nada.
-      const timedOut = /timed out/i.test(e?.message || "");
+      // Rejeição rápida = o utilizador fechou a caixa nativa (cancelou).
+      // Só após ~25 s é que faz sentido falar de tempo limite.
+      const timedOut = elapsedMs >= 25_000;
       return new PasskeyError(
         timedOut ? "timeout" : "cancelled",
         timedOut
@@ -389,10 +390,11 @@ export async function registerPasskey(
   };
 
   let cred: Credential | null;
+  const startedAt = Date.now();
   try {
     cred = await navigator.credentials.create({ publicKey });
   } catch (err) {
-    throw passkeyErrorFromException(err, "register");
+    throw passkeyErrorFromException(err, "register", Date.now() - startedAt);
   }
   if (!cred) throw new PasskeyError("cancelled", "Registo cancelado.");
 
@@ -439,10 +441,11 @@ export async function loginWithPasskey(email?: string): Promise<AuthResponse> {
   };
 
   let cred: Credential | null;
+  const startedAt = Date.now();
   try {
     cred = await navigator.credentials.get({ publicKey });
   } catch (err) {
-    throw passkeyErrorFromException(err, "login");
+    throw passkeyErrorFromException(err, "login", Date.now() - startedAt);
   }
   if (!cred) throw new PasskeyError("no_credential", "Nenhuma passkey encontrada.");
 

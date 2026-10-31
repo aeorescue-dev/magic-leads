@@ -145,4 +145,79 @@ test.describe("passkeys", () => {
       .toBe(1);
     await expect.poll(async () => (await ids())[0]).not.toBe(before[0]);
   });
+
+  test("chave antiga (user-32) explica que não pertence à conta", async ({ page }) => {
+    await installApiProxy(page, { token: E2E_CYCLE_TOKEN });
+    await page.context().addCookies([
+      { name: "garimpador_auth", value: E2E_CYCLE_TOKEN, url: LOCAL_ORIGIN },
+      { name: "garimpador_token", value: E2E_CYCLE_TOKEN, url: LOCAL_ORIGIN },
+    ]);
+    const client = await page.context().newCDPSession(page);
+    await client.send("WebAuthn.enable");
+    await client.send("WebAuthn.addVirtualAuthenticator", {
+      options: {
+        protocol: "ctap2",
+        transport: "internal",
+        hasResidentKey: true,
+        hasUserVerification: true,
+        isUserVerified: true,
+        automaticPresenceSimulation: true,
+      },
+    });
+
+    // Regista normalmente, depois remove SÓ no servidor: fica a credencial
+    // "órfã" no autenticador (o caso user-32 do Google Password Manager).
+    await page.goto(`${LOCAL_ORIGIN}/en/dashboard/settings`);
+    await expect(page.getByTestId("passkey-settings")).toBeVisible({ timeout: 20000 });
+    const existing = await page.evaluate(async () => {
+      const res = await fetch("/api/users/me/passkeys", { credentials: "include" });
+      const data = await res.json();
+      return (data.passkeys || []).map((p: any) => p.credential_id as string);
+    });
+    for (const id of existing) {
+      await page.evaluate(
+        async (credentialId) => {
+          await fetch(`/api/users/me/passkeys/${encodeURIComponent(credentialId)}`, {
+            method: "DELETE",
+            credentials: "include",
+          });
+        },
+        id
+      );
+    }
+    await page.reload();
+    await page.getByTestId("passkey-register").click();
+    await expect(page.getByTestId("passkey-ok")).toBeVisible({ timeout: 20000 });
+    await page.evaluate(async () => {
+      const res = await fetch("/api/users/me/passkeys", { credentials: "include" });
+      const data = await res.json();
+      for (const p of data.passkeys || []) {
+        await fetch(`/api/users/me/passkeys/${encodeURIComponent(p.credential_id)}`, {
+          method: "DELETE",
+          credentials: "include",
+        });
+      }
+    });
+
+    // Sessão limpa (o hint local permanece → o botão continua visível).
+    await page.addInitScript(() => {
+      try {
+        window.localStorage.removeItem("garimpador.token");
+      } catch {
+        /* noop */
+      }
+    });
+    await page.goto(`${LOCAL_ORIGIN}/en/auth`);
+    await expect(page.getByTestId("passkey-login")).toBeVisible({ timeout: 20000 });
+    await page.getByTestId("passkey-login").click();
+
+    await expect(
+      page.getByText(/isn't linked to the account|não está associada à conta/i)
+    ).toBeVisible({ timeout: 20000 });
+    // O botão desaparece (hint limpo), mas a explicação fica visível.
+    await expect(page.getByTestId("passkey-login")).toHaveCount(0);
+    await expect(page.getByTestId("passkey-detail")).toContainText(
+      /passkey_not_recognized/
+    );
+  });
 });

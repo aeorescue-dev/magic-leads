@@ -289,16 +289,23 @@ def test_login_verify_creates_session(client, monkeypatch):
 
 
 def test_login_verify_rejects_unknown_credential(client):
-    challenge = "auth-unknown"
+    """Credencial órfã (ex.: user-32 antigo no GPM) → código específico.
+
+    O cliente usa `passkey_not_recognized` para explicar que a chave não
+    pertence à conta e mandar entrar com a palavra-passe / apagar a antiga.
+    """
+    challenge = bytes_to_base64url(b"auth-unknown")
     db_service._service.create_webauthn_challenge(challenge, "auth")
     r = client.post(
         "/api/auth/webauthn/login/verify",
+        headers={"Origin": ORIGIN},
         json={
             "id": "does-not-exist",
             "response": {"clientDataJSON": _client_data(challenge)},
         },
     )
     assert r.status_code == 401
+    assert r.json()["detail"]["error"] == "passkey_not_recognized"
 
 
 def test_list_and_delete_passkeys(client):
