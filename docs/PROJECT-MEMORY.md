@@ -805,6 +805,24 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   transports serializáveis), vitest do `timeout`, e2e de substituição garante
   **1** credencial com id novo. **944 pytest**, **93 vitest**, **28 e2e**.
 
+### UX — cancelamento e chave antiga (2026-10-31)
+
+- **Cancelar ≠ timeout**: o Chrome devolve sempre `NotAllowedError` com
+  “timed out or was not allowed”, mesmo quando o utilizador fecha a caixa
+  nativa. A distinção passou a ser pelo tempo até à rejeição: <25 s →
+  `cancelled` (“Login por biometria cancelado”, curto); ≥25 s → `timeout` com
+  instruções. O detalhe técnico continua disponível.
+- **Chave antiga (`user-32`)**: ao escolher no Google Password Manager uma
+  credencial que o servidor não conhece, o `/verify` devolve
+  `passkey_not_recognized`; a UI explica que a chave não pertence à conta,
+  manda entrar com a palavra-passe e ativar uma nova, e limpa o hint local.
+  O bloco de erro passou para **fora** do bloco do botão — antes, limpar o hint
+  desmontava o botão e a explicação desaparecia com ele.
+- **Testes**: e2e novo simula exatamente isso (regista, apaga só no servidor,
+  escolhe a órfã, confirma a mensagem e que o botão desaparece mas o detalhe
+  fica); vitest cobre a distinção por tempo. **944 pytest**, **93 vitest**,
+  **29 e2e**.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

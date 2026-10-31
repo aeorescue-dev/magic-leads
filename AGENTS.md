@@ -171,10 +171,16 @@ Contexto completo e números medidos: **`docs/PROJECT-MEMORY.md`**. Ler antes de
     “Chave ativa neste dispositivo” e “Substituir”. A substituição pede
     `replace_credential_id` (a credencial antiga fica **fora** de
     `excludeCredentials`, senão o Android devolve `NotAllowedError`/timeout),
-    cria a nova e só então apaga a antiga no servidor. `NotAllowedError` com
-    “timed out” no texto é `timeout`, não cancelamento. `_wa_descriptors` tem de
+    cria a nova e só então apaga a antiga no servidor. `_wa_descriptors` tem de
     passar `AuthenticatorTransport` (enum) — strings cruas rebentam o
     `options_to_json` assim que exista uma credencial.
+44. **Passkeys — feedback de cancelamento**: o Chrome inclui sempre “timed out
+    or was not allowed” na mensagem, por isso o texto não distingue cancelar de
+    expirar. A distinção é pelo **tempo**: rejeição <25 s → `cancelled` (copy
+    curta “Login por biometria cancelado”); ≥25 s → `timeout` com instruções.
+    O bloco de erro do login fica **fora** do bloco do botão: ao limpar o hint
+    (`passkey_not_recognized`) o botão desaparece, mas a explicação e o detalhe
+    técnico têm de continuar visíveis.
 
 ## Verificação mínima antes de deploy
 ```bash
