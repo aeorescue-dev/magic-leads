@@ -69,9 +69,18 @@ def _iso(dt: datetime) -> str:
 def _parse(value: Optional[str]) -> Optional[datetime]:
     if not value:
         return None
+    text = str(value).strip()
+    # ISO 8601 real (utcnow().isoformat() inclui microssegundos e pode ter Z).
+    try:
+        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt.replace(tzinfo=timezone.utc)
+    except ValueError:
+        pass
     for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
         try:
-            return datetime.strptime(value, fmt).replace(tzinfo=timezone.utc)
+            return datetime.strptime(text, fmt).replace(tzinfo=timezone.utc)
         except ValueError:
             continue
     return None

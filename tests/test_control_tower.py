@@ -113,3 +113,10 @@ def test_parse_aceita_formatos_do_sqlite_e_iso():
     assert ct._parse("2026-10-28") is not None
     assert ct._parse("lixo") is None
     assert ct._parse(None) is None
+
+
+def test_parse_aceita_microssegundos_do_utcnow_isoformat():
+    """Regressão do falso 'sem data de conclusão' (31/10)."""
+    parsed = ct._parse("2026-10-30T22:50:53.145799")
+    assert parsed is not None
+    assert parsed.year == 2026 and parsed.minute == 50

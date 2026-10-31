@@ -106,6 +106,9 @@ class Settings(BaseSettings):
     # Scheduler interno (independente do GH Actions — redundância no Railway)
     SCRAPER_SELF_SCHEDULED: bool = True   # True = scheduler interno roda a cada N horas
     SCRAPER_INTERVAL_HOURS: int = 6       # Intervalo em horas entre varreduras agendadas
+    # Fase E/incidente: uma varredura que exceda este limite é cancelada e
+    # marcada como error (liberta o scheduler e gera alerta crítico).
+    SCRAPER_MAX_HOURS: float = 3.0
     # Sweep de holds/reveals dentro do processo. Independe do GitHub Actions, que
     # falhou 6 execucoes seguidas (canceladas na fila, 0 passos).
     HOLD_WATCHDOG_INTERVAL_MIN: int = 15

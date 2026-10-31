@@ -1591,7 +1591,7 @@ async def run_scraper(
         "started_at": utcnow().isoformat(),
         "inserted": 0, "total_raw": 0, "status": "running", "error": None,
     })
-    asyncio.create_task(_scrape_worker(run_id, max_cities, hours_override=hours))
+    asyncio.create_task(_run_scrape_guarded(run_id, max_cities, hours_override=hours))
     return JSONResponse(status_code=202, content={
         "status": "started", "run_id": run_id,
         "note": "Run em background; acompanhe em GET /api/scraper/status",
@@ -3688,6 +3688,70 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
         await db_service.record_scrape_run(state)
 
 
+async def _run_scrape_guarded(
+    run_id: str, max_cities: int = 8, hours_override: int = None
+) -> None:
+    """Executa `_scrape_worker` com timeout duro e auto-recuperação.
+
+    Um run que não termina (fonte pendurada, deadlock, tarefa zombie) deixa o
+    scheduler permanentemente em "já está a correr". Ao exceder
+    `SCRAPER_MAX_HOURS`, cancelamos, marcamos `error`, gravamos um system_alert
+    CRITICAL e disparamos a Control Tower (alerta vermelho imediato).
+    """
+    timeout_h = max(0.25, float(getattr(settings, "SCRAPER_MAX_HOURS", 3) or 3))
+    try:
+        await asyncio.wait_for(
+            _scrape_worker(run_id, max_cities, hours_override=hours_override),
+            timeout=timeout_h * 3600,
+        )
+    except asyncio.TimeoutError:
+        state = _scrape_runs.get(run_id) or {
+            "run_id": run_id,
+            "trigger": "unknown",
+            "started_at": utcnow().isoformat(),
+            "inserted": 0,
+            "total_raw": 0,
+        }
+        state.update(
+            status="error",
+            error=f"timeout após {timeout_h:g}h sem concluir",
+            running=False,
+            finished_at=utcnow().isoformat(),
+        )
+        _remember_scrape_run(state)
+        message = (
+            f"SCRAPER TIMEOUT: run {run_id} excedeu {timeout_h:g}h e foi "
+            "cancelado. Scheduler libertado; verificar fonte/BD."
+        )
+        logger.critical(message)
+        try:
+            await db_service.record_scrape_run(state)
+        except Exception as e:  # noqa: BLE001
+            logger.error("Falha ao persistir run em timeout: %s", e)
+        try:
+            await db_service.record_system_alert(
+                level="critical",
+                code="SCRAPER_TIMEOUT",
+                message=message,
+                context={
+                    "run_id": run_id,
+                    "timeout_hours": timeout_h,
+                    "inserted": state.get("inserted"),
+                    "started_at": state.get("started_at"),
+                },
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.error("Falha ao registar alerta de timeout: %s", e)
+        try:
+            # Reavalia a saúde já: o check de ingestão passa a fail (run error)
+            # e a Control Tower envia o alerta vermelho imediato.
+            await control_tower.run_health_checks()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Control Tower não conseguiu avaliar o timeout: %s", e)
+    except asyncio.CancelledError:
+        raise
+
+
 # ------------------------------------------------------------------
 # Scheduler interno — robustez no Railway (independe do GH Actions).
 # Roda a varredura a cada SCRAPER_INTERVAL_HOURS horas, reutilizando
@@ -3711,7 +3775,7 @@ def _scheduled_scrape(max_cities: int = 8, hours_override: int = None):
         "inserted": 0, "total_raw": 0, "status": "running", "error": None,
         "trigger": "scheduler",
     })
-    asyncio.create_task(_scrape_worker(run_id, max_cities, hours_override=hours_override))
+    asyncio.create_task(_run_scrape_guarded(run_id, max_cities, hours_override=hours_override))
     logger.info(f"Scheduler: varredura disparada [run {run_id}]" + (f" com hours={hours_override}" if hours_override else ""))
 
 
