@@ -272,6 +272,10 @@ class Settings(BaseSettings):
     # HTTP para uma tarefa de background com estado em SQLite e retry/backoff.
     # Fail-closed: sem VPS_WORKER_URL cada job termina em no_email/failed.
     ENRICH_QUEUE_ENABLED: bool = True
+    # Fase 3: scheduler autónomo de entidades (OSM + SMTP), 24/7.
+    ENRICH_SCHEDULER_ENABLED: bool = True
+    ENRICH_ENTITY_CITIES: str = "NYC,CHICAGO,BOSTON"
+    ENRICH_ENTITIES_PER_CITY_DAY: int = 300
 
     # Control Tower: saude do motor (15 min), backup off-site e digest diario.
     CONTROL_TOWER_ENABLED: bool = True

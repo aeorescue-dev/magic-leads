@@ -208,3 +208,14 @@ def test_endpoints_recusam_nao_admin(client):
         "/api/admin/outbound/mailboxes/1/controls", json={"daily_cap": 5}
     )
     assert r.status_code == 401
+
+
+def test_contractors_stats_por_cidade(client):
+    r = client.get(
+        "/api/admin/contractors/stats?city=NYC", headers=_headers()
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "NYC" in body["cities"]
+    assert "by_status" in body["cities"]["NYC"]["counts"]
+    assert "jobs_today" in body["cities"]["NYC"]["state"]

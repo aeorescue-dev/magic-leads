@@ -942,6 +942,11 @@ CREATE TABLE IF NOT EXISTS contractor_entities (
   phone TEXT,
   status TEXT NOT NULL DEFAULT 'new',
   source_refs TEXT,
+  domain_checked_at TEXT,
+  domain_attempts INTEGER NOT NULL DEFAULT 0,
+  email_checked_at TEXT,
+  email_attempts INTEGER NOT NULL DEFAULT 0,
+  quarantine_reason TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
@@ -1958,6 +1963,20 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
                     "UPDATE sending_mailboxes SET auth_ref=? WHERE id=?",
                     (enc, row["id"]),
                 )
+
+    # Fase 3: colunas de tentativa/quarentena das entidades.
+    ent_cols = {
+        r["name"] for r in conn.execute("PRAGMA table_info(contractor_entities)")
+    }
+    for name, ddl in (
+        ("domain_checked_at", "TEXT"),
+        ("domain_attempts", "INTEGER NOT NULL DEFAULT 0"),
+        ("email_checked_at", "TEXT"),
+        ("email_attempts", "INTEGER NOT NULL DEFAULT 0"),
+        ("quarantine_reason", "TEXT"),
+    ):
+        if name not in ent_cols:
+            conn.execute(f"ALTER TABLE contractor_entities ADD COLUMN {name} {ddl}")
 
 
 
@@ -3787,6 +3806,153 @@ class DatabaseService:
             )
             conn.commit()
             return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    # ------------------------------------------- Fase 3: scheduler de entidades
+    def list_entities_for_domain(self, city: str, limit: int = 4) -> List[dict]:
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM contractor_entities "
+                "WHERE UPPER(TRIM(city))=? AND status='new' "
+                "AND COALESCE(domain,'')='' AND domain_attempts < 2 "
+                "ORDER BY id LIMIT ?",
+                (city.strip().upper(), max(1, min(int(limit), 50))),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def list_entities_for_email(self, city: str, limit: int = 4) -> List[dict]:
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM contractor_entities "
+                "WHERE UPPER(TRIM(city))=? AND status='domain' "
+                "AND COALESCE(domain,'')<>'' AND COALESCE(email,'')='' "
+                "AND email_attempts < 2 "
+                "ORDER BY id LIMIT ?",
+                (city.strip().upper(), max(1, min(int(limit), 50))),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def mark_contractor_domain_attempt(
+        self,
+        entity_id: int,
+        domain: Optional[str] = None,
+        confidence: float = 0.0,
+        max_attempts: int = 2,
+    ) -> dict:
+        conn = get_connection()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT domain_attempts FROM contractor_entities WHERE id=?",
+                (int(entity_id),),
+            ).fetchone()
+            attempts = int((row["domain_attempts"] if row else 0) or 0) + 1
+            if domain:
+                conn.execute(
+                    "UPDATE contractor_entities SET domain=?, domain_confidence=?, "
+                    "status='domain', domain_checked_at=CURRENT_TIMESTAMP, "
+                    "domain_attempts=?, quarantine_reason=NULL, "
+                    "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (domain, float(confidence), attempts, int(entity_id)),
+                )
+            else:
+                status = "quarantined" if attempts >= max_attempts else "new"
+                conn.execute(
+                    "UPDATE contractor_entities SET domain_checked_at=CURRENT_TIMESTAMP, "
+                    "domain_attempts=?, status=?, "
+                    "quarantine_reason=CASE WHEN ?='quarantined' THEN 'no_domain' "
+                    "ELSE NULL END, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (attempts, status, status, int(entity_id)),
+                )
+            conn.commit()
+            return {"attempts": attempts, "status": status if not domain else "domain"}
+        finally:
+            conn.close()
+
+    def mark_contractor_email_attempt(
+        self,
+        entity_id: int,
+        email: Optional[str] = None,
+        email_status: str = "unknown",
+        max_attempts: int = 2,
+    ) -> dict:
+        conn = get_connection()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT email_attempts FROM contractor_entities WHERE id=?",
+                (int(entity_id),),
+            ).fetchone()
+            attempts = int((row["email_attempts"] if row else 0) or 0) + 1
+            ok = bool(email) and email_status in ("valid", "verified")
+            catch_all = email_status == "catch_all"
+            if ok:
+                status = "ready"
+                reason = None
+            elif catch_all or attempts >= max_attempts:
+                status = "quarantined"
+                reason = "catch_all" if catch_all else "no_email"
+            else:
+                status = "domain"
+                reason = None
+            conn.execute(
+                "UPDATE contractor_entities SET email=COALESCE(?, email), "
+                "email_status=?, status=?, email_checked_at=CURRENT_TIMESTAMP, "
+                "email_attempts=?, quarantine_reason=?, updated_at=CURRENT_TIMESTAMP "
+                "WHERE id=?",
+                (email, email_status, status, attempts, reason, int(entity_id)),
+            )
+            conn.commit()
+            return {"attempts": attempts, "status": status}
+        finally:
+            conn.close()
+
+    def get_city_enrichment_state(self, city: str, day: str) -> dict:
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT * FROM city_enrichment_state WHERE city=?",
+                (city.strip().upper(),),
+            ).fetchone()
+            if not row:
+                return {"city": city.upper(), "day": day, "jobs_today": 0,
+                        "last_entity_id": 0}
+            data = dict(row)
+            if data.get("day") != day:
+                conn.execute(
+                    "UPDATE city_enrichment_state SET day=?, jobs_today=0, "
+                    "updated_at=CURRENT_TIMESTAMP WHERE city=?",
+                    (day, city.strip().upper()),
+                )
+                conn.commit()
+                data["day"] = day
+                data["jobs_today"] = 0
+            return data
+        finally:
+            conn.close()
+
+    def bump_city_enrichment_state(
+        self, city: str, day: str, jobs: int, last_entity_id: Optional[int] = None
+    ) -> None:
+        conn = get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO city_enrichment_state (city, day, jobs_today, last_entity_id, "
+                "last_run_at, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(city) DO UPDATE SET day=excluded.day, "
+                "jobs_today=excluded.jobs_today, "
+                "last_entity_id=COALESCE(excluded.last_entity_id, city_enrichment_state.last_entity_id), "
+                "last_run_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP",
+                (city.strip().upper(), day, int(jobs), last_entity_id),
+            )
+            conn.commit()
         finally:
             conn.close()
 
@@ -12336,6 +12502,49 @@ class AsyncDatabaseService:
     ) -> bool:
         return await anyio.to_thread.run_sync(
             self._service.set_contractor_entity_email, entity_id, email, email_status
+        )
+
+    async def list_entities_for_domain(self, city: str, limit: int = 4) -> List[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.list_entities_for_domain, city, limit
+        )
+
+    async def list_entities_for_email(self, city: str, limit: int = 4) -> List[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.list_entities_for_email, city, limit
+        )
+
+    async def mark_contractor_domain_attempt(
+        self, entity_id: int, domain: Optional[str] = None, confidence: float = 0.0,
+        max_attempts: int = 2,
+    ) -> dict:
+        return await anyio.to_thread.run_sync(
+            lambda: self._service.mark_contractor_domain_attempt(
+                entity_id, domain, confidence, max_attempts
+            )
+        )
+
+    async def mark_contractor_email_attempt(
+        self, entity_id: int, email: Optional[str] = None,
+        email_status: str = "unknown", max_attempts: int = 2,
+    ) -> dict:
+        return await anyio.to_thread.run_sync(
+            lambda: self._service.mark_contractor_email_attempt(
+                entity_id, email, email_status, max_attempts
+            )
+        )
+
+    async def get_city_enrichment_state(self, city: str, day: str) -> dict:
+        return await anyio.to_thread.run_sync(
+            self._service.get_city_enrichment_state, city, day
+        )
+
+    async def bump_city_enrichment_state(
+        self, city: str, day: str, jobs: int, last_entity_id: Optional[int] = None
+    ) -> None:
+        return await anyio.to_thread.run_sync(
+            self._service.bump_city_enrichment_state,
+            city, day, jobs, last_entity_id,
         )
 
     async def get_outbound_counter(self, city: str, day: str) -> dict:

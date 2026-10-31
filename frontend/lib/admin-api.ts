@@ -702,6 +702,41 @@ export interface AdminOutboundReadiness {
   by_niche: Array<{ niche_key: string; c: number }>;
 }
 
+export interface AdminContractorCityStats {
+  counts: {
+    city: string;
+    total: number;
+    by_status: Record<string, number>;
+  };
+  state: {
+    city: string;
+    day: string;
+    jobs_today: number;
+    last_entity_id?: number;
+    last_run_at?: string | null;
+  };
+  enrich_enabled: boolean;
+}
+
+export interface AdminContractorStats {
+  day: string;
+  cities: Record<string, AdminContractorCityStats>;
+}
+
+export function fetchAdminContractorStats(
+  city?: string | null
+): Promise<AdminContractorStats> {
+  const qs = city ? `?city=${encodeURIComponent(city)}` : "";
+  return adminFetch<AdminContractorStats>(`/contractors/stats${qs}`);
+}
+
+export function runAdminContractorEnrichment(
+  city?: string | null
+): Promise<{ status: string; processed: number; cities: Record<string, unknown> }> {
+  const qs = city ? `?city=${encodeURIComponent(city)}` : "";
+  return adminFetch(`/contractors/run${qs}`, { method: "POST" });
+}
+
 export function fetchAdminOutboundReadiness(
   city: string,
   niche?: string | null

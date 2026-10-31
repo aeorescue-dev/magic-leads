@@ -911,6 +911,27 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Testes**: 4 novos (extratores + dedupe na BD); suite **988 pytest**.
 - Dallas continua pausada até haver fonte pública de permits.
 
+### Fase 3 — Scheduler autónomo de enriquecimento (2026-10-31)
+
+- **`enrichment_scheduler.py`**: loop 24/7 em processo (60 s), concorrência
+  global 4, quota **300/cidade/dia** (`ENRICH_ENTITIES_PER_CITY_DAY`), cidades
+  `NYC,CHICAGO,BOSTON` (`ENRICH_ENTITY_CITIES`); Dallas fora até haver fonte.
+  Só atua com `enrich_enabled=1` na cidade; nunca envia e-mail.
+- **Estágios**: `new` → OSM/Overpass (throttle ~1,1 s) → `domain` → SMTP RCPT
+  com prova de catch-all → `ready`; sem site/catch-all/sem e-mail após 2
+  tentativas → `quarantined` com `quarantine_reason`.
+- **Persistência**: `domain_checked_at/attempts`, `email_checked_at/attempts`,
+  `quarantine_reason`; cursor/quota em `city_enrichment_state`.
+- **Admin**: bloco “Entidades” com `new/domain/ready/quarantined`, quota do dia
+  e botão “Correr enriquecimento”; endpoints `/api/admin/contractors/stats|run|
+  entities`.
+- **Reconciliação**: `contractor_release_tracking/penalties/metrics` são
+  métricas operacionais de liberação/penalidade (45/0/5 linhas), **não**
+  identidade; não foram fundidas em `contractor_entities` para não misturar
+  conceitos. Ficam como histórico operacional.
+- **Testes**: 5 scheduler (domain→email→ready, sem domínio 2×→quarentena,
+  catch-all, cidade desligada, quota) + 1 stats. Suite **994 pytest**.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

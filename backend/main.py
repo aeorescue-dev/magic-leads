@@ -92,6 +92,7 @@ from .services import (
     contractor_ingest,
     control_tower,
     enrichment_queue,
+    enrichment_scheduler,
     freshness,
     geo_lookup,
     inbox_sync,
@@ -2337,6 +2338,55 @@ async def admin_outbound_readiness(
     return data
 
 
+@app.get("/api/admin/contractors/stats")
+async def admin_contractor_stats(
+    city: str = "", _admin: dict = Depends(_require_admin_user)
+):
+    """Contagens por estágio (new/domain/ready/quarantined) por cidade."""
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    targets = (
+        [city.strip().upper()]
+        if city.strip()
+        else list(enrichment_scheduler.cities())
+    )
+    out = {}
+    for target in targets:
+        out[target] = {
+            "counts": await db_service.contractor_entity_counts(target),
+            "state": await db_service.get_city_enrichment_state(target, day),
+            "enrich_enabled": (
+                await db_service.get_outbound_config(target)
+            ).get("enrich_enabled")
+            == "1",
+        }
+    return {"day": day, "cities": out}
+
+
+@app.post("/api/admin/contractors/run")
+async def admin_contractor_run(
+    city: str | None = None, _admin: dict = Depends(_require_admin_user)
+):
+    """Força um ciclo do scheduler (útil para validação; respeita quotas)."""
+    result = await enrichment_scheduler.run_once(
+        cities_override=[city.strip().upper()] if city else None
+    )
+    return result
+
+
+@app.get("/api/admin/contractors/entities")
+async def admin_contractor_entities(
+    city: str = "",
+    status: str = "",
+    limit: int = 50,
+    _admin: dict = Depends(_require_admin_user),
+):
+    return {
+        "entities": await db_service.list_contractor_entities(
+            city or None, status or None, limit
+        )
+    }
+
+
 @app.post("/api/admin/outbound/mailboxes/{mailbox_id}/controls")
 async def admin_mailbox_controls(
     mailbox_id: int,
@@ -4160,6 +4210,12 @@ async def _lifespan(app):
         )
     else:
         logger.info("[OUTBOUND] Worker desativado por OUTBOUND_WORKER_ENABLED=0")
+
+    # Fase 3: scheduler autónomo de entidades (só atua com enrich_enabled=1).
+    if getattr(settings, "ENRICH_SCHEDULER_ENABLED", True):
+        _enrich_task = asyncio.create_task(enrichment_scheduler.scheduler_loop())
+    else:
+        logger.info("[ENRICH-SCHED] Desativado por ENRICH_SCHEDULER_ENABLED=0")
 
     # Control Tower (Etapa 1): saude a cada 15 min, backup diario off-site e
     # digest diario. Fail-soft: qualquer falha aqui nunca derruba a app.

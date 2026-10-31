@@ -84,6 +84,8 @@ import {
   fetchAdminAccessAudit,
   fetchAdminOutboundHealth,
   fetchAdminOutboundReadiness,
+  fetchAdminContractorStats,
+  runAdminContractorEnrichment,
   updateAdminMailboxControls,
   pauseAdminMailbox,
   resumeAdminMailbox,
@@ -94,6 +96,7 @@ import {
   type AdminAccessAuditEntry,
   type AdminOutboundHealth,
   type AdminOutboundReadiness,
+  type AdminContractorStats,
   type AdminBillingFunnel,
 } from "@/lib/admin-api";
 import { AUTH_TOKEN_KEY } from "@/lib/api-client";
@@ -362,6 +365,8 @@ function OutboundPanel() {
   const [inboxBusy, setInboxBusy] = useState(false);
   const [enrichMsg, setEnrichMsg] = useState<string | null>(null);
   const [readiness, setReadiness] = useState<AdminOutboundReadiness | null>(null);
+  const [contractorStats, setContractorStats] = useState<AdminContractorStats | null>(null);
+  const [enrichBusy, setEnrichBusy] = useState(false);
   const [controlsBusy, setControlsBusy] = useState<number | null>(null);
 
   const loadConfig = useCallback(async () => {
@@ -562,6 +567,37 @@ function OutboundPanel() {
     }
   }, [city, niche]);
 
+  const loadContractorStats = useCallback(async () => {
+    if (!city) {
+      setContractorStats(null);
+      return;
+    }
+    try {
+      setContractorStats(await fetchAdminContractorStats(city));
+    } catch {
+      setContractorStats(null);
+    }
+  }, [city]);
+
+  const runEnrichment = useCallback(async () => {
+    if (!city) return;
+    setEnrichBusy(true);
+    setError(null);
+    try {
+      await runAdminContractorEnrichment(city);
+      await loadContractorStats();
+      await loadReadiness();
+    } catch (e) {
+      setError(
+        e instanceof AdminApiError
+          ? e.message
+          : "Falha ao correr o enriquecimento."
+      );
+    } finally {
+      setEnrichBusy(false);
+    }
+  }, [city, loadContractorStats, loadReadiness]);
+
   useEffect(() => {
     if (!city) return;
     let alive = true;
@@ -577,15 +613,31 @@ function OutboundPanel() {
     };
   }, [city, niche]);
 
+  useEffect(() => {
+    if (!city) return;
+    let alive = true;
+    fetchAdminContractorStats(city)
+      .then((r) => {
+        if (alive) setContractorStats(r);
+      })
+      .catch(() => {
+        if (alive) setContractorStats(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [city]);
+
   // Auto-refresh leve: fila, caixas e prontos mudam sem interacção.
   useEffect(() => {
     const id = setInterval(() => {
       fetchAdminOutboundStatus().then(setStatus).catch(() => undefined);
       void loadBatches(true);
       void loadReadiness();
+      void loadContractorStats();
     }, 30000);
     return () => clearInterval(id);
-  }, [loadBatches, loadReadiness]);
+  }, [loadBatches, loadReadiness, loadContractorStats]);
 
   const saveMailbox = useCallback(
     async (
@@ -855,6 +907,50 @@ function OutboundPanel() {
               </p>
             ) : null}
           </div>
+        ) : null}
+
+        {/* entidades da Fase 2/3: contagens por estágio */}
+        {contractorStats?.cities[city?.toUpperCase()] ? (
+          (() => {
+            const stats = contractorStats.cities[city.toUpperCase()];
+            const by = stats.counts.by_status || {};
+            return (
+              <div
+                className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2.5"
+                data-testid="contractor-stats"
+              >
+                <div className="flex flex-wrap items-baseline gap-3 text-[11px] text-slate-400">
+                  <span className="text-[10px] uppercase tracking-wider text-slate-500">
+                    Entidades · {stats.counts.city}
+                  </span>
+                  <span>
+                    novas <b className="text-slate-200">{by.new ?? 0}</b>
+                  </span>
+                  <span>
+                    com site <b className="text-sky-300">{by.domain ?? 0}</b>
+                  </span>
+                  <span>
+                    prontas <b className="text-emerald-300">{by.ready ?? 0}</b>
+                  </span>
+                  <span>
+                    quarentena <b className="text-amber-300">{by.quarantined ?? 0}</b>
+                  </span>
+                  <span className="ml-auto">
+                    hoje {stats.state.jobs_today}/300 · enriquecimento{" "}
+                    {stats.enrich_enabled ? "ligado" : "desligado"}
+                  </span>
+                  <button
+                    onClick={() => void runEnrichment()}
+                    disabled={enrichBusy || !stats.enrich_enabled}
+                    data-testid="run-enrichment"
+                    className="rounded border border-indigo-500/40 bg-indigo-500/10 px-2 py-0.5 font-semibold text-indigo-300 hover:bg-indigo-500/20 disabled:opacity-40"
+                  >
+                    {enrichBusy ? "A enriquecer…" : "Correr enriquecimento"}
+                  </button>
+                </div>
+              </div>
+            );
+          })()
         ) : null}
 
         {/* config efetiva da cidade + switches desta cidade */}
