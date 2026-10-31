@@ -15,7 +15,26 @@ import { E2E_CYCLE_TOKEN, FRONTEND_ORIGIN, installApiProxy } from "./api-proxy";
 const LOCAL_ORIGIN = FRONTEND_ORIGIN.replace("127.0.0.1", "localhost");
 
 test.describe("passkeys", () => {
-  test("regista Face ID e entra sem palavra-passe", async ({ page }) => {
+  test("Android mostra impressão digital, nunca Face ID", async ({ page }) => {
+    await installApiProxy(page, { token: E2E_CYCLE_TOKEN });
+    await page.addInitScript(() => {
+      // Android real: biometria primária é a impressão digital / bloqueio.
+      Object.defineProperty(navigator, "userAgent", {
+        get: () =>
+          "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 " +
+          "Chrome/140.0.0.0 Mobile Safari/537.36",
+      });
+      window.localStorage.setItem("garimpador.passkey.enabled", "1");
+    });
+
+    await page.goto("/pt/auth");
+    const button = page.getByTestId("passkey-login");
+    await expect(button).toBeVisible({ timeout: 20000 });
+    await expect(button).toContainText(/impressão digital/i);
+    await expect(button).not.toContainText(/Face ID/i);
+  });
+
+  test("regista chave de acesso e entra sem palavra-passe", async ({ page }) => {
     await installApiProxy(page, { token: E2E_CYCLE_TOKEN });
     // O proxy semeia cookies para 127.0.0.1; esta origem é localhost.
     await page.context().addCookies([

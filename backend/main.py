@@ -40,7 +40,6 @@ from webauthn import (
 )
 from webauthn.helpers import base64url_to_bytes, bytes_to_base64url
 from webauthn.helpers.structs import (
-    AuthenticatorAttachment,
     AuthenticatorSelectionCriteria,
     AuthenticatorTransport,
     PublicKeyCredentialDescriptor,
@@ -5022,8 +5021,17 @@ def _wa_error(status_code: int, code: str, message: str) -> HTTPException:
 
 
 def _wa_user_handle(user_id: int) -> bytes:
-    """Handle opaco e estável (não expor o id sequencial ao autenticador)."""
-    return hashlib.sha256(f"magic-leads-webauthn:{int(user_id)}".encode()).digest()
+    """Handle opaco e estável (não expor o id sequencial ao autenticador).
+
+    v2: a v1 colidia com credenciais órfãs deixadas por registos que falharam
+    no verify (o Google Password Manager mostrou "Usar chave de acesso salva?"
+    para um `user-32` que o servidor não conhecia). O handle é opaco e o login
+    resolve a conta pelo `credential_id`, por isso mudar de versão não invalida
+    credenciais já gravadas.
+    """
+    return hashlib.sha256(
+        f"magic-leads-webauthn:v2:{int(user_id)}".encode()
+    ).digest()
 
 
 def _wa_label(request: Request) -> str:
@@ -5091,17 +5099,29 @@ async def webauthn_register_options(
 ):
     """Inicia o registo de uma passkey para o utilizador autenticado."""
     rp_id, origin = _wa_verify_context(request)
+    # `_get_current_user` só devolve o id (dependência leve usada por toda a
+    # API). Sem o perfil, o Google Password Manager mostrava "user-32" em vez
+    # do e-mail e o preenchimento do gestor ficava ambíguo.
+    profile = await db_service.get_user_by_id(int(user["id"])) or {}
+    email = str(profile.get("email") or "").strip()
+    company = str(profile.get("company_name") or "").strip()
+    account_name = email or f"user-{user['id']}"
     credentials = await db_service.list_webauthn_credentials(user["id"])
     options = generate_registration_options(
         rp_id=rp_id,
         rp_name=settings.WEBAUTHN_RP_NAME,
         user_id=_wa_user_handle(user["id"]),
-        user_name=user.get("email") or f"user-{user['id']}",
-        user_display_name=user.get("company_name") or user.get("email"),
+        user_name=account_name,
+        user_display_name=company or account_name,
         exclude_credentials=_wa_descriptors(credentials),
+        # Passkey (credencial descobrível) e sem forçar `platform`: no Android
+        # isso levava o Chrome ao FIDO API (chave presa ao dispositivo), cujo
+        # desbloqueio por bloqueio de ecrã devolve NotReadableError em timeout.
+        # Com `residentKey=required` a criação passa pelo Credential Manager
+        # (Google Password Manager), que suporta chaves sincronizadas.
         authenticator_selection=AuthenticatorSelectionCriteria(
-            authenticator_attachment=AuthenticatorAttachment.PLATFORM,
-            resident_key=ResidentKeyRequirement.PREFERRED,
+            resident_key=ResidentKeyRequirement.REQUIRED,
+            require_resident_key=True,
             user_verification=UserVerificationRequirement.REQUIRED,
         ),
     )

@@ -173,6 +173,16 @@ def test_register_options_and_verify_store_public_key(client, monkeypatch):
     challenge = options["challenge"]
     assert options["rp"]["id"] == main_module.settings.WEBAUTHN_RP_ID
     assert options["user"]["id"]
+    # O Google Password Manager mostra o e-mail, não "user-32".
+    assert options["user"]["name"] == EMAIL
+    assert options["user"]["displayName"] == "Pytest Passkey"
+    # Passkey descobrível e sem forçar `platform`: no Android isto evita o
+    # caminho do FIDO API que devolvia NotReadableError no bloqueio de ecrã.
+    selection = options["authenticatorSelection"]
+    assert selection["residentKey"] == "required"
+    assert selection["requireResidentKey"] is True
+    assert selection["userVerification"] == "required"
+    assert "authenticatorAttachment" not in selection
 
     verified = SimpleNamespace(
         credential_id=b"credential-bytes",

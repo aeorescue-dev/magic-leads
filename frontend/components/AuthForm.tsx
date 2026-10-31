@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useSyncExternalStore } from 'react';
+import { useState, useEffect, useRef, useSyncExternalStore } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
 import { Loader2, Eye, EyeOff, Mail, Lock, Building2, ArrowRight, CheckCircle, AlertTriangle, X, Fingerprint } from 'lucide-react';
@@ -8,7 +8,7 @@ import { useAuth } from '@/lib/auth';
 import { useI18n } from '@/lib/i18n';
 import { useStartCheckout } from '@/lib/billing';
 import { requestPasswordReset, setAuthCookie, setToken } from '@/lib/api-client';
-import { hasPasskeyHint, isPasskeySupported, loginWithPasskey, PasskeyError, passkeyMessageKey } from '@/lib/webauthn';
+import { hasPasskeyHint, isPasskeySupported, loginWithPasskey, PasskeyError, passkeyMessageKey, passkeyPlatform, passkeyPlatformSuffix, setPasskeyHint } from '@/lib/webauthn';
 
 const subscribeNoop = () => () => {};
 
@@ -131,13 +131,24 @@ function AuthFormInner() {
     () => isPasskeySupported() && hasPasskeyHint(),
     () => false
   );
+  // Rótulo honesto por plataforma (Android não tem Face ID).
+  const passkeyPlatformValue = useSyncExternalStore(
+    subscribeNoop,
+    passkeyPlatform,
+    () => 'other' as const
+  );
+  const passkeyLabelKey = `auth.passkey.login_${passkeyPlatformSuffix(passkeyPlatformValue)}`;
+  // Ignora resultados atrasados de uma tentativa anterior (cancelar + repetir).
+  const attemptRef = useRef(0);
 
   const handlePasskeyLogin = async () => {
+    const attempt = ++attemptRef.current;
     setPasskeyBusy(true);
     setPasskeyError(null);
     setPasskeyDetail(null);
     try {
       const out = await loginWithPasskey(email.trim() || undefined);
+      if (attempt !== attemptRef.current) return;
       setToken(out.token);
       setAuthCookie();
       updateUser(out.user);
@@ -145,17 +156,27 @@ function AuthFormInner() {
       router.push(nextPath || localePath('/dashboard'));
       router.refresh();
     } catch (e) {
+      if (attempt !== attemptRef.current) return;
       const pe = e instanceof PasskeyError ? e : null;
-      const key = passkeyMessageKey(pe?.code ?? 'failed');
+      const serverCode = pe?.detail?.serverCode;
+      const key =
+        serverCode === 'passkey_not_recognized'
+          ? 'unknown_passkey'
+          : passkeyMessageKey(pe?.code ?? 'failed');
+      if (serverCode === 'passkey_not_recognized') {
+        // Credencial órfã no gestor do telemóvel: o botão deixa de fazer
+        // sentido até haver um registo válido no servidor.
+        setPasskeyHint(false);
+      }
       const message = t(`auth.passkey.${key}`);
-      setPasskeyError(message || 'Não foi possível entrar com Face ID. Use a palavra-passe.');
+      setPasskeyError(message || 'Não foi possível entrar com a chave de acesso. Use a palavra-passe.');
       setPasskeyDetail(
         pe?.detail?.browserError ||
           pe?.detail?.serverCode ||
           (pe?.code === 'server' ? pe.message : null)
       );
     } finally {
-      setPasskeyBusy(false);
+      if (attempt === attemptRef.current) setPasskeyBusy(false);
     }
   };
 
@@ -320,7 +341,7 @@ function AuthFormInner() {
             )}
             {passkeyBusy
               ? t('auth.passkey.confirming') || 'A confirmar…'
-              : t('auth.passkey.login') || 'Entrar com Face ID'}
+              : t(passkeyLabelKey) || t('auth.passkey.login') || 'Entrar com chave de acesso'}
           </button>
           {passkeyError && (
             <p role="alert" className="text-xs text-amber-400 text-center">

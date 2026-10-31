@@ -15,8 +15,31 @@ export type PasskeyErrorCode =
   | "no_credential"
   | "origin"
   | "already_registered"
+  | "unreadable"
   | "failed"
   | "server";
+
+/** Plataformas com nomes de biometria diferentes (UX honesta). */
+export type PasskeyPlatform = "apple" | "android" | "windows" | "other";
+
+/**
+ * Deteta a plataforma para escolher o vocabulário certo. No Android a
+ * biometria primária é a impressão digital (ou o bloqueio do ecrã), não há
+ * "Face ID"; em Windows é Windows Hello.
+ */
+export function passkeyPlatform(): PasskeyPlatform {
+  if (typeof navigator === "undefined") return "other";
+  const ua = navigator.userAgent || "";
+  if (/android/i.test(ua)) return "android";
+  if (/iphone|ipad|ipod|macintosh|mac os x/i.test(ua)) return "apple";
+  if (/windows/i.test(ua)) return "windows";
+  return "other";
+}
+
+/** Sufixo i18n por plataforma (`auth.passkey.login_<suffix>`). */
+export function passkeyPlatformSuffix(platform: PasskeyPlatform): string {
+  return platform === "other" ? "default" : platform;
+}
 
 /** Contexto técnico do browser/servidor, para o utilizador reportar suporte. */
 export interface PasskeyErrorDetail {
@@ -74,14 +97,14 @@ export function passkeyErrorFromException(
     case "SecurityError":
       return new PasskeyError(
         "origin",
-        "O domínio atual não corresponde ao domínio autorizado para Face ID.",
+        "O domínio atual não corresponde ao domínio autorizado para a chave de acesso.",
         undefined,
         detail
       );
     case "NotSupportedError":
       return new PasskeyError(
         "unsupported",
-        "Este dispositivo ou navegador não suporta Face ID.",
+        "Este dispositivo ou navegador não suporta chaves de acesso.",
         undefined,
         detail
       );
@@ -94,12 +117,24 @@ export function passkeyErrorFromException(
         undefined,
         detail
       );
+    case "NotReadableError":
+    case "UnknownError":
+      // Android/Chromium: o Credential Manager (Google Password Manager)
+      // falhou ou expirou durante o desbloqueio. Não é "tente novamente" cego:
+      // o utilizador tem de desbloquear o gestor de senhas.
+      return new PasskeyError(
+        "unreadable",
+        "O gestor de chaves do dispositivo não respondeu. Desbloqueie o ecrã, " +
+          "confirme que o gestor de senhas está ativo e tente novamente.",
+        undefined,
+        detail
+      );
     default:
       return new PasskeyError(
         "failed",
         phase === "register"
-          ? "Não foi possível criar a passkey neste dispositivo."
-          : "Não foi possível confirmar a passkey.",
+          ? "Não foi possível criar a chave de acesso neste dispositivo."
+          : "Não foi possível confirmar a chave de acesso.",
         undefined,
         detail
       );
@@ -109,7 +144,14 @@ export function passkeyErrorFromException(
 /** Chave i18n (`*.passkey.<key>`) para cada código de erro. */
 export function passkeyMessageKey(
   code: PasskeyErrorCode
-): "unsupported" | "not_setup" | "cancelled" | "origin" | "already_registered" | "failed" {
+):
+  | "unsupported"
+  | "not_setup"
+  | "cancelled"
+  | "origin"
+  | "already_registered"
+  | "unreadable"
+  | "failed" {
   switch (code) {
     case "unsupported":
       return "unsupported";
@@ -121,6 +163,8 @@ export function passkeyMessageKey(
       return "origin";
     case "already_registered":
       return "already_registered";
+    case "unreadable":
+      return "unreadable";
     default:
       return "failed";
   }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Bell, BellOff, Check, CreditCard, Fingerprint, Loader2, LogOut, MapPin, Pencil, ShieldCheck, Trash2, X } from "lucide-react";
@@ -13,6 +13,8 @@ import {
   PasskeyError,
   PasskeyInfo,
   passkeyMessageKey,
+  passkeyPlatform,
+  passkeyPlatformSuffix,
   registerPasskey,
   setPasskeyHint,
 } from "@/lib/webauthn";
@@ -94,11 +96,19 @@ function PasskeySettings() {
     () => isPasskeySupported(),
     () => false
   );
+  const platform = useSyncExternalStore(
+    subscribeNoop,
+    passkeyPlatform,
+    () => "other" as const
+  );
+  const suffix = passkeyPlatformSuffix(platform);
   const [passkeys, setPasskeys] = useState<PasskeyInfo[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
+  // Ignora resultados atrasados de uma tentativa anterior.
+  const attemptRef = useRef(0);
 
   const refresh = async () => {
     try {
@@ -129,19 +139,22 @@ function PasskeySettings() {
   }, []);
 
   const add = async () => {
+    const attempt = ++attemptRef.current;
     setBusy(true);
     setError(null);
     setErrorDetail(null);
     setOk(null);
     try {
       const out = await registerPasskey();
+      if (attempt !== attemptRef.current) return;
       setPasskeyHint(true);
       setOk(
         t("settings.passkey.added", { device: out.device_label }) ||
-          `Face ID ativo neste ${out.device_label}.`
+          `Chave de acesso ativa neste ${out.device_label}.`
       );
       await refresh();
     } catch (e) {
+      if (attempt !== attemptRef.current) return;
       const pe = e instanceof PasskeyError ? e : null;
       const code = pe?.code ?? "failed";
       // `origin_not_allowed` é um 403 do servidor: a mensagem útil é a de
@@ -159,7 +172,7 @@ function PasskeySettings() {
           (pe?.code === "server" ? pe.message : null)
       );
     } finally {
-      setBusy(false);
+      if (attempt === attemptRef.current) setBusy(false);
     }
   };
 
@@ -186,7 +199,7 @@ function PasskeySettings() {
         </h2>
       </div>
       <p className="text-xs text-slate-400 leading-relaxed">
-        {t("settings.passkey.sub")}
+        {t(`settings.passkey.sub_${suffix}`) || t("settings.passkey.sub")}
       </p>
 
       {!supported ? (
@@ -199,7 +212,9 @@ function PasskeySettings() {
           className="inline-flex items-center gap-2 rounded-lg bg-indigo-500 hover:bg-indigo-400 disabled:opacity-50 px-3 py-2 text-xs font-semibold text-white"
         >
           {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Fingerprint className="w-3.5 h-3.5" />}
-          {busy ? t("settings.passkey.adding") : t("settings.passkey.add")}
+          {busy
+            ? t("settings.passkey.adding")
+            : t(`settings.passkey.add_${suffix}`) || t("settings.passkey.add")}
         </button>
       )}
 
