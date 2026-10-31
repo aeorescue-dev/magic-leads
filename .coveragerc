@@ -1,0 +1,17 @@
+[run]
+source = backend
+omit =
+    backend/venv/*
+    backend/scripts/*
+    backend/tests/*
+    backend/check_users.py
+    backend/diagnostic.py
+    backend/run_scraper.py
+    backend/apply_logging.py
+    backend/fix_indent2.py
+
+[report]
+skip_empty = True
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:

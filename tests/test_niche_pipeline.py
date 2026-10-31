@@ -16,7 +16,6 @@ from backend.services import niche_classifier as nc
 from backend.services import outbound_engine as oe
 from backend.services import outbound_templates as ot
 
-
 # ------------------------------------------------------------ classificador
 
 @pytest.mark.parametrize(

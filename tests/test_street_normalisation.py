@@ -79,7 +79,10 @@ def test_migration_and_ingestion_agree():
     O que não pode diferir é o CONTEÚDO — sobretudo nunca sobrar a cidade.
     """
     addr = "257-259 Cambridge St  Allston  MA  02134, Boston, MA"
-    squeeze = lambda s: " ".join(str(s).upper().split())
+
+    def squeeze(value: str) -> str:
+        return " ".join(str(value).upper().split())
+
     assert squeeze(strip_city_state(addr, "Boston", "MA", "02134")) == squeeze(
         normalize_street(addr, city="Boston", state="MA", zip_code="02134")
     )

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useI18n } from "@/lib/i18n";
 import { usePushNotifications } from "@/lib/usePushNotifications";
 import { useAuth } from "@/lib/auth";
-import { iOSInstallModal as IOSInstallModal } from "@/components/iOSInstallModal";
+import { IOSInstallModal } from "@/components/iOSInstallModal";
 import { Bell, BellRing, ShieldAlert, Smartphone, X, ArrowUpRight } from "lucide-react";
 
 const DISMISSED_KEY = "garimpador.push.ios_tutorial.dismissed";

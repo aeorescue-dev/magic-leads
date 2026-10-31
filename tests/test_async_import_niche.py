@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from backend.services.db import AsyncDatabaseService, DatabaseService
+from backend.services.db import AsyncDatabaseService
 
 
 @pytest.mark.asyncio

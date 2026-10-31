@@ -17,11 +17,8 @@ Invariantes fixados aqui:
 """
 from __future__ import annotations
 
-import pytest
-
 from backend.models.schemas import IssueCategory
 from backend.scrapers.socrata_311 import socrata_scraper
-
 
 # ------------------------------------------------------- 1. inferencia de oficio
 
@@ -228,7 +225,6 @@ def test_guess_columns_hpd_keeps_a_description_column():
 def test_scrape_worker_config_includes_chicago_permits():
     """A fonte nova tem de estar na configuracao do worker."""
     import re
-
     from pathlib import Path
 
     main_py = Path(__file__).resolve().parents[1] / "backend" / "main.py"

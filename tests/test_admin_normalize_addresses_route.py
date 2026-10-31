@@ -25,7 +25,8 @@ URL = "/api/admin/normalize-addresses"
 
 @pytest.fixture
 def client(monkeypatch, tmp_path):
-    from backend import config, main as main_mod
+    from backend import config
+    from backend import main as main_mod
 
     db = tmp_path / "leads.db"
     conn = sqlite3.connect(db)
@@ -82,7 +83,8 @@ def test_secret_errado_nao_faz_nada(client):
 
 
 def test_sem_admin_secret_configurado_e_fail_closed(client, monkeypatch):
-    from backend import config, main as main_mod
+    from backend import config
+    from backend import main as main_mod
 
     tc, db = client
     before = _count(db)

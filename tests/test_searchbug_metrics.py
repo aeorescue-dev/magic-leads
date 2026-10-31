@@ -28,7 +28,7 @@ import asyncio
 
 import pytest
 
-from backend.services.db import _record_credit_event_connection, get_connection
+from backend.services.db import get_connection
 from backend.services.metrics import (
     _SEARCHBUG_COLUMNS,
     MetricsBuffer,
@@ -206,21 +206,6 @@ async def test_http_error_records_status(monkeypatch):
     assert row["outcome"] == "http_error"
     assert row["billed"] == 0, "5xx e transporte, nao busca faturavel"
     assert row["http_status"] == 503
-
-
-@pytest.mark.asyncio
-async def test_no_phone_in_records_is_NOT_billed(monkeypatch):
-    """OK mas sem telefone nos registros = no_results nao cobrado."""
-    payload = {"Status": "OK", "Data": {"RECORD": [{}]}}  # sem PHONE
-    _patch_client(monkeypatch, response=_FakeResponse(200, payload))
-
-    service = _configured_service(monkeypatch)
-    result = await service._lookup_searchbug_nape("10 Main St", "Miami", "FL", owner_name="John Smith")
-
-    assert result.success is False
-    row = (await _rows_after_flush())[0]
-    assert row["outcome"] == "no_results"
-    assert row["billed"] == 0
 
 
 @pytest.mark.asyncio

@@ -24,10 +24,10 @@ from backend.services.outbound_engine import (
 )
 from backend.services.snov import (
     SnovService,
-    email_domain,
-    normalize_email,
     _extract_email_records,
     _extract_verification,
+    email_domain,
+    normalize_email,
 )
 
 # ------------------------------------------------------------------ pure helpers
@@ -540,7 +540,7 @@ async def test_engine_schedules_step2_after_step1_sent(engine, monkeypatch):
     """Enviado o passo 1, o passo 2 (oferta) e' enfileirado."""
     svc = engine_module.db_service._service
     lead_id = _seed_lead("BOSTON", "engine-seq-1", "10 SEQUENCE AVENUE")
-    contact = _seed_contact(lead_id, "seq1@vitorio.com")
+    _seed_contact(lead_id, "seq1@vitorio.com")
     batch = svc.create_outbound_batch(
         city="BOSTON", name="engine-seq-1",
         filters_json=json.dumps({"city": "BOSTON", "niche": "roofing"}), kind="email",

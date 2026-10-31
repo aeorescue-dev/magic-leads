@@ -7,7 +7,7 @@ interface iOSInstallModalProps {
   onClose: () => void;
 }
 
-export function iOSInstallModal({ onClose }: iOSInstallModalProps) {
+export function IOSInstallModal({ onClose }: iOSInstallModalProps) {
   const { t } = useI18n();
 
   return (
@@ -94,4 +94,4 @@ export function iOSInstallModal({ onClose }: iOSInstallModalProps) {
   );
 }
 
-export default iOSInstallModal;
+export default IOSInstallModal;

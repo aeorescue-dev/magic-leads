@@ -202,6 +202,27 @@ def build(db_path: str) -> str:
             )
             svc.insert_lead_new(payload)
 
+    async def setup_admin() -> None:
+        """Admin interno de E2E (BD isolada) para o fluxo de concessão."""
+        TOKEN = "e2e-token-admin"
+        EMAIL = "e2e-admin@magicleads.app"
+        user = svc.get_user_by_email(EMAIL)
+        if not user:
+            user = svc.create_user(
+                EMAIL, "hash-nao-usado", "E2E Admin", plan="pro",
+                subscription_status="active",
+            )
+        user_id = user["id"]
+        svc.create_user_session(user_id, _hash_token(TOKEN), "E2E Admin", None)
+        svc.extend_access(user_id, days=7)
+        svc.set_user_admin(EMAIL, True)
+        conn = get_connection()
+        try:
+            conn.execute("UPDATE users SET welcome_popup_shown = 1 WHERE id = ?", (user_id,))
+            conn.commit()
+        finally:
+            conn.close()
+
     async def setup_onboarding() -> None:
         """Utilizador NOVO: sem interesses -> tem de cair no Onboarding Wizard."""
         TOKEN = "e2e-token-novo"
@@ -227,6 +248,7 @@ def build(db_path: str) -> str:
     asyncio.run(setup())
     asyncio.run(setup_lifecycle())
     asyncio.run(setup_onboarding())
+    asyncio.run(setup_admin())
     return TOKEN
 
 

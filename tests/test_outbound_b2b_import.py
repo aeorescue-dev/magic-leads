@@ -163,7 +163,7 @@ def test_import_entra_no_lote_mesmo_atras_de_250_permissoes(clean_city):
 
     assert len(leads) == 200
     assert leads[0]["owner_email"] == "pamela@pamela-clark.com"
-    assert any(l["issue_category"] == "General Contractors" for l in leads)
+    assert any(lead["issue_category"] == "General Contractors" for lead in leads)
 
 
 def test_contagem_de_destinatarios_separa_inventario_de_emails(clean_city):

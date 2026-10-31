@@ -2,20 +2,17 @@
 
 from __future__ import annotations
 
-import pytest
-
-from backend.services.lead_filter import (
-    classify_owner_name,
-    norm_key,
-    should_skip_discovery,
-)
 from backend.services.company_discovery import (
     CompanyDiscovery,
-    Resolver,
     Fetcher,
+    Resolver,
     SmtpProber,
-    registrable_domain,
     is_blocked_domain,
+    registrable_domain,
+)
+from backend.services.lead_filter import (
+    classify_owner_name,
+    should_skip_discovery,
 )
 
 

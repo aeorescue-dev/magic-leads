@@ -1,6 +1,9 @@
 /** @type {import('next').NextConfig} */
+const path = require("path");
 const nextConfig = {
   reactStrictMode: true,
+  // Evita que o tracing suba até C:\Users e apanhe package-lock alheios.
+  outputFileTracingRoot: path.join(__dirname),
   env: {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || "https://magic-leads-production.up.railway.app",
   },

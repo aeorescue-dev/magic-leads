@@ -221,7 +221,7 @@ def test_quiet_hours_window_ny():
 
 def test_quiet_suppresses_311_push_but_not_legal(monkeypatch):
     _reset()
-    uid = _user(["Roof", "Plumbing"], push_enabled=True)
+    _user(["Roof", "Plumbing"], push_enabled=True)
     monkeypatch.setattr(alert_planner, "_is_quiet_hours", lambda now=None: True)
 
     sent = []
