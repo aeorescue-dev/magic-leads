@@ -151,8 +151,20 @@ Contexto completo e números medidos: **`docs/PROJECT-MEMORY.md`**. Ler antes de
     (cookie + `user_sessions`). A palavra-passe nunca é removida como
     alternativa. `proxy.ts` preserva `next` no redirect para `/{locale}/auth` —
     sem isso os deep links de push perdem-se. O cliente mostra sempre o erro
-    real do browser (SecurityError, InvalidStateError, NotAllowedError) num
-    detalhe técnico — nunca só "tente novamente".
+    real do browser (SecurityError, InvalidStateError, NotAllowedError,
+    NotReadableError) num detalhe técnico — nunca só "tente novamente".
+42. **Passkeys — Android e rótulos**: nunca escrever “Face ID” a quem está no
+    Android. O rótulo e a descrição derivam da plataforma
+    (`passkeyPlatform()`): Apple → Face ID/Touch ID, Android → impressão
+    digital/bloqueio de ecrã, Windows → Windows Hello, resto → chave de acesso.
+    O registo pede **`residentKey=required`** e **não** força
+    `authenticatorAttachment` (no Android o `platform` levava ao FIDO API e o
+    desbloqueio por bloqueio de ecrã devolvia `NotReadableError`). O `user.name`
+    do options tem de ser o **e-mail** (não `user-<id>`), para o gestor de
+    senhas mostrar a conta certa. `NotReadableError`/`UnknownError` →
+    mensagem que manda desbloquear o ecrã e verificar o gestor de senhas.
+    Resultados de tentativas antigas não podem escrever estado na UI
+    (`attemptRef`), e `passkey_not_recognized` limpa o hint local.
 
 ## Verificação mínima antes de deploy
 ```bash

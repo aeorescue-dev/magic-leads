@@ -745,6 +745,38 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   com 403, verify a usar o RP gravado) e 7 vitest de mapeamento de erros;
   e2e de passkey continua verde em `localhost` (origem não-canónica real).
 
+### Incidente — Android: “Face ID” e NotReadableError (2026-10-31)
+
+- **Sintoma**: no Android o botão dizia “Entrar com Face ID” e a ativação
+  falhava com `NotReadableError: An unknown error occurred while talking to
+  the credential manager`.
+- **Causa raiz (rótulo)**: copy fixa em “Face ID”, vocabulário só da Apple.
+- **Causa raiz (erro)**: o registo pedia `authenticatorAttachment=platform` +
+  `residentKey=preferred`. No Android isso encaminha o Chrome para o **FIDO
+  API** (chave presa ao dispositivo); o desbloqueio pelo bloqueio de ecrã pode
+  expirar e o Chromium mapeia o `UNKNOWN_ERROR` do Credential Manager para
+  `NotReadableError`. Além disso o `user.name` ia como `user-32` porque
+  `_get_current_user` só devolve o id — daí o Google Password Manager mostrar
+  “user-32” e oferecer “Usar chave de acesso salva?” para uma credencial órfã.
+- **Correção**:
+  - Registo pede `residentKey=required` + `requireResidentKey`, sem forçar
+    attachment → caminho do Credential Manager (passkeys sincronizadas).
+  - `user.name` = e-mail e `displayName` = empresa (perfil carregado no options).
+  - Handle do utilizador passou a **v2** (`sha256("…:v2:<id>")`) para não
+    colidir com credenciais órfãs deixadas por registos que falharam no verify.
+    O login resolve a conta pelo `credential_id`, por isso nada quebrou.
+  - Rótulos/descrições por plataforma (Apple/Android/Windows/outro) em PT/EN/ES.
+  - `NotReadableError`/`UnknownError` → código `unreadable` com instruções
+    (desbloquear o ecrã, confirmar o gestor de senhas, repetir). O erro real
+    continua no “Detalhe técnico”.
+  - Resiliência: `attemptRef` ignora resultados atrasados de tentativas
+    canceladas; `passkey_not_recognized` limpa o hint local (o botão deixa de
+    aparecer até haver registo válido).
+- **Testes**: pytest do options (e-mail, `residentKey=required`, sem
+  attachment); vitest de `NotReadableError`/`UnknownError` e deteção de
+  plataforma; e2e novo com UA Android garante “impressão digital” e ausência de
+  “Face ID”. **942 pytest**, **92 vitest**, **27 e2e**.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
