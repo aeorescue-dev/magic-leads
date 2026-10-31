@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from typing import Iterable, Optional
 
 from ..utils.logger import logger
+from . import entity_bridge
 from .company_discovery import CompanyDiscovery
 from .db import db_service
 from .domain_resolver import resolve_domain
@@ -96,7 +97,8 @@ async def _email_stage(entity: dict) -> str:
         await db_service.mark_contractor_email_attempt(
             int(entity["id"]), accepted[0], "valid", MAX_ATTEMPTS
         )
-        return "ready"
+        updated = await db_service.get_contractor_entity(int(entity["id"]))
+        return await entity_bridge.bridge_entity(updated or {**entity, "email": accepted[0]})
     await db_service.mark_contractor_email_attempt(
         int(entity["id"]), None, "unknown", MAX_ATTEMPTS
     )
@@ -125,15 +127,17 @@ async def run_once(
                 stats[city] = {"status": "quota", "processed": 0}
                 continue
             take = min(CONCURRENCY, remaining)
+            # Entidades que ficaram 'ready' antes da ponte existir.
+            bridged_now = await entity_bridge.bridge_ready_entities(city, take)
             domain_jobs = await db_service.list_entities_for_domain(city, take)
             email_jobs = await db_service.list_entities_for_email(city, take)
             tasks = [_domain_stage(e) for e in domain_jobs]
             tasks += [_email_stage(e) for e in email_jobs]
-            if not tasks:
+            if not tasks and not bridged_now.get("processed"):
                 stats[city] = {"status": "idle", "processed": 0}
                 continue
             results = await asyncio.gather(*tasks, return_exceptions=True)
-            counts: dict[str, int] = {}
+            counts: dict[str, int] = dict(bridged_now.get("outcomes") or {})
             for result in results:
                 if isinstance(result, Exception):
                     logger.warning("[ENRICH-SCHED] job falhou (%s): %s", city, result)

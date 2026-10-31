@@ -932,6 +932,20 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Testes**: 5 scheduler (domain→email→ready, sem domínio 2×→quarentena,
   catch-all, cidade desligada, quota) + 1 stats. Suite **994 pytest**.
 
+### Fase 3.1 — Ponte `ready → outbound_contacts` (2026-10-31)
+
+- `entity_bridge.py`: entidade `ready` passa por `niche_classifier.classify`;
+  só com `confirmed` cria lead `import_b2b` + `outbound_contacts`
+  (`email_source='import'`, `niche_status='confirmed'`) e marca
+  `bridged_at/outbound_contact_id/outbound_lead_id`. Sem nicho confirmado →
+  `quarantined` (`niche_unconfirmed`), sem contacto. Idempotente por e-mail.
+- O scheduler faz a ponte logo após o e-mail validado e também drena entidades
+  `ready` antigas (`list_entities_for_bridge`). Nunca envia e-mail.
+- UI “Prontos para enviar” passa a refletir o inventário real do robô, porque
+  a contagem é de `outbound_contacts`.
+- Testes: 2 novos (bridge cria contacto/lead e readiness=1; nicho não
+  confirmado não cria contacto). Suite **995 pytest**.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

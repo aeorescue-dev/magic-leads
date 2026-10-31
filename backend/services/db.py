@@ -947,6 +947,9 @@ CREATE TABLE IF NOT EXISTS contractor_entities (
   email_checked_at TEXT,
   email_attempts INTEGER NOT NULL DEFAULT 0,
   quarantine_reason TEXT,
+  bridged_at TEXT,
+  outbound_contact_id INTEGER,
+  outbound_lead_id INTEGER,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
@@ -1974,6 +1977,9 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         ("email_checked_at", "TEXT"),
         ("email_attempts", "INTEGER NOT NULL DEFAULT 0"),
         ("quarantine_reason", "TEXT"),
+        ("bridged_at", "TEXT"),
+        ("outbound_contact_id", "INTEGER"),
+        ("outbound_lead_id", "INTEGER"),
     ):
         if name not in ent_cols:
             conn.execute(f"ALTER TABLE contractor_entities ADD COLUMN {name} {ddl}")
@@ -3810,6 +3816,74 @@ class DatabaseService:
             conn.close()
 
     # ------------------------------------------- Fase 3: scheduler de entidades
+    def get_contractor_entity(self, entity_id: int) -> Optional[dict]:
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT * FROM contractor_entities WHERE id=?", (int(entity_id),)
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def set_contractor_entity_niche(
+        self, entity_id: int, niche_key: Optional[str], niche_status: str
+    ) -> bool:
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE contractor_entities SET niche_key=?, niche_status=?, "
+                "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (niche_key, niche_status, int(entity_id)),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def quarantine_contractor_entity(self, entity_id: int, reason: str) -> bool:
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE contractor_entities SET status='quarantined', "
+                "quarantine_reason=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (reason[:80], int(entity_id)),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def mark_contractor_bridged(
+        self, entity_id: int, contact_id: Optional[int], lead_id: Optional[int]
+    ) -> bool:
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE contractor_entities SET bridged_at=CURRENT_TIMESTAMP, "
+                "outbound_contact_id=?, outbound_lead_id=?, "
+                "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (contact_id, lead_id, int(entity_id)),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def list_entities_for_bridge(self, city: str, limit: int = 50) -> List[dict]:
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM contractor_entities "
+                "WHERE UPPER(TRIM(city))=? AND status='ready' "
+                "AND COALESCE(email,'')<>'' AND bridged_at IS NULL "
+                "ORDER BY id LIMIT ?",
+                (city.strip().upper(), max(1, min(int(limit), 200))),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
     def list_entities_for_domain(self, city: str, limit: int = 4) -> List[dict]:
         conn = get_connection()
         try:
@@ -12507,6 +12581,35 @@ class AsyncDatabaseService:
     async def list_entities_for_domain(self, city: str, limit: int = 4) -> List[dict]:
         return await anyio.to_thread.run_sync(
             self._service.list_entities_for_domain, city, limit
+        )
+
+    async def get_contractor_entity(self, entity_id: int) -> Optional[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.get_contractor_entity, entity_id
+        )
+
+    async def set_contractor_entity_niche(
+        self, entity_id: int, niche_key: Optional[str], niche_status: str
+    ) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.set_contractor_entity_niche, entity_id, niche_key, niche_status
+        )
+
+    async def mark_contractor_bridged(
+        self, entity_id: int, contact_id: Optional[int], lead_id: Optional[int]
+    ) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.mark_contractor_bridged, entity_id, contact_id, lead_id
+        )
+
+    async def quarantine_contractor_entity(self, entity_id: int, reason: str) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.quarantine_contractor_entity, entity_id, reason
+        )
+
+    async def list_entities_for_bridge(self, city: str, limit: int = 50) -> List[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.list_entities_for_bridge, city, limit
         )
 
     async def list_entities_for_email(self, city: str, limit: int = 4) -> List[dict]:

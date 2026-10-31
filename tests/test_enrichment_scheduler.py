@@ -23,6 +23,16 @@ def clean_entities():
         conn.execute("DELETE FROM contractor_entities")
         conn.execute("DELETE FROM city_enrichment_state")
         conn.execute("DELETE FROM outbound_config WHERE city=?", (CITY,))
+        conn.execute(
+            "DELETE FROM outbound_messages WHERE lower(to_email) LIKE '%@wightco.com'"
+        )
+        conn.execute(
+            "DELETE FROM outbound_contacts WHERE lower(email) LIKE '%@wightco.com'"
+        )
+        conn.execute(
+            "DELETE FROM leads WHERE source_type='import_b2b' "
+            "AND lower(owner_email) LIKE '%@wightco.com'"
+        )
         conn.commit()
     finally:
         conn.close()
@@ -34,6 +44,16 @@ def clean_entities():
         conn.execute("DELETE FROM contractor_entities")
         conn.execute("DELETE FROM city_enrichment_state")
         conn.execute("DELETE FROM outbound_config WHERE city=?", (CITY,))
+        conn.execute(
+            "DELETE FROM outbound_messages WHERE lower(to_email) LIKE '%@wightco.com'"
+        )
+        conn.execute(
+            "DELETE FROM outbound_contacts WHERE lower(email) LIKE '%@wightco.com'"
+        )
+        conn.execute(
+            "DELETE FROM leads WHERE source_type='import_b2b' "
+            "AND lower(owner_email) LIKE '%@wightco.com'"
+        )
         conn.commit()
     finally:
         conn.close()
@@ -70,12 +90,57 @@ async def test_domain_e_depois_email_ate_ready(clean_entities, monkeypatch):
     monkeypatch.setattr(
         enrichment_scheduler._discovery, "validate_domain", lambda *a, **k: fake
     )
+    monkeypatch.setattr(
+        enrichment_scheduler.entity_bridge.niche_classifier,
+        "classify",
+        lambda *a, **k: {
+            "niche": "general_contractors",
+            "status": "confirmed",
+            "score": 10,
+            "margin": 5,
+        },
+    )
     second = await enrichment_scheduler.run_once(now=NOW, cities_override=[CITY])
-    assert second["cities"][CITY]["outcomes"] == {"ready": 1}
+    assert second["cities"][CITY]["outcomes"] == {"bridged": 1}
 
     row = db_service._service.list_contractor_entities(CITY)[0]
     assert row["status"] == "ready"
     assert row["email"] == "info@wightco.com"
+    assert row["bridged_at"]
+    contact = db_service._service.get_outbound_contact_by_email(
+        "info@wightco.com"
+    )
+    assert contact and contact["niche_status"] == "confirmed"
+    assert db_service._service.outbound_readiness(CITY)["ready"] == 1
+
+
+@pytest.mark.asyncio
+async def test_nicho_nao_confirmado_nao_cria_contacto(clean_entities, monkeypatch):
+    row = _entity()
+    db_service._service.set_contractor_entity_domain(row["id"], "wightco.com", 0.9)
+
+    fake = SimpleNamespace(catch_all=False, accepted=["info@wightco.com"])
+    monkeypatch.setattr(
+        enrichment_scheduler._discovery, "validate_domain", lambda *a, **k: fake
+    )
+    monkeypatch.setattr(
+        enrichment_scheduler.entity_bridge.niche_classifier,
+        "classify",
+        lambda *a, **k: {
+            "niche": None,
+            "status": "unknown",
+            "score": 0,
+            "margin": 0,
+        },
+    )
+    result = await enrichment_scheduler.run_once(now=NOW, cities_override=[CITY])
+    assert result["cities"][CITY]["outcomes"] == {"niche_unconfirmed": 1}
+    row = db_service._service.list_contractor_entities(CITY)[0]
+    assert row["status"] == "quarantined"
+    assert row["quarantine_reason"] == "niche_unconfirmed"
+    assert not db_service._service.get_outbound_contact_by_email(
+        "info@wightco.com"
+    )
 
 
 @pytest.mark.asyncio
