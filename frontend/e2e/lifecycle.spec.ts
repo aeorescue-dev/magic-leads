@@ -129,13 +129,25 @@ test("transições de fase na UI: Contactar e Negociar reabrem 48h; Converter sa
   await expect(page.getByText("CONCLUÍDO").first()).toBeVisible({ timeout: 20000 });
 
   // O lead saiu do feed público de descoberta (para todos, incluindo o dono).
-  const feed = await request.get(`${BACKEND_ORIGIN}/api/leads/today?limit=100`, {
-    headers: auth(E2E_CYCLE_TOKEN),
-  });
-  expect(feed.ok()).toBeTruthy();
-  const { leads } = await feed.json();
-  const noFeed = (leads || []).filter((l: any) => (l.address || "").includes(CYCLE_ADDRESS));
-  expect(noFeed).toHaveLength(0);
+  // Nota: a conversão é síncrona no servidor, mas o GET seguinte pode cair na
+  // mesma janela de commit (observado 2x em corridas completas). Poll curto em
+  // vez de leitura única: se o lead persistir no feed, o teste falha.
+  await expect
+    .poll(
+      async () => {
+        const feed = await request.get(
+          `${BACKEND_ORIGIN}/api/leads/today?limit=100`,
+          { headers: auth(E2E_CYCLE_TOKEN) }
+        );
+        expect(feed.ok()).toBeTruthy();
+        const { leads } = await feed.json();
+        return (leads || []).filter((l: any) =>
+          (l.address || "").includes(CYCLE_ADDRESS)
+        ).length;
+      },
+      { timeout: 5000, intervals: [100, 250, 500] }
+    )
+    .toBe(0);
 
   // E ficou guardado em "Meus Leads" como convertido, sem prazo de fase.
   const history = await request.get(`${BACKEND_ORIGIN}/api/me/history?limit=100`, {
