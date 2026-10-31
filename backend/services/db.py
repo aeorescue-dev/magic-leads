@@ -462,6 +462,37 @@ CREATE TABLE IF NOT EXISTS user_sessions (
   UNIQUE(token_hash)
 );
 
+-- WebAuthn / Passkeys. Guarda apenas chave PÚBLICA e metadados; a biometria
+-- nunca sai do dispositivo. credential_id/public_key em base64url.
+CREATE TABLE IF NOT EXISTS webauthn_credentials (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  credential_id TEXT NOT NULL UNIQUE,
+  public_key TEXT NOT NULL,
+  sign_count INTEGER DEFAULT 0,
+  transports TEXT,
+  aaguid TEXT,
+  device_label TEXT,
+  cloned_warning INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  last_used_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_webauthn_credentials_user
+  ON webauthn_credentials (user_id);
+
+-- Challenge de uso único (5 min) para registo/autenticação.
+CREATE TABLE IF NOT EXISTS webauthn_challenges (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER,
+  challenge TEXT NOT NULL UNIQUE,
+  kind TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  used INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_webauthn_challenges_exp
+  ON webauthn_challenges (expires_at);
+
 CREATE TABLE IF NOT EXISTS lead_holds (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
@@ -5254,6 +5285,135 @@ class DatabaseService:
             )
             conn.commit()
             return cur.rowcount
+        finally:
+            conn.close()
+
+    # ---------------------------------------------------------------- WebAuthn
+    # Passkeys: o servidor guarda só a chave pública. Challenges são de uso
+    # único e expiram em 5 min; verify consome atomicamente.
+
+    def create_webauthn_challenge(
+        self, challenge: str, kind: str, user_id: Optional[int] = None,
+        ttl_seconds: int = 300,
+    ) -> bool:
+        conn = get_connection()
+        try:
+            now = utcnow()
+            expires = now + timedelta(seconds=max(30, int(ttl_seconds)))
+            conn.execute("DELETE FROM webauthn_challenges WHERE datetime(expires_at) <= datetime(?)", (now.isoformat(),))
+            conn.execute(
+                "INSERT INTO webauthn_challenges (user_id, challenge, kind, expires_at) "
+                "VALUES (?, ?, ?, ?)",
+                (user_id, challenge, kind, expires.isoformat()),
+            )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+    def consume_webauthn_challenge(self, challenge: str, kind: str) -> Optional[dict]:
+        conn = get_connection()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM webauthn_challenges "
+                "WHERE challenge = ? AND kind = ? AND used = 0 "
+                "AND datetime(expires_at) > datetime('now') LIMIT 1",
+                (challenge, kind),
+            ).fetchone()
+            if not row:
+                conn.rollback()
+                return None
+            conn.execute(
+                "UPDATE webauthn_challenges SET used = 1 WHERE id = ?", (row["id"],)
+            )
+            conn.commit()
+            return dict(row)
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            conn.close()
+
+    def add_webauthn_credential(
+        self, user_id: int, credential_id: str, public_key: str,
+        sign_count: int = 0, transports: Optional[str] = None,
+        aaguid: Optional[str] = None, device_label: Optional[str] = None,
+    ) -> bool:
+        conn = get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO webauthn_credentials "
+                "(user_id, credential_id, public_key, sign_count, transports, aaguid, device_label) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    int(user_id), credential_id, public_key, int(sign_count),
+                    transports, aaguid, device_label,
+                ),
+            )
+            conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            return False
+        finally:
+            conn.close()
+
+    def list_webauthn_credentials(self, user_id: int) -> List[dict]:
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT id, credential_id, sign_count, transports, aaguid, device_label, "
+                "cloned_warning, created_at, last_used_at "
+                "FROM webauthn_credentials WHERE user_id = ? ORDER BY id DESC",
+                (int(user_id),),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def get_webauthn_credential(self, credential_id: str) -> Optional[dict]:
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT * FROM webauthn_credentials WHERE credential_id = ?",
+                (credential_id,),
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def update_webauthn_credential_after_auth(
+        self, credential_id: str, new_sign_count: int, cloned_warning: bool = False
+    ) -> bool:
+        conn = get_connection()
+        try:
+            conn.execute(
+                "UPDATE webauthn_credentials SET sign_count = ?, last_used_at = ?, "
+                "cloned_warning = MAX(cloned_warning, ?) WHERE credential_id = ?",
+                (
+                    int(new_sign_count),
+                    utcnow().isoformat(),
+                    1 if cloned_warning else 0,
+                    credential_id,
+                ),
+            )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+    def delete_webauthn_credential(self, user_id: int, credential_id: str) -> bool:
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "DELETE FROM webauthn_credentials WHERE user_id = ? AND credential_id = ?",
+                (int(user_id), credential_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
         finally:
             conn.close()
 
@@ -10641,6 +10801,45 @@ class AsyncDatabaseService:
 
     async def remove_user_sessions(self, user_id: int) -> int:
         return await anyio.to_thread.run_sync(self._service.remove_user_sessions, user_id)
+
+    # WebAuthn
+    async def create_webauthn_challenge(self, challenge: str, kind: str, user_id=None, ttl_seconds: int = 300) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.create_webauthn_challenge, challenge, kind, user_id, ttl_seconds
+        )
+
+    async def consume_webauthn_challenge(self, challenge: str, kind: str):
+        return await anyio.to_thread.run_sync(
+            self._service.consume_webauthn_challenge, challenge, kind
+        )
+
+    async def add_webauthn_credential(self, user_id: int, credential_id: str, public_key: str, **kwargs) -> bool:
+        return await anyio.to_thread.run_sync(
+            lambda: self._service.add_webauthn_credential(
+                user_id, credential_id, public_key, **kwargs
+            )
+        )
+
+    async def list_webauthn_credentials(self, user_id: int) -> List[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.list_webauthn_credentials, user_id
+        )
+
+    async def get_webauthn_credential(self, credential_id: str):
+        return await anyio.to_thread.run_sync(
+            self._service.get_webauthn_credential, credential_id
+        )
+
+    async def update_webauthn_credential_after_auth(self, credential_id: str, new_sign_count: int, cloned_warning: bool = False) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.update_webauthn_credential_after_auth,
+            credential_id, new_sign_count, cloned_warning,
+        )
+
+    async def delete_webauthn_credential(self, user_id: int, credential_id: str) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.delete_webauthn_credential, user_id, credential_id
+        )
 
     async def get_user_active_sessions(self, user_id: int) -> List[dict]:
         return await anyio.to_thread.run_sync(self._service.get_user_active_sessions, user_id)

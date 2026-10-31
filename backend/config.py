@@ -109,6 +109,10 @@ class Settings(BaseSettings):
     # Fase E/incidente: uma varredura que exceda este limite é cancelada e
     # marcada como error (liberta o scheduler e gera alerta crítico).
     SCRAPER_MAX_HOURS: float = 3.0
+    # WebAuthn / Passkeys. RP ID é o domínio registável (cobre www e subdomínios).
+    # Em E2E é forçado para 127.0.0.1; previews Vercel não são RP válidos.
+    WEBAUTHN_RP_ID: str = "magicleads.app"
+    WEBAUTHN_RP_NAME: str = "Magic Leads"
     # Sweep de holds/reveals dentro do processo. Independe do GitHub Actions, que
     # falhou 6 execucoes seguidas (canceladas na fila, 0 passos).
     HOLD_WATCHDOG_INTERVAL_MIN: int = 15

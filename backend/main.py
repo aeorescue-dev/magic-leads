@@ -8,11 +8,21 @@ import sqlite3
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 import anyio
 import httpx
 import stripe
-from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi import (
+    Body,
+    Cookie,
+    Depends,
+    FastAPI,
+    Header,
+    HTTPException,
+    Request,
+    Response,
+)
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -20,6 +30,22 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response as StarletteResponse
+from webauthn import (
+    generate_authentication_options,
+    generate_registration_options,
+    options_to_json,
+    verify_authentication_response,
+    verify_registration_response,
+)
+from webauthn.helpers import base64url_to_bytes, bytes_to_base64url
+from webauthn.helpers.structs import (
+    AuthenticatorAttachment,
+    AuthenticatorSelectionCriteria,
+    AuthenticatorTransport,
+    PublicKeyCredentialDescriptor,
+    ResidentKeyRequirement,
+    UserVerificationRequirement,
+)
 
 from .config import settings
 from .models.schemas import (
@@ -4917,6 +4943,291 @@ async def reset_password(request: Request, payload: ResetPasswordRequest):
     except Exception as e:
         logger.error(f"Erro no reset-password: {e}")
         raise HTTPException(status_code=500, detail="Erro ao redefinir senha")
+
+
+# ------------------------------------------------------------------
+# WebAuthn / Passkeys (Face ID, Touch ID, Windows Hello)
+#
+# Zero custo externo: a biometria fica no dispositivo; a BD guarda apenas a
+# chave pública. A sessão emitida é a mesma de A2 (cookie + TTL deslizante).
+# ------------------------------------------------------------------
+def _wa_origins() -> list[str]:
+    origins = {o.rstrip("/") for o in settings.allowed_origins_list if o}
+    front = (settings.FRONTEND_URL or "").strip().rstrip("/")
+    if front:
+        origins.add(front)
+    return sorted(origins)
+
+
+def _wa_user_handle(user_id: int) -> bytes:
+    """Handle opaco e estável (não expor o id sequencial ao autenticador)."""
+    return hashlib.sha256(f"magic-leads-webauthn:{int(user_id)}".encode()).digest()
+
+
+def _wa_label(request: Request) -> str:
+    ua = (request.headers.get("user-agent") or "").lower()
+    if "iphone" in ua:
+        return "iPhone"
+    if "ipad" in ua:
+        return "iPad"
+    if "android" in ua:
+        return "Android"
+    if "windows" in ua:
+        return "Windows"
+    if "macintosh" in ua or "mac os" in ua:
+        return "Mac"
+    return "Dispositivo"
+
+
+def _wa_challenge_from_client_data(client_data_json: str) -> Optional[str]:
+    try:
+        data = json.loads(base64url_to_bytes(client_data_json))
+        challenge = data.get("challenge")
+        return str(challenge) if challenge else None
+    except Exception:
+        return None
+
+
+def _wa_descriptors(credentials: list[dict]) -> list[PublicKeyCredentialDescriptor]:
+    valid_transports = {t.value for t in AuthenticatorTransport}
+    out: list[PublicKeyCredentialDescriptor] = []
+    for cred in credentials:
+        try:
+            transports = json.loads(cred.get("transports") or "[]")
+        except Exception:
+            transports = []
+        out.append(
+            PublicKeyCredentialDescriptor(
+                id=base64url_to_bytes(cred["credential_id"]),
+                transports=[t for t in transports if t in valid_transports],
+            )
+        )
+    return out
+
+
+def _set_webauthn_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key="garimpador_token",
+        value=token,
+        httponly=True,
+        secure=not settings.DEBUG,
+        samesite="lax",
+        max_age=max(1, int(getattr(settings, "SESSION_TTL_DAYS", 30) or 30))
+        * 24 * 60 * 60,
+        path="/",
+    )
+
+
+class WebAuthnLoginOptionsRequest(BaseModel):
+    email: Optional[EmailStr] = None
+
+
+@app.post("/api/auth/webauthn/register/options")
+@limiter.limit("10/minute")
+async def webauthn_register_options(
+    request: Request, user: dict = Depends(_get_current_user)
+):
+    """Inicia o registo de uma passkey para o utilizador autenticado."""
+    if not _wa_origins():
+        raise HTTPException(status_code=503, detail="WebAuthn sem origem configurada")
+    credentials = await db_service.list_webauthn_credentials(user["id"])
+    options = generate_registration_options(
+        rp_id=settings.WEBAUTHN_RP_ID,
+        rp_name=settings.WEBAUTHN_RP_NAME,
+        user_id=_wa_user_handle(user["id"]),
+        user_name=user.get("email") or f"user-{user['id']}",
+        user_display_name=user.get("company_name") or user.get("email"),
+        exclude_credentials=_wa_descriptors(credentials),
+        authenticator_selection=AuthenticatorSelectionCriteria(
+            authenticator_attachment=AuthenticatorAttachment.PLATFORM,
+            resident_key=ResidentKeyRequirement.PREFERRED,
+            user_verification=UserVerificationRequirement.REQUIRED,
+        ),
+    )
+    await db_service.create_webauthn_challenge(
+        bytes_to_base64url(options.challenge), "register", user["id"]
+    )
+    return json.loads(options_to_json(options))
+
+
+@app.post("/api/auth/webauthn/register/verify")
+@limiter.limit("10/minute")
+async def webauthn_register_verify(
+    request: Request,
+    payload: dict = Body(...),
+    user: dict = Depends(_get_current_user),
+):
+    """Valida a atestação e grava a chave pública (nunca a biometria)."""
+    credential = payload.get("credential") or payload
+    try:
+        client_data = credential["response"]["clientDataJSON"]
+        challenge = _wa_challenge_from_client_data(client_data)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Credencial inválida")
+    if not challenge:
+        raise HTTPException(status_code=400, detail="Challenge ausente")
+
+    row = await db_service.consume_webauthn_challenge(challenge, "register")
+    if not row or int(row.get("user_id") or 0) != int(user["id"]):
+        raise HTTPException(status_code=400, detail="Challenge inválido ou expirado")
+
+    try:
+        verified = verify_registration_response(
+            credential=credential,
+            expected_challenge=base64url_to_bytes(challenge),
+            expected_rp_id=settings.WEBAUTHN_RP_ID,
+            expected_origin=_wa_origins(),
+            require_user_verification=True,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[WEBAUTHN] Registo rejeitado: %s", e)
+        raise HTTPException(status_code=400, detail="Não foi possível validar o dispositivo")
+
+    try:
+        transports = json.loads(credential["response"].get("transports") or "[]")
+    except Exception:
+        transports = []
+    ok = await db_service.add_webauthn_credential(
+        user_id=user["id"],
+        credential_id=bytes_to_base64url(verified.credential_id),
+        public_key=bytes_to_base64url(verified.credential_public_key),
+        sign_count=int(verified.sign_count or 0),
+        transports=json.dumps(transports),
+        aaguid=str(verified.aaguid),
+        device_label=_wa_label(request),
+    )
+    if not ok:
+        raise HTTPException(status_code=409, detail="Este dispositivo já está registado")
+    return {"status": "ok", "device_label": _wa_label(request)}
+
+
+@app.post("/api/auth/webauthn/login/options")
+@limiter.limit("20/minute")
+async def webauthn_login_options(
+    request: Request, payload: WebAuthnLoginOptionsRequest | None = None
+):
+    """Gera opções de autenticação; e-mail opcional (discoverable sem ele)."""
+    email = str(payload.email).strip().lower() if payload and payload.email else ""
+    user = await db_service.get_user_by_email(email) if email else None
+    credentials = (
+        await db_service.list_webauthn_credentials(user["id"]) if user else []
+    )
+    options = generate_authentication_options(
+        rp_id=settings.WEBAUTHN_RP_ID,
+        allow_credentials=_wa_descriptors(credentials),
+        user_verification=UserVerificationRequirement.REQUIRED,
+    )
+    await db_service.create_webauthn_challenge(
+        bytes_to_base64url(options.challenge),
+        "auth",
+        user["id"] if user else None,
+    )
+    return json.loads(options_to_json(options))
+
+
+@app.post("/api/auth/webauthn/login/verify")
+@limiter.limit("20/minute")
+async def webauthn_login_verify(
+    request: Request,
+    response: Response,
+    payload: dict = Body(...),
+):
+    """Valida a asserção e emite a mesma sessão A2 (cookie + token)."""
+    credential = payload.get("credential") or payload
+    try:
+        challenge = _wa_challenge_from_client_data(
+            credential["response"]["clientDataJSON"]
+        )
+        credential_id = credential.get("id") or credential.get("rawId")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Credencial inválida")
+    if not challenge or not credential_id:
+        raise HTTPException(status_code=400, detail="Credencial inválida")
+
+    row = await db_service.consume_webauthn_challenge(challenge, "auth")
+    if not row:
+        raise HTTPException(status_code=401, detail="Challenge inválido ou expirado")
+
+    stored = await db_service.get_webauthn_credential(str(credential_id))
+    if not stored:
+        raise HTTPException(status_code=401, detail="Passkey não reconhecida")
+    if row.get("user_id") and int(row["user_id"]) != int(stored["user_id"]):
+        raise HTTPException(status_code=401, detail="Passkey não reconhecida")
+
+    user = await db_service.get_user_by_id(int(stored["user_id"]))
+    if not user:
+        raise HTTPException(status_code=401, detail="Conta indisponível")
+
+    try:
+        verified = verify_authentication_response(
+            credential=credential,
+            expected_challenge=base64url_to_bytes(challenge),
+            expected_rp_id=settings.WEBAUTHN_RP_ID,
+            expected_origin=_wa_origins(),
+            credential_public_key=base64url_to_bytes(stored["public_key"]),
+            credential_current_sign_count=int(stored["sign_count"] or 0),
+            require_user_verification=True,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[WEBAUTHN] Login rejeitado: %s", e)
+        raise HTTPException(status_code=401, detail="Não foi possível confirmar a passkey")
+
+    current_count = int(stored["sign_count"] or 0)
+    new_count = int(verified.new_sign_count or 0)
+    cloned = bool(current_count) and new_count <= current_count
+    await db_service.update_webauthn_credential_after_auth(
+        str(credential_id), new_count, cloned_warning=cloned
+    )
+    if cloned:
+        await db_service.record_system_alert(
+            level="critical",
+            code="WEBAUTHN_CLONED_SIGNAL",
+            message=(
+                f"Possível clone de passkey: user {user['id']} credential "
+                f"{str(credential_id)[:12]}… signCount {current_count}->{new_count}"
+            ),
+            context={"user_id": user["id"], "credential_id": str(credential_id)[:32]},
+        )
+
+    token = security.new_session_token()
+    await db_service.create_user_session(
+        user["id"],
+        _hash_token(token),
+        f"Passkey · {_wa_label(request)}",
+        request.client.host if request.client else None,
+    )
+    _set_webauthn_cookie(response, token)
+    logger.info("[WEBAUTHN] Login por passkey: user %s", user["id"])
+    return AuthResponse(token=token, user=_user_response(user))
+
+
+@app.get("/api/users/me/passkeys")
+async def list_my_passkeys(user: dict = Depends(_get_current_user)):
+    """Lista dispositivos com passkey (sem chaves públicas)."""
+    rows = await db_service.list_webauthn_credentials(user["id"])
+    return {
+        "passkeys": [
+            {
+                "id": r["id"],
+                "credential_id": r["credential_id"],
+                "device_label": r.get("device_label") or "Dispositivo",
+                "created_at": r.get("created_at"),
+                "last_used_at": r.get("last_used_at"),
+                "cloned_warning": bool(r.get("cloned_warning")),
+            }
+            for r in rows
+        ]
+    }
+
+
+@app.delete("/api/users/me/passkeys/{credential_id}")
+async def delete_my_passkey(
+    credential_id: str, user: dict = Depends(_get_current_user)
+):
+    ok = await db_service.delete_webauthn_credential(user["id"], credential_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Passkey não encontrada")
+    return {"status": "ok"}
 
 
 # ------------------------------------------------------------------
