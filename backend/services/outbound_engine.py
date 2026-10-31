@@ -14,6 +14,7 @@ import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 from ..config import settings
 from ..utils.logger import logger
@@ -26,6 +27,9 @@ from .db import (
 )
 from .enrichment_emaillistverify import emaillistverify_service
 from .gmail import gmail_sender
+
+# Janela de silêncio configurada em horário local do mercado (EUA/Leste).
+QUIET_TZ = ZoneInfo("America/New_York")
 
 # --------------------------------------------------------------- helpers
 
@@ -111,13 +115,19 @@ def _now_str(now: Optional[datetime] = None) -> str:
 
 
 def is_quiet_hours(now: datetime, start: Optional[str], end: Optional[str]) -> bool:
-    """True se `now` (UTC) cai dentro do intervalo de silencio (aceita wrap)."""
-    now = _now_dt(now)
+    """True se `now` (UTC) cai dentro da janela de silêncio em Nova Iorque.
+
+    A comparação é feita em `America/New_York`, não em UTC: o operador configura
+    22:00-07:00 a pensar no horário local, e comparar em UTC fazia os envios
+    saírem às 03:00 ET. Aceita janelas que atravessam a meia-noite e aplica o
+    DST automaticamente via `zoneinfo`.
+    """
+    now_local = _now_dt(now).astimezone(QUIET_TZ)
     s = _parse_hhmm(start)
     e = _parse_hhmm(end)
     if not s or not e or s == e:
         return False
-    minutes = now.hour * 60 + now.minute
+    minutes = now_local.hour * 60 + now_local.minute
     start_m = s[0] * 60 + s[1]
     end_m = e[0] * 60 + e[1]
     if start_m < end_m:
@@ -205,7 +215,11 @@ def next_utc_midnight(now: Optional[datetime] = None) -> str:
 
 
 def quiet_hours_end_iso(now: datetime, config: dict) -> Optional[str]:
-    """Instante em que a janela de silêncio atual termina (UTC), se aplicável."""
+    """Instante em que a janela de silêncio atual termina (UTC), se aplicável.
+
+    O fim é configurado em horário de Nova Iorque; devolvemos UTC para que o
+    resto do motor (guardado em UTC) continue consistente.
+    """
     if not is_quiet_hours(
         now, config.get("quiet_hours_start"), config.get("quiet_hours_end")
     ):
@@ -213,11 +227,11 @@ def quiet_hours_end_iso(now: datetime, config: dict) -> Optional[str]:
     end = _parse_hhmm(config.get("quiet_hours_end"))
     if not end:
         return None
-    dt = _now_dt(now)
-    target = dt.replace(hour=end[0], minute=end[1], second=0, microsecond=0)
-    if target <= dt:
+    local_now = _now_dt(now).astimezone(QUIET_TZ)
+    target = local_now.replace(hour=end[0], minute=end[1], second=0, microsecond=0)
+    if target <= local_now:
         target += timedelta(days=1)
-    return target.strftime("%Y-%m-%d %H:%M:%S")
+    return target.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def mailbox_matches_city(mailbox_city: Optional[str], message_city: Optional[str]) -> bool:
@@ -633,7 +647,11 @@ class OutboundEngine:
             return None
         # Mais folga primeiro; desempate estável pelo id.
         pool.sort(key=lambda m: (_int(m.get("sent_today"), 0), _int(m.get("id"), 0)))
-        best = dict(pool[0])
+        # IMPORTANTE: referência ao snapshot, NÃO uma cópia. O consumo de folga
+        # em `process_queue` tem de ser visível ao próximo `_pick_mailbox` do
+        # mesmo tick; com `dict(...)` uma caixa com cap 1 levava até `chunk`
+        # mensagens no mesmo tick (regressão 995007d, 2026-10-31).
+        best = pool[0]
         best["_spillover"] = not mailbox_matches_city(best.get("city"), city)
         best["_sent_today"] = _int(best.get("sent_today"), 0)
         best["_cap"] = _int(best.get("effective_cap"), 0)
@@ -867,6 +885,14 @@ class OutboundEngine:
                     0, _int(mailbox.get("remaining_today"), 0) - 1
                 )
                 sent += 1
+                # Log por envio: permite auditar caixa a caixa sem abrir a BD.
+                logger.info(
+                    "[OUTBOUND] Enviado msg=%s caixa=%s step=%s provider=%s",
+                    message["id"],
+                    mailbox.get("email"),
+                    _int(message.get("sequence_step"), 1),
+                    result.provider_id,
+                )
             else:
                 await db_service.update_outbound_message(
                     message["id"],
@@ -875,6 +901,12 @@ class OutboundEngine:
                     mailbox_id=mailbox["id"],
                 )
                 failed += 1
+                logger.warning(
+                    "[OUTBOUND] Falha no envio msg=%s caixa=%s: %s",
+                    message["id"],
+                    mailbox.get("email"),
+                    result.error,
+                )
 
         for batch_id in touched_batches:
             remaining = await db_service.count_outbound_messages(
@@ -949,10 +981,14 @@ class OutboundEngine:
         day = day_key(now)
         global_config = await db_service.get_outbound_config()
         mailboxes = await db_service.list_sending_mailboxes(enabled_only=False)
+        health = {
+            int(h["id"]): h for h in await db_service.outbound_mailbox_health(48)
+        }
         mailbox_rows = []
         for mailbox in mailboxes:
             sent_today = await db_service.count_mailbox_sent_today(mailbox["id"], day)
             row = mailbox_capacity_row(mailbox, global_config, now, sent_today)
+            diag = health.get(int(row["id"]), {})
             mailbox_rows.append(
                 {
                     "id": row["id"],
@@ -965,6 +1001,11 @@ class OutboundEngine:
                     "remaining_today": _int(row.get("remaining_today"), 0),
                     "warmup_state": row["warmup_state"],
                     "warmup_days": row["warmup_days"],
+                    "last_send_at": row.get("last_send_at"),
+                    "sent_48h": _int(diag.get("sent"), 0),
+                    "failed_48h": _int(diag.get("failed"), 0),
+                    "skipped_48h": _int(diag.get("skipped"), 0),
+                    "last_error": diag.get("last_error"),
                 }
             )
         usage = await db_service.get_outbound_counter("", day)

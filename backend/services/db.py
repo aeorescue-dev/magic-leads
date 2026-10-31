@@ -3265,6 +3265,40 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def outbound_mailbox_health(self, hours: int = 48) -> List[dict]:
+        """Diagnóstico por caixa: enviados/falhas/ignorados na janela + último erro.
+
+        Junta `sending_mailboxes` com `outbound_messages` para o Admin mostrar a
+        saúde de cada conta (Pamela/Pedro) sem consultar a BD à mão.
+        """
+        hours = max(1, min(int(hours), 168))
+        window = f"-{hours} hours"
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                """
+                SELECT m.id, m.email, m.city, m.enabled, m.daily_cap,
+                       m.warmup_state, m.warmup_started_at, m.last_send_at,
+                       COALESCE(SUM(CASE WHEN o.status='sent' THEN 1 ELSE 0 END), 0) AS sent,
+                       COALESCE(SUM(CASE WHEN o.status='failed' THEN 1 ELSE 0 END), 0) AS failed,
+                       COALESCE(SUM(CASE WHEN o.status IN ('skipped','suppressed') THEN 1 ELSE 0 END), 0) AS skipped,
+                       MAX(CASE WHEN o.status='sent' THEN o.sent_at END) AS last_sent_at_msg,
+                       (SELECT e.error FROM outbound_messages e
+                         WHERE e.mailbox_id = m.id AND e.status='failed'
+                         ORDER BY e.id DESC LIMIT 1) AS last_error
+                  FROM sending_mailboxes m
+                  LEFT JOIN outbound_messages o
+                    ON o.mailbox_id = m.id
+                   AND COALESCE(o.sent_at, o.created_at) >= datetime('now', ?)
+                 GROUP BY m.id
+                 ORDER BY m.id
+                """,
+                (window,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
     def count_mailbox_sent_today(self, mailbox_id: int, day: str) -> int:
         conn = get_connection()
         try:
@@ -11653,6 +11687,11 @@ class AsyncDatabaseService:
     async def count_mailbox_sent_today(self, mailbox_id: int, day: str) -> int:
         return await anyio.to_thread.run_sync(
             self._service.count_mailbox_sent_today, mailbox_id, day
+        )
+
+    async def outbound_mailbox_health(self, hours: int = 48) -> List[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.outbound_mailbox_health, hours
         )
 
     async def get_outbound_counter(self, city: str, day: str) -> dict:

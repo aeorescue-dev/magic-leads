@@ -262,6 +262,79 @@ async def test_reaper_runs_even_when_send_is_disabled(clean_engine, monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_cap_por_caixa_e_respeitado_no_mesmo_tick(clean_engine, monkeypatch):
+    """Regressão 995007d: o snapshot não podia ser copiado.
+
+    Uma caixa com cap 1 e duas mensagens na mesma cidade tem de enviar UMA e
+    deixar a outra na fila. Antes, `_pick_mailbox` devolvia `dict(pool[0])` e o
+    consumo de folga não era visível ao próximo pedido do mesmo tick.
+    """
+    _config(send_enabled="1", warmup_enabled="0")
+    _mailbox("cap1@example.com", daily_cap=1)
+
+    first = _lead("BOSTON", "cap-bos-1", "1 CAP AVE")
+    second = _lead("BOSTON", "cap-bos-2", "2 CAP AVE")
+    _contact(first, "one@vitorio.com", "BOSTON")
+    _contact(second, "two@vitorio.com", "BOSTON")
+    _queue("BOSTON", "one@vitorio.com")
+    _queue("BOSTON", "two@vitorio.com")
+
+    fake = FakeGmail()
+    monkeypatch.setattr(engine_module, "gmail_sender", fake)
+    monkeypatch.setattr(engine_module, "is_quiet_hours", lambda *a, **k: False)
+
+    result = await clean_engine.process_queue(now=NOW)
+    assert result["sent"] == 1, result
+    assert len(fake.sent) == 1
+    assert result.get("blocked_reason") == "mailbox_cap"
+    assert _svc().count_outbound_messages(status="queued", batch_id=None) == 1
+
+
+@pytest.mark.asyncio
+async def test_duas_caixas_cap1_alternam_sem_overshoot(clean_engine, monkeypatch):
+    """Com duas caixas cap 1, cada uma envia uma — e nenhuma envia duas."""
+    _config(send_enabled="1", warmup_enabled="0")
+    _mailbox("a@example.com", daily_cap=1)
+    _mailbox("b@example.com", daily_cap=1)
+
+    for i in range(1, 4):
+        lead = _lead("BOSTON", f"cap2-bos-{i}", f"{i} CAP TWO AVE")
+        _contact(lead, f"c{i}@vitorio.com", "BOSTON")
+        _queue("BOSTON", f"c{i}@vitorio.com")
+
+    fake = FakeGmail()
+    monkeypatch.setattr(engine_module, "gmail_sender", fake)
+    monkeypatch.setattr(engine_module, "is_quiet_hours", lambda *a, **k: False)
+
+    result = await clean_engine.process_queue(now=NOW)
+    assert result["sent"] == 2, result
+    assert len(fake.sent) == 2
+    assert _svc().count_outbound_messages(status="queued", batch_id=None) == 1
+
+
+def test_mailbox_health_conta_enviados_e_falhas(clean_engine):
+    _config(send_enabled="1", warmup_enabled="0")
+    box = _mailbox("health@example.com", daily_cap=5)
+    msg = _queue("BOSTON", "health@vitorio.com")
+    _svc().update_outbound_message(
+        msg["id"],
+        status="sent",
+        mailbox_id=box["id"],
+        sent_at=NOW.strftime("%Y-%m-%d %H:%M:%S"),
+    )
+    bad = _queue("BOSTON", "bad@vitorio.com")
+    _svc().update_outbound_message(
+        bad["id"], status="failed", mailbox_id=box["id"], error="boom"
+    )
+
+    rows = _svc().outbound_mailbox_health(48)
+    row = next(r for r in rows if r["email"] == "health@example.com")
+    assert row["sent"] == 1
+    assert row["failed"] == 1
+    assert row["last_error"] == "boom"
+
+
+@pytest.mark.asyncio
 async def test_status_reports_mailbox_cap_blocker(clean_engine, monkeypatch):
     _config(send_enabled="1", warmup_enabled="0")
     box = _mailbox("cap@example.com", daily_cap=1)

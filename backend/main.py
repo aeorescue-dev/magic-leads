@@ -2282,6 +2282,22 @@ async def admin_outbound_status(_admin: dict = Depends(_require_admin_user)):
     return await outbound_engine.status()
 
 
+@app.get("/api/admin/outbound/mailbox-health")
+async def admin_outbound_mailbox_health(
+    hours: int = 48, _admin: dict = Depends(_require_admin_user)
+):
+    """Diagnóstico por caixa: enviados/falhas/ignorados e último erro.
+
+    Janela em horas (1–168). Complementa `/outbound/status` com a visão 48 h
+    que o Admin mostra no bloco "Caixas de envio".
+    """
+    window = max(1, min(int(hours), 168))
+    return {
+        "hours": window,
+        "mailboxes": await db_service.outbound_mailbox_health(window),
+    }
+
+
 @app.post("/api/admin/outbound/replied")
 async def admin_outbound_mark_replied(
     contact_id: int, _admin: dict = Depends(_require_admin_user)

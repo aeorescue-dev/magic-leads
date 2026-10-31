@@ -209,15 +209,17 @@ async def test_process_queue_reaps_during_quiet_hours(clean_messages, sending_en
         "quiet-reaps@test.local", claimed_at="2025-12-31 00:00:00"
     )
 
+    # Janela configurada em Nova Iorque: 17:00 UTC = 12:00 EST (dentro de
+    # 11:00-13:00). O fim da janela é 13:00 EST = 18:00 UTC.
     result = await OutboundEngine().process_queue(
-        limit=1, now=datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+        limit=1, now=datetime(2026, 1, 1, 17, 0, tzinfo=timezone.utc)
     )
 
     assert result["status"] == "quiet_hours"
     assert result["sent"] == 0
     # Diagnóstico explícito: a UI/Control Tower mostra o motivo e quando retoma.
     assert result["blocked_reason"] == "quiet_hours"
-    assert result["retry_at"] == "2026-01-01 13:00:00"
+    assert result["retry_at"] == "2026-01-01 18:00:00"
     assert _svc().get_outbound_message(message_id)["status"] == "failed"
 
 

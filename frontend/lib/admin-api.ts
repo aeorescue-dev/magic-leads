@@ -516,6 +516,11 @@ export interface AdminOutboundStatusMailbox {
   remaining_today: number;
   warmup_state: string;
   warmup_days: number;
+  last_send_at?: string | null;
+  sent_48h?: number;
+  failed_48h?: number;
+  skipped_48h?: number;
+  last_error?: string | null;
 }
 
 export interface AdminOutboundQueueBlocker {

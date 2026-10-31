@@ -34,21 +34,67 @@ from backend.services.snov import (
 
 
 def test_is_quiet_hours_inside_wrapped_window():
-    # Janela 22:00-07:00 (wrap). 23:30 esta' dentro; 12:00 nao.
+    # Janela 22:00-07:00 em Nova Iorque (EDT = UTC-4 em outubro).
+    # 02:30 UTC = 22:30 EDT -> dentro; 16:00 UTC = 12:00 EDT -> fora.
     assert is_quiet_hours(
-        datetime(2026, 10, 19, 23, 30, tzinfo=timezone.utc), "22:00", "07:00"
+        datetime(2026, 10, 20, 2, 30, tzinfo=timezone.utc), "22:00", "07:00"
     )
     assert not is_quiet_hours(
-        datetime(2026, 10, 19, 12, 0, tzinfo=timezone.utc), "22:00", "07:00"
+        datetime(2026, 10, 20, 16, 0, tzinfo=timezone.utc), "22:00", "07:00"
+    )
+
+
+def test_is_quiet_hours_uses_new_york_not_utc():
+    # 03:00 UTC = 23:00 EDT (silêncio); 07:00 UTC = 03:00 EDT (silêncio);
+    # 11:00 UTC = 07:00 EDT (fim exclusivo -> permitido).
+    assert is_quiet_hours(
+        datetime(2026, 10, 20, 3, 0, tzinfo=timezone.utc), "22:00", "07:00"
+    )
+    assert is_quiet_hours(
+        datetime(2026, 10, 20, 7, 0, tzinfo=timezone.utc), "22:00", "07:00"
+    )
+    assert not is_quiet_hours(
+        datetime(2026, 10, 20, 11, 0, tzinfo=timezone.utc), "22:00", "07:00"
+    )
+
+
+def test_is_quiet_hours_respeita_dst():
+    # Inverno (EST = UTC-5): 13:00 UTC = 08:00 -> permitido;
+    # 03:00 UTC = 22:00 -> silêncio.
+    assert not is_quiet_hours(
+        datetime(2026, 12, 15, 13, 0, tzinfo=timezone.utc), "22:00", "07:00"
+    )
+    assert is_quiet_hours(
+        datetime(2026, 12, 15, 3, 0, tzinfo=timezone.utc), "22:00", "07:00"
+    )
+
+
+def test_quiet_hours_end_iso_em_utc():
+    config = {"quiet_hours_start": "22:00", "quiet_hours_end": "07:00"}
+    # 02:30 UTC = 22:30 EDT -> termina às 07:00 EDT = 11:00 UTC.
+    assert (
+        engine_module.quiet_hours_end_iso(
+            datetime(2026, 10, 20, 2, 30, tzinfo=timezone.utc), config
+        )
+        == "2026-10-20 11:00:00"
+    )
+    # Inverno: 04:00 UTC = 23:00 EST -> 07:00 EST = 12:00 UTC.
+    assert (
+        engine_module.quiet_hours_end_iso(
+            datetime(2026, 12, 15, 4, 0, tzinfo=timezone.utc), config
+        )
+        == "2026-12-15 12:00:00"
     )
 
 
 def test_is_quiet_hours_inside_plain_window_and_invalid_values():
+    # 13:30 UTC = 09:30 EDT -> dentro de 08:00-18:00 NY.
     assert is_quiet_hours(
-        datetime(2026, 10, 19, 9, 30, tzinfo=timezone.utc), "08:00", "18:00"
+        datetime(2026, 10, 20, 13, 30, tzinfo=timezone.utc), "08:00", "18:00"
     )
+    # 22:00 UTC = 18:00 EDT -> fim exclusivo, permitido.
     assert not is_quiet_hours(
-        datetime(2026, 10, 19, 19, 0, tzinfo=timezone.utc), "08:00", "18:00"
+        datetime(2026, 10, 20, 22, 0, tzinfo=timezone.utc), "08:00", "18:00"
     )
     # Valores invalidos nao bloqueiam envio.
     assert not is_quiet_hours(

@@ -741,6 +741,8 @@ function OutboundPanel() {
                   <th className="py-1">Conta</th>
                   <th className="py-1">Estado</th>
                   <th className="py-1">Hoje / cap</th>
+                  <th className="py-1">48 h (env/falha)</th>
+                  <th className="py-1">Último envio</th>
                   <th className="py-1">Warm-up</th>
                 </tr>
               </thead>
@@ -751,6 +753,14 @@ function OutboundPanel() {
                       {mb.email}
                       {mb.city ? (
                         <span className="ml-1 text-[10px] text-slate-500">{mb.city}</span>
+                      ) : null}
+                      {mb.last_error ? (
+                        <div
+                          className="max-w-[220px] truncate text-[10px] text-rose-300/80"
+                          title={mb.last_error}
+                        >
+                          erro: {mb.last_error}
+                        </div>
                       ) : null}
                     </td>
                     <td className="py-1">
@@ -765,6 +775,32 @@ function OutboundPanel() {
                       <span className="ml-1 text-[10px] text-slate-500">
                         (restam {mb.remaining_today})
                       </span>
+                    </td>
+                    <td className="py-1">
+                      <span className="text-emerald-400">{mb.sent_48h ?? 0}</span>
+                      {" / "}
+                      <span className={mb.failed_48h ? "text-rose-300" : ""}>
+                        {mb.failed_48h ?? 0}
+                      </span>
+                      {(mb.skipped_48h ?? 0) > 0 ? (
+                        <span className="ml-1 text-[10px] text-slate-500">
+                          ({mb.skipped_48h} ignorados)
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="py-1 text-[10px] text-slate-400">
+                      {mb.last_send_at
+                        ? new Date(
+                            mb.last_send_at.includes("T")
+                              ? mb.last_send_at
+                              : mb.last_send_at.replace(" ", "T") + "Z"
+                          ).toLocaleString("pt-PT", {
+                            day: "2-digit",
+                            month: "2-digit",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })
+                        : "nunca"}
                     </td>
                     <td className="py-1">
                       dia {mb.warmup_days} · {mb.warmup_state}
