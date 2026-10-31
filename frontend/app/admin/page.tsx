@@ -202,6 +202,8 @@ function OutboundPanel() {
   const [toggling, setToggling] = useState(false);
   const [enriching, setEnriching] = useState(false);
   const [batches, setBatches] = useState<AdminOutboundBatchRow[]>([]);
+  const [batchesBusy, setBatchesBusy] = useState(false);
+  const [batchesError, setBatchesError] = useState<string | null>(null);
   const [openBatch, setOpenBatch] = useState<number | null>(null);
   const [batchMsgs, setBatchMsgs] = useState<AdminOutboundMessageRow[]>([]);
   const [inboxBusy, setInboxBusy] = useState(false);
@@ -227,12 +229,26 @@ function OutboundPanel() {
     }
   }, []);
 
-  const loadBatches = useCallback(async () => {
+  const loadBatches = useCallback(async (silent = false) => {
+    if (!silent) {
+      setBatchesBusy(true);
+      setBatchesError(null);
+    }
     try {
       const res = await fetchAdminOutboundBatches(8);
       setBatches(res.batches ?? []);
-    } catch {
-      /* silencioso: nao bloqueia o painel */
+      if (!silent) setBatchesError(null);
+    } catch (e) {
+      // Nunca deixar o botão "morto": erro visível e estado sempre reposto.
+      if (!silent) {
+        setBatchesError(
+          e instanceof AdminApiError
+            ? `Falha ao actualizar (${e.status}): ${e.message}`
+            : "Falha ao actualizar a fila. Verifique a ligação e tente novamente."
+        );
+      }
+    } finally {
+      if (!silent) setBatchesBusy(false);
     }
   }, []);
 
@@ -245,7 +261,7 @@ function OutboundPanel() {
   useEffect(() => {
     const id = setInterval(() => {
       fetchAdminOutboundStatus().then(setStatus).catch(() => undefined);
-      void loadBatches();
+      void loadBatches(true);
     }, 30000);
     return () => clearInterval(id);
   }, [loadBatches]);
@@ -771,11 +787,27 @@ function OutboundPanel() {
             </span>
             <button
               onClick={() => void loadBatches()}
-              className="ml-auto inline-flex items-center gap-1 rounded border border-white/10 px-2 py-1 text-[10px] font-semibold text-slate-300 hover:bg-white/5"
+              disabled={batchesBusy}
+              data-testid="reload-batches"
+              className="ml-auto inline-flex items-center gap-1 rounded border border-white/10 px-2 py-1 text-[10px] font-semibold text-slate-300 hover:bg-white/5 disabled:cursor-wait disabled:opacity-60"
             >
-              <RefreshCcw className="h-3 w-3" /> Actualizar
+              {batchesBusy ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <RefreshCcw className="h-3 w-3" />
+              )}
+              {batchesBusy ? "A actualizar…" : "Actualizar"}
             </button>
           </div>
+          {batchesError ? (
+            <p
+              role="alert"
+              data-testid="batches-error"
+              className="border-b border-rose-500/20 bg-rose-500/5 px-3 py-1.5 text-[10px] text-rose-300"
+            >
+              {batchesError}
+            </p>
+          ) : null}
           {batches.length === 0 ? (
             <p className="px-3 py-3 text-[11px] text-slate-500">Sem lotes.</p>
           ) : (

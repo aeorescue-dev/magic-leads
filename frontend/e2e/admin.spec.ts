@@ -41,3 +41,26 @@ test("admin carrega, mostra funil/saúde e concede+reverte acesso", async ({ pag
   await revert.click();
   await expect(page.getByText(/Concessão #\d+ revertida/)).toBeVisible({ timeout: 20000 });
 });
+
+test("falha ao actualizar a fila mostra erro e repõe o botão", async ({ page }) => {
+  await page.route("**/api/admin/outbound/batches*", (route) =>
+    route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ detail: "fila indisponível" }),
+    })
+  );
+
+  await page.goto("/admin");
+  const button = page.getByTestId("reload-batches");
+  await expect(button).toBeVisible({ timeout: 20000 });
+  await expect(button).toBeEnabled();
+
+  await button.click();
+
+  await expect(page.getByTestId("batches-error")).toBeVisible({ timeout: 10000 });
+  await expect(page.getByTestId("batches-error")).toContainText("Falha ao actualizar");
+  // O botão não fica preso em loading.
+  await expect(button).toBeEnabled();
+  await expect(button).toContainText("Actualizar");
+});
