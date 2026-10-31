@@ -165,6 +165,16 @@ Contexto completo e números medidos: **`docs/PROJECT-MEMORY.md`**. Ler antes de
     mensagem que manda desbloquear o ecrã e verificar o gestor de senhas.
     Resultados de tentativas antigas não podem escrever estado na UI
     (`attemptRef`), e `passkey_not_recognized` limpa o hint local.
+43. **Passkeys — substituição**: cada browser tem um `device_id` opaco em
+    localStorage, gravado em `webauthn_credentials.device_id`. Se já existe
+    chave neste dispositivo, a UI **não** oferece “Ativar” outra vez: mostra
+    “Chave ativa neste dispositivo” e “Substituir”. A substituição pede
+    `replace_credential_id` (a credencial antiga fica **fora** de
+    `excludeCredentials`, senão o Android devolve `NotAllowedError`/timeout),
+    cria a nova e só então apaga a antiga no servidor. `NotAllowedError` com
+    “timed out” no texto é `timeout`, não cancelamento. `_wa_descriptors` tem de
+    passar `AuthenticatorTransport` (enum) — strings cruas rebentam o
+    `options_to_json` assim que exista uma credencial.
 
 ## Verificação mínima antes de deploy
 ```bash

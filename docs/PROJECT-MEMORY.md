@@ -777,6 +777,34 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   plataforma; e2e novo com UA Android garante “impressão digital” e ausência de
   “Face ID”. **942 pytest**, **92 vitest**, **27 e2e**.
 
+### Incidente — Android: NotAllowedError com credencial existente (2026-10-31)
+
+- **Sintoma**: já existia uma credencial “Android · Nunca usado”; clicar em
+  “Ativar impressão digital” devolvia `NotAllowedError: The operation either
+  timed out or was not allowed` e a UI dizia “Ativação cancelada”.
+- **Causa raiz**: a UI oferecia **registo duplicado** no mesmo dispositivo. A
+  credencial existente ia em `excludeCredentials`; no Android/Chrome esse
+  caminho não devolve o `InvalidStateError` previsto — fica à espera e termina
+  em `NotAllowedError`/timeout. O cliente ainda mapeava `NotAllowedError` para
+  “cancelado”, mesmo quando o utilizador não cancelou nada.
+- **Bug latente encontrado no caminho**: `_wa_descriptors` passava strings em
+  `transports`; `options_to_json` faz `transport.value` e rebentava (500)
+  quando a credencial tinha transports (ex.: `["internal"]`). Corrigido para
+  `AuthenticatorTransport(...)`.
+- **Correção**:
+  - `device_id` opaco por browser (localStorage) gravado em
+    `webauthn_credentials.device_id`; fallback pelo label para linhas antigas.
+  - Se já há chave neste dispositivo: “Chave de acesso ativa neste dispositivo”
+    + botão **Substituir** (em vez de “Ativar”).
+  - Substituição envia `replace_credential_id`; o servidor **exclui** essa
+    credencial de `excludeCredentials`, cria a nova e só depois a antiga é
+    apagada (se o registo falhar, a antiga continua válida).
+  - `NotAllowedError` com “timed out” → código `timeout` com instruções
+    (desbloquear o ecrã, manter aberto), separado de “cancelado”.
+- **Testes**: pytest (device_id sanitizado, substituição fora do exclude,
+  transports serializáveis), vitest do `timeout`, e2e de substituição garante
+  **1** credencial com id novo. **944 pytest**, **93 vitest**, **28 e2e**.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
