@@ -84,7 +84,7 @@ if (pathname === "/admin" || pathname.startsWith("/admin/")) {
   if (isProtected) {
     const accessCookie = request.cookies.get("garimpador_access");
     if (accessCookie && accessCookie.value === "blocked" && !pathAfterLocale.startsWith("/checkout")) {
-      const checkoutUrl = new URL("//checkout", request.url);
+      const checkoutUrl = new URL(`/${locale}/checkout`, request.url);
       return NextResponse.redirect(checkoutUrl);
     }
 
@@ -92,7 +92,13 @@ if (pathname === "/admin" || pathname.startsWith("/admin/")) {
     const tokenCookie = request.cookies.get("garimpador_token");
 
     if ((!authCookie || !authCookie.value) && (!tokenCookie || !tokenCookie.value)) {
-      const loginUrl = new URL(`/${locale}/`, request.url);
+      // Preserva o destino (ex.: deep link ?lead=42 do push) para retorno
+      // após login/passkey. Sem isto, o utilizador caía na landing.
+      const loginUrl = new URL(`/${locale}/auth`, request.url);
+      loginUrl.searchParams.set(
+        "next",
+        `${pathname}${request.nextUrl.search}` || `/${locale}/dashboard`
+      );
       return NextResponse.redirect(loginUrl);
     }
   }

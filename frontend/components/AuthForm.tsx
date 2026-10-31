@@ -95,6 +95,11 @@ function AuthFormInner() {
   const { lang, t } = useI18n();
   const { signIn, loading: authLoading } = useAuth();
   const startCheckout = useStartCheckout();
+  const rawNext = searchParams.get('next');
+  const nextPath =
+    rawNext && rawNext.startsWith('/') && !rawNext.startsWith('//')
+      ? rawNext
+      : null;
 
   const localePath = (href: string) => `/${lang}${href}`;
 
@@ -169,7 +174,7 @@ function AuthFormInner() {
       } else {
         setSuccess(true);
         setTimeout(() => {
-          router.push(localePath('/dashboard'));
+          router.push(nextPath || localePath('/dashboard'));
           router.refresh();
         }, 800);
       }
