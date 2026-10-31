@@ -173,6 +173,8 @@ def build(db_path: str) -> str:
         for external_id, name, phone, mailing, address in [
             ("E2E-CICLO", "Carlos Ciclo", "(718) 555-0201", None, "9 CYCLE AVE"),
             ("E2E-TIMER", "Tina Timer", "(718) 555-0202", None, "10 TIMER ST"),
+            # Lead dedicado ao teste do 402 (não é tocado pelo ciclo de vida).
+            ("E2E-PAY", "Paula Pay", "(718) 555-0203", None, "11 PAYMENT ST"),
         ]:
             # Mesma fonte/categoria dos leads "visíveis" (dob_violation/ROOF):
             # são os que passam na regra de qualificação e entram no feed por

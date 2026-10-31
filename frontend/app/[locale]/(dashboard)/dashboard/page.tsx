@@ -59,6 +59,7 @@ import {
   fetchScraperStatus, ScraperRunState,
   fetchPublicMetrics, PublicMetrics, EMPTY_PUBLIC_METRICS, RELEASE_REASONS,
   revealPhone, PhoneRevealResult,
+  PAYMENT_REQUIRED_EVENT,
 } from "@/lib/api-client";
 
 // Tipo enriquecido para o modal de revelação (com histórico e ocorrências)
@@ -400,6 +401,19 @@ const URGENCIES = ["all", "high", "medium", "low"];
       setShowCheckout(true);
     }
   }, [subscription, setShowCheckout]);
+
+  // A5 (402): o interceptor do api-client emite este evento. Abre o checkout
+  // imediatamente — antes o utilizador esperava até 10 min pelo refresh.
+  useEffect(() => {
+    const onPaymentRequired = () => {
+      checkoutAutoOpened.current = true;
+      setShowCheckout(true);
+      void refreshSubscription();
+    };
+    window.addEventListener(PAYMENT_REQUIRED_EVENT, onPaymentRequired);
+    return () =>
+      window.removeEventListener(PAYMENT_REQUIRED_EVENT, onPaymentRequired);
+  }, [refreshSubscription, setShowCheckout]);
 
   // Dynamic Greeting based on client local time
   const [greetingKey, setGreetingKey] = useState<string>("dashboard.greeting.morning");

@@ -193,6 +193,12 @@ async function handle<T>(res: Response): Promise<T> {
     } catch {
       detail = await res.text();
     }
+    // A5: assinatura em falta/expirada. O backend devolve 402 com
+    // `action=REDIRECT_TO_CHECKOUT`; a UI abre o checkout sem esperar pelo
+    // refresh periódico de subscrição (10 min).
+    if (isPaymentRequired(res.status, responseBody)) {
+      notifyPaymentRequired(responseBody);
+    }
     // Sessão expirada (TTL) ou deslogado por login concorrente (limite de 2).
     if (
       detail &&
@@ -211,6 +217,28 @@ async function handle<T>(res: Response): Promise<T> {
     throw error;
   }
   return res.json() as Promise<T>;
+}
+
+// ------------------------------------------------------------------
+// A5 — pagamento necessário (402)
+// ------------------------------------------------------------------
+export const PAYMENT_REQUIRED_EVENT = "garimpador:payment-required";
+
+/** Verdadeiro para 402 ou para o envelope A5 `{action: REDIRECT_TO_CHECKOUT}`. */
+export function isPaymentRequired(status?: number, body?: any): boolean {
+  if (status === 402) return true;
+  const action = body?.detail?.action ?? body?.action;
+  return action === "REDIRECT_TO_CHECKOUT";
+}
+
+/** Emite o evento que o dashboard usa para abrir o CheckoutModal. */
+export function notifyPaymentRequired(body?: any): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.dispatchEvent(new CustomEvent(PAYMENT_REQUIRED_EVENT, { detail: body }));
+  } catch {
+    /* ambiente sem CustomEvent: o refresh periódico cobre */
+  }
 }
 
 // Limita a 2 sessões simultâneas por usuário (backend 401 session_expired_concurrent_login).

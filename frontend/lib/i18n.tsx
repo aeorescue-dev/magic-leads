@@ -1165,6 +1165,7 @@ const PT: Dict = {
 
   // Dashboard — Phase 4: Phone Reveal & cota diária (sem "créditos")
   "dashboard.action.reveal_phone": "Revelar Telefone",
+  "dashboard.detail.copy_phone": "Copiar telefone",
   "dashboard.toast.phone_revealed": "Telefone revelado com sucesso",
   "dashboard.toast.phone_reveal_failed": "Não foi possível revelar o telefone",
   "dashboard.toast.phone_reveal_error": "Erro ao revelar telefone",
@@ -1227,6 +1228,10 @@ const PT: Dict = {
   "checkout.notice": "Subscrição em pausa. Contacta o suporte ou reativa o plano para recuperar o acesso.",
   "checkout.choose_plan": "Escolher plano",
   "checkout.back_home": "Voltar ao início",
+  "checkout.btn_processing": "A processar...",
+  "checkout.error_company_req": "Indique o nome da empresa",
+  "checkout.error_generic_fail": "Não foi possível iniciar o pagamento",
+  "checkout.error_payment_fail": "O pagamento não foi concluído. Tente novamente.",
   "checkout.company_name": "O nome real da sua empresa",
   "checkout.company_name_help": "É o nome que aparece como remetente nas mensagens aos clientes (WhatsApp, SMS e e-mail). Pode alterá-lo depois em Configurações.",
   "dashboard.opportunities.see_all": "Ver todas as demandas do dia →",
@@ -1609,6 +1614,11 @@ const EN: Dict = {
   "dashboard.sidebar.daily_quota": "Daily reveals",
   "dashboard.sidebar.daily_quota_used": "used today",
   "dashboard.sidebar.daily_quota_reset": "resets at midnight",
+  "dashboard.action.reveal_phone": "Reveal phone",
+  "dashboard.detail.copy_phone": "Copy phone",
+  "dashboard.toast.phone_revealed": "Phone revealed successfully",
+  "dashboard.toast.phone_reveal_failed": "Could not reveal the phone",
+  "dashboard.toast.phone_reveal_error": "Error revealing phone",
 
   // Onboarding Wizard
   "onboarding.step": "Step {current} of {total}",
@@ -2430,6 +2440,10 @@ const EN: Dict = {
   "checkout.notice": "Subscription paused. Contact support or reactivate plan to regain access.",
   "checkout.choose_plan": "Choose plan",
   "checkout.back_home": "Back to home",
+  "checkout.btn_processing": "Processing...",
+  "checkout.error_company_req": "Enter your company name",
+  "checkout.error_generic_fail": "Could not start checkout",
+  "checkout.error_payment_fail": "Payment was not completed. Please try again.",
   "dashboard.opportunities.load_all": "See all today's leads →",
   "hero.mockup.lead_types.grass": "Tall Grass",
   "hero.mockup.lead_types.plumbing": "Plumbing",
@@ -2798,6 +2812,11 @@ const ES: Dict = {
   "dashboard.sidebar.daily_quota": "Revelaciones diarias",
   "dashboard.sidebar.daily_quota_used": "usadas hoy",
   "dashboard.sidebar.daily_quota_reset": "se renueva a medianoche",
+  "dashboard.action.reveal_phone": "Revelar teléfono",
+  "dashboard.detail.copy_phone": "Copiar teléfono",
+  "dashboard.toast.phone_revealed": "Teléfono revelado correctamente",
+  "dashboard.toast.phone_reveal_failed": "No se pudo revelar el teléfono",
+  "dashboard.toast.phone_reveal_error": "Error al revelar el teléfono",
 
   // Onboarding Wizard
   "onboarding.step": "Paso {current} de {total}",
@@ -3593,6 +3612,10 @@ const ES: Dict = {
   "checkout.notice": "Suscripción en pausa. Contacta con soporte o reactiva el plan para recuperar el acceso.",
   "checkout.choose_plan": "Elegir plan",
   "checkout.back_home": "Volver al inicio",
+  "checkout.btn_processing": "Procesando...",
+  "checkout.error_company_req": "Indique el nombre de la empresa",
+  "checkout.error_generic_fail": "No se pudo iniciar el pago",
+  "checkout.error_payment_fail": "El pago no se completó. Inténtelo de nuevo.",
 
   "layout.title": "Magic Leads - Obras reales con dueño identificado",
   "layout.description": "Capturamos oportunidades de reforma y corrección (techo, estructura, fontanería, pintura) directo de registros públicos actualizados continuamente, con dueño identificado y reserva exclusiva de 60 minutos por $120/semana. Sistema disponible 24/7.",
