@@ -273,6 +273,24 @@ def slug_candidates(name: str, city: str = "") -> list[str]:
 
     joined = "".join(toks)
     add(joined)
+    # Variantes com os tokens "comerciais" que `significant_tokens` remove
+    # (GROUP/COMPANY/ENTERPRISES/SERVICES): walshgroup, wightco, etc.
+    raw_clean = re.sub(
+        r"[^A-Za-z0-9\s]", " ", strip_accents(name or "").upper()
+    )
+    legal_only = {
+        "LLC", "INC", "CORP", "CORPORATION", "LTD", "LIMITED", "LP", "LLP",
+        "PLLC", "PC", "PLC",
+    }
+    raw_toks = [
+        t for t in raw_clean.split() if len(t) >= 3 and t.upper() not in legal_only
+    ]
+    if raw_toks:
+        add("".join(raw_toks))
+        if len(raw_toks) >= 2:
+            add(raw_toks[0] + "co")
+            add(raw_toks[0] + "group")
+            add(raw_toks[0] + "companies")
     if len(toks) >= 2:
         add("-".join(toks))
         add("".join(toks[:2]))
@@ -312,13 +330,61 @@ def email_patterns(owner_name: str, name_class: str) -> list[str]:
 
 # --------------------------------------------------------------- SMTP real
 
+# DNS do contentor (Railway) nao tem nameserver utilizavel: `dns.resolver`
+# falha com "Network is unreachable". O DoH abaixo e' o fallback autonomo
+# (Cloudflare + Google, sem chave nem custo) com cache em memoria.
+_DOH_URLS = (
+    "https://cloudflare-dns.com/dns-query",
+    "https://dns.google/resolve",
+)
+_doh_cache: dict[tuple[str, str], tuple[float, list[dict]]] = {}
+DOH_TTL_S = 900.0
+
+
+def _doh_answer(name: str, rtype: str) -> list[dict]:
+    """Consulta DNS-over-HTTPS. Devolve `Answer` cru ou [] em caso de erro."""
+    key = (name.lower().rstrip("."), rtype.upper())
+    cached = _doh_cache.get(key)
+    now = time.monotonic()
+    if cached and (now - cached[0]) < DOH_TTL_S:
+        return cached[1]
+    import requests
+
+    for url in _DOH_URLS:
+        try:
+            r = requests.get(
+                url,
+                params={"name": key[0], "type": key[1]},
+                headers={"accept": "application/dns-json"},
+                timeout=5.0,
+            )
+            if r.status_code != 200:
+                continue
+            data = r.json() or {}
+            answers = list(data.get("Answer") or [])
+            _doh_cache[key] = (now, answers)
+            return answers
+        except Exception:  # noqa: BLE001
+            continue
+    return []
+
+
 def _default_a_record(domain: str) -> bool:
     import dns.resolver
 
     try:
-        return len(dns.resolver.resolve(domain, "A", lifetime=3.0)) > 0
-    except Exception:
-        return False
+        if len(dns.resolver.resolve(domain, "A", lifetime=3.0)) > 0:
+            return True
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        import socket
+
+        socket.getaddrinfo(domain, 443, socket.AF_INET)
+        return True
+    except Exception:  # noqa: BLE001
+        pass
+    return any(a.get("type") == 1 for a in _doh_answer(domain, "A"))
 
 
 def _default_mx_records(domain: str) -> list[tuple[int, str]]:
@@ -329,8 +395,19 @@ def _default_mx_records(domain: str) -> list[tuple[int, str]]:
         return sorted(
             (int(r.preference), str(r.exchange).rstrip(".")) for r in ans
         )
-    except Exception:
-        return []
+    except Exception:  # noqa: BLE001
+        pass
+    out: list[tuple[int, str]] = []
+    for a in _doh_answer(domain, "MX"):
+        if a.get("type") != 15:
+            continue
+        data = str(a.get("data") or "")
+        pref, _, host = data.partition(" ")
+        try:
+            out.append((int(pref), host.rstrip(".")))
+        except ValueError:
+            continue
+    return sorted(out)
 
 
 def _default_ns_records(domain: str) -> list[str]:
@@ -339,8 +416,13 @@ def _default_ns_records(domain: str) -> list[str]:
     try:
         ans = dns.resolver.resolve(domain, "NS", lifetime=4.0)
         return [str(r).rstrip(".").lower() for r in ans]
-    except Exception:
-        return []
+    except Exception:  # noqa: BLE001
+        pass
+    return [
+        str(a.get("data") or "").rstrip(".").lower()
+        for a in _doh_answer(domain, "NS")
+        if a.get("type") == 2
+    ]
 
 
 def default_resolver() -> Resolver:

@@ -7,8 +7,11 @@ from backend.services.company_discovery import (
     Fetcher,
     Resolver,
     SmtpProber,
+    _default_a_record,
+    _default_mx_records,
     is_blocked_domain,
     registrable_domain,
+    slug_candidates,
 )
 from backend.services.lead_filter import (
     classify_owner_name,
@@ -34,6 +37,42 @@ def test_domain_normalization():
     assert is_blocked_domain("yelp.com") is True
     assert is_blocked_domain("google.com") is True
     assert is_blocked_domain("kingsleyconstruction.com") is False
+
+
+def test_slug_candidates_keep_commercial_tokens():
+    """`significant_tokens` remove GROUP/COMPANY; o slug tem de os reintroduzir."""
+    assert "walshgroup" in slug_candidates("Walsh Group", "Chicago")
+    assert "wightco" in slug_candidates("Wight & Company", "Chicago")
+    assert "leopardo" in slug_candidates("Leopardo Companies", "Chicago")
+    assert "turnerconstruction" in slug_candidates("Turner Construction", "NYC")
+
+
+def test_dns_fallback_usa_doh_quando_resolver_falha(monkeypatch):
+    """Sem nameserver no contentor, o fallback DoH tem de resolver A e MX."""
+    import dns.resolver
+
+    def boom(*a, **k):
+        raise RuntimeError("Network is unreachable")
+
+    monkeypatch.setattr(dns.resolver, "resolve", boom)
+    monkeypatch.setattr(
+        "socket.getaddrinfo",
+        lambda *a, **k: (_ for _ in ()).throw(OSError("no dns")),
+    )
+
+    answers = {
+        ("walshgroup.com", "A"): [{"type": 1, "data": "1.2.3.4"}],
+        ("walshgroup.com", "MX"): [{"type": 15, "data": "10 walshgroup-com.mail.protection.outlook.com."}],
+    }
+    monkeypatch.setattr(
+        "backend.services.company_discovery._doh_answer",
+        lambda name, rtype: answers.get((name.lower(), rtype), []),
+    )
+
+    assert _default_a_record("walshgroup.com") is True
+    assert _default_mx_records("walshgroup.com") == [
+        (10, "walshgroup-com.mail.protection.outlook.com")
+    ]
 
 
 def test_company_discovery_heuristic_mocked():
