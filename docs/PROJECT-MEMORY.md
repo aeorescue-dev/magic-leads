@@ -889,6 +889,28 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   `contact_*`, fontes de Dallas/Boston), estágio de e-mail, scheduler 24/7 e
   UI de entidades.
 
+### Fase 2.2 — Ingestão de entidades NYC/Chicago/Boston (2026-10-31)
+
+- **Extratores** (`contractor_ingest.py`), funções puras:
+  - NYC: `applicant_business_name` + `applicant_license` (novo no select do DOB),
+    papel contractor; `job_filing_number~work_permit` como fonte idempotente.
+  - Chicago: leitura dedicada de `contact_N_type/name` (o fetch genérico não
+    os traz); só `CONTRACTOR-*` e `MASON*`; prefixo de licença
+    (`PL058130279-`) separado do nome.
+  - Boston: o 311 não tem empreiteiro; passa a ler o dataset público
+    **Approved Building Permits** e só aceita `applicant` com indicador
+    empresarial (pessoa não vira entidade).
+  - Owners/architects ficam fora (não são alvo comercial).
+- **Proteção do scrape**: `_record_contractor_entities` deduplica antes da BD,
+  limita a 2000 registos/run e nunca propaga exceção para o scrape.
+- **Dry-run real (amostras de 200 linhas, sem escrita)**:
+  - NYC: 200 linhas → **195 entidades / 111 únicas**.
+  - Chicago: 200 → **147 / 117 únicas**.
+  - Boston: 200 → **5 / 4 únicas** (fonte é maioritariamente pessoa, como
+    esperado).
+- **Testes**: 4 novos (extratores + dedupe na BD); suite **988 pytest**.
+- Dallas continua pausada até haver fonte pública de permits.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

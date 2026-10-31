@@ -89,6 +89,7 @@ from .scrapers.socrata_discovery import socrata_discovery
 from .services import (
     alert_planner,
     auto_ramp,
+    contractor_ingest,
     control_tower,
     enrichment_queue,
     freshness,
@@ -3290,7 +3291,7 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                     try:
                         rows = await _s._fetch_all_pages(
                             domain=domain, dataset=dataset,
-                            select="job_filing_number, work_permit, house_no, street_name, borough, zip_code, latitude, longitude, approved_date, issued_date, job_description, work_type, permit_status, applicant_first_name, applicant_last_name, applicant_business_name, owner_name, owner_business_name, nta, council_district",
+                            select="job_filing_number, work_permit, house_no, street_name, borough, zip_code, latitude, longitude, approved_date, issued_date, job_description, work_type, permit_status, applicant_first_name, applicant_last_name, applicant_business_name, applicant_license, owner_name, owner_business_name, nta, council_district",
                             where=None, order="approved_date DESC",
                             page_size=5000, max_pages=6, date_col="approved_date",
                         )
@@ -3431,6 +3432,12 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                         f"PASSED={len(out)}"
                     )
                     leads = out
+                    try:
+                        await _record_contractor_entities(
+                            contractor_ingest.extract_nyc_permits(rows)
+                        )
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("[ENTITIES] NYC extração falhou: %s", e)
 
                 elif city != "Boston":
                     # Socrata 311 genérico (NYC, Chicago, Dallas, etc.)
@@ -3454,6 +3461,34 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                     )
                     if not meta.get("truncated") and meta.get("max_date"):
                         pending_watermarks[wm_key] = meta["max_date"]
+
+                    # Fase 2: contactos por tipo do permit de Chicago (o fetch
+                    # genérico não traz `contact_N_*`, logo vai uma leitura
+                    # dedicada só para o grafo de empreiteiros).
+                    if entry.get("type") == "chi_permits":
+                        try:
+                            contact_fields = ["id"] + [
+                                f"contact_{i}_{suffix}"
+                                for i in range(1, 16)
+                                for suffix in ("type", "name")
+                            ]
+                            raw_contacts = await socrata_scraper._fetch_all_pages(
+                                domain=entry["domain"],
+                                dataset=entry["dataset"],
+                                select=",".join(contact_fields),
+                                where=None,
+                                order="issue_date DESC",
+                                page_size=5000,
+                                max_pages=1,
+                                date_col="issue_date",
+                            )
+                            await _record_contractor_entities(
+                                contractor_ingest.extract_chicago_permits(raw_contacts)
+                            )
+                        except Exception as e:  # noqa: BLE001
+                            logger.warning(
+                                "[ENTITIES] Chicago extração falhou: %s", e
+                            )
 
                 # Boston (CKAN) - caso especial
                 if city == "Boston":
@@ -3571,6 +3606,32 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                             if max_open is None or odo > max_open:
                                 max_open = odo
                         leads = out
+                        # Fase 2: o 311 não traz empreiteiro; lemos o dataset
+                        # de Approved Building Permits (applicant) só para o
+                        # grafo. Sem empresa no nome -> não cria entidade.
+                        try:
+                            async with _h.AsyncClient(timeout=60) as client:
+                                pr = await client.get(
+                                    "https://data.boston.gov/api/3/action/datastore_search",
+                                    params={
+                                        "resource_id": "6ddcd912-32a0-43df-9908-63574f8c7e77",
+                                        "limit": 5000,
+                                        "sort": "issued_date DESC",
+                                    },
+                                )
+                                pdata = pr.json()
+                            permits = (
+                                (pdata.get("result") or {}).get("records") or []
+                                if pdata.get("success")
+                                else []
+                            )
+                            await _record_contractor_entities(
+                                contractor_ingest.extract_boston_permits(permits)
+                            )
+                        except Exception as e:  # noqa: BLE001
+                            logger.warning(
+                                "[ENTITIES] Boston extração falhou: %s", e
+                            )
                         logger.info(
                             "[P0-A] Boston: %s registos, %s aceites, truncado=%s",
                             len(records), len(out), truncated,
@@ -3845,6 +3906,51 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
         logger.error(f"Erro no scraper [run {run_id}]: {e}", exc_info=True)
         state.update(status="error", error=str(e), running=False, finished_at=utcnow().isoformat())
         await db_service.record_scrape_run(state)
+
+
+async def _record_contractor_entities(records: list[dict]) -> dict:
+    """Grava entidades extraídas; nunca derruba o scrape por causa disto.
+
+    Deduplica antes de tocar na BD e limita o volume por run para o scrape não
+    ficar preso a gravar dezenas de milhares de linhas.
+    """
+    if not records:
+        return {"saved": 0, "failed": 0, "total": 0}
+    max_records = 2000
+    seen: set[tuple] = set()
+    unique: list[dict] = []
+    for rec in records:
+        key = (
+            (rec.get("license") or "").upper(),
+            (rec.get("legal_name") or "").upper(),
+            (rec.get("state") or "").upper(),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(rec)
+        if len(unique) >= max_records:
+            break
+    saved = 0
+    failed = 0
+    for rec in unique:
+        try:
+            if await db_service.upsert_contractor_entity(**rec):
+                saved += 1
+        except Exception as e:  # noqa: BLE001
+            failed += 1
+            logger.warning(
+                "[ENTITIES] falha ao gravar %r: %s", rec.get("legal_name"), e
+            )
+    logger.info(
+        "[ENTITIES] %s/%s guardadas (únicas=%s, falhas=%s)",
+        saved,
+        len(records),
+        len(unique),
+        failed,
+    )
+    return {"saved": saved, "failed": failed, "total": len(records),
+            "unique": len(unique)}
 
 
 async def _run_scrape_guarded(
