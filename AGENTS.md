@@ -122,6 +122,13 @@ Contexto completo e números medidos: **`docs/PROJECT-MEMORY.md`**. Ler antes de
     estar em inglês natural; PT/ES continuam suportados quando escolhidos.
     `pickLang()` é a função única e `tests/unit/i18n-default-lang.test.ts`
     guarda o default.
+37. **Frescura de ingestão (Fase C)**: `_check_ingestion_freshness()` na Control
+    Tower usa o último run **concluído** (`success`/`partial`). Limiares derivam
+    de `SCRAPER_INTERVAL_HOURS` (6 h → warn 10,5 h / fail 15 h), com override
+    `INGESTION_WARN_HOURS`/`INGESTION_FAIL_HOURS`. Um `error` mais recente que o
+    último sucesso é **fail**; um `running` >2 h é **warn** (processo preso).
+    O digest tem a linha `INGESTAO` com idade, inseridos e captura 24 h.
+    Nunca deixar a ingestão falhar em silêncio.
 
 ## Verificação mínima antes de deploy
 ```bash

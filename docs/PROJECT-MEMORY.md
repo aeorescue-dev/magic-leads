@@ -647,6 +647,19 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   checkout…”). Teste unitário do default + e2e `/en` com 402.
 - Testes: 907 pytest (+11 de segurança), 22 e2e (+2), 83 vitest (+4).
 
+### Fase C — Alerta de frescura de ingestão (2026-10-31)
+
+- **Problema**: a Control Tower vigiava worker/fila/backup/VPS/tokens/Searchbug/
+  push, mas **não** a ingestão. Uma fonte a mudar de schema podia parar o scraper
+  com o sistema “verde”.
+- **`_check_ingestion_freshness()`**: último run concluído (`success`/`partial`)
+  com limiares derivados de `SCRAPER_INTERVAL_HOURS` (default 6 h → warn 10,5 h,
+  fail 15 h; override por env). `error` posterior ao último sucesso → **fail**;
+  `running` >2 h → **warn** (preso); sem data → warn.
+- **Digest**: nova linha `INGESTAO` com estado/idade/inseridos e leads em 24 h.
+- **Testes**: `tests/test_ingestion_freshness.py` (8) + digest com motivo;
+  **916 pytest**, 22 e2e, 83 vitest.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

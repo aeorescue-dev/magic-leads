@@ -158,6 +158,117 @@ def _check_worker() -> dict:
     return {"name": "worker", "status": "ok", "detail": f"tick ha {age_min:.0f} min"}
 
 
+def _ingestion_thresholds() -> tuple[float, float]:
+    """Limiares (warn, fail) derivados da cadência do scraper.
+
+    Default: intervalo 6 h -> warn 10.5 h, fail 15 h (uma e duas varreduras
+    perdidas, com margem para runs longos). Override por env se necessário.
+    """
+    try:
+        interval = float(os.getenv("SCRAPER_INTERVAL_HOURS") or 6)
+    except (TypeError, ValueError):
+        interval = 6.0
+    interval = max(1.0, interval)
+
+    def _env(name: str, default: float) -> float:
+        try:
+            value = float(os.getenv(name) or default)
+        except (TypeError, ValueError):
+            return default
+        return value if value > 0 else default
+
+    warn_h = _env("INGESTION_WARN_HOURS", max(8.0, interval * 1.75))
+    fail_h = _env("INGESTION_FAIL_HOURS", max(12.0, interval * 2.5))
+    if fail_h <= warn_h:
+        fail_h = warn_h + 1
+    return warn_h, fail_h
+
+
+def _check_ingestion_freshness() -> dict:
+    """O scraper parou de capturar? Esta era a falha silenciosa sem alerta.
+
+    Considera o último run CONCLUÍDO (`success`/`partial`). Um run `error` mais
+    recente do que o último sucesso é falha imediata. Um run `running` antigo
+    (>2 h) indica processo preso. Runs com 0 inseridos não mudam o estado, mas
+    ficam visíveis no detalhe.
+    """
+    now = _now()
+    warn_h, fail_h = _ingestion_thresholds()
+    conn = get_connection()
+    try:
+        last_ok = conn.execute(
+            "SELECT * FROM scraper_runs WHERE status IN ('success', 'partial') "
+            "ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        latest = conn.execute(
+            "SELECT * FROM scraper_runs ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        captured_24h = conn.execute(
+            "SELECT COUNT(1) FROM leads "
+            "WHERE created_at >= datetime('now', '-24 hours')"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    suffix = f" · {captured_24h} lead(s) em 24h"
+    if captured_24h == 0:
+        suffix += " (sem captura)"
+
+    # Run em execução há demasiado tempo: o processo pode ter morrido.
+    if latest and str(latest["status"]) == "running":
+        started = _parse(latest["finished_at"] or latest["started_at"])
+        if started:
+            running_h = (now - started).total_seconds() / 3600
+            if running_h > 2.0:
+                return {
+                    "name": "ingestion",
+                    "status": "warn",
+                    "detail": f"run em execução há {running_h:.1f}h (preso?){suffix}",
+                }
+
+    if not last_ok:
+        if latest and str(latest["status"]) == "error":
+            return {
+                "name": "ingestion",
+                "status": "fail",
+                "detail": f"nenhum run concluído; último falhou: {str(latest['error'] or 'erro')[:80]}{suffix}",
+            }
+        return {
+            "name": "ingestion",
+            "status": "warn",
+            "detail": f"sem run concluído registado{suffix}",
+        }
+
+    # Erro mais recente do que o último sucesso = ingestão parada por falha.
+    if latest and str(latest["status"]) == "error" and latest["id"] > last_ok["id"]:
+        return {
+            "name": "ingestion",
+            "status": "fail",
+            "detail": f"último run falhou: {str(latest['error'] or 'erro')[:80]}{suffix}",
+        }
+
+    finished = _parse(last_ok["finished_at"] or last_ok["started_at"])
+    if not finished:
+        return {
+            "name": "ingestion",
+            "status": "warn",
+            "detail": f"último run sem data de conclusão{suffix}",
+        }
+
+    age_h = (now - finished).total_seconds() / 3600
+    base = (
+        f"último run {last_ok['status']} há {age_h:.1f}h · "
+        f"{int(last_ok['inserted'] or 0)} inseridos"
+    )
+    if age_h > fail_h:
+        status = "fail"
+    elif age_h > warn_h:
+        status = "warn"
+    else:
+        status = "ok"
+    return {"name": "ingestion", "status": status, "detail": f"{base}{suffix}"}
+
+
 def _check_searchbug_cost() -> dict:
     """Anomalias de custo/qualidade da Searchbug (sem cap global).
 
@@ -559,6 +670,7 @@ def _check_push_health() -> dict:
 
 async def run_health_checks() -> list[dict]:
     checks: list[dict] = [_check_db(), _check_worker()]
+    checks.append(_check_ingestion_freshness())
     checks.extend(_check_queue())
     checks.extend(_check_backup())
     checks.append(await _check_vps())
@@ -783,6 +895,10 @@ def build_digest() -> str:
             f"CAPACIDADE restam {cap['remaining']} envio(s) hoje "
             f"(total {cap['cap_total']})"
         )
+    ingestion = next(
+        (c for c in checks if c.get("check_name") == "ingestion"), None
+    ) or _check_ingestion_freshness()
+    lines.append(f"INGESTAO   {ingestion['detail']}")
     lines += [
         f"FUNIL      contactos {contacts} · respostas 24h {replied_24h}",
         f"DADOS      quarentena de nicho {quarantined}",

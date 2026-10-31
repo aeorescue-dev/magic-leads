@@ -78,10 +78,24 @@ def test_digest_tem_os_blocos_esperados(monkeypatch):
         {"check_name": "backup", "status": "ok", "detail": "ha 2h"},
     ])
     out = ct.build_digest()
-    for bloco in ("CONTROL TOWER", "estado geral: VERDE", "MOTOR", "BACKUP"):
+    for bloco in ("CONTROL TOWER", "estado geral: VERDE", "MOTOR", "INGESTAO", "BACKUP"):
         assert bloco in out
     assert "ALERTAS    nenhum" in out
     assert "https://www.magicleads.app/" in out
+
+
+def test_digest_mostra_o_motivo_da_ingestao_parada(monkeypatch):
+    monkeypatch.setattr(ct, "latest_health", lambda: [
+        {"check_name": "worker", "status": "ok", "detail": "tick ha 1 min"},
+        {
+            "check_name": "ingestion",
+            "status": "fail",
+            "detail": "último run success há 20.0h · 0 inseridos · 0 lead(s) em 24h",
+        },
+    ])
+    out = ct.build_digest()
+    assert "INGESTAO" in out
+    assert "há 20.0h" in out
 
 
 def test_digest_marca_estado_vermelho_quando_ha_fail(monkeypatch):
