@@ -84,6 +84,16 @@ Contexto completo e números medidos: **`docs/PROJECT-MEMORY.md`**. Ler antes de
     Na UI diz-se “Revelações diárias” / “usadas hoje” e mostra-se `used / limit` de
     `daily-stats`. Proibido “Saldo de Créditos”, “créditos disponíveis” ou equivalentes
     em qualquer idioma (`tests/test_sidebar_quota_copy.py`).
+31. **Gate A5 (assinatura)**: qualquer ação de valor — reservar, revelar, contactar,
+    negociar, converter — passa por `_require_active_access(user)`. Sem acesso vigente
+    devolve **402** `{error: subscription_required, action: REDIRECT_TO_CHECKOUT}`.
+    403 fica reservado a autorização (sem sessão / sem admin), nunca a renovação.
+32. **Onboarding (ativação)**: sem ofícios escolhidos (`user_interests` vazio) o
+    dashboard redirecciona para `/{locale}/onboarding` antes do feed. Nunca
+    auto-persistir as 16 categorias em nome do utilizador — isso mascara o gate.
+    O wizard grava via `PUT /api/users/me/interests` / `POST /api/users/me/onboarding`
+    (recusa lista vazia) e o passo do push explica o valor ANTES da permissão nativa.
+    Revogação de sessão no admin apaga a linha e o token morre no pedido seguinte (401).
 
 ## Verificação mínima antes de deploy
 ```bash

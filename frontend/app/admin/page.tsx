@@ -73,6 +73,10 @@ import {
   triggerAdminInboxSync,
   triggerAdminOutboundWorker,
   updateAdminOutboundConfig,
+  fetchAdminSessions,
+  revokeAdminSession,
+  revokeAdminUserSessions,
+  type AdminSession,
 } from "@/lib/admin-api";
 import { AUTH_TOKEN_KEY } from "@/lib/api-client";
 
@@ -1035,6 +1039,8 @@ export default function AdminPage() {
   const [planner, setPlanner] = useState<AdminPlannerMetrics | null>(null);
   const [creditLedger, setCreditLedger] = useState<AdminCreditLedgerResponse | null>(null);
   const [creditBalance, setCreditBalance] = useState<AdminCreditBalance | null>(null);
+  const [sessions, setSessions] = useState<AdminSession[]>([]);
+  const [revoking, setRevoking] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [pushTest, setPushTest] = useState<{ state: "idle" | "sending" | "ok" | "error"; message?: string }>(
     { state: "idle" }
@@ -1052,7 +1058,8 @@ export default function AdminPage() {
       const pl = fetchAdminPlanner().catch(() => null);
       const cl = fetchAdminCreditLedger(1, 50).catch(() => null);
       const cb = fetchAdminCreditBalance(1).catch(() => null);
-      const [ov, src, rn, rv, al, sbm, psm, pum, abm, plm, clm, cbm] = await Promise.all([
+      const ss = fetchAdminSessions(200).catch(() => null);
+      const [ov, src, rn, rv, al, sbm, psm, pum, abm, plm, clm, cbm, ssm] = await Promise.all([
         fetchAdminOverview(),
         fetchAdminSources(),
         fetchAdminScraperRuns(15),
@@ -1065,6 +1072,7 @@ export default function AdminPage() {
         pl,
         cl,
         cb,
+        ss,
       ]);
       setOverview(ov);
       setSources(src);
@@ -1078,6 +1086,7 @@ export default function AdminPage() {
       setPlanner(plm);
       setCreditLedger(clm);
       setCreditBalance(cbm);
+      setSessions(ssm?.sessions ?? []);
       setGate("ok");
     } catch (e) {
       if (e instanceof AdminApiError) {
@@ -1119,6 +1128,39 @@ export default function AdminPage() {
       setPushTest({ state: "error", message: msg });
     }
   }, []);
+
+  const revokeOne = useCallback(async (sessionId: number) => {
+    if (!window.confirm("Revogar esta sessão? O dispositivo cai no próximo pedido.")) return;
+    setRevoking(sessionId);
+    try {
+      await revokeAdminSession(sessionId);
+      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+    } catch (e) {
+      window.alert(
+        e instanceof AdminApiError ? e.message : "Não foi possível revogar a sessão."
+      );
+    } finally {
+      setRevoking(null);
+    }
+  }, []);
+
+  const revokeAllFromUser = useCallback(
+    async (userId: number, email: string) => {
+      if (!window.confirm(`Terminar TODAS as sessões de ${email}?`)) return;
+      setRevoking(-1);
+      try {
+        await revokeAdminUserSessions(userId);
+        setSessions((prev) => prev.filter((s) => s.user_id !== userId));
+      } catch (e) {
+        window.alert(
+          e instanceof AdminApiError ? e.message : "Não foi possível revogar as sessões."
+        );
+      } finally {
+        setRevoking(null);
+      }
+    },
+    []
+  );
 
   if (gate !== "ok") return <GateScreen gate={gate} hasToken={hasToken} />;
 
@@ -2013,6 +2055,76 @@ export default function AdminPage() {
           )}
         </Card>
       </div>
+
+      {/* -------------------------------------------------- sessões */}
+      <Card
+        title="Sessões ativas"
+        icon={<ShieldAlert className="h-4 w-4" />}
+        hint={`${sessions.length} dispositivo(s)`}
+      >
+        <div data-testid="admin-sessions">
+          {sessions.length === 0 ? (
+            <p className="text-xs text-slate-500">Sem sessões ativas.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="text-[10px] uppercase tracking-wider text-slate-500">
+                  <tr>
+                    <th className="py-1.5">Utilizador</th>
+                    <th className="py-1.5">Dispositivo</th>
+                    <th className="py-1.5">IP</th>
+                    <th className="py-1.5">Última atividade</th>
+                    <th className="py-1.5">Expira</th>
+                    <th className="py-1.5 text-right">Ações</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {sessions.map((s) => (
+                    <tr key={s.id}>
+                      <td className="py-1.5">
+                        <div className="font-medium text-slate-200">{s.email}</div>
+                        <div className="text-[10px] text-slate-500">
+                          {s.company_name || "—"}
+                          {s.is_admin ? " · admin" : ""}
+                        </div>
+                      </td>
+                      <td className="py-1.5 text-slate-400">{s.device_info || "—"}</td>
+                      <td className="py-1.5 font-mono text-[11px] text-slate-400">
+                        {s.ip_address || "—"}
+                      </td>
+                      <td className="py-1.5 text-slate-400">{fmtDt(s.last_active_at)}</td>
+                      <td className="py-1.5 text-slate-400">{fmtDt(s.expires_at)}</td>
+                      <td className="py-1.5 text-right">
+                        <div className="flex justify-end gap-1.5">
+                          <button
+                            onClick={() => void revokeOne(s.id)}
+                            disabled={revoking !== null}
+                            className="rounded-md border border-rose-500/30 px-2 py-1 text-[11px] font-semibold text-rose-300 hover:bg-rose-500/10 disabled:opacity-50"
+                          >
+                            {revoking === s.id ? "…" : "Revogar"}
+                          </button>
+                          <button
+                            onClick={() => void revokeAllFromUser(s.user_id, s.email)}
+                            disabled={revoking !== null}
+                            title="Terminar todas as sessões deste utilizador"
+                            className="rounded-md border border-white/10 px-2 py-1 text-[11px] font-semibold text-slate-300 hover:bg-white/5 disabled:opacity-50"
+                          >
+                            Todas
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <p className="mt-2 text-[10px] text-slate-600">
+            A revogação apaga a sessão na hora; o dispositivo perde acesso no pedido
+            seguinte (401). Expiração padrão: 30 dias de inatividade.
+          </p>
+        </div>
+      </Card>
 
       <footer className="flex items-center gap-2 pt-2 text-[11px] text-slate-600">
         <Users className="h-3 w-3" />

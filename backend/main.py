@@ -40,6 +40,7 @@ from .models.schemas import (
     NoteCreate,
     NoteResponse,
     NotificationResponse,
+    OnboardingUpdate,
     PushEnabledUpdate,
     PushPreferencesUpdate,
     PushSubscribeRequest,
@@ -597,6 +598,27 @@ async def _get_optional_admin_user(
         return {"id": user["id"], "email": user.get("email")}
     except Exception:
         return None
+
+
+async def _require_active_access(user: dict) -> None:
+    """Gate de assinatura para qualquer ação de valor (A5).
+
+    Devolve **402 Payment Required** (semântica correta para "renove") com
+    `action: REDIRECT_TO_CHECKOUT`. A mesma resposta é usada em reservar,
+    revelar e no ciclo de vida — antes só reservar/revelar estavam protegidos
+    (e com 403, que não comunica "renove" ao cliente).
+    """
+    sub = await db_service.get_user_subscription_status(user["id"])
+    if not sub.get("can_access", False):
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "error": "subscription_required",
+                "status": sub.get("status", "expired"),
+                "message": sub.get("message") or "Assinatura necessária para continuar.",
+                "action": "REDIRECT_TO_CHECKOUT",
+            },
+        )
 
 
 async def _require_admin_user(
@@ -1647,6 +1669,33 @@ async def acknowledge_system_alert(alert_id: int, _admin: bool = Depends(_requir
 async def admin_overview(_admin: dict = Depends(_require_admin_user)):
     """KPIs de topo: leads, utilizadores, reveals, créditos e alertas."""
     return await db_service.admin_get_overview()
+
+
+@app.get("/api/admin/sessions")
+async def admin_sessions(limit: int = 100, _admin: dict = Depends(_require_admin_user)):
+    """Sessões ativas (A2): quem, dispositivo, IP e até quando.
+
+    A fonte é `user_sessions.expires_at` (TTL deslizante de 30 dias). As
+    expiradas já são podadas no arranque e nunca aparecem aqui.
+    """
+    sessions = await db_service.admin_list_sessions(limit)
+    return {"sessions": sessions, "count": len(sessions)}
+
+
+@app.delete("/api/admin/sessions/{session_id}")
+async def admin_revoke_session(session_id: int, _admin: dict = Depends(_require_admin_user)):
+    """Revoga uma sessão específica (o cliente cai no próximo pedido com 401)."""
+    ok = await db_service.admin_revoke_session(session_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Sessão não encontrada")
+    return {"revoked": True, "session_id": session_id}
+
+
+@app.delete("/api/admin/users/{user_id}/sessions")
+async def admin_revoke_user_sessions(user_id: int, _admin: dict = Depends(_require_admin_user)):
+    """Revoga todas as sessões de um utilizador (ex.: conta comprometida)."""
+    count = await db_service.admin_revoke_user_sessions(user_id)
+    return {"revoked_count": count, "user_id": user_id}
 
 
 @app.get("/api/admin/sources")
@@ -5009,6 +5058,63 @@ async def stripe_webhook(request: Request, stripe_signature: str | None = Header
     return {"status": "received", "handled": False}
 
 
+@app.get("/api/users/me/interests")
+async def get_my_interests(user: dict = Depends(_get_current_user)):
+    """Interesses do utilizador autenticado (atalho para o onboarding)."""
+    return {
+        "categories": await db_service.get_user_interests(user["id"]),
+        "cities": await db_service.get_user_cities_filter(user["id"]),
+    }
+
+
+@app.put("/api/users/me/interests")
+async def set_my_interests(payload: OnboardingUpdate, user: dict = Depends(_get_current_user)):
+    """Grava categorias e (opcionalmente) cidades do utilizador autenticado.
+
+    É o endpoint usado pelo Onboarding Wizard. Um PUT com `categories` vazio
+    é rejeitado: "sem interesses" traz o fallback de todas as categorias no
+    backend, pelo que gravar vazio seria uma escolha que se perde.
+    """
+    if not payload.categories:
+        raise HTTPException(status_code=400, detail="Escolha pelo menos uma categoria")
+    ok = await db_service.set_user_interests(user["id"], payload.categories)
+    if not ok:
+        raise HTTPException(status_code=500, detail="Erro ao salvar interesses")
+    if payload.cities is not None:
+        await db_service.set_user_cities_filter(user["id"], payload.cities)
+    return {
+        "categories": await db_service.get_user_interests(user["id"]),
+        "cities": await db_service.get_user_cities_filter(user["id"]),
+    }
+
+
+@app.get("/api/users/me/onboarding")
+async def get_my_onboarding(user: dict = Depends(_get_current_user)):
+    """Estado do onboarding: concluído quando há ≥1 categoria escolhida."""
+    categories = await db_service.get_user_interests(user["id"])
+    return {
+        "completed": len(categories) > 0,
+        "categories": categories,
+        "cities": await db_service.get_user_cities_filter(user["id"]),
+    }
+
+
+@app.post("/api/users/me/onboarding")
+async def complete_my_onboarding(payload: OnboardingUpdate, user: dict = Depends(_get_current_user)):
+    """Conclui o onboarding numa única chamada (categorias + cidades)."""
+    if not payload.categories:
+        raise HTTPException(status_code=400, detail="Escolha pelo menos uma categoria")
+    ok = await db_service.set_user_interests(user["id"], payload.categories)
+    if not ok:
+        raise HTTPException(status_code=500, detail="Erro ao salvar interesses")
+    await db_service.set_user_cities_filter(user["id"], payload.cities)
+    return {
+        "completed": True,
+        "categories": await db_service.get_user_interests(user["id"]),
+        "cities": await db_service.get_user_cities_filter(user["id"]),
+    }
+
+
 @app.get("/api/users/{user_id}/score")
 async def user_score(user_id: int, user: dict = Depends(_get_current_user)):
     if user["id"] != user_id:
@@ -5237,17 +5343,8 @@ async def reserve_lead(
 ):
     user_id = user["id"]
 
-    # 1. VALIDA SUBSCRIPTION STATUS (PRIMEIRO!)
-    sub_status = await db_service.get_user_subscription_status(user_id)
-    if not sub_status.get("can_access", False):
-        return JSONResponse(
-            status_code=403,
-            content={
-                "error": sub_status.get("message", "Acesso negado"),
-                "status": sub_status.get("status", "denied"),
-                "action": "REDIRECT_TO_CHECKOUT"
-            }
-        )
+    # 1. GATE DE ASSINATURA (A5): 402 + REDIRECT_TO_CHECKOUT.
+    await _require_active_access(user)
 
     # 1.1 Sinaliza contato nos reveals em aberto (watchdog para de notificar)
     await db_service.flag_reveal_contact(user_id, lead_id)
@@ -5618,6 +5715,8 @@ async def contact_lead(
     lead_id: int, payload: ContactLeadRequest,
     user: dict = Depends(_get_current_user),
 ):
+    # A5: contacto é uma ação de valor; conta expirada não avança o ciclo.
+    await _require_active_access(user)
     lead = await db_service.get_lead_by_id(lead_id)
     if not lead:
         raise HTTPException(status_code=404, detail="Lead não encontrado")
@@ -5668,12 +5767,8 @@ async def reveal_phone_endpoint(
     """
     user_id = user["id"]
     try:
-        sub_status = await db_service.get_user_subscription_status(user_id)
-        if not sub_status.get("can_access", False):
-            raise HTTPException(
-                status_code=403,
-                detail=sub_status.get("message", "Acesso negado"),
-            )
+        # A5: 402 com action de renovação (igual a reservar/revelar).
+        await _require_active_access(user)
 
         pre = await db_service.precheck_reveal(user_id, lead_id)
         pre_status = pre.get("status")
@@ -5858,6 +5953,8 @@ async def contractor_metrics(user: dict = Depends(_get_current_user)):
 
 @app.post("/api/leads/{lead_id}/negotiate")
 async def negotiate_lead(lead_id: int, user: dict = Depends(_get_current_user)):
+    # A5: negociação é ação de valor; conta expirada bloqueia (402).
+    await _require_active_access(user)
     result = await db_service.mark_negotiation(lead_id, user["id"])
     if not result:
         raise HTTPException(status_code=409, detail="Não foi possível marcar negociação")
@@ -5868,6 +5965,8 @@ async def negotiate_lead(lead_id: int, user: dict = Depends(_get_current_user)):
 
 @app.post("/api/leads/{lead_id}/convert")
 async def convert_lead(lead_id: int, user: dict = Depends(_get_current_user)):
+    # A5: conversão é ação de valor; conta expirada bloqueia (402).
+    await _require_active_access(user)
     result = await db_service.convert_lead(lead_id, user["id"])
     if not result:
         raise HTTPException(status_code=409, detail="Não foi possível confirmar conversão")

@@ -31,7 +31,8 @@ import {
 } from "@/lib/lead-delivery";
 import { buildOutreachMessage } from "@/lib/outreach";
 import { buildFullAddress } from "@/lib/address";
-import { shouldSeedDefaultInterests, toggleInterestKey } from "@/lib/interests";
+import { toggleInterestKey } from "@/lib/interests";
+import { needsOnboarding } from "@/lib/categories";
 import CheckoutModal from "@/components/CheckoutModal";
 import ReleaseModal from "@/components/ReleaseModal";
 import WelcomePopup from "@/components/WelcomePopup";
@@ -503,12 +504,12 @@ const URGENCIES = ["all", "high", "medium", "low"];
           setInterestsConfigured(hasInterests);
           if (hasInterests) {
             setInterests(new Set(cats));
-          } else if (shouldSeedDefaultInterests(cats, interestsTouchedRef.current)) {
-            // Sem interesses gravados: o backend trata o utilizador como "sem
-            // configuração" e torna-o elegível a TODAS as categorias (fallback),
-            // enviando alertas que ele não escolheu. Persistimos o default
-            // (todas) para que o estado do backend fique explícito. Best-effort.
-            updateUserInterests(userId, ALL_CATEGORY_KEYS).catch(() => {});
+          } else if (!interestsTouchedRef.current && needsOnboarding(cats)) {
+            // Gate de onboarding: sem ofícios escolhidos não há feed
+            // personalizado. Vai ao wizard ANTES de ver as oportunidades.
+            // (Antes auto-persistíamos as 16 categorias, o que tornava o
+            // utilizador "configurado" com escolhas que ele nunca fez.)
+            router.replace(`/${lang}/onboarding`);
           }
         })
         .catch(() => {});

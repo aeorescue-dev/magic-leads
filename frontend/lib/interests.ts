@@ -7,13 +7,10 @@
  *   Logo, um conjunto VAZIO nunca pode ser persistido como "zero": o
  *   utilizador voltaria a receber alertas de tudo.
  *
- *   Consequência no frontend (bug corrigido): o dashboard auto-persiste as
- *   16 categorias quando o servidor devolve lista vazia. Se o utilizador
- *   pudesse desmarcar todas, o PUT gravava vazio e, no reload seguinte, o
- *   auto-PUT repunha as 16 — a escolha do utilizador desaparecia sozinha.
- *
- *   Por isso a selecção NUNCA fica vazia: desmarcar a última categoria volta
- *   a marcar todas, que e' exactamente o que o backend faria com o vazio.
+ *   Consequência no frontend: a selecção NUNCA fica vazia — desmarcar a
+ *   última categoria volta a marcar todas. Quem ainda não escolheu nada é
+ *   encaminhado para o Onboarding Wizard (`needsOnboarding` em
+ *   `lib/categories.ts`), em vez de receber o default silenciosamente.
  */
 
 /**
@@ -37,19 +34,4 @@ export function toggleInterestKey(
   // Invariante: sem categorias == todas as categorias (ver backend).
   if (next.size === 0) return new Set(allKeys);
   return next;
-}
-
-/**
- * Decide se a selecção actual precisa de ser persistida.
- *
- * O dashboard auto-persiste as 16 categorias quando o servidor devolve lista
- * vazia (para tornar o estado explicito no backend). Isso so' faz sentido
- * para um utilizador que NUNCA configurou interesses.
- */
-export function shouldSeedDefaultInterests(
-  serverCategories: string[] | null | undefined,
-  touchedByUser: boolean
-): boolean {
-  if (touchedByUser) return false;
-  return !Array.isArray(serverCategories) || serverCategories.length === 0;
 }

@@ -5671,6 +5671,53 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def admin_list_sessions(self, limit: int = 100) -> List[dict]:
+        """Sessões ativas (A2) para o painel: quem, onde e até quando.
+
+        Só devolve sessões vivas (`expires_at` futuro); as expiradas são
+        removidas pelo `prune_expired_sessions` no arranque.
+        """
+        limit = max(1, min(int(limit), 500))
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                """
+                SELECT s.id, s.user_id, u.email, u.company_name, u.is_admin,
+                       s.device_info, s.ip_address, s.created_at,
+                       s.last_active_at, s.expires_at
+                FROM user_sessions s
+                JOIN users u ON u.id = s.user_id
+                WHERE s.expires_at IS NULL
+                   OR datetime(s.expires_at) > datetime('now')
+                ORDER BY s.last_active_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def admin_revoke_session(self, session_id: int) -> bool:
+        """Revoga (apaga) uma sessão específica. Idempotente = False se não existir."""
+        conn = get_connection()
+        try:
+            cur = conn.execute("DELETE FROM user_sessions WHERE id = ?", (int(session_id),))
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def admin_revoke_user_sessions(self, user_id: int) -> int:
+        """Revoga todas as sessões de um utilizador (ex.: conta comprometida)."""
+        conn = get_connection()
+        try:
+            cur = conn.execute("DELETE FROM user_sessions WHERE user_id = ?", (int(user_id),))
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
+
     def admin_get_push_metrics(self, days: int = 7, recent_limit: int = 50) -> dict:
         """Saúde das entregas de push notification.
 
@@ -10142,6 +10189,17 @@ class AsyncDatabaseService:
     async def admin_get_push_metrics(self, days: int = 7, recent_limit: int = 50) -> dict:
         return await anyio.to_thread.run_sync(
             self._service.admin_get_push_metrics, days, recent_limit
+        )
+
+    async def admin_list_sessions(self, limit: int = 100) -> List[dict]:
+        return await anyio.to_thread.run_sync(self._service.admin_list_sessions, limit)
+
+    async def admin_revoke_session(self, session_id: int) -> bool:
+        return await anyio.to_thread.run_sync(self._service.admin_revoke_session, session_id)
+
+    async def admin_revoke_user_sessions(self, user_id: int) -> int:
+        return await anyio.to_thread.run_sync(
+            self._service.admin_revoke_user_sessions, user_id
         )
 
     async def admin_get_digest_ab(self, days: int = 30) -> dict:

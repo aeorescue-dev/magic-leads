@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import Enum
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 class SourceType(str, Enum):
@@ -364,6 +364,13 @@ class AuthResponse(BaseModel):
 
 class InterestsUpdate(BaseModel):
     categories: List[str]
+
+
+class OnboardingUpdate(BaseModel):
+    """Payload do Onboarding Wizard (categorias + cidades opcionais)."""
+
+    categories: List[str] = Field(default_factory=list)
+    cities: Optional[List[str]] = None
 
 
 class ReserverLeadRequest(BaseModel):

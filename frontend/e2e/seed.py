@@ -140,6 +140,18 @@ def build(db_path: str) -> str:
             conn0.commit()
         finally:
             conn0.close()
+        # O gate de onboarding redirecciona quem não tem ofícios. Este
+        # utilizador é dos testes de UI/ciclo: já vem configurado.
+        conn_i = get_connection()
+        try:
+            conn_i.execute(
+                "INSERT OR IGNORE INTO user_interests (user_id, category, push_enabled) "
+                "VALUES (?, 'Roof', 1)",
+                (user_id,),
+            )
+            conn_i.commit()
+        finally:
+            conn_i.close()
         # Cota zera (0/10): o utilizador do ciclo tem créditos para reservar.
         conn = get_connection()
         try:
@@ -188,8 +200,31 @@ def build(db_path: str) -> str:
             )
             svc.insert_lead_new(payload)
 
+    async def setup_onboarding() -> None:
+        """Utilizador NOVO: sem interesses -> tem de cair no Onboarding Wizard."""
+        TOKEN = "e2e-token-novo"
+        EMAIL = "e2e-novo@magicleads.app"
+        user = svc.get_user_by_email(EMAIL)
+        if not user:
+            user = svc.create_user(
+                EMAIL, "hash-nao-usado", "E2E Novo", plan="pro",
+                subscription_status="active",
+            )
+        user_id = user["id"]
+        svc.create_user_session(user_id, _hash_token(TOKEN), "E2E", None)
+        svc.extend_access(user_id, days=7)
+        conn = get_connection()
+        try:
+            conn.execute("UPDATE users SET welcome_popup_shown = 1 WHERE id = ?", (user_id,))
+            # Base limpa: sem ofícios o backend faria fallback para "todas".
+            conn.execute("DELETE FROM user_interests WHERE user_id = ?", (user_id,))
+            conn.commit()
+        finally:
+            conn.close()
+
     asyncio.run(setup())
     asyncio.run(setup_lifecycle())
+    asyncio.run(setup_onboarding())
     return TOKEN
 
 

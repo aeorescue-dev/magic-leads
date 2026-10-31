@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  shouldSeedDefaultInterests,
-  toggleInterestKey,
-} from "@/lib/interests";
+import { toggleInterestKey } from "@/lib/interests";
+import { needsOnboarding, TRADE_CATEGORIES, TRADE_CATEGORY_KEYS } from "@/lib/categories";
 
 const ALL = ["Roof", "Plumbing", "Paint", "Electrical"];
 
@@ -44,20 +42,22 @@ describe("toggleInterestKey — invariante 'nunca vazio'", () => {
   });
 });
 
-describe("shouldSeedDefaultInterests — auto-PUT do default", () => {
-  it("faz o seed quando o servidor está vazio e o utilizador nunca tocou", () => {
-    expect(shouldSeedDefaultInterests([], false)).toBe(true);
-    expect(shouldSeedDefaultInterests(null, false)).toBe(true);
-    expect(shouldSeedDefaultInterests(undefined, false)).toBe(true);
+describe("needsOnboarding — gate do wizard", () => {
+  it("exige onboarding quando o servidor devolve lista vazia", () => {
+    expect(needsOnboarding([])).toBe(true);
   });
 
-  it("NÃO faz o seed quando o servidor já tem categorias", () => {
-    expect(shouldSeedDefaultInterests(["Roof"], false)).toBe(false);
+  it("exige onboarding quando não há resposta (null/undefined)", () => {
+    expect(needsOnboarding(null)).toBe(true);
+    expect(needsOnboarding(undefined)).toBe(true);
   });
 
-  it("NÃO faz o seed quando o utilizador já tocou (mesmo com lista vazia)", () => {
-    // O utilizador que desmarcou tudo tem uma escolha explicita — nunca
-    // voltamos a impor as 16 categorias.
-    expect(shouldSeedDefaultInterests([], true)).toBe(false);
+  it("NÃO exige onboarding quando já há ≥1 ofício escolhido", () => {
+    expect(needsOnboarding(["Roof"])).toBe(false);
+  });
+
+  it("TRADE_CATEGORIES tem 16 ofícios com chaves únicas", () => {
+    expect(TRADE_CATEGORIES).toHaveLength(16);
+    expect(new Set(TRADE_CATEGORY_KEYS).size).toBe(16);
   });
 });

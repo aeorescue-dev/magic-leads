@@ -555,6 +555,28 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - Novas chaves em PT/EN/ES. Guard: `tests/test_sidebar_quota_copy.py` (4) + e2e da
   sidebar. **865 testes**, 16 e2e.
 
+### Segurança — A5 + sessões + onboarding (2026-10-30)
+
+- **Gate A5**: `_require_active_access(user)` devolve **402** com
+  `{error: subscription_required, action: REDIRECT_TO_CHECKOUT}`. Aplicado a
+  reservar, revelar, contactar, negociar e converter. Antes, contactar/negociar/
+  converter não tinham gate e reservar/revelar respondiam 403 (que não comunica
+  "renove"). O frontend já trata 402 como checkout.
+- **Sessões no Admin**: `GET /api/admin/sessions`, `DELETE /api/admin/sessions/{id}`
+  e `DELETE /api/admin/users/{id}/sessions`. A listagem lê `user_sessions.expires_at`
+  (TTL 30 d) e a revogação apaga a linha — o dispositivo perde acesso no pedido
+  seguinte (401). UI na Torre de Controlo ("Sessões ativas").
+- **Onboarding Wizard** (`/[locale]/onboarding`): passo 1 ofícios + cidades,
+  passo 2 valor do push antes da permissão nativa, depois grava e abre o dashboard.
+  Endpoints novos: `GET/PUT /api/users/me/interests` e
+  `GET/POST /api/users/me/onboarding` (este recusa lista vazia).
+- **Gate de ativação**: o dashboard deixou de auto-persistir as 16 categorias
+  quando o servidor devolvia vazio (isso marcava o utilizador como "configurado"
+  com escolhas que ele nunca fez). Sem ofícios → `router.replace('/onboarding')`
+  antes do feed. `/onboarding` entrou em `PROTECTED_PATHS`.
+- Seed E2E: `e2e-token-novo` (sem interesses) para o wizard; `e2e-token-ciclo`
+  ganhou 'Roof' para não ser redireccionado. **876 pytest**, 19 e2e, 74 vitest.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

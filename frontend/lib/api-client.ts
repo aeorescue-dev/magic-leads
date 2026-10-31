@@ -871,6 +871,61 @@ export async function updateUserInterests(userId: number, categories: string[]):
 }
 
 // ------------------------------------------------------------------
+// Onboarding Wizard — atalhos "me" (sem expor o id do utilizador)
+// ------------------------------------------------------------------
+export interface OnboardingState {
+  completed: boolean;
+  categories: string[];
+  cities: string[] | null;
+}
+
+export async function fetchOnboardingState(): Promise<OnboardingState> {
+  return handle<OnboardingState>(
+    await fetch(`${API_URL}/api/users/me/onboarding`, {
+      credentials: "include",
+      headers: { ...authHeaders() },
+    })
+  );
+}
+
+export async function fetchMyInterests(): Promise<{ categories: string[]; cities: string[] | null }> {
+  return handle<{ categories: string[]; cities: string[] | null }>(
+    await fetch(`${API_URL}/api/users/me/interests`, {
+      credentials: "include",
+      headers: { ...authHeaders() },
+    })
+  );
+}
+
+export async function saveMyInterests(
+  categories: string[],
+  cities?: string[] | null
+): Promise<{ categories: string[]; cities: string[] | null }> {
+  return handle<{ categories: string[]; cities: string[] | null }>(
+    await fetch(`${API_URL}/api/users/me/interests`, {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ categories, ...(cities !== undefined ? { cities } : {}) }),
+    })
+  );
+}
+
+export async function completeOnboarding(
+  categories: string[],
+  cities: string[]
+): Promise<OnboardingState> {
+  return handle<OnboardingState>(
+    await fetch(`${API_URL}/api/users/me/onboarding`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ categories, cities }),
+    })
+  );
+}
+
+// ------------------------------------------------------------------
 // Notificações por usuário (sino)
 // ------------------------------------------------------------------
 export async function fetchUserNotifications(

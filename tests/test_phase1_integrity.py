@@ -1,10 +1,10 @@
 """
 Testes unitarios dedicados para as correcoes F1, F3, F4, F6 e is_intersection.
 """
-import pytest
-from backend.utils.address import is_intersection
-from backend.services.outbound_templates import copy_count, build_context
 from backend.scrapers.socrata_311 import Socrata311Scraper
+from backend.services.outbound_templates import build_context, copy_count
+from backend.utils.address import is_intersection
+
 
 def test_is_intersection():
     assert is_intersection("INTERSECTION OF 5TH AVE & 34TH ST") is True
@@ -71,16 +71,26 @@ def test_greeting_without_contact_name_is_clean():
 
 
 def test_contact_lead_channel_guards():
-    from fastapi.testclient import TestClient
-    from backend.main import app, _hash_token
-    from backend.services.db import db_service
-    from backend.models.schemas import EnrichedLead, SourceType, IssueCategory, UrgencyLevel
     from datetime import datetime
+
+    from fastapi.testclient import TestClient
+
+    from backend.main import _hash_token, app
+    from backend.models.schemas import (
+        EnrichedLead,
+        IssueCategory,
+        SourceType,
+        UrgencyLevel,
+    )
+    from backend.services.db import db_service
 
     svc = db_service._service
     user = svc.get_user_by_email("pytest-channel-guards@magicleads.app") or svc.create_user(
         "pytest-channel-guards@magicleads.app", "pass", "Pytest Guard"
     )
+    # A5: contacto exige acesso vigente; estes guards só fazem sentido para
+    # um assinante ativo (senão a resposta é 402 antes de validar o canal).
+    svc.extend_access(user["id"], days=7)
     token = "pytest_guard_token_123"
     svc.create_user_session(user["id"], _hash_token(token), "Pytest", None)
 

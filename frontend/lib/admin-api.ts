@@ -733,3 +733,45 @@ export function sendAdminTestPush(body?: {
     body: JSON.stringify(body ?? {}),
   });
 }
+
+// ------------------------------------------------------------------
+// Sessões ativas (A2) — listar e revogar
+// ------------------------------------------------------------------
+export interface AdminSession {
+  id: number;
+  user_id: number;
+  email: string;
+  company_name?: string | null;
+  is_admin?: number;
+  device_info?: string | null;
+  ip_address?: string | null;
+  created_at?: string | null;
+  last_active_at?: string | null;
+  expires_at?: string | null;
+}
+
+export function fetchAdminSessions(
+  limit = 100
+): Promise<{ sessions: AdminSession[]; count: number }> {
+  return adminFetch<{ sessions: AdminSession[]; count: number }>(
+    `/sessions?limit=${limit}`
+  );
+}
+
+export function revokeAdminSession(
+  sessionId: number
+): Promise<{ revoked: boolean; session_id: number }> {
+  return adminFetch<{ revoked: boolean; session_id: number }>(
+    `/sessions/${sessionId}`,
+    { method: "DELETE" }
+  );
+}
+
+export function revokeAdminUserSessions(
+  userId: number
+): Promise<{ revoked_count: number; user_id: number }> {
+  return adminFetch<{ revoked_count: number; user_id: number }>(
+    `/users/${userId}/sessions`,
+    { method: "DELETE" }
+  );
+}
