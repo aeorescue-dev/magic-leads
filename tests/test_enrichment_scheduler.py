@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from backend.services import enrichment_scheduler
+from backend.services import enrichment_scheduler, entity_bridge
 from backend.services.db import db_service, get_connection
 
 CITY = "TESTCITY"
@@ -33,6 +33,16 @@ def clean_entities():
             "DELETE FROM leads WHERE source_type='import_b2b' "
             "AND lower(owner_email) LIKE '%@wightco.com'"
         )
+        conn.execute(
+            "DELETE FROM outbound_messages WHERE lower(to_email) LIKE '%@nomisgroup.com'"
+        )
+        conn.execute(
+            "DELETE FROM outbound_contacts WHERE lower(email) LIKE '%@nomisgroup.com'"
+        )
+        conn.execute(
+            "DELETE FROM leads WHERE source_type='import_b2b' "
+            "AND lower(owner_email) LIKE '%@nomisgroup.com'"
+        )
         conn.commit()
     finally:
         conn.close()
@@ -53,6 +63,16 @@ def clean_entities():
         conn.execute(
             "DELETE FROM leads WHERE source_type='import_b2b' "
             "AND lower(owner_email) LIKE '%@wightco.com'"
+        )
+        conn.execute(
+            "DELETE FROM outbound_messages WHERE lower(to_email) LIKE '%@nomisgroup.com'"
+        )
+        conn.execute(
+            "DELETE FROM outbound_contacts WHERE lower(email) LIKE '%@nomisgroup.com'"
+        )
+        conn.execute(
+            "DELETE FROM leads WHERE source_type='import_b2b' "
+            "AND lower(owner_email) LIKE '%@nomisgroup.com'"
         )
         conn.commit()
     finally:
@@ -76,6 +96,8 @@ def no_throttle(monkeypatch):
     monkeypatch.setattr(
         enrichment_scheduler._discovery, "heuristic_domain", lambda *a, **k: None
     )
+    # A ponte nunca deve ir a rede nos testes.
+    monkeypatch.setattr(entity_bridge, "_site_snippet", lambda domain: "")
 
 
 @pytest.mark.asyncio
@@ -206,6 +228,52 @@ async def test_catch_all_quarentena_imediata(clean_entities, monkeypatch):
     row = db_service._service.list_contractor_entities(CITY)[0]
     assert row["status"] == "quarantined"
     assert row["quarantine_reason"] == "catch_all"
+
+
+@pytest.mark.asyncio
+async def test_domain_guarda_snippet_do_site(clean_entities, monkeypatch):
+    _entity()
+
+    async def fake_resolve(name, city):
+        return {
+            "domain": "wightco.com",
+            "confidence": 0.9,
+            "snippet": "Wight & Company design build plumbing",
+        }
+
+    monkeypatch.setattr(enrichment_scheduler, "resolve_domain", fake_resolve)
+    await enrichment_scheduler.run_once(now=NOW, cities_override=[CITY])
+    row = db_service._service.list_contractor_entities(CITY)[0]
+    assert row["site_snippet"].startswith("Wight & Company design")
+
+
+@pytest.mark.asyncio
+async def test_ponte_confirma_nicho_pelo_texto_do_site(clean_entities, monkeypatch):
+    """Sem texto, 'Nomis Group' nao confirma nicho; com o site, confirma."""
+    _entity(name="Nomis Group")
+    entity_id = db_service._service.list_contractor_entities(CITY)[0]["id"]
+    db_service._service.mark_contractor_domain_attempt(
+        entity_id,
+        "nomisgroup.com",
+        0.9,
+        2,
+        "Nomis Group is a commercial construction and general contracting firm",
+    )
+    db_service._service.mark_contractor_email_attempt(
+        entity_id, "info@nomisgroup.com", "valid", 2
+    )
+
+    row = db_service._service.list_contractor_entities(CITY)[0]
+    assert row["niche_status"] != "confirmed"  # o nome sozinho nao chega
+    result = await entity_bridge.bridge_entity(row)
+    assert result == "bridged"
+    contact = db_service._service.get_outbound_contact_by_email(
+        "info@nomisgroup.com"
+    )
+    assert contact and contact["niche_status"] == "confirmed"
+    entity = db_service._service.list_contractor_entities(CITY)[0]
+    assert entity["niche_key"] == "general_contractors"
+    assert entity["niche_status"] == "confirmed"
 
 
 @pytest.mark.asyncio

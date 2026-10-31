@@ -79,6 +79,7 @@ async def _domain_stage(entity: dict) -> str:
                     "domain": found.domain,
                     "confidence": 0.55,
                     "source": "heuristic",
+                    "snippet": getattr(found, "snippet", "") or "",
                 }
     if resolved:
         await db_service.mark_contractor_domain_attempt(
@@ -86,6 +87,7 @@ async def _domain_stage(entity: dict) -> str:
             resolved["domain"],
             float(resolved.get("confidence") or 0.0),
             MAX_ATTEMPTS,
+            resolved.get("snippet") or "",
         )
         return "domain"
     await db_service.mark_contractor_domain_attempt(

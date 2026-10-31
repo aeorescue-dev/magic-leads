@@ -143,6 +143,7 @@ class DomainResult:
     mx: list[tuple[int, str]] = field(default_factory=list)
     ns: list[str] = field(default_factory=list)
     tried: int = 0
+    snippet: str = ""
 
     def as_dict(self) -> dict:
         return {
@@ -152,6 +153,7 @@ class DomainResult:
             "title": self.title,
             "mx": [[p, h] for p, h in self.mx],
             "tried": self.tried,
+            "snippet": self.snippet,
         }
 
 
@@ -602,6 +604,7 @@ class CompanyDiscovery:
                         return DomainResult(
                             domain=fqdn, source="heuristic", evidence=evidence,
                             title=title[:160], mx=mx, ns=ns, tried=tried,
+                            snippet=text[:1200],
                         )
                     break
         return None
@@ -676,13 +679,14 @@ class CompanyDiscovery:
         deadline = started + max(1.0, timeout)
         out: dict = {
             "domain": None, "domain_source": None, "evidence": {},
-            "validation": None, "elapsed_s": 0.0,
+            "validation": None, "elapsed_s": 0.0, "snippet": "",
         }
         found = self.heuristic_domain(lead, deadline)
         if found:
             out["domain"] = found.domain
             out["domain_source"] = found.source
             out["evidence"] = found.evidence
+            out["snippet"] = found.snippet
             validation = self.validate_domain(found.domain, lead, found.mx)
             out["validation"] = validation.as_dict()
         out["elapsed_s"] = round(self._clock() - started, 2)

@@ -946,6 +946,19 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - Testes: 2 novos (bridge cria contacto/lead e readiness=1; nicho não
   confirmado não cria contacto). Suite **995 pytest**.
 
+### Fase 3.2 — Snippet do site no nicho (2026-10-31)
+
+- O `DomainResult` passa a devolver `snippet` (texto da homepage) e o
+  scheduler guarda-o em `contractor_entities.site_snippet`.
+- A ponte classifica com `name + domínio + texto do site`; quando falta o
+  snippet, descarrega a homepage uma vez e persiste-a. Um único token no nome
+  vale 2.0 (limiar 3.0), por isso o texto do site é o que confirma
+  `general_contractors`, `plumbing`, `hvac`, etc.
+- No ensaio real isto recupera e-mails válidos que antes caíam em
+  `niche_unconfirmed` (Formlinea, Nomis, Star Tuckpointing, RAM Mechanical…).
+- Testes: snippet guardado e ponte a confirmar nicho pelo site; suite
+  **1000 pytest**.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

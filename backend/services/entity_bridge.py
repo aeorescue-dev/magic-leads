@@ -7,17 +7,39 @@ envio já aceita. Idempotente pelo e-mail (UNIQUE) e pelo `external_id`
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Optional
 
 from . import niche_classifier, outbound_templates
+from .company_discovery import default_fetch, extract_text
 from .db import db_service
+
+
+def _site_snippet(domain: str) -> str:
+    """Texto da homepage para o classificador (só quando ainda não há snippet)."""
+    if not domain:
+        return ""
+    for scheme in ("https", "http"):
+        page = default_fetch(f"{scheme}://{domain}/", 6.0)
+        if page and page.get("status", 0) < 400:
+            _title, text = extract_text(page.get("html") or b"")
+            if text:
+                return text[:1200]
+    return ""
 
 
 async def bridge_entity(entity: dict) -> str:
     """Confirma nicho e cria o contacto. Devolve o resultado para o scheduler."""
     entity_id = int(entity["id"])
+    snippet = entity.get("site_snippet") or ""
+    if not snippet and entity.get("domain"):
+        snippet = await asyncio.to_thread(_site_snippet, entity["domain"])
+        if snippet:
+            await db_service.set_contractor_entity_snippet(entity_id, snippet)
     verdict = niche_classifier.classify(
-        entity.get("legal_name") or "", domain=entity.get("domain") or ""
+        entity.get("legal_name") or "",
+        domain=entity.get("domain") or "",
+        text=snippet,
     )
     niche_key: Optional[str] = verdict.get("niche")
     niche_status = str(verdict.get("status") or "unknown")

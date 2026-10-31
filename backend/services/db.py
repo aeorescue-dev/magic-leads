@@ -950,6 +950,7 @@ CREATE TABLE IF NOT EXISTS contractor_entities (
   bridged_at TEXT,
   outbound_contact_id INTEGER,
   outbound_lead_id INTEGER,
+  site_snippet TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
@@ -1980,6 +1981,7 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         ("bridged_at", "TEXT"),
         ("outbound_contact_id", "INTEGER"),
         ("outbound_lead_id", "INTEGER"),
+        ("site_snippet", "TEXT"),
     ):
         if name not in ent_cols:
             conn.execute(f"ALTER TABLE contractor_entities ADD COLUMN {name} {ddl}")
@@ -3841,6 +3843,19 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def set_contractor_entity_snippet(self, entity_id: int, snippet: str) -> bool:
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE contractor_entities SET site_snippet=?, "
+                "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                ((snippet or "")[:1200], int(entity_id)),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
     def quarantine_contractor_entity(self, entity_id: int, reason: str) -> bool:
         conn = get_connection()
         try:
@@ -3919,6 +3934,7 @@ class DatabaseService:
         domain: Optional[str] = None,
         confidence: float = 0.0,
         max_attempts: int = 2,
+        snippet: str = "",
     ) -> dict:
         conn = get_connection()
         try:
@@ -3933,8 +3949,10 @@ class DatabaseService:
                     "UPDATE contractor_entities SET domain=?, domain_confidence=?, "
                     "status='domain', domain_checked_at=CURRENT_TIMESTAMP, "
                     "domain_attempts=?, quarantine_reason=NULL, "
+                    "site_snippet=COALESCE(NULLIF(?, ''), site_snippet), "
                     "updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                    (domain, float(confidence), attempts, int(entity_id)),
+                    (domain, float(confidence), attempts, (snippet or "")[:1200],
+                     int(entity_id)),
                 )
             else:
                 status = "quarantined" if attempts >= max_attempts else "new"
@@ -12595,6 +12613,11 @@ class AsyncDatabaseService:
             self._service.set_contractor_entity_niche, entity_id, niche_key, niche_status
         )
 
+    async def set_contractor_entity_snippet(self, entity_id: int, snippet: str) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.set_contractor_entity_snippet, entity_id, snippet
+        )
+
     async def mark_contractor_bridged(
         self, entity_id: int, contact_id: Optional[int], lead_id: Optional[int]
     ) -> bool:
@@ -12619,11 +12642,11 @@ class AsyncDatabaseService:
 
     async def mark_contractor_domain_attempt(
         self, entity_id: int, domain: Optional[str] = None, confidence: float = 0.0,
-        max_attempts: int = 2,
+        max_attempts: int = 2, snippet: str = "",
     ) -> dict:
         return await anyio.to_thread.run_sync(
             lambda: self._service.mark_contractor_domain_attempt(
-                entity_id, domain, confidence, max_attempts
+                entity_id, domain, confidence, max_attempts, snippet
             )
         )
 

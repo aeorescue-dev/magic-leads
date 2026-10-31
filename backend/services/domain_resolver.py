@@ -86,6 +86,10 @@ def pick_domain(
             "osm_name": name,
             "confidence": round(score, 3),
             "city": city,
+            "snippet": " ".join(
+                str(tags.get(k) or "")
+                for k in ("name", "description", "shop", "office", "craft", "industry")
+            ).strip()[:600],
         }
         if not best or candidate["confidence"] > best["confidence"]:
             best = candidate
