@@ -921,6 +921,58 @@ CREATE TABLE IF NOT EXISTS mailbox_ramp_log (
   metrics_json TEXT
 );
 
+-- Fase 2: grafo de empreiteiros (empresa), independente do imovel.
+-- `entity_key` = hash(nome_normalizado + estado); `license` e' chave forte
+-- quando existe. `status`: new | domain | email | ready | quarantined.
+CREATE TABLE IF NOT EXISTS contractor_entities (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  entity_key TEXT NOT NULL UNIQUE,
+  legal_name TEXT NOT NULL,
+  normalized_name TEXT NOT NULL,
+  license TEXT,
+  city TEXT,
+  state TEXT,
+  role TEXT,
+  domain TEXT,
+  domain_confidence REAL DEFAULT 0,
+  niche_key TEXT,
+  niche_status TEXT DEFAULT 'unknown',
+  email TEXT,
+  email_status TEXT DEFAULT 'unknown',
+  phone TEXT,
+  status TEXT NOT NULL DEFAULT 'new',
+  source_refs TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_contractor_entities_city
+  ON contractor_entities (city, status);
+CREATE INDEX IF NOT EXISTS idx_contractor_entities_license
+  ON contractor_entities (license, state);
+CREATE INDEX IF NOT EXISTS idx_contractor_entities_domain
+  ON contractor_entities (domain);
+
+-- Proveniencia: cada linha de permit/licenca que originou a entidade.
+CREATE TABLE IF NOT EXISTS contractor_entity_sources (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  entity_id INTEGER NOT NULL REFERENCES contractor_entities(id) ON DELETE CASCADE,
+  source TEXT NOT NULL,
+  external_id TEXT NOT NULL,
+  role TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(source, external_id, role)
+);
+
+-- Cursor/quota do scheduler autonomo por cidade.
+CREATE TABLE IF NOT EXISTS city_enrichment_state (
+  city TEXT PRIMARY KEY,
+  last_entity_id INTEGER DEFAULT 0,
+  last_run_at TEXT,
+  day TEXT,
+  jobs_today INTEGER DEFAULT 0,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS outbound_contacts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   lead_id INTEGER REFERENCES leads(id) ON DELETE CASCADE,
@@ -3564,6 +3616,177 @@ class DatabaseService:
                 (window,),
             ).fetchall()
             return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    # ---------------------------------------------------- Fase 2: empreiteiros
+    def upsert_contractor_entity(
+        self,
+        legal_name: str,
+        city: str,
+        state: Optional[str] = None,
+        role: Optional[str] = None,
+        license: Optional[str] = None,
+        source: Optional[str] = None,
+        external_id: Optional[str] = None,
+        domain: Optional[str] = None,
+    ) -> Optional[dict]:
+        """Deduplica por licença (quando existe) ou nome normalizado+estado."""
+        from .contractor_entities import (
+            entity_key,
+            is_usable_company_name,
+            normalize_company_name,
+            normalize_role,
+        )
+
+        if not is_usable_company_name(legal_name):
+            return None
+        norm = normalize_company_name(legal_name)
+        key = entity_key(legal_name, state)
+        role = normalize_role(role)
+        city = (city or "").strip()
+        st = (state or "").strip().upper() or None
+        lic = (license or "").strip() or None
+        conn = get_connection()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            row = None
+            if lic:
+                row = conn.execute(
+                    "SELECT * FROM contractor_entities WHERE license=? "
+                    "AND COALESCE(state,'')=COALESCE(?, '') LIMIT 1",
+                    (lic, st),
+                ).fetchone()
+            if not row:
+                row = conn.execute(
+                    "SELECT * FROM contractor_entities WHERE entity_key=?",
+                    (key,),
+                ).fetchone()
+            if row:
+                eid = int(row["id"])
+                conn.execute(
+                    "UPDATE contractor_entities SET "
+                    "legal_name=COALESCE(NULLIF(legal_name,''), ?), "
+                    "city=COALESCE(NULLIF(city,''), ?), "
+                    "license=COALESCE(license, ?), role=COALESCE(role, ?), "
+                    "domain=COALESCE(domain, ?), "
+                    "status=CASE WHEN COALESCE(domain,'')<>'' AND status='new' "
+                    "            THEN 'domain' ELSE status END, "
+                    "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (legal_name, city, lic, role, domain, eid),
+                )
+            else:
+                cur = conn.execute(
+                    "INSERT INTO contractor_entities "
+                    "(entity_key, legal_name, normalized_name, license, city, state, "
+                    " role, domain, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        key,
+                        legal_name,
+                        norm,
+                        lic,
+                        city,
+                        st,
+                        role,
+                        domain,
+                        "domain" if domain else "new",
+                    ),
+                )
+                eid = int(cur.lastrowid)
+            if source and external_id:
+                conn.execute(
+                    "INSERT OR IGNORE INTO contractor_entity_sources "
+                    "(entity_id, source, external_id, role) VALUES (?, ?, ?, ?)",
+                    (eid, source, str(external_id), role),
+                )
+            conn.commit()
+            out = conn.execute(
+                "SELECT * FROM contractor_entities WHERE id=?", (eid,)
+            ).fetchone()
+            return dict(out) if out else None
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            return None
+        finally:
+            conn.close()
+
+    def list_contractor_entities(
+        self,
+        city: Optional[str] = None,
+        status: Optional[str] = None,
+        limit: int = 200,
+    ) -> List[dict]:
+        conn = get_connection()
+        try:
+            where: list[str] = []
+            params: list = []
+            if city:
+                where.append("UPPER(TRIM(city))=?")
+                params.append(city.strip().upper())
+            if status:
+                where.append("status=?")
+                params.append(status)
+            sql = "SELECT * FROM contractor_entities"
+            if where:
+                sql += " WHERE " + " AND ".join(where)
+            sql += " ORDER BY id DESC LIMIT ?"
+            params.append(max(1, min(int(limit), 1000)))
+            return [dict(r) for r in conn.execute(sql, params).fetchall()]
+        finally:
+            conn.close()
+
+    def contractor_entity_counts(self, city: Optional[str] = None) -> dict:
+        conn = get_connection()
+        try:
+            params: list = []
+            where = ""
+            if city:
+                where = " WHERE UPPER(TRIM(city))=?"
+                params = [city.strip().upper()]
+            rows = conn.execute(
+                "SELECT status, COUNT(*) c FROM contractor_entities"
+                + where
+                + " GROUP BY status",
+                params,
+            ).fetchall()
+            by_status = {r["status"]: int(r["c"]) for r in rows}
+            total = sum(by_status.values())
+            return {"city": (city or "").upper(), "total": total, "by_status": by_status}
+        finally:
+            conn.close()
+
+    def set_contractor_entity_domain(
+        self, entity_id: int, domain: str, confidence: float = 1.0
+    ) -> bool:
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE contractor_entities SET domain=?, domain_confidence=?, "
+                "status=CASE WHEN status='new' THEN 'domain' ELSE status END, "
+                "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (domain, float(confidence), int(entity_id)),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def set_contractor_entity_email(
+        self, entity_id: int, email: str, email_status: str
+    ) -> bool:
+        status = "ready" if email_status in ("valid", "verified") else "quarantined"
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE contractor_entities SET email=?, email_status=?, status=?, "
+                "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (email, email_status, status, int(entity_id)),
+            )
+            conn.commit()
+            return cur.rowcount > 0
         finally:
             conn.close()
 
@@ -12079,6 +12302,40 @@ class AsyncDatabaseService:
     async def outbound_readiness(self, city: str, niche: Optional[str] = None) -> dict:
         return await anyio.to_thread.run_sync(
             self._service.outbound_readiness, city, niche
+        )
+
+    # ---------------------------------------------------- Fase 2: empreiteiros
+    async def upsert_contractor_entity(self, legal_name: str, city: str, **kwargs):
+        return await anyio.to_thread.run_sync(
+            lambda: self._service.upsert_contractor_entity(
+                legal_name, city, **kwargs
+            )
+        )
+
+    async def list_contractor_entities(
+        self, city: Optional[str] = None, status: Optional[str] = None, limit: int = 200
+    ) -> List[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.list_contractor_entities, city, status, limit
+        )
+
+    async def contractor_entity_counts(self, city: Optional[str] = None) -> dict:
+        return await anyio.to_thread.run_sync(
+            self._service.contractor_entity_counts, city
+        )
+
+    async def set_contractor_entity_domain(
+        self, entity_id: int, domain: str, confidence: float = 1.0
+    ) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.set_contractor_entity_domain, entity_id, domain, confidence
+        )
+
+    async def set_contractor_entity_email(
+        self, entity_id: int, email: str, email_status: str
+    ) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.set_contractor_entity_email, entity_id, email, email_status
         )
 
     async def get_outbound_counter(self, city: str, day: str) -> dict:
