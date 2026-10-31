@@ -686,6 +686,35 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   **928 pytest**, Ruff global limpo (23 avisos antigos de testes resolvidos,
   incluindo um teste duplicado `F811` que nunca corria).
 
+### Passkeys / Face ID (WebAuthn) — MVP (2026-10-31)
+
+- **Fluxo de retorno primeiro** (`ee12cb5`): `proxy.ts` deixou de perder o
+  destino. Sessão ausente em `/pt/dashboard?lead=42` → `/pt/auth?next=…`; o
+  `AuthForm` valida `next` (só caminho relativo) e regressa lá depois do login.
+  Corrigido também o redirect de bloqueio (`//checkout` → `/{locale}/checkout`).
+- **Zero custo externo**: a biometria nunca sai do dispositivo. O servidor
+  guarda só a chave **pública** (`webauthn_credentials`), o challenge de uso
+  único (`webauthn_challenges`, 5 min, consumo atómico com `BEGIN IMMEDIATE`)
+  e metadados (transports, aaguid, label do dispositivo). `py_webauthn 2.8`.
+- **Sessão igual à A2**: login por passkey emite `garimpador_token` +
+  `user_sessions` com o mesmo TTL deslizante de 30 d. Sem segundo sistema de
+  autenticação, sem JWT novo, sem serviço pago.
+- **Segurança**: `rp_id` = `WEBAUTHN_RP_ID` (default `magicleads.app`),
+  `user_verification=required`, `authenticator_attachment=platform`,
+  `exclude_credentials` no registo e `allow_credentials` no login (descoberta
+  por e-mail opcional, sem enumerar contas). `sign_count` regressivo gera
+  `system_alert` `WEBAUTHN_CLONED_SIGNAL`.
+- **UI**: botão “Entrar com Face ID” no ecrã de auth apenas quando o browser
+  suporta WebAuthn **e** já há uma passkey neste dispositivo (hint local);
+  painel “Segurança de acesso” nas Definições para ativar/remover; erros
+  distintos para não suportado, sem passkey, cancelado e falha. A palavra-passe
+  continua sempre disponível.
+- **E2E real**: `e2e/passkey.spec.ts` usa o *virtual authenticator* do Chromium
+  (CDP `WebAuthn.addVirtualAuthenticator`) — regista, limpa a sessão local e
+  entra sem palavra-passe. RP ID em E2E = `localhost` (WebAuthn rejeita IPs).
+- Testes: **937 pytest** (+6), **26 e2e** (+3 desde a Fase E), 83 vitest,
+  Ruff/tsc/ESLint limpos (0 erros, 34 avisos antigos).
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

@@ -141,6 +141,12 @@ Contexto completo e números medidos: **`docs/PROJECT-MEMORY.md`**. Ler antes de
 40. **Segredos fail-closed**: sem `DEMO_PASSWORD` o login demo devolve 503;
     sem `PUSH_CLICK_SECRET`/`CRON_SECRET` nenhum clique é assinado/aceite.
     Nunca reintroduzir fallback hardcoded de HMAC.
+41. **Passkeys (WebAuthn)**: a biometria nunca sai do dispositivo; a BD guarda
+    só a chave pública. Registo/login exigem `user_verification=required` e
+    `rp_id` = `WEBAUTHN_RP_ID`; o challenge é de uso único (5 min) e o login
+    emite a **mesma** sessão A2 (cookie + `user_sessions`). A palavra-passe
+    nunca é removida como alternativa. `proxy.ts` preserva `next` no redirect
+    para `/{locale}/auth` — sem isso os deep links de push perdem-se.
 
 ## Verificação mínima antes de deploy
 ```bash
