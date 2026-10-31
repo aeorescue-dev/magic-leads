@@ -40,7 +40,9 @@ def parse_auth_ref(auth_ref: Optional[str]) -> dict:
     if not auth_ref:
         return {}
     try:
-        data = json.loads(auth_ref)
+        from .secrets import decrypt_secret
+
+        data = json.loads(decrypt_secret(auth_ref))
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}

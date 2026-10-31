@@ -264,6 +264,9 @@ class Settings(BaseSettings):
     OUTBOUND_WORKER_ENABLED: bool = True
     OUTBOUND_WORKER_INTERVAL_SECONDS: int = 60
     OUTBOUND_WORKER_CHUNK: int = 10
+    # Chave Fernet para encriptar `sending_mailboxes.auth_ref` em repouso.
+    # Vazia = comportamento antigo (texto simples); definir em produção.
+    MAILBOX_SECRET_KEY: str = ""
 
     # Fila de enriquecimento (Fase 1). Tira a descoberta/validacao do request
     # HTTP para uma tarefa de background com estado em SQLite e retry/backoff.

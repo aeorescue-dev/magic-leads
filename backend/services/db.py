@@ -1893,6 +1893,20 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         if name not in mb_cols:
             conn.execute(f"ALTER TABLE sending_mailboxes ADD COLUMN {name} {ddl}")
 
+    # Encripta auth_ref existentes assim que MAILBOX_SECRET_KEY estiver definida.
+    from .secrets import encrypt_secret, is_encrypted
+
+    for row in conn.execute(
+        "SELECT id, auth_ref FROM sending_mailboxes WHERE COALESCE(auth_ref,'')<>''"
+    ).fetchall():
+        if not is_encrypted(row["auth_ref"]):
+            enc = encrypt_secret(row["auth_ref"])
+            if enc and enc != row["auth_ref"]:
+                conn.execute(
+                    "UPDATE sending_mailboxes SET auth_ref=? WHERE id=?",
+                    (enc, row["id"]),
+                )
+
 
 
 
@@ -2174,6 +2188,9 @@ class DatabaseService:
     ) -> Optional[dict]:
         conn = get_connection()
         try:
+            from .secrets import encrypt_secret
+
+            auth_ref = encrypt_secret(auth_ref)
             conn.execute(
                 "INSERT INTO sending_mailboxes (email, provider, transport, domain, display_name, city, daily_cap, enabled, warmup_state, auth_ref, notes, updated_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
