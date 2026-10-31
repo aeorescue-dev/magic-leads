@@ -82,9 +82,14 @@ import {
   grantAdminAccess,
   revokeAdminAccess,
   fetchAdminAccessAudit,
+  fetchAdminOutboundHealth,
+  markAdminOutboundReplied,
+  fetchAdminBillingFunnel,
   type AdminSession,
   type AdminAccessLookup,
   type AdminAccessAuditEntry,
+  type AdminOutboundHealth,
+  type AdminBillingFunnel,
 } from "@/lib/admin-api";
 import { AUTH_TOKEN_KEY } from "@/lib/api-client";
 
@@ -139,7 +144,11 @@ function StateBadge({ ok, bad }: { ok: boolean; bad: string }) {
 
 function fmtDt(value?: string | null) {
   if (!value) return "—";
-  const d = new Date(value.includes("T") ? value : value.replace(" ", "T"));
+  // Timestamps da BD são UTC naive. Sem sufixo, o browser interpretava como
+  // hora local e desviava o valor pelo fuso.
+  const normalized = value.includes("T") ? value : value.replace(" ", "T");
+  const hasTz = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized);
+  const d = new Date(hasTz ? normalized : `${normalized}Z`);
   if (isNaN(d.getTime())) return value;
   return d.toLocaleString("pt-PT", { dateStyle: "short", timeStyle: "short" });
 }
@@ -188,6 +197,8 @@ function OutboundPanel() {
     message?: string;
   }>({ state: "idle" });
   const [status, setStatus] = useState<AdminOutboundStatus | null>(null);
+  const [health, setHealth] = useState<AdminOutboundHealth | null>(null);
+  const [healthBusy, setHealthBusy] = useState(false);
   const [toggling, setToggling] = useState(false);
   const [enriching, setEnriching] = useState(false);
   const [batches, setBatches] = useState<AdminOutboundBatchRow[]>([]);
@@ -359,6 +370,35 @@ function OutboundPanel() {
       setError(e instanceof AdminApiError ? e.message : "Falha ao correr o worker.");
     } finally {
       setToggling(false);
+    }
+  }, []);
+
+  const loadHealth = useCallback(async () => {
+    setHealthBusy(true);
+    setError(null);
+    try {
+      setHealth(await fetchAdminOutboundHealth());
+    } catch (e) {
+      setError(e instanceof AdminApiError ? e.message : "Falha ao ler a saúde do motor.");
+    } finally {
+      setHealthBusy(false);
+    }
+  }, []);
+
+  const markReplied = useCallback(async (message: AdminOutboundMessageRow) => {
+    if (!message.contact_id) return;
+    if (!window.confirm(`Marcar ${message.to_email} como tendo respondido?`)) return;
+    try {
+      await markAdminOutboundReplied(message.contact_id);
+      setBatchMsgs((prev) =>
+        prev.map((m) =>
+          m.id === message.id
+            ? { ...m, replied_at: new Date().toISOString() }
+            : m
+        )
+      );
+    } catch (e) {
+      setError(e instanceof AdminApiError ? e.message : "Falha ao marcar a resposta.");
     }
   }, []);
 
@@ -556,6 +596,18 @@ function OutboundPanel() {
               Rodar worker
             </button>
             <button
+              onClick={() => void loadHealth()}
+              disabled={healthBusy}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:bg-white/5 disabled:opacity-50"
+            >
+              {healthBusy ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Activity className="h-3.5 w-3.5" />
+              )}
+              Saúde do motor
+            </button>
+            <button
               onClick={() => void runEnrich()}
               disabled={!city || enriching}
               title={
@@ -599,8 +651,41 @@ function OutboundPanel() {
               Fila a drenar · {status.mailbox_remaining_today ?? 0} envio(s) disponíveis hoje.
             </p>
           ) : null}
+          {health ? (
+            <div className="rounded border border-white/10 bg-black/20 px-2 py-1.5" data-testid="outbound-health">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                  Saúde do motor · Control Tower
+                </span>
+                <button
+                  onClick={() => setHealth(null)}
+                  className="ml-auto text-[10px] text-slate-500 hover:text-slate-300"
+                >
+                  fechar
+                </button>
+              </div>
+              {health.checks.filter((c) => c.status !== "ok").length > 0 ? (
+                <ul className="mt-1 space-y-0.5">
+                  {health.checks
+                    .filter((c) => c.status !== "ok")
+                    .map((c) => (
+                      <li
+                        key={c.check_name}
+                        className={c.status === "fail" ? "text-[10px] text-rose-400" : "text-[10px] text-amber-400"}
+                      >
+                        [{c.status}] {c.check_name}: {c.detail}
+                      </li>
+                    ))}
+                </ul>
+              ) : (
+                <p className="mt-1 text-[10px] text-emerald-400">Todos os checks OK.</p>
+              )}
+              <pre className="mt-1 max-h-56 overflow-auto whitespace-pre-wrap text-[10px] leading-relaxed text-slate-400">
+                {health.digest}
+              </pre>
+            </div>
+          ) : null}
           <p className="text-[10px] text-slate-600">
-            Envio real pela Gmail API com warm-up por caixa, tetos diários e quiet hours (UTC).
             EmailListVerify {status?.enrichment_configured ? "configurado" : "não configurado"}.
             {status?.quiet_hours_now ? " Agora em quiet hours — o worker não envia." : ""}
             {status && status.mailboxes.length === 0
@@ -745,6 +830,7 @@ function OutboundPanel() {
                                 <th className="py-1">provider_id</th>
                                 <th className="py-1">Enviado</th>
                                 <th className="py-1">Erro</th>
+                                <th className="py-1">Resposta</th>
                               </tr>
                             </thead>
                             <tbody className="text-slate-400">
@@ -759,6 +845,20 @@ function OutboundPanel() {
                                   <td className="py-0.5 font-mono">{m.provider_id || "—"}</td>
                                   <td className="py-0.5">{m.sent_at || "—"}</td>
                                   <td className="py-0.5 text-rose-400">{m.error || ""}</td>
+                                   <td className="py-0.5">
+                                     {m.replied_at ? (
+                                       <span className="text-emerald-400">respondeu</span>
+                                     ) : m.contact_id && m.status === "sent" ? (
+                                       <button
+                                         onClick={() => void markReplied(m)}
+                                         className="rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-slate-300 hover:bg-white/5"
+                                       >
+                                         marcar
+                                       </button>
+                                     ) : (
+                                       <span className="text-slate-600">—</span>
+                                     )}
+                                   </td>
                                 </tr>
                               ))}
                             </tbody>
@@ -1436,6 +1536,79 @@ function AccessGrantPanel() {
   );
 }
 
+// --------------------------------------------------------------- billing
+
+function BillingFunnelPanel() {
+  const [data, setData] = useState<AdminBillingFunnel | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchAdminBillingFunnel()
+      .then(setData)
+      .catch((e) =>
+        setError(
+          e instanceof AdminApiError ? e.message : "Falha ao carregar o funil de checkout."
+        )
+      );
+  }, []);
+
+  const f = data?.funnel;
+  return (
+    <Card
+      title="Funil de checkout"
+      icon={<Wallet className="h-4 w-4" />}
+      hint="criou → email → pagou"
+    >
+      <div data-testid="billing-funnel">
+        {error ? <p className="text-xs text-rose-400">{error}</p> : null}
+        {!f ? (
+          <p className="text-xs text-slate-500">A carregar…</p>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
+              {[
+                { label: "Sessões criadas", value: f.sessions_created },
+                { label: "Com e-mail", value: f.sessions_with_email },
+                { label: "Pagas", value: f.sessions_completed },
+                { label: "Recuperadas", value: f.sessions_recovered },
+                { label: "Abertas", value: f.sessions_open },
+                { label: "Expiradas", value: f.sessions_expired },
+              ].map((k) => (
+                <div key={k.label} className="rounded-lg border border-white/10 p-2">
+                  <div className="text-[10px] uppercase tracking-wider text-slate-500">
+                    {k.label}
+                  </div>
+                  <div className="text-lg font-bold text-slate-100">{k.value}</div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-2 flex flex-wrap gap-4 text-[11px] text-slate-400">
+              <span>
+                Captura de e-mail:{" "}
+                <strong className="text-slate-200">
+                  {(f.email_capture_rate * 100).toFixed(1)}%
+                </strong>
+              </span>
+              <span>
+                Conversão:{" "}
+                <strong className="text-emerald-400">
+                  {(f.conversion_rate * 100).toFixed(1)}%
+                </strong>
+              </span>
+              <span>
+                Recuperação:{" "}
+                {data?.recovery.enabled ? "ligada" : "desligada"} ·{" "}
+                {data?.recovery.after_minutes} min · {data?.recovery.max_reminders} lembrete(s)
+              </span>
+              <span className="text-slate-600">{data?.open_sessions} sessão(ões) aberta(s)</span>
+            </div>
+          </>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 // --------------------------------------------------------------- gate
 
 function GateScreen({ gate, hasToken }: { gate: Gate; hasToken: boolean }) {
@@ -1668,6 +1841,7 @@ export default function AdminPage() {
 
       {/* ------------------------------------------------------ outbound */}
       <OutboundPanel />
+      <BillingFunnelPanel />
 
       <div className="grid gap-5 lg:grid-cols-2">
         {/* -------------------------------------------------- fontes */}

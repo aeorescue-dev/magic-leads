@@ -2213,7 +2213,8 @@ class DatabaseService:
                 """
                 SELECT m.id, m.to_email, m.subject, m.status, m.provider_id,
                        m.queued_at, m.sent_at, COALESCE(m.error,'') AS error,
-                       m.sequence_step, m.next_step_at,
+                       m.sequence_step, m.next_step_at, m.contact_id,
+                       COALESCE(oc.replied_at,'') AS replied_at,
                        COALESCE(mb.email,'') AS from_addr,
                        COALESCE(oc.company_name,'') AS company_name
                 FROM outbound_messages m

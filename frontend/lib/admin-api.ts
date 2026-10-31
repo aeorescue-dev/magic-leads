@@ -607,6 +607,8 @@ export interface AdminOutboundMessageRow {
   company_name: string;
   sequence_step: number;
   next_step_at: string | null;
+  contact_id: number | null;
+  replied_at: string;
 }
 
 export function fetchAdminOutboundBatches(limit = 10): Promise<{ batches: AdminOutboundBatchRow[] }> {
@@ -624,6 +626,48 @@ export function fetchAdminOutboundMessages(
 
 export function triggerAdminInboxSync(): Promise<Record<string, unknown>> {
   return adminFetch<Record<string, unknown>>("/outbound/inbox/sync", { method: "POST" });
+}
+
+export interface AdminOutboundHealth {
+  checks: Array<{ check_name: string; status: string; detail: string; checked_at?: string }>;
+  digest: string;
+}
+
+export function fetchAdminOutboundHealth(): Promise<AdminOutboundHealth> {
+  return adminFetch<AdminOutboundHealth>("/outbound/health");
+}
+
+export function markAdminOutboundReplied(
+  contactId: number
+): Promise<{ status: string; contact_id: number; replied_at: string }> {
+  return adminFetch<{ status: string; contact_id: number; replied_at: string }>(
+    `/outbound/replied?contact_id=${contactId}`,
+    { method: "POST" }
+  );
+}
+
+export interface AdminBillingFunnel {
+  funnel: {
+    sessions_created: number;
+    sessions_with_email: number;
+    sessions_completed: number;
+    sessions_expired: number;
+    sessions_open: number;
+    sessions_recovered: number;
+    email_capture_rate: number;
+    conversion_rate: number;
+  };
+  recovery: {
+    enabled: boolean;
+    channel_configured: boolean;
+    after_minutes: number;
+    max_reminders: number;
+  };
+  open_sessions: number;
+}
+
+export function fetchAdminBillingFunnel(): Promise<AdminBillingFunnel> {
+  return adminFetch<AdminBillingFunnel>("/billing/funnel");
 }
 
 export function fetchAdminOutboundStatus(): Promise<AdminOutboundStatus> {
