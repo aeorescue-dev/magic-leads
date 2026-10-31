@@ -513,8 +513,15 @@ export interface AdminOutboundStatusMailbox {
   daily_cap: number;
   effective_cap: number;
   sent_today: number;
+  remaining_today: number;
   warmup_state: string;
   warmup_days: number;
+}
+
+export interface AdminOutboundQueueBlocker {
+  reason: string;
+  detail: string;
+  retry_at?: string | null;
 }
 
 export interface AdminOutboundStatus {
@@ -523,6 +530,13 @@ export interface AdminOutboundStatus {
   quiet_hours_now: boolean;
   day: string;
   queued: number;
+  queue_oldest_at?: string | null;
+  queue_oldest_age_hours?: number | null;
+  queue_oldest_city?: string;
+  mailbox_remaining_today?: number;
+  mailbox_cap_total?: number;
+  mailbox_sent_today?: number;
+  queue_blocker?: AdminOutboundQueueBlocker | null;
   sent_today: number;
   enriched_today: number;
   spend_today_usd: number;

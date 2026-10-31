@@ -571,6 +571,26 @@ function OutboundPanel() {
               </span>
             ) : null}
           </div>
+          {status?.queue_blocker ? (
+            <div
+              data-testid="outbound-queue-blocker"
+              className="rounded border border-amber-500/30 bg-amber-500/5 px-2 py-1.5 text-[10px] text-amber-300"
+            >
+              <span className="font-semibold uppercase tracking-wide">
+                Fila parada · {status.queue_blocker.reason}
+              </span>
+              <span className="ml-1 text-amber-200/90">{status.queue_blocker.detail}</span>
+              {status.queue_blocker.retry_at ? (
+                <span className="ml-1 text-amber-200/70">
+                  (retoma {status.queue_blocker.retry_at.slice(0, 16)} UTC)
+                </span>
+              ) : null}
+            </div>
+          ) : status && status.queued > 0 ? (
+            <p className="text-[10px] text-emerald-400/80">
+              Fila a drenar · {status.mailbox_remaining_today ?? 0} envio(s) disponíveis hoje.
+            </p>
+          ) : null}
           <p className="text-[10px] text-slate-600">
             Envio real pela Gmail API com warm-up por caixa, tetos diários e quiet hours (UTC).
             EmailListVerify {status?.enrichment_configured ? "configurado" : "não configurado"}.
@@ -618,7 +638,12 @@ function OutboundPanel() {
               <tbody className="text-slate-300">
                 {status.mailboxes.map((mb) => (
                   <tr key={mb.id} className="border-t border-white/5">
-                    <td className="py-1">{mb.email}</td>
+                    <td className="py-1">
+                      {mb.email}
+                      {mb.city ? (
+                        <span className="ml-1 text-[10px] text-slate-500">{mb.city}</span>
+                      ) : null}
+                    </td>
                     <td className="py-1">
                       {mb.enabled ? (
                         <span className="text-emerald-400">ligada</span>
@@ -628,6 +653,9 @@ function OutboundPanel() {
                     </td>
                     <td className="py-1">
                       {mb.sent_today} / {mb.effective_cap}
+                      <span className="ml-1 text-[10px] text-slate-500">
+                        (restam {mb.remaining_today})
+                      </span>
                     </td>
                     <td className="py-1">
                       dia {mb.warmup_days} · {mb.warmup_state}

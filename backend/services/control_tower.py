@@ -232,26 +232,133 @@ def _check_searchbug_cost() -> dict:
     }
 
 
+def _queue_capacity(config: dict, now) -> dict:
+    """Capacidade agregada das caixas ligadas para hoje (UTC).
+
+    Sincrono e sem side-effects: a Control Tower corre no thread de health.
+    Reaproveita as MESMAS funções puras do motor para o número não divergir.
+    """
+    from .outbound_engine import effective_mailbox_cap, warmup_days
+
+    day = now.strftime("%Y-%m-%d")
+    conn = get_connection()
+    try:
+        mailboxes = conn.execute(
+            "SELECT * FROM sending_mailboxes WHERE enabled=1 ORDER BY id"
+        ).fetchall()
+        rows = []
+        for mb in mailboxes:
+            mb = dict(mb)
+            sent = conn.execute(
+                "SELECT COUNT(1) FROM outbound_messages "
+                "WHERE mailbox_id=? AND status='sent' AND sent_at >= ?",
+                (mb["id"], f"{day} 00:00:00"),
+            ).fetchone()[0]
+            cap = effective_mailbox_cap(mb, config, now)
+            rows.append(
+                {
+                    "email": mb.get("email"),
+                    "cap": cap,
+                    "sent": int(sent),
+                    "remaining": max(0, cap - int(sent)),
+                    "warmup_days": warmup_days(mb.get("warmup_started_at"), now),
+                }
+            )
+        return {
+            "mailboxes": rows,
+            "cap_total": sum(r["cap"] for r in rows),
+            "sent_total": sum(r["sent"] for r in rows),
+            "remaining": sum(r["remaining"] for r in rows),
+        }
+    finally:
+        conn.close()
+
+
 def _check_queue() -> list[dict]:
+    from .outbound_engine import is_quiet_hours, next_utc_midnight, quiet_hours_end_iso
+
     out = []
+    now = _now()
     conn = get_connection()
     try:
         row = conn.execute(
             "SELECT MIN(queued_at) AS oldest, COUNT(1) AS n FROM outbound_messages "
             "WHERE status='queued'"
         ).fetchone()
+        oldest_msg = conn.execute(
+            "SELECT city FROM outbound_messages WHERE status='queued' "
+            "ORDER BY queued_at, id LIMIT 1"
+        ).fetchone()
+        config = {
+            r["key"]: r["value"]
+            for r in conn.execute("SELECT key, value FROM outbound_config WHERE city=''")
+        }
         oldest = _parse(row["oldest"]) if row else None
         if row and row["n"]:
-            age_h = (_now() - oldest).total_seconds() / 3600 if oldest else 0
-            if age_h > QUEUE_WARN_H:
-                out.append({"name": "queue_age", "status": "fail",
-                            "detail": f"{row['n']} na fila; mais antiga {age_h:.0f}h"})
-            elif age_h > QUEUE_OK_H:
-                out.append({"name": "queue_age", "status": "warn",
-                            "detail": f"{row['n']} na fila; mais antiga {age_h:.0f}h"})
+            age_h = (now - oldest).total_seconds() / 3600 if oldest else 0
+            oldest_city = (oldest_msg["city"] or "") if oldest_msg else ""
+            capacity = _queue_capacity(config, now)
+            quiet_now = is_quiet_hours(
+                now, config.get("quiet_hours_start"), config.get("quiet_hours_end")
+            )
+
+            # Uma fila velha nem sempre é um defeito: se o motor está
+            # deliberadamente parado (quiet hours/cap de warm-up/motor off),
+            # o alerta explica o motivo em vez de acusar "falha".
+            blocked_reason = None
+            blocked_detail = ""
+            retry_at = None
+            if config.get("send_enabled") != "1":
+                blocked_reason = "motor desligado"
+                blocked_detail = "send_enabled=0 (envio manualmente desligado)"
+            elif quiet_now:
+                blocked_reason = "quiet hours"
+                retry_at = quiet_hours_end_iso(now, config)
+                blocked_detail = (
+                    f"quiet hours até {retry_at[11:16]} UTC" if retry_at else "quiet hours"
+                )
+            elif capacity["remaining"] <= 0:
+                blocked_reason = "limite de caixa"
+                retry_at = next_utc_midnight(now)
+                ramp_day = capacity["mailboxes"][0]["warmup_days"] if capacity["mailboxes"] else 0
+                blocked_detail = (
+                    f"{capacity['sent_total']}/{capacity['cap_total']} envios hoje; "
+                    f"warm-up dia {ramp_day} — retoma à meia-noite UTC"
+                )
             else:
-                out.append({"name": "queue_age", "status": "ok",
-                            "detail": f"{row['n']} na fila; mais antiga {age_h:.1f}h"})
+                # Capacidade existe mas a fila não anda: pode ser config por
+                # cidade ou um lote preso. Isto sim é uma falha operacional.
+                if oldest_city:
+                    city_cfg = conn.execute(
+                        "SELECT key, value FROM outbound_config WHERE UPPER(city)=?",
+                        (oldest_city.strip().upper(),),
+                    ).fetchall()
+                    city_map = {r["key"]: r["value"] for r in city_cfg}
+                    if city_map.get("send_enabled") == "0":
+                        blocked_reason = "cidade com envio desligado"
+                        blocked_detail = (
+                            f"{oldest_city}: send_enabled=0 na configuração por cidade"
+                        )
+
+            base = f"{row['n']} na fila; mais antiga {age_h:.0f}h"
+            if blocked_reason:
+                detail = f"{base} · parada por {blocked_reason}: {blocked_detail}"
+                status = "warn"
+            elif age_h > QUEUE_WARN_H:
+                detail = (
+                    f"{base} · há capacidade ({capacity['remaining']} envio(s) hoje) "
+                    "mas a fila não avança — verificar config/caixas"
+                )
+                status = "fail"
+            elif age_h > QUEUE_OK_H:
+                detail = f"{base} · restam {capacity['remaining']} envio(s) hoje"
+                status = "warn"
+            else:
+                detail = (
+                    f"{base} · {capacity['sent_total']}/{capacity['cap_total']} hoje"
+                )
+                status = "ok"
+            out.append({"name": "queue_age", "status": status, "detail": detail})
         else:
             out.append({"name": "queue_age", "status": "ok", "detail": "fila vazia"})
 
@@ -634,11 +741,12 @@ def build_digest() -> str:
             "SELECT COUNT(1) FROM leads WHERE niche_status IN ('ambiguous','unknown') "
             "AND source_type='import_b2b'"
         ).fetchone()[0]
-        mailboxes = conn.execute(
-            "SELECT id, email, daily_cap, warmup_started_at FROM sending_mailboxes "
-            "WHERE enabled=1 ORDER BY id"
-        ).fetchall()
-        config = {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM outbound_config")}
+        config = {
+            r["key"]: r["value"]
+            for r in conn.execute(
+                "SELECT key, value FROM outbound_config WHERE city=''"
+            )
+        }
         today_sent = 0
         for r in conn.execute(
             "SELECT sent FROM outbound_daily_counters WHERE day=?", (day,)
@@ -664,11 +772,16 @@ def build_digest() -> str:
         + f" · enviados 24h {sent_24h} · hoje {today_sent}"
         + f" · send_enabled={config.get('send_enabled')}",
     ]
-    for mb in mailboxes:
-        started = _parse(mb["warmup_started_at"])
-        days = (now - started).days if started else 0
+    cap = _queue_capacity(config, now)
+    for mb in cap["mailboxes"]:
         lines.append(
-            f"CAIXA      {mb['email']}: cap {mb['daily_cap']}/dia · warm-up dia {days}"
+            f"CAIXA      {mb['email']}: cap {mb['cap']}/dia · "
+            f"hoje {mb['sent']}/{mb['cap']} · warm-up dia {mb['warmup_days']}"
+        )
+    if cap["mailboxes"]:
+        lines.append(
+            f"CAPACIDADE restam {cap['remaining']} envio(s) hoje "
+            f"(total {cap['cap_total']})"
         )
     lines += [
         f"FUNIL      contactos {contacts} · respostas 24h {replied_24h}",

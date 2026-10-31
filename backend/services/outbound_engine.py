@@ -196,6 +196,58 @@ def _mailbox_warmup_state(mailbox: dict, config: dict, now: datetime) -> str:
     return "warm" if warmup_days(mailbox.get("warmup_started_at"), now) >= min_days else "warming"
 
 
+def next_utc_midnight(now: Optional[datetime] = None) -> str:
+    """Primeiro instante do próximo dia UTC (quando os caps de caixa repõem)."""
+    dt = (_now_dt(now) + timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def quiet_hours_end_iso(now: datetime, config: dict) -> Optional[str]:
+    """Instante em que a janela de silêncio atual termina (UTC), se aplicável."""
+    if not is_quiet_hours(
+        now, config.get("quiet_hours_start"), config.get("quiet_hours_end")
+    ):
+        return None
+    end = _parse_hhmm(config.get("quiet_hours_end"))
+    if not end:
+        return None
+    dt = _now_dt(now)
+    target = dt.replace(hour=end[0], minute=end[1], second=0, microsecond=0)
+    if target <= dt:
+        target += timedelta(days=1)
+    return target.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def mailbox_matches_city(mailbox_city: Optional[str], message_city: Optional[str]) -> bool:
+    """Caixa global (city vazio) serve qualquer cidade; específica só a sua.
+
+    Uma mensagem sem cidade também aceita qualquer caixa — é o caso dos lotes
+    antigos criados antes de `city` ser propagada.
+    """
+    mb = (mailbox_city or "").strip().upper()
+    msg = (message_city or "").strip().upper()
+    if not mb or not msg:
+        return True
+    return mb == msg
+
+
+def mailbox_capacity_row(
+    mailbox: dict, config: dict, now: datetime, sent_today: int
+) -> dict:
+    """Fotografia de capacidade de uma caixa para o dia corrente."""
+    cap = effective_mailbox_cap(mailbox, config, now)
+    return {
+        **mailbox,
+        "effective_cap": cap,
+        "sent_today": max(0, _int(sent_today, 0)),
+        "remaining_today": max(0, cap - max(0, _int(sent_today, 0))),
+        "warmup_state": _mailbox_warmup_state(mailbox, config, now),
+        "warmup_days": warmup_days(mailbox.get("warmup_started_at"), now),
+    }
+
+
 class OutboundEngine:
     """Materializa lotes e processa a fila de envio real."""
 
@@ -541,54 +593,92 @@ class OutboundEngine:
 
     # ---------------------------------------------------------- worker tick
 
-    async def _pick_mailbox(self, city: str, config: dict, now: datetime, day: str) -> Optional[dict]:
+    async def _capacity_snapshot(
+        self, config: dict, now: datetime, day: str
+    ) -> list[dict]:
+        """Capacidade de TODAS as caixas ligadas, já com o cap de hoje.
+
+        Uma caixa sem `warmup_started_at` é inicializada aqui (dia 0 da rampa).
+        O snapshot é reutilizado por todos os pedidos do mesmo tick.
+        """
         mailboxes = await db_service.list_sending_mailboxes(enabled_only=True)
-        best: Optional[dict] = None
+        out: list[dict] = []
         for mailbox in mailboxes:
-            mb_city = (mailbox.get("city") or "").strip().upper()
-            if mb_city and mb_city != (city or "").strip().upper():
-                continue
             if mailbox.get("warmup_started_at") is None:
                 await db_service.set_mailbox_warmup_started(mailbox["id"])
                 mailbox = {**mailbox, "warmup_started_at": _now_str(now)}
-            cap = effective_mailbox_cap(mailbox, config, now)
-            if cap <= 0:
-                continue
             sent = await db_service.count_mailbox_sent_today(mailbox["id"], day)
-            if sent >= cap:
-                continue
-            if best is None or sent < best["_sent_today"]:
-                best = {
-                    **mailbox,
-                    "_sent_today": sent,
-                    "_cap": cap,
-                    "_warmup_state": _mailbox_warmup_state(mailbox, config, now),
-                }
+            out.append(mailbox_capacity_row(mailbox, config, now, sent))
+        return out
+
+    def _pick_mailbox(
+        self, city: str, snapshot: list[dict], *, allow_spillover: bool = True
+    ) -> Optional[dict]:
+        """Escolhe a caixa com mais folga; a da cidade tem prioridade.
+
+        Duas passagens:
+          1. caixas globais ou da própria cidade com `remaining_today > 0`;
+          2. se nenhuma da cidade tiver folga, qualquer caixa ligada com folga
+             (spillover). Sem isto, uma cidade cujas caixas esgotaram o cap
+             ficava bloqueada para sempre mesmo com outras caixas vazias.
+        """
+        eligible = [m for m in snapshot if _int(m.get("remaining_today"), 0) > 0]
+        if not eligible:
+            return None
+        preferred = [
+            m for m in eligible if mailbox_matches_city(m.get("city"), city)
+        ]
+        pool = preferred or (eligible if allow_spillover else [])
+        if not pool:
+            return None
+        # Mais folga primeiro; desempate estável pelo id.
+        pool.sort(key=lambda m: (_int(m.get("sent_today"), 0), _int(m.get("id"), 0)))
+        best = dict(pool[0])
+        best["_spillover"] = not mailbox_matches_city(best.get("city"), city)
+        best["_sent_today"] = _int(best.get("sent_today"), 0)
+        best["_cap"] = _int(best.get("effective_cap"), 0)
+        best["_warmup_state"] = best.get("warmup_state") or "cold"
         return best
 
     async def process_queue(
         self, limit: Optional[int] = None, now: Optional[datetime] = None
     ) -> dict:
-        """Um tick do worker: envia ate' ao limite do chunk respeitando travas."""
+        """Um tick do worker: envia ate' ao limite do chunk respeitando travas.
+
+        Regras de bloqueio (nenhuma delas pode parar o tick inteiro):
+          * cidade com `send_enabled=0` -> essas mensagens ficam na fila e o
+            tick continua para as outras cidades (antes um `break` parava tudo:
+            head-of-line blocking e a fila de Chicago travava o resto);
+          * caixa sem folga -> spillover para outra caixa com folga;
+          * sem NENHUMA folga -> tick pára e reporta `blocked_reason=mailbox_cap`
+            (é backpressure esperado do warm-up, não uma falha).
+        """
         now = now or datetime.now(timezone.utc)
         global_config = await db_service.get_outbound_config()
-        if global_config.get("send_enabled") != "1":
-            return {"status": "disabled", "sent": 0}
 
-        # Sprint 1: limpa mensagens presas em 'sending' (o processo morreu entre
-        # o claim e o envio — tipicamente num deploy). Sem isto ficavam para
-        # sempre: credito gasto, lead contactado, e-mail nunca enviado.
-        # Corre ANTES das quiet hours: o reaper nao envia nada e, se so'
-        # corresse na janela de envio, um deploy a noite deixava as linhas
-        # presas ate' 9h depois (22:00-07:00 UTC) e o painel mostrava-as como
-        # 'sending' o dia inteiro. Dois reapers concorrentes sao seguros: o
-        # UPDATE condicional transita cada linha uma unica vez (at-most-once).
+        # Reaper corre SEMPRE (mesmo com envio desligado): uma mensagem presa
+        # em 'sending' por um deploy não pode ficar invisível até alguém ligar
+        # o motor outra vez.
         await self.reap_stale_sending(now)
+
+        if global_config.get("send_enabled") != "1":
+            return {
+                "status": "disabled",
+                "sent": 0,
+                "blocked_reason": "send_enabled_off",
+                "blocked_detail": "Motor de envio desligado (send_enabled=0).",
+            }
 
         if is_quiet_hours(
             now, global_config.get("quiet_hours_start"), global_config.get("quiet_hours_end")
         ):
-            return {"status": "quiet_hours", "sent": 0}
+            return {
+                "status": "quiet_hours",
+                "sent": 0,
+                "blocked_reason": "quiet_hours",
+                "blocked_detail": "Dentro da janela de silêncio.",
+                "retry_at": quiet_hours_end_iso(now, global_config),
+            }
 
         limit = limit or _int(
             getattr(settings, "OUTBOUND_WORKER_CHUNK", 10), 10
@@ -596,22 +686,52 @@ class OutboundEngine:
         # Sequencia (Prioridade D): agenda o proximo passo antes de drenar a
         # fila, para que o passo 2 entre na MESMA janela de envio.
         await self.schedule_next_steps(now)
-        messages = await db_service.list_queued_outbound_messages(limit=limit)
+        # Janela de scan maior do que o chunk: mensagens de cidades bloqueadas
+        # (ou inválidas) não podem esconder as que estão atrás delas na fila.
+        scan_limit = min(500, max(limit * 10, 200))
+        messages = await db_service.list_queued_outbound_messages(limit=scan_limit)
         day = day_key(now)
         sent = 0
         skipped = 0
         failed = 0
+        deferred = 0
         touched_batches: set[int] = set()
 
+        # Cache por cidade: config + snapshot de caixas. Evita 3 queries por
+        # mensagem e mantém o mesmo snapshot coerente dentro do tick.
+        city_config: dict[str, dict] = {}
+        city_snapshot: dict[str, list[dict]] = {}
+        blocked_cities: dict[str, str] = {}
+
+        stop_reason: Optional[str] = None
+        stop_detail: Optional[str] = None
+        retry_at: Optional[str] = None
+
         for message in messages:
-            city = message.get("city") or ""
-            config = await db_service.get_outbound_config(city or None)
-            if config.get("send_enabled") != "1":
+            if sent >= limit:
                 break
+            city = (message.get("city") or "").strip()
+            city_key = city.upper()
+
+            if city_key in blocked_cities:
+                deferred += 1
+                continue
+
+            if city_key not in city_config:
+                city_config[city_key] = await db_service.get_outbound_config(city or None)
+            config = city_config[city_key]
+
+            if config.get("send_enabled") != "1":
+                blocked_cities[city_key] = "city_send_disabled"
+                deferred += 1
+                continue
+
             counter = await db_service.get_outbound_counter(city, day)
             daily_cap = _int(config.get("daily_send_cap"), 100)
             if daily_cap > 0 and _int(counter.get("sent"), 0) >= daily_cap:
-                break
+                blocked_cities[city_key] = "city_daily_cap"
+                deferred += 1
+                continue
 
             batch = (
                 await db_service.get_outbound_batch(message["batch_id"])
@@ -646,10 +766,45 @@ class OutboundEngine:
                 skipped += 1
                 continue
 
-            mailbox = await self._pick_mailbox(city, config, now, day)
+            if city_key not in city_snapshot:
+                city_snapshot[city_key] = await self._capacity_snapshot(
+                    config, now, day
+                )
+            mailbox = self._pick_mailbox(city, city_snapshot[city_key])
             if not mailbox:
-                logger.info("[OUTBOUND] Sem caixa com capacidade agora — parando o tick")
+                # Sem folga em NENHUMA caixa: nada mais pode sair neste tick.
+                total_cap = sum(
+                    _int(m.get("effective_cap"), 0)
+                    for m in city_snapshot[city_key]
+                )
+                total_sent = sum(
+                    _int(m.get("sent_today"), 0)
+                    for m in city_snapshot[city_key]
+                )
+                stop_reason = (
+                    "no_mailbox" if not city_snapshot[city_key] else "mailbox_cap"
+                )
+                stop_detail = (
+                    "Sem caixas de envio ligadas."
+                    if stop_reason == "no_mailbox"
+                    else (
+                        f"Limite de caixa atingido: {total_sent}/{total_cap} hoje "
+                        f"(warm-up {warmup_days(city_snapshot[city_key][0].get('warmup_started_at'), now)} dia(s))."
+                    )
+                )
+                retry_at = next_utc_midnight(now)
+                logger.info(
+                    "[OUTBOUND] Tick parado: %s (%s). %s mensagem(ns) ficam na fila.",
+                    stop_reason, stop_detail, len(messages) - sent - skipped - failed,
+                )
                 break
+
+            if mailbox.get("_spillover"):
+                logger.info(
+                    "[OUTBOUND] Spillover: mensagem %s (%s) vai pela caixa %s "
+                    "por falta de folga na cidade.",
+                    message["id"], city or "-", mailbox.get("email"),
+                )
 
             subject, body = await self._render_message(
                 batch, contact, city, _int(message.get("sequence_step"), 1)
@@ -669,13 +824,30 @@ class OutboundEngine:
                 )
                 continue
 
-            result = await gmail_sender.send(
-                mailbox,
-                message["to_email"],
-                subject or (message.get("subject") or ""),
-                body,
-                from_name=mailbox.get("display_name"),
-            )
+            try:
+                result = await gmail_sender.send(
+                    mailbox,
+                    message["to_email"],
+                    subject or (message.get("subject") or ""),
+                    body,
+                    from_name=mailbox.get("display_name"),
+                )
+            except Exception as e:  # noqa: BLE001
+                # Uma exceção da Gmail (rede/token) não pode matar o tick e
+                # deixar a mensagem em 'sending' até ao reaper: marca failed e
+                # segue para a próxima.
+                logger.error(
+                    "[OUTBOUND] Envio falhou com exceção (msg %s): %s",
+                    message["id"], e,
+                )
+                await db_service.update_outbound_message(
+                    message["id"],
+                    status="failed",
+                    error=f"send exception: {e}"[:300],
+                    mailbox_id=mailbox["id"],
+                )
+                failed += 1
+                continue
             if result.success:
                 await db_service.update_outbound_message(
                     message["id"],
@@ -687,6 +859,12 @@ class OutboundEngine:
                 await db_service.increment_outbound_counter(city, day, sent=1)
                 await db_service.update_mailbox_after_send(
                     mailbox["id"], warmup_state=mailbox.get("_warmup_state")
+                )
+                # Consome a folga no snapshot em memória (o próximo pedido do
+                # mesmo tick não pode reutilizar uma unidade já gasta).
+                mailbox["sent_today"] = _int(mailbox.get("sent_today"), 0) + 1
+                mailbox["remaining_today"] = max(
+                    0, _int(mailbox.get("remaining_today"), 0) - 1
                 )
                 sent += 1
             else:
@@ -705,7 +883,20 @@ class OutboundEngine:
             if remaining == 0:
                 await db_service.finish_outbound_batch(batch_id, status="sent")
 
-        return {"status": "ok", "sent": sent, "skipped": skipped, "failed": failed}
+        out = {
+            "status": "ok",
+            "sent": sent,
+            "skipped": skipped,
+            "failed": failed,
+            "deferred": deferred,
+        }
+        if blocked_cities:
+            out["blocked_cities"] = blocked_cities
+        if stop_reason:
+            out["blocked_reason"] = stop_reason
+            out["blocked_detail"] = stop_detail
+            out["retry_at"] = retry_at
+        return out
 
     async def _render_message(
         self,
@@ -760,19 +951,20 @@ class OutboundEngine:
         mailboxes = await db_service.list_sending_mailboxes(enabled_only=False)
         mailbox_rows = []
         for mailbox in mailboxes:
-            cap = effective_mailbox_cap(mailbox, global_config, now)
             sent_today = await db_service.count_mailbox_sent_today(mailbox["id"], day)
+            row = mailbox_capacity_row(mailbox, global_config, now, sent_today)
             mailbox_rows.append(
                 {
-                    "id": mailbox["id"],
-                    "email": mailbox["email"],
-                    "city": mailbox.get("city") or "",
-                    "enabled": _int(mailbox.get("enabled"), 0),
-                    "daily_cap": _int(mailbox.get("daily_cap"), 25),
-                    "effective_cap": cap,
-                    "sent_today": sent_today,
-                    "warmup_state": _mailbox_warmup_state(mailbox, global_config, now),
-                    "warmup_days": warmup_days(mailbox.get("warmup_started_at"), now),
+                    "id": row["id"],
+                    "email": row["email"],
+                    "city": row.get("city") or "",
+                    "enabled": _int(row.get("enabled"), 0),
+                    "daily_cap": _int(row.get("daily_cap"), 25),
+                    "effective_cap": _int(row.get("effective_cap"), 0),
+                    "sent_today": _int(row.get("sent_today"), 0),
+                    "remaining_today": _int(row.get("remaining_today"), 0),
+                    "warmup_state": row["warmup_state"],
+                    "warmup_days": row["warmup_days"],
                 }
             )
         usage = await db_service.get_outbound_counter("", day)
@@ -784,16 +976,82 @@ class OutboundEngine:
             sent_today += _int(counter.get("sent"), 0)
             enriched_today += _int(counter.get("enriched"), 0)
             spend_today += _float(counter.get("spend_usd"), 0.0)
+
+        queue = await db_service.outbound_queue_summary()
+        queued = _int(queue.get("queued"), 0)
+        oldest_at = queue.get("oldest_at")
+        oldest_age_h = None
+        if oldest_at:
+            try:
+                oldest_dt = datetime.strptime(
+                    str(oldest_at), "%Y-%m-%d %H:%M:%S"
+                ).replace(tzinfo=timezone.utc)
+                oldest_age_h = round((now - oldest_dt).total_seconds() / 3600, 1)
+            except ValueError:
+                oldest_age_h = None
+
+        enabled_rows = [m for m in mailbox_rows if _int(m["enabled"], 0)]
+        remaining_capacity = sum(_int(m["remaining_today"], 0) for m in enabled_rows)
+        cap_total = sum(_int(m["effective_cap"], 0) for m in enabled_rows)
+        cap_sent = sum(_int(m["sent_today"], 0) for m in enabled_rows)
+        quiet_now = is_quiet_hours(
+            now,
+            global_config.get("quiet_hours_start"),
+            global_config.get("quiet_hours_end"),
+        )
+
+        # Motivo explícito do bloqueio (mostrado na UI e na Control Tower).
+        queue_blocker: Optional[dict] = None
+        if queued > 0:
+            oldest_city = (queue.get("oldest_city") or "").strip()
+            city_cfg = (
+                await db_service.get_outbound_config(oldest_city or None)
+                if oldest_city
+                else global_config
+            )
+            if global_config.get("send_enabled") != "1":
+                queue_blocker = {
+                    "reason": "send_enabled_off",
+                    "detail": "Motor de envio desligado (send_enabled=0).",
+                }
+            elif quiet_now:
+                queue_blocker = {
+                    "reason": "quiet_hours",
+                    "detail": "Quiet hours: o worker retoma no fim da janela.",
+                    "retry_at": quiet_hours_end_iso(now, global_config),
+                }
+            elif city_cfg.get("send_enabled") != "1":
+                queue_blocker = {
+                    "reason": "city_send_disabled",
+                    "detail": (
+                        f"Envio desligado para {oldest_city or 'a cidade da fila'} "
+                        "(configuração por cidade)."
+                    ),
+                }
+            elif remaining_capacity <= 0:
+                ramp_day = enabled_rows[0]["warmup_days"] if enabled_rows else 0
+                queue_blocker = {
+                    "reason": "mailbox_cap",
+                    "detail": (
+                        f"Limite de caixa atingido: {cap_sent}/{cap_total} hoje "
+                        f"(warm-up dia {ramp_day}). Retoma à meia-noite UTC."
+                    ),
+                    "retry_at": next_utc_midnight(now),
+                }
+
         return {
             "send_enabled": global_config.get("send_enabled") == "1",
             "enrich_enabled": global_config.get("enrich_enabled") == "1",
-            "quiet_hours_now": is_quiet_hours(
-                now,
-                global_config.get("quiet_hours_start"),
-                global_config.get("quiet_hours_end"),
-            ),
+            "quiet_hours_now": quiet_now,
             "day": day,
-            "queued": await db_service.count_outbound_messages(status="queued"),
+            "queued": queued,
+            "queue_oldest_at": oldest_at,
+            "queue_oldest_age_hours": oldest_age_h,
+            "queue_oldest_city": (queue.get("oldest_city") or ""),
+            "mailbox_remaining_today": remaining_capacity,
+            "mailbox_cap_total": cap_total,
+            "mailbox_sent_today": cap_sent,
+            "queue_blocker": queue_blocker,
             "sent_today": sent_today,
             "enriched_today": enriched_today,
             "spend_today_usd": round(spend_today, 4),

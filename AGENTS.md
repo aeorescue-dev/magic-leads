@@ -94,6 +94,14 @@ Contexto completo e números medidos: **`docs/PROJECT-MEMORY.md`**. Ler antes de
     O wizard grava via `PUT /api/users/me/interests` / `POST /api/users/me/onboarding`
     (recusa lista vazia) e o passo do push explica o valor ANTES da permissão nativa.
     Revogação de sessão no admin apaga a linha e o token morre no pedido seguinte (401).
+33. **Fila outbound — sem head-of-line**: uma cidade com `send_enabled=0` ou sem
+    cap NUNCA pára o tick das outras (nada de `break` no primeiro bloqueio). A
+    escolha de caixa faz spillover: cidade própria primeiro, depois qualquer
+    caixa ligada com folga. `process_queue` devolve `blocked_reason` e o
+    `/outbound/status` expõe `queue_blocker` (a UI/Control Tower têm de mostrar
+    o motivo: cap/warm-up, quiet hours, cidade desligada ou motor off); fila
+    velha com capacidade disponível é `fail`, sem capacidade é `warn` explicado.
+    O reaper de `sending` corre mesmo com `send_enabled=0`.
 
 ## Verificação mínima antes de deploy
 ```bash

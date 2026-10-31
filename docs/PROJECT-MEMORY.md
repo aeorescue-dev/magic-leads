@@ -577,6 +577,30 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - Seed E2E: `e2e-token-novo` (sem interesses) para o wizard; `e2e-token-ciclo`
   ganhou 'Roof' para não ser redireccionado. **876 pytest**, 19 e2e, 74 vitest.
 
+### Outbound — fila resiliente e diagnóstico (2026-10-31)
+
+- **Sintoma**: 2 mensagens de Chicago presas 51 h com `queue_age=fail`; caixas
+  em warm-up dia 2 com cap 1/dia.
+- **Causa raiz estrutural**: dois `break` no tick. (1) cidade com
+  `send_enabled=0` parava o tick inteiro (head-of-line blocking); (2) cidade
+  cujas caixas esgotavam o cap parava tudo, mesmo com caixas de outras cidades
+  vazias. O digest mostrava só o cap global, nunca o motivo real.
+- **Motor**: `_pick_mailbox` passou a fazer duas passagens — caixa da cidade
+  primeiro, depois **spillover** para qualquer caixa com folga. O tick continua
+  para outras cidades quando uma está desligada/sem cap, com janela de scan de
+  200 linhas (mensagens bloqueadas não escondem as de trás). Envio com exceção
+  da Gmail marca `failed` e o tick continua; o reaper de `sending` corre também
+  com `send_enabled=0`.
+- **Diagnóstico**: `process_queue` devolve `blocked_reason`/`blocked_detail`/
+  `retry_at`; `/outbound/status` expõe `queue_blocker`, `queue_oldest_*`,
+  `mailbox_remaining_today`; a Torre de Controlo mostra o banner "Fila parada ·
+  limite de caixa (0/2 hoje, warm-up dia 2) — retoma à meia-noite UTC".
+- **Control Tower**: `queue_age` deixa de ser `fail` cego. Sem capacidade →
+  `warn` com o motivo (cap/quiet hours/cidade desligada). Com capacidade e
+  fila velha → `fail` "há capacidade mas a fila não avança" (stall real).
+  O digest mostra `hoje x/cap` e `CAPACIDADE restam N`.
+- Testes: `tests/test_outbound_queue_resilience.py` (8).
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

@@ -213,7 +213,11 @@ async def test_process_queue_reaps_during_quiet_hours(clean_messages, sending_en
         limit=1, now=datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
     )
 
-    assert result == {"status": "quiet_hours", "sent": 0}
+    assert result["status"] == "quiet_hours"
+    assert result["sent"] == 0
+    # Diagnóstico explícito: a UI/Control Tower mostra o motivo e quando retoma.
+    assert result["blocked_reason"] == "quiet_hours"
+    assert result["retry_at"] == "2026-01-01 13:00:00"
     assert _svc().get_outbound_message(message_id)["status"] == "failed"
 
 

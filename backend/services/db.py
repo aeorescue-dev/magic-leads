@@ -3130,6 +3130,31 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def outbound_queue_summary(self) -> dict:
+        """Fila pendente: total e a mensagem mais antiga (cidade incluída).
+
+        Usado pelo `/outbound/status` e pela Control Tower para explicar o
+        `queue_age` com o motivo real (cidade bloqueada, cap de caixa, etc.).
+        """
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT COUNT(1) AS queued, MIN(queued_at) AS oldest_at "
+                "FROM outbound_messages WHERE status='queued'"
+            ).fetchone()
+            oldest = conn.execute(
+                "SELECT id, city, queued_at FROM outbound_messages "
+                "WHERE status='queued' ORDER BY queued_at, id LIMIT 1"
+            ).fetchone()
+            return {
+                "queued": int(row["queued"] if row else 0),
+                "oldest_at": row["oldest_at"] if row else None,
+                "oldest_id": oldest["id"] if oldest else None,
+                "oldest_city": (oldest["city"] or "") if oldest else "",
+            }
+        finally:
+            conn.close()
+
     def count_mailbox_sent_today(self, mailbox_id: int, day: str) -> int:
         conn = get_connection()
         try:
@@ -11013,6 +11038,9 @@ class AsyncDatabaseService:
         return await anyio.to_thread.run_sync(
             self._service.count_outbound_messages, status, batch_id
         )
+
+    async def outbound_queue_summary(self) -> dict:
+        return await anyio.to_thread.run_sync(self._service.outbound_queue_summary)
 
     async def count_mailbox_sent_today(self, mailbox_id: int, day: str) -> int:
         return await anyio.to_thread.run_sync(
