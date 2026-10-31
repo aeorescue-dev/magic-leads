@@ -378,8 +378,8 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # Allowlist EXPLICITA de origens. Nao reintroduzir allow_origin_regex com
 # curingas tipo "https://.*.vercel.app": com allow_credentials=True isso daria
 # acesso autenticado a API a qualquer dominio Vercel registavel por terceiros.
-# Para suportar preview deployments, usamos middleware customizado que valida
-# tanto origens estaticas quanto padroes de preview do Vercel (git branch URLs).
+# Previews do Vercel só são aceites pelo dominio BASE EXATO (sem wildcard de
+# branch/utilizador): qualquer sufixo é registável por terceiros.
 _ALLOWED_ORIGINS = settings.allowed_origins_list
 _VERCEL_PREVIEW_BASE_DOMAINS = settings.vercel_preview_base_domains_list
 if not _ALLOWED_ORIGINS:
@@ -390,60 +390,28 @@ if not _ALLOWED_ORIGINS:
 else:
     logger.info(f"CORS allowlist ativa ({len(_ALLOWED_ORIGINS)} origens estaticas)")
     if _VERCEL_PREVIEW_BASE_DOMAINS:
-        logger.info(f"Vercel preview base domains: {_VERCEL_PREVIEW_BASE_DOMAINS}")
+        logger.info(f"Vercel base domains exatos: {_VERCEL_PREVIEW_BASE_DOMAINS}")
 
-# Custom CORS middleware que suporta Vercel preview deployments
-# Verifica Origin header contra origens estaticas + padroes de preview Vercel
+# Custom CORS middleware: origens estáticas + domínio base Vercel EXATO.
+# Preview branches devem ser adicionadas explicitamente a ALLOWED_ORIGINS.
 
 class VercelAwareCORSMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, allowed_origins: list[str], vercel_preview_base_domains: list[str]):
         super().__init__(app)
         self.allowed_origins = set(allowed_origins)
-        self.vercel_preview_base_domains = vercel_preview_base_domains
+        self.vercel_preview_base_domains = set(vercel_preview_base_domains)
 
     def _is_origin_allowed(self, origin: str) -> bool:
-        """Verifica se a origem e permitida (estatica ou preview Vercel)."""
+        """Aceita a origem apenas se for allowlist exata ou o base Vercel exato."""
+        if not origin:
+            return False
         if origin in self.allowed_origins:
             return True
-
-        # Verifica se e um preview deployment do Vercel
-        # Formato: https://<project>-git-<branch>-<user>.vercel.app
-        # ou https://<project>-git-<branch>.vercel.app
-        # ou https://<project>-<user>.vercel.app (preview antigo)
         if not origin.startswith("https://") or not origin.endswith(".vercel.app"):
             return False
-
-        # Remove https:// e .vercel.app para obter o prefixo do projeto
-        prefix = origin.removeprefix("https://").removesuffix(".vercel.app")
-        if not prefix:
-            return False
-
-        # Verifica se o prefixo corresponde a um projeto permitido
-        # Formatos validos:
-        # - <projeto>
-        # - <projeto>-git-<branch>-<user>
-        # - <projeto>-git-<branch>
-        # - <projeto>-<user>
-        # Onde <projeto> deve estar na lista de base domains permitidos
-        for base_domain in self.vercel_preview_base_domains:
-            # base_domain e o dominio base do projeto (ex: "magicleads-oficial.vercel.app")
-            # mas no Vercel preview, o formato e <projeto>.vercel.app ou <projeto>-git-... .vercel.app
-            # Entao o projeto base e o dominio sem .vercel.app
-            project_base = base_domain.removesuffix(".vercel.app")
-
-            # Verifica se o prefixo comeca com o nome do projeto
-            if prefix == project_base:
-                return True
-            if prefix.startswith(f"{project_base}-git-"):
-                return True
-            if prefix.startswith(f"{project_base}-"):
-                # Formato antigo: <projeto>-<user>
-                # Validar que so ha um hifen apos o projeto
-                rest = prefix[len(project_base)+1:]
-                if rest and all(p.isalnum() or p in "-_" for p in rest.split("-")):
-                    return True
-
-        return False
+        host = origin.removeprefix("https://")
+        # Sem `-git-`, sem `-<user>`: apenas o domínio base registado.
+        return host in self.vercel_preview_base_domains
 
     async def dispatch(self, request: Request, call_next):
         origin = request.headers.get("origin")
@@ -475,6 +443,30 @@ class VercelAwareCORSMiddleware(BaseHTTPMiddleware):
         return response
 
 app.add_middleware(VercelAwareCORSMiddleware, allowed_origins=_ALLOWED_ORIGINS, vercel_preview_base_domains=_VERCEL_PREVIEW_BASE_DOMAINS)
+
+
+# Headers de segurança mínimos, aplicados a TODAS as respostas (incl. OPTIONS).
+# CSP fica restrita a frame-ancestors/object/base para não bloquear scripts
+# inline do Next; o endurecimento de script-src exige nonces (fase própria).
+_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "geolocation=(self), camera=(), microphone=()",
+    "Content-Security-Policy": "frame-ancestors 'none'; object-src 'none'; base-uri 'self'",
+}
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        for key, value in _SECURITY_HEADERS.items():
+            if key not in response.headers:
+                response.headers[key] = value
+        return response
+
+
+app.add_middleware(SecurityHeadersMiddleware)
 
 
 # ------------------------------------------------------------------
@@ -4209,9 +4201,20 @@ async def discover_available(_admin: bool = Depends(_require_admin)):
 
 # Enriquecimento em lote: preenche owner_name = nome do proprietário (registro público)
 @app.post("/api/scraper/enrich")
-async def enrich_leads(city: str = "NYC", limit: int = 500, user: dict = Depends(_get_current_user)):
-    """Busca o nome do proprietário para os leads que ainda não têm owner_name (requer login)."""
+@limiter.limit("5/hour")
+async def enrich_leads(
+    request: Request,
+    city: str = "NYC",
+    limit: int = 500,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Enriquecimento em lote — operação administrativa (sessão + is_admin).
+
+    Antes exigia apenas login: qualquer conta (incluindo demo) podia disparar
+    até 500 consultas externas numa única request. Não é usada pela UI.
+    """
     try:
+        limit = max(1, min(int(limit), 500))
         from backend.services import db as dbmod
 
         # pega leads sem owner_name
@@ -4503,8 +4506,13 @@ async def admin_requalify_leads(request: Request, _admin: bool = Depends(_requir
 
 # Enriquecimento/consulta do dono de um único lead
 @app.post("/api/leads/{lead_id}/enrich")
-async def enrich_single_lead(lead_id: int, user: dict = Depends(_get_current_user)):
-    """Consulta o nome do proprietário de um lead específico (requer login)."""
+@limiter.limit("10/hour")
+async def enrich_single_lead(
+    request: Request,
+    lead_id: int,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Consulta o nome do proprietário de um lead (operação administrativa)."""
     try:
         lead = await db_service.get_lead_by_id(lead_id)
         if not lead:

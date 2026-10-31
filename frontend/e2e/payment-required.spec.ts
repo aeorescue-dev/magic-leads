@@ -79,3 +79,41 @@ test("402 no reserve abre o checkout sem esperar o refresh de 10 min", async ({
   ).toBeVisible({ timeout: 10000 });
   expect(reserveHits).toBeGreaterThan(0);
 });
+
+test("em /en o checkout de conversão aparece em inglês natural", async ({
+  page,
+  request,
+}) => {
+  const leadId = await findLeadId(request, PAYMENT_ADDRESS);
+  await ensureAvailable(request, leadId);
+
+  await page.route("**/api/leads/*/reserve", async (route) => {
+    await route.fulfill({
+      status: 402,
+      contentType: "application/json",
+      body: JSON.stringify({
+        detail: {
+          error: "subscription_required",
+          status: "expired",
+          message: "Subscription required.",
+          action: "REDIRECT_TO_CHECKOUT",
+        },
+      }),
+    });
+  });
+
+  await page.goto("/en/dashboard");
+  const card = page.locator('[data-testid="lead-card"]').filter({ hasText: PAYMENT_ADDRESS });
+  await expect(card.first()).toBeVisible({ timeout: 20000 });
+
+  await card.locator("button", { hasText: /Reserve 1 Hour/ }).first().click();
+  await page.getByRole("button", { name: /Reserve 1 Hour\W+Reveal/ }).click();
+
+  // Copy EN (não deve cair para PT nem mostrar keys cruas).
+  await expect(
+    page.getByText(/Reactivate your access|Start your 7-day access/).first()
+  ).toBeVisible({ timeout: 10000 });
+  const body = (await page.locator("body").innerText()).toLowerCase();
+  expect(body).not.toContain("reativar a tua");
+  expect(body).not.toContain("checkout.title_");
+});

@@ -109,6 +109,19 @@ Contexto completo e números medidos: **`docs/PROJECT-MEMORY.md`**. Ler antes de
     Revogação só restaura se `plan_until` não mudou desde o grant (senão 409).
     A copy mostra “Acesso ativo até …” apenas quando a expiração em vigor veio
     de um grant. Não reutilizar `credit_ledger` para isto.
+35. **CORS e headers (Fase B)**: CORS aceita apenas `ALLOWED_ORIGINS` exatas e o
+    domínio base Vercel **exato**; nunca `project-*`/`-git-*` (qualquer sufixo é
+    registável por terceiros). Previews novos entram explicitamente em
+    `ALLOWED_ORIGINS`. Todas as respostas levam `X-Content-Type-Options`,
+    `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy` e CSP
+    mínima (`frame-ancestors 'none'`). `POST /api/scraper/enrich` e
+    `POST /api/leads/{id}/enrich` são **admin-only** com rate limit; nunca
+    voltar a expô-los a qualquer sessão.
+36. **Idioma (mercado EUA)**: sem escolha explícita (localStorage → cookie →
+    browser), o locale é **EN**. O fluxo de checkout/conversão em `/en` tem de
+    estar em inglês natural; PT/ES continuam suportados quando escolhidos.
+    `pickLang()` é a função única e `tests/unit/i18n-default-lang.test.ts`
+    guarda o default.
 
 ## Verificação mínima antes de deploy
 ```bash

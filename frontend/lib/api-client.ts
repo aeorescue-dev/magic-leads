@@ -557,16 +557,6 @@ export async function deleteNote(id: string, noteId: number): Promise<{ status: 
   );
 }
 
-export async function enrichLeads(city: string = "NYC", limit: number = 500): Promise<{ status: string; processed: number; owners_found: number }> {
-  return handle<{ status: string; processed: number; owners_found: number }>(
-    await fetch(`${API_URL}/api/scraper/enrich?city=${city}&limit=${limit}`, {
-      method: "POST",
-      credentials: "include",
-      headers: authHeaders(),
-    })
-  );
-}
-
 export interface Notification {
   id: number;
   type: "new_lead" | "owner_enriched" | "contact_made" | "status_change" | "system";

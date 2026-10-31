@@ -2300,9 +2300,9 @@ const EN: Dict = {
   "release.confirm": "Release lead",
 
   // Checkout — company name (sender identity)
-  "checkout.company_name": "Your real company name",
+  "checkout.company_name": "Your company name",
   "checkout.company_name.placeholder": "Ex.: Rocha Repairs",
-  "checkout.company_name_help": "This is the name shown as the sender in messages to clients (WhatsApp, SMS and e-mail). You can change it later in Settings.",
+  "checkout.company_name_help": "This is the name clients see as the sender on WhatsApp, SMS and email. You can change it later in Settings.",
 
   // Dashboard — opportunities list
   "dashboard.opportunities.title": "Recent records",
@@ -2323,16 +2323,16 @@ const EN: Dict = {
 
   // Checkout — modal extras
   "checkout.plan_label": "Plan",
-  "checkout.pay_once": "One-time weekly payment",
+  "checkout.pay_once": "One-time payment for 7 days",
   "checkout.annual_short": "~${amount}/year",
   "checkout.feat1": "No automatic renewal — you decide when to renew.",
   "checkout.feat2": "Exclusive reservations, alerts, favorites and full dashboard for 7 days.",
-  "checkout.feat3": "Fixed price: $120/week, no commission percentage on jobs.",
+  "checkout.feat3": "Fixed price: $120/week. No commission on jobs.",
   "checkout.per_week": "/week",
-  "checkout.btn_pay_label": "Subscribe now for $120/week",
-  "checkout.payment_secure": "100% secure payment",
-  "checkout.title_new": "Subscribe now — 7-day access",
-  "checkout.title_reactivate": "Reactivate your subscription",
+  "checkout.btn_pay_label": "Subscribe for $120/week",
+  "checkout.payment_secure": "Secure payment",
+  "checkout.title_new": "Start your 7-day access",
+  "checkout.title_reactivate": "Reactivate your access",
 
   // db — contact modal extensions
   "db.sms.body": "sent successfully",
@@ -2435,15 +2435,15 @@ const EN: Dict = {
 
   // Checkout page
   "checkout.secure": "Secure payment",
-  "checkout.title": "Reactivate your subscription",
-  "checkout.subtitle": "Your subscription has expired or been paused. Reactivate to continue accessing leads.",
-  "checkout.notice": "Subscription paused. Contact support or reactivate plan to regain access.",
+  "checkout.title": "Reactivate your access",
+  "checkout.subtitle": "Your subscription has expired or been paused. Reactivate to keep seeing new jobs.",
+  "checkout.notice": "Your subscription is paused. Reactivate your plan to regain access.",
   "checkout.choose_plan": "Choose plan",
   "checkout.back_home": "Back to home",
   "checkout.btn_processing": "Processing...",
   "checkout.error_company_req": "Enter your company name",
-  "checkout.error_generic_fail": "Could not start checkout",
-  "checkout.error_payment_fail": "Payment was not completed. Please try again.",
+  "checkout.error_generic_fail": "We couldn't start checkout. Please try again.",
+  "checkout.error_payment_fail": "Payment wasn't completed. Please try again.",
   "dashboard.opportunities.load_all": "See all today's leads →",
   "hero.mockup.lead_types.grass": "Tall Grass",
   "hero.mockup.lead_types.plumbing": "Plumbing",
@@ -3653,24 +3653,43 @@ interface I18nCtx {
 }
 
 const Ctx = createContext<I18nCtx>({
-  lang: "pt",
+  lang: "en",
   setLang: () => {},
   t: (k, _v?) => k,
 });
 
-function getInitialLang(): Lang {
-  if (typeof window === "undefined") return "pt";
-  const stored = window.localStorage.getItem(STORAGE_KEY);
+/**
+ * Resolve o idioma inicial. Prioridade: escolha explícita (localStorage) →
+ * cookie de locale → idioma do browser → **EN** (mercado principal, EUA).
+ * Nunca infere PT por omissão.
+ */
+export function pickLang(
+  stored: string | null,
+  cookie: string | null,
+  navigatorLang: string | null
+): Lang {
   if (stored && LANGS_VALID.includes(stored as Lang)) return stored as Lang;
-  const cookieLang = getLocaleCookie();
-  if (cookieLang && LANGS_VALID.includes(cookieLang as Lang)) return cookieLang as Lang;
+  if (cookie && LANGS_VALID.includes(cookie as Lang)) return cookie as Lang;
+  const nav = (navigatorLang || "").toLowerCase().slice(0, 2);
+  if (LANGS_VALID.includes(nav as Lang)) return nav as Lang;
+  return "en";
+}
+
+function getInitialLang(): Lang {
+  if (typeof window === "undefined") return "en";
+  let stored: string | null = null;
   try {
-    const nav = (navigator.language || "pt").toLowerCase().slice(0, 2);
-    if (LANGS_VALID.includes(nav as Lang)) return nav as Lang;
+    stored = window.localStorage.getItem(STORAGE_KEY);
+  } catch {
+    /* storage indisponível */
+  }
+  let nav: string | null = null;
+  try {
+    nav = navigator.language || null;
   } catch {
     /* ignore */
   }
-  return "pt";
+  return pickLang(stored, getLocaleCookie(), nav);
 }
 
 function persistLocale(l: Lang) {
@@ -3684,7 +3703,7 @@ function persistLocale(l: Lang) {
 }
 
 export function LanguageProvider({ children, initialLocale }: { children: ReactNode; initialLocale?: Lang }) {
-  const [lang, setLangState] = useState<Lang>(initialLocale || "pt");
+  const [lang, setLangState] = useState<Lang>(initialLocale || "en");
 
   useEffect(() => {
     const initial = initialLocale || getInitialLang();

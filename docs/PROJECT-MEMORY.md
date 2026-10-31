@@ -629,6 +629,24 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - Testes: `tests/test_admin_access_grant.py` (12) — soma, validação,
   idempotência, revogação segura, gate A5 e copy.
 
+### Fase B — Segurança, CORS, headers e inglês no checkout (2026-10-31)
+
+- **Endpoints dormentes**: `/api/scraper/enrich` e `/api/leads/{id}/enrich`
+  passaram de “qualquer sessão” para `_require_admin_user` + limite (5/h e 10/h).
+  Eram um vetor de abuso (até 500 consultas externas por request, sem uso na UI).
+  `enrichLeads()` morto removido do cliente.
+- **CORS**: removido o wildcard `project-*`/`-git-*` que aceitava
+  `magicleads-oficial-evil.vercel.app` com credenciais. Agora só allowlist exata
+  e domínio base Vercel exato; previews exigem entrada explícita.
+- **Headers**: middleware backend + `next.config.js` com `X-Content-Type-Options`,
+  `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy` e CSP mínima
+  (`frame-ancestors 'none'`, `object-src 'none'`, `base-uri 'self'`).
+- **Inglês no checkout**: `pickLang()` (novo) resolve
+  localStorage → cookie → browser → **EN**. Copy EN do modal/página reescrita
+  (“Start your 7-day access”, “Reactivate your access”, “We couldn't start
+  checkout…”). Teste unitário do default + e2e `/en` com 402.
+- Testes: 907 pytest (+11 de segurança), 22 e2e (+2), 83 vitest (+4).
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
