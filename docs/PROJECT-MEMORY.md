@@ -823,6 +823,31 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   fica); vitest cobre a distinção por tempo. **944 pytest**, **93 vitest**,
   **29 e2e**.
 
+### Incidente — cap de caixa e quiet hours (2026-10-31)
+
+- **Auditoria de produção** (read-only, Railway/SQLite): 8 e-mails aceites pela
+  Gmail API (Pamela 5, Pedro 3), 0 falhas, 0 stale, 1 bounce suprimido. O motor
+  estava **vivo** (tick 60 s, inbox sync e backup OK) mas **subaproveitado**:
+  10 contactos, todos de Chicago, `enrich_enabled=0`.
+- **P0-1 — cap violado no mesmo tick**: em `995007d`, `_pick_mailbox` passou a
+  devolver `dict(pool[0])` (cópia). O incremento de `sent_today` em
+  `process_queue` alterava a cópia, não o snapshot; a mesma caixa voltava a ser
+  escolhida. Prova real: Pamela com `daily_cap=1` enviou **2** a 31/10
+  (`sent: 2` no log). Corrigido para devolver a **referência** ao snapshot;
+  regressão coberta por dois testes (cap 1 + 2 mensagens → 1 envio; duas caixas
+  cap 1 → 1 cada).
+- **P0-2 — quiet hours em UTC**: os envios saíam às 03:00 ET porque a janela
+  22:00–07:00 era comparada em UTC. Passou a comparar em
+  `America/New_York` (com DST via `zoneinfo`); `quiet_hours_end_iso` converte
+  o fim de volta para UTC. Testes de verão/inverno e `retry_at`.
+- **P2 — observabilidade**: log por envio
+  (`[OUTBOUND] Enviado msg=… caixa=… provider=…`) e por falha; o
+  `/outbound/status` passou a trazer `last_send_at`, `sent_48h`, `failed_48h`,
+  `skipped_48h` e `last_error` por caixa; novo
+  `GET /api/admin/outbound/mailbox-health?hours=48`; o painel Admin mostra
+  “48 h (env/falha)”, “Último envio” e o último erro na tabela de caixas.
+- **Testes**: **950 pytest** (+6), tsc/ESLint/Ruff limpos (34 avisos antigos).
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

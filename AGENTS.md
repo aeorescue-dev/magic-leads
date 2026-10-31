@@ -102,6 +102,14 @@ Contexto completo e números medidos: **`docs/PROJECT-MEMORY.md`**. Ler antes de
     o motivo: cap/warm-up, quiet hours, cidade desligada ou motor off); fila
     velha com capacidade disponível é `fail`, sem capacidade é `warn` explicado.
     O reaper de `sending` corre mesmo com `send_enabled=0`.
+    **Cap por caixa**: `_pick_mailbox` devolve a **referência** ao snapshot (nunca
+    `dict(...)`); o consumo de folga tem de ser visível ao próximo pedido do
+    mesmo tick, senão uma caixa com cap 1 leva até `chunk` mensagens (regressão
+    995007d, corrigida em 2026-10-31). Cada envio/falha gera log
+    `[OUTBOUND] Enviado/Falha msg=… caixa=… provider/erro`, e
+    `/api/admin/outbound/mailbox-health` expõe 48 h por caixa.
+    **Quiet hours do outbound são `America/New_York`** (não UTC): 22:00–07:00
+    locais; `quiet_hours_end_iso` devolve o fim em UTC para o resto do motor.
 34. **Cortesia / override de assinatura**: só via `admin_grant_access`, que escreve
     `subscription_status='active'` + `plan_until` (fonte única, sem novo campo) e
     **soma** dias — nunca encurta. Toda a concessão/revogação vai para
