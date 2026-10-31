@@ -1,11 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Bell, BellOff, Check, CreditCard, Loader2, LogOut, MapPin, Pencil, ShieldCheck, X } from "lucide-react";
+import { ArrowLeft, Bell, BellOff, Check, CreditCard, Fingerprint, Loader2, LogOut, MapPin, Pencil, ShieldCheck, Trash2, X } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
+import {
+  deleteMyPasskey,
+  fetchMyPasskeys,
+  isPasskeySupported,
+  PasskeyError,
+  PasskeyInfo,
+  registerPasskey,
+  setPasskeyHint,
+} from "@/lib/webauthn";
 import {
   clearBaseLocation,
   fetchInterestPushSettings,
@@ -16,6 +25,8 @@ import {
   updateCompanyName,
 } from "@/lib/api-client";
 import CheckoutModal from "@/components/CheckoutModal";
+
+const subscribeNoop = () => () => {};
 
 const CATEGORY_LABEL_KEYS: Record<string, string> = {
   Roof: "dashboard.cat.telhado",
@@ -72,6 +83,146 @@ function Toggle({
         className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${on ? "left-[22px]" : "left-0.5"}`}
       />
     </button>
+  );
+}
+
+function PasskeySettings() {
+  const { t } = useI18n();
+  const supported = useSyncExternalStore(
+    subscribeNoop,
+    () => isPasskeySupported(),
+    () => false
+  );
+  const [passkeys, setPasskeys] = useState<PasskeyInfo[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [ok, setOk] = useState<string | null>(null);
+
+  const refresh = async () => {
+    try {
+      setPasskeys(await fetchMyPasskeys());
+    } catch (e) {
+      setError(
+        e instanceof PasskeyError ? e.message : t("settings.passkey.load_error")
+      );
+    }
+  };
+
+  useEffect(() => {
+    let alive = true;
+    fetchMyPasskeys()
+      .then((rows) => {
+        if (alive) setPasskeys(rows);
+      })
+      .catch((e) => {
+        if (!alive) return;
+        setError(
+          e instanceof PasskeyError ? e.message : t("settings.passkey.load_error")
+        );
+      });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const add = async () => {
+    setBusy(true);
+    setError(null);
+    setOk(null);
+    try {
+      const out = await registerPasskey();
+      setPasskeyHint(true);
+      setOk(
+        t("settings.passkey.added", { device: out.device_label }) ||
+          `Face ID ativo neste ${out.device_label}.`
+      );
+      await refresh();
+    } catch (e) {
+      const code = e instanceof PasskeyError ? e.code : "failed";
+      setError(
+        code === "unsupported"
+          ? t("settings.passkey.unsupported")
+          : code === "cancelled"
+            ? t("settings.passkey.cancelled")
+            : t("settings.passkey.add_error")
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (credentialId: string) => {
+    if (!window.confirm(t("settings.passkey.remove_confirm"))) return;
+    setError(null);
+    setOk(null);
+    try {
+      await deleteMyPasskey(credentialId);
+      await refresh();
+      if (!(await fetchMyPasskeys()).length) setPasskeyHint(false);
+    } catch {
+      setError(t("settings.passkey.remove_error"));
+    }
+  };
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-[#14161d] p-5 space-y-4" data-testid="passkey-settings">
+      <div className="flex items-center gap-2">
+        <Fingerprint className="w-4 h-4 text-indigo-400" />
+        <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide">
+          {t("settings.passkey.title")}
+        </h2>
+      </div>
+      <p className="text-xs text-slate-400 leading-relaxed">
+        {t("settings.passkey.sub")}
+      </p>
+
+      {!supported ? (
+        <p className="text-xs text-amber-400">{t("settings.passkey.unsupported")}</p>
+      ) : (
+        <button
+          onClick={() => void add()}
+          disabled={busy}
+          data-testid="passkey-register"
+          className="inline-flex items-center gap-2 rounded-lg bg-indigo-500 hover:bg-indigo-400 disabled:opacity-50 px-3 py-2 text-xs font-semibold text-white"
+        >
+          {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Fingerprint className="w-3.5 h-3.5" />}
+          {busy ? t("settings.passkey.adding") : t("settings.passkey.add")}
+        </button>
+      )}
+
+      {ok && <p className="text-xs text-emerald-400" data-testid="passkey-ok">{ok}</p>}
+      {error && <p role="alert" className="text-xs text-amber-400" data-testid="passkey-error">{error}</p>}
+
+      {passkeys.length > 0 && (
+        <ul className="divide-y divide-white/5 rounded-xl border border-white/10">
+          {passkeys.map((p) => (
+            <li key={p.id} className="flex items-center gap-2 px-3 py-2 text-xs" data-testid="passkey-item">
+              <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+              <div className="min-w-0">
+                <p className="font-medium text-slate-200">{p.device_label}</p>
+                <p className="text-[10px] text-slate-500">
+                  {p.last_used_at
+                    ? `${t("settings.passkey.last_used")} ${new Date(
+                        p.last_used_at.includes("T") ? p.last_used_at : p.last_used_at.replace(" ", "T") + "Z"
+                      ).toLocaleDateString()}`
+                    : t("settings.passkey.never_used")}
+                </p>
+              </div>
+              <button
+                onClick={() => void remove(p.credential_id)}
+                className="ml-auto inline-flex items-center gap-1 rounded-md border border-rose-500/30 px-2 py-1 text-[10px] font-semibold text-rose-300 hover:bg-rose-500/10"
+              >
+                <Trash2 className="w-3 h-3" /> {t("settings.passkey.remove")}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {passkeys.length === 0 && supported && (
+        <p className="text-[11px] text-slate-500">{t("settings.passkey.none")}</p>
+      )}
+    </div>
   );
 }
 
@@ -382,6 +533,8 @@ export default function DashboardSettingsPage() {
                 </p>
               </div>
             </div>
+
+            <PasskeySettings />
 
             <div className="rounded-2xl border border-white/10 bg-[#14161d] p-5 space-y-4">
               <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide">{t("dashboard.settings.alerts")}</h2>

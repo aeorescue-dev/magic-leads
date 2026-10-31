@@ -1,13 +1,16 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useSyncExternalStore } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
-import { Loader2, Eye, EyeOff, Mail, Lock, Building2, ArrowRight, CheckCircle, AlertTriangle, X } from 'lucide-react';
+import { Loader2, Eye, EyeOff, Mail, Lock, Building2, ArrowRight, CheckCircle, AlertTriangle, X, Fingerprint } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { useI18n } from '@/lib/i18n';
 import { useStartCheckout } from '@/lib/billing';
-import { requestPasswordReset } from '@/lib/api-client';
+import { requestPasswordReset, setAuthCookie, setToken } from '@/lib/api-client';
+import { hasPasskeyHint, isPasskeySupported, loginWithPasskey, PasskeyError } from '@/lib/webauthn';
+
+const subscribeNoop = () => () => {};
 
 interface FormErrors {
   email?: string;
@@ -93,7 +96,7 @@ function AuthFormInner() {
       ? 'session_expired'
       : null;
   const { lang, t } = useI18n();
-  const { signIn, loading: authLoading } = useAuth();
+  const { signIn, loading: authLoading, updateUser, refreshSubscription } = useAuth();
   const startCheckout = useStartCheckout();
   const rawNext = searchParams.get('next');
   const nextPath =
@@ -119,6 +122,41 @@ function AuthFormInner() {
   const [errors, setErrors] = useState<FormErrors>({});
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
+  const [passkeyError, setPasskeyError] = useState<string | null>(null);
+  // Só depois da hidratação: no servidor não há window/PublicKeyCredential.
+  const passkeyReady = useSyncExternalStore(
+    subscribeNoop,
+    () => isPasskeySupported() && hasPasskeyHint(),
+    () => false
+  );
+
+  const handlePasskeyLogin = async () => {
+    setPasskeyBusy(true);
+    setPasskeyError(null);
+    try {
+      const out = await loginWithPasskey(email.trim() || undefined);
+      setToken(out.token);
+      setAuthCookie();
+      updateUser(out.user);
+      await refreshSubscription();
+      router.push(nextPath || localePath('/dashboard'));
+      router.refresh();
+    } catch (e) {
+      const code = e instanceof PasskeyError ? e.code : 'failed';
+      const message =
+        code === 'unsupported'
+          ? t('auth.passkey.unsupported')
+          : code === 'no_credential'
+            ? t('auth.passkey.not_setup')
+            : code === 'cancelled'
+              ? t('auth.passkey.cancelled')
+              : t('auth.passkey.failed');
+      setPasskeyError(message || 'Não foi possível entrar com Face ID. Use a palavra-passe.');
+    } finally {
+      setPasskeyBusy(false);
+    }
+  };
 
   const validate = () => {
     const newErrors: FormErrors = {};
@@ -262,6 +300,35 @@ function AuthFormInner() {
         <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-black/40 border border-white/10 backdrop-blur-sm animate-in fade-in slide-in-from-top-2 duration-300">
           <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0" aria-hidden="true" />
           <p className="text-sm text-gray-200 leading-relaxed">{sessionMessage}</p>
+        </div>
+      )}
+
+      {!isRegister && passkeyReady && (
+        <div className="space-y-2">
+          <button
+            type="button"
+            onClick={() => void handlePasskeyLogin()}
+            disabled={passkeyBusy || submitting}
+            data-testid="passkey-login"
+            className="w-full py-3 rounded-lg bg-emerald-500 text-slate-950 font-semibold hover:bg-emerald-400 disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+          >
+            {passkeyBusy ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : (
+              <Fingerprint className="h-5 w-5" />
+            )}
+            {passkeyBusy
+              ? t('auth.passkey.confirming') || 'A confirmar…'
+              : t('auth.passkey.login') || 'Entrar com Face ID'}
+          </button>
+          {passkeyError && (
+            <p role="alert" className="text-xs text-amber-400 text-center">
+              {passkeyError}
+            </p>
+          )}
+          <p className="text-center text-[11px] text-muted-foreground">
+            {t('auth.passkey.or_password') || 'ou continue com a palavra-passe'}
+          </p>
         </div>
       )}
 
