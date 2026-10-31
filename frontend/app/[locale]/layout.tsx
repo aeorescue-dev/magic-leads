@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { LanguageProvider } from "@/lib/i18n";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
@@ -10,12 +10,13 @@ export const metadata: Metadata = {
   description:
     "Capturamos oportunidades de reforma e correção (telhado, estrutura, encanamento, pintura) direto de registros públicos atualizados continuamente, com dono identificado e reserva exclusiva de 60 minutos por $120/semana. Sistema disponível 24/7.",
   manifest: "/manifest.json",
+};
+
+export const viewport: Viewport = {
   themeColor: "#10b981",
-  viewport: {
-    width: "device-width",
-    initialScale: 1,
-    maximumScale: 1,
-  },
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
 };
 
 const LOCALE_LANG_MAP: Record<string, string> = {
