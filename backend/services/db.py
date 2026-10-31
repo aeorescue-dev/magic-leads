@@ -595,6 +595,13 @@ CREATE INDEX IF NOT EXISTS idx_leads_lead_status ON leads (lead_status);
 CREATE INDEX IF NOT EXISTS idx_leads_source ON leads (source_type);
 CREATE INDEX IF NOT EXISTS idx_leads_category ON leads (issue_category);
 CREATE INDEX IF NOT EXISTS idx_leads_phone ON leads (owner_phone);
+-- Fase E: consultas por utilizador/lead/data em lead_reveals (feed, histórico,
+-- reembolsos) e contagem de não lidas por utilizador em notifications.
+CREATE INDEX IF NOT EXISTS idx_lead_reveals_user ON lead_reveals (user_id, revealed_at);
+CREATE INDEX IF NOT EXISTS idx_lead_reveals_lead ON lead_reveals (lead_id);
+CREATE INDEX IF NOT EXISTS idx_lead_reveals_date ON lead_reveals (revealed_date);
+CREATE INDEX IF NOT EXISTS idx_lead_reveals_refund ON lead_reveals (refunded, revealed_date);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications (user_id, read, created_at);
 CREATE INDEX IF NOT EXISTS idx_users_plan_until ON users (plan_until);
 CREATE INDEX IF NOT EXISTS idx_notes_lead ON lead_notes (lead_id);
 CREATE INDEX IF NOT EXISTS idx_events_lead ON lead_events (lead_id);
@@ -1027,6 +1034,28 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_credit_ledger_idempotent ON credit_ledger (
 # Mantemos a lista explicita para a copy, a landing page e `/api/metrics/public`
 # nunca voltarem a prometer uma cidade que nao servimos.
 SERVED_CITIES: tuple[str, ...] = ("NYC", "CHICAGO", "DALLAS", "BOSTON")
+
+# Forma de exibição canónica (a base tem linhas com casing misto: CHICAGO/Chicago).
+_CITY_DISPLAY: dict[str, str] = {
+    "NYC": "NYC",
+    "CHICAGO": "Chicago",
+    "DALLAS": "Dallas",
+    "BOSTON": "Boston",
+}
+
+
+def canonical_served_cities(raw_cities) -> list[str]:
+    """Dedupa cidades servidas por casing e devolve a forma canónica.
+
+    `SELECT DISTINCT city` devolvia "CHICAGO" e "Chicago" como duas cidades,
+    inflacionando `cities_count` (landing anunciava 5 em vez de 4).
+    """
+    out = set()
+    for raw in raw_cities:
+        key = str(raw or "").strip().upper()
+        if key in _CITY_DISPLAY:
+            out.add(_CITY_DISPLAY[key])
+    return sorted(out)
 
 
 def get_connection() -> sqlite3.Connection:
@@ -7610,7 +7639,7 @@ class DatabaseService:
             #(fontes fora desta lista nao passam `_qualified_where`; se ficar
             # alguma linha orfa, nao deve virar promessa comercial.)
             qs = ",".join("?" * len(SERVED_CITIES))
-            cities = [
+            raw_cities = [
                 r["city"]
                 for r in conn.execute(
                     f"SELECT DISTINCT city FROM leads "
@@ -7619,6 +7648,7 @@ class DatabaseService:
                     [c.upper() for c in SERVED_CITIES],
                 ).fetchall()
             ]
+            cities = canonical_served_cities(raw_cities)
             # Leads efetivamente inseridos nas últimas 24h (ENTRADAS reais na
             # base, por `created_at` — que NÃO é reescrito por re-scrape;
             # `updated_at` seria poluído por cada varredura).
@@ -7887,6 +7917,31 @@ class DatabaseService:
         except Exception as e:
             logger.error(f"Erro ao ler último run do scraper: {e}")
             return None
+        finally:
+            conn.close()
+
+    def mark_stale_scraper_runs(self, older_than_minutes: int = 180) -> int:
+        """Fecha runs presos em 'running' após restart/OOM.
+
+        Sem isto, uma linha `running` antiga ficava para sempre na tabela e o
+        painel mostrava um run eternamente em curso.
+        """
+        minutes = max(1, int(older_than_minutes))
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE scraper_runs SET status='error', "
+                "error=COALESCE(error, 'run interrompido (processo reiniciado)'), "
+                "finished_at=? "
+                "WHERE status='running' "
+                "AND datetime(COALESCE(started_at, '')) <= datetime('now', ?)",
+                (
+                    utcnow().isoformat(),
+                    f"-{minutes} minutes",
+                ),
+            )
+            conn.commit()
+            return cur.rowcount
         finally:
             conn.close()
 
@@ -10120,6 +10175,11 @@ class AsyncDatabaseService:
 
     async def get_last_scrape_run(self) -> Optional[dict]:
         return await anyio.to_thread.run_sync(self._service.get_last_scrape_run)
+
+    async def mark_stale_scraper_runs(self, older_than_minutes: int = 180) -> int:
+        return await anyio.to_thread.run_sync(
+            self._service.mark_stale_scraper_runs, older_than_minutes
+        )
 
     async def get_city_health(self, city: str) -> dict:
         return await anyio.to_thread.run_sync(self._service.get_city_health, city)

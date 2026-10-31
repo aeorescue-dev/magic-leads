@@ -472,7 +472,7 @@ app.add_middleware(SecurityHeadersMiddleware)
 # ------------------------------------------------------------------
 # Sessões via banco de dados (controle de concorrência: máx. 2 por usuário)
 # ------------------------------------------------------------------
-_SESSIONS: dict[str, int] = {}  # Fallback para compatibilidade (legacy)
+# Sessões são persistidas exclusivamente em `user_sessions` (A2).
 
 
 def _hash_token(token: str) -> str:
@@ -1544,6 +1544,22 @@ async def send_test_push(payload: SendTestPushRequest, _admin: bool = Depends(_r
 # Webhook para rodar scraper manualmente
 # Estado dos runs do scraper (background — o Railway corta conexões longas)
 _scrape_runs: dict = {}
+_MAX_SCRAPE_RUNS = 50
+
+
+def _remember_scrape_run(state: dict) -> None:
+    """Guarda o run em memória com poda (o processo pode viver semanas)."""
+    run_id = state.get("run_id")
+    if not run_id:
+        return
+    _scrape_runs[run_id] = state
+    if len(_scrape_runs) > _MAX_SCRAPE_RUNS:
+        old = sorted(
+            _scrape_runs,
+            key=lambda k: (_scrape_runs[k].get("started_at") or ""),
+        )[: len(_scrape_runs) - _MAX_SCRAPE_RUNS]
+        for key in old:
+            _scrape_runs.pop(key, None)
 
 
 @app.post("/api/scraper/run")
@@ -1570,11 +1586,11 @@ async def run_scraper(
                 "note": "Scraper já em execução; inserts são incrementais/reentrantes (dedupe).",
             })
     run_id = uuid.uuid4().hex[:12]
-    _scrape_runs[run_id] = {
+    _remember_scrape_run({
         "run_id": run_id, "running": True,
         "started_at": utcnow().isoformat(),
         "inserted": 0, "total_raw": 0, "status": "running", "error": None,
-    }
+    })
     asyncio.create_task(_scrape_worker(run_id, max_cities, hours_override=hours))
     return JSONResponse(status_code=202, content={
         "status": "started", "run_id": run_id,
@@ -3689,12 +3705,12 @@ def _scheduled_scrape(max_cities: int = 8, hours_override: int = None):
             logger.info("Scheduler: run do scraper já ativo, pulando")
             return
     run_id = uuid.uuid4().hex[:12]
-    _scrape_runs[run_id] = {
+    _remember_scrape_run({
         "run_id": run_id, "running": True,
         "started_at": utcnow().isoformat(),
         "inserted": 0, "total_raw": 0, "status": "running", "error": None,
         "trigger": "scheduler",
-    }
+    })
     asyncio.create_task(_scrape_worker(run_id, max_cities, hours_override=hours_override))
     logger.info(f"Scheduler: varredura disparada [run {run_id}]" + (f" com hours={hours_override}" if hours_override else ""))
 
@@ -3751,6 +3767,15 @@ async def _lifespan(app):
             logger.info("Sessoes expiradas removidas: %s", pruned)
     except Exception as e:
         logger.warning("Falha ao limpar sessoes expiradas: %s", e)
+
+    # Fase E: runs do scraper presos em 'running' após restart/OOM. Sem isto
+    # a linha ficava eternamente "em curso" no painel/status.
+    try:
+        stale_runs = await db_service.mark_stale_scraper_runs(180)
+        if stale_runs:
+            logger.warning("Runs do scraper presos em running fechados: %s", stale_runs)
+    except Exception as e:
+        logger.warning("Falha ao fechar runs presos do scraper: %s", e)
 
     # B1: higiene de dispositivos push (limite de 5). Corrige o estado legado
     # (utilizadores com 9 browsers) sem esperar por um novo subscribe.
@@ -4582,7 +4607,6 @@ async def register_user(request: Request, payload: UserCreate, response: Respons
         token = security.new_session_token()
         # Registra a sessão no banco (aplica limite de 2 sessões por usuário - FIFO)
         await db_service.create_user_session(user["id"], _hash_token(token), "Signup", None)
-        _SESSIONS[token] = user["id"]
 
         # Define httpOnly cookie com o token
         if response:
@@ -4620,9 +4644,6 @@ async def login_user(request: Request, payload: UserLogin, response: Response = 
         device_info = request.headers.get("user-agent", "")
         ip_address = request.client.host if request.client else None
         await db_service.create_user_session(user["id"], _hash_token(token), device_info, ip_address)
-
-        # Mantém compatibilidade com fallback em memória
-        _SESSIONS[token] = user["id"]
 
         # Define httpOnly cookie com o token
         if response:
@@ -4716,8 +4737,6 @@ async def logout_user(authorization: str | None = Header(None), response: Respon
         token = authorization[len("Bearer "):].strip()
         # Remove do banco
         await db_service.remove_user_session(_hash_token(token))
-        # Remove do fallback em memória
-        _SESSIONS.pop(token, None)
 
     # Limpa o cookie
     if response:
@@ -4760,10 +4779,7 @@ async def demo_login(request: Request, response: Response = None):
     token_hash = _hash_token(token)
     await db_service.create_user_session(user["id"], token_hash, "Demo Login", None)
 
-    # Mantém compatibilidade com fallback em memória
-    _SESSIONS[token] = user["id"]
-
-# Define httpOnly cookie com o token
+    # Define httpOnly cookie com o token
     if response:
         response.set_cookie(
             key="garimpador_token",
