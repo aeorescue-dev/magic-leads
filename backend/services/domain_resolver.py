@@ -7,6 +7,7 @@ negócio no OSM coincide com a empresa (Jaccard de tokens >= 0.5).
 from __future__ import annotations
 
 import re
+import time
 from typing import Iterable, Optional
 
 import httpx
@@ -16,6 +17,9 @@ from .company_discovery import registrable_domain
 from .contractor_entities import normalize_company_name
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+OVERPASS_TIMEOUT = 8.0
+OVERPASS_COOLDOWN_S = 900
+_last_failure_at = 0.0
 CITY_OSM_NAME = {
     "NYC": "New York",
     "NEW YORK": "New York",
@@ -89,9 +93,12 @@ def pick_domain(
 
 
 async def fetch_osm_elements(legal_name: str, city: str) -> list[dict]:
+    global _last_failure_at
+    if _last_failure_at and (time.monotonic() - _last_failure_at) < OVERPASS_COOLDOWN_S:
+        return []
     query = build_overpass_query(legal_name, city)
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=OVERPASS_TIMEOUT) as client:
             resp = await client.post(
                 OVERPASS_URL,
                 data={"data": query},
@@ -99,10 +106,12 @@ async def fetch_osm_elements(legal_name: str, city: str) -> list[dict]:
             )
         if resp.status_code != 200:
             logger.warning("[DOMAIN] Overpass HTTP %s", resp.status_code)
+            _last_failure_at = time.monotonic()
             return []
         return list((resp.json() or {}).get("elements") or [])
     except Exception as exc:  # noqa: BLE001
-        logger.warning("[DOMAIN] Overpass falhou para %r: %s", legal_name, exc)
+        logger.warning("[DOMAIN] Overpass indisponível para %r: %s", legal_name, exc)
+        _last_failure_at = time.monotonic()
         return []
 
 

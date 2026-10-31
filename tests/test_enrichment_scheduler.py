@@ -73,6 +73,9 @@ def no_throttle(monkeypatch):
         return None
 
     monkeypatch.setattr(enrichment_scheduler, "_throttle_overpass", _noop)
+    monkeypatch.setattr(
+        enrichment_scheduler._discovery, "heuristic_domain", lambda *a, **k: None
+    )
 
 
 @pytest.mark.asyncio

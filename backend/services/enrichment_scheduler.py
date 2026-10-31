@@ -62,6 +62,22 @@ async def _domain_stage(entity: dict) -> str:
     async with _global_sem:
         await _throttle_overpass()
         resolved = await resolve_domain(entity.get("legal_name") or "", entity.get("city") or "")
+        if not resolved:
+            # Fallback autónomo: heurística de domínio (DNS + site + corroboração)
+            # quando o Overpass está bloqueado/indisponível.
+            lead = {
+                "owner_name": entity.get("legal_name") or "",
+                "city": entity.get("city") or "",
+            }
+            found = await asyncio.to_thread(
+                _discovery.heuristic_domain, lead, time.monotonic() + 12.0
+            )
+            if found:
+                resolved = {
+                    "domain": found.domain,
+                    "confidence": 0.55,
+                    "source": "heuristic",
+                }
     if resolved:
         await db_service.mark_contractor_domain_attempt(
             int(entity["id"]),
