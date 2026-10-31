@@ -40,6 +40,17 @@ describe("passkeyErrorFromException", () => {
     );
   });
 
+  it("distingue timeout de cancelamento pelo texto do NotAllowedError", () => {
+    const err = new Error(
+      "The operation either timed out or was not allowed. See: https://www.w3.org/TR/webauthn-2/"
+    );
+    err.name = "NotAllowedError";
+    expect(passkeyErrorFromException(err, "register").code).toBe("timeout");
+    expect(
+      passkeyErrorFromException(domError("NotAllowedError"), "register").code
+    ).toBe("cancelled");
+  });
+
   it("mapeia NotSupportedError para unsupported", () => {
     expect(
       passkeyErrorFromException(domError("NotSupportedError"), "register").code
@@ -71,6 +82,7 @@ describe("passkeyMessageKey", () => {
     expect(passkeyMessageKey("origin")).toBe("origin");
     expect(passkeyMessageKey("already_registered")).toBe("already_registered");
     expect(passkeyMessageKey("unreadable")).toBe("unreadable");
+    expect(passkeyMessageKey("timeout")).toBe("timeout");
     expect(passkeyMessageKey("no_credential")).toBe("not_setup");
     expect(passkeyMessageKey("server")).toBe("failed");
   });

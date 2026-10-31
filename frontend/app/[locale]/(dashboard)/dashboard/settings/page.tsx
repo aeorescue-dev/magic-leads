@@ -14,7 +14,9 @@ import {
   PasskeyInfo,
   passkeyMessageKey,
   passkeyPlatform,
+  passkeyDeviceLabel,
   passkeyPlatformSuffix,
+  getPasskeyDeviceId,
   registerPasskey,
   setPasskeyHint,
 } from "@/lib/webauthn";
@@ -102,6 +104,8 @@ function PasskeySettings() {
     () => "other" as const
   );
   const suffix = passkeyPlatformSuffix(platform);
+  const deviceId = useSyncExternalStore(subscribeNoop, getPasskeyDeviceId, () => "");
+  const deviceLabel = passkeyDeviceLabel(platform);
   const [passkeys, setPasskeys] = useState<PasskeyInfo[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -109,6 +113,13 @@ function PasskeySettings() {
   const [ok, setOk] = useState<string | null>(null);
   // Ignora resultados atrasados de uma tentativa anterior.
   const attemptRef = useRef(0);
+  // Chave já registada NESTE dispositivo (id opaco; fallback pelo label para
+  // credenciais antigas sem device_id). Evita pedir um duplicado — no Android
+  // isso terminava em NotAllowedError/timeout.
+  const devicePasskey =
+    passkeys.find((p) => p.device_id && p.device_id === deviceId) ??
+    passkeys.find((p) => !p.device_id && p.device_label === deviceLabel) ??
+    null;
 
   const refresh = async () => {
     try {
@@ -139,14 +150,28 @@ function PasskeySettings() {
   }, []);
 
   const add = async () => {
+    const target = devicePasskey;
+    if (target && !window.confirm(t("settings.passkey.replace_confirm"))) return;
     const attempt = ++attemptRef.current;
     setBusy(true);
     setError(null);
     setErrorDetail(null);
     setOk(null);
     try {
-      const out = await registerPasskey();
+      // Ao substituir, a credencial antiga fica fora de excludeCredentials
+      // (senão o Android recusa/entra em timeout) e só é apagada após sucesso.
+      const out = await registerPasskey({
+        replaceCredentialId: target?.credential_id,
+      });
       if (attempt !== attemptRef.current) return;
+      if (target) {
+        // Nunca apagar a credencial recém-criada (defensivo).
+        const sameAsNew =
+          out.credential_id && out.credential_id === target.credential_id;
+        if (!sameAsNew) {
+          await deleteMyPasskey(target.credential_id).catch(() => undefined);
+        }
+      }
       setPasskeyHint(true);
       setOk(
         t("settings.passkey.added", { device: out.device_label }) ||
@@ -202,6 +227,12 @@ function PasskeySettings() {
         {t(`settings.passkey.sub_${suffix}`) || t("settings.passkey.sub")}
       </p>
 
+      {devicePasskey && (
+        <p className="text-xs text-emerald-400" data-testid="passkey-device-active">
+          {t("settings.passkey.active_device")}
+        </p>
+      )}
+
       {!supported ? (
         <p className="text-xs text-amber-400">{t("settings.passkey.unsupported")}</p>
       ) : (
@@ -213,8 +244,12 @@ function PasskeySettings() {
         >
           {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Fingerprint className="w-3.5 h-3.5" />}
           {busy
-            ? t("settings.passkey.adding")
-            : t(`settings.passkey.add_${suffix}`) || t("settings.passkey.add")}
+            ? devicePasskey
+              ? t("settings.passkey.replacing")
+              : t("settings.passkey.adding")
+            : devicePasskey
+              ? t("settings.passkey.replace")
+              : t(`settings.passkey.add_${suffix}`) || t("settings.passkey.add")}
         </button>
       )}
 

@@ -473,6 +473,9 @@ CREATE TABLE IF NOT EXISTS webauthn_credentials (
   transports TEXT,
   aaguid TEXT,
   device_label TEXT,
+  -- Identificador opaco do browser/perfil (localStorage). Permite distinguir
+  -- "este dispositivo" de outro Android com o mesmo label.
+  device_id TEXT,
   cloned_warning INTEGER DEFAULT 0,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   last_used_at TEXT
@@ -1830,6 +1833,12 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     for name in ("rp_id", "origin"):
         if name not in wa_cols:
             conn.execute(f"ALTER TABLE webauthn_challenges ADD COLUMN {name} TEXT")
+
+    cred_cols = {
+        r["name"] for r in conn.execute("PRAGMA table_info(webauthn_credentials)")
+    }
+    if "device_id" not in cred_cols:
+        conn.execute("ALTER TABLE webauthn_credentials ADD COLUMN device_id TEXT")
 
 
 
@@ -5357,16 +5366,18 @@ class DatabaseService:
         self, user_id: int, credential_id: str, public_key: str,
         sign_count: int = 0, transports: Optional[str] = None,
         aaguid: Optional[str] = None, device_label: Optional[str] = None,
+        device_id: Optional[str] = None,
     ) -> bool:
         conn = get_connection()
         try:
             conn.execute(
                 "INSERT INTO webauthn_credentials "
-                "(user_id, credential_id, public_key, sign_count, transports, aaguid, device_label) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "(user_id, credential_id, public_key, sign_count, transports, "
+                " aaguid, device_label, device_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     int(user_id), credential_id, public_key, int(sign_count),
-                    transports, aaguid, device_label,
+                    transports, aaguid, device_label, device_id,
                 ),
             )
             conn.commit()
@@ -5381,7 +5392,7 @@ class DatabaseService:
         try:
             rows = conn.execute(
                 "SELECT id, credential_id, sign_count, transports, aaguid, device_label, "
-                "cloned_warning, created_at, last_used_at "
+                "device_id, cloned_warning, created_at, last_used_at "
                 "FROM webauthn_credentials WHERE user_id = ? ORDER BY id DESC",
                 (int(user_id),),
             ).fetchall()

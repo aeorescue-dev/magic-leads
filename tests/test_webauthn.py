@@ -198,6 +198,7 @@ def test_register_options_and_verify_store_public_key(client, monkeypatch):
         "id": "credential-bytes-b64",
         "rawId": "credential-bytes-b64",
         "type": "public-key",
+        "device_id": "pytest-device-1",
         "response": {
             "clientDataJSON": _client_data(challenge),
             "attestationObject": "att",
@@ -215,6 +216,7 @@ def test_register_options_and_verify_store_public_key(client, monkeypatch):
     assert len(rows) == 1
     assert rows[0]["credential_id"] == bytes_to_base64url(b"credential-bytes")
     assert rows[0]["device_label"]
+    assert rows[0]["device_id"] == "pytest-device-1"
 
     # Challenge é de uso único.
     again = client.post(
@@ -322,3 +324,66 @@ def test_list_and_delete_passkeys(client):
     assert client.delete(
         f"/api/users/me/passkeys/{credential_id}", headers=_headers()
     ).status_code == 404
+
+
+def test_replace_credential_fica_fora_do_exclude(client):
+    """Ao substituir, a chave alvo não entra em excludeCredentials.
+
+    No Android, incluir a credencial existente faz o Chrome cair em
+    NotAllowedError/timeout em vez do InvalidStateError previsto.
+    """
+    user_id = _user()
+    keep = bytes_to_base64url(b"replace-keep")
+    replace = bytes_to_base64url(b"replace-target")
+    for cid in (keep, replace):
+        db_service._service.add_webauthn_credential(
+            user_id=user_id,
+            credential_id=cid,
+            public_key=bytes_to_base64url(b"pk"),
+            sign_count=0,
+            transports=json.dumps(["internal"]),
+            device_label="Pytest",
+        )
+    r = client.post(
+        "/api/auth/webauthn/register/options",
+        headers=_headers(),
+        json={"replace_credential_id": replace},
+    )
+    assert r.status_code == 200, r.text
+    excluded = {c["id"] for c in r.json().get("excludeCredentials") or []}
+    assert keep in excluded
+    assert replace not in excluded
+
+
+def test_device_id_e_sanitizado(client, monkeypatch):
+    user_id = _user()
+    r = client.post("/api/auth/webauthn/register/options", headers=_headers(), json={})
+    challenge = r.json()["challenge"]
+    monkeypatch.setattr(
+        main_module,
+        "verify_registration_response",
+        lambda **_k: SimpleNamespace(
+            credential_id=b"device-id-cred",
+            credential_public_key=b"device-id-pub",
+            sign_count=0,
+            aaguid="00000000-0000-0000-0000-000000000000",
+        ),
+    )
+    payload = {
+        "id": "device-id-cred",
+        "device_id": 'abc<script>"!def',
+        "response": {
+            "clientDataJSON": _client_data(challenge),
+            "attestationObject": "att",
+            "transports": ["internal"],
+        },
+    }
+    assert client.post(
+        "/api/auth/webauthn/register/verify", headers=_headers(), json=payload
+    ).status_code == 200
+    row = next(
+        c
+        for c in db_service._service.list_webauthn_credentials(user_id)
+        if c["credential_id"] == bytes_to_base64url(b"device-id-cred")
+    )
+    assert row["device_id"] == "abcscriptdef"

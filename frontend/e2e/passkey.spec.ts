@@ -61,6 +61,12 @@ test.describe("passkeys", () => {
     await page.getByTestId("passkey-register").click();
     await expect(page.getByTestId("passkey-ok")).toBeVisible({ timeout: 20000 });
     await expect(page.getByTestId("passkey-item").first()).toBeVisible();
+    // Já há chave neste dispositivo: a UI não pode voltar a oferecer "Ativar"
+    // (era o caminho que originava NotAllowedError/timeout no Android).
+    await expect(page.getByTestId("passkey-device-active")).toBeVisible();
+    await expect(page.getByTestId("passkey-register")).toContainText(
+      /Replace passkey|Substituir/i
+    );
 
     // 2) Sessão local limpa (o proxy E2E continua a encaminhar /api).
     //    Este init script corre depois do init do proxy, por isso apaga o token.
@@ -77,5 +83,66 @@ test.describe("passkeys", () => {
     // 3) Login só com a passkey: o virtual authenticator responde sozinho.
     await page.getByTestId("passkey-login").click();
     await expect(page).toHaveURL(/\/en\/dashboard/, { timeout: 20000 });
+  });
+
+  test("substituir não duplica: nova credencial e a antiga sai do servidor", async ({
+    page,
+  }) => {
+    await installApiProxy(page, { token: E2E_CYCLE_TOKEN });
+    await page.context().addCookies([
+      { name: "garimpador_auth", value: E2E_CYCLE_TOKEN, url: LOCAL_ORIGIN },
+      { name: "garimpador_token", value: E2E_CYCLE_TOKEN, url: LOCAL_ORIGIN },
+    ]);
+    const client = await page.context().newCDPSession(page);
+    await client.send("WebAuthn.enable");
+    await client.send("WebAuthn.addVirtualAuthenticator", {
+      options: {
+        protocol: "ctap2",
+        transport: "internal",
+        hasResidentKey: true,
+        hasUserVerification: true,
+        isUserVerified: true,
+        automaticPresenceSimulation: true,
+      },
+    });
+
+    const ids = () =>
+      page.evaluate(async () => {
+        const res = await fetch("/api/users/me/passkeys", {
+          credentials: "include",
+        });
+        const data = await res.json();
+        return (data.passkeys || []).map((p: any) => p.credential_id as string);
+      });
+
+    // Este teste partilha a conta E2E; começa sem chaves.
+    await page.goto(`${LOCAL_ORIGIN}/en/dashboard/settings`);
+    await expect(page.getByTestId("passkey-settings")).toBeVisible({ timeout: 20000 });
+    for (const id of await ids()) {
+      await page.evaluate(
+        async (credentialId) => {
+          await fetch(`/api/users/me/passkeys/${encodeURIComponent(credentialId)}`, {
+            method: "DELETE",
+            credentials: "include",
+          });
+        },
+        id
+      );
+    }
+    await page.reload();
+    await expect(page.getByTestId("passkey-device-active")).toHaveCount(0);
+
+    await page.getByTestId("passkey-register").click();
+    await expect(page.getByTestId("passkey-ok")).toBeVisible({ timeout: 20000 });
+    const before = await ids();
+    expect(before).toHaveLength(1);
+    await expect(page.getByTestId("passkey-device-active")).toBeVisible();
+
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByTestId("passkey-register").click();
+    await expect
+      .poll(async () => (await ids()).length, { timeout: 20000 })
+      .toBe(1);
+    await expect.poll(async () => (await ids())[0]).not.toBe(before[0]);
   });
 });

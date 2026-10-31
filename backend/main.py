@@ -5069,7 +5069,14 @@ def _wa_descriptors(credentials: list[dict]) -> list[PublicKeyCredentialDescript
         out.append(
             PublicKeyCredentialDescriptor(
                 id=base64url_to_bytes(cred["credential_id"]),
-                transports=[t for t in transports if t in valid_transports],
+                # `options_to_json` serializa `transport.value`: com strings
+                # cruas rebentava com AttributeError assim que o utilizador
+                # tinha QUALQUER credencial (exclude/allow lists não vazias).
+                transports=[
+                    AuthenticatorTransport(t)
+                    for t in transports
+                    if t in valid_transports
+                ],
             )
         )
     return out
@@ -5092,10 +5099,27 @@ class WebAuthnLoginOptionsRequest(BaseModel):
     email: Optional[EmailStr] = None
 
 
+class WebAuthnRegisterOptionsRequest(BaseModel):
+    # Quando o utilizador substitui a chave deste dispositivo, a credencial
+    # antiga NÃO entra em excludeCredentials (evita o "já existe" que, no
+    # Android, acabava em NotAllowedError/timeout). É apagada após o sucesso.
+    replace_credential_id: Optional[str] = None
+
+
+def _wa_device_id(value: object) -> Optional[str]:
+    """Aceita apenas um id opaco e curto vindo do browser."""
+    if not value:
+        return None
+    clean = "".join(ch for ch in str(value) if ch.isalnum() or ch in "-_")
+    return clean[:64] or None
+
+
 @app.post("/api/auth/webauthn/register/options")
 @limiter.limit("10/minute")
 async def webauthn_register_options(
-    request: Request, user: dict = Depends(_get_current_user)
+    request: Request,
+    payload: WebAuthnRegisterOptionsRequest | None = Body(None),
+    user: dict = Depends(_get_current_user),
 ):
     """Inicia o registo de uma passkey para o utilizador autenticado."""
     rp_id, origin = _wa_verify_context(request)
@@ -5107,13 +5131,19 @@ async def webauthn_register_options(
     company = str(profile.get("company_name") or "").strip()
     account_name = email or f"user-{user['id']}"
     credentials = await db_service.list_webauthn_credentials(user["id"])
+    replace_id = (payload.replace_credential_id or "").strip() if payload else ""
+    exclude_source = (
+        [c for c in credentials if c["credential_id"] != replace_id]
+        if replace_id
+        else credentials
+    )
     options = generate_registration_options(
         rp_id=rp_id,
         rp_name=settings.WEBAUTHN_RP_NAME,
         user_id=_wa_user_handle(user["id"]),
         user_name=account_name,
         user_display_name=company or account_name,
-        exclude_credentials=_wa_descriptors(credentials),
+        exclude_credentials=_wa_descriptors(exclude_source),
         # Passkey (credencial descobrível) e sem forçar `platform`: no Android
         # isso levava o Chrome ao FIDO API (chave presa ao dispositivo), cujo
         # desbloqueio por bloqueio de ecrã devolve NotReadableError em timeout.
@@ -5194,10 +5224,15 @@ async def webauthn_register_verify(
         transports=json.dumps(transports),
         aaguid=str(verified.aaguid),
         device_label=_wa_label(request),
+        device_id=_wa_device_id(payload.get("device_id")),
     )
     if not ok:
         raise _wa_error(409, "credential_exists", "Este dispositivo já está registado")
-    return {"status": "ok", "device_label": _wa_label(request)}
+    return {
+        "status": "ok",
+        "device_label": _wa_label(request),
+        "credential_id": bytes_to_base64url(verified.credential_id),
+    }
 
 
 @app.post("/api/auth/webauthn/login/options")
@@ -5322,6 +5357,7 @@ async def list_my_passkeys(user: dict = Depends(_get_current_user)):
                 "id": r["id"],
                 "credential_id": r["credential_id"],
                 "device_label": r.get("device_label") or "Dispositivo",
+                "device_id": r.get("device_id"),
                 "created_at": r.get("created_at"),
                 "last_used_at": r.get("last_used_at"),
                 "cloned_warning": bool(r.get("cloned_warning")),

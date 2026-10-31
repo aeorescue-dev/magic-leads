@@ -12,6 +12,7 @@ import { getToken, type AuthResponse } from "./api-client";
 export type PasskeyErrorCode =
   | "unsupported"
   | "cancelled"
+  | "timeout"
   | "no_credential"
   | "origin"
   | "already_registered"
@@ -79,14 +80,20 @@ export function passkeyErrorFromException(
     browserError: `${name}: ${e?.message || "sem mensagem"}`,
   };
   switch (name) {
-    case "NotAllowedError":
-      // Pode ser cancelamento, timeout ou permissão negada pelo SO.
+    case "NotAllowedError": {
+      // "timed out" = o gestor de credenciais não respondeu a tempo (típico
+      // quando o telemóvel bloqueia ou já existe uma chave travada). Sem esta
+      // distinção o utilizador via "cancelado" sem ter cancelado nada.
+      const timedOut = /timed out/i.test(e?.message || "");
       return new PasskeyError(
-        "cancelled",
-        "Operação cancelada ou não autorizada pelo dispositivo.",
+        timedOut ? "timeout" : "cancelled",
+        timedOut
+          ? "O telemóvel não respondeu a tempo. Desbloqueie o ecrã e tente novamente."
+          : "Operação cancelada ou não autorizada pelo dispositivo.",
         undefined,
         detail
       );
+    }
     case "InvalidStateError":
       return new PasskeyError(
         "already_registered",
@@ -148,6 +155,7 @@ export function passkeyMessageKey(
   | "unsupported"
   | "not_setup"
   | "cancelled"
+  | "timeout"
   | "origin"
   | "already_registered"
   | "unreadable"
@@ -159,6 +167,8 @@ export function passkeyMessageKey(
       return "not_setup";
     case "cancelled":
       return "cancelled";
+    case "timeout":
+      return "timeout";
     case "origin":
       return "origin";
     case "already_registered":
@@ -223,6 +233,51 @@ function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+const DEVICE_KEY = "garimpador.passkey.device";
+
+/**
+ * Id opaco deste browser/perfil. Permite ao servidor e à UI distinguirem
+ * "este dispositivo" de outro Android com o mesmo rótulo — e evitarem o
+ * registo duplicado que no Android acaba em NotAllowedError/timeout.
+ */
+export function getPasskeyDeviceId(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    let id = window.localStorage.getItem(DEVICE_KEY);
+    if (!id) {
+      id =
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+      id = id.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64);
+      window.localStorage.setItem(DEVICE_KEY, id);
+    }
+    return id;
+  } catch {
+    return "";
+  }
+}
+
+/** Rótulo que o servidor usa (derivado do UA) para este dispositivo. */
+export function passkeyDeviceLabel(platform: PasskeyPlatform): string {
+  switch (platform) {
+    case "android":
+      return "Android";
+    case "apple":
+      return /ipad/i.test(typeof navigator !== "undefined" ? navigator.userAgent : "")
+        ? "iPad"
+        : /iphone|ipod/i.test(
+            typeof navigator !== "undefined" ? navigator.userAgent : ""
+          )
+          ? "iPhone"
+          : "Mac";
+    case "windows":
+      return "Windows";
+    default:
+      return "Dispositivo";
+  }
+}
+
 /**
  * Falha antes de tocar no autenticador quando o servidor devolveu um RP ID
  * que não cobre o host atual (ex.: backend configurado para magicleads.app e
@@ -235,7 +290,7 @@ function assertRpIdMatches(rpId?: string): void {
   if (host === expected || host.endsWith(`.${expected}`)) return;
   throw new PasskeyError(
     "origin",
-    "O domínio atual não corresponde ao domínio autorizado para Face ID.",
+    "O domínio atual não corresponde ao domínio autorizado para chaves de acesso.",
     undefined,
     { browserError: `rpId "${expected}" ≠ host "${host}"` }
   );
@@ -277,6 +332,7 @@ export interface PasskeyInfo {
   id: number;
   credential_id: string;
   device_label: string;
+  device_id?: string | null;
   created_at?: string | null;
   last_used_at?: string | null;
   cloned_warning?: boolean;
@@ -309,11 +365,18 @@ export async function deleteMyPasskey(credentialId: string): Promise<void> {
   }
 }
 
-export async function registerPasskey(): Promise<{ device_label: string }> {
+export async function registerPasskey(
+  opts: { replaceCredentialId?: string } = {}
+): Promise<{ device_label: string; credential_id?: string }> {
   if (!isPasskeySupported()) {
-    throw new PasskeyError("unsupported", "Este dispositivo não suporta Face ID.");
+    throw new PasskeyError("unsupported", "Este dispositivo não suporta chaves de acesso.");
   }
-  const options = await post<any>("/api/auth/webauthn/register/options", {});
+  const options = await post<any>(
+    "/api/auth/webauthn/register/options",
+    opts.replaceCredentialId
+      ? { replace_credential_id: opts.replaceCredentialId }
+      : {}
+  );
   assertRpIdMatches(options?.rp?.id);
   const publicKey: PublicKeyCredentialCreationOptions = {
     ...options,
@@ -341,6 +404,7 @@ export async function registerPasskey(): Promise<{ device_label: string }> {
     id: attestation.id,
     rawId: bufToB64url(attestation.rawId),
     type: attestation.type,
+    device_id: getPasskeyDeviceId(),
     response: {
       clientDataJSON: bufToB64url(response.clientDataJSON),
       attestationObject: bufToB64url(response.attestationObject),
@@ -348,7 +412,7 @@ export async function registerPasskey(): Promise<{ device_label: string }> {
     },
     clientExtensionResults: attestation.getClientExtensionResults?.() ?? {},
   };
-  const out = await post<{ device_label: string }>(
+  const out = await post<{ device_label: string; credential_id?: string }>(
     "/api/auth/webauthn/register/verify",
     payload
   );
@@ -358,7 +422,7 @@ export async function registerPasskey(): Promise<{ device_label: string }> {
 
 export async function loginWithPasskey(email?: string): Promise<AuthResponse> {
   if (!isPasskeySupported()) {
-    throw new PasskeyError("unsupported", "Este dispositivo não suporta Face ID.");
+    throw new PasskeyError("unsupported", "Este dispositivo não suporta chaves de acesso.");
   }
   const options = await post<any>(
     "/api/auth/webauthn/login/options",
