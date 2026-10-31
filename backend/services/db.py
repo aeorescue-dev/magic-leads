@@ -878,6 +878,19 @@ CREATE TABLE IF NOT EXISTS sending_mailboxes (
   warmup_started_at TEXT,
   last_send_at TEXT,
   auth_ref TEXT,
+  -- Auto-Ramp: rampa automatica por caixa (1,1,1,2,3,5,8,12,20,25,35,50,75).
+  -- `auto_ramp_cap` e' o cap corrente; `auto_ramp_max` e' o teto escolhido no
+  -- Admin; nunca sobe sem amostra minima e metricas limpas.
+  auto_ramp_enabled INTEGER NOT NULL DEFAULT 0,
+  auto_ramp_cap INTEGER NOT NULL DEFAULT 1,
+  auto_ramp_max INTEGER NOT NULL DEFAULT 75,
+  auto_ramp_stage INTEGER NOT NULL DEFAULT 0,
+  auto_ramp_last_step_at TEXT,
+  auto_ramp_hold_reason TEXT,
+  -- Disjuntor: pausa automatica/manual da caixa (bounce, complaint, auth).
+  paused_at TEXT,
+  paused_reason TEXT,
+  last_auth_error_at TEXT,
   notes TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -885,6 +898,28 @@ CREATE TABLE IF NOT EXISTS sending_mailboxes (
 
 CREATE INDEX IF NOT EXISTS idx_sending_mailboxes_enabled ON sending_mailboxes (enabled, city);
 CREATE INDEX IF NOT EXISTS idx_sending_mailboxes_city ON sending_mailboxes (city);
+
+-- Eventos de bounce/complaint por caixa (base da taxa de 30 dias).
+CREATE TABLE IF NOT EXISTS mailbox_bounce_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  mailbox_id INTEGER NOT NULL REFERENCES sending_mailboxes(id) ON DELETE CASCADE,
+  email TEXT,
+  kind TEXT NOT NULL DEFAULT 'bounce',
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_mailbox_bounce_mb
+  ON mailbox_bounce_events (mailbox_id, created_at);
+
+-- Auditoria das subidas de Auto-Ramp (append-only).
+CREATE TABLE IF NOT EXISTS mailbox_ramp_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  mailbox_id INTEGER NOT NULL REFERENCES sending_mailboxes(id) ON DELETE CASCADE,
+  at TEXT DEFAULT CURRENT_TIMESTAMP,
+  from_cap INTEGER,
+  to_cap INTEGER,
+  reason TEXT,
+  metrics_json TEXT
+);
 
 CREATE TABLE IF NOT EXISTS outbound_contacts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1840,6 +1875,24 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     if "device_id" not in cred_cols:
         conn.execute("ALTER TABLE webauthn_credentials ADD COLUMN device_id TEXT")
 
+    # Auto-Ramp + disjuntor das caixas de envio (bases antigas).
+    mb_cols = {
+        r["name"] for r in conn.execute("PRAGMA table_info(sending_mailboxes)")
+    }
+    for name, ddl in (
+        ("auto_ramp_enabled", "INTEGER NOT NULL DEFAULT 0"),
+        ("auto_ramp_cap", "INTEGER NOT NULL DEFAULT 1"),
+        ("auto_ramp_max", "INTEGER NOT NULL DEFAULT 75"),
+        ("auto_ramp_stage", "INTEGER NOT NULL DEFAULT 0"),
+        ("auto_ramp_last_step_at", "TEXT"),
+        ("auto_ramp_hold_reason", "TEXT"),
+        ("paused_at", "TEXT"),
+        ("paused_reason", "TEXT"),
+        ("last_auth_error_at", "TEXT"),
+    ):
+        if name not in mb_cols:
+            conn.execute(f"ALTER TABLE sending_mailboxes ADD COLUMN {name} {ddl}")
+
 
 
 
@@ -2132,6 +2185,204 @@ class DatabaseService:
             return dict(r) if r else None
         except Exception:
             return None
+        finally:
+            conn.close()
+
+    # ---------------------------------------------------- Auto-Ramp / disjuntor
+    def update_mailbox_controls(
+        self,
+        mailbox_id: int,
+        *,
+        daily_cap: Optional[int] = None,
+        auto_ramp_enabled: Optional[int] = None,
+        auto_ramp_max: Optional[int] = None,
+        auto_ramp_cap: Optional[int] = None,
+    ) -> Optional[dict]:
+        """Atualiza cap manual, liga/desliga rampa e teto da rampa (Admin)."""
+        sets: list[str] = []
+        params: list = []
+        if daily_cap is not None:
+            sets.append("daily_cap=?")
+            params.append(max(0, min(int(daily_cap), 100)))
+        if auto_ramp_enabled is not None:
+            sets.append("auto_ramp_enabled=?")
+            params.append(1 if auto_ramp_enabled else 0)
+        if auto_ramp_max is not None:
+            sets.append("auto_ramp_max=?")
+            params.append(max(1, min(int(auto_ramp_max), 100)))
+        if auto_ramp_cap is not None:
+            sets.append("auto_ramp_cap=?")
+            params.append(max(0, min(int(auto_ramp_cap), 100)))
+        if not sets:
+            return None
+        sets.append("updated_at=CURRENT_TIMESTAMP")
+        params.append(int(mailbox_id))
+        conn = get_connection()
+        try:
+            conn.execute(
+                f"UPDATE sending_mailboxes SET {', '.join(sets)} WHERE id=?", params
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT * FROM sending_mailboxes WHERE id=?", (int(mailbox_id),)
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def pause_mailbox(self, mailbox_id: int, reason: str) -> bool:
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE sending_mailboxes SET enabled=0, paused_at=CURRENT_TIMESTAMP, "
+                "paused_reason=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (reason[:120], int(mailbox_id)),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def resume_mailbox(self, mailbox_id: int) -> bool:
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE sending_mailboxes SET enabled=1, paused_at=NULL, "
+                "paused_reason=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (int(mailbox_id),),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def mark_mailbox_auth_error(self, mailbox_id: int) -> None:
+        conn = get_connection()
+        try:
+            conn.execute(
+                "UPDATE sending_mailboxes SET last_auth_error_at=CURRENT_TIMESTAMP, "
+                "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (int(mailbox_id),),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def record_mailbox_bounce(self, mailbox_id: int, email: str, kind: str) -> bool:
+        conn = get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO mailbox_bounce_events (mailbox_id, email, kind) "
+                "VALUES (?, ?, ?)",
+                (int(mailbox_id), (email or "").lower(), kind),
+            )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+    def mailbox_metrics(self, mailbox_id: int, days: int = 30) -> dict:
+        """Métricas da caixa para o disjuntor e o Auto-Ramp (janela em dias)."""
+        days = max(1, min(int(days), 90))
+        window = f"-{days} days"
+        conn = get_connection()
+        try:
+            sent = conn.execute(
+                "SELECT COUNT(*) c FROM outbound_messages WHERE mailbox_id=? "
+                "AND status='sent' AND sent_at >= datetime('now', ?)",
+                (int(mailbox_id), window),
+            ).fetchone()["c"]
+            events = conn.execute(
+                "SELECT kind, COUNT(*) c FROM mailbox_bounce_events "
+                "WHERE mailbox_id=? AND created_at >= datetime('now', ?) GROUP BY kind",
+                (int(mailbox_id), window),
+            ).fetchall()
+            counts = {r["kind"]: int(r["c"]) for r in events}
+            row = conn.execute(
+                "SELECT last_auth_error_at FROM sending_mailboxes WHERE id=?",
+                (int(mailbox_id),),
+            ).fetchone()
+            sent = int(sent or 0)
+            bounces = int(counts.get("bounce", 0))
+            complaints = int(counts.get("complaint", 0))
+            return {
+                "days": days,
+                "sent": sent,
+                "bounces": bounces,
+                "complaints": complaints,
+                "bounce_rate": (bounces / sent) if sent else 0.0,
+                "complaint_rate": (complaints / sent) if sent else 0.0,
+                "last_auth_error_at": row["last_auth_error_at"] if row else None,
+            }
+        finally:
+            conn.close()
+
+    def last_bounce_events(self, mailbox_id: int, limit: int = 2) -> List[dict]:
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT email, kind, created_at FROM mailbox_bounce_events "
+                "WHERE mailbox_id=? ORDER BY id DESC LIMIT ?",
+                (int(mailbox_id), max(1, int(limit))),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def apply_auto_ramp_step(
+        self,
+        mailbox_id: int,
+        from_cap: int,
+        to_cap: int,
+        stage: int,
+        reason: str,
+        metrics: dict,
+    ) -> bool:
+        conn = get_connection()
+        try:
+            conn.execute(
+                "UPDATE sending_mailboxes SET auto_ramp_cap=?, auto_ramp_stage=?, "
+                "auto_ramp_last_step_at=CURRENT_TIMESTAMP, auto_ramp_hold_reason=NULL, "
+                "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (int(to_cap), int(stage), int(mailbox_id)),
+            )
+            conn.execute(
+                "INSERT INTO mailbox_ramp_log (mailbox_id, from_cap, to_cap, reason, "
+                "metrics_json) VALUES (?, ?, ?, ?, ?)",
+                (
+                    int(mailbox_id),
+                    int(from_cap),
+                    int(to_cap),
+                    reason,
+                    json.dumps(metrics, ensure_ascii=False),
+                ),
+            )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+    def set_auto_ramp_hold(self, mailbox_id: int, reason: str) -> None:
+        conn = get_connection()
+        try:
+            conn.execute(
+                "UPDATE sending_mailboxes SET auto_ramp_hold_reason=?, "
+                "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (reason[:80], int(mailbox_id)),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def mailbox_ramp_log(self, mailbox_id: int, limit: int = 20) -> List[dict]:
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM mailbox_ramp_log WHERE mailbox_id=? "
+                "ORDER BY id DESC LIMIT ?",
+                (int(mailbox_id), max(1, int(limit))),
+            ).fetchall()
+            return [dict(r) for r in rows]
         finally:
             conn.close()
 
@@ -3296,6 +3547,61 @@ class DatabaseService:
                 (window,),
             ).fetchall()
             return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def outbound_readiness(self, city: str, niche: Optional[str] = None) -> dict:
+        """Contagens por estágio para o cartão 'Prontos' do Admin."""
+        city = (city or "").strip().upper()
+        niche = (niche or "").strip()
+        if not city:
+            return {"city": "", "niche": niche, "total": 0, "valid": 0,
+                    "confirmed": 0, "ready": 0, "quarantined": 0, "by_niche": []}
+        conn = get_connection()
+        try:
+            base = (
+                "FROM outbound_contacts oc "
+                "WHERE UPPER(TRIM(oc.city))=? AND COALESCE(oc.email,'')<>''"
+            )
+            params: list = [city]
+            if niche:
+                base += " AND oc.niche_key=?"
+                params.append(niche)
+            row = conn.execute(
+                "SELECT COUNT(*) total, "
+                "SUM(CASE WHEN LOWER(COALESCE(oc.email_status,'')) IN ('valid','verified') THEN 1 ELSE 0 END) valid, "
+                "SUM(CASE WHEN oc.niche_status='confirmed' AND COALESCE(oc.niche_key,'')<>'' THEN 1 ELSE 0 END) confirmed, "
+                "SUM(CASE WHEN LOWER(COALESCE(oc.email_status,'')) IN ('valid','verified') "
+                "          AND oc.niche_status='confirmed' AND COALESCE(oc.niche_key,'')<>'' "
+                "          AND COALESCE(oc.unsubscribed,0)=0 "
+                "          AND NOT EXISTS (SELECT 1 FROM outbound_messages om "
+                "                          WHERE LOWER(om.to_email)=LOWER(oc.email) "
+                "                          AND om.status IN ('queued','sending','sent')) "
+                "     THEN 1 ELSE 0 END) ready, "
+                "SUM(CASE WHEN oc.niche_status IN ('unknown','ambiguous') THEN 1 ELSE 0 END) quarantined "
+                + base,
+                params,
+            ).fetchone()
+            by_niche = [
+                dict(r)
+                for r in conn.execute(
+                    "SELECT oc.niche_key, COUNT(*) c " + base +
+                    " AND LOWER(COALESCE(oc.email_status,'')) IN ('valid','verified') "
+                    " AND oc.niche_status='confirmed' AND COALESCE(oc.unsubscribed,0)=0 "
+                    "GROUP BY oc.niche_key ORDER BY c DESC",
+                    params,
+                ).fetchall()
+            ]
+            return {
+                "city": city,
+                "niche": niche,
+                "total": int(row["total"] or 0),
+                "valid": int(row["valid"] or 0),
+                "confirmed": int(row["confirmed"] or 0),
+                "ready": int(row["ready"] or 0),
+                "quarantined": int(row["quarantined"] or 0),
+                "by_niche": by_niche,
+            }
         finally:
             conn.close()
 
@@ -11336,6 +11642,58 @@ class AsyncDatabaseService:
     async def list_sending_mailboxes(self, enabled_only: bool = False) -> List[dict]:
         return await anyio.to_thread.run_sync(self._service.list_sending_mailboxes, enabled_only)
 
+    # ---------------------------------------------------- Auto-Ramp / disjuntor
+    async def update_mailbox_controls(self, mailbox_id: int, **kwargs) -> Optional[dict]:
+        return await anyio.to_thread.run_sync(
+            lambda: self._service.update_mailbox_controls(mailbox_id, **kwargs)
+        )
+
+    async def pause_mailbox(self, mailbox_id: int, reason: str) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.pause_mailbox, mailbox_id, reason
+        )
+
+    async def resume_mailbox(self, mailbox_id: int) -> bool:
+        return await anyio.to_thread.run_sync(self._service.resume_mailbox, mailbox_id)
+
+    async def mark_mailbox_auth_error(self, mailbox_id: int) -> None:
+        return await anyio.to_thread.run_sync(
+            self._service.mark_mailbox_auth_error, mailbox_id
+        )
+
+    async def record_mailbox_bounce(self, mailbox_id: int, email: str, kind: str) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.record_mailbox_bounce, mailbox_id, email, kind
+        )
+
+    async def mailbox_metrics(self, mailbox_id: int, days: int = 30) -> dict:
+        return await anyio.to_thread.run_sync(
+            self._service.mailbox_metrics, mailbox_id, days
+        )
+
+    async def last_bounce_events(self, mailbox_id: int, limit: int = 2) -> List[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.last_bounce_events, mailbox_id, limit
+        )
+
+    async def apply_auto_ramp_step(
+        self, mailbox_id: int, from_cap: int, to_cap: int, stage: int, reason: str, metrics: dict
+    ) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.apply_auto_ramp_step,
+            mailbox_id, from_cap, to_cap, stage, reason, metrics,
+        )
+
+    async def set_auto_ramp_hold(self, mailbox_id: int, reason: str) -> None:
+        return await anyio.to_thread.run_sync(
+            self._service.set_auto_ramp_hold, mailbox_id, reason
+        )
+
+    async def mailbox_ramp_log(self, mailbox_id: int, limit: int = 20) -> List[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.mailbox_ramp_log, mailbox_id, limit
+        )
+
     async def upsert_sending_mailbox(
         self,
         email: str,
@@ -11692,6 +12050,11 @@ class AsyncDatabaseService:
     async def outbound_mailbox_health(self, hours: int = 48) -> List[dict]:
         return await anyio.to_thread.run_sync(
             self._service.outbound_mailbox_health, hours
+        )
+
+    async def outbound_readiness(self, city: str, niche: Optional[str] = None) -> dict:
+        return await anyio.to_thread.run_sync(
+            self._service.outbound_readiness, city, niche
         )
 
     async def get_outbound_counter(self, city: str, day: str) -> dict:

@@ -1,0 +1,322 @@
+"""Auto-Ramp e disjuntor das caixas (Fase 1).
+
+Cobrem a escada, os gates (amostra/bounce/complaint/auth), o teto, a
+idempotência diária e a pausa automática por bounce/consecutivos/auth.
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import datetime, timedelta, timezone
+
+import pytest
+
+from backend.services import auto_ramp, mailbox_guard
+from backend.services.db import db_service, get_connection
+from backend.services.outbound_engine import effective_mailbox_cap
+
+NOW = datetime(2026, 11, 2, 12, 0, tzinfo=timezone.utc)
+DAY = 24 * 60 * 60
+
+
+@pytest.fixture()
+def clean_mailboxes():
+    conn = get_connection()
+    try:
+        for table in (
+            "mailbox_bounce_events",
+            "mailbox_ramp_log",
+            "sending_mailboxes",
+            "outbound_messages",
+        ):
+            conn.execute(f"DELETE FROM {table}")
+        conn.execute("DELETE FROM system_kv WHERE key=?", (auto_ramp.EVAL_KEY,))
+        conn.commit()
+    finally:
+        conn.close()
+    yield
+    conn = get_connection()
+    try:
+        for table in (
+            "mailbox_bounce_events",
+            "mailbox_ramp_log",
+            "sending_mailboxes",
+            "outbound_messages",
+        ):
+            conn.execute(f"DELETE FROM {table}")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _mailbox(**overrides) -> dict:
+    base = {
+        "email": "ramp@example.com",
+        "provider": "gmail",
+        "transport": "gmail_api",
+        "daily_cap": 10,
+        "enabled": 1,
+        "warmup_state": "warm",
+        "auth_ref": json.dumps({"refresh_token": "x"}),
+    }
+    base.update(
+        {
+            k: v
+            for k, v in overrides.items()
+            if k in ("email", "provider", "transport", "daily_cap", "enabled",
+                     "warmup_state", "auth_ref", "city")
+        }
+    )
+    row = db_service._service.upsert_sending_mailbox(**base)
+    assert row
+    sets = ["warmup_started_at=?"]
+    params: list = [(NOW - timedelta(days=20)).strftime("%Y-%m-%d %H:%M:%S")]
+    for key in (
+        "auto_ramp_enabled",
+        "auto_ramp_cap",
+        "auto_ramp_max",
+        "auto_ramp_stage",
+        "auto_ramp_last_step_at",
+        "paused_at",
+        "paused_reason",
+    ):
+        if key in overrides:
+            sets.append(f"{key}=?")
+            params.append(overrides[key])
+    params.append(row["id"])
+    conn = get_connection()
+    try:
+        conn.execute(
+            f"UPDATE sending_mailboxes SET {', '.join(sets)} WHERE id=?", params
+        )
+        conn.commit()
+        refreshed = conn.execute(
+            "SELECT * FROM sending_mailboxes WHERE id=?", (row["id"],)
+        ).fetchone()
+        return dict(refreshed)
+    finally:
+        conn.close()
+
+
+def _metrics(sent=250, bounces=0, complaints=0, auth=None) -> dict:
+    return {
+        "days": 30,
+        "sent": sent,
+        "bounces": bounces,
+        "complaints": complaints,
+        "bounce_rate": (bounces / sent) if sent else 0.0,
+        "complaint_rate": (complaints / sent) if sent else 0.0,
+        "last_auth_error_at": auth,
+    }
+
+
+# ------------------------------------------------------------------ escada
+
+
+def test_next_stage_cap_respeita_teto():
+    assert auto_ramp.next_stage_cap(1, 75) == 2
+    assert auto_ramp.next_stage_cap(20, 75) == 25
+    assert auto_ramp.next_stage_cap(25, 75) == 35
+    assert auto_ramp.next_stage_cap(50, 75) == 75
+    assert auto_ramp.next_stage_cap(75, 75) is None
+    assert auto_ramp.next_stage_cap(20, 12) is None
+
+
+def test_evaluate_hold_por_intervalo():
+    mailbox = {
+        "enabled": 1,
+        "auto_ramp_enabled": 1,
+        "auto_ramp_cap": 25,
+        "auto_ramp_max": 75,
+        "auto_ramp_last_step_at": (NOW - timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    assert auto_ramp.evaluate_mailbox(mailbox, _metrics(), NOW)["reason"] == "interval"
+
+
+def test_evaluate_hold_por_amostra_no_patamar_25():
+    mailbox = {
+        "enabled": 1,
+        "auto_ramp_enabled": 1,
+        "auto_ramp_cap": 25,
+        "auto_ramp_max": 75,
+        "auto_ramp_last_step_at": (NOW - timedelta(days=8)).strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    assert auto_ramp.evaluate_mailbox(mailbox, _metrics(sent=199), NOW)["reason"] == "sample"
+    decision = auto_ramp.evaluate_mailbox(mailbox, _metrics(sent=200), NOW)
+    assert decision["action"] == "step"
+    assert decision["to_cap"] == 35
+
+
+def test_evaluate_hold_bounce_complaint_auth():
+    base = {
+        "enabled": 1,
+        "auto_ramp_enabled": 1,
+        "auto_ramp_cap": 35,
+        "auto_ramp_max": 75,
+        "auto_ramp_last_step_at": (NOW - timedelta(days=8)).strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    assert auto_ramp.evaluate_mailbox(base, _metrics(bounces=3), NOW)["reason"] == "bounce"
+    assert auto_ramp.evaluate_mailbox(base, _metrics(complaints=1), NOW)["reason"] == "complaint"
+    assert (
+        auto_ramp.evaluate_mailbox(
+            base, _metrics(auth=(NOW - timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S")), NOW
+        )["reason"]
+        == "auth"
+    )
+
+
+def test_evaluate_warmup_sobe_com_amostra_pequena():
+    mailbox = {
+        "enabled": 1,
+        "auto_ramp_enabled": 1,
+        "auto_ramp_cap": 1,
+        "auto_ramp_max": 75,
+        "auto_ramp_last_step_at": (NOW - timedelta(days=8)).strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    assert auto_ramp.evaluate_mailbox(mailbox, _metrics(sent=7), NOW)["action"] == "step"
+    assert auto_ramp.evaluate_mailbox(mailbox, _metrics(sent=3), NOW)["reason"] == "sample"
+
+
+def test_evaluate_teto_maximo():
+    mailbox = {
+        "enabled": 1,
+        "auto_ramp_enabled": 1,
+        "auto_ramp_cap": 75,
+        "auto_ramp_max": 75,
+        "auto_ramp_last_step_at": (NOW - timedelta(days=15)).strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    assert auto_ramp.evaluate_mailbox(mailbox, _metrics(sent=2000), NOW)["reason"] == "max"
+
+
+# --------------------------------------------------------------- integracao
+
+
+@pytest.mark.asyncio
+async def test_evaluate_auto_ramp_aplica_e_audita(clean_mailboxes, monkeypatch):
+    mailbox = _mailbox(auto_ramp_enabled=1, auto_ramp_cap=25, auto_ramp_max=75)
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE sending_mailboxes SET auto_ramp_last_step_at=? WHERE id=?",
+            ((NOW - timedelta(days=8)).strftime("%Y-%m-%d %H:%M:%S"), mailbox["id"]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    async def fake_metrics(mailbox_id, days=30):
+        return _metrics(sent=250)
+
+    monkeypatch.setattr(
+        auto_ramp.db_service, "mailbox_metrics", fake_metrics, raising=False
+    )
+    result = await auto_ramp.evaluate_auto_ramp(now=NOW, force=True)
+    assert result["steps"] == 1
+
+    row = db_service._service.list_sending_mailboxes()[0]
+    assert row["auto_ramp_cap"] == 35
+    assert row["auto_ramp_stage"] == 1
+    log = db_service._service.mailbox_ramp_log(mailbox["id"])
+    assert log and log[0]["to_cap"] == 35
+
+
+@pytest.mark.asyncio
+async def test_evaluate_auto_ramp_uma_vez_por_dia(clean_mailboxes, monkeypatch):
+    _mailbox(auto_ramp_enabled=1, auto_ramp_cap=25, auto_ramp_max=75)
+
+    async def fake_metrics(mailbox_id, days=30):
+        return _metrics(sent=250)
+
+    monkeypatch.setattr(
+        auto_ramp.db_service, "mailbox_metrics", fake_metrics, raising=False
+    )
+    assert (await auto_ramp.evaluate_auto_ramp(now=NOW))["status"] == "ok"
+    second = await auto_ramp.evaluate_auto_ramp(now=NOW)
+    assert second["status"] == "skipped"
+
+
+# ------------------------------------------------------------- effective cap
+
+
+def test_effective_cap_auto_ramp():
+    config = {"per_mailbox_daily_cap": "25", "warmup_enabled": "1"}
+    mb = {"auto_ramp_enabled": 1, "auto_ramp_cap": 35, "auto_ramp_max": 75}
+    assert effective_mailbox_cap(mb, config, NOW) == 25  # teto global manda
+    config2 = {"per_mailbox_daily_cap": "100", "warmup_enabled": "1"}
+    assert effective_mailbox_cap(mb, config2, NOW) == 35
+    mb2 = {"auto_ramp_enabled": 1, "auto_ramp_cap": 80, "auto_ramp_max": 75}
+    assert effective_mailbox_cap(mb2, config2, NOW) == 75
+
+
+# ------------------------------------------------------------------ disjuntor
+
+
+def test_looks_like_auth_error():
+    assert mailbox_guard.looks_like_auth_error("invalid_grant", None)
+    assert mailbox_guard.looks_like_auth_error("HTTP 403", 403)
+    assert not mailbox_guard.looks_like_auth_error("HTTP 500", 500)
+
+
+@pytest.mark.asyncio
+async def test_bounce_rate_pausa_caixa(clean_mailboxes, monkeypatch):
+    mailbox = _mailbox()
+    conn = get_connection()
+    try:
+        for _ in range(3):
+            conn.execute(
+                "INSERT INTO mailbox_bounce_events (mailbox_id, email, kind) "
+                "VALUES (?, 'x@example.com', 'bounce')",
+                (mailbox["id"],),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    async def fake_metrics(mailbox_id, days=30):
+        return _metrics(sent=100, bounces=3)
+
+    monkeypatch.setattr(
+        mailbox_guard.db_service, "mailbox_metrics", fake_metrics, raising=False
+    )
+    result = await mailbox_guard.check_mailboxes(NOW)
+    assert result["paused"] == 1
+    row = db_service._service.list_sending_mailboxes()[0]
+    assert row["enabled"] == 0
+    assert row["paused_reason"] == "bounce_rate"
+
+
+@pytest.mark.asyncio
+async def test_dois_bounces_consecutivos_pausam(clean_mailboxes, monkeypatch):
+    mailbox = _mailbox()
+    conn = get_connection()
+    try:
+        for _ in range(2):
+            conn.execute(
+                "INSERT INTO mailbox_bounce_events (mailbox_id, email, kind) "
+                "VALUES (?, 'x@example.com', 'bounce')",
+                (mailbox["id"],),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    async def fake_metrics(mailbox_id, days=30):
+        return _metrics(sent=3, bounces=2)
+
+    monkeypatch.setattr(
+        mailbox_guard.db_service, "mailbox_metrics", fake_metrics, raising=False
+    )
+    await mailbox_guard.check_mailboxes(NOW)
+    row = db_service._service.list_sending_mailboxes()[0]
+    assert row["enabled"] == 0
+    assert row["paused_reason"] == "consecutive_bounces"
+
+
+@pytest.mark.asyncio
+async def test_auth_error_pausa_e_marca(clean_mailboxes):
+    mailbox = _mailbox()
+    await mailbox_guard.handle_auth_error(mailbox, "HTTP 401 invalid_grant")
+    row = db_service._service.list_sending_mailboxes()[0]
+    assert row["enabled"] == 0
+    assert row["paused_reason"] == "auth_failure"
+    assert row["last_auth_error_at"]

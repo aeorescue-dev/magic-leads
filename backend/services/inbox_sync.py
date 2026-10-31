@@ -191,7 +191,7 @@ def _mark_replied(contact_id: int) -> None:
         con.close()
 
 
-def _suppress(email: str, reason: str) -> None:
+def _suppress(email: str, reason: str, mailbox_id: Optional[int] = None) -> None:
     con = get_connection()
     try:
         con.execute(
@@ -207,6 +207,13 @@ def _suppress(email: str, reason: str) -> None:
             "WHERE lower(to_email)=? AND status IN ('queued','sending')",
             (reason, email.lower()),
         )
+        if mailbox_id is not None:
+            # Base do disjuntor: bounce/complaint por caixa (30 dias).
+            con.execute(
+                "INSERT INTO mailbox_bounce_events (mailbox_id, email, kind) "
+                "VALUES (?, ?, ?)",
+                (int(mailbox_id), email.lower(), reason),
+            )
         con.commit()
     finally:
         con.close()
@@ -296,7 +303,7 @@ async def sync_inbox(days: int = 2, max_messages: int = 40) -> dict:
                     recipients = detail or []
                     for addr in recipients:
                         if addr in by_email:
-                            _suppress(addr, kind)
+                            _suppress(addr, kind, mb["id"])
                             stats["bounces" if kind == "bounce" else "complaints"] += 1
 
     _kv_set(KV_LAST_SYNC, "ok")

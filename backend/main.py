@@ -88,6 +88,7 @@ from .scrapers.socrata_311 import socrata_scraper
 from .scrapers.socrata_discovery import socrata_discovery
 from .services import (
     alert_planner,
+    auto_ramp,
     control_tower,
     enrichment_queue,
     freshness,
@@ -123,7 +124,7 @@ from .services.lead_rules import (
     is_corporate as is_corporate_lead,
 )
 from .services.metrics import push_metrics, searchbug_metrics
-from .services.outbound_engine import outbound_engine
+from .services.outbound_engine import effective_mailbox_cap, outbound_engine
 from .services.privacy import sanitize_lead, scrub
 from .services.push_click import verify_click
 from .services.push_service import push_service
@@ -2124,6 +2125,16 @@ class OutboundConfigUpdateRequest(BaseModel):
     city: str | None = None
 
 
+class MailboxControlsRequest(BaseModel):
+    daily_cap: int | None = None
+    auto_ramp_enabled: bool | None = None
+    auto_ramp_max: int | None = None
+
+
+class MailboxPauseRequest(BaseModel):
+    reason: str | None = None
+
+
 class OutboundImportItem(BaseModel):
     email: str
     company_name: str
@@ -2295,6 +2306,97 @@ async def admin_outbound_mailbox_health(
     return {
         "hours": window,
         "mailboxes": await db_service.outbound_mailbox_health(window),
+    }
+
+
+@app.get("/api/admin/outbound/readiness")
+async def admin_outbound_readiness(
+    city: str, niche: str | None = None, _admin: dict = Depends(_require_admin_user)
+):
+    """Inventário pronto (valid + nicho confirmado + sem mensagem ativa)."""
+    data = await db_service.outbound_readiness(city, niche)
+    status = await outbound_engine.status()
+    data["capacity_today"] = status.get("mailbox_remaining_today", 0)
+    data["queue_blocker"] = status.get("queue_blocker")
+    return data
+
+
+@app.post("/api/admin/outbound/mailboxes/{mailbox_id}/controls")
+async def admin_mailbox_controls(
+    mailbox_id: int,
+    payload: MailboxControlsRequest,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Cap manual, Auto-Ramp on/off e teto da rampa (por caixa)."""
+    rows = await db_service.list_sending_mailboxes(enabled_only=False)
+    mailbox = next((m for m in rows if int(m["id"]) == int(mailbox_id)), None)
+    if not mailbox:
+        raise HTTPException(status_code=404, detail="Caixa não encontrada")
+
+    kwargs: dict = {}
+    if payload.daily_cap is not None:
+        kwargs["daily_cap"] = max(0, min(int(payload.daily_cap), 100))
+    if payload.auto_ramp_max is not None:
+        kwargs["auto_ramp_max"] = max(1, min(int(payload.auto_ramp_max), 100))
+    if payload.auto_ramp_enabled is not None:
+        kwargs["auto_ramp_enabled"] = 1 if payload.auto_ramp_enabled else 0
+        # Ao ligar a rampa, parte do cap efetivo atual (nunca salta para 25).
+        if payload.auto_ramp_enabled and not int(mailbox.get("auto_ramp_enabled") or 0):
+            config = await db_service.get_outbound_config(mailbox.get("city") or None)
+            current = effective_mailbox_cap(
+                mailbox, config, datetime.now(timezone.utc)
+            )
+            ceiling = int(
+                kwargs.get("auto_ramp_max")
+                or mailbox.get("auto_ramp_max")
+                or 75
+            )
+            kwargs["auto_ramp_cap"] = max(1, min(int(current or 1), ceiling))
+
+    if not kwargs:
+        raise HTTPException(status_code=400, detail="Nada para atualizar")
+    updated = await db_service.update_mailbox_controls(mailbox_id, **kwargs)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Caixa não encontrada")
+    logger.info(
+        "[OUTBOUND] Caixa %s: controls=%s pelo admin=%s",
+        mailbox.get("email"),
+        kwargs,
+        (_admin or {}).get("id"),
+    )
+    return {"status": "ok", "mailbox": updated}
+
+
+@app.post("/api/admin/outbound/mailboxes/{mailbox_id}/pause")
+async def admin_mailbox_pause(
+    mailbox_id: int,
+    payload: MailboxPauseRequest | None = None,
+    _admin: dict = Depends(_require_admin_user),
+):
+    reason = ((payload.reason if payload else "") or "manual").strip()[:120]
+    if not await db_service.pause_mailbox(mailbox_id, reason):
+        raise HTTPException(status_code=404, detail="Caixa não encontrada")
+    return {"status": "ok", "paused_reason": reason}
+
+
+@app.post("/api/admin/outbound/mailboxes/{mailbox_id}/resume")
+async def admin_mailbox_resume(
+    mailbox_id: int, _admin: dict = Depends(_require_admin_user)
+):
+    if not await db_service.resume_mailbox(mailbox_id):
+        raise HTTPException(status_code=404, detail="Caixa não encontrada")
+    return {"status": "ok"}
+
+
+@app.get("/api/admin/outbound/mailboxes/{mailbox_id}/ramp-log")
+async def admin_mailbox_ramp_log(
+    mailbox_id: int,
+    limit: int = 20,
+    _admin: dict = Depends(_require_admin_user),
+):
+    return {
+        "mailbox_id": mailbox_id,
+        "entries": await db_service.mailbox_ramp_log(mailbox_id, limit),
     }
 
 
@@ -4157,6 +4259,11 @@ async def _outbound_worker_loop():
                 logger.info("[OUTBOUND] Worker tick: %s", result)
             elif result.get("status") not in ("idle", "disabled", "quiet_hours"):
                 logger.debug("[OUTBOUND] Worker tick: %s", result)
+            # Auto-Ramp: avalia no maximo 1x/dia (guard em system_kv).
+            try:
+                await auto_ramp.evaluate_auto_ramp()
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[AUTO-RAMP] avaliacao falhou: %s", e)
         except asyncio.CancelledError:
             raise
         except Exception as e:

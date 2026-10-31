@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 from ..config import settings
 from ..utils.logger import logger
-from . import niche_classifier, outbound_templates
+from . import mailbox_guard, niche_classifier, outbound_templates
 from .db import (
     SENDABLE_EMAIL_STATUSES,
     SERVED_CITIES,
@@ -184,6 +184,15 @@ def effective_mailbox_cap(mailbox: dict, config: dict, now: datetime) -> int:
     """
     mailbox_cap = _int(mailbox.get("daily_cap"), _int(config.get("per_mailbox_daily_cap"), 25))
     config_cap = _int(config.get("per_mailbox_daily_cap"), 25)
+    # Auto-Ramp: o cap corrente da rampa manda, limitado pelo teto escolhido
+    # no Admin (nunca acima de 100) e pelo teto global por caixa.
+    if int(mailbox.get("auto_ramp_enabled") or 0):
+        ramp_cap = max(0, _int(mailbox.get("auto_ramp_cap"), 1))
+        ramp_max = max(1, min(_int(mailbox.get("auto_ramp_max"), 75), 100))
+        if config_cap > 0:
+            ramp_max = min(ramp_max, config_cap)
+        return max(0, min(ramp_cap, ramp_max))
+
     ceiling = max(0, min(mailbox_cap, config_cap)) if config_cap > 0 else max(0, mailbox_cap)
 
     if config.get("warmup_enabled") != "1":
@@ -701,6 +710,9 @@ class OutboundEngine:
         limit = limit or _int(
             getattr(settings, "OUTBOUND_WORKER_CHUNK", 10), 10
         )
+        # Disjuntor: pausa caixas com bounce/complaint acima do limite antes de
+        # construir o snapshot de capacidade (as pausadas saem do pool).
+        await mailbox_guard.check_mailboxes(now)
         # Sequencia (Prioridade D): agenda o proximo passo antes de drenar a
         # fila, para que o passo 2 entre na MESMA janela de envio.
         await self.schedule_next_steps(now)
@@ -858,6 +870,10 @@ class OutboundEngine:
                     "[OUTBOUND] Envio falhou com exceção (msg %s): %s",
                     message["id"], e,
                 )
+                if mailbox_guard.looks_like_auth_error(str(e)):
+                    await mailbox_guard.handle_auth_error(mailbox, str(e))
+                    mailbox["remaining_today"] = 0
+                    mailbox["enabled"] = 0
                 await db_service.update_outbound_message(
                     message["id"],
                     status="failed",
@@ -907,6 +923,12 @@ class OutboundEngine:
                     mailbox.get("email"),
                     result.error,
                 )
+                if mailbox_guard.looks_like_auth_error(
+                    result.error, getattr(result, "http_status", None)
+                ):
+                    await mailbox_guard.handle_auth_error(mailbox, result.error)
+                    mailbox["remaining_today"] = 0
+                    mailbox["enabled"] = 0
 
         for batch_id in touched_batches:
             remaining = await db_service.count_outbound_messages(
@@ -1002,6 +1024,14 @@ class OutboundEngine:
                     "warmup_state": row["warmup_state"],
                     "warmup_days": row["warmup_days"],
                     "last_send_at": row.get("last_send_at"),
+                    "paused_at": row.get("paused_at"),
+                    "paused_reason": row.get("paused_reason"),
+                    "auto_ramp_enabled": _int(row.get("auto_ramp_enabled"), 0),
+                    "auto_ramp_cap": _int(row.get("auto_ramp_cap"), 1),
+                    "auto_ramp_max": _int(row.get("auto_ramp_max"), 75),
+                    "auto_ramp_stage": _int(row.get("auto_ramp_stage"), 0),
+                    "auto_ramp_last_step_at": row.get("auto_ramp_last_step_at"),
+                    "auto_ramp_hold_reason": row.get("auto_ramp_hold_reason"),
                     "sent_48h": _int(diag.get("sent"), 0),
                     "failed_48h": _int(diag.get("failed"), 0),
                     "skipped_48h": _int(diag.get("skipped"), 0),
