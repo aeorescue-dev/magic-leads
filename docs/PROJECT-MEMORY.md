@@ -973,6 +973,35 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   general contractors.
 - Testes: identidade, diretório e domínio partilhado; suite **1002 pytest**.
 
+### Fase 4 — Copy v2, rampa acelerada e Brave (2026-11-01)
+
+- **Copy v2** (aprovada pelo owner): exclusividade real ("one contractor at a
+  time - first come, first served"), "property details" em vez de homeowner,
+  saudação com o nome da empresa (`Hi Kelso-Burnett Co. team,`), assinatura
+  Pamela, morada postal `110-33 64th Rd, Forest Hills, NY 11375` e
+  `Unsubscribe: <link assinado>` + `reply "unsubscribe"`.
+- **Passo 2**: `{count}` dinâmico (fim do "300" fixo), categoria derivada do
+  nicho (nunca "construction" para um canalizador) e "one closed job covers
+  the week".
+- **Opt-out**: token HMAC `base64url(email).sig`, `GET/POST /unsubscribe`,
+  `List-Unsubscribe` + `List-Unsubscribe-Post` no envio. Sem segredo o link
+  cai para a página genérica (fail-closed) e o opt-out por resposta mantém-se.
+- **Inventário**: `import_b2b` deixou de contar como "oportunidade" no
+  `{count}` e na mistura de categorias — é destinatário, nunca projeto.
+- **Auto-Ramp**: `STEP_INTERVAL_DAYS` (2 dias até 8, 3 até 25, 4–7 acima) em
+  vez de 7 dias fixos; gates de amostra/bounce/complaint/auth mantidos.
+  Ligado nas duas caixas (max 75, `per_mailbox_daily_cap=75`); primeira
+  avaliação subiu 1 → 2/dia em ambas.
+- **Brave Search**: `brave_search.py` com candidatos → verificação
+  DNS/HTTP + `identity_ok` + cidade, cache de 30 dias (negativo incluído) e
+  orçamento diário em `system_kv` (450 queries). Quota de enriquecimento
+  750/cidade/dia (default do scheduler). Inerte até `BRAVE_SEARCH_API_KEY`.
+- **Admin**: `/api/admin/outbound/capacity` + cartão "Capacidade vs
+  inventário" (prontos agora, produzidos/dia, envio/dia, cobertura, por
+  cidade). Primeira leitura: 22 prontos, 3,7/dia produzidos, 4/dia de
+  capacidade, 5,5 dias de cobertura.
+- **Testes**: 1017 pytest (1 skip), Ruff limpo, tsc limpo, ESLint 0 erros.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
