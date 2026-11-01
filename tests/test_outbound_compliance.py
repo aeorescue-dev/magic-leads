@@ -70,6 +70,17 @@ def test_copy_v2_tem_rodape_legal_e_exclusividade_real():
     assert "never shared" not in body.lower()
 
 
+def test_friendly_company_nao_capitaliza_conjuncoes():
+    from backend.services.outbound_templates import _friendly_company
+
+    assert _friendly_company("KELSO-BURNETT CO.") == "Kelso-Burnett Co."
+    assert (
+        _friendly_company("123 REMODELING AND ROOFING LLC")
+        == "123 Remodeling and Roofing LLC"
+    )
+    assert _friendly_company("Acme Roofing") == "Acme Roofing"
+
+
 def test_singular_quando_ha_um_projeto():
     """`copy_count` tem piso 1: a frase nao pode dizer '1 projects'."""
     ctx = ot.build_context(

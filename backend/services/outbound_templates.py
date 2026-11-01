@@ -494,10 +494,14 @@ def _friendly_company(name: str) -> str:
     if not letters or not all(c.isupper() for c in letters):
         return text
     keep = {"LLC", "INC", "CORP", "LTD", "LP", "LLP", "PLLC", "PC", "NYC"}
+    small = {"And", "Of", "The", "For"}
     parts = []
     for word in text.split():
         core = re.sub(r"[^A-Za-z]", "", word).upper()
         parts.append(word if core in keep else word.title())
+    for idx in range(1, len(parts)):
+        if parts[idx] in small:
+            parts[idx] = parts[idx].lower()
     return " ".join(parts)
 
 
