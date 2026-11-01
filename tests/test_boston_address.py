@@ -14,6 +14,7 @@ from backend.services.boston_address import (
     parcel_filters,
     parcel_has_unit,
     parcel_match_key,
+    parcel_number_variants,
 )
 from backend.services.enrichment import _number_overlap, normalize_street, parse_address
 
@@ -151,3 +152,18 @@ def test_parcel_has_unit(raw, expected):
 )
 def test_number_overlap(num, row_num, expected):
     assert _number_overlap(num, row_num) is expected
+
+
+@pytest.mark.parametrize(
+    "num, expected",
+    [
+        ("355-357", ["355", "356", "357"]),
+        ("980 970", [str(n) for n in range(970, 981)]),
+        ("132", ["132"]),
+        ("132A", ["132A"]),
+        ("1-100", ["1-100"]),
+        ("", []),
+    ],
+)
+def test_parcel_number_variants(num, expected):
+    assert parcel_number_variants(num) == expected

@@ -10,7 +10,12 @@ import sqlite3
 import time
 
 import httpx
-from backend.services.boston_address import clean_boston_location, parcel_match_key
+from backend.services.boston_address import (
+    clean_boston_location,
+    parcel_has_unit,
+    parcel_match_key,
+    parcel_number_variants,
+)
 from backend.services.db import db_service, get_connection
 from backend.services.enrichment import normalize_street
 
@@ -64,7 +69,7 @@ def fetch_boston_owners() -> dict:
     (o contentor de produção tem memória limitada e o script corre ao lado da
     app).
     """
-    index: dict[tuple[str, str], list[tuple[str, str, str]]] = {}
+    index: dict[tuple[str, str], list[tuple[str, str, str, bool]]] = {}
     offset = 0
     total = None
     seen = 0
@@ -94,16 +99,15 @@ def fetch_boston_owners() -> dict:
                 if not parsed:
                     continue
                 num, street = parsed
-                key = (str(num).strip(), normalize_street(street))
-                index.setdefault(key, []).append(
-                    (
-                        owner,
-                        _zip5(rec.get("ZIPCODE")),
-                        " ".join(
-                            str(rec.get("OWNER_MAIL_ADDRESS") or "").split()
-                        ).strip(),
+                street_norm = normalize_street(street)
+                has_unit = parcel_has_unit(rec.get("full_address"))
+                mailing = " ".join(
+                    str(rec.get("OWNER_MAIL_ADDRESS") or "").split()
+                ).strip()
+                for variant in parcel_number_variants(num):
+                    index.setdefault((variant, street_norm), []).append(
+                        (owner, _zip5(rec.get("ZIPCODE")), mailing, has_unit)
                     )
-                )
             seen += len(chunk)
             offset += PAGE
             print(f"[BOSTON] dataset {seen}/{total} (index {len(index)})", flush=True)
@@ -130,20 +134,28 @@ def apply_owners(conn, index: dict) -> dict:
         if not parsed:
             continue
         num, street = parsed
-        key = (str(num).strip(), normalize_street(street))
-        candidates = index.get(key) or []
+        street_norm = normalize_street(street)
+        candidates: list[tuple] = []
+        for variant in parcel_number_variants(num) or [str(num)]:
+            candidates.extend(index.get((variant, street_norm), []))
         if not candidates:
             continue
         matched += 1
         zc = _zip5(clean_zip or row["zip_code"])
         chosen = None
-        if zc:
+        # 1) dono do edificio (sem unidade) com o ZIP certo
+        chosen = next(
+            (c for c in candidates if not c[3] and (not zc or c[1] == zc)), None
+        )
+        # 2) qualquer linha com o ZIP certo
+        if chosen is None and zc:
             chosen = next((c for c in candidates if c[1] == zc), None)
-        if chosen is None and len(candidates) == 1:
+        # 3) um unico proprietario possivel para esta chave
+        if chosen is None and len({(c[0], c[1]) for c in candidates}) == 1:
             chosen = candidates[0]
         if chosen is None:
             continue
-        owner, _zc, mailing = chosen
+        owner, _zc, mailing, _has_unit = chosen
         conn.execute(
             "UPDATE leads SET owner_name=?, "
             "mailing_address=COALESCE(NULLIF(mailing_address,''), ?), "

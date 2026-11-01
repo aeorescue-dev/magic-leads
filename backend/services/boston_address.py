@@ -131,6 +131,27 @@ def parcel_match_key(full_address: Optional[str]) -> Optional[tuple[str, str]]:
     return num, street
 
 
+def parcel_number_variants(num: Optional[str]) -> list[str]:
+    """Números que representam o mesmo imóvel ('355-357' -> 355, 356, 357).
+
+    O parcel dataset de Boston guarda intervalos em formatos diferentes do
+    311 ("980 970" vs "970"; "107 -109" vs "107-109"). Indexar cada número
+    do intervalo evita depender de um único formato.
+    """
+    text = str(num or "").strip()
+    if not text:
+        return []
+    values = [int(x) for x in re.findall(r"\d+", text)]
+    if not values:
+        return [text]
+    if len(values) == 1:
+        return [text]
+    low, high = min(values), max(values)
+    if high - low > 50:
+        return [text]
+    return [str(n) for n in range(low, high + 1)]
+
+
 def parcel_has_unit(full_address: Optional[str]) -> bool:
     """True se a morada do parcel traz unidade/andar depois do sufixo da via."""
     text = " ".join(str(full_address or "").upper().split())
