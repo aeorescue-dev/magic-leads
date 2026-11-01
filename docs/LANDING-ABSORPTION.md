@@ -47,14 +47,14 @@ canal de conversão, não a resposta ao e-mail.
 | Nomeia Angi/HomeAdvisor | Não nomeia | Manter sem nomes no e-mail (entregabilidade) |
 | "Guaranteed or free" / crédito protegido | ausente | Acrescentar a prova de risco |
 
-## Problemas vistos na página em produção
+## Problemas vistos na página em produção (corrigidos na Fase 17)
 
-1. **Painel de amostra em português na versão EN** ("URGENTE", "Telhado &
-   Cobertura", "Infiltração grave…"). São dados hardcoded em PT no
-   `page.tsx`. Para um empreiteiro americano, isso destrói credibilidade.
-2. **Hero mostra "0 jobs in the bank right now"** no primeiro render (o
-   componente é client-side e arranca com `EMPTY_PUBLIC_METRICS`). A API
-   devolve 106.782; é um flash de zeros até a hidratação.
+1. ~~**Painel de amostra em português na versão EN**~~ (“URGENTE”, “Telhado &
+   Cobertura”, “Infiltração grave…”). Eram dados hardcoded em PT no
+   `page.tsx`. Agora vêm de `landing.sampleLeads` + `landing.badge.*` em EN/PT/ES.
+2. ~~**Hero mostra “0 jobs in the bank right now”**~~ no primeiro render (o
+   componente arrancava com `EMPTY_PUBLIC_METRICS`). Agora o estado começa a
+   `null`: “—” e `landing.heroLoading` até a API responder.
 3. Respostas do FAQ só aparecem ao clicar (comportamento normal, mas o texto
    inicial fica vazio no HTML).
 

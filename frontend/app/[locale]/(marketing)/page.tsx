@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/lib/i18n";
-import { fetchPublicMetrics, EMPTY_PUBLIC_METRICS } from "@/lib/api-client";
+import { fetchPublicMetrics } from "@/lib/api-client";
 import type { PublicMetrics } from "@/lib/api-client";
 import { FoldWave, useLandingShell } from "@/components/landing/LandingShell";
 import { Building2, Phone, ShieldCheck } from "lucide-react";
@@ -10,48 +10,61 @@ import { Building2, Phone, ShieldCheck } from "lucide-react";
 // ------------------------------------------------------------------
 // Tipos e dados ilustrativos do "painel amostra"
 // (endereços mascarados, telefones fictícios da central 555, nomes truncados)
+//
+// Só o que muda de idioma (ofício, gravidade e descrição) vem do i18n
+// (`landing.sampleLeads`); rua, bairro, nome e telefone são iguais em EN/PT/ES.
 // ------------------------------------------------------------------
 type City = "New York" | "Boston" | "Dallas" | "Chicago";
 type TradeKey = "Telhado" | "Encanamento" | "Estrutura" | "Pintura" | "Elétrica" | "Aquecimento";
 type Channel = "whatsapp" | "sms" | "email";
+type BadgeKey = "urgent" | "high" | "medium";
 
 const CITIES: City[] = ["New York", "Boston", "Dallas", "Chicago"];
 const TRADE_KEYS: TradeKey[] = ["Telhado", "Encanamento", "Estrutura", "Pintura", "Elétrica", "Aquecimento"];
 const CHANNELS: Channel[] = ["whatsapp", "sms", "email"];
 
-interface SampleLead {
+const BADGE_STYLE: Record<BadgeKey, string> = {
+  urgent: "bg-[#f43f5e]/15 text-[#ff7a8a]",
+  high: "bg-[#f59e0b]/15 text-[#f59e0b]",
+  medium: "bg-white/10 text-[#9aa7ba]",
+};
+
+interface SampleLeadBase {
   id: string;
-  category: string;
-  badge: "URGENTE" | "ALTA" | "MÉDIA";
-  addressMasked: string;
-  addressFull: string;
+  address: string;
   neighborhood: string;
-  description: string;
   timeAgo: string;
   ownerName: string;
   ownerPhone: string;
 }
 
-const SAMPLE_LEADS: Record<City, SampleLead[]> = {
+interface SampleLead extends SampleLeadBase {
+  category: string;
+  badge: BadgeKey;
+  badgeLabel: string;
+  description: string;
+}
+
+const SAMPLE_LEADS_BASE: Record<City, SampleLeadBase[]> = {
   "New York": [
-    { id: "ny-1", category: "Telhado & Cobertura", badge: "URGENTE", addressMasked: "•••• Flatbush Ave", addressFull: "•••• Flatbush Ave", neighborhood: "Flatbush, Brooklyn", description: "Infiltração grave no teto após chuva intensa. Proprietário busca vistoria imediata.", timeAgo: "3 min", ownerName: "Maria S.", ownerPhone: "(347) 555-0192" },
-    { id: "ny-2", category: "Encanamento & Hidráulica", badge: "ALTA", addressMasked: "•••• 30th Ave", addressFull: "•••• 30th Ave", neighborhood: "Astoria, Queens", description: "Vazamento em tubulação principal e troca de aquecedor de água.", timeAgo: "14 min", ownerName: "Carlos M.", ownerPhone: "(917) 555-0143" },
-    { id: "ny-3", category: "Estrutura & Fundação", badge: "ALTA", addressMasked: "•••• 5th Ave", addressFull: "•••• 5th Ave", neighborhood: "Park Slope, Brooklyn", description: "Trinca estrutural visível na parede lateral. Requer laudo e reforço.", timeAgo: "28 min", ownerName: "Roberto L.", ownerPhone: "(718) 555-0188" },
+    { id: "ny-1", address: "•••• Flatbush Ave", neighborhood: "Flatbush, Brooklyn", timeAgo: "3 min", ownerName: "Maria S.", ownerPhone: "(347) 555-0192" },
+    { id: "ny-2", address: "•••• 30th Ave", neighborhood: "Astoria, Queens", timeAgo: "14 min", ownerName: "Carlos M.", ownerPhone: "(917) 555-0143" },
+    { id: "ny-3", address: "•••• 5th Ave", neighborhood: "Park Slope, Brooklyn", timeAgo: "28 min", ownerName: "Roberto L.", ownerPhone: "(718) 555-0188" },
   ],
   Boston: [
-    { id: "bos-1", category: "Pintura & Fachada", badge: "ALTA", addressMasked: "•••• Centre St", addressFull: "•••• Centre St", neighborhood: "Jamaica Plain", description: "Descamação e infiltração na fachada. Deseja impermeabilização e pintura.", timeAgo: "5 min", ownerName: "Fernanda C.", ownerPhone: "(617) 555-0129" },
-    { id: "bos-2", category: "Telhado & Cobertura", badge: "URGENTE", addressMasked: "•••• Meridian St", addressFull: "•••• Meridian St", neighborhood: "East Boston", description: "Dano em telhado plano de membrana. Goteira no último andar.", timeAgo: "19 min", ownerName: "David M.", ownerPhone: "(857) 555-0174" },
-    { id: "bos-3", category: "Elétrica & Painel", badge: "MÉDIA", addressMasked: "•••• Dorchester Ave", addressFull: "•••• Dorchester Ave", neighborhood: "Dorchester", description: "Painel antigo de 100A desarmando. Necessária atualização para 200A.", timeAgo: "42 min", ownerName: "Juliana D.", ownerPhone: "(617) 555-0199" },
+    { id: "bos-1", address: "•••• Centre St", neighborhood: "Jamaica Plain", timeAgo: "5 min", ownerName: "Fernanda C.", ownerPhone: "(617) 555-0129" },
+    { id: "bos-2", address: "•••• Meridian St", neighborhood: "East Boston", timeAgo: "19 min", ownerName: "David M.", ownerPhone: "(857) 555-0174" },
+    { id: "bos-3", address: "•••• Dorchester Ave", neighborhood: "Dorchester", timeAgo: "42 min", ownerName: "Juliana D.", ownerPhone: "(617) 555-0199" },
   ],
   Dallas: [
-    { id: "dal-1", category: "Estrutura & Fundação", badge: "URGENTE", addressMasked: "•••• Jefferson Blvd", addressFull: "•••• Jefferson Blvd", neighborhood: "Oak Cliff", description: "Afundamento no piso e desnível de porta. Necessita nivelamento de fundação.", timeAgo: "8 min", ownerName: "Lucas A.", ownerPhone: "(214) 555-0112" },
-    { id: "dal-2", category: "Pintura & Exterior", badge: "MÉDIA", addressMasked: "•••• Gaston Ave", addressFull: "•••• Gaston Ave", neighborhood: "Lakewood", description: "Pintura externa completa de sobrado residencial de 2 pisos.", timeAgo: "25 min", ownerName: "Patricia R.", ownerPhone: "(469) 555-0165" },
-    { id: "dal-3", category: "Encanamento & Esgoto", badge: "ALTA", addressMasked: "•••• Preston Rd", addressFull: "•••• Preston Rd", neighborhood: "Preston Hollow", description: "Retorno de água na linha principal subterrânea. Necessita substituição.", timeAgo: "51 min", ownerName: "Ricardo S.", ownerPhone: "(972) 555-0131" },
+    { id: "dal-1", address: "•••• Jefferson Blvd", neighborhood: "Oak Cliff", timeAgo: "8 min", ownerName: "Lucas A.", ownerPhone: "(214) 555-0112" },
+    { id: "dal-2", address: "•••• Gaston Ave", neighborhood: "Lakewood", timeAgo: "25 min", ownerName: "Patricia R.", ownerPhone: "(469) 555-0165" },
+    { id: "dal-3", address: "•••• Preston Rd", neighborhood: "Preston Hollow", timeAgo: "51 min", ownerName: "Ricardo S.", ownerPhone: "(972) 555-0131" },
   ],
   Chicago: [
-    { id: "chi-1", category: "Aquecimento & Caldeira", badge: "URGENTE", addressMasked: "•••• Milwaukee Ave", addressFull: "•••• Milwaukee Ave", neighborhood: "Logan Square", description: "Caldeira parou de aquecer os radiadores. Família precisa de conserto urgente.", timeAgo: "4 min", ownerName: "Eduardo F.", ownerPhone: "(312) 555-0184" },
-    { id: "chi-2", category: "Telhado & Calha", badge: "ALTA", addressMasked: "•••• 18th St", addressFull: "•••• 18th St", neighborhood: "Pilsen", description: "Telhas arrancadas por vento forte e calha entupida transbordando.", timeAgo: "22 min", ownerName: "Sandra M.", ownerPhone: "(773) 555-0156" },
-    { id: "chi-3", category: "Elétrica & Fiação", badge: "MÉDIA", addressMasked: "•••• 53rd St", addressFull: "•••• 53rd St", neighborhood: "Hyde Park", description: "Instalação de tomadas dedicadas para ar-condicionado e revisão da fiação.", timeAgo: "39 min", ownerName: "Gabriel R.", ownerPhone: "(872) 555-0120" },
+    { id: "chi-1", address: "•••• Milwaukee Ave", neighborhood: "Logan Square", timeAgo: "4 min", ownerName: "Eduardo F.", ownerPhone: "(312) 555-0184" },
+    { id: "chi-2", address: "•••• 18th St", neighborhood: "Pilsen", timeAgo: "22 min", ownerName: "Sandra M.", ownerPhone: "(773) 555-0156" },
+    { id: "chi-3", address: "•••• 53rd St", neighborhood: "Hyde Park", timeAgo: "39 min", ownerName: "Gabriel R.", ownerPhone: "(872) 555-0120" },
   ],
 };
 
@@ -93,7 +106,8 @@ export default function LandingPage() {
   const [openFaq, setOpenFaq] = useState<number | null>(0);
 
   // dados reais (métricas públicas — fonte única da verdade)
-  const [metrics, setMetrics] = useState<PublicMetrics>(EMPTY_PUBLIC_METRICS);
+  // null = ainda a carregar: nunca mostramos "0" antes de haver resposta.
+  const [metrics, setMetrics] = useState<PublicMetrics | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -141,16 +155,45 @@ export default function LandingPage() {
     const coverageItems = blocks(t("landing.coverageItems")).map((f) => ({
       icon: f[0] ?? "", title: f[1] ?? "", desc: f[2] ?? "", color: f[3] || "#10b981",
     }));
+    // id | ofício | gravidade | descrição (traduzidos; rua/nome/telefone vêm da base)
+    const sampleMeta: Record<string, { category: string; badge: BadgeKey; description: string }> = {};
+    blocks(t("landing.sampleLeads")).forEach((f) => {
+      if (!f[0]) return;
+      sampleMeta[f[0]] = {
+        category: f[1] ?? "",
+        badge: (f[2] === "urgent" || f[2] === "high" ? f[2] : "medium") as BadgeKey,
+        description: f[3] ?? "",
+      };
+    });
 
     const waMsg = (name: string, cat: string, addr: string) =>
       t("landing.waMsg").replace("{name}", name).replace("{cat}", cat).replace("{addr}", addr);
     const aboutJobs = (n: number, ticket: string) =>
       t("landing.aboutJobs").replace("{n}", String(n)).replace("{ticket}", ticket);
 
-    return { categories, tradesLabel, signals, problems, comparisons, quotes, planFeatures, neverItems, faqs, templates, trust, waMsg, aboutJobs, coverageItems };
+    return { categories, tradesLabel, signals, problems, comparisons, quotes, planFeatures, neverItems, faqs, templates, trust, waMsg, aboutJobs, coverageItems, sampleMeta };
   }, [t]);
 
+  const leadsByCity = useMemo(() => {
+    const out = {} as Record<City, SampleLead[]>;
+    CITIES.forEach((city) => {
+      out[city] = (SAMPLE_LEADS_BASE[city] ?? []).map((base) => {
+        const meta = L.sampleMeta[base.id];
+        const badge = meta?.badge ?? "medium";
+        return {
+          ...base,
+          category: meta?.category ?? "",
+          badge,
+          badgeLabel: t(`landing.badge.${badge}`),
+          description: meta?.description ?? "",
+        };
+      });
+    });
+    return out;
+  }, [L, t]);
+
   // ------------------------------------------------ derivados (métricas públicas)
+  const hasMetrics = (metrics?.total_leads ?? 0) > 0;
   const leadsBank = metrics?.total_leads ?? 0;
   const withOwner = metrics?.leads_with_owner ?? 0;
   const citiesCount = metrics?.cities_count ?? CITIES.length;
@@ -178,7 +221,7 @@ export default function LandingPage() {
         <div className="relative mx-auto max-w-6xl px-4 pb-16 pt-16 text-center sm:px-6 md:pb-24 md:pt-24">
           <div className="fade-up inline-flex items-center gap-2 text-[12px] font-bold tracking-wider text-[#0a8f65]">
             <span className="blink-dot" /><span className="blink-dot blink-dot-delay" /><span className="blink-dot blink-dot-delay-2" />
-            {leadsBank.toLocaleString("en-US")} {t("landing.heroKicker")}
+            {hasMetrics ? `${leadsBank.toLocaleString("en-US")} ${t("landing.heroKicker")}` : t("landing.heroLoading")}
           </div>
           <h1 className="fade-up font-display mx-auto mt-8 max-w-5xl text-[3.1rem] font-black leading-[0.9] sm:text-7xl lg:text-[6.2rem] lg:leading-[0.88]">
             {t("landing.heroTitle1")}<br /><span className="hl">{t("landing.heroTitle2")}</span>
@@ -203,11 +246,11 @@ export default function LandingPage() {
           <div className="pop-in mx-auto mt-14 max-w-4xl">
             <div className="grid gap-8 sm:grid-cols-3">
               <div className="text-center">
-                <p className="inline-flex items-center gap-2 font-display text-4xl font-black text-[#10b981] sm:text-5xl"><span className="blink-dot" />{leadsBank.toLocaleString("en-US")}+</p>
+                <p className="inline-flex items-center gap-2 font-display text-4xl font-black text-[#10b981] sm:text-5xl"><span className="blink-dot" />{hasMetrics ? `${leadsBank.toLocaleString("en-US")}+` : "—"}</p>
                 <p className="mt-2 text-[11px] font-bold uppercase tracking-wider text-[#94a3b8]">{t("landing.statBank")}</p>
               </div>
               <div className="text-center">
-                <p className="inline-flex items-center gap-2 font-display text-4xl font-black text-[#10b981] sm:text-5xl"><span className="blink-dot blink-dot-delay" />{withOwner.toLocaleString("en-US")}+</p>
+                <p className="inline-flex items-center gap-2 font-display text-4xl font-black text-[#10b981] sm:text-5xl"><span className="blink-dot blink-dot-delay" />{hasMetrics ? `${withOwner.toLocaleString("en-US")}+` : "—"}</p>
                 <p className="mt-2 text-[11px] font-bold uppercase tracking-wider text-[#94a3b8]">{t("landing.statOwner")}</p>
               </div>
               <div className="text-center">
@@ -218,8 +261,12 @@ export default function LandingPage() {
             <p className="mt-8 flex items-center justify-center gap-2 text-sm font-medium text-[#0a8f65]">
               <span className="blink-dot" /><span className="blink-dot blink-dot-delay" /><span className="blink-dot blink-dot-delay-2" />
               {t("landing.updated")} {t("landing.agoLittle")}
-              {" · "}
-              {newThisRun.toLocaleString("en-US")} {t("landing.updatedNew")}
+              {hasMetrics && newThisRun > 0 && (
+                <>
+                  {" · "}
+                  {newThisRun.toLocaleString("en-US")} {t("landing.updatedNew")}
+                </>
+              )}
             </p>
           </div>
         </div>
@@ -347,13 +394,13 @@ export default function LandingPage() {
               </div>
             </div>
             <div className="grid gap-5 p-4 sm:p-6 lg:grid-cols-3">
-              {SAMPLE_LEADS[activeCity].map((lead) => {
+              {leadsByCity[activeCity].map((lead) => {
                 const reserved = reservedLeadId === lead.id;
                 return (
                   <div key={lead.id} className={`flex flex-col justify-between rounded-2xl border p-5 ${reserved ? "border-[#10b981] bg-[#0b1e1c]" : "border-white/10 bg-[#0d1422]"}`}>
                     <div>
                       <div className="flex items-center justify-between">
-                        <span className={`rounded-md px-2 py-0.5 text-[10px] font-black ${lead.badge === "URGENTE" ? "bg-[#f43f5e]/15 text-[#ff7a8a]" : lead.badge === "ALTA" ? "bg-[#f59e0b]/15 text-[#f59e0b]" : "bg-white/10 text-[#9aa7ba]"}`}>{lead.badge}</span>
+                        <span className={`rounded-md px-2 py-0.5 text-[10px] font-black ${BADGE_STYLE[lead.badge]}`}>{lead.badgeLabel}</span>
                         <span className="text-xs text-[#64748b]">{lead.timeAgo}</span>
                       </div>
                       <h4 className="font-display mt-3 text-lg font-bold">{lead.category}</h4>
@@ -369,13 +416,13 @@ export default function LandingPage() {
                           <div className="rounded-lg border border-white/10 bg-black/60 p-3">
                             <p className="text-[11px] text-[#9aa7ba]">{lead.ownerName} · {t("landing.owner")}</p>
                             <p className="font-mono text-base font-black text-[#34e0a1]">{lead.ownerPhone}</p>
-                            <p className="mt-1 text-[10px] text-[#64748b]">{lead.addressFull}</p>
+                            <p className="mt-1 text-[10px] text-[#64748b]">{lead.address}</p>
                           </div>
                           <button onClick={() => setWhatsappLead(lead)} className="btn-mint w-full py-2.5 text-xs uppercase tracking-wider">{t("landing.openWa")}</button>
                         </div>
                       ) : (
                         <div className="space-y-2">
-                          <div className="flex items-center justify-between text-[11px] text-[#9aa7ba]"><span>{t("landing.address")}</span><span className="font-mono text-white">{lead.addressMasked}</span></div>
+                          <div className="flex items-center justify-between text-[11px] text-[#9aa7ba]"><span>{t("landing.address")}</span><span className="font-mono text-white">{lead.address}</span></div>
                           <button onClick={() => { setReservedLeadId(lead.id); setTimerSeconds(3600); }} className="flex w-full items-center justify-center rounded-lg border border-[#10b981]/40 bg-[#10b981]/10 py-2.5 text-xs font-bold text-[#34e0a1] hover:bg-[#10b981] hover:text-white">{t("landing.reserveHour")}</button>
                         </div>
                       )}
@@ -663,7 +710,7 @@ export default function LandingPage() {
               <div><p className="text-sm font-bold">{whatsappLead.ownerName}</p><p className="font-mono text-xs text-[#10b981]">{whatsappLead.ownerPhone}</p></div>
             </div>
             <div className="my-4 rounded-2xl bg-[#dcf8c6] p-4 text-sm leading-relaxed">
-              {L.waMsg(whatsappLead.ownerName.split(" ")[0], whatsappLead.category.toLowerCase(), whatsappLead.addressFull)}
+              {L.waMsg(whatsappLead.ownerName.split(" ")[0], whatsappLead.category.toLowerCase(), whatsappLead.address)}
             </div>
             <button onClick={() => { setWhatsappLead(null); openModal(); }} className="btn-mint w-full py-3.5 text-sm uppercase tracking-wider">{t("landing.activateSend")}</button>
           </div>

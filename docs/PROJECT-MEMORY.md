@@ -1184,6 +1184,20 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   Três variantes propostas para aprovação.
 - **Testes**: 1055 pytest.
 
+### Fase 17 — Landing: painel de amostra localizado e fim do flash de zeros (2026-11-01)
+
+- O painel de amostra da landing tinha os 12 leads hardcoded em português
+  (categoria, gravidade e descrição) e aparecia em PT na versão `/en`. Passou a
+  ler `landing.sampleLeads` (bloco `id|ofício|gravidade|descrição`) + as chaves
+  `landing.badge.*`, com tradução EN/PT/ES. Rua, bairro, nome e telefone
+  continuam na base (são iguais nos três idiomas).
+- **Flash de zeros**: o hero arrancava com `EMPTY_PUBLIC_METRICS` e mostrava
+  “0 jobs in the bank right now”, “0+ leads”, “0+ with owner”. O estado passou a
+  ser `null` até a API responder: o kicker mostra `landing.heroLoading`, os
+  dois números mostram “—” e a linha “· N new opportunities” só aparece com
+  dados reais. Cidades mantém 4 (é um facto conhecido, não uma métrica).
+- **Testes**: 1055 pytest · 93 vitest · tsc limpo · ESLint 0 erros.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
