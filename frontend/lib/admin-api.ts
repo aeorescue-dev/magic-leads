@@ -624,6 +624,7 @@ export interface AdminOutboundMessageRow {
   next_step_at: string | null;
   contact_id: number | null;
   replied_at: string;
+  reply_sentiment?: string | null;
 }
 
 export function fetchAdminOutboundBatches(limit = 10): Promise<{ batches: AdminOutboundBatchRow[] }> {
@@ -760,6 +761,51 @@ export function fetchAdminOutboundCapacity(
   days = 7
 ): Promise<AdminOutboundCapacity> {
   return adminFetch<AdminOutboundCapacity>(`/outbound/capacity?days=${days}`);
+}
+
+export interface AdminOutboundMetrics {
+  days: number;
+  mailboxes: Array<{
+    id: number;
+    email: string;
+    sent: number;
+    failed: number;
+    bounced: number;
+    complaints: number;
+    replies: number;
+    positive: number;
+    bounce_rate: number;
+    reply_rate: number;
+    positive_rate: number;
+  }>;
+  totals: {
+    sent: number;
+    failed: number;
+    bounced: number;
+    complaints: number;
+    replies: number;
+    positive: number;
+    bounce_rate: number;
+    reply_rate: number;
+    positive_rate: number;
+  };
+}
+
+export function fetchAdminOutboundMetrics(
+  days = 30
+): Promise<AdminOutboundMetrics> {
+  return adminFetch<AdminOutboundMetrics>(`/outbound/metrics?days=${days}`);
+}
+
+export function setAdminReplySentiment(
+  contactId: number,
+  sentiment: "positive" | "neutral" | "negative" | null
+): Promise<{ status: string; contact_id: number; sentiment: string | null }> {
+  const qs = new URLSearchParams({ contact_id: String(contactId) });
+  if (sentiment) qs.set("sentiment", sentiment);
+  return adminFetch(`/outbound/reply-sentiment?${qs.toString()}`, {
+    method: "POST",
+  });
 }
 
 export function fetchAdminOutboundReadiness(

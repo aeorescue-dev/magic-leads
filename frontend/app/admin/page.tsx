@@ -84,6 +84,8 @@ import {
   fetchAdminAccessAudit,
   fetchAdminOutboundHealth,
   fetchAdminOutboundCapacity,
+  fetchAdminOutboundMetrics,
+  setAdminReplySentiment,
   fetchAdminOutboundReadiness,
   fetchAdminContractorStats,
   runAdminContractorEnrichment,
@@ -97,6 +99,7 @@ import {
   type AdminAccessAuditEntry,
   type AdminOutboundHealth,
   type AdminOutboundCapacity,
+  type AdminOutboundMetrics,
   type AdminOutboundReadiness,
   type AdminContractorStats,
   type AdminBillingFunnel,
@@ -104,6 +107,8 @@ import {
 import { AUTH_TOKEN_KEY } from "@/lib/api-client";
 
 type Gate = "loading" | "unauthenticated" | "forbidden" | "ok" | "error";
+
+const fmtPct = (value: number) => `${(value * 100).toFixed(1)}%`;
 
 // --------------------------------------------------------------- UI bits
 
@@ -368,6 +373,7 @@ function OutboundPanel() {
   const [enrichMsg, setEnrichMsg] = useState<string | null>(null);
   const [readiness, setReadiness] = useState<AdminOutboundReadiness | null>(null);
   const [capacity, setCapacity] = useState<AdminOutboundCapacity | null>(null);
+  const [metrics, setMetrics] = useState<AdminOutboundMetrics | null>(null);
   const [contractorStats, setContractorStats] = useState<AdminContractorStats | null>(null);
   const [enrichBusy, setEnrichBusy] = useState(false);
   const [controlsBusy, setControlsBusy] = useState<number | null>(null);
@@ -570,6 +576,7 @@ function OutboundPanel() {
       ]);
       setReadiness(ready);
       setCapacity(cap);
+      setMetrics(await fetchAdminOutboundMetrics(30).catch(() => null));
     } catch {
       setReadiness(null);
     }
@@ -760,6 +767,25 @@ function OutboundPanel() {
       setError(e instanceof AdminApiError ? e.message : "Falha ao marcar a resposta.");
     }
   }, []);
+
+  const markSentiment = useCallback(
+    async (contactId: number, sentiment: "positive" | "negative") => {
+      try {
+        await setAdminReplySentiment(contactId, sentiment);
+        setBatchMsgs((prev) =>
+          prev.map((m) =>
+            m.contact_id === contactId ? { ...m, reply_sentiment: sentiment } : m
+          )
+        );
+        setMetrics(await fetchAdminOutboundMetrics(30).catch(() => null));
+      } catch (e) {
+        setError(
+          e instanceof AdminApiError ? e.message : "Falha ao classificar a resposta."
+        );
+      }
+    },
+    []
+  );
 
   const runEnrich = useCallback(async () => {
     if (!city) return;
@@ -969,6 +995,74 @@ function OutboundPanel() {
                 inventário (Brave/quota) antes de subir a rampa.
               </p>
             ) : null}
+          </div>
+        ) : null}
+
+        {/* métricas reais (sem pixel): envios, falhas, bounce, respostas */}
+        {metrics ? (
+          <div
+            className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2.5"
+            data-testid="outbound-metrics"
+          >
+            <div className="flex flex-wrap items-baseline gap-3 text-[11px] text-slate-400">
+              <span className="text-[10px] uppercase tracking-wider text-slate-500">
+                Métricas outbound · {metrics.days}d
+              </span>
+              <span>
+                enviados <b className="text-slate-200">{metrics.totals.sent}</b>
+              </span>
+              <span>
+                falhas <b className="text-slate-300">{metrics.totals.failed}</b>
+              </span>
+              <span>
+                bounce{" "}
+                <b className={metrics.totals.bounce_rate > 0.02 ? "text-rose-300" : "text-emerald-300"}>
+                  {fmtPct(metrics.totals.bounce_rate)}
+                </b>
+              </span>
+              <span>
+                respostas <b className="text-sky-300">{metrics.totals.replies}</b>{" "}
+                <span className="text-slate-500">({fmtPct(metrics.totals.reply_rate)})</span>
+              </span>
+              <span>
+                positivas <b className="text-emerald-300">{metrics.totals.positive}</b>{" "}
+                <span className="text-slate-500">({fmtPct(metrics.totals.positive_rate)})</span>
+              </span>
+            </div>
+            <table className="mt-1.5 w-full text-left text-[10px] text-slate-400">
+              <thead className="text-slate-500">
+                <tr>
+                  <th className="py-0.5">Caixa</th>
+                  <th className="py-0.5">Envios</th>
+                  <th className="py-0.5">Falhas</th>
+                  <th className="py-0.5">Bounce</th>
+                  <th className="py-0.5">Respostas</th>
+                  <th className="py-0.5">Taxa resposta</th>
+                  <th className="py-0.5">Positivas</th>
+                  <th className="py-0.5">Taxa positiva</th>
+                </tr>
+              </thead>
+              <tbody>
+                {metrics.mailboxes.map((m) => (
+                  <tr key={m.id} className="border-t border-white/5">
+                    <td className="py-0.5 text-slate-300">{m.email}</td>
+                    <td className="py-0.5">{m.sent}</td>
+                    <td className="py-0.5">{m.failed}</td>
+                    <td className={`py-0.5 ${m.bounce_rate > 0.02 ? "text-rose-300" : ""}`}>
+                      {fmtPct(m.bounce_rate)}
+                    </td>
+                    <td className="py-0.5 text-sky-300">{m.replies}</td>
+                    <td className="py-0.5">{fmtPct(m.reply_rate)}</td>
+                    <td className="py-0.5 text-emerald-300">{m.positive}</td>
+                    <td className="py-0.5">{fmtPct(m.positive_rate)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="mt-1 text-[10px] text-slate-600">
+              Sem pixel de abertura (protege a entregabilidade). “Positiva” é
+              classificação manual em Fila e lotes → Resposta.
+            </p>
           </div>
         ) : null}
 
@@ -1460,7 +1554,35 @@ function OutboundPanel() {
                                   <td className="py-0.5 text-rose-400">{m.error || ""}</td>
                                    <td className="py-0.5">
                                      {m.replied_at ? (
-                                       <span className="text-emerald-400">respondeu</span>
+                                       <span className="inline-flex items-center gap-1">
+                                         <span className="text-emerald-400">respondeu</span>
+                                         {m.contact_id ? (
+                                           <>
+                                             <button
+                                               onClick={() => void markSentiment(m.contact_id!, "positive")}
+                                               title="Resposta positiva"
+                                               className={`rounded border px-1 text-[10px] ${
+                                                 m.reply_sentiment === "positive"
+                                                   ? "border-emerald-500/50 text-emerald-300"
+                                                   : "border-white/10 text-slate-400 hover:bg-white/5"
+                                               }`}
+                                             >
+                                               +
+                                             </button>
+                                             <button
+                                               onClick={() => void markSentiment(m.contact_id!, "negative")}
+                                               title="Resposta negativa"
+                                               className={`rounded border px-1 text-[10px] ${
+                                                 m.reply_sentiment === "negative"
+                                                   ? "border-rose-500/50 text-rose-300"
+                                                   : "border-white/10 text-slate-400 hover:bg-white/5"
+                                               }`}
+                                             >
+                                               −
+                                             </button>
+                                           </>
+                                         ) : null}
+                                       </span>
                                      ) : m.contact_id && m.status === "sent" ? (
                                        <button
                                          onClick={() => void markReplied(m)}

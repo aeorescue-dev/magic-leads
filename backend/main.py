@@ -2522,6 +2522,37 @@ async def admin_mailbox_ramp_log(
     }
 
 
+@app.get("/api/admin/outbound/metrics")
+async def admin_outbound_metrics(
+    days: int = 30, _admin: dict = Depends(_require_admin_user)
+):
+    """KPI de outbound (sem pixel): envios, falhas, bounce %, respostas.
+
+    A taxa de resposta positiva usa `outbound_contacts.reply_sentiment`, que o
+    Admin classifica manualmente (a deteccao automatica nao sabe se a resposta
+    e' "quero a lista" ou "parem de enviar").
+    """
+    return await db_service.outbound_metrics(days)
+
+
+@app.post("/api/admin/outbound/reply-sentiment")
+async def admin_outbound_reply_sentiment(
+    contact_id: int,
+    sentiment: str | None = None,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Classifica a resposta: positive | neutral | negative | null."""
+    if contact_id <= 0:
+        raise HTTPException(status_code=400, detail="contact_id invalido")
+    value = (sentiment or "").strip().lower() or None
+    if value not in (None, "positive", "neutral", "negative"):
+        raise HTTPException(status_code=400, detail="sentiment invalido")
+    ok = await db_service.set_contact_reply_sentiment(contact_id, value)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Contacto nao encontrado")
+    return {"status": "ok", "contact_id": contact_id, "sentiment": value}
+
+
 @app.post("/api/admin/outbound/replied")
 async def admin_outbound_mark_replied(
     contact_id: int, _admin: dict = Depends(_require_admin_user)

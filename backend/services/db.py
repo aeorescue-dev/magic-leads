@@ -1011,6 +1011,7 @@ CREATE TABLE IF NOT EXISTS outbound_contacts (
   unsubscribed INTEGER NOT NULL DEFAULT 0,
   company_domain TEXT,
   replied_at TEXT,
+  reply_sentiment TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -1568,6 +1569,10 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     if "niche_status" not in ccols:
         conn.execute(
             "ALTER TABLE outbound_contacts ADD COLUMN niche_status TEXT DEFAULT 'unknown'"
+        )
+    if "reply_sentiment" not in ccols:
+        conn.execute(
+            "ALTER TABLE outbound_contacts ADD COLUMN reply_sentiment TEXT"
         )
     if "refund_blocked" not in cols:
         conn.execute("ALTER TABLE leads ADD COLUMN refund_blocked INTEGER DEFAULT 0")
@@ -2806,6 +2811,123 @@ class DatabaseService:
             return False
         finally:
             conn.close()
+
+    def set_contact_reply_sentiment(
+        self, contact_id: int, sentiment: Optional[str]
+    ) -> bool:
+        """Classifica a resposta (positive/neutral/negative) para o KPI."""
+        value = sentiment if sentiment in ("positive", "neutral", "negative") else None
+        conn = get_connection()
+        try:
+            conn.execute(
+                "UPDATE outbound_contacts SET reply_sentiment=? WHERE id=?",
+                (value, int(contact_id)),
+            )
+            conn.commit()
+            return True
+        except Exception:
+            return False
+        finally:
+            conn.close()
+
+    def outbound_metrics(self, days: int = 30) -> dict:
+        """KPI reais de outbound por caixa (sem pixel de abertura).
+
+        Envios/falhas vem de `outbound_messages`; bounces/complaints de
+        `mailbox_bounce_events`; respostas de `outbound_contacts.replied_at` e a
+        classificacao positiva/negativa de `reply_sentiment` (manual no Admin).
+        Totais de respostas sao distintos para nao contar duas vezes um contacto
+        que recebeu passo 1 e passo 2 de caixas diferentes.
+        """
+        window = max(1, min(int(days), 90))
+        win = f"-{window} days"
+        conn = get_connection()
+        try:
+            rows = []
+            for mb in self.list_sending_mailboxes(enabled_only=False):
+                sent = conn.execute(
+                    "SELECT COUNT(*) c FROM outbound_messages "
+                    "WHERE mailbox_id=? AND status='sent' AND sent_at >= datetime('now', ?)",
+                    (mb["id"], win),
+                ).fetchone()["c"]
+                failed = conn.execute(
+                    "SELECT COUNT(*) c FROM outbound_messages "
+                    "WHERE mailbox_id=? AND status='failed' "
+                    "AND COALESCE(sent_at, created_at) >= datetime('now', ?)",
+                    (mb["id"], win),
+                ).fetchone()["c"]
+                bounced = conn.execute(
+                    "SELECT COUNT(*) c FROM mailbox_bounce_events "
+                    "WHERE mailbox_id=? AND kind='bounce' AND created_at >= datetime('now', ?)",
+                    (mb["id"], win),
+                ).fetchone()["c"]
+                complaints = conn.execute(
+                    "SELECT COUNT(*) c FROM mailbox_bounce_events "
+                    "WHERE mailbox_id=? AND kind='complaint' AND created_at >= datetime('now', ?)",
+                    (mb["id"], win),
+                ).fetchone()["c"]
+                replies = conn.execute(
+                    "SELECT COUNT(DISTINCT c.id) c FROM outbound_contacts c "
+                    "JOIN outbound_messages m ON m.contact_id = c.id "
+                    "WHERE m.mailbox_id=? AND m.status='sent' "
+                    "AND c.replied_at IS NOT NULL "
+                    "AND c.replied_at >= datetime('now', ?)",
+                    (mb["id"], win),
+                ).fetchone()["c"]
+                positive = conn.execute(
+                    "SELECT COUNT(DISTINCT c.id) c FROM outbound_contacts c "
+                    "JOIN outbound_messages m ON m.contact_id = c.id "
+                    "WHERE m.mailbox_id=? AND m.status='sent' "
+                    "AND c.reply_sentiment='positive' "
+                    "AND c.replied_at >= datetime('now', ?)",
+                    (mb["id"], win),
+                ).fetchone()["c"]
+                rows.append({
+                    "id": int(mb["id"]),
+                    "email": mb["email"],
+                    "sent": int(sent),
+                    "failed": int(failed),
+                    "bounced": int(bounced),
+                    "complaints": int(complaints),
+                    "replies": int(replies),
+                    "positive": int(positive),
+                    "bounce_rate": round(bounced / sent, 4) if sent else 0.0,
+                    "reply_rate": round(replies / sent, 4) if sent else 0.0,
+                    "positive_rate": round(positive / sent, 4) if sent else 0.0,
+                })
+            total_sent = sum(r["sent"] for r in rows)
+            total_failed = sum(r["failed"] for r in rows)
+            total_bounced = sum(r["bounced"] for r in rows)
+            total_complaints = sum(r["complaints"] for r in rows)
+            total_replies = conn.execute(
+                "SELECT COUNT(*) c FROM outbound_contacts "
+                "WHERE replied_at IS NOT NULL AND replied_at >= datetime('now', ?)",
+                (win,),
+            ).fetchone()["c"]
+            total_positive = conn.execute(
+                "SELECT COUNT(*) c FROM outbound_contacts "
+                "WHERE reply_sentiment='positive' AND replied_at >= datetime('now', ?)",
+                (win,),
+            ).fetchone()["c"]
+        finally:
+            conn.close()
+        return {
+            "days": window,
+            "mailboxes": rows,
+            "totals": {
+                "sent": total_sent,
+                "failed": total_failed,
+                "bounced": total_bounced,
+                "complaints": total_complaints,
+                "replies": int(total_replies),
+                "positive": int(total_positive),
+                "bounce_rate": round(total_bounced / total_sent, 4) if total_sent else 0.0,
+                "reply_rate": round(total_replies / total_sent, 4) if total_sent else 0.0,
+                "positive_rate": (
+                    round(total_positive / total_sent, 4) if total_sent else 0.0
+                ),
+            },
+        }
 
     def claim_outbound_message(self, message_id: int) -> bool:
         """Claim atomico: `queued` -> `sending` so' para o primeiro tick.
@@ -12448,6 +12570,16 @@ class AsyncDatabaseService:
         return await anyio.to_thread.run_sync(
             self._service.mark_outbound_contact_replied, contact_id
         )
+
+    async def set_contact_reply_sentiment(
+        self, contact_id: int, sentiment: Optional[str]
+    ) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.set_contact_reply_sentiment, contact_id, sentiment
+        )
+
+    async def outbound_metrics(self, days: int = 30) -> dict:
+        return await anyio.to_thread.run_sync(self._service.outbound_metrics, days)
 
     async def outbound_category_mix(
         self, city: str, categories: Optional[List[str]] = None, limit: int = 3
