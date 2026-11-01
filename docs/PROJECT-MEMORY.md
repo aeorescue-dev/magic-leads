@@ -1002,6 +1002,25 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   capacidade, 5,5 dias de cobertura.
 - **Testes**: 1017 pytest (1 skip), Ruff limpo, tsc limpo, ESLint 0 erros.
 
+### Fase 5 — Fontes orgânicas gratuitas (2026-11-01)
+
+- **NYC DCWP**: `licensing_sources.py` ingere `Home Improvement Contractor`
+  ativos (Socrata `w7w3-xahh`), com telefone e licença. Backfill: **13.385
+  linhas → 13.383 entidades**, 9.855 novas (as restantes já existiam). O
+  telefone alimenta o `corroborate()`, que usa `phone_match` como sinal forte.
+- **OSM (salta a Brave)**: `osm_extract.py` descarrega extracts BBBike,
+  filtra `craft=*`/`office=construction_company` por bbox e grava o domínio do
+  website diretamente. Medido: NYC 251 (70 com site), Chicago 53 (25), Dallas
+  30 (25). Boston removido (311 MB/19 min para 15 empresas).
+- **Fila por intenção**: `list_entities_for_domain|email` ordena por telefone,
+  depois licença, depois id.
+- **Incidente e recuperação**: o backfill levou o WAL a 257 MB num volume de
+  434 MB e encheu `/data` (disk I/O error). Recuperado com checkpoint+VACUUM de
+  uma cópia e swap do ficheiro; **13.395 entidades e 17 mensagens intactas**.
+  Guardas: `journal_size_limit=64 MB`, checkpoint a cada 30 ticks, checkpoint
+  após cada ingestão e bloqueio de ingestão com <120 MB livres.
+- **Testes**: 1033 pytest.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

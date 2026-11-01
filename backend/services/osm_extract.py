@@ -26,7 +26,9 @@ CITY_EXTRACTS: dict[str, str] = {
     "NYC": "https://download.bbbike.org/osm/bbbike/NewYork/NewYork.osm.pbf",
     "CHICAGO": "https://download.bbbike.org/osm/bbbike/Chicago/Chicago.osm.pbf",
     "DALLAS": "https://download.bbbike.org/osm/bbbike/Dallas/Dallas.osm.pbf",
-    "BOSTON": "https://download.geofabrik.de/north-america/us/massachusetts-latest.osm.pbf",
+    # Boston fica de fora: nao ha extract de cidade (BBBike nao tem Boston) e o
+    # extract de Massachusetts custa 311 MB + ~19 min para 15 empresas.
+    # Boston continua coberto por permits e, mais tarde, por associacoes.
 }
 
 # (min_lat, max_lat, min_lon, max_lon)
