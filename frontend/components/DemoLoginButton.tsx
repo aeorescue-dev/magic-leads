@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useI18n } from "@/lib/i18n";
+import { useAuth } from "@/lib/auth";
 import { demoLogin } from "@/lib/api-client";
 
 interface DemoLoginButtonProps {
@@ -13,11 +14,14 @@ interface DemoLoginButtonProps {
 export function DemoLoginButton({ children, variant = "primary", className = "" }: DemoLoginButtonProps) {
   const router = useRouter();
   const { lang } = useI18n();
+  const { updateUser } = useAuth();
 
   const localePath = (href: string) => `/${lang}${href}`;
 
   const handleClick = async () => {
-    await demoLogin();
+    const user = await demoLogin();
+    // Provider global: sem isto o estado de auth ficava null até um refresh.
+    updateUser(user);
     router.push(localePath("/dashboard"));
   };
 

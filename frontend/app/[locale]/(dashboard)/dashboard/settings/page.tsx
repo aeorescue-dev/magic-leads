@@ -517,7 +517,13 @@ export default function DashboardSettingsPage() {
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <div className="max-w-2xl mx-auto px-4 py-8 space-y-6">
         <div className="flex items-center gap-3">
-          <Link href="/dashboard" className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300">
+          <Link
+            href={`/${lang}/dashboard`}
+            prefetch
+            onMouseEnter={() => router.prefetch(`/${lang}/dashboard`)}
+            onFocus={() => router.prefetch(`/${lang}/dashboard`)}
+            className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300"
+          >
             <ArrowLeft className="w-5 h-5" />
           </Link>
           <div>

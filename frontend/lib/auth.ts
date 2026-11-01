@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import {
   AuthUser, registerUser, loginUser, logoutUser, fetchMe, getToken, setToken,
   fetchUserSubscriptionStatus,
@@ -22,7 +22,7 @@ function storeUser(user: AuthUser | null) {
   else window.localStorage.removeItem(STORAGE_KEY);
 }
 
-interface SubscriptionStatus {
+export interface SubscriptionStatus {
   status: string;
   is_active: boolean;
   can_access: boolean;
@@ -48,30 +48,59 @@ async function refreshUserSubscription(
   }
 }
 
-export function useAuth() {
+export interface AuthContextValue {
+  user: AuthUser | null;
+  subscription: SubscriptionStatus | null;
+  loading: boolean;
+  signIn: (
+    email: string,
+    password: string,
+    companyName?: string,
+    locale?: string,
+  ) => Promise<AuthUser>;
+  signOut: () => Promise<void>;
+  updateUser: (user: AuthUser) => void;
+  refreshSubscription: () => Promise<void>;
+}
+
+/**
+ * Contexto global de autenticação.
+ *
+ * Antes, `useAuth()` era um hook que chamava `/me` e `/subscription-status`
+ * em CADA componente/página montada. Trocar de rota repetia as duas chamadas.
+ * O provider vive no layout do locale (persistente entre navegações), pelo que
+ * a validação acontece uma vez por sessão de app.
+ */
+export const AuthContext = createContext<AuthContextValue | null>(null);
+
+/** Estado de autenticação — usar apenas dentro de <AuthProvider>. */
+export function useAuthState(): AuthContextValue {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [subscription, setSubscription] = useState<SubscriptionStatus | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let active = true;
     const attempt = async () => {
       // Se já existe token, valida com /me
       if (getToken()) {
         try {
           const u = await fetchMe();
+          if (!active) return;
           storeUser(u);
           setUser(u);
-          
+
           // Busca status da subscription
           if (u?.id) {
             try {
               const sub = await fetchUserSubscriptionStatus(u.id);
-              setSubscription(sub);
+              if (active) setSubscription(sub);
             } catch (e) {
               console.error("Erro ao buscar subscription:", e);
             }
           }
         } catch {
+          if (!active) return;
           setToken(null);
           storeUser(null);
           setUser(null);
@@ -79,11 +108,14 @@ export function useAuth() {
       } else {
         // Fallback para sessão local legada (demo)
         const legacy = readStoredUser();
-        if (legacy) setUser(legacy);
+        if (active && legacy) setUser(legacy);
       }
-      setLoading(false);
+      if (active) setLoading(false);
     };
     attempt();
+    return () => {
+      active = false;
+    };
   }, []);
 
   // Refetch do status da subscription a cada 10min para bloquear/avisar na hora
@@ -94,23 +126,33 @@ export function useAuth() {
     return () => clearInterval(id);
   }, [user]);
 
-  // HARD BLOCK (Fase 5): subscrição expirada/pausada => acesso TOTAL negado.
-  // Qualquer utilizador com can_access === false é forçado para /checkout e não
-  // consegue permanecer no dashboard/leads (bloqueio estrutural, não só visual).
-  const signIn = useCallback(async (email: string, password: string, companyName?: string, locale?: string) => {
-    const withSubscription = async (u: AuthUser) => {
-      setUser(u);
-      storeUser(u);
-      await refreshUserSubscription(u, setSubscription);
-      return u;
-    };
-    if (companyName) {
-      const out = await registerUser({ email, password, company_name: companyName, ...(locale ? { locale } : {}) });
+  const signIn = useCallback(
+    async (
+      email: string,
+      password: string,
+      companyName?: string,
+      locale?: string,
+    ) => {
+      const withSubscription = async (u: AuthUser) => {
+        setUser(u);
+        storeUser(u);
+        await refreshUserSubscription(u, setSubscription);
+        return u;
+      };
+      if (companyName) {
+        const out = await registerUser({
+          email,
+          password,
+          company_name: companyName,
+          ...(locale ? { locale } : {}),
+        });
+        return withSubscription(out.user);
+      }
+      const out = await loginUser({ email, password });
       return withSubscription(out.user);
-    }
-    const out = await loginUser({ email, password });
-    return withSubscription(out.user);
-  }, []);
+    },
+    [],
+  );
 
   const signOut = useCallback(async () => {
     await logoutUser();
@@ -132,6 +174,15 @@ export function useAuth() {
   }, [user]);
 
   return { user, subscription, loading, signIn, signOut, updateUser, refreshSubscription };
+}
+
+/** Consumidor do contexto global (falha alto se faltar o provider). */
+export function useAuth(): AuthContextValue {
+  const ctx = useContext(AuthContext);
+  if (!ctx) {
+    throw new Error("useAuth tem de ser usado dentro de <AuthProvider>");
+  }
+  return ctx;
 }
 
 export default useAuth;

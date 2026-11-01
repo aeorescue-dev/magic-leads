@@ -7,6 +7,7 @@ export const dynamic = 'force-dynamic';
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import useSWR, { useSWRConfig } from "swr";
 import {
   LayoutDashboard, FolderKanban, Star, SlidersHorizontal, Bell,
   CreditCard, Settings, LogOut, Search, MapPin, Building2,
@@ -509,86 +510,84 @@ const URGENCIES = ["all", "high", "medium", "low"];
     }
   }, [searchParams, refreshSubscription, router, showToast]);
 
-  // Load user interests
-  useEffect(() => {
-    if (userId) {
-      fetchUserInterests(userId)
-        .then((cats) => {
-          const hasInterests = Array.isArray(cats) && cats.length > 0;
-          setInterestsConfigured(hasInterests);
-          if (hasInterests) {
-            setInterests(new Set(cats));
-          } else if (!interestsTouchedRef.current && needsOnboarding(cats)) {
-            // Gate de onboarding: sem ofícios escolhidos não há feed
-            // personalizado. Vai ao wizard ANTES de ver as oportunidades.
-            // (Antes auto-persistíamos as 16 categorias, o que tornava o
-            // utilizador "configurado" com escolhas que ele nunca fez.)
-            router.replace(`/${lang}/onboarding`);
-          }
-        })
-        .catch(() => {
-          // Falha ao ler interesses: sem isto o feed abria com "todas" e
-          // contornava o gate de onboarding. Encaminha para o wizard.
-          if (!interestsTouchedRef.current) {
-            router.replace(`/${lang}/onboarding`);
-          }
-        });
-
-    }
-    // `interestsTouchedRef` e' lido dentro do .then, mas nao pode ser
-    // dependencia do efeito: mudar o efeito re-disparava o seed.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]);
-
-  // Refresh notifications and unread count
-  const lastUnreadRef = useRef<number | null>(null);
-  const refreshNotifications = useCallback(async () => {
-    if (!userId) return;
-    try {
-      const [list, unread] = await Promise.all([
-        fetchUserNotifications(userId, "recent", 30),
-        fetchUserUnreadCount(userId),
-      ]);
-      setNotifications(list || []);
-      const nextUnread = unread || 0;
-      const prevUnread = lastUnreadRef.current;
-      lastUnreadRef.current = nextUnread;
-      setUnreadCount(nextUnread);
-      // B3: chime quando chega um alerta novo com a app aberta.
-      if (
-        prevUnread !== null &&
-        nextUnread > prevUnread &&
-        typeof document !== "undefined" &&
-        document.visibilityState === "visible" &&
-        user?.chime_enabled !== false
-      ) {
-        playAlertChime();
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  }, [userId, user?.chime_enabled]);
-
-  useEffect(() => {
-    if (userId) {
-      refreshNotifications();
-      const interval = setInterval(refreshNotifications, 30000);
-      return () => clearInterval(interval);
-    }
-  }, [userId, refreshNotifications]);
+  // ------------------------------------------------ dados com SWR (Fase 23)
+  // O cache vive no layout do dashboard e sobrevive à troca de rota. A tela
+  // pinta com o valor anterior e revalida em background (SWR).
+  const swrPaused = useCallback(
+    () => typeof document !== "undefined" && document.hidden,
+    []
+  );
 
   // B3: arma o chime no primeiro gesto (autoplay policy dos browsers).
   useEffect(() => {
     primeAlertChime();
   }, []);
 
-  // Load penalty metrics (Phase 4.2)
+  // Interesses (gate de onboarding).
+  const { data: interestsData } = useSWR(
+    userId ? ["user-interests", userId] : null,
+    () => fetchUserInterests(userId as number),
+    { revalidateOnFocus: false }
+  );
   useEffect(() => {
+    if (!interestsData) return;
+    const cats = interestsData;
+    const hasInterests = Array.isArray(cats) && cats.length > 0;
+    setInterestsConfigured(hasInterests);
+    if (hasInterests) {
+      setInterests(new Set(cats));
+    } else if (!interestsTouchedRef.current && needsOnboarding(cats)) {
+      // Gate de onboarding: sem ofícios escolhidos não há feed
+      // personalizado. Vai ao wizard ANTES de ver as oportunidades.
+      router.replace(`/${lang}/onboarding`);
+    }
+  }, [interestsData, lang, router]);
+
+  // Notificações (lista + não lidas), com chime in-app.
+  const lastUnreadRef = useRef<number | null>(null);
+  const { mutate: mutateNotifications } = useSWRConfig();
+  const refreshNotifications = useCallback(async () => {
     if (!userId) return;
-    fetchContractorMetrics()
-      .then(setContractorMetrics)
-      .catch(() => {});
-  }, [userId]);
+    await mutateNotifications(["notifications", userId]);
+  }, [mutateNotifications, userId]);
+  const { data: notificationsData } = useSWR(
+    userId ? ["notifications", userId] : null,
+    async () => {
+      const [list, unread] = await Promise.all([
+        fetchUserNotifications(userId as number, "recent", 30),
+        fetchUserUnreadCount(userId as number),
+      ]);
+      return { list: list || [], unread: unread || 0 };
+    },
+    { refreshInterval: 30000, isPaused: swrPaused }
+  );
+  useEffect(() => {
+    if (!notificationsData) return;
+    setNotifications(notificationsData.list);
+    const nextUnread = notificationsData.unread || 0;
+    const prevUnread = lastUnreadRef.current;
+    lastUnreadRef.current = nextUnread;
+    setUnreadCount(nextUnread);
+    if (
+      prevUnread !== null &&
+      nextUnread > prevUnread &&
+      typeof document !== "undefined" &&
+      document.visibilityState === "visible" &&
+      user?.chime_enabled !== false
+    ) {
+      playAlertChime();
+    }
+  }, [notificationsData, user?.chime_enabled]);
+
+  // Métricas de penalidade (pequenas; cacheadas entre rotas).
+  const { data: contractorMetricsData } = useSWR(
+    userId ? ["contractor-metrics", userId] : null,
+    fetchContractorMetrics,
+    { revalidateOnFocus: false }
+  );
+  useEffect(() => {
+    if (contractorMetricsData) setContractorMetrics(contractorMetricsData);
+  }, [contractorMetricsData]);
 
   const refreshContractorMetrics = useCallback(async () => {
     if (!userId) return;
@@ -614,54 +613,22 @@ const URGENCIES = ["all", "high", "medium", "low"];
     };
   }, [bellOpen]);
 
-  // Load general initial data: Stats, Cities with Counts, Leads, Dashboard Summary
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      setLoadingLeads(true);
-      try {
-        const [statsData, leadsData, summaryData, scraperData, publicMetricsData] = await Promise.all([
-          fetchStats().catch(() => null),
-          fetchTodayLeads(
-            PAGE_SIZE,
-            selectedCity === "all" ? undefined : selectedCity,
-            includeClosed,
-            1,
-            selectedType === "all" ? undefined : selectedType,
-            selectedCategory === "all" ? undefined : selectedCategory,
-            selectedUrgency === "all" ? undefined : selectedUrgency
-          ).catch(() => ({ leads: [], total: 0, page: 1, per_page: PAGE_SIZE })),
-          fetchDashboardSummary().catch(() => null),
-          fetchScraperStatus().catch(() => null),
-          fetchPublicMetrics().catch(() => null),
-        ]);
-        if (!active) return;
-        if (statsData) setStats(statsData);
-        if (summaryData) setDashboardSummary(summaryData);
-        if (scraperData) setScraperState(scraperData);
-        if (publicMetricsData) setPublicMetrics(publicMetricsData);
-        const page = leadsData.leads || [];
-        setLeads(page);
-        setCurrentPage(1);
-        setFeedTotal(Number(leadsData.total) || 0);
-        // `total` vem do SERVIDOR (a pagina so devolve PAGE_SIZE linhas). Antes
-        // usava-se `page.length >= 50`, que nunca soube detectar "ha mais" a
-        // partir de filtros de categoria/urgencia aplicados no cliente.
-        setHasMoreLeads(leadsData.total > page.length);
-      } catch (e) {
-        console.error("Erro ao carregar dados do dashboard:", e);
-      } finally {
-        if (active) setLoadingLeads(false);
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, [selectedCity, selectedType, selectedCategory, selectedUrgency, includeClosed]);
-
-  // Real-time polling: refresh leads + KPIs every 30 seconds
-  useEffect(() => {
-    const interval = setInterval(() => {
+  // ------------------------------------------------ onda 1: feed
+  // Só esta chamada bloqueia a lista. O resto (KPIs) entra depois.
+  const feedKey = userId
+    ? [
+        "leads-today",
+        userId,
+        selectedCity,
+        selectedType,
+        selectedCategory,
+        selectedUrgency,
+        includeClosed,
+      ]
+    : null;
+  const { data: feedData, isLoading: feedLoading } = useSWR(
+    feedKey,
+    () =>
       fetchTodayLeads(
         PAGE_SIZE,
         selectedCity === "all" ? undefined : selectedCity,
@@ -670,41 +637,70 @@ const URGENCIES = ["all", "high", "medium", "low"];
         selectedType === "all" ? undefined : selectedType,
         selectedCategory === "all" ? undefined : selectedCategory,
         selectedUrgency === "all" ? undefined : selectedUrgency
-      )
-        .then((data) => {
-          const page = data.leads || [];
-          setLeads(page);
-          setCurrentPage(1);
-          setFeedTotal(Number(data.total) || 0);
-          setHasMoreLeads(data.total > page.length);
-        })
-        .catch(() => {});
-      fetchDashboardSummary().then(setDashboardSummary).catch(() => {});
-      fetchStats().then(setStats).catch(() => {});
-      fetchScraperStatus().then(setScraperState).catch(() => {});
-      fetchPublicMetrics().then(setPublicMetrics).catch(() => {});
-    }, 30000);
-    return () => clearInterval(interval);
-    // FALTOU selectedType aqui: mudar o seletor "Tipo" recriava o intervalo,
-    // mas continuava a pedir o tipo ANTIGO (value stale) nos polls seguintes.
-  }, [selectedCity, selectedType, selectedCategory, selectedUrgency, includeClosed]);
-
-  // Fetch daily stats (limit 10/day)
+      ),
+    { refreshInterval: 60000, isPaused: swrPaused }
+  );
   useEffect(() => {
-    if (userId) {
-      const fetchDaily = async () => {
-        try {
-          const stats = await fetchUserDailyStats(userId);
-          setDailyStats(stats);
-        } catch (e) {
-          console.error(e);
-        }
-      };
-      fetchDaily();
-      const interval = setInterval(fetchDaily, 60000); // Refresh every minute
-      return () => clearInterval(interval);
-    }
-  }, [userId]);
+    if (!feedData) return;
+    const page = feedData.leads || [];
+    setLeads(page);
+    setCurrentPage(1);
+    setFeedTotal(Number(feedData.total) || 0);
+    // `total` vem do SERVIDOR (a pagina so devolve PAGE_SIZE linhas).
+    setHasMoreLeads(feedData.total > page.length);
+  }, [feedData]);
+  useEffect(() => {
+    // Sem cache: a lista só espera pelo feed (não pelos KPIs).
+    setLoadingLeads(Boolean(authLoading) || (feedLoading && !feedData));
+  }, [authLoading, feedLoading, feedData]);
+
+  // ------------------------------------------------ onda 2: KPIs globais
+  // Nenhum destes bloqueia o feed; o cache do servidor (60 s) e o SWR evitam
+  // pedidos repetidos a cada navegação. Mudar filtros NÃO os refaz (keys fixas).
+  const { data: statsData } = useSWR("/api/leads/stats", fetchStats, {
+    refreshInterval: 60000,
+    isPaused: swrPaused,
+  });
+  useEffect(() => {
+    if (statsData) setStats(statsData);
+  }, [statsData]);
+
+  const { data: summaryData } = useSWR(
+    "/api/leads/dashboard-summary",
+    fetchDashboardSummary,
+    { refreshInterval: 60000, isPaused: swrPaused }
+  );
+  useEffect(() => {
+    if (summaryData) setDashboardSummary(summaryData);
+  }, [summaryData]);
+
+  const { data: scraperData } = useSWR(
+    "/api/scraper/status",
+    fetchScraperStatus,
+    { refreshInterval: 120000, isPaused: swrPaused }
+  );
+  useEffect(() => {
+    if (scraperData) setScraperState(scraperData);
+  }, [scraperData]);
+
+  const { data: publicMetricsData } = useSWR(
+    "/api/metrics/public",
+    fetchPublicMetrics,
+    { refreshInterval: 60000, isPaused: swrPaused }
+  );
+  useEffect(() => {
+    if (publicMetricsData) setPublicMetrics(publicMetricsData);
+  }, [publicMetricsData]);
+
+  // ------------------------------------------------ quota diária
+  const { data: dailyStatsData } = useSWR(
+    userId ? ["daily-stats", userId] : null,
+    () => fetchUserDailyStats(userId as number),
+    { refreshInterval: 60000, isPaused: swrPaused }
+  );
+  useEffect(() => {
+    if (dailyStatsData) setDailyStats(dailyStatsData);
+  }, [dailyStatsData]);
 
   // Fetch "Meus Leads / Histórico" quando a aba está ativa ou filtros mudam
   useEffect(() => {
@@ -1739,7 +1735,10 @@ const URGENCIES = ["all", "high", "medium", "low"];
               </span>
             </button>
             <Link
-              href="/dashboard/settings"
+              href={`/${lang}/dashboard/settings`}
+              prefetch
+              onMouseEnter={() => router.prefetch(`/${lang}/dashboard/settings`)}
+              onFocus={() => router.prefetch(`/${lang}/dashboard/settings`)}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition ${T.text2} ${T.navHover}`}
             >
               <Settings className="h-4 w-4" />

@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { LayoutDashboard, LogOut, Menu, Sparkles, X, Plus } from "lucide-react";
 import { getToken, logoutUser, demoLogin, updateUserLocale } from "@/lib/api-client";
-import { readStoredUser } from "@/lib/auth";
+import { readStoredUser, useAuth } from "@/lib/auth";
 import { useI18n, LANGS } from "@/lib/i18n";
 
 const FLAGS: Record<string, string> = {
@@ -18,6 +18,7 @@ export function NavbarNew() {
   const router = useRouter();
   const pathname = usePathname();
   const { lang, setLang, t } = useI18n();
+  const { updateUser } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isLogged, setIsLogged] = useState(false);
 
@@ -30,7 +31,8 @@ export function NavbarNew() {
   }, [pathname]);
 
   const handleDemoLogin = async () => {
-    await demoLogin();
+    const user = await demoLogin();
+    updateUser(user);
     router.push("/dashboard");
   };
 

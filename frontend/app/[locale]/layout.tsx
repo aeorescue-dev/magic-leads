@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { LanguageProvider } from "@/lib/i18n";
+import AuthProvider from "@/components/AuthProvider";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
 import { PwaSessionRedirect } from "@/components/PwaSessionRedirect";
@@ -48,9 +49,11 @@ export default async function LocaleLayout({
       </head>
       <body className="min-h-screen bg-background text-foreground antialiased">
         <LanguageProvider initialLocale={localeStr as "pt" | "en" | "es"}>
-          <PwaSessionRedirect />
-          <ServiceWorkerRegistration />
-          <ErrorBoundary>{children}</ErrorBoundary>
+          <AuthProvider>
+            <PwaSessionRedirect />
+            <ServiceWorkerRegistration />
+            <ErrorBoundary>{children}</ErrorBoundary>
+          </AuthProvider>
         </LanguageProvider>
       </body>
     </html>
