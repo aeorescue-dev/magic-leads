@@ -54,6 +54,25 @@ DFW_CITIES = {
 }
 DALLAS_CITY_RE = re.compile(r"^(.*?)[,\s]+TX[,\s]+(\d{5})", re.IGNORECASE)
 
+# Illinois IDFPR (data.illinois.gov pzzh-kp68): unica base estadual com
+# contractor de construcao - ROOFING CONTRACTOR (Chicago: ~1.265 ativos).
+IL_LICENSE_URL = "https://data.illinois.gov/resource/pzzh-kp68.json"
+IL_ROOFING_WHERE = (
+    "license_type='ROOFING CONTRACTOR' AND license_status='ACTIVE' "
+    "AND city='CHICAGO'"
+)
+# Chicago Business Licenses (uupf-x98q): poucos contractors de oficio (a
+# licenca de canalizador/eletricista e' estadual), mas os de construcao geral
+# valem a pena e sao gratuitos.
+CHI_LICENSE_URL = "https://data.cityofchicago.org/resource/uupf-x98q.json"
+CHI_WHERE = (
+    "license_status='AAI' AND ("
+    "upper(business_activity) like '%CONSTRUCTION%' OR "
+    "upper(business_activity) like '%CONTRACT%' OR "
+    "upper(business_activity) like '%ELECTRIC%')"
+)
+
+
 
 
 def _clean(value: object) -> str:
@@ -208,6 +227,115 @@ async def ingest_tdlr(limit: int = 12000) -> dict:
     result["per_file"] = per_file
     logger.info(
         "[LICENSES] TDLR: extraidas=%s guardadas=%s", len(records), result.get("saved")
+    )
+    return result
+
+
+def extract_il_roofing(rows: Iterable[dict]) -> list[dict]:
+    """IDFPR -> entidades de roofing em Chicago."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    for row in rows or []:
+        name = _clean(
+            row.get("business_name")
+            or row.get("businessdba")
+            or f"{row.get('first_name') or ''} {row.get('last_name') or ''}"
+        )
+        license_no = _clean(row.get("license_number"))
+        if not name or not license_no or not is_usable_company_name(name):
+            continue
+        key = name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({
+            "legal_name": name,
+            "city": "CHICAGO",
+            "state": "IL",
+            "role": "contractor",
+            "license": license_no,
+            "source": "il_idfpr",
+            "external_id": f"il:{license_no}",
+        })
+    return out
+
+
+async def ingest_il_roofing(limit: int = 5000) -> dict:
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.get(IL_LICENSE_URL, params={
+                "$select": "business_name,businessdba,first_name,last_name,"
+                           "license_number,zip,city",
+                "$where": IL_ROOFING_WHERE,
+                "$limit": str(max(1, min(limit, 50000))),
+            })
+        if resp.status_code != 200:
+            logger.warning("[LICENSES] IL IDFPR HTTP %s", resp.status_code)
+            return {"status": "http_error", "code": resp.status_code}
+        rows = resp.json()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[LICENSES] IL IDFPR falhou: %s", exc)
+        return {"status": "error"}
+    records = extract_il_roofing(rows if isinstance(rows, list) else [])
+    result = await record_entities(records, max_records=max(limit, len(records)))
+    result["fetched"] = len(rows) if isinstance(rows, list) else 0
+    result["extracted"] = len(records)
+    logger.info(
+        "[LICENSES] IL roofing: fetched=%s extraidas=%s guardadas=%s",
+        result["fetched"], len(records), result.get("saved"),
+    )
+    return result
+
+
+def extract_chicago_licenses(rows: Iterable[dict]) -> list[dict]:
+    """Business Licenses de Chicago -> entidades de construcao."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    for row in rows or []:
+        name = _clean(
+            row.get("legal_name") or row.get("doing_business_as_name")
+        )
+        license_no = _clean(row.get("license_number"))
+        if not name or not license_no or not is_usable_company_name(name):
+            continue
+        key = name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({
+            "legal_name": name,
+            "city": "CHICAGO",
+            "state": "IL",
+            "role": "contractor",
+            "license": license_no,
+            "source": "chi_business_license",
+            "external_id": f"chi:{license_no}",
+        })
+    return out
+
+
+async def ingest_chicago_licenses(limit: int = 2000) -> dict:
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.get(CHI_LICENSE_URL, params={
+                "$select": "legal_name,doing_business_as_name,license_number",
+                "$where": CHI_WHERE,
+                "$limit": str(max(1, min(limit, 20000))),
+            })
+        if resp.status_code != 200:
+            logger.warning("[LICENSES] Chicago HTTP %s", resp.status_code)
+            return {"status": "http_error", "code": resp.status_code}
+        rows = resp.json()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[LICENSES] Chicago falhou: %s", exc)
+        return {"status": "error"}
+    records = extract_chicago_licenses(rows if isinstance(rows, list) else [])
+    result = await record_entities(records, max_records=max(limit, len(records)))
+    result["fetched"] = len(rows) if isinstance(rows, list) else 0
+    result["extracted"] = len(records)
+    logger.info(
+        "[LICENSES] Chicago: fetched=%s extraidas=%s guardadas=%s",
+        result["fetched"], len(records), result.get("saved"),
     )
     return result
 

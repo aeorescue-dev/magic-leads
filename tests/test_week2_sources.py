@@ -12,6 +12,37 @@ from backend.services.owner_email import (
 )
 
 
+def test_il_roofing_extrai_empresa_e_licenca():
+    from backend.services.licensing_sources import extract_il_roofing
+
+    rows = [
+        {"business_name": "EBERSON ROOFING CORP", "license_number": "104001443",
+         "zip": "60617"},
+        {"business_name": "", "first_name": "JOHN", "last_name": "DOE",
+         "license_number": "104000999"},
+        {"business_name": "", "license_number": "1"},
+        {"business_name": "EBERSON ROOFING CORP", "license_number": "104001444"},
+    ]
+    out = extract_il_roofing(rows)
+    assert [r["legal_name"] for r in out] == ["EBERSON ROOFING CORP", "JOHN DOE"]
+    assert all(r["city"] == "CHICAGO" and r["source"] == "il_idfpr" for r in out)
+
+
+def test_chicago_business_licenses_extrai_construcao():
+    from backend.services.licensing_sources import extract_chicago_licenses
+
+    rows = [
+        {"legal_name": "ACME BUILDERS INC", "license_number": "1001"},
+        {"legal_name": "", "doing_business_as_name": "SMITH GC LLC",
+         "license_number": "1002"},
+        {"legal_name": "N/A", "license_number": "1003"},
+        {"legal_name": "ACME BUILDERS INC", "license_number": "1004"},
+    ]
+    out = extract_chicago_licenses(rows)
+    assert [r["legal_name"] for r in out] == ["ACME BUILDERS INC", "SMITH GC LLC"]
+    assert all(r["source"] == "chi_business_license" for r in out)
+
+
 def test_tdlr_filtra_metro_de_dallas_e_normaliza():
     rows = [
         {"BUSINESS NAME": "TORRES ELECTRICAL SERVICE", "LICENSE NUMBER": "17000",

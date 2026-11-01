@@ -229,6 +229,28 @@ async def _ingest_sources(now: datetime) -> dict:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("[ENRICH-SCHED] TDLR falhou: %s", exc)
                 out["tdlr"] = {"status": "error"}
+        last = await db_service.get_system_kv("il_roofing_last_run")
+        if not last or (now - _parse_day(last)).days >= SOURCE_INTERVAL_DAYS:
+            try:
+                out["il_roofing"] = await licensing_sources.ingest_il_roofing(
+                    limit=5000
+                )
+                await db_service.set_system_kv("il_roofing_last_run", day)
+                await db_service.checkpoint()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[ENRICH-SCHED] IL roofing falhou: %s", exc)
+                out["il_roofing"] = {"status": "error"}
+        last = await db_service.get_system_kv("chi_licenses_last_run")
+        if not last or (now - _parse_day(last)).days >= SOURCE_INTERVAL_DAYS:
+            try:
+                out["chi_licenses"] = await licensing_sources.ingest_chicago_licenses(
+                    limit=2000
+                )
+                await db_service.set_system_kv("chi_licenses_last_run", day)
+                await db_service.checkpoint()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[ENRICH-SCHED] Chicago licencas falharam: %s", exc)
+                out["chi_licenses"] = {"status": "error"}
         last = await db_service.get_system_kv("osm_last_run")
         if not last or (now - _parse_day(last)).days >= SOURCE_INTERVAL_DAYS:
             try:
