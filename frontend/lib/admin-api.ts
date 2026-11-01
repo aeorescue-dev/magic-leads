@@ -789,6 +789,14 @@ export interface AdminOutboundMetrics {
     reply_rate: number;
     positive_rate: number;
   };
+  by_email_source: Array<{
+    source: string;
+    contacts: number;
+    replies: number;
+    positive: number;
+    reply_rate: number;
+    positive_rate: number;
+  }>;
 }
 
 export function fetchAdminOutboundMetrics(

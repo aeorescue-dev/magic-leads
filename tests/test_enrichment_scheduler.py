@@ -144,6 +144,7 @@ async def test_domain_e_depois_email_ate_ready(clean_entities, monkeypatch):
         "info@wightco.com"
     )
     assert contact and contact["niche_status"] == "confirmed"
+    assert contact["email_source"] == "smtp_pattern"
     assert db_service._service.outbound_readiness(CITY)["ready"] == 1
 
 

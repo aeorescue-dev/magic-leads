@@ -70,6 +70,7 @@ async def bridge_entity(entity: dict) -> str:
         niche_key=niche_key,
         niche_status="confirmed",
         create_contact=True,
+        email_source=entity.get("email_source") or "import",
     )
     if not contact or not contact.get("id"):
         await db_service.quarantine_contractor_entity(entity_id, "bridge_failed")

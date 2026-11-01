@@ -130,6 +130,7 @@ async def _email_stage(entity: dict) -> str:
         )
         return "catch_all"
     accepted = list(getattr(validation, "accepted", []) or [])
+    email_source = "smtp_pattern"
     if not accepted and domain:
         # OSINT do dono quando os padroes genericos falham (mesmo gate RCPT).
         async with _global_sem:
@@ -140,9 +141,10 @@ async def _email_stage(entity: dict) -> str:
             )
         if owner_found:
             accepted = [owner_found]
+            email_source = "owner_osint"
     if accepted:
         await db_service.mark_contractor_email_attempt(
-            int(entity["id"]), accepted[0], "valid", MAX_ATTEMPTS
+            int(entity["id"]), accepted[0], "valid", MAX_ATTEMPTS, email_source
         )
         updated = await db_service.get_contractor_entity(int(entity["id"]))
         return await entity_bridge.bridge_entity(updated or {**entity, "email": accepted[0]})

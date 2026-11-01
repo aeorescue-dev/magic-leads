@@ -92,7 +92,12 @@ def extract_chicago_permits(rows: Iterable[dict]) -> list[dict]:
             ctype = _clean(row.get(f"contact_{idx}_type")).upper()
             if not ctype:
                 continue
-            if not (ctype.startswith("CONTRACTOR") or ctype.startswith("MASON")):
+            # "ELECTRICAL CONTRACTOR" (261k) e "SIGN CONTRACTOR" ficavam de
+            # fora com o filtro antigo (startswith CONTRACTOR); "OWNER AS
+            # GENERAL CONTRACTOR" e' o proprietario, nao uma empresa.
+            if ctype.startswith("OWNER"):
+                continue
+            if "CONTRACTOR" not in ctype and not ctype.startswith("MASON"):
                 continue
             raw_name = _clean(row.get(f"contact_{idx}_name"))
             if not raw_name:

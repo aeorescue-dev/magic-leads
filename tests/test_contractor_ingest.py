@@ -48,12 +48,17 @@ def test_chicago_so_contratantes_e_separa_licenca_do_nome():
         "contact_4_name": "2622 NHALSTED ST LLC",
         "contact_5_type": "MASON - BRICK AND CONCRETE",
         "contact_5_name": "WINDY CITY MASONRY, INC.",
+        "contact_6_type": "ELECTRICAL CONTRACTOR",
+        "contact_6_name": "BRIGHTLINE ELECTRIC INC",
+        "contact_7_type": "OWNER AS GENERAL CONTRACTOR",
+        "contact_7_name": "SELF BUILDER LLC",
     }
     out = extract_chicago_permits([row])
     names = {r["legal_name"] for r in out}
     assert "CURRAGH ELECTRIC CO." in names
     assert "LONE STAR PLUMBING" in names
     assert "WINDY CITY MASONRY, INC." in names
+    assert "BRIGHTLINE ELECTRIC INC" in names
     assert "2622 NHALSTED ST LLC" not in names  # owner não é alvo
     assert "SULLIVAN, MARK J" not in names
     plumbing = next(r for r in out if r["legal_name"] == "LONE STAR PLUMBING")

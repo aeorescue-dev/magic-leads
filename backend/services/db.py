@@ -952,6 +952,7 @@ CREATE TABLE IF NOT EXISTS contractor_entities (
   niche_status TEXT DEFAULT 'unknown',
   email TEXT,
   email_status TEXT DEFAULT 'unknown',
+  email_source TEXT,
   phone TEXT,
   status TEXT NOT NULL DEFAULT 'new',
   source_refs TEXT,
@@ -2003,6 +2004,7 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         ("outbound_contact_id", "INTEGER"),
         ("outbound_lead_id", "INTEGER"),
         ("site_snippet", "TEXT"),
+        ("email_source", "TEXT"),
     ):
         if name not in ent_cols:
             conn.execute(f"ALTER TABLE contractor_entities ADD COLUMN {name} {ddl}")
@@ -2916,11 +2918,33 @@ class DatabaseService:
                 "WHERE reply_sentiment='positive' AND replied_at >= datetime('now', ?)",
                 (win,),
             ).fetchone()["c"]
+            by_source = [
+                dict(r) for r in conn.execute(
+                    "SELECT COALESCE(NULLIF(c.email_source,''),'import') AS source, "
+                    "COUNT(DISTINCT c.id) AS contacts, "
+                    "COUNT(DISTINCT CASE WHEN c.replied_at IS NOT NULL THEN c.id END) AS replies, "
+                    "COUNT(DISTINCT CASE WHEN c.reply_sentiment='positive' THEN c.id END) AS positive "
+                    "FROM outbound_contacts c "
+                    "JOIN outbound_messages m ON m.contact_id = c.id "
+                    "WHERE m.status='sent' AND m.sent_at >= datetime('now', ?) "
+                    "GROUP BY source ORDER BY contacts DESC",
+                    (win,),
+                ).fetchall()
+            ]
+            for row in by_source:
+                contacts = int(row["contacts"] or 0)
+                row["reply_rate"] = (
+                    round(int(row["replies"] or 0) / contacts, 4) if contacts else 0.0
+                )
+                row["positive_rate"] = (
+                    round(int(row["positive"] or 0) / contacts, 4) if contacts else 0.0
+                )
         finally:
             conn.close()
         return {
             "days": window,
             "mailboxes": rows,
+            "by_email_source": by_source,
             "totals": {
                 "sent": total_sent,
                 "failed": total_failed,
@@ -3468,6 +3492,7 @@ class DatabaseService:
         niche_score: float = 0.0,
         niche_evidence: Optional[str] = None,
         create_contact: bool = True,
+        email_source: str = "import",
     ) -> Optional[dict]:
         if not email or not company_name or not city:
             return None
@@ -3547,10 +3572,10 @@ class DatabaseService:
                 "(lead_id, kind, company_name, contact_name, email, email_source, "
                 "email_status, city, state, company_domain, enriched_at, last_verified_at, "
                 "niche_key, niche_status) "
-                "VALUES (?, 'business', ?, ?, ?, 'import', 'valid', ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?) "
+                "VALUES (?, 'business', ?, ?, ?, ?, 'valid', ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?) "
                 "ON CONFLICT(email) DO UPDATE SET "
                 "email_status='valid', "
-                "email_source='import', "
+                "email_source=COALESCE(excluded.email_source, outbound_contacts.email_source), "
                 "enriched_at=CURRENT_TIMESTAMP, last_verified_at=CURRENT_TIMESTAMP, "
                 "company_name=COALESCE(excluded.company_name, outbound_contacts.company_name), "
                 "contact_name=COALESCE(excluded.contact_name, outbound_contacts.contact_name), "
@@ -3564,6 +3589,7 @@ class DatabaseService:
                     company_name,
                     contact_name,
                     clean_email,
+                    (email_source or "import"),
                     clean_city,
                     st,
                     domain or (clean_email.split('@')[1] if '@' in clean_email else None),
@@ -4249,6 +4275,7 @@ class DatabaseService:
         email: Optional[str] = None,
         email_status: str = "unknown",
         max_attempts: int = 2,
+        source: str = "",
     ) -> dict:
         conn = get_connection()
         try:
@@ -4272,9 +4299,11 @@ class DatabaseService:
             conn.execute(
                 "UPDATE contractor_entities SET email=COALESCE(?, email), "
                 "email_status=?, status=?, email_checked_at=CURRENT_TIMESTAMP, "
+                "email_source=COALESCE(NULLIF(?, ''), email_source), "
                 "email_attempts=?, quarantine_reason=?, updated_at=CURRENT_TIMESTAMP "
                 "WHERE id=?",
-                (email, email_status, status, attempts, reason, int(entity_id)),
+                (email, email_status, status, (source or ""), attempts, reason,
+                 int(entity_id)),
             )
             conn.commit()
             return {"attempts": attempts, "status": status}
@@ -12701,6 +12730,7 @@ class AsyncDatabaseService:
         niche_score: float = 0.0,
         niche_evidence: Optional[str] = None,
         create_contact: bool = True,
+        email_source: str = "import",
     ) -> Optional[dict]:
         return await anyio.to_thread.run_sync(
             lambda: self._service.import_b2b_lead(
@@ -12716,6 +12746,7 @@ class AsyncDatabaseService:
                 niche_score=niche_score,
                 niche_evidence=niche_evidence,
                 create_contact=create_contact,
+                email_source=email_source,
             )
         )
 
@@ -12957,11 +12988,11 @@ class AsyncDatabaseService:
 
     async def mark_contractor_email_attempt(
         self, entity_id: int, email: Optional[str] = None,
-        email_status: str = "unknown", max_attempts: int = 2,
+        email_status: str = "unknown", max_attempts: int = 2, source: str = "",
     ) -> dict:
         return await anyio.to_thread.run_sync(
             lambda: self._service.mark_contractor_email_attempt(
-                entity_id, email, email_status, max_attempts
+                entity_id, email, email_status, max_attempts, source
             )
         )
 

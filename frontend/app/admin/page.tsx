@@ -1063,6 +1063,19 @@ function OutboundPanel() {
               Sem pixel de abertura (protege a entregabilidade). “Positiva” é
               classificação manual em Fila e lotes → Resposta.
             </p>
+            {metrics.by_email_source?.length ? (
+              <p className="mt-1 text-[10px] text-slate-500">
+                Por origem do e-mail:{" "}
+                {metrics.by_email_source
+                  .map(
+                    (s) =>
+                      `${s.source} ${s.replies}/${s.contacts} respostas (${fmtPct(
+                        s.reply_rate
+                      )})`
+                  )
+                  .join(" · ")}
+              </p>
+            ) : null}
           </div>
         ) : null}
 

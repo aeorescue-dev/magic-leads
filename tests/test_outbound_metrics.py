@@ -54,12 +54,12 @@ def test_metricas_por_caixa_e_totais():
             (box["id"], "sent0@metrics-test.com"),
         )
         conn.execute(
-            "INSERT INTO outbound_contacts (email, city, replied_at, reply_sentiment) "
-            "VALUES ('sent0@metrics-test.com', 'NYC', CURRENT_TIMESTAMP, 'positive')"
+            "INSERT INTO outbound_contacts (email, city, email_source, replied_at, reply_sentiment) "
+            "VALUES ('sent0@metrics-test.com', 'NYC', 'smtp_pattern', CURRENT_TIMESTAMP, 'positive')"
         )
         conn.execute(
-            "INSERT INTO outbound_contacts (email, city, replied_at) "
-            "VALUES ('sent1@metrics-test.com', 'NYC', CURRENT_TIMESTAMP)"
+            "INSERT INTO outbound_contacts (email, city, email_source, replied_at) "
+            "VALUES ('sent1@metrics-test.com', 'NYC', 'smtp_pattern', CURRENT_TIMESTAMP)"
         )
         c0 = conn.execute(
             "SELECT id FROM outbound_contacts WHERE email='sent0@metrics-test.com'"
@@ -94,6 +94,12 @@ def test_metricas_por_caixa_e_totais():
     assert data["totals"]["sent"] >= 4
     assert data["totals"]["replies"] >= 2
     assert data["totals"]["positive"] >= 1
+
+    # Origem do e-mail: o KPI que mede o impacto do OSINT do dono.
+    by_source = {row["source"]: row for row in data["by_email_source"]}
+    assert "smtp_pattern" in by_source
+    assert by_source["smtp_pattern"]["contacts"] >= 2
+    assert by_source["smtp_pattern"]["replies"] >= 2
 
     # Classificacao manual da resposta (KPI de positivas).
     assert svc.set_contact_reply_sentiment(contact_id, "positive") is True
