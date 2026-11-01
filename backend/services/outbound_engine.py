@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 from ..config import settings
 from ..utils.logger import logger
-from . import mailbox_guard, niche_classifier, outbound_templates
+from . import mailbox_guard, niche_classifier, outbound_templates, timeutil
 from .db import (
     SENDABLE_EMAIL_STATUSES,
     SERVED_CITIES,
@@ -107,7 +107,8 @@ def _now_dt(now: Optional[datetime] = None) -> datetime:
 
 
 def day_key(now: Optional[datetime] = None) -> str:
-    return _now_dt(now).strftime("%Y-%m-%d")
+    """Dia operacional em America/New_York (ver `timeutil`)."""
+    return timeutil.day_key(now)
 
 
 def _signature_for(mailbox: dict) -> str:
@@ -228,11 +229,8 @@ def _mailbox_warmup_state(mailbox: dict, config: dict, now: datetime) -> str:
 
 
 def next_utc_midnight(now: Optional[datetime] = None) -> str:
-    """Primeiro instante do próximo dia UTC (quando os caps de caixa repõem)."""
-    dt = (_now_dt(now) + timedelta(days=1)).replace(
-        hour=0, minute=0, second=0, microsecond=0
-    )
-    return dt.strftime("%Y-%m-%d %H:%M:%S")
+    """Próxima meia-noite de Nova Iorque, devolvida em UTC (repõe os caps)."""
+    return timeutil.next_day_start_utc(now)
 
 
 def quiet_hours_end_iso(now: datetime, config: dict) -> Optional[str]:

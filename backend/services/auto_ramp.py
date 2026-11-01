@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from ..utils.logger import logger
+from . import timeutil
 from .db import db_service, get_connection
 
 AUTO_RAMP_STAGES: tuple[int, ...] = (1, 1, 1, 2, 3, 5, 8, 12, 20, 25, 35, 50, 75)
@@ -126,7 +127,7 @@ def _mark_eval(now: datetime) -> None:
         conn.execute(
             "INSERT INTO system_kv (key, value, updated_at) VALUES (?, ?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
-            (EVAL_KEY, now.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%dT%H:%M:%SZ")),
+            (EVAL_KEY, timeutil.day_key(now), now.strftime("%Y-%m-%dT%H:%M:%SZ")),
         )
         conn.commit()
     finally:
@@ -138,7 +139,7 @@ async def evaluate_auto_ramp(
 ) -> dict:
     """Avalia todas as caixas com Auto-Ramp ligado (1x/dia, salvo force)."""
     now = now or datetime.now(timezone.utc)
-    today = now.strftime("%Y-%m-%d")
+    today = timeutil.day_key(now)
     if not force and _eval_today(now) == today:
         return {"status": "skipped", "reason": "already_evaluated", "steps": 0}
 

@@ -15,7 +15,14 @@ from datetime import datetime, timezone
 from typing import Iterable, Optional
 
 from ..utils.logger import logger
-from . import brave_search, entity_bridge, licensing_sources, osm_extract, owner_email
+from . import (
+    brave_search,
+    entity_bridge,
+    licensing_sources,
+    osm_extract,
+    owner_email,
+    timeutil,
+)
 from .company_discovery import CompanyDiscovery
 from .db import db_service
 from .domain_resolver import resolve_domain
@@ -162,7 +169,7 @@ async def run_once(
         return {"status": "busy", "processed": 0, "cities": {}}
     async with _run_lock:
         now = now or datetime.now(timezone.utc)
-        day = now.strftime("%Y-%m-%d")
+        day = timeutil.day_key(now)
         stats: dict[str, dict] = {}
         total = 0
         for city in (cities_override or cities()):

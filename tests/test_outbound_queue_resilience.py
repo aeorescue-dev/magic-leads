@@ -161,8 +161,9 @@ def test_mailbox_city_match_rules():
     assert mailbox_matches_city("NYC", "")
 
 
-def test_next_utc_midnight_is_next_day():
-    assert next_utc_midnight(NOW) == "2026-11-01 00:00:00"
+def test_next_utc_midnight_is_next_ny_day():
+    # NOW = 31/10 12:00 UTC = 08:00 EDT -> meia-noite NY = 01/11 04:00 UTC
+    assert next_utc_midnight(NOW) == "2026-11-01 04:00:00"
 
 
 @pytest.mark.asyncio
@@ -363,7 +364,7 @@ async def test_status_reports_mailbox_cap_blocker(clean_engine, monkeypatch):
     assert status["mailbox_remaining_today"] == 0
     assert status["queue_blocker"]["reason"] == "mailbox_cap"
     assert "warm-up" in status["queue_blocker"]["detail"]
-    assert status["queue_blocker"]["retry_at"].endswith("00:00:00")
+    assert status["queue_blocker"]["retry_at"].endswith(("04:00:00", "05:00:00"))
     # A caixa expõe a folga nas linhas (a UI mostra "restam 0").
     assert status["mailboxes"][0]["remaining_today"] == 0
 

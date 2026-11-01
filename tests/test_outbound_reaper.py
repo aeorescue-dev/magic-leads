@@ -240,7 +240,8 @@ async def test_reap_stale_sending_returns_zero_when_disabled(monkeypatch, clean_
 def test_now_str_normalizes_aware_datetimes_to_utc():
     tz_plus3 = timezone(timedelta(hours=3))
     assert _now_str(datetime(2026, 1, 1, 3, 0, tzinfo=tz_plus3)) == "2026-01-01 00:00:00"
-    assert day_key(datetime(2026, 1, 1, 3, 0, tzinfo=tz_plus3)) == "2026-01-01"
+    # 00:00 UTC = 19:00 EST de 31/12 -> o dia operacional (NY) e' 31/12.
+    assert day_key(datetime(2026, 1, 1, 3, 0, tzinfo=tz_plus3)) == "2025-12-31"
 
 
 def test_now_str_keeps_naive_datetimes_as_utc():

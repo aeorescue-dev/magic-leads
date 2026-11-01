@@ -4563,12 +4563,14 @@ class DatabaseService:
             conn.close()
 
     def count_mailbox_sent_today(self, mailbox_id: int, day: str) -> int:
+        from .timeutil import day_start_utc
+
         conn = get_connection()
         try:
             row = conn.execute(
                 "SELECT COUNT(*) AS c FROM outbound_messages "
                 "WHERE mailbox_id=? AND status='sent' AND sent_at >= ?",
-                (int(mailbox_id), f"{day} 00:00:00"),
+                (int(mailbox_id), day_start_utc(day)),
             ).fetchone()
             return int(row["c"])
         finally:
