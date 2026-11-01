@@ -88,6 +88,7 @@ from .scrapers.socrata_311 import socrata_scraper
 from .scrapers.socrata_discovery import socrata_discovery
 from .services import (
     alert_planner,
+    auto_batch,
     auto_ramp,
     contractor_ingest,
     control_tower,
@@ -4521,6 +4522,11 @@ async def _outbound_worker_loop():
         try:
             # Dorme primeiro: evita disparos na arrancagem e nos testes.
             await asyncio.sleep(interval_s)
+            # Auto-lote: mantem a fila viva quando ha capacidade e inventario.
+            try:
+                await auto_batch.maybe_create_batch()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[AUTO-BATCH] tick falhou: %s", exc)
             result = await outbound_engine.process_queue()
             # Heartbeat: a Control Tower usa isto para detectar worker morto.
             try:
