@@ -340,3 +340,138 @@ async def test_auth_error_pausa_e_marca(clean_mailboxes):
     assert row["enabled"] == 0
     assert row["paused_reason"] == "auth_failure"
     assert row["last_auth_error_at"]
+
+
+# ------------------------------------------- auditoria preditiva (2026-11-01)
+#
+# O Auto-Ramp e' avaliado 1x/dia no primeiro tick apos a meia-noite de Nova
+# Iorque. Estes testes simulam o calendario real (03/11 e 05/11), o jitter de
+# ate 60 s entre dois degraus e as fronteiras exatas do disjuntor.
+
+
+def _ramp_box(cap: int, last: datetime, max_cap: int = 75) -> dict:
+    return {
+        "enabled": 1,
+        "auto_ramp_enabled": 1,
+        "auto_ramp_cap": cap,
+        "auto_ramp_max": max_cap,
+        "auto_ramp_last_step_at": last.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
+def _at(day: int, hour: int, minute: int, month: int = 11) -> datetime:
+    return datetime(2026, month, day, hour, minute, tzinfo=timezone.utc)
+
+
+def test_rampa_03_11_e_05_11_resistem_ao_jitter_do_tick():
+    """2 -> 3 em 03/11 e 3 -> 5 em 05/11 mesmo com 20 s de jitter."""
+    last = datetime(2026, 11, 1, 0, 43, 47, tzinfo=timezone.utc)
+    box = _ramp_box(2, last)
+
+    # 02/11 00:01 ET: so' 1 dia e 4 h desde o passo -> segura.
+    assert auto_ramp.evaluate_mailbox(box, _metrics(sent=12), _at(2, 5, 1))["reason"] == "interval"
+
+    # 03/11 00:00:10 ET: primeiro tick do dia -> sobe para 3.
+    step = auto_ramp.evaluate_mailbox(box, _metrics(sent=12), _at(3, 5, 0))
+    assert step["action"] == "step"
+    assert (step["from_cap"], step["to_cap"]) == (2, 3)
+
+    # O passo real ficou gravado 20 s DEPOIS da avaliacao (jitter do tick).
+    box3 = _ramp_box(3, datetime(2026, 11, 3, 5, 0, 30))
+    # 04/11: um dia antes -> nunca sobe (nem com a folga de 1 h).
+    assert auto_ramp.evaluate_mailbox(box3, _metrics(sent=20), _at(4, 5, 0))["reason"] == "interval"
+    # 05/11 00:00:10 ET: 20 s "cedo" face ao passo, mas dentro da folga -> sobe.
+    step2 = auto_ramp.evaluate_mailbox(box3, _metrics(sent=20), _at(5, 5, 0))
+    assert step2["action"] == "step"
+    assert (step2["from_cap"], step2["to_cap"]) == (3, 5)
+
+
+def test_rampa_nunca_salta_degraus_mesmo_com_folga_maxima():
+    box = _ramp_box(2, datetime(2026, 10, 20, 12, 0, tzinfo=timezone.utc))
+    decision = auto_ramp.evaluate_mailbox(box, _metrics(sent=2000), _at(3, 12, 0))
+    assert decision["action"] == "step"
+    assert decision["to_cap"] == 3, "a escada so' avanca um degrau por avaliacao"
+
+
+def test_rampa_segura_com_erro_de_auth_dentro_de_30_dias_e_liberta_depois():
+    last = datetime(2026, 10, 20, 12, 0, tzinfo=timezone.utc)
+    box = _ramp_box(25, last)
+    now = _at(3, 12, 0)
+    dentro = _metrics(sent=250, auth=(now - timedelta(days=29)).strftime("%Y-%m-%d %H:%M:%S"))
+    assert auto_ramp.evaluate_mailbox(box, dentro, now)["reason"] == "auth"
+    fora = _metrics(sent=250, auth=(now - timedelta(days=31)).strftime("%Y-%m-%d %H:%M:%S"))
+    assert auto_ramp.evaluate_mailbox(box, fora, now)["action"] == "step"
+
+
+def test_caixa_pausada_pelo_disjuntor_nao_e_retomada_pelo_auto_ramp():
+    box = _ramp_box(5, datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc))
+    box["paused_at"] = "2026-11-01 12:00:00"
+    box["paused_reason"] = "bounce_rate"
+    assert auto_ramp.evaluate_mailbox(box, _metrics(sent=500), _at(3, 12, 0)) == {
+        "action": "hold",
+        "reason": "paused",
+    }
+
+
+@pytest.mark.asyncio
+async def test_complaint_acima_de_0_1_por_cento_pausa(clean_mailboxes, monkeypatch):
+    mailbox = _mailbox()
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO mailbox_bounce_events (mailbox_id, email, kind) "
+            "VALUES (?, 'x@example.com', 'complaint')",
+            (mailbox["id"],),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    async def fake_metrics(mailbox_id, days=30):
+        return _metrics(sent=20, complaints=1)
+
+    monkeypatch.setattr(
+        mailbox_guard.db_service, "mailbox_metrics", fake_metrics, raising=False
+    )
+    result = await mailbox_guard.check_mailboxes(NOW)
+    assert result["paused"] == 1
+    row = db_service._service.list_sending_mailboxes()[0]
+    assert row["enabled"] == 0
+    assert row["paused_reason"] == "complaint_rate"
+
+
+@pytest.mark.asyncio
+async def test_limites_exatos_do_disjuntor_nao_pausam(clean_mailboxes, monkeypatch):
+    """bounce == 2% e complaint == 0.1% ficam no limite, sem pausa (regra e' >)."""
+    mailbox = _mailbox()
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO mailbox_bounce_events (mailbox_id, email, kind) "
+            "VALUES (?, 'x@example.com', 'bounce')",
+            (mailbox["id"],),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    state = {"metrics": _metrics(sent=50, bounces=1)}
+    async def fake_metrics(mailbox_id, days=30):
+        return state["metrics"]
+
+    monkeypatch.setattr(
+        mailbox_guard.db_service, "mailbox_metrics", fake_metrics, raising=False
+    )
+
+    # 1 bounce em 50 envios = 2,0% (nao e' > 2%).
+    result = await mailbox_guard.check_mailboxes(NOW)
+    assert result["paused"] == 0
+    row = db_service._service.list_sending_mailboxes()[0]
+    assert row["enabled"] == 1
+
+    # 1 complaint em 1.000 envios = 0,1% (nao e' > 0,1%).
+    state["metrics"] = _metrics(sent=1000, complaints=1)
+    result = await mailbox_guard.check_mailboxes(NOW)
+    assert result["paused"] == 0
+    row = db_service._service.list_sending_mailboxes()[0]
+    assert row["enabled"] == 1

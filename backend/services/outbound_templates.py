@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import re
 from typing import Any, Mapping, Optional
+from urllib.parse import urlencode
 
 # --------------------------------------------------------------- language
 
@@ -276,14 +277,20 @@ SEQUENCE_LANDING_BASE = "https://www.magicleads.app/en"
 
 
 def sequence_url(city: Optional[str], niche: Optional[str], step: int = 2) -> str:
-    """URL da landing para o passo da sequencia, com cidade e nicho."""
-    parts = []
+    """URL da landing para o passo da sequencia, com cidade e nicho.
+
+    Usa `urlencode`: um token com `&`, espaco ou acento nunca parte o link (o
+    redirecionamento continua valido em 100% dos lotes). Para os tokens reais
+    (`NYC`, `DALLAS`, `general_contractors`, ...) o resultado e' identico ao
+    formato literal.
+    """
+    params: dict[str, str] = {}
     if city:
-        parts.append(f"city={str(city).strip().upper()}")
+        params["city"] = str(city).strip().upper()
     if niche:
-        parts.append(f"niche={niche}")
-    parts.append(f"step={int(step)}")
-    return f"{SEQUENCE_LANDING_BASE}?{'&'.join(parts)}"
+        params["niche"] = str(niche).strip()
+    params["step"] = str(int(step))
+    return f"{SEQUENCE_LANDING_BASE}?{urlencode(params)}"
 
 
 def render_sequence_email(step: str, context: Mapping[str, str]) -> dict[str, str]:

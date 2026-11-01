@@ -1234,6 +1234,31 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   após cada envio, para o teto ver a folga gasta de imediato.
 - **Testes**: 1066 pytest (2 novos) · 97 vitest · tsc limpo · Ruff limpo.
 
+### Fase 20 — Auditoria preditiva do cruzeiro (2026-11-01)
+
+- **Rampa:** o intervalo era comparado ao segundo, mas a avaliação é 1x/dia com
+  jitter de até 60 s; um degrau podia escorregar um dia inteiro (`hold:
+  interval` com a marca diária já escrita). `INTERVAL_TOLERANCE = 1 h` absorve
+  o jitter. Simulação com os valores reais: 03/11 `2→3`, 05/11 `3→5`; nunca
+  sobe dois dias seguidos nem salta degraus.
+- **Fuso:** teste fixa a mudança de hora (`01/11` começa 04:00 UTC em EDT;
+  `02/11` começa 05:00 UTC em EST) e o dia operacional.
+- **Links:** `sequence_url` passou a usar `urlencode` (tokens crus com `&` ou
+  espaço nunca partem o redirect). 64 combinações cidade×nicho×passo
+  verificadas com `parse_qs`; 8 URLs reais devolvem 200; cada variante tem um
+  único link de campanha.
+- **Disjuntor:** testes novos para complaint >0,1%, limites exatos (2,0% e
+  0,1% não pausam) e para a garantia de que o Auto-Ramp nunca retoma uma caixa
+  pausada. Auth, 2 bounces consecutivos e bounce >2% já estavam cobertos.
+- **Produção (read-only):** `integrity_check`/`quick_check` ok, WAL 0,1 MB,
+  693 MB livres, 0 mensagens presas, 0 duplicadas, 0 falhas 7 d, 0 erros nos
+  logs, RSS 53 MB, 2 threads.
+- **Dívida encontrada:** `PRAGMA foreign_keys=0` deixou 1.058 linhas órfãs em
+  tabelas de dashboard (`lead_case_history` 912, `credit_ledger` 52, …); o
+  domínio de envio tem **0** órfãos. Limpeza fica para tarefa separada.
+- Relatório completo: `docs/PREDICTIVE-AUDIT.md`.
+- **Testes**: 1077 pytest (11 novos) · Ruff limpo.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

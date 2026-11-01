@@ -32,6 +32,11 @@ MAX_RAMP = 100
 BOUNCE_LIMIT = 0.01
 COMPLAINT_LIMIT = 0.001
 EVAL_KEY = "auto_ramp_last_eval"
+# A avaliacao corre 1x/dia no primeiro tick apos a meia-noite de Nova Iorque.
+# O tick tem jitter de ate 60 s: sem esta folga, um passo gravado as 05:00:30
+# e avaliado as 05:00:10 dois dias depois ficava 20 s "cedo" e o degrau
+# escorregava um dia inteiro (a marca diaria ja' estava escrita).
+INTERVAL_TOLERANCE = timedelta(hours=1)
 
 
 def _parse_dt(value: Optional[str]) -> Optional[datetime]:
@@ -79,8 +84,10 @@ def evaluate_mailbox(
         or mailbox.get("warmup_started_at")
         or mailbox.get("created_at")
     )
-    if last and (now - last) < timedelta(days=step_interval_days(current)):
-        return {"action": "hold", "reason": "interval"}
+    if last:
+        interval = timedelta(days=step_interval_days(current)) - INTERVAL_TOLERANCE
+        if (now - last) < interval:
+            return {"action": "hold", "reason": "interval"}
 
     sent = int(metrics.get("sent") or 0)
     if current >= GATED_FROM:
