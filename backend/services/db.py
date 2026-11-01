@@ -4212,6 +4212,26 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def ready_source_mix(self, city: str) -> List[dict]:
+        """Prontos por nicho e origem do e-mail (para o 1:1 do auto-lote)."""
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT COALESCE(NULLIF(c.niche_key,''),'general_contractors') niche, "
+                "SUM(CASE WHEN c.email_source='owner_osint' THEN 1 ELSE 0 END) osint, "
+                "SUM(CASE WHEN COALESCE(c.email_source,'')<>'owner_osint' THEN 1 ELSE 0 END) generic "
+                "FROM outbound_contacts c "
+                "WHERE UPPER(TRIM(c.city))=? AND COALESCE(c.unsubscribed,0)=0 "
+                "AND c.email_status='valid' AND c.niche_status='confirmed' "
+                "AND NOT EXISTS (SELECT 1 FROM outbound_messages m "
+                "  WHERE m.contact_id=c.id AND m.status IN ('queued','sending','sent')) "
+                "GROUP BY 1 ORDER BY (osint + generic) DESC",
+                ((city or "").strip().upper(),),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
     def get_system_kv(self, key: str) -> Optional[str]:
         conn = get_connection()
         try:
@@ -12811,6 +12831,9 @@ class AsyncDatabaseService:
         return await anyio.to_thread.run_sync(
             self._service.upgrade_contact_email, entity_id, new_email, source
         )
+
+    async def ready_source_mix(self, city: str) -> List[dict]:
+        return await anyio.to_thread.run_sync(self._service.ready_source_mix, city)
 
     async def outbound_category_mix(
         self, city: str, categories: Optional[List[str]] = None, limit: int = 3

@@ -53,6 +53,18 @@ def _cooldown_ok() -> bool:
         return True
 
 
+def choose_balanced_niche(mix: list[dict]) -> Optional[str]:
+    """Nicho com as DUAS origens (para o 1:1 arrancar logo no lote)."""
+    balanced = [
+        row for row in mix or []
+        if int(row.get("osint") or 0) > 0 and int(row.get("generic") or 0) > 0
+    ]
+    if not balanced:
+        return None
+    best = max(balanced, key=lambda r: int(r["osint"]) + int(r["generic"]))
+    return str(best.get("niche") or "")
+
+
 async def maybe_create_batch(now: Optional[datetime] = None) -> dict:
     now = now or datetime.now(timezone.utc)
     config = await db_service.get_outbound_config()
@@ -83,6 +95,13 @@ async def maybe_create_batch(now: Optional[datetime] = None) -> dict:
         return {"status": "no_inventory"}
     city, ready = pick
     niche = choose_niche(readiness[city])
+    try:
+        mix = await db_service.ready_source_mix(city)
+    except Exception:  # noqa: BLE001
+        mix = []
+    balanced = choose_balanced_niche(mix)
+    if balanced:
+        niche = balanced
     size = max(1, min(ready, remaining, DEFAULT_BATCH))
 
     svc = db_service._service

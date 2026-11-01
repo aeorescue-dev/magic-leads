@@ -23,6 +23,18 @@ def test_nicho_usa_o_topo_do_inventario_ou_default():
     assert auto_batch.choose_niche({"by_niche": []}) == "general_contractors"
 
 
+def test_escolhe_nicho_com_as_duas_origens():
+    mix = [
+        {"niche": "general_contractors", "osint": 0, "generic": 71},
+        {"niche": "roofing", "osint": 6, "generic": 2},
+        {"niche": "plumbing", "osint": 3, "generic": 0},
+    ]
+    assert auto_batch.choose_balanced_niche(mix) == "roofing"
+    assert auto_batch.choose_balanced_niche(
+        [{"niche": "roofing", "osint": 0, "generic": 5}]
+    ) is None
+
+
 def _patch(monkeypatch, *, send="1", quiet=False, queued=0, capacity=4,
            ready=10, enqueue_queued=4):
     calls: dict = {}
@@ -42,6 +54,9 @@ def _patch(monkeypatch, *, send="1", quiet=False, queued=0, capacity=4,
         calls["enqueued"] = batch
         return {"queued": enqueue_queued}
 
+    async def fake_mix(city):
+        return [{"niche": "plumbing", "osint": 4, "generic": 6}]
+
     async def fake_set_kv(key, value):
         calls[key] = value
 
@@ -56,6 +71,7 @@ def _patch(monkeypatch, *, send="1", quiet=False, queued=0, capacity=4,
     )
     monkeypatch.setattr(auto_batch.db_service, "get_outbound_config", fake_cfg)
     monkeypatch.setattr(auto_batch.db_service, "outbound_readiness", fake_ready)
+    monkeypatch.setattr(auto_batch.db_service, "ready_source_mix", fake_mix)
     monkeypatch.setattr(auto_batch.db_service, "set_system_kv", fake_set_kv)
     monkeypatch.setattr(auto_batch.engine, "status", fake_status)
     monkeypatch.setattr(auto_batch.engine, "enqueue_batch", fake_enqueue)
