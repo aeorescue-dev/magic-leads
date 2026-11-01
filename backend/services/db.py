@@ -4342,8 +4342,13 @@ class DatabaseService:
             conn.execute(
                 "INSERT INTO city_enrichment_state (city, day, jobs_today, last_entity_id, "
                 "last_run_at, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) "
-                "ON CONFLICT(city) DO UPDATE SET day=excluded.day, "
-                "jobs_today=excluded.jobs_today, "
+                "ON CONFLICT(city) DO UPDATE SET "
+                # Acumula dentro do mesmo dia; reseta quando o dia muda. Antes
+                # sobrescrevia e a quota por cidade nunca era atingida.
+                "jobs_today=CASE WHEN city_enrichment_state.day=excluded.day "
+                "               THEN city_enrichment_state.jobs_today + excluded.jobs_today "
+                "               ELSE excluded.jobs_today END, "
+                "day=excluded.day, "
                 "last_entity_id=COALESCE(excluded.last_entity_id, city_enrichment_state.last_entity_id), "
                 "last_run_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP",
                 (city.strip().upper(), day, int(jobs), last_entity_id),

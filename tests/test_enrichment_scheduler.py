@@ -195,6 +195,17 @@ async def test_sem_dominio_duas_vezes_quarentena(clean_entities, monkeypatch):
     assert row["quarantine_reason"] == "no_domain"
 
 
+def test_bump_city_enrichment_acumula_no_dia_e_reseta(clean_entities):
+    svc = db_service._service
+    svc.bump_city_enrichment_state(CITY, "2026-11-01", 4, 10)
+    svc.bump_city_enrichment_state(CITY, "2026-11-01", 5, 20)
+    state = svc.get_city_enrichment_state(CITY, "2026-11-01")
+    assert state["jobs_today"] == 9
+    svc.bump_city_enrichment_state(CITY, "2026-11-02", 3, 30)
+    state = svc.get_city_enrichment_state(CITY, "2026-11-02")
+    assert state["jobs_today"] == 3
+
+
 @pytest.mark.asyncio
 async def test_fallback_heuristico_usa_o_relogio_do_motor(clean_entities, monkeypatch):
     """O deadline do heuristico tem de estar no mesmo relogio do motor.
