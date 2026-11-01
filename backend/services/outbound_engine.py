@@ -1132,7 +1132,7 @@ class OutboundEngine:
                     "reason": "mailbox_cap",
                     "detail": (
                         f"Limite de caixa atingido: {cap_sent}/{cap_total} hoje "
-                        f"(warm-up dia {ramp_day}). Retoma à meia-noite UTC."
+                        f"(warm-up dia {ramp_day}). Retoma à meia-noite de Nova Iorque."
                     ),
                     "retry_at": next_utc_midnight(now),
                 }

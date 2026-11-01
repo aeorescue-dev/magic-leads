@@ -443,7 +443,7 @@ def _check_queue() -> list[dict]:
                 ramp_day = capacity["mailboxes"][0]["warmup_days"] if capacity["mailboxes"] else 0
                 blocked_detail = (
                     f"{capacity['sent_total']}/{capacity['cap_total']} envios hoje; "
-                    f"warm-up dia {ramp_day} — retoma à meia-noite UTC"
+                    f"warm-up dia {ramp_day} — retoma à meia-noite de Nova Iorque"
                 )
             else:
                 # Capacidade existe mas a fila não anda: pode ser config por
