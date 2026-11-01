@@ -176,6 +176,38 @@ def _qualified_where(alias: str = "") -> str:
     return " AND ".join(parts)
 
 
+def _feed_where(alias: str = "") -> str:
+    """Predicado do feed (/api/leads e /api/leads/today), sem o gatilho.
+
+    O feed exige `signal_type IS NOT NULL` a parte; por isso `is_feed_ok` não
+    inclui `_trigger_where` (que aceita o fallback legado por `case_status`).
+    """
+    return " AND ".join(
+        [_address_where(alias), _category_where(alias), _not_junk_where(alias)]
+    )
+
+
+def _quality_set_clause() -> str:
+    """SET que (re)calcula as três colunas materializadas da Fase 22."""
+    return (
+        f"is_junk = CASE WHEN {_junk_where()} THEN 1 ELSE 0 END, "
+        f"is_feed_ok = CASE WHEN ({_feed_where()}) THEN 1 ELSE 0 END, "
+        f"is_qualified = CASE WHEN ({_qualified_where()}) THEN 1 ELSE 0 END"
+    )
+
+
+def refresh_lead_quality(conn, where_sql: str, params: tuple) -> int:
+    """Recalcula a qualificação materializada para as linhas que casarem.
+
+    Chamado na escrita (ingestão/update) e no backfill de arranque. Devolve o
+    número de linhas afetadas.
+    """
+    cur = conn.execute(
+        f"UPDATE leads SET {_quality_set_clause()} WHERE {where_sql}", params
+    )
+    return int(cur.rowcount or 0)
+
+
 def _merge_city_counts(rows) -> List[dict]:
     """Agrupa cidades sem distinguir maiusculas ("CHICAGO" + "Chicago").
 
@@ -225,6 +257,40 @@ def clear_dashboard_summary_cache() -> None:
     """Invalida o cache in-process do resumo do dashboard."""
     with _DASHBOARD_SUMMARY_CACHE_LOCK:
         _DASHBOARD_SUMMARY_CACHE.clear()
+
+
+# ----- Cache in-process das métricas globais (Fase 22) -----
+# `get_stats` e `get_public_metrics` varrem a tabela toda (45–51 ms cada) e eram
+# chamados em cada montagem e a cada poll de 30 s. Os valores só mudam no fim de
+# uma ingestão, pelo que 60 s de TTL (invalidado no `record_scrape_run`) elimina
+# ~96 ms e 8 full scans por pedido sem sacrificar frescura.
+_GLOBAL_METRICS_CACHE: dict = {}
+_GLOBAL_METRICS_CACHE_LOCK = threading.Lock()
+try:
+    _GLOBAL_METRICS_CACHE_TTL = float(os.environ.get("GLOBAL_METRICS_CACHE_TTL", "60"))
+except (TypeError, ValueError):
+    _GLOBAL_METRICS_CACHE_TTL = 60.0
+
+
+def clear_global_metrics_cache() -> None:
+    """Invalida as métricas globais (stats + métricas públicas)."""
+    with _GLOBAL_METRICS_CACHE_LOCK:
+        _GLOBAL_METRICS_CACHE.clear()
+
+
+def _cached_metrics(key: str, loader):
+    """Leitura com TTL; `loader` reconstrói o valor quando expira."""
+    if _GLOBAL_METRICS_CACHE_TTL <= 0:
+        return loader()
+    now = time.monotonic()
+    with _GLOBAL_METRICS_CACHE_LOCK:
+        cached = _GLOBAL_METRICS_CACHE.get(key)
+        if cached and (now - cached[0]) < _GLOBAL_METRICS_CACHE_TTL:
+            return cached[1]
+    value = loader()
+    with _GLOBAL_METRICS_CACHE_LOCK:
+        _GLOBAL_METRICS_CACHE[key] = (time.monotonic(), value)
+    return value
 
 
 # Banco de dados SQLite: em produção DEVE apontar para volume persistente (Railway).
@@ -357,6 +423,12 @@ CREATE TABLE IF NOT EXISTS leads (
   converted_at TEXT,
   revealed_at TEXT,
   refund_blocked INTEGER DEFAULT 0,
+  -- Fase 22: qualificação materializada. O feed avaliava 20 LIKEs sobre 5
+  -- colunas em cada linha (13 mil por pedido); estas colunas são calculadas
+  -- na escrita e lidas como índice.
+  is_junk INTEGER,
+  is_feed_ok INTEGER,
+  is_qualified INTEGER,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(external_id, source_type),
@@ -1612,10 +1684,60 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         "descriptor": "TEXT",
         "resolution_description": "TEXT",
         "resolution_action_updated_date": "TEXT",
+        # Fase 22: qualificação materializada (backfill abaixo).
+        "is_junk": "INTEGER",
+        "is_feed_ok": "INTEGER",
+        "is_qualified": "INTEGER",
     }
     for name, ctype in extra_cols.items():
         if name not in cols:
             conn.execute(f"ALTER TABLE leads ADD COLUMN {name} {ctype}")
+
+    # Fase 22: calcula a qualificação uma única vez por linha nova/migrada e
+    # cria os índices que o feed usa. O UPDATE só toca em linhas ainda por
+    # calcular (NULL), pelo que reinícios normais não custam nada.
+    _pending_quality = conn.execute(
+        "SELECT COUNT(*) AS c FROM leads WHERE is_qualified IS NULL"
+    ).fetchone()["c"]
+    if _pending_quality:
+        _t0 = time.perf_counter()
+        _done = refresh_lead_quality(conn, "is_qualified IS NULL", ())
+        conn.commit()
+        logger.info(
+            "[PERF] qualificação materializada: %s leads em %.0f ms",
+            _done,
+            (time.perf_counter() - _t0) * 1000,
+        )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_leads_feed_order "
+        "ON leads (is_feed_ok, date_reported DESC, id DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_leads_qualified_order "
+        "ON leads (is_qualified, date_reported DESC, id DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_leads_qualified_city "
+        "ON leads (is_qualified, city, issue_category)"
+    )
+    # Fase 22: triggers mantêm as colunas materializadas em QUALQUER escrita
+    # (ingestão, admin, scripts, testes). Sem isto, uma linha inserida por SQL
+    # direto ficava com is_* NULL e desaparecia do feed.
+    _quality_update = (
+        f"UPDATE leads SET {_quality_set_clause()} WHERE id = NEW.id;"
+    )
+    _watch_cols = (
+        "address, issue_category, issue_description, descriptor, case_title, "
+        "resolution_description, department, signal_type, signal_status, "
+        "case_status, source_type"
+    )
+    conn.executescript(
+        "CREATE TRIGGER IF NOT EXISTS trg_leads_quality_ins "
+        f"AFTER INSERT ON leads BEGIN {_quality_update} END;"
+        "CREATE TRIGGER IF NOT EXISTS trg_leads_quality_upd "
+        f"AFTER UPDATE OF {_watch_cols} ON leads BEGIN {_quality_update} END;"
+    )
+    conn.commit()
 
     deduped_keys = {
         "idx_leads_address_city": "(address, city)",
@@ -3175,7 +3297,8 @@ class DatabaseService:
             return 0
         conn = get_connection()
         try:
-            where = _qualified_where()
+            # Fase 22: qualificação materializada (is_qualified).
+            where = "is_qualified = 1"
             not_institutional = institutional_owner_name_where()
             params: List[Any] = [city]
             cat_clause = ""
@@ -4767,6 +4890,8 @@ class DatabaseService:
                     f"ON CONFLICT(address, city) DO UPDATE SET {_lead_set_clause('excluded.{col}')}",
                     [values[c] for c in insert_cols],
                 )
+            # Fase 22: os triggers `trg_leads_quality_*` recalculam is_junk /
+            # is_feed_ok / is_qualified desta linha.
             conn.commit()
             logger.info(f"Lead inserido/atualizado: {lead.external_id}")
             return True
@@ -4841,6 +4966,8 @@ class DatabaseService:
                     external_id, city,
                 ),
             )
+            # `descriptor`/`department`/`case_title` entram no filtro de ruído:
+            # o trigger `trg_leads_quality_upd` recalcula automaticamente.
             conn.commit()
             return cur.rowcount > 0
         except Exception as e:
@@ -4869,9 +4996,9 @@ class DatabaseService:
         limit = max(1, min(int(limit), 200))
         offset = max(0, int(offset))
         where = [
-            _address_where("l"),
-            _category_where("l"),
-            _not_junk_where("l"),
+            # Fase 22: predicado materializado na escrita (antes eram 20 LIKEs
+            # por linha em cada pedido, ~300 ms por página).
+            "l.is_feed_ok = 1",
             "l.signal_type IS NOT NULL",
             "l.lead_status != 'converted'",
         ]
@@ -9127,6 +9254,10 @@ class DatabaseService:
             conn.close()
 
     def get_stats(self) -> dict:
+        """KPIs globais do feed (cache in-process de 60 s — Fase 22)."""
+        return _cached_metrics("stats", self._compute_stats)
+
+    def _compute_stats(self) -> dict:
         conn = get_connection()
         try:
             total = conn.execute("SELECT COUNT(*) AS c FROM leads").fetchone()["c"]
@@ -9195,7 +9326,12 @@ class DatabaseService:
         Cálculo: `inserted` REAL do último lote CONCLUÍDO do scraper
         (`scraper_runs`), ancorado ao run — estável entre varreduras e
         reconciliável com a base. Sem janela móvel de 2h e sem piso fixo.
+
+        Fase 22: cache in-process de 60 s (invalidado no fim da ingestão).
         """
+        return _cached_metrics("public_metrics", self._compute_public_metrics)
+
+    def _compute_public_metrics(self) -> dict:
         conn = get_connection()
         try:
             total = conn.execute("SELECT COUNT(*) AS c FROM leads").fetchone()["c"]
@@ -9279,10 +9415,11 @@ class DatabaseService:
             # Base query alinhada com o feed (`/api/leads/today`): janela por
             # `date_reported` (data do facto), nao por `updated_at` (que cada
             # varredura reescreve e inflacionava o KPI).
-            base_where = f"""
+            # Fase 22: qualificação materializada em vez do WHERE com 20 LIKEs.
+            base_where = """
                 WHERE date_reported IS NOT NULL
                   AND date_reported >= datetime('now', '-7 days')
-                  AND {_qualified_where()}
+                  AND is_qualified = 1
             """
             params: list = []
 
@@ -9470,6 +9607,11 @@ class DatabaseService:
                 ),
             )
             conn.commit()
+            # Fase 22: um run concluído muda os contadores e o resumo — invalida
+            # os caches in-process para o próximo pedido já ver o valor novo.
+            if str(run.get("status") or "") != "running":
+                clear_global_metrics_cache()
+                clear_dashboard_summary_cache()
         except Exception as e:
             logger.error(f"Erro ao registrar run do scraper: {e}")
         finally:
@@ -9972,6 +10114,9 @@ class DatabaseService:
                    WHERE id = ?""",
                 (case_status, signal_status, closed_dt, resolution, lead_id),
             )
+            # `signal_status`/`case_status` mudam o gatilho; o trigger
+            # `trg_leads_quality_upd` recalcula is_qualified. `closed` continua
+            # a ser excluído no feed à parte.
             conn.commit()
             if cur.rowcount:
                 clear_dashboard_summary_cache()

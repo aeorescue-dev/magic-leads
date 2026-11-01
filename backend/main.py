@@ -1094,17 +1094,9 @@ async def user_daily_stats(user_id: int, user: dict = Depends(_get_current_user)
     if user["id"] != user_id:
         raise HTTPException(status_code=403, detail="Sem permissão")
     try:
-        # Sweep watchdog de reveals (notificação 30/45min, retorno ao pool 60min).
-        # Expiram-se primeiro os holds: um reveal cujo hold ja morreu tem de ser
-        # fechado, nao notificado como se ainda estivesse vivo.
-        try:
-            await db_service.expire_holds()
-        except Exception as e:
-            logger.error(f"Erro a expirar holds: {e}")
-        try:
-            await db_service.check_reveal_watchdogs()
-        except Exception as e:
-            logger.error(f"Erro no watchdog de reveals: {e}")
+        # Fase 22: os sweeps (expire_holds / reveal watchdogs) saíram daqui — são
+        # escrita e corriam a cada poll de 60 s do dashboard. Continuam no loop
+        # de watchdog (15 min) e no cron /api/cron/expire-holds.
         return await db_service.get_daily_leads_used(user_id)
     except Exception as e:
         logger.error(f"Erro ao buscar stats diários: {e}")
@@ -4977,6 +4969,17 @@ async def admin_requalify_leads(request: Request, _admin: bool = Depends(_requir
                 kept += 1
 
         conn.commit()
+
+        # Fase 22: a categoria mudou em massa; os triggers recalculam a
+        # qualificação por linha. Aqui só invalidamos os caches in-process.
+        if changes:
+            from backend.services.db import (
+                clear_dashboard_summary_cache,
+                clear_global_metrics_cache,
+            )
+
+            clear_dashboard_summary_cache()
+            clear_global_metrics_cache()
 
         # 3. Estatísticas DEPOIS (filtro qualificado novo)
         from backend.services.db import _qualified_where

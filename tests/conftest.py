@@ -20,3 +20,22 @@ os.environ.pop("LEADS_SEED_FILE", None)
 os.environ.pop("DATA_DIR", None)
 # Segredo determinístico para assinatura de cliques push nos testes.
 os.environ.setdefault("PUSH_CLICK_SECRET", "pytest-push-click-secret")
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _clear_perf_caches():
+    """Fase 22: isola os caches in-process entre testes.
+
+    `get_stats`/`get_public_metrics`/`get_dashboard_summary` guardam 45–60 s.
+    Os testes escrevem direto na BD (sem `record_scrape_run`), por isso o cache
+    de outro teste apareceria como valor stale.
+    """
+    from backend.services import db as dbmod
+
+    dbmod.clear_global_metrics_cache()
+    dbmod.clear_dashboard_summary_cache()
+    yield
+    dbmod.clear_global_metrics_cache()
+    dbmod.clear_dashboard_summary_cache()

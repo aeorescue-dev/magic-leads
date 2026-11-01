@@ -1274,6 +1274,31 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   cobre o fallback sem nicho confirmado.
 - **Testes**: 1079 pytest · Ruff limpo.
 
+### Fase 22 — Performance do dashboard: qualificação materializada (2026-11-01)
+
+- **Causa medida**: `get_leads_feed` custava **555 ms** (258 ms `COUNT` + 297 ms
+  página) e **3 074 ms** a frio. O filtro de ruído faz 20 `LIKE '%…%'` sobre 5
+  colunas; o planner usava `idx_leads_category` + `TEMP B-TREE FOR ORDER BY`
+  sobre 13 mil linhas. Todo o resto do dashboard estava abaixo de 130 ms.
+- Colunas materializadas `is_junk`, `is_feed_ok` e `is_qualified`, recalculadas
+  na escrita (`insert_lead`, `update_lead_historical`, `update_lead_freshness`)
+  e no backfill de arranque (só linhas NULL, ~2 s medidos numa cópia).
+- Índices `(is_feed_ok, date_reported DESC, id DESC)`,
+  `(is_qualified, date_reported DESC, id DESC)` e
+  `(is_qualified, city, issue_category)`.
+- `get_leads_feed`, `count_qualified_contractors_in_city` e
+  `get_dashboard_summary` leem as colunas. Benchmark na cópia: **13 ms** count e
+  **0,4 ms** página (de 258/297).
+- Cache in-process de 60 s em `get_stats` e `get_public_metrics`, invalidado no
+  fim de cada run de ingestão (`record_scrape_run`).
+- `/daily-stats` deixa de correr `expire_holds`/`check_reveal_watchdogs`
+  (escritas a cada poll de 60 s); ficam no watchdog de 15 min e no cron.
+- **Paridade**: teste compara nos dois sentidos os ids das colunas com
+  `_qualified_where`/`_feed_where`, cobre lixo/morada curta/categoria/fechado/
+  legado e verifica o recálculo na escrita. Relatório em
+  `docs/PERFORMANCE-AUDIT.md`.
+- **Testes**: 1084 pytest · Ruff limpo.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

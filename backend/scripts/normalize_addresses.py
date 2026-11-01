@@ -579,6 +579,16 @@ def main() -> int:
         merge_duplicates=args.merge_duplicates,
         limit=args.limit,
     )
+    # Fase 22: `address` entra na qualificação materializada e o trigger
+    # `trg_leads_quality_upd` recalcula por linha; só os caches são limpos.
+    if args.apply and result.get("ok"):
+        from backend.services.db import (
+            clear_dashboard_summary_cache,
+            clear_global_metrics_cache,
+        )
+
+        clear_dashboard_summary_cache()
+        clear_global_metrics_cache()
     return 0 if result.get("ok") else (2 if "requires_apply" in str(result.get("error")) else 1)
 
 
