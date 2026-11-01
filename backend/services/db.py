@@ -4142,6 +4142,76 @@ class DatabaseService:
         except OSError:
             return 10**6
 
+    def upgrade_contact_email(
+        self, entity_id: int, new_email: str, source: str = "owner_osint"
+    ) -> dict:
+        """Troca o e-mail generico por um nominal comprovado.
+
+        Nunca toca em contactos com mensagem ativa (queued/sending/sent) nem
+        colide com outro contacto ja existente. Atualiza contacto, lead B2B e
+        entidade na mesma transacao.
+        """
+        new = (new_email or "").strip().lower()
+        if not new or "@" not in new:
+            return {"status": "invalid"}
+        conn = get_connection()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            entity = conn.execute(
+                "SELECT * FROM contractor_entities WHERE id=?", (int(entity_id),)
+            ).fetchone()
+            if not entity:
+                return {"status": "no_entity"}
+            contact = None
+            if entity["outbound_contact_id"]:
+                contact = conn.execute(
+                    "SELECT * FROM outbound_contacts WHERE id=?",
+                    (int(entity["outbound_contact_id"]),),
+                ).fetchone()
+            if not contact and entity["email"]:
+                contact = conn.execute(
+                    "SELECT * FROM outbound_contacts WHERE lower(email)=lower(?)",
+                    (entity["email"],),
+                ).fetchone()
+            if not contact:
+                return {"status": "no_contact"}
+            active = conn.execute(
+                "SELECT 1 FROM outbound_messages WHERE contact_id=? "
+                "AND status IN ('queued','sending','sent') LIMIT 1",
+                (int(contact["id"]),),
+            ).fetchone()
+            if active:
+                return {"status": "has_active_message"}
+            other = conn.execute(
+                "SELECT id FROM outbound_contacts WHERE lower(email)=lower(?) "
+                "AND id<>? LIMIT 1",
+                (new, int(contact["id"])),
+            ).fetchone()
+            if other:
+                return {"status": "email_in_use"}
+            conn.execute(
+                "UPDATE outbound_contacts SET email=?, email_source=?, "
+                "last_verified_at=CURRENT_TIMESTAMP WHERE id=?",
+                (new, source, int(contact["id"])),
+            )
+            if entity["outbound_lead_id"]:
+                conn.execute(
+                    "UPDATE leads SET owner_email=? WHERE id=?",
+                    (new, int(entity["outbound_lead_id"])),
+                )
+            conn.execute(
+                "UPDATE contractor_entities SET email=?, email_source=?, "
+                "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (new, source, int(entity_id)),
+            )
+            conn.commit()
+            return {"status": "updated", "contact_id": int(contact["id"]),
+                    "old_email": contact["email"], "new_email": new}
+        except Exception as exc:  # noqa: BLE001
+            return {"status": "error", "error": str(exc)[:120]}
+        finally:
+            conn.close()
+
     def get_system_kv(self, key: str) -> Optional[str]:
         conn = get_connection()
         try:
@@ -12734,6 +12804,13 @@ class AsyncDatabaseService:
 
     async def set_system_kv(self, key: str, value: str) -> None:
         return await anyio.to_thread.run_sync(self._service.set_system_kv, key, value)
+
+    async def upgrade_contact_email(
+        self, entity_id: int, new_email: str, source: str = "owner_osint"
+    ) -> dict:
+        return await anyio.to_thread.run_sync(
+            self._service.upgrade_contact_email, entity_id, new_email, source
+        )
 
     async def outbound_category_mix(
         self, city: str, categories: Optional[List[str]] = None, limit: int = 3
