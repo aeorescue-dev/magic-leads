@@ -1100,6 +1100,21 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   por degrau). Bounce 0,0% e complaint 0,0% em 30 dias.
 - **Testes**: 1043 pytest.
 
+### Fase 11 — Monitorização da ramp e orçamento Brave real (2026-11-01)
+
+- **Ramp log** visível no Admin: `auto_ramp_last_step_at` na linha de cada
+  caixa. Histórico confirma 1→2 em 01/11 00:43 (`healthy`), próxima subida
+  em 03/11 (intervalo de 2 dias para cap 2). Bounce/complaint 0/0.
+- **Quota por cidade** a acumular corretamente: NYC 19, Chicago 15, Dallas 8
+  no mesmo dia (antes ficava sempre em 4-5).
+- **Orçamento Brave**: o saldo de $6,13 ≈ 1.226 queries a $5/1.000. A
+  2.000/dia isso dura **menos de um dia** (~$10/dia); a 250/dia dura ~5 dias
+  (~$1,25/dia). Limite reduzido para **250/dia** por proteção até haver
+  recarga; o disjuntor 401/402/429 continua a travar em caso de saldo zero.
+- **Capacidade vs orçamento**: 250 queries/dia ≈ 60 prontos/dia (suporta
+  ~60 envios/dia); 750/dia ≈ 190 prontos (150+ envios); 2.000/dia ≈ 500.
+- **Testes**: 1043 pytest.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
