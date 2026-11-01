@@ -167,10 +167,12 @@ def test_import_entra_no_lote_mesmo_atras_de_250_permissoes(clean_city):
 
 
 def test_contagem_de_destinatarios_separa_inventario_de_emails(clean_city):
+    """B2B importado e' DESTINATARIO, nunca "oportunidade" no {count} do copy."""
     _import()
     _seed_permits(250)
     assert _svc().count_outbound_recipients(CITY) == 1
-    assert _svc().count_qualified_contractors_in_city(CITY, None) == 251
+    # 250 oportunidades reais; o contacto B2B nao infla o numero divulgado.
+    assert _svc().count_qualified_contractors_in_city(CITY, None) == 250
 
 
 def test_diagnostico_mostra_onde_o_funil_para(clean_city):

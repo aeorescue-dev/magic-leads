@@ -164,126 +164,58 @@ SUBJECT_MAX = 38
 # NOTE: {company_name}, {state} and {sender_name} are still produced by
 # build_context for backwards compatibility, but the hardened copy below does
 # not reference them.
+# CAN-SPAM: o rodape leva sempre a morada postal do remetente e um opt-out.
+# (A morada do LEAD nunca entra no e-mail - invariante #2.)
+SENDER_POSTAL_ADDRESS = "110-33 64th Rd, Forest Hills, NY 11375, USA"
+DEFAULT_SIGNATURE = "Pamela"
+FALLBACK_UNSUBSCRIBE_URL = "https://www.magicleads.app/unsubscribe"
+
+_BODY = (
+    "{greeting}\n\n"
+    "{hook}\n\n"
+    "Each project is offered to one contractor at a time - first come, first "
+    "served - with the property details and the exact service needed.\n\n"
+    "{cta}\n\n"
+    "{signature}\n"
+    "Magic Leads\n"
+    "{postal_address}\n\n"
+    "https://www.magicleads.app/\n\n"
+    "Unsubscribe: {unsubscribe_url}\n"
+    'To stop receiving these emails, reply "unsubscribe".'
+)
+
 TEMPLATES: dict[str, dict[str, str]] = {
     "general_contractors": {
         "subject": "{subject}",
-        "body": (
-            "{greeting}\n\n"
-            "{hook}\n\n"
-            "Each one is matched to a single contractor: the address, the "
-            "homeowner's details and the exact service needed - never shared "
-            "with other {audience}.\n\n"
-            "{cta}\n\n"
-            "Best regards,\n"
-            "Magic Leads\n\n"
-            "https://www.magicleads.app/\n\n"
-            'To stop receiving these emails, reply "unsubscribe".'
-        ),
+        "body": _BODY,
     },
     "roofing": {
         "subject": "{subject}",
-        "body": (
-            "{greeting}\n\n"
-            "{hook}\n\n"
-            "Each one is matched to a single contractor: the address, the "
-            "homeowner's details and the exact service needed - never shared "
-            "with other {audience}.\n\n"
-            "{cta}\n\n"
-            "Best regards,\n"
-            "Magic Leads\n\n"
-            "https://www.magicleads.app/\n\n"
-            'To stop receiving these emails, reply "unsubscribe".'
-        ),
+        "body": _BODY,
     },
     "remodeling": {
         "subject": "{subject}",
-        "body": (
-            "{greeting}\n\n"
-            "{hook}\n\n"
-            "Each one is matched to a single contractor: the address, the "
-            "homeowner's details and the exact service needed - never shared "
-            "with other {audience}.\n\n"
-            "{cta}\n\n"
-            "Best regards,\n"
-            "Magic Leads\n\n"
-            "https://www.magicleads.app/\n\n"
-            'To stop receiving these emails, reply "unsubscribe".'
-        ),
+        "body": _BODY,
     },
     "plumbing": {
         "subject": "{subject}",
-        "body": (
-            "{greeting}\n\n"
-            "{hook}\n\n"
-            "Each one is matched to a single contractor: the address, the "
-            "homeowner's details and the exact service needed - never shared "
-            "with other {audience}.\n\n"
-            "{cta}\n\n"
-            "Best regards,\n"
-            "Magic Leads\n\n"
-            "https://www.magicleads.app/\n\n"
-            'To stop receiving these emails, reply "unsubscribe".'
-        ),
+        "body": _BODY,
     },
     "electrical": {
         "subject": "{subject}",
-        "body": (
-            "{greeting}\n\n"
-            "{hook}\n\n"
-            "Each one is matched to a single contractor: the address, the "
-            "homeowner's details and the exact service needed - never shared "
-            "with other {audience}.\n\n"
-            "{cta}\n\n"
-            "Best regards,\n"
-            "Magic Leads\n\n"
-            "https://www.magicleads.app/\n\n"
-            'To stop receiving these emails, reply "unsubscribe".'
-        ),
+        "body": _BODY,
     },
     "hvac": {
         "subject": "{subject}",
-        "body": (
-            "{greeting}\n\n"
-            "{hook}\n\n"
-            "Each one is matched to a single contractor: the address, the "
-            "homeowner's details and the exact service needed - never shared "
-            "with other {audience}.\n\n"
-            "{cta}\n\n"
-            "Best regards,\n"
-            "Magic Leads\n\n"
-            "https://www.magicleads.app/\n\n"
-            'To stop receiving these emails, reply "unsubscribe".'
-        ),
+        "body": _BODY,
     },
     "restoration": {
         "subject": "{subject}",
-        "body": (
-            "{greeting}\n\n"
-            "{hook}\n\n"
-            "Each one is matched to a single contractor: the address, the "
-            "homeowner's details and the exact service needed - never shared "
-            "with other {audience}.\n\n"
-            "{cta}\n\n"
-            "Best regards,\n"
-            "Magic Leads\n\n"
-            "https://www.magicleads.app/\n\n"
-            'To stop receiving these emails, reply "unsubscribe".'
-        ),
+        "body": _BODY,
     },
     "landscaping": {
         "subject": "{subject}",
-        "body": (
-            "{greeting}\n\n"
-            "{hook}\n\n"
-            "Each one is matched to a single contractor: the address, the "
-            "homeowner's details and the exact service needed - never shared "
-            "with other {audience}.\n\n"
-            "{cta}\n\n"
-            "Best regards,\n"
-            "Magic Leads\n\n"
-            "https://www.magicleads.app/\n\n"
-            'To stop receiving these emails, reply "unsubscribe".'
-        ),
+        "body": _BODY,
     },
 }
 
@@ -310,21 +242,22 @@ del _niche, _tpl
 # cobertura da sua regiao antes de se registar.
 SEQUENCE_TEMPLATES: dict[str, dict[str, str]] = {
     "step2_offer": {
-        "subject": "{count} {category} jobs in {city} - one contractor each",
+        "subject": "{count} {category} projects in {city} - one contractor at a time",
         "body": (
             "{greeting}\n\n"
-            "I wanted to follow up on my last note with the straightforward part.\n\n"
-            "Magic Leads gives you 300 verified opportunities a week in {city} - "
-            "each one exclusive to a single contractor, with the owner's contact "
-            "details and the exact service needed.\n\n"
+            "Following up on my last note with the commercial part.\n\n"
+            "Magic Leads gives you {count} verified {category} projects in {city} "
+            "this week, each offered to one contractor at a time, with the "
+            "property details and the exact service needed.\n\n"
             "It is $120 for 7 days. No commitment, and you can cancel whenever "
-            "you want. If you close one job, the week pays for itself many "
-            "times over.\n\n"
+            "you want. One closed job covers the week.\n\n"
             "You can see what this week's list looks like here:\n"
             "{url}\n\n"
-            "Best regards,\n"
-            "Magic Leads\n\n"
+            "{signature}\n"
+            "Magic Leads\n"
+            "{postal_address}\n\n"
             "https://www.magicleads.app/\n\n"
+            "Unsubscribe: {unsubscribe_url}\n"
             'To stop receiving these emails, reply "unsubscribe".'
         ),
     },
@@ -395,6 +328,12 @@ def copy_count(count: Any) -> str:
         return "0"
 
 
+def offer_category(niche: Optional[str]) -> str:
+    """Palavra curta do nicho para o assunto do passo 2 (nunca vazia)."""
+    spec = NICHES.get(niche or DEFAULT_NICHE) or NICHES[DEFAULT_NICHE]
+    return str(spec.get("subject_trade") or spec.get("label") or "construction")
+
+
 def niche_options() -> list[dict[str, Any]]:
     """Niches for the panel selector: key + English label + target categories."""
     return [
@@ -438,7 +377,7 @@ _TRADE_WORDS = {
     "Electrical": "electrical",
     "Elevator": "elevator",
     "Gas": "gas",
-    "Rodent": "pest control",
+    "Rodent": "rodent",
     "Mold": "mold remediation",
     "Lead": "lead abatement",
     "Unsanitary": "sanitation",
@@ -530,7 +469,7 @@ _ATTRACTIVE_SERVICES: dict[str, str] = {
     "Heating": "no-heat emergencies",
     "Mold": "mold remediation",
     "Unsanitary": "sanitation cleanups",
-    "Rodent": "pest control",
+    "Rodent": "rodent cleanup",
     "Grass": "groundskeeping",
 }
 
@@ -544,6 +483,22 @@ def _fmt_count(value: int) -> str:
         return f"{int(value):,}"
     except (TypeError, ValueError):
         return str(value)
+
+
+def _friendly_company(name: str) -> str:
+    """'KELSO-BURNETT CO.' -> 'Kelso-Burnett Co.' (so' para a saudacao)."""
+    text = (name or "").strip()
+    if not text:
+        return ""
+    letters = [c for c in text if c.isalpha()]
+    if not letters or not all(c.isupper() for c in letters):
+        return text
+    keep = {"LLC", "INC", "CORP", "LTD", "LP", "LLP", "PLLC", "PC", "NYC"}
+    parts = []
+    for word in text.split():
+        core = re.sub(r"[^A-Za-z]", "", word).upper()
+        parts.append(word if core in keep else word.title())
+    return " ".join(parts)
 
 
 def composition_clause(
@@ -592,6 +547,8 @@ def build_context(
     sender_name: str = "MagicLeads Outreach",
     contact: Optional[Mapping[str, Any]] = None,
     top_categories: Optional[list[tuple[str, int]]] = None,
+    category_override: Optional[str] = None,
+    signature: Optional[str] = None,
 ) -> dict[str, str]:
     """Merge REAL data (contact + lead row + niche + city) into placeholders.
 
@@ -620,13 +577,11 @@ def build_context(
     contact_name = (contact.get("contact_name") or "").strip()
     if contact_name:
         greeting_name = contact_name
-        greeting = f"Hi {contact_name},"
     elif company_usable:
-        greeting_name = f"{company} team"
-        greeting = "Hi,"
+        greeting_name = f"{_friendly_company(company)} team"
     else:
         greeting_name = "there"
-        greeting = "Hi,"
+    greeting = "Hi there," if greeting_name == "there" else f"Hi {greeting_name},"
 
     # Conditional opportunity clause: a real address reads naturally; with no
     # address or an intersection, we fall back to the city so the sentence
@@ -667,6 +622,12 @@ def build_context(
     hook = f"{count_txt} active {hook_trade} projects in {display_city} this week"
     hook = f"{hook}{composition}" if composition else f"{hook}."
 
+    from .unsubscribe import unsubscribe_url
+
+    recipient_email = (
+        (contact.get("email") or "").strip()
+        or str(sample.get("owner_email") or "").strip()
+    )
     return {
         "subject": subject,
         "hook": hook,
@@ -677,11 +638,14 @@ def build_context(
         "greeting": greeting,
         "city": display_city,
         "state": (contact.get("state") or "").strip() or CITY_STATE.get(city, ""),
-        "category": humanize_category(sample.get("issue_category")),
+        "category": category_override or humanize_category(sample.get("issue_category")),
         "address": real_address or "a property in your area",
         "address_tail": address_tail,
         "count": copy_count(count),
         "sender_name": sender_name,
+        "signature": signature or DEFAULT_SIGNATURE,
+        "postal_address": SENDER_POSTAL_ADDRESS,
+        "unsubscribe_url": unsubscribe_url(recipient_email),
     }
 
 

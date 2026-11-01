@@ -445,7 +445,7 @@ async def test_engine_worker_sends_and_respects_caps(engine, monkeypatch):
     sent_ids: list[str] = []
 
     class FakeGmail:
-        async def send(self, mailbox, to_email, subject, body, from_name=None):
+        async def send(self, mailbox, to_email, subject, body, from_name=None, headers=None):
             sent_ids.append(to_email)
             return SendResult(success=True, provider_id="fake-1", http_status=200)
 

@@ -926,8 +926,8 @@ def test_outbound_build_context_personalization_fallbacks():
     assert c["company_name"] == "your team"
     assert c["contact_name"] == "there"
     body = ot.render(ot.get_template("roofing")["body"], c)
+    assert "Hi there," in body
     assert 'Reply with "send"' in body
-    assert "Hi," in body
 
     # Empresa generica -> "your team".
     assert _ctx(company="your company")["company_name"] == "your team"
@@ -1102,9 +1102,9 @@ def test_outbound_preview_falls_back_to_lead_owner_without_enrichment(admin_clie
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["sample_source"] == "lead_owner_fallback"
-    # F6 aprovado: sem contacto nominal a saudacao e' limpa ("Hi,"), sem
+    # F6 aprovado: com empresa utilizavel a saudacao usa o nome (Copy v2).
     # interpolar o nome da empresa.
-    assert body["preview"]["body"].startswith("Hi,")
+    assert body["preview"]["body"].startswith("Hi Lone Star Builders LLC team,")
 
 
 def test_outbound_preview_uses_enriched_contact_when_available(admin_client):

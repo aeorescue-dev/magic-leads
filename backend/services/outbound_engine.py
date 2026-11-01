@@ -568,7 +568,8 @@ class OutboundEngine:
 
             try:
                 context = outbound_templates.build_context(
-                    lead, city, niche, count, contact=contact
+                    lead, city, niche, count, contact=contact,
+                    category_override=outbound_templates.offer_category(niche),
                 )
                 context["url"] = outbound_templates.sequence_url(city, niche, step=step + 1)
                 rendered = outbound_templates.render_sequence_email("step2_offer", context)
@@ -855,12 +856,19 @@ class OutboundEngine:
                 continue
 
             try:
+                from .unsubscribe import unsubscribe_url
+
+                unsubscribe = unsubscribe_url(message["to_email"])
+                extra_headers = {"List-Unsubscribe": f"<{unsubscribe}>"}
+                if "token=" in unsubscribe:
+                    extra_headers["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
                 result = await gmail_sender.send(
                     mailbox,
                     message["to_email"],
                     subject or (message.get("subject") or ""),
                     body,
                     from_name=mailbox.get("display_name"),
+                    headers=extra_headers,
                 )
             except Exception as e:  # noqa: BLE001
                 # Uma exceção da Gmail (rede/token) não pode matar o tick e
@@ -980,7 +988,10 @@ class OutboundEngine:
         if not lead:
             return None, None
         try:
-            context = outbound_templates.build_context(lead, city, niche, count, contact=contact)
+            context = outbound_templates.build_context(
+                lead, city, niche, count, contact=contact,
+                category_override=outbound_templates.offer_category(niche),
+            )
             if sequence_step >= 2:
                 # Passo da sequencia (oferta): template proprio + link da landing.
                 context["url"] = outbound_templates.sequence_url(

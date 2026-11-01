@@ -24,7 +24,7 @@ from fastapi import (
     Request,
     Response,
 )
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, EmailStr
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -1466,6 +1466,47 @@ async def subscribe_push(
     except Exception as e:
         logger.error(f"Erro ao inscrever push: {e}")
         raise HTTPException(status_code=500, detail="Erro ao inscrever")
+
+
+@app.get("/unsubscribe", response_class=HTMLResponse)
+async def unsubscribe_page(token: str = ""):
+    """Opt-out publico do outbound (assinado por HMAC, sem sessao).
+
+    `List-Unsubscribe` aponta para aqui; o POST abaixo faz o one-click. O e-mail
+    nunca aparece em claro no link e sem assinatura valida nao se altera nada.
+    """
+    from .services.unsubscribe import verify_token
+
+    email = verify_token(token)
+    if email:
+        await db_service.add_suppression(email, "email", "unsubscribe")
+    message = (
+        "You have been unsubscribed and will not receive further emails."
+        if email
+        else "This unsubscribe link is invalid or has expired."
+    )
+    return HTMLResponse(
+        "<!doctype html><html><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<title>Magic Leads</title></head>"
+        "<body style='font-family:system-ui,sans-serif;max-width:520px;"
+        "margin:80px auto;padding:0 24px;color:#111'>"
+        f"<h1 style='font-size:20px'>Magic Leads</h1><p>{message}</p>"
+        "</body></html>",
+        status_code=200 if email else 400,
+    )
+
+
+@app.post("/unsubscribe")
+async def unsubscribe_one_click(token: str = ""):
+    """Endpoint do `List-Unsubscribe-Post` (RFC 8058). Idempotente."""
+    from .services.unsubscribe import verify_token
+
+    email = verify_token(token)
+    if email:
+        await db_service.add_suppression(email, "email", "unsubscribe")
+        return {"status": "ok"}
+    raise HTTPException(status_code=400, detail="invalid token")
 
 
 @app.get("/api/push/click")

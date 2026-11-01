@@ -54,6 +54,7 @@ def build_raw_message(
     body_text: str,
     from_email: str,
     from_name: Optional[str] = None,
+    headers: Optional[dict[str, str]] = None,
 ) -> str:
     """Constroi uma mensagem MIME em base64url (formato exigido pela API)."""
     msg = EmailMessage()
@@ -62,6 +63,9 @@ def build_raw_message(
     msg["Subject"] = subject
     msg["Date"] = formatdate(localtime=False)
     msg["Message-ID"] = make_msgid(domain=from_email.split("@")[-1] if "@" in from_email else None)
+    for key, value in (headers or {}).items():
+        if value:
+            msg[key] = value
     msg.set_content(body_text)
     return base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
 
@@ -152,6 +156,7 @@ class GmailSender:
         subject: str,
         body_text: str,
         from_name: Optional[str] = None,
+        headers: Optional[dict[str, str]] = None,
     ) -> SendResult:
         """Envia um e-mail real pela caixa indicada. Nunca levanta excecao."""
         if not to_email:
@@ -165,7 +170,9 @@ class GmailSender:
         if not from_email:
             return SendResult(success=False, error="mailbox has no email")
         display = from_name or mailbox.get("display_name")
-        raw = build_raw_message(to_email, subject, body_text, from_email, display)
+        raw = build_raw_message(
+            to_email, subject, body_text, from_email, display, headers=headers
+        )
         try:
             resp = await self._get_client().post(
                 f"{self.api_url}/users/{from_email}/messages/send",

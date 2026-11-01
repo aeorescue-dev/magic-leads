@@ -27,6 +27,12 @@ from backend.services.outbound_engine import (
 NOW = datetime(2026, 10, 31, 12, 0, tzinfo=timezone.utc)
 
 
+def _utc_now_str() -> str:
+    """Data real: os contadores diarios (`status()`, Control Tower) usam o
+    relogio do processo, nao o `NOW` fixo do teste."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
 @pytest.fixture()
 def clean_engine() -> OutboundEngine:
     conn = get_connection()
@@ -142,7 +148,7 @@ class FakeGmail:
     def __init__(self) -> None:
         self.sent: list[str] = []
 
-    async def send(self, mailbox, to_email, subject, body, from_name=None):
+    async def send(self, mailbox, to_email, subject, body, from_name=None, headers=None):
         self.sent.append(to_email)
         return SendResult(success=True, provider_id="fake", http_status=200)
 
@@ -223,7 +229,7 @@ async def test_send_exception_does_not_kill_the_tick(clean_engine, monkeypatch):
         def __init__(self) -> None:
             self.sent: list[str] = []
 
-        async def send(self, mailbox, to_email, subject, body, from_name=None):
+        async def send(self, mailbox, to_email, subject, body, from_name=None, headers=None):
             if to_email == "boom@vitorio.com":
                 raise RuntimeError("gmail down")
             self.sent.append(to_email)
@@ -320,7 +326,7 @@ def test_mailbox_health_conta_enviados_e_falhas(clean_engine):
         msg["id"],
         status="sent",
         mailbox_id=box["id"],
-        sent_at=NOW.strftime("%Y-%m-%d %H:%M:%S"),
+        sent_at=_utc_now_str(),
     )
     bad = _queue("BOSTON", "bad@vitorio.com")
     _svc().update_outbound_message(
@@ -350,7 +356,7 @@ async def test_status_reports_mailbox_cap_blocker(clean_engine, monkeypatch):
     )
     sent = _svc().list_queued_outbound_messages(limit=10)[-1]
     _svc().update_outbound_message(
-        sent["id"], status="sent", mailbox_id=box["id"], sent_at=NOW.strftime("%Y-%m-%d %H:%M:%S")
+        sent["id"], status="sent", mailbox_id=box["id"], sent_at=_utc_now_str()
     )
 
     status = await clean_engine.status()
@@ -370,7 +376,7 @@ def test_control_tower_explains_cap_instead_of_failing(clean_engine):
     _contact(lead, "ct@vitorio.com", "BOSTON")
     msg = _queue("BOSTON", "ct@vitorio.com")
     # Fila com 60h.
-    old = (NOW - timedelta(hours=60)).strftime("%Y-%m-%d %H:%M:%S")
+    old = (datetime.now(timezone.utc) - timedelta(hours=60)).strftime("%Y-%m-%d %H:%M:%S")
     conn = get_connection()
     try:
         conn.execute("UPDATE outbound_messages SET queued_at=? WHERE id=?", (old, msg["id"]))
@@ -390,7 +396,7 @@ def test_control_tower_explains_cap_instead_of_failing(clean_engine):
     )
     done = _svc().list_queued_outbound_messages(limit=10)[-1]
     _svc().update_outbound_message(
-        done["id"], status="sent", mailbox_id=box["id"], sent_at=NOW.strftime("%Y-%m-%d %H:%M:%S")
+        done["id"], status="sent", mailbox_id=box["id"], sent_at=_utc_now_str()
     )
 
     checks = {c["name"]: c for c in control_tower._check_queue()}

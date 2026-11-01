@@ -2922,7 +2922,7 @@ class DatabaseService:
                 params.extend(clean)
             q = (
                 "SELECT issue_category, COUNT(1) AS c FROM leads "
-                f"WHERE ({where} OR source_type = 'import_b2b') "
+                f"WHERE ({where}) "
                 "AND UPPER(TRIM(city)) = UPPER(TRIM(?)) "
                 "AND (lead_status IS NULL OR lead_status = 'available') "
                 f"AND NOT ({not_inst}) "
@@ -2962,7 +2962,7 @@ class DatabaseService:
                 params.extend(clean)
             q = (
                 "SELECT COUNT(*) AS c FROM leads "
-                f"WHERE ({where} OR source_type = 'import_b2b') "
+                f"WHERE ({where}) "
                 "AND UPPER(TRIM(city)) = UPPER(TRIM(?)) "
                 "AND (lead_status IS NULL OR lead_status = 'available') "
                 f"AND NOT ({not_institutional}) "

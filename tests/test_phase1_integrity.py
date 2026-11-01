@@ -66,7 +66,7 @@ def test_catch_all_is_not_sendable():
 def test_greeting_without_contact_name_is_clean():
     ctx = build_context({"owner_name": "", "address": "1 MAIN ST", "issue_category": "Roof"},
                         "NYC", "roofing", 3)
-    assert ctx["greeting"] == "Hi,"
+    assert ctx["greeting"] == "Hi there,"
     assert "Hi ," not in ctx["greeting"]
 
 
