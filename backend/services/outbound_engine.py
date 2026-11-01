@@ -128,6 +128,21 @@ def _signature_for(mailbox: dict) -> str:
     return local[:1].upper() + local[1:].lower()
 
 
+def _recipient_niche(contact: Optional[dict], batch_niche: Optional[str]) -> str:
+    """Nicho que manda no copy e no URL: o do destinatario, se confirmado.
+
+    O enfileiramento ja' escreve com o nicho do contacto; o re-render de envio
+    tem de usar a mesma fonte, senao um lead de categoria partilhada (ex.:
+    Roof em `general_contractors` e em `roofing`) sairia com texto de um nicho
+    e link de outro. Sem nicho confirmado, cai para o nicho do lote.
+    """
+    key = (contact or {}).get("niche_key")
+    status = (contact or {}).get("niche_status")
+    if niche_classifier.is_sendable(key, status):
+        return str(key)
+    return batch_niche or outbound_templates.DEFAULT_NICHE
+
+
 def _now_str(now: Optional[datetime] = None) -> str:
     return _now_dt(now).strftime("%Y-%m-%d %H:%M:%S")
 
@@ -590,6 +605,8 @@ class OutboundEngine:
             if batch:
                 filters = _parse_json(batch.get("filters_json"))
                 niche = filters.get("niche") or niche
+            # O passo 2 segue o mesmo nicho do passo 1 (destinatario).
+            niche = _recipient_niche(contact, niche)
             categories = outbound_templates.niche_categories(niche)
 
             lead = None
@@ -1025,11 +1042,12 @@ class OutboundEngine:
         """Re-renderiza subject+body a partir do lead real (integridade = hash)."""
         niche = outbound_templates.DEFAULT_NICHE
         count = 0
-        categories = None
         if batch:
             filters = _parse_json(batch.get("filters_json"))
             niche = filters.get("niche") or niche
-            categories = outbound_templates.niche_categories(niche)
+        # Mesma fonte do enfileiramento: o nicho do DESTINATARIO manda.
+        niche = _recipient_niche(contact, niche)
+        categories = outbound_templates.niche_categories(niche)
         # Mesmo `{count}` da previa e do enqueue: inventario real da cidade/nicho.
         try:
             count = await db_service.count_qualified_contractors_in_city(city, categories)

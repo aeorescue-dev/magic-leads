@@ -1259,6 +1259,21 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - Relatório completo: `docs/PREDICTIVE-AUDIT.md`.
 - **Testes**: 1077 pytest (11 novos) · Ruff limpo.
 
+### Fase 21 — Consistência de nicho entre fila e envio (2026-11-01)
+
+- O enfileiramento escrevia copy e URL com o nicho do **destinatário**
+  (`contact.niche_key` confirmado), mas o re-render de envio usava o nicho do
+  **lote**. Num lead de categoria partilhada (`Roof` em `general_contractors` e
+  em `roofing`; `Paint` em GC/remodeling; `Gas` em electrical/hvac) o e-mail
+  podia sair com texto de um nicho e link de outro.
+- `_recipient_niche(contact, batch_niche)` centraliza a regra: nicho do
+  contacto quando `niche_status="confirmed"`, senão o do lote. Aplicado em
+  `_render_message` (passos 1 e 2) e em `schedule_next_steps`.
+- Teste novo captura o corpo no enfileiramento (gate A/B forçado aberto), faz o
+  re-render de envio e exige que a URL seja **exatamente igual**; teste unitário
+  cobre o fallback sem nicho confirmado.
+- **Testes**: 1079 pytest · Ruff limpo.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

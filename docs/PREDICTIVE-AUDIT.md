@@ -102,9 +102,26 @@ fica como tarefa separada, sem tocar em `credit_ledger`.
   (regressão 995007d coberta).
 - Reaper de `sending` corre mesmo com envio desligado.
 
+## 6. Consistência de nicho (Fase 21)
+
+O enfileiramento já escrevia a copy e a URL com o **nicho do destinatário**
+(`contact.niche_key` confirmado). O re-render de envio usava o nicho do lote —
+num lead de categoria partilhada (ex.: `Roof` em `general_contractors` e em
+`roofing`) o texto podia sair de um nicho e o link de outro.
+
+Correção: `_recipient_niche(contact, batch_niche)` devolve o nicho do contacto
+quando `niche_status == "confirmed"` e só cai para o do lote quando não há
+confirmação. Aplicado em `_render_message` (passos 1 e 2) e em
+`schedule_next_steps`. Teste novo captura a URL no enfileiramento, re-renderiza
+como o envio e exige igualdade exata.
+
+O `body_hash` continua a ser auditoria histórica (não é comparado no envio);
+com a fonte de nicho unificada, as duas renderizações convergem.
+
 ## Veredicto
 
 Fluxo de cruzeiro aprovado: **rampa, disjuntor, links e base de envio passaram**
-nos testes preditivos. Duas correções foram feitas antes do "ok" (jitter do
-intervalo e encoding do URL) e ficaram cobertas por testes. O único achado
-aberto é a higiene de órfãos no dashboard, fora do caminho de envio.
+nos testes preditivos. Correções feitas antes do "ok": jitter do intervalo,
+encoding do URL e consistência de nicho entre fila e envio — todas cobertas por
+testes. O único achado aberto é a higiene de órfãos no dashboard, fora do
+caminho de envio.

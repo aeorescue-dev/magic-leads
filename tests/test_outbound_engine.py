@@ -411,6 +411,89 @@ async def test_engine_enqueue_enqueues_only_valid_contact(engine):
 
 
 @pytest.mark.asyncio
+async def test_url_da_fila_e_do_envio_usam_o_nicho_do_contacto(engine, monkeypatch):
+    """Lead de categoria partilhada: copy e URL seguem o nicho do CONTACTO.
+
+    O lead e' `Roof` (categoria de GC e de roofing) e o lote e' GC, mas o
+    contacto confirma `roofing`. O enfileiramento e o re-render de envio tem de
+    produzir a MESMA URL — antes, o envio re-renderizava com o nicho do lote.
+    """
+    svc = engine_module.db_service._service
+    lead_id = _seed_lead("BOSTON", "engine-niche-1", "5 NICHE AVENUE")
+    contact = _seed_contact(lead_id, "niche@vitorio.com")
+    assert contact
+    svc.set_contact_niche(contact["id"], "roofing", "confirmed")
+
+    batch = svc.create_outbound_batch(
+        city="BOSTON", name="engine-niche-1",
+        filters_json=json.dumps({"city": "BOSTON", "niche": "general_contractors"}),
+        kind="email",
+    )
+    svc.mark_outbound_batch_previewed(batch["id"], 1, 0.0)
+    batch = svc.get_outbound_batch(batch["id"])
+
+    # Captura o corpo tal como o enfileiramento o escreveu. O gate do A/B e'
+    # forcado aberto (21 envios hoje) para a mensagem sair numa variante com
+    # link de campanha — o braco `control` usa CTA de resposta, sem URL.
+    async def fake_sent(day, city=None):
+        return 21
+
+    monkeypatch.setattr(
+        engine_module.db_service, "count_outbound_sent_today", fake_sent, raising=False
+    )
+
+    captured: dict[str, str] = {}
+    original = engine_module.outbound_templates.render_copy_variant
+
+    def spy(variant, context):
+        out = original(variant, context)
+        captured["body"] = out["body"]
+        return out
+
+    monkeypatch.setattr(
+        engine_module.outbound_templates, "render_copy_variant", spy
+    )
+    _set_config(send_enabled="1", enrich_enabled="0")
+    try:
+        result = await engine.enqueue_batch(batch)
+        assert result["queued"] == 1
+        assert "niche=roofing" in captured["body"]
+        assert "niche=general_contractors" not in captured["body"]
+
+        message = svc.list_queued_outbound_messages(limit=10)[0]
+        assert message.get("copy_variant") not in (None, "control")
+        _, body = await engine._render_message(
+            batch,
+            svc.get_outbound_contact_by_email("niche@vitorio.com"),
+            "BOSTON",
+            1,
+            sender_name="Pamela",
+            copy_variant=message.get("copy_variant"),
+        )
+        assert body is not None
+        # Fila e envio tem de apontar para a MESMA landing.
+        assert "niche=roofing" in body
+        assert "niche=general_contractors" not in body
+        fila = captured["body"].split("https://www.magicleads.app/en?")[1].split("\n")[0]
+        envio = body.split("https://www.magicleads.app/en?")[1].split("\n")[0]
+        assert fila == envio
+    finally:
+        _set_config(send_enabled="0")
+
+
+def test_recipient_niche_prefere_o_contacto_confirmado():
+    from backend.services.outbound_engine import _recipient_niche
+
+    contact = {"niche_key": "roofing", "niche_status": "confirmed"}
+    assert _recipient_niche(contact, "general_contractors") == "roofing"
+    # Sem confirmacao, o lote manda (nunca inventa um nicho).
+    assert _recipient_niche({"niche_key": "roofing", "niche_status": "unknown"},
+                            "general_contractors") == "general_contractors"
+    assert _recipient_niche({}, "roofing") == "roofing"
+    assert _recipient_niche({}, None) == "general_contractors"
+
+
+@pytest.mark.asyncio
 async def test_engine_worker_is_disabled_and_respects_quiet_hours(engine, monkeypatch):
     _set_config(send_enabled="0")
     assert (await engine.process_queue())["status"] == "disabled"
