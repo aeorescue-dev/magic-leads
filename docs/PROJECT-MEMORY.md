@@ -1021,6 +1021,21 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   após cada ingestão e bloqueio de ingestão com <120 MB livres.
 - **Testes**: 1033 pytest.
 
+### Fase 6 — TDLR, OSINT do dono e check pós-deploy (2026-11-01)
+
+- **TDLR (Texas)**: 4 CSVs públicos (A/C, eletricistas, sign, elevadores)
+  filtrados ao metro de Dallas (cidade **ou** condado de Dallas). Resultado:
+  **3.630 entidades** em 4,9 s, com telefone e licença. Dallas passou de 30
+  para **4.468 entidades**.
+- **Owner-email OSINT**: crawl de `/about`, `/team`, `/about-us`, `/contact`;
+  extrai nome + cargo, gera padrões (`first@`, `first.last@`, `f.last@`,
+  `jsmith@`, …) e valida por RCPT no worker VPS. Catch-all nunca é aceite.
+  Primeiro achado real: `springscaffolding.com → tony.halasz@…`.
+- **Pós-deploy**: `post_deploy_check.py` corre antes do uvicorn, valida
+  `quick_check`, WAL, espaço e escrita real; grava em `system_kv`. Primeira
+  execução: `status ok, 265 MB livres, integrity ok, writable true`.
+- **Testes**: 1039 pytest.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

@@ -21,7 +21,7 @@ from .company_discovery import (
     extract_text,
 )
 
-PATHS = ("/about", "/about-us", "/team", "/our-team", "/leadership", "/contact", "/")
+PATHS = ("/about", "/team", "/about-us", "/contact")
 TITLE = (
     r"(?:Owner|Co-?Owner|President|Founder|Co-?Founder|CEO|"
     r"Chief Executive Officer|Managing Partner|Principal|Proprietor|"
@@ -134,7 +134,7 @@ def find_owner_email(
         return None
     names: list[tuple[str, str]] = []
     for path in PATHS:
-        page = fetch(f"https://{domain}{path}", 5.0)
+        page = fetch(f"https://{domain}{path}", 4.0)
         if not page or page.get("status", 0) >= 400:
             continue
         try:
