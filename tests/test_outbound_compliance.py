@@ -70,6 +70,27 @@ def test_copy_v2_tem_rodape_legal_e_exclusividade_real():
     assert "never shared" not in body.lower()
 
 
+def test_singular_quando_ha_um_projeto():
+    """`copy_count` tem piso 1: a frase nao pode dizer '1 projects'."""
+    ctx = ot.build_context(
+        {"owner_name": "Acme Roofing", "address": "1 MAIN ST", "issue_category": "Roof"},
+        "NYC", "roofing", 1,
+    )
+    mail = ot.render_email("roofing", ctx)
+    assert "1 roofing project open in NYC" in mail["subject"]
+    assert "1 active roofing project in New York City" in mail["body"]
+    assert "1 roofing projects" not in mail["body"]
+
+    ctx2 = ot.build_context(
+        {"owner_name": "Acme Roofing", "address": "1 MAIN ST", "issue_category": "Roof"},
+        "NYC", "roofing", 1, category_override=ot.offer_category("roofing"),
+    )
+    ctx2["url"] = ot.sequence_url("NYC", "roofing", 2)
+    step2 = ot.render_sequence_email("step2_offer", ctx2)
+    assert "1 roofing project in New York City" in step2["subject"]
+    assert "1 verified roofing project in New York City" in step2["body"]
+
+
 def test_step2_usa_contagem_dinamica_e_categoria_do_nicho():
     ctx = ot.build_context(
         {"owner_name": "Hogan Plumbing", "address": "B2B contact - x", "city": "CHICAGO"},

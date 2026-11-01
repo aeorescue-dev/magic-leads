@@ -242,11 +242,11 @@ del _niche, _tpl
 # cobertura da sua regiao antes de se registar.
 SEQUENCE_TEMPLATES: dict[str, dict[str, str]] = {
     "step2_offer": {
-        "subject": "{count} {category} projects in {city} - one contractor at a time",
+        "subject": "{count} {category} {project_noun} in {city} - one contractor at a time",
         "body": (
             "{greeting}\n\n"
             "Following up on my last note with the commercial part.\n\n"
-            "Magic Leads gives you {count} verified {category} projects in {city} "
+            "Magic Leads gives you {count} verified {category} {project_noun} in {city} "
             "this week, each offered to one contractor at a time, with the "
             "property details and the exact service needed.\n\n"
             "It is $120 for 7 days. No commitment, and you can cancel whenever "
@@ -610,16 +610,19 @@ def build_context(
     city_short = CITY_SHORT.get((city or "").upper(), display_city)
 
     count_txt = _fmt_count(count)
+    noun = "project" if int(count or 0) == 1 else "projects"
     # Assunto: nunca perder a palavra do nicho (e' o teste de relevancia).
     # Cadeia de fallback: "open in" -> "in" -> sem nicho (ultimo recurso).
-    subject = f"{count_txt} {trade_short} projects open in {city_short}"
+    subject = f"{count_txt} {trade_short} {noun} open in {city_short}"
     if len(subject) > SUBJECT_MAX:
-        subject = f"{count_txt} {trade_short} projects in {city_short}"
+        subject = f"{count_txt} {trade_short} {noun} in {city_short}"
     if len(subject) > SUBJECT_MAX:
-        subject = f"{count_txt} projects in {city_short}"
+        subject = f"{count_txt} {noun} in {city_short}"
 
     composition = composition_clause(top_categories, count, exclude=hook_trade)
-    hook = f"{count_txt} active {hook_trade} projects in {display_city} this week"
+    hook = (
+        f"{count_txt} active {hook_trade} {noun} in {display_city} this week"
+    )
     hook = f"{hook}{composition}" if composition else f"{hook}."
 
     from .unsubscribe import unsubscribe_url
@@ -642,6 +645,7 @@ def build_context(
         "address": real_address or "a property in your area",
         "address_tail": address_tail,
         "count": copy_count(count),
+        "project_noun": noun,
         "sender_name": sender_name,
         "signature": signature or DEFAULT_SIGNATURE,
         "postal_address": SENDER_POSTAL_ADDRESS,

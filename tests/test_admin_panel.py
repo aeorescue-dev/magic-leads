@@ -1080,7 +1080,7 @@ def test_outbound_preview_renders_real_data_in_english(admin_client):
     assert "{" not in rendered and "}" not in rendered
     # Dados reais: o endereço aparece na clausula condicional.
     assert "500 N MICHIGAN AVENUE" not in rendered
-    assert "active roofing projects in Chicago this week" in rendered
+    assert "active roofing project in Chicago this week" in rendered
     # A prévia e' estritamente en-US (mesmo guard dos templates).
     outbound_templates.assert_english_only(subject)
     outbound_templates.assert_english_only(rendered)
