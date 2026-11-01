@@ -1036,6 +1036,22 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   execução: `status ok, 265 MB livres, integrity ok, writable true`.
 - **Testes**: 1039 pytest.
 
+### Fase 7 — Licenças de Chicago e diretórios de associações (2026-11-01)
+
+- **IL IDFPR** (`data.illinois.gov/pzzh-kp68`): a única base estadual com
+  contractor de construção é `ROOFING CONTRACTOR`. Filtrado a Chicago ativo:
+  **1.238 entidades** (1.265 linhas) com licença e zip, em 16 s.
+- **Chicago Business Licenses** (`uupf-x98q`): poucos ofícios (plumbing 0,
+  electrical 16; a licença de ofício é estadual). Filtro construção/contratação/
+  elétrica rendeu **216 entidades**.
+- Chicago passou de 1.967 para **3.387 entidades**.
+- **Associações: sem parser viável.** Testados AGC Chicago (sem diretório),
+  AGC NYS (só info), Texas Builders (403), BRAGB (Wix/JS), BXNet (lista de
+  associações, não de empresas), Dallas Builders (`/member-directory` e
+  `web.dallasbuilders.org` atrás de Cloudflare 403); três domínios já não
+  resolvem. Contornar 403/Cloudflare está fora de questão.
+- **Testes**: 1041 pytest.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
