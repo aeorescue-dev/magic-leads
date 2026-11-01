@@ -112,7 +112,7 @@ CITY_DATASETS: Dict[str, Dict] = {
 
 
 _SUFFIX = {
-    "STREET": "ST", "AVENUE": "AVE", "PLACE": "PL", "ROAD": "RD",
+    "STREET": "ST", "AVENUE": "AVE", "AV": "AVE", "PLACE": "PL", "ROAD": "RD",
     "BOULEVARD": "BLVD", "LANE": "LN", "DRIVE": "DR", "TERRACE": "TER",
     "PARKWAY": "PKWY", "COURT": "CT", "SQUARE": "SQ", "HIGHWAY": "HWY",
     "CIRCLE": "CIR", "WAY": "WAY", "DR": "DR", "LN": "LN",

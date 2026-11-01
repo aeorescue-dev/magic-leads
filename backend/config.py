@@ -109,6 +109,19 @@ class Settings(BaseSettings):
     # Fase E/incidente: uma varredura que exceda este limite é cancelada e
     # marcada como error (liberta o scheduler e gera alerta crítico).
     SCRAPER_MAX_HOURS: float = 3.0
+    # Cadência por relógio: um run falhado pode ser retentado após N minutos
+    # (não espera o intervalo completo), mas nunca em paralelo.
+    SCRAPER_RETRY_MINUTES: int = 30
+    # Watchdog de frescura (auditoria 01/11/2026).
+    SCRAPER_WATCHDOG_ENABLED: bool = True
+    SCRAPER_WATCHDOG_INTERVAL_MIN: int = 30
+    SCRAPER_STALE_HOURS: float = 24.0
+    SCRAPER_WATCHDOG_FORCE_MIN_HOURS: float = 3.0
+    SCRAPER_ALERT_DEDUPE_HOURS: int = 6
+    # Backfill de owners em lote (leads com owner_name NULL).
+    OWNER_BACKFILL_ENABLED: bool = True
+    OWNER_BACKFILL_PER_CITY_DAY: int = 200
+    OWNER_BACKFILL_INTERVAL_HOURS: float = 3.0
     # WebAuthn / Passkeys. O RP ID é DERIVADO da origem de cada pedido:
     # `magicleads.app` e `*.magicleads.app` usam o domínio canónico; qualquer
     # outra origem na allowlist (`ALLOWED_ORIGINS`) usa o próprio host (é o que

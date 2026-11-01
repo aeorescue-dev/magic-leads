@@ -100,8 +100,11 @@ from .services import (
     lifecycle_push,
     notifier,
     outbound_templates,
+    owner_backfill,
+    scrape_guard,
     security,
 )
+from .services.boston_address import clean_boston_location
 from .services.db import (  # noqa: F401  — usados nos filtros de qualificação
     _OPEN_STATUSES,
     _TRADE_CATEGORIES,
@@ -3170,7 +3173,7 @@ async def _dlq_reprocess(run_id: str) -> int:
 # ============================================================
 # Webhook Alert Helper
 # ============================================================
-async def _send_scraper_webhook(run_id: str, city_results: dict, dlq_reprocessed: int, inserted: int, total_raw: int, hours_override: int = None, notified: int = None) -> bool:
+async def _send_scraper_webhook(run_id: str, city_results: dict, dlq_reprocessed: int, inserted: int, total_raw: int, hours_override: int = None, notified: int = None, trigger: str = None) -> bool:
     """Envia relatório consolidado do scraper para webhook configurado (Telegram/Slack/Email).
 
     Retorna True se enviado com sucesso, False caso contrário.
@@ -3218,7 +3221,7 @@ async def _send_scraper_webhook(run_id: str, city_results: dict, dlq_reprocessed
 
     # Monta mensagem
     hours_info = f" (janela: {hours_override}h)" if hours_override else ""
-    trigger = "scheduler" if "scheduler" in run_id else "manual"
+    trigger = trigger or ("scheduler" if "scheduler" in run_id else "manual")
 
     lines = [
         f"📊 **Scraper Run `{run_id}`** {hours_info}",
@@ -3748,18 +3751,22 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                             eid = str(rec.get("case_enquiry_id") or rec.get("_id") or "")
                             if not eid:
                                 continue
-                            address = rec.get("location") or rec.get("location_street_name") or "Boston, MA"
-                            desc = rec.get("case_title") or rec.get("reason") or rec.get("type") or ""
+
+                            raw_location = rec.get("location") or rec.get("location_street_name") or ""
                             raw_zip = str(rec.get("location_zipcode") or "").strip()
+                            address, clean_zip = clean_boston_location(raw_location, raw_zip)
+                            if not address:
+                                address = "Boston"
+                            desc = rec.get("case_title") or rec.get("reason") or rec.get("type") or ""
                             if raw_zip.isdigit() and len(raw_zip) == 4:
                                 raw_zip = raw_zip.zfill(5)
                             import backend.models.schemas as _sch
                             out.append(_sch.RawLead311(
                                 external_id=eid,
-                                address=f"{address}, Boston, MA" if address else "Boston, MA",
+                                address=address,
                                 city="Boston",
                                 state="MA",
-                                zip_code=raw_zip or None,
+                                zip_code=clean_zip or (raw_zip or None),
                                 issue_description=desc,
                                 created_at=odo,
                                 lat=rec.get("latitude"),
@@ -3867,6 +3874,9 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
         # 5. Inserção com DLQ fallback
         inserted = 0
         newly_added: list[dict] = []
+        # Auditoria 01/11: anomalia por cidade tem de olhar para INSERTED, não
+        # para linhas brutas. Um run pode trazer 11.690 raw todos duplicados.
+        inserted_by_city: dict[str, int] = {}
         # P0-B: historico por ocorrencia + reincidencia por imovel.
         history_batch: list[dict] = []
         history_lead_ids: set[int] = set()
@@ -3956,6 +3966,8 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
 
             if new_lead:
                 inserted += 1
+                _city_key = (raw_lead.city or "").strip().upper()
+                inserted_by_city[_city_key] = inserted_by_city.get(_city_key, 0) + 1
                 newly_added.append(new_lead)
                 # Enriquecimento automático APENAS em leads estritamente novos
                 try:
@@ -4027,15 +4039,34 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
 
         # 7. Anomalia: cidades ativas que zeraram leads
         for city, result in city_results.items():
-            if not result["skipped"] and len(result["leads"]) == 0:
+            city_inserted = int(inserted_by_city.get(city.strip().upper(), 0))
+            result["inserted"] = city_inserted
+            if not result["skipped"] and city_inserted == 0:
                 anomaly_count = await db_service.increment_anomaly_counter(city)
                 if anomaly_count >= 2:
                     logger.warning(f"ANOMALIA: {city} zerou {anomaly_count} execuções consecutivas")
-            elif not result["skipped"] and len(result["leads"]) > 0:
+                    try:
+                        await db_service.record_system_alert(
+                            "warning",
+                            f"SCRAPER_CITY_ZERO_INSERTS:{city.strip().upper()}",
+                            (
+                                f"{city} sem leads novos há {anomaly_count} runs "
+                                f"(raw={len(result['leads'])}, inserted=0)"
+                            ),
+                            {
+                                "city": city.strip().upper(),
+                                "anomaly_counter": anomaly_count,
+                                "raw": len(result["leads"]),
+                                "run_id": run_id,
+                            },
+                        )
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("Falha ao gravar alerta de anomalia: %s", e)
+            elif not result["skipped"] and city_inserted > 0:
                 await db_service.reset_anomaly_counter(city)
 
         # 8. Envia webhook de alerta consolidado
-        await _send_scraper_webhook(run_id, city_results, dlq_reprocessed, inserted, len(all_raw), hours_override, notified=notified_total)
+        await _send_scraper_webhook(run_id, city_results, dlq_reprocessed, inserted, len(all_raw), hours_override, notified=notified_total, trigger=state.get("trigger"))
 
         # Uma cidade que falhou por completo nao conta como coberta. O run
         # anterior reportava status="success" e cities_covered=4 com Chicago
@@ -4105,6 +4136,14 @@ async def _run_scrape_guarded(
     CRITICAL e disparamos a Control Tower (alerta vermelho imediato).
     """
     timeout_h = max(0.25, float(getattr(settings, "SCRAPER_MAX_HOURS", 3) or 3))
+    # Persiste o arranque imediatamente: sem isto, um deploy/OOM a meio deixava
+    # o run invisivel na BD e o scheduler nao sabia quando foi a ultima tentativa.
+    try:
+        started = dict(_scrape_runs.get(run_id) or {})
+        if started:
+            await db_service.record_scrape_run(started)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Falha ao persistir o inicio do run %s: %s", run_id, e)
     try:
         await asyncio.wait_for(
             _scrape_worker(run_id, max_cities, hours_override=hours_override),
@@ -4163,53 +4202,209 @@ async def _run_scrape_guarded(
 # Roda a varredura a cada SCRAPER_INTERVAL_HOURS horas, reutilizando
 # a mesma fila de runs (_scrape_runs) do endpoint manual.
 # ------------------------------------------------------------------
-def _scheduled_scrape(max_cities: int = 8, hours_override: int = None):
-    # Validação de secret do scheduler interno (fail-closed)
+def _scheduled_scrape(
+    max_cities: int = 8, hours_override: int = None, trigger: str = "scheduler"
+):
+    # Validacao de secret do scheduler interno (fail-closed)
     if settings.CRON_SECRET:
-        logger.debug("Scheduler: secret válido, prosseguindo")
+        logger.debug("Scheduler: secret valido, prosseguindo")
     else:
-        logger.warning("Scheduler: CRON_SECRET não configurado — execução permitida (modo desenvolvimento)")
+        logger.warning("Scheduler: CRON_SECRET nao configurado - execucao permitida (modo desenvolvimento)")
 
     for run in _scrape_runs.values():
         if run.get("running"):
-            logger.info("Scheduler: run do scraper já ativo, pulando")
+            logger.info("Scheduler: run do scraper ja ativo, pulando")
             return
     run_id = uuid.uuid4().hex[:12]
     _remember_scrape_run({
         "run_id": run_id, "running": True,
         "started_at": utcnow().isoformat(),
         "inserted": 0, "total_raw": 0, "status": "running", "error": None,
-        "trigger": "scheduler",
+        "trigger": trigger,
     })
     asyncio.create_task(_run_scrape_guarded(run_id, max_cities, hours_override=hours_override))
     logger.info(f"Scheduler: varredura disparada [run {run_id}]" + (f" com hours={hours_override}" if hours_override else ""))
+    return run_id
 
 
 async def _scheduler_loop():
-    """Loop do scheduler interno: espera o intervalo e dispara a varredura.
+    """Scheduler interno ancorado ao relogio (sobrevive a deploys).
 
-    Executa varredura normal a cada SCRAPER_INTERVAL_HOURS horas.
-    Executa varredura estendida (hours=120) às 02:00 UTC para catch-up noturno.
+    Antes: `sleep(6h)` antes do primeiro run. Cada deploy reiniciava o processo
+    e o timer, e a ingestao podia ficar >8h parada (auditoria 01/11/2026).
+
+    Agora: le o ultimo run bem-sucedido da BD, calcula o proximo slot por
+    relogio e dispara imediatamente se o slot ja passou. Acorda no maximo a
+    cada 15 min para reavaliar (deploy/OOM nao perdem o slot).
     """
-    interval_seconds = max(300, settings.SCRAPER_INTERVAL_HOURS * 3600)
+    interval_hours = max(0.25, float(settings.SCRAPER_INTERVAL_HOURS or 6))
+    retry_minutes = int(getattr(settings, "SCRAPER_RETRY_MINUTES", 30) or 30)
+    logger.info(
+        "Scheduler interno: cadencia por relogio (intervalo %.1fh, retry %smin)",
+        interval_hours,
+        retry_minutes,
+    )
     while True:
-        await asyncio.sleep(interval_seconds)
         try:
-            # Verifica se é hora da varredura noturna estendida (02:00 UTC)
-            now_utc = utcnow()
-            if now_utc.hour == 2 and now_utc.minute < (interval_seconds // 60):
-                logger.info("Scheduler: disparando varredura noturna estendida (hours=120)")
-                _scheduled_scrape(max_cities=12, hours_override=120)
+            last_success = await db_service.get_last_successful_scrape_run()
+            last_run = await db_service.get_last_scrape_run()
+            delay = scrape_guard.seconds_until_next_scrape(
+                utcnow(),
+                (last_success or {}).get("started_at"),
+                (last_run or {}).get("started_at"),
+                interval_hours,
+                retry_minutes=retry_minutes,
+            )
+            if delay > 0:
+                await asyncio.sleep(delay)
+                continue
+
+            # Um run deixado "running" por outro processo (ou por um deploy
+            # anterior) não deve ser duplicado.
+            if _run_is_fresh_running(last_run):
+                await asyncio.sleep(300)
+                continue
+
+            if utcnow().hour == 2:
+                logger.info("Scheduler: varredura noturna estendida (hours=120)")
+                _scheduled_scrape(max_cities=12, hours_override=120, trigger="scheduler")
             else:
-                _scheduled_scrape(max_cities=8)
+                _scheduled_scrape(max_cities=8, trigger="scheduler")
+            # Um run pode durar 20-45 min; reavalia no tick seguinte.
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             logger.error(f"Erro no scheduler interno: {e}", exc_info=True)
+            await asyncio.sleep(60)
+
+
+def _scrape_is_running() -> bool:
+    return any(run.get("running") for run in _scrape_runs.values())
+
+
+def _run_is_fresh_running(run: dict | None) -> bool:
+    """Run gravado como `running` e dentro do limite duro (`SCRAPER_MAX_HOURS`)."""
+    if not run or str(run.get("status") or "").lower() != "running":
+        return False
+    started = scrape_guard.parse_dt(run.get("started_at"))
+    if started is None:
+        return False
+    max_h = max(0.25, float(getattr(settings, "SCRAPER_MAX_HOURS", 3) or 3))
+    return (utcnow() - started).total_seconds() < max_h * 3600
+
+
+async def _run_scrape_watchdog() -> dict:
+    """Watchdog de frescura: alerta e forca recolha quando a ingestao seca.
+
+    Criterios (auditoria 01/11/2026):
+      * `MAX(date_reported)` de uma cidade > 24h;
+      * 2 runs concluidos consecutivos com `inserted=0`;
+      * nenhum run iniciado ha `intervalo + 2h`.
+
+    Alertas deduplicados por codigo/cidade durante 6h. A recolha forcada
+    respeita um cooldown de 3h e nunca corre em paralelo com outro run.
+    """
+    now = utcnow()
+    cities = ["NYC", "CHICAGO", "DALLAS", "BOSTON"]
+    city_last = await db_service.get_city_freshness(cities)
+    recent = await db_service.get_recent_scrape_runs(5)
+    problems = scrape_guard.freshness_problems(
+        now,
+        city_last,
+        recent,
+        interval_hours=float(settings.SCRAPER_INTERVAL_HOURS or 6),
+        stale_hours=float(getattr(settings, "SCRAPER_STALE_HOURS", 24) or 24),
+        # Alinhado com a Control Tower (warn = intervalo * 1.75 ~ 10,5 h).
+        overdue_grace_hours=max(
+            2.0, float(settings.SCRAPER_INTERVAL_HOURS or 6) * 0.75
+        ),
+    )
+
+    alert_hours = int(getattr(settings, "SCRAPER_ALERT_DEDUPE_HOURS", 6) or 6)
+    recorded = 0
+    for problem in problems:
+        code = problem["code"]
+        if problem.get("city"):
+            code = f"{code}:{problem['city']}"
+        try:
+            if await db_service.has_recent_system_alert(code, alert_hours):
+                continue
+            await db_service.record_system_alert(
+                problem["level"], code, problem["message"], problem.get("context")
+            )
+            recorded += 1
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[WATCHDOG] falha ao gravar alerta %s: %s", code, e)
+
+    forced = False
+    last_run_at = (recent[0] or {}).get("started_at") if recent else None
+    force_hours = float(
+        getattr(settings, "SCRAPER_WATCHDOG_FORCE_MIN_HOURS", 3) or 3
+    )
+    if (
+        problems
+        and not _scrape_is_running()
+        and not _run_is_fresh_running(recent[0] if recent else None)
+        and scrape_guard.should_force_collection(
+            now, last_run_at, problems, min_hours_between_forces=force_hours
+        )
+    ):
+        _scheduled_scrape(max_cities=8, trigger="watchdog")
+        forced = True
+
+    if problems:
+        logger.warning(
+            "[WATCHDOG] %s problema(s) de frescura; alertas novos=%s; recolha forcada=%s",
+            len(problems), recorded, forced,
+        )
+    return {
+        "problems": len(problems),
+        "alerts": recorded,
+        "forced": forced,
+        "cities": city_last,
+    }
+
+
+async def _scrape_watchdog_loop():
+    interval_s = max(
+        300, int(getattr(settings, "SCRAPER_WATCHDOG_INTERVAL_MIN", 30) or 30) * 60
+    )
+    # Nao compete com o arranque/deploy nem com o primeiro run.
+    await asyncio.sleep(min(300, interval_s))
+    while True:
+        try:
+            await _run_scrape_watchdog()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            logger.error("[WATCHDOG] erro: %s", e, exc_info=True)
+        await asyncio.sleep(interval_s)
+
+
+async def _owner_backfill_loop():
+    """Backfill de owners em lote (leads que ficaram sem dono por falha de API)."""
+    interval_h = max(0.5, float(getattr(settings, "OWNER_BACKFILL_INTERVAL_HOURS", 3) or 3))
+    # Nao competir com o arranque nem com a varredura de recuperacao pos-deploy.
+    await asyncio.sleep(min(1800.0, interval_h * 1800))
+    while True:
+        try:
+            result = await owner_backfill.run_once()
+            if result.get("filled"):
+                logger.info("[OWNER-BACKFILL] %s owners recuperados", result["filled"])
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            logger.error("[OWNER-BACKFILL] erro: %s", e, exc_info=True)
+        await asyncio.sleep(interval_h * 3600)
 
 
 @contextlib.asynccontextmanager
 async def _lifespan(app):
     _scheduler_task = None
     _watchdog_task = None
+    _scrape_watchdog_task = None
+    _owner_backfill_task = None
     _outbound_task = None
     _freshness_task = None
 
@@ -4275,6 +4470,16 @@ async def _lifespan(app):
         _scheduler_task = asyncio.create_task(_scheduler_loop())
         logger.info(f"Scheduler interno ativo (a cada {settings.SCRAPER_INTERVAL_HOURS}h)")
 
+    # Watchdog de frescura: se uma cidade ficar 24h sem factos novos, dois runs
+    # seguidos inserirem 0, ou nao houver run no intervalo previsto, alerta e
+    # forca recolha. Independente do scheduler e sobrevive a deploys.
+    if getattr(settings, "SCRAPER_WATCHDOG_ENABLED", True):
+        _scrape_watchdog_task = asyncio.create_task(_scrape_watchdog_loop())
+        logger.info(
+            "Watchdog de ingestao ativo (cada %s min)",
+            getattr(settings, "SCRAPER_WATCHDOG_INTERVAL_MIN", 30),
+        )
+
     # Sweep de holds/reveals no proprio processo. O cron do GitHub Actions esta a
     # falhar de forma sistematica (cancelado antes de correr um passo), portanto
     # esta e agora a cobertura garantida, independente de trafego e de terceiros.
@@ -4307,6 +4512,16 @@ async def _lifespan(app):
         _enrich_task = asyncio.create_task(enrichment_scheduler.scheduler_loop())
     else:
         logger.info("[ENRICH-SCHED] Desativado por ENRICH_SCHEDULER_ENABLED=0")
+
+    # P1 (auditoria 01/11/2026): owners que ficaram NULL por falha transitória
+    # da API são recuperados em lote, com quota por cidade e cursor persistente.
+    if getattr(settings, "OWNER_BACKFILL_ENABLED", True):
+        _owner_backfill_task = asyncio.create_task(_owner_backfill_loop())
+        logger.info(
+            "Backfill de owners ativo (cada %sh, %s/cidade/dia)",
+            getattr(settings, "OWNER_BACKFILL_INTERVAL_HOURS", 3),
+            getattr(settings, "OWNER_BACKFILL_PER_CITY_DAY", 200),
+        )
 
     # Control Tower (Etapa 1): saude a cada 15 min, backup diario off-site e
     # digest diario. Fail-soft: qualquer falha aqui nunca derruba a app.
@@ -4373,6 +4588,8 @@ async def _lifespan(app):
     for name, task in (
         ("scheduler", _scheduler_task),
         ("watchdog", _watchdog_task),
+        ("scrape_watchdog", _scrape_watchdog_task),
+        ("owner_backfill", _owner_backfill_task),
         ("outbound", _outbound_task),
         ("freshness", _freshness_task),
     ):

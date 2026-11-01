@@ -60,6 +60,44 @@ def per_city_day() -> int:
         return PER_CITY_DAY
 
 
+def domain_per_city_day(enabled_cities: int = 1) -> int:
+    """Quota diária de jobs de DOMÍNIO por cidade.
+
+    Cada job pode gastar uma query paga (Brave). O orçamento Brave é global,
+    portanto a quota por cidade é derivada dele: com 250 queries/dia e 3
+    cidades activas, cada cidade fica com ~83 jobs/dia — em vez de 750 jobs
+    que esgotavam o orçamento na primeira hora e queimavam as 2 tentativas
+    dos 24k de entidades sem pesquisa disponível (auditoria 01/11/2026).
+    `ENRICH_DOMAIN_PER_CITY_DAY` permite override explícito.
+    """
+    raw = (os.getenv("ENRICH_DOMAIN_PER_CITY_DAY") or "").strip()
+    if raw:
+        try:
+            return max(0, int(raw))
+        except ValueError:
+            pass
+    if not brave_search.api_key():
+        # Sem chave paga: OSM/Overpass + heurística continuam disponíveis e
+        # não custam orçamento; mantém a quota de jobs.
+        return per_city_day()
+    cities = max(1, int(enabled_cities or 1))
+    try:
+        budget = max(0, int(brave_search.daily_limit()))
+    except (TypeError, ValueError):
+        budget = 0
+    return max(0, budget // cities)
+
+
+def domain_search_available() -> bool:
+    """False quando o orçamento pago do dia acabou (não queimar tentativas)."""
+    if not brave_search.api_key():
+        return True
+    try:
+        return brave_search.budget_left() > 0
+    except Exception:  # noqa: BLE001
+        return True
+
+
 async def _throttle_overpass() -> None:
     """Uma consulta Overpass a cada ~1,1 s (política de uso público)."""
     global _last_overpass_at
@@ -71,6 +109,11 @@ async def _throttle_overpass() -> None:
 
 
 async def _domain_stage(entity: dict) -> str:
+    # Orçamento pago esgotado: adia sem gastar tentativa. Antes cada job
+    # marcava `no_domain` mesmo sem pesquisa disponível, queimando as 2
+    # tentativas e empurrando entidades válidas para quarentena.
+    if not domain_search_available():
+        return "deferred"
     async with _global_sem:
         await _throttle_overpass()
         # 1) busca paga (Brave) com cache/orcamento: maior cobertura.
@@ -172,9 +215,16 @@ async def run_once(
         day = timeutil.day_key(now)
         stats: dict[str, dict] = {}
         total = 0
-        for city in (cities_override or cities()):
+        target_cities = list(cities_override or cities())
+        enabled: list[str] = []
+        for city in target_cities:
             config = await db_service.get_outbound_config(city)
-            if config.get("enrich_enabled") != "1":
+            if config.get("enrich_enabled") == "1":
+                enabled.append(city)
+        domain_cap = domain_per_city_day(len(enabled))
+
+        for city in target_cities:
+            if city not in enabled:
                 stats[city] = {"status": "disabled", "processed": 0}
                 continue
             state = await db_service.get_city_enrichment_state(city, day)
@@ -185,7 +235,17 @@ async def run_once(
             take = min(CONCURRENCY, remaining)
             # Entidades que ficaram 'ready' antes da ponte existir.
             bridged_now = await entity_bridge.bridge_ready_entities(city, take)
-            domain_jobs = await db_service.list_entities_for_domain(city, take)
+
+            domain_used = int(state.get("domain_jobs_today") or 0)
+            domain_remaining = max(0, domain_cap - domain_used)
+            if domain_remaining <= 0 or not domain_search_available():
+                # Sem orçamento pago: NÃO listar jobs de domínio (não queimar
+                # tentativas). O estágio de e-mail (SMTP) é gratuito e segue.
+                domain_jobs: list[dict] = []
+            else:
+                domain_jobs = await db_service.list_entities_for_domain(
+                    city, min(CONCURRENCY, domain_remaining)
+                )
             email_jobs = await db_service.list_entities_for_email(city, take)
             tasks = [_domain_stage(e) for e in domain_jobs]
             tasks += [_email_stage(e) for e in email_jobs]
@@ -199,11 +259,21 @@ async def run_once(
                     logger.warning("[ENRICH-SCHED] job falhou (%s): %s", city, result)
                     continue
                 counts[result] = counts.get(result, 0) + 1
-            processed = sum(counts.values())
+            # `deferred` não consumiu tentativa nem quota de domínio.
+            processed = sum(v for k, v in counts.items() if k != "deferred")
+            # Só os jobs realmente lançados contam para a quota de domínio.
+            domain_processed = len(domain_jobs) - int(counts.get("deferred", 0))
             total += processed
             last_id = (domain_jobs + email_jobs)[-1]["id"] if (domain_jobs or email_jobs) else None
-            await db_service.bump_city_enrichment_state(city, day, processed, last_id)
-            stats[city] = {"status": "ok", "processed": processed, "outcomes": counts}
+            await db_service.bump_city_enrichment_state(
+                city, day, processed, last_id, max(0, domain_processed)
+            )
+            stats[city] = {
+                "status": "ok",
+                "processed": processed,
+                "outcomes": counts,
+                "domain_cap": domain_cap,
+            }
             logger.info("[ENRICH-SCHED] %s: %s", city, stats[city])
         return {"status": "ok", "processed": total, "cities": stats}
 

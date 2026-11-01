@@ -1067,6 +1067,20 @@ CREATE TABLE IF NOT EXISTS city_enrichment_state (
   last_run_at TEXT,
   day TEXT,
   jobs_today INTEGER DEFAULT 0,
+  -- Quota separada para o estagio de dominio: cada job pode gastar uma query
+  -- paga (Brave), portanto nao pode seguir a quota de jobs (que inclui SMTP).
+  domain_jobs_today INTEGER DEFAULT 0,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Cursor/quota do backfill de proprietarios (leads com owner_name NULL).
+-- `last_id` desce a partir do max(id) e reinicia em 0 quando chega ao fim.
+CREATE TABLE IF NOT EXISTS owner_backfill_state (
+  city TEXT PRIMARY KEY,
+  day TEXT,
+  jobs_today INTEGER DEFAULT 0,
+  last_id INTEGER DEFAULT 0,
+  last_run_at TEXT,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -2152,6 +2166,17 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     ):
         if name not in ent_cols:
             conn.execute(f"ALTER TABLE contractor_entities ADD COLUMN {name} {ddl}")
+
+    # Quota separada de dominio por cidade (orcamento Brave). Bancos antigos
+    # nascem sem a coluna; o ALTER e' idempotente.
+    enr_cols = {
+        r["name"] for r in conn.execute("PRAGMA table_info(city_enrichment_state)")
+    }
+    if enr_cols and "domain_jobs_today" not in enr_cols:
+        conn.execute(
+            "ALTER TABLE city_enrichment_state "
+            "ADD COLUMN domain_jobs_today INTEGER DEFAULT 0"
+        )
 
 
 
@@ -4661,11 +4686,78 @@ class DatabaseService:
             ).fetchone()
             if not row:
                 return {"city": city.upper(), "day": day, "jobs_today": 0,
-                        "last_entity_id": 0}
+                        "domain_jobs_today": 0, "last_entity_id": 0}
             data = dict(row)
             if data.get("day") != day:
                 conn.execute(
                     "UPDATE city_enrichment_state SET day=?, jobs_today=0, "
+                    "domain_jobs_today=0, "
+                    "updated_at=CURRENT_TIMESTAMP WHERE city=?",
+                    (day, city.strip().upper()),
+                )
+                conn.commit()
+                data["day"] = day
+                data["jobs_today"] = 0
+                data["domain_jobs_today"] = 0
+            return data
+        finally:
+            conn.close()
+
+    def bump_city_enrichment_state(
+        self,
+        city: str,
+        day: str,
+        jobs: int,
+        last_entity_id: Optional[int] = None,
+        domain_jobs: int = 0,
+    ) -> None:
+        conn = get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO city_enrichment_state (city, day, jobs_today, "
+                "domain_jobs_today, last_entity_id, "
+                "last_run_at, updated_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(city) DO UPDATE SET "
+                # Acumula dentro do mesmo dia; reseta quando o dia muda. Antes
+                # sobrescrevia e a quota por cidade nunca era atingida.
+                "jobs_today=CASE WHEN city_enrichment_state.day=excluded.day "
+                "               THEN city_enrichment_state.jobs_today + excluded.jobs_today "
+                "               ELSE excluded.jobs_today END, "
+                "domain_jobs_today=CASE WHEN city_enrichment_state.day=excluded.day "
+                "               THEN city_enrichment_state.domain_jobs_today + excluded.domain_jobs_today "
+                "               ELSE excluded.domain_jobs_today END, "
+                "day=excluded.day, "
+                "last_entity_id=COALESCE(excluded.last_entity_id, city_enrichment_state.last_entity_id), "
+                "last_run_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP",
+                (
+                    city.strip().upper(),
+                    day,
+                    int(jobs),
+                    int(domain_jobs),
+                    last_entity_id,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    # ------------------------------------------------- owner backfill (P1)
+    def get_owner_backfill_state(self, city: str, day: str) -> dict:
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT * FROM owner_backfill_state WHERE city=?",
+                (city.strip().upper(),),
+            ).fetchone()
+            if not row:
+                return {
+                    "city": city.upper(), "day": day, "jobs_today": 0,
+                    "last_id": 0,
+                }
+            data = dict(row)
+            if data.get("day") != day:
+                conn.execute(
+                    "UPDATE owner_backfill_state SET day=?, jobs_today=0, "
                     "updated_at=CURRENT_TIMESTAMP WHERE city=?",
                     (day, city.strip().upper()),
                 )
@@ -4676,26 +4768,49 @@ class DatabaseService:
         finally:
             conn.close()
 
-    def bump_city_enrichment_state(
-        self, city: str, day: str, jobs: int, last_entity_id: Optional[int] = None
+    def bump_owner_backfill_state(
+        self, city: str, day: str, jobs: int, last_id: Optional[int] = None
     ) -> None:
         conn = get_connection()
         try:
             conn.execute(
-                "INSERT INTO city_enrichment_state (city, day, jobs_today, last_entity_id, "
+                "INSERT INTO owner_backfill_state (city, day, jobs_today, last_id, "
                 "last_run_at, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) "
                 "ON CONFLICT(city) DO UPDATE SET "
-                # Acumula dentro do mesmo dia; reseta quando o dia muda. Antes
-                # sobrescrevia e a quota por cidade nunca era atingida.
-                "jobs_today=CASE WHEN city_enrichment_state.day=excluded.day "
-                "               THEN city_enrichment_state.jobs_today + excluded.jobs_today "
+                "jobs_today=CASE WHEN owner_backfill_state.day=excluded.day "
+                "               THEN owner_backfill_state.jobs_today + excluded.jobs_today "
                 "               ELSE excluded.jobs_today END, "
                 "day=excluded.day, "
-                "last_entity_id=COALESCE(excluded.last_entity_id, city_enrichment_state.last_entity_id), "
+                "last_id=COALESCE(excluded.last_id, owner_backfill_state.last_id), "
                 "last_run_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP",
-                (city.strip().upper(), day, int(jobs), last_entity_id),
+                (city.strip().upper(), day, int(jobs), last_id),
             )
             conn.commit()
+        finally:
+            conn.close()
+
+    def list_leads_missing_owner(
+        self, city: str, before_id: int, limit: int = 50
+    ) -> List[dict]:
+        """Leads reais (nao B2B) da cidade, sem owner, por ordem decrescente de id."""
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT id, address, city, state, zip_code, bbl FROM leads "
+                "WHERE UPPER(TRIM(city))=? "
+                "  AND COALESCE(TRIM(owner_name),'')='' "
+                "  AND COALESCE(TRIM(address),'')<>'' "
+                "  AND address NOT LIKE 'B2B contact%' "
+                "  AND (? <= 0 OR id < ?) "
+                "ORDER BY id DESC LIMIT ?",
+                (
+                    city.strip().upper(),
+                    int(before_id or 0),
+                    int(before_id or 0),
+                    max(1, min(int(limit), 500)),
+                ),
+            ).fetchall()
+            return [dict(r) for r in rows]
         finally:
             conn.close()
 
@@ -5218,6 +5333,26 @@ class DatabaseService:
             cur = conn.execute(
                 "UPDATE leads SET owner_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (owner_name, lead_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def update_owner_details(
+        self,
+        lead_id: int,
+        owner_name: Optional[str],
+        mailing_address: Optional[str] = None,
+    ) -> bool:
+        """Grava owner + morada de correspondência numa só escrita (backfill)."""
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE leads SET owner_name = ?, "
+                "mailing_address = COALESCE(NULLIF(?, ''), mailing_address), "
+                "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (owner_name, (mailing_address or "").strip() or None, lead_id),
             )
             conn.commit()
             return cur.rowcount > 0
@@ -9677,6 +9812,69 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def get_last_successful_scrape_run(self) -> Optional[dict]:
+        """Último run que produziu dados (success/partial), para a cadência."""
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT * FROM scraper_runs "
+                "WHERE status IN ('success','partial') AND started_at IS NOT NULL "
+                "ORDER BY datetime(started_at) DESC, id DESC LIMIT 1"
+            ).fetchone()
+            return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Erro ao ler último run bem-sucedido: {e}")
+            return None
+        finally:
+            conn.close()
+
+    def get_recent_scrape_runs(self, limit: int = 5) -> List[dict]:
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT run_id, trigger, started_at, finished_at, status, "
+                "inserted, total_raw, cities_covered, error "
+                "FROM scraper_runs ORDER BY id DESC LIMIT ?",
+                (max(1, min(int(limit), 50)),),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def get_city_freshness(self, cities: List[str]) -> dict:
+        """Data do facto mais recente por cidade (`MAX(date_reported)`)."""
+        conn = get_connection()
+        out: dict[str, Optional[str]] = {}
+        try:
+            for city in cities or []:
+                key = (city or "").strip().upper()
+                if not key:
+                    continue
+                row = conn.execute(
+                    "SELECT MAX(date_reported) AS last FROM leads "
+                    "WHERE UPPER(TRIM(city))=?",
+                    (key,),
+                ).fetchone()
+                out[key] = row["last"] if row else None
+            return out
+        except Exception as e:
+            logger.error(f"Erro ao ler frescura por cidade: {e}")
+            return out
+        finally:
+            conn.close()
+
+    def has_recent_system_alert(self, code: str, hours: int = 6) -> bool:
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM system_alerts "
+                "WHERE code=? AND datetime(created_at) >= datetime('now', ?) LIMIT 1",
+                (code, f"-{max(1, int(hours))} hours"),
+            ).fetchone()
+            return row is not None
+        finally:
+            conn.close()
+
     def mark_stale_scraper_runs(self, older_than_minutes: int = 180) -> int:
         """Fecha runs presos em 'running' após restart/OOM.
 
@@ -11949,11 +12147,41 @@ class AsyncDatabaseService:
     async def update_owner(self, lead_id: int, owner_name: Optional[str]) -> bool:
         return await anyio.to_thread.run_sync(self._service.update_owner, lead_id, owner_name)
 
+    async def update_owner_details(
+        self,
+        lead_id: int,
+        owner_name: Optional[str],
+        mailing_address: Optional[str] = None,
+    ) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.update_owner_details, lead_id, owner_name, mailing_address
+        )
+
     async def record_scrape_run(self, run: dict) -> None:
         return await anyio.to_thread.run_sync(self._service.record_scrape_run, run)
 
     async def get_last_scrape_run(self) -> Optional[dict]:
         return await anyio.to_thread.run_sync(self._service.get_last_scrape_run)
+
+    async def get_last_successful_scrape_run(self) -> Optional[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.get_last_successful_scrape_run
+        )
+
+    async def get_recent_scrape_runs(self, limit: int = 5) -> List[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.get_recent_scrape_runs, limit
+        )
+
+    async def get_city_freshness(self, cities: List[str]) -> dict:
+        return await anyio.to_thread.run_sync(
+            self._service.get_city_freshness, cities
+        )
+
+    async def has_recent_system_alert(self, code: str, hours: int = 6) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.has_recent_system_alert, code, hours
+        )
 
     async def mark_stale_scraper_runs(self, older_than_minutes: int = 180) -> int:
         return await anyio.to_thread.run_sync(
@@ -13473,11 +13701,36 @@ class AsyncDatabaseService:
         )
 
     async def bump_city_enrichment_state(
-        self, city: str, day: str, jobs: int, last_entity_id: Optional[int] = None
+        self,
+        city: str,
+        day: str,
+        jobs: int,
+        last_entity_id: Optional[int] = None,
+        domain_jobs: int = 0,
     ) -> None:
         return await anyio.to_thread.run_sync(
             self._service.bump_city_enrichment_state,
-            city, day, jobs, last_entity_id,
+            city, day, jobs, last_entity_id, domain_jobs,
+        )
+
+    async def get_owner_backfill_state(self, city: str, day: str) -> dict:
+        return await anyio.to_thread.run_sync(
+            self._service.get_owner_backfill_state, city, day
+        )
+
+    async def bump_owner_backfill_state(
+        self, city: str, day: str, jobs: int, last_id: Optional[int] = None
+    ) -> None:
+        return await anyio.to_thread.run_sync(
+            self._service.bump_owner_backfill_state,
+            city, day, jobs, last_id,
+        )
+
+    async def list_leads_missing_owner(
+        self, city: str, before_id: int, limit: int = 50
+    ) -> List[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.list_leads_missing_owner, city, before_id, limit
         )
 
     async def get_outbound_counter(self, city: str, day: str) -> dict:
