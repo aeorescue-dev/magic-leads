@@ -6,6 +6,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
+    libexpat1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
