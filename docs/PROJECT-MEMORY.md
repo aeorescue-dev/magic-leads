@@ -1143,6 +1143,21 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   na fila, o envio para quando ela sair.
 - **Testes**: 1048 pytest.
 
+### Fase 14 — Auto-lote (2026-11-01)
+
+- Loop no worker (60 s) chama `auto_batch.maybe_create_batch()`: se
+  `send_enabled=1`, fora das quiet hours, fila <3, capacidade do dia >0,
+  cooldown de 10 min e cidade/nicho ligados, cria um lote com
+  `min(prontos, capacidade, 8)` e chama `enqueue_batch` (nunca envia).
+- Escolha do par (cidade, nicho) maximiza `owner_osint` **e** `generic` no
+  mesmo lote — primeiro Dallas/GC (2 osint + 5 generic), para o 1:1 arrancar.
+- Verificado em produção: com 4/4 já enviados hoje devolve `no_capacity`
+  (guarda correta). O primeiro lote automático sai quando o contador UTC
+  reinicia (00:00 UTC = 20:00 EDT) e depois às 11:00 UTC.
+- Quirk conhecido: o cap diário usa o dia **UTC** (reinicia às 20:00 EDT),
+  não a meia-noite de Nova Iorque.
+- **Testes**: 1055 pytest.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
