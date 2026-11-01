@@ -4,6 +4,9 @@
 // /api/admin/* valida no backend que a sessão existe E que users.is_admin = 1.
 // Este módulo só trata o resultado (200 = ok, 401 = sem sessão, 403 = sem role).
 import { AUTH_TOKEN_KEY } from "./api-client";
+import type { SystemHealth } from "./system-health";
+
+export type { SystemHealth } from "./system-health";
 
 const API_URL = (
   (typeof window !== "undefined" && (window as any).__NEXT_PUBLIC_API_URL) ||
@@ -1139,5 +1142,12 @@ export function fetchAdminAccessAudit(
 ): Promise<{ entries: AdminAccessAuditEntry[]; count: number }> {
   return adminFetch<{ entries: AdminAccessAuditEntry[]; count: number }>(
     `/access/audit?limit=${limit}`
+  );
+}
+
+/** Snapshot read-only do System Health (7 camadas + score 0–100). */
+export function fetchSystemHealth(windowHours = 24): Promise<SystemHealth> {
+  return adminFetch<SystemHealth>(
+    `/system-health?window=${encodeURIComponent(String(windowHours))}`
   );
 }

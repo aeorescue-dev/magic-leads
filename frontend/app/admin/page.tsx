@@ -2602,10 +2602,17 @@ export default function AdminPage() {
             Painel interno. Gerado em {fmtDt(overview?.generated_at)} (UTC).
           </p>
         </div>
+        <a
+          href="/admin/system-health"
+          className="ml-auto inline-flex items-center gap-2 rounded-lg border border-indigo-400/30 bg-indigo-500/10 px-3 py-2 text-xs font-semibold text-indigo-200 hover:bg-indigo-500/20"
+        >
+          <Activity className="h-4 w-4" />
+          System Health
+        </a>
         <button
           onClick={() => void load()}
           disabled={busy}
-          className="ml-auto inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/5 disabled:opacity-50"
+          className="inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/5 disabled:opacity-50"
         >
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
           Atualizar

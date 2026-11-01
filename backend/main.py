@@ -103,6 +103,7 @@ from .services import (
     owner_backfill,
     scrape_guard,
     security,
+    system_health,
 )
 from .services.boston_address import clean_boston_location
 from .services.db import (  # noqa: F401  — usados nos filtros de qualificação
@@ -2668,6 +2669,17 @@ async def admin_outbound_inbox_sync(_admin: dict = Depends(_require_admin_user))
     return await inbox_sync.sync_inbox()
 
 
+@app.get("/api/admin/system-health")
+async def admin_system_health(
+    window: int = 24, _admin: dict = Depends(_require_admin_user)
+):
+    """Snapshot read-only de saúde: 7 camadas com score 0–100 + histórico.
+
+    Fonte: tabelas persistidas (nunca contadores em memória). Cache de 30 s.
+    """
+    return await system_health.get_snapshot(window)
+
+
 @app.get("/api/admin/outbound/health")
 async def admin_outbound_health(_admin: dict = Depends(_require_admin_user)):
     """Ultimo snapshot de saude do motor + digest textual (sem enviar)."""
@@ -4712,6 +4724,10 @@ async def _control_tower_loop():
             await control_tower.run_health_checks()
         except Exception as exc:  # noqa: BLE001
             logger.warning("[CONTROL-TOWER] health falhou: %s", exc)
+        try:
+            await system_health.capture_snapshot()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[CONTROL-TOWER] snapshot de sistema falhou: %s", exc)
         try:
             res = await control_tower.maybe_send_digest()
             if res:

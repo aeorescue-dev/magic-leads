@@ -931,6 +931,20 @@ CREATE TABLE IF NOT EXISTS health_checks (
 
 CREATE INDEX IF NOT EXISTS idx_health_checks_at ON health_checks (checked_at);
 
+-- Fase 27: histórico compacto do System Health (1 linha/15 min, 30 dias).
+-- O payload guarda apenas scores/status por camada (~2 KB), não o detalhe
+-- completo: serve para sparklines e "pior estado nas últimas 24h".
+CREATE TABLE IF NOT EXISTS system_health_snapshots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  captured_at TEXT NOT NULL,
+  overall_status TEXT NOT NULL,
+  overall_score INTEGER NOT NULL,
+  payload TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_system_health_snapshots_at
+  ON system_health_snapshots (captured_at);
+
 -- Pequeno armazem chave/valor para estado operacional (heartbeat do worker,
 -- data do ultimo backup, ultimo digest). Nao e' cache de dados de negocio.
 CREATE TABLE IF NOT EXISTS system_kv (
@@ -9875,6 +9889,64 @@ class DatabaseService:
         finally:
             conn.close()
 
+    # ------------------------------------------------- System Health (Fase 27)
+    def insert_system_health_snapshot(
+        self,
+        captured_at: str,
+        overall_status: str,
+        overall_score: int,
+        payload: str,
+    ) -> int:
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "INSERT INTO system_health_snapshots "
+                "(captured_at, overall_status, overall_score, payload) "
+                "VALUES (?, ?, ?, ?)",
+                (
+                    captured_at,
+                    str(overall_status or "unknown"),
+                    max(0, min(100, int(overall_score))),
+                    payload,
+                ),
+            )
+            conn.commit()
+            return int(cur.lastrowid or 0)
+        finally:
+            conn.close()
+
+    def list_system_health_snapshots(
+        self, hours: int = 24, limit: int = 200
+    ) -> List[dict]:
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT captured_at, overall_status, overall_score, payload "
+                "FROM system_health_snapshots "
+                "WHERE captured_at >= datetime('now', ?) "
+                "ORDER BY captured_at ASC LIMIT ?",
+                (
+                    f"-{max(1, int(hours))} hours",
+                    max(1, min(int(limit), 2000)),
+                ),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def prune_system_health_snapshots(self, days: int = 30) -> int:
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "DELETE FROM system_health_snapshots "
+                "WHERE datetime(captured_at) < datetime('now', ?)",
+                (f"-{max(1, int(days))} days",),
+            )
+            conn.commit()
+            return int(cur.rowcount or 0)
+        finally:
+            conn.close()
+
     def mark_stale_scraper_runs(self, older_than_minutes: int = 180) -> int:
         """Fecha runs presos em 'running' após restart/OOM.
 
@@ -12181,6 +12253,33 @@ class AsyncDatabaseService:
     async def has_recent_system_alert(self, code: str, hours: int = 6) -> bool:
         return await anyio.to_thread.run_sync(
             self._service.has_recent_system_alert, code, hours
+        )
+
+    async def insert_system_health_snapshot(
+        self,
+        captured_at: str,
+        overall_status: str,
+        overall_score: int,
+        payload: str,
+    ) -> int:
+        return await anyio.to_thread.run_sync(
+            self._service.insert_system_health_snapshot,
+            captured_at,
+            overall_status,
+            overall_score,
+            payload,
+        )
+
+    async def list_system_health_snapshots(
+        self, hours: int = 24, limit: int = 200
+    ) -> List[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.list_system_health_snapshots, hours, limit
+        )
+
+    async def prune_system_health_snapshots(self, days: int = 30) -> int:
+        return await anyio.to_thread.run_sync(
+            self._service.prune_system_health_snapshots, days
         )
 
     async def mark_stale_scraper_runs(self, older_than_minutes: int = 180) -> int:
