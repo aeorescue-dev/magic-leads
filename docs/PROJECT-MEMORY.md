@@ -1071,6 +1071,21 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   lado do Railway).
 - **Testes**: 1041 pytest.
 
+### Fase 9 — Backfill de Chicago, volume 1 GB e avaliação de Boston (2026-11-01)
+
+- **Backfill de Chicago**: 85.000 permits antigos (offsets 10k–95k) em 17
+  páginas, **384 s**; ~150k registos extraídos, **49.470 upserts**. Chicago
+  passou de 5.493 para **11.887 entidades** (+6.394).
+- **Volume**: resize para 1 GB aplicado — **700 MB livres** no `/data`.
+- **KPI por origem**: `/outbound/metrics` devolve `by_email_source`; nesta
+  janela só há 8 contactos antigos (`import`), 0 respostas. A comparação
+  `owner_osint` vs `smtp_pattern` começa a encher com os próximos bridges.
+- **Massachusetts**: sem dados em massa. `data.mass.gov` é um hub Next.js sem
+  API de catálogo; `mass.gov/.../check-a-license` devolve 403 e o eLicensing
+  recusa ligação. Boston fica com OSM (8 domínios) + permits até haver
+  exportação/parceria.
+- **Testes**: 1041 pytest.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
