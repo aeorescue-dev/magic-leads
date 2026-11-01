@@ -20,7 +20,7 @@ from .company_discovery import CompanyDiscovery
 from .db import db_service
 from .domain_resolver import resolve_domain
 
-DEFAULT_CITIES = ("NYC", "CHICAGO", "BOSTON")
+DEFAULT_CITIES = ("NYC", "CHICAGO", "BOSTON", "DALLAS")
 CONCURRENCY = 4
 PER_CITY_DAY = 750
 TICK_SECONDS = 60

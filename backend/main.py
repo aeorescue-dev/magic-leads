@@ -3596,6 +3596,28 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                                 "[ENTITIES] Chicago extração falhou: %s", e
                             )
 
+                    # Dallas: o 311 nao traz empreiteiro; os Building Permits
+                    # (e7gq-4sah) trazem `contractor` com nome+morada+telefone.
+                    if entry.get("city") == "Dallas":
+                        try:
+                            dallas_rows = await socrata_scraper._fetch_all_pages(
+                                domain="www.dallasopendata.com",
+                                dataset="e7gq-4sah",
+                                select="permit_number,contractor,permit_type,issued_date",
+                                where=None,
+                                order="issued_date DESC",
+                                page_size=5000,
+                                max_pages=1,
+                                date_col="issued_date",
+                            )
+                            await _record_contractor_entities(
+                                contractor_ingest.extract_dallas_permits(dallas_rows)
+                            )
+                        except Exception as e:  # noqa: BLE001
+                            logger.warning(
+                                "[ENTITIES] Dallas extração falhou: %s", e
+                            )
+
                 # Boston (CKAN) - caso especial
                 if city == "Boston":
                     from backend.scrapers.socrata_311 import socrata_scraper as _s

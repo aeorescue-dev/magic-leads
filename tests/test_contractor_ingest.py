@@ -7,6 +7,7 @@ import pytest
 from backend.services.contractor_ingest import (
     extract_boston_permits,
     extract_chicago_permits,
+    extract_dallas_permits,
     extract_nyc_permits,
 )
 
@@ -58,6 +59,27 @@ def test_chicago_so_contratantes_e_separa_licenca_do_nome():
     plumbing = next(r for r in out if r["legal_name"] == "LONE STAR PLUMBING")
     assert plumbing["license"] == "PL058130279"
     assert all(r["source"] == "chi_permits" for r in out)
+
+
+def test_dallas_separa_nome_da_morada_e_telefone():
+    rows = [
+        {"permit_number": "P1",
+         "contractor": "ALL MASTERS PLUMBING 7501 US HWY 287, SuiteC4, ARLINGTON, TX 76001 (817) 969-5050"},
+        {"permit_number": "P2",
+         "contractor": "ACM PLUMBING CO. PO BOX 210864, DALLAS, TX 75211 (469) 360-6479"},
+        {"permit_number": "P3",
+         "contractor": "JOHN SMITH 123 MAIN ST, DALLAS, TX 75201 (214) 555-0101"},
+        {"permit_number": "P4",
+         "contractor": "HARVEY CONSTRUCTION 113 SCENIC DR, HEATH, TX 75032 (469) 438-7316"},
+    ]
+    out = extract_dallas_permits(rows)
+    assert [r["legal_name"] for r in out] == [
+        "ALL MASTERS PLUMBING",
+        "ACM PLUMBING CO.",
+        "HARVEY CONSTRUCTION",
+    ]
+    assert all(r["source"] == "dallas_permits" for r in out)
+    assert all(r["city"] == "DALLAS" and r["state"] == "TX" for r in out)
 
 
 def test_boston_so_empresas_nao_pessoas():

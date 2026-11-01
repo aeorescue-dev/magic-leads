@@ -20,9 +20,10 @@ from typing import Iterable, Optional
 from .contractor_entities import is_usable_company_name, normalize_role
 
 _COMPANY_HINT_RE = re.compile(
-    r"\b(LLC|L L C|INC|CORP|CORPORATION|CONSTRUCTION|CONTRACTING|BUILDERS|"
+    r"\b(LLC|L L C|INC|CORP|CORPORATION|CO|CONSTRUCTION|CONTRACTING|BUILDERS|"
     r"BUILDING|ENTERPRISES|COMPANY|LTD|SERVICES|MECHANICAL|ELECTRIC|"
-    r"ELECTRICAL|PLUMBING|ROOFING|MASONRY)\b"
+    r"ELECTRICAL|PLUMBING|ROOFING|MASONRY|HVAC|HEATING|AIR|RESTORATION|"
+    r"REMODELING|SCAFFOLD|TUCKPOINT|SIGNS)\b"
 )
 _CHI_LICENSE_RE = re.compile(r"^([A-Z]{2}\d{6,})\s*-\s*(.+)$")
 
@@ -115,6 +116,51 @@ def extract_chicago_permits(rows: Iterable[dict]) -> list[dict]:
 
 def _looks_like_company(name: str) -> bool:
     return bool(_COMPANY_HINT_RE.search(_clean(name).upper()))
+
+
+# Dallas: o campo `contractor` vem com nome + morada + telefone numa so'
+# string ("ACME PLUMBING 123 MAIN ST, DALLAS, TX 75211 (469) 360-6479").
+_DALLAS_PHONE_RE = re.compile(r"\(\d{3}\)\s*\d{3}-\d{4}")
+_DALLAS_STREET_RE = re.compile(r"\s+\d{1,6}\s+[A-Z0-9]")
+_DALLAS_POBOX_RE = re.compile(r"\bP\.?\s*O\.?\s*BOX\b", re.I)
+
+
+def _dallas_contractor_name(raw: object) -> str:
+    text = _clean(raw)
+    if not text:
+        return ""
+    text = _DALLAS_PHONE_RE.split(text)[0]
+    text = _DALLAS_POBOX_RE.split(text)[0]
+    match = _DALLAS_STREET_RE.search(text)
+    if match:
+        text = text[: match.start()]
+    return _clean(text).strip(" ,-")
+
+
+def extract_dallas_permits(rows: Iterable[dict]) -> list[dict]:
+    """Empreiteiros dos Building Permits de Dallas (dataset e7gq-4sah).
+
+    O `contractor` e' o unico campo com identidade de empresa. Nomes de pessoa
+    fisica sao descartados por `_looks_like_company` (mesmo criterio de Boston).
+    """
+    out: list[dict] = []
+    for row in rows or []:
+        name = _dallas_contractor_name(row.get("contractor"))
+        permit = _clean(row.get("permit_number"))
+        if not name or not permit or not _looks_like_company(name):
+            continue
+        rec = _record(
+            legal_name=name,
+            city="DALLAS",
+            state="TX",
+            role="contractor",
+            license=None,
+            source="dallas_permits",
+            external_id=permit,
+        )
+        if rec:
+            out.append(rec)
+    return out
 
 
 def extract_boston_permits(rows: Iterable[dict]) -> list[dict]:
