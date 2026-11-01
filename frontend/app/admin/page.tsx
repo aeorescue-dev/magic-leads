@@ -283,6 +283,18 @@ function MailboxControlRow({
               mb.auto_ramp_hold_reason ?? "ok"
             }`
           : `manual ${mb.daily_cap}/dia`}
+        {mb.auto_ramp_last_step_at
+          ? ` · última subida ${new Date(
+              mb.auto_ramp_last_step_at.includes("T")
+                ? mb.auto_ramp_last_step_at
+                : mb.auto_ramp_last_step_at.replace(" ", "T") + "Z"
+            ).toLocaleString("pt-PT", {
+              day: "2-digit",
+              month: "2-digit",
+              hour: "2-digit",
+              minute: "2-digit",
+            })}`
+          : ""}
       </span>
       {mb.paused_reason ? (
         <span className="text-[10px] text-rose-300">pausada: {mb.paused_reason}</span>
