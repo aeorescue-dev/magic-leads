@@ -23,9 +23,8 @@ def run(limit: int = 200, budget_s: int = 1500) -> dict:
         if time.time() - started > budget_s:
             break
         entities = [
-            e for e in svc.list_contractor_entities(city)
-            if e.get("status") == "ready"
-            and (e.get("email") or "")
+            e for e in svc.list_contractor_entities(city, status="ready", limit=1000)
+            if (e.get("email") or "")
             and (e.get("domain") or "")
             and (e.get("email_source") or "") != "owner_osint"
         ]
