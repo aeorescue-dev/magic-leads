@@ -1115,6 +1115,18 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   ~60 envios/dia); 750/dia ≈ 190 prontos (150+ envios); 2.000/dia ≈ 500.
 - **Testes**: 1043 pytest.
 
+### Fase 12 — Fila 50/50 por origem do e-mail (2026-11-01)
+
+- `list_queued_outbound_messages_balanced` intercala `owner_osint` e
+  `smtp_pattern` 1:1, começando pela origem com menos envios nas últimas
+  24 h; sem as duas origens mantém FIFO. O motor usa esta lista, o que
+  duplica a velocidade de acumulação da amostra sem enviesar o KPI.
+- Brave mantido em **250/dia** por decisão de custo; o contador de hoje
+  (780, da janela anterior de 2.000) fecha o dia e volta a 0 às 00:00 UTC.
+- Ramp: ambas as caixas em 2/dia, `hold: interval`, última subida 01/11
+  00:43 — próxima a 03/11.
+- **Testes**: 1045 pytest.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
