@@ -23,14 +23,24 @@ KV_LAST_AT = "auto_batch_last_at"
 KV_LAST = "auto_batch_last"
 
 
-def choose_city(readiness: dict[str, dict]) -> Optional[tuple[str, int]]:
-    """Cidade com mais prontos (ignora cidades sem inventário)."""
+def choose_city(
+    readiness: dict[str, dict], osint_by_city: Optional[dict[str, int]] = None
+) -> Optional[tuple[str, int]]:
+    """Cidade a processar: mais owner_osint prontos; empate -> mais prontos.
+
+    Assim o braço escasso do KPI (owner_osint) chega aos 50 envios primeiro,
+    sem deixar de enviar para o braço genérico (o 1:1 dentro do lote garante).
+    """
+    osint_by_city = osint_by_city or {}
     best: Optional[tuple[str, int]] = None
+    best_score: Optional[tuple[int, int]] = None
     for city, data in readiness.items():
         ready = int(data.get("ready") or 0)
         if ready <= 0:
             continue
-        if best is None or ready > best[1]:
+        score = (int(osint_by_city.get(city, 0)), ready)
+        if best_score is None or score > best_score:
+            best_score = score
             best = (city, ready)
     return best
 
@@ -61,7 +71,7 @@ def choose_balanced_niche(mix: list[dict]) -> Optional[str]:
     ]
     if not balanced:
         return None
-    best = max(balanced, key=lambda r: int(r["osint"]) + int(r["generic"]))
+    best = max(balanced, key=lambda r: (int(r["osint"]), int(r["osint"]) + int(r["generic"])))
     return str(best.get("niche") or "")
 
 
@@ -85,21 +95,26 @@ async def maybe_create_batch(now: Optional[datetime] = None) -> dict:
         return {"status": "no_capacity"}
 
     readiness: dict[str, dict] = {}
+    mixes: dict[str, list[dict]] = {}
     for city in enrichment_scheduler.cities():
         cfg = await db_service.get_outbound_config(city)
         if cfg.get("send_enabled") != "1":
             continue
         readiness[city] = await db_service.outbound_readiness(city)
-    pick = choose_city(readiness)
+        try:
+            mixes[city] = await db_service.ready_source_mix(city)
+        except Exception:  # noqa: BLE001
+            mixes[city] = []
+    osint_by_city = {
+        city: sum(int(row.get("osint") or 0) for row in mix)
+        for city, mix in mixes.items()
+    }
+    pick = choose_city(readiness, osint_by_city)
     if not pick:
         return {"status": "no_inventory"}
     city, ready = pick
     niche = choose_niche(readiness[city])
-    try:
-        mix = await db_service.ready_source_mix(city)
-    except Exception:  # noqa: BLE001
-        mix = []
-    balanced = choose_balanced_niche(mix)
+    balanced = choose_balanced_niche(mixes.get(city) or [])
     if balanced:
         niche = balanced
     size = max(1, min(ready, remaining, DEFAULT_BATCH))

@@ -16,6 +16,14 @@ def test_escolhe_cidade_com_mais_prontos_e_respeita_zero():
     assert auto_batch.choose_city({"BOSTON": {"ready": 0}}) is None
 
 
+def test_cidade_prioriza_owner_osint_mesmo_com_menos_prontos():
+    readiness = {"NYC": {"ready": 40}, "DALLAS": {"ready": 20}}
+    assert auto_batch.choose_city(readiness, {"NYC": 1, "DALLAS": 4}) == (
+        "DALLAS", 20,
+    )
+    assert auto_batch.choose_city(readiness, {}) == ("NYC", 40)
+
+
 def test_nicho_usa_o_topo_do_inventario_ou_default():
     assert auto_batch.choose_niche(
         {"by_niche": [{"niche_key": "plumbing", "c": 9}]}
