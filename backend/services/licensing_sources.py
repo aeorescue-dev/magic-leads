@@ -67,32 +67,46 @@ def extract_nyc_licenses(rows: Iterable[dict]) -> list[dict]:
 
 
 async def fetch_nyc_licenses(limit: int = 5000) -> list[dict]:
-    """Ultimas licencas ativas (paginado) direto do Socrata, sem chave."""
+    """Licencas ativas (paginado) direto do Socrata, sem chave.
+
+    Pagina com `$offset` ate' esgotar ou atingir `limit`: sem isto, duas
+    execucoes seguidas traziam sempre as mesmas 4.000 primeiras linhas.
+    """
     limit = max(1, min(int(limit), MAX_ROWS))
-    params = {
-        "$select": NYC_SELECT,
-        "$where": NYC_WHERE,
-        "$order": "license_creation_date DESC",
-        "$limit": str(limit),
-    }
+    page = 5000
+    out: list[dict] = []
+    offset = 0
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.get(NYC_DCWP_URL, params=params)
-        if resp.status_code != 200:
-            logger.warning("[LICENSES] NYC HTTP %s", resp.status_code)
-            return []
-        data = resp.json()
-        return data if isinstance(data, list) else []
+            while len(out) < limit:
+                params = {
+                    "$select": NYC_SELECT,
+                    "$where": NYC_WHERE,
+                    "$order": "license_creation_date DESC",
+                    "$limit": str(min(page, limit - len(out))),
+                    "$offset": str(offset),
+                }
+                resp = await client.get(NYC_DCWP_URL, params=params)
+                if resp.status_code != 200:
+                    logger.warning("[LICENSES] NYC HTTP %s", resp.status_code)
+                    break
+                data = resp.json()
+                if not isinstance(data, list) or not data:
+                    break
+                out.extend(data)
+                if len(data) < page:
+                    break
+                offset += len(data)
     except Exception as exc:  # noqa: BLE001
         logger.warning("[LICENSES] NYC fetch falhou: %s", exc)
-        return []
+    return out
 
 
 async def ingest_nyc_licenses(limit: int = 2000) -> dict:
     """Busca + grava. Idempotente; devolve {fetched, extracted, saved, ...}."""
     rows = await fetch_nyc_licenses(limit=limit)
     records = extract_nyc_licenses(rows)
-    result = await record_entities(records, max_records=limit)
+    result = await record_entities(records, max_records=max(limit, len(records)))
     result["fetched"] = len(rows)
     result["extracted"] = len(records)
     logger.info(
