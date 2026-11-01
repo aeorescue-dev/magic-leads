@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from backend.services.boston_address import clean_boston_location
+from backend.services.boston_address import clean_boston_location, parcel_match_key
 from backend.services.enrichment import normalize_street, parse_address
 
 
@@ -68,6 +68,33 @@ def test_parcel_dataset_abbreviation_matches_311_address():
     """`full_address` do parcel dataset usa "AV"; o 311 usa "Ave"."""
     lead = parse_address("199 Savin Hill Ave")
     parcel = parse_address("199   SAVIN HILL AV ")
+    assert lead and parcel
+    assert (lead[0], normalize_street(lead[1])) == (
+        parcel[0],
+        normalize_street(parcel[1]),
+    )
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("199   SAVIN HILL AV ", ("199", "SAVIN HILL AV")),
+        ("526   COLUMBUS AV 2", ("526", "COLUMBUS AV")),
+        ("604 608 COLUMBUS AV ", ("604", "COLUMBUS AV")),
+        ("107 -109 SAVIN HILL AV 1", ("107-109", "SAVIN HILL AV")),
+        ("9   JEFFRIES ST", ("9", "JEFFRIES ST")),
+        ("2 Columbus Ave", ("2", "COLUMBUS AVE")),
+        ("INTERSECTION of W Broadway &amp; D St", None),
+        ("", None),
+    ],
+)
+def test_parcel_match_key_ignores_unit_and_range(raw, expected):
+    assert parcel_match_key(raw) == expected
+
+
+def test_parcel_key_matches_311_after_normalization():
+    lead = parcel_match_key("526 Columbus Ave")
+    parcel = parcel_match_key("526   COLUMBUS AV 2")
     assert lead and parcel
     assert (lead[0], normalize_street(lead[1])) == (
         parcel[0],

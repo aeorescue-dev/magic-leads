@@ -19,6 +19,7 @@ import httpx
 
 from ..config import settings
 from ..utils.logger import logger
+from .boston_address import parcel_match_key
 
 # Retry configuration for enrichment
 ENRICHMENT_MAX_RETRIES = 3
@@ -478,15 +479,19 @@ class OwnerEnrichment:
         street_search = street_norm.split()[0] if street_norm else ""
         if not street_search:
             return None
+        # Incluir o número na query: "columbus" devolve 1.092 imóveis e os 10
+        # primeiros nunca incluem o número pedido (Boston tem ruas muito
+        # compridas). "2 columbus" restringe aos candidatos certos.
+        query = f"{num} {street_search}".strip() if num else street_search
 
         for attempt in range(ENRICHMENT_MAX_RETRIES + 1):
             try:
                 async with httpx.AsyncClient(timeout=90) as client:
                     resp = await client.get(base, params={
                         "resource_id": dset,
-                        "limit": "10",
+                        "limit": "50",
                         "fields": ",".join(fields),
-                        "q": street_search,
+                        "q": query,
                     }, headers=self._headers())
                     if resp.status_code != 200:
                         if attempt < ENRICHMENT_MAX_RETRIES:
@@ -520,6 +525,14 @@ class OwnerEnrichment:
 
         for row in records:
             full_addr = str(row.get(cfg["street_col"]) or "").upper()
+            row_key = parcel_match_key(full_addr)
+            if row_key and num:
+                row_num, row_street = row_key
+                if (
+                    row_num == str(num).strip()
+                    and normalize_street(row_street) == street_norm
+                ):
+                    return self._build_result(row, cfg, original_address)
             if street_norm in full_addr:
                 if num:
                     addr_part = full_addr.split(",")[0].strip()

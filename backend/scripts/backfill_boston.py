@@ -10,10 +10,9 @@ import sqlite3
 import time
 
 import httpx
-
-from backend.services.boston_address import clean_boston_location
+from backend.services.boston_address import clean_boston_location, parcel_match_key
 from backend.services.db import db_service, get_connection
-from backend.services.enrichment import normalize_street, parse_address
+from backend.services.enrichment import normalize_street
 
 CKAN = "https://data.boston.gov/api/3/action/datastore_search"
 RESOURCE = "bdb17c2b-e9ab-44e4-a070-bf804a0e1a7f"
@@ -91,7 +90,7 @@ def fetch_boston_owners() -> dict:
                 owner = " ".join(str(rec.get("OWNER") or "").split()).strip()
                 if not owner or owner.upper().startswith(("N/A", "UNKNOWN")):
                     continue
-                parsed = parse_address(str(rec.get("full_address") or ""))
+                parsed = parcel_match_key(rec.get("full_address"))
                 if not parsed:
                     continue
                 num, street = parsed
@@ -121,7 +120,13 @@ def apply_owners(conn, index: dict) -> dict:
     matched = 0
     updated = 0
     for row in rows:
-        parsed = parse_address(row["address"] or "")
+        # Usa a morada JÁ limpa em memória. Há 1.002 duplicados cujo UPDATE
+        # colide com a linha canónica (índice único address+city): sem isto,
+        # ficavam sem owner mesmo quando o imóvel existe no parcel dataset.
+        clean_street, clean_zip = clean_boston_location(
+            row["address"], row["zip_code"]
+        )
+        parsed = parcel_match_key(clean_street)
         if not parsed:
             continue
         num, street = parsed
@@ -130,7 +135,7 @@ def apply_owners(conn, index: dict) -> dict:
         if not candidates:
             continue
         matched += 1
-        zc = _zip5(row["zip_code"])
+        zc = _zip5(clean_zip or row["zip_code"])
         chosen = None
         if zc:
             chosen = next((c for c in candidates if c[1] == zc), None)

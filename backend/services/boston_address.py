@@ -15,6 +15,14 @@ from typing import Optional
 _ZIP_RE = re.compile(r"\b(\d{5})(?:-\d{4})?\b")
 _STATE_ZIP_RE = re.compile(r"\s+MA\s+\d{5}(?:-\d{4})?\s*$", re.IGNORECASE)
 _TRAILING_ZIP_RE = re.compile(r"\s+\d{5}(?:-\d{4})?\s*$")
+_HOUSE_RE = re.compile(r"^(\d+[A-Za-z]?(?:\s*-\s*\d+[A-Za-z]?)?)\s+(.*)$")
+# Sufixos de via usados pelo parcel dataset de Boston (full_address).
+_STREET_SUFFIXES = {
+    "ST", "STREET", "AVE", "AV", "AVENUE", "PL", "PLACE", "RD", "ROAD",
+    "BLVD", "BOULEVARD", "LN", "LANE", "DR", "DRIVE", "TER", "TERRACE",
+    "PKWY", "PARKWAY", "CT", "COURT", "SQ", "SQUARE", "HWY", "HIGHWAY",
+    "CIR", "CIRCLE", "WAY",
+}
 _BOSTON_PLACES = (
     "BOSTON", "DORCHESTER", "ROXBURY", "JAMAICA PLAIN", "HYDE PARK",
     "EAST BOSTON", "WEST ROXBURY", "ROSLINDALE", "MATTAPAN", "BRIGHTON",
@@ -64,3 +72,38 @@ def clean_boston_location(
     street = _PLACE_RE.sub("", street).strip()
     zip_match = _ZIP_RE.search(raw)
     return street.strip(" ,"), (zip_match.group(1) if zip_match else fallback)
+
+
+def parcel_match_key(full_address: Optional[str]) -> Optional[tuple[str, str]]:
+    """(número, rua) de uma morada do parcel dataset, ignorando a unidade.
+
+    O portal guarda ``"526   COLUMBUS AV 2"`` (unidade 2) e
+    ``"107 -109 SAVIN HILL AV 1"``. O parser antigo usava toda a cauda como
+    rua, por isso nunca casava com o 311 (``"526 Columbus Ave"``): 1.500+
+    imóveis ficavam sem proprietário mesmo com a morada já limpa.
+
+    A rua devolvida vem em maiúsculas e sem normalização de sufixos; o
+    chamador aplica ``normalize_street`` para alinhar ``AV``/``AVE``.
+    """
+    text = " ".join(str(full_address or "").upper().split())
+    if not text:
+        return None
+    match = _HOUSE_RE.match(text)
+    if not match:
+        return None
+    num = re.sub(r"\s+", "", match.group(1))
+    tokens = match.group(2).split()
+    # Intervalo escrito com espaço ("604 608 COLUMBUS AV"): o primeiro
+    # número é a chave; o segundo é a outra extremidade do intervalo.
+    if len(tokens) > 1 and tokens[0].isdigit():
+        tokens = tokens[1:]
+    cut = None
+    for idx, tok in enumerate(tokens):
+        if tok.strip(".,") in _STREET_SUFFIXES:
+            cut = idx
+            break
+    street = " ".join(tokens[: cut + 1] if cut is not None else tokens)
+    street = street.strip(" .,")
+    if not street:
+        return None
+    return num, street
