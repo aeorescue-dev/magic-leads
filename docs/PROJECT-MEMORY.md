@@ -1052,6 +1052,25 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   resolvem. Contornar 403/Cloudflare está fora de questão.
 - **Testes**: 1041 pytest.
 
+### Fase 8 — Chicago elétrico e KPI de origem do e-mail (2026-11-01)
+
+- **Filtro de Chicago corrigido**: exigia prefixo `CONTRACTOR` e perdia
+  `ELECTRICAL CONTRACTOR` (261.787 registos no dataset). Agora aceita qualquer
+  tipo com `CONTRACTOR` (exceto `OWNER AS GENERAL CONTRACTOR`) e mantém
+  `MASON`. Dry-run em 10.000 permits: **18.023 entidades → 4.184 únicas**;
+  Chicago passou de 3.387 para **5.493**.
+- **Origem do e-mail rastreada**: `contractor_entities.email_source`
+  (`smtp_pattern` vs `owner_osint`) propaga-se ao contacto via
+  `import_b2b_lead(email_source=...)`. `/outbound/metrics` ganhou
+  `by_email_source` (contactos, respostas, positivas, taxas) e o cartão do
+  Admin mostra a linha “Por origem do e-mail”.
+- **IDFPR sem plumbing/electric**: confirmado por consulta direta — só existe
+  `ROOFING CONTRACTOR`. Os datasets de eletricistas do catálogo federado são
+  de Vermont, Louisiana, Buffalo, Montgomery e Delaware.
+- **Volume**: ainda 263 MB livres no `/data` (resize para 2 GB pendente do
+  lado do Railway).
+- **Testes**: 1041 pytest.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
