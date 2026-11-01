@@ -2885,6 +2885,7 @@ class DatabaseService:
                 rows.append({
                     "id": int(mb["id"]),
                     "email": mb["email"],
+                    "enabled": int(mb.get("enabled") or 0),
                     "sent": int(sent),
                     "failed": int(failed),
                     "bounced": int(bounced),
@@ -2895,6 +2896,8 @@ class DatabaseService:
                     "reply_rate": round(replies / sent, 4) if sent else 0.0,
                     "positive_rate": round(positive / sent, 4) if sent else 0.0,
                 })
+            # Caixa desligada e sem historico na janela nao polui o cartao.
+            rows = [r for r in rows if r["enabled"] or r["sent"] > 0]
             total_sent = sum(r["sent"] for r in rows)
             total_failed = sum(r["failed"] for r in rows)
             total_bounced = sum(r["bounced"] for r in rows)
