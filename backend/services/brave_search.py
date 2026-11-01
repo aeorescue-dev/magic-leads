@@ -67,9 +67,15 @@ def consume_budget() -> bool:
     if limit <= 0:
         return False
     key = f"brave_queries:{_today()}"
+    blocked_key = f"brave_blocked:{_today()}"
     conn = get_connection()
     try:
         conn.execute("BEGIN IMMEDIATE")
+        if conn.execute(
+            "SELECT 1 FROM system_kv WHERE key=?", (blocked_key,)
+        ).fetchone():
+            conn.rollback()
+            return False
         row = conn.execute(
             "SELECT value FROM system_kv WHERE key=?", (key,)
         ).fetchone()
@@ -86,6 +92,22 @@ def consume_budget() -> bool:
         return True
     except Exception:  # noqa: BLE001
         return False
+    finally:
+        conn.close()
+
+
+def block_for_today(status: int) -> None:
+    """Brave recusou (401/402/429): nao insistir ate' amanha."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO system_kv (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP",
+            (f"brave_blocked:{_today()}", str(int(status))),
+        )
+        conn.commit()
+    except Exception:  # noqa: BLE001
+        pass
     finally:
         conn.close()
 
@@ -228,6 +250,8 @@ async def find_domain(legal_name: str, city: str) -> Optional[dict]:
             )
         if resp.status_code != 200:
             logger.warning("[BRAVE] HTTP %s para %r", resp.status_code, legal_name)
+            if resp.status_code in (401, 402, 429):
+                block_for_today(resp.status_code)
             return None
         results = ((resp.json() or {}).get("web") or {}).get("results") or []
         candidates = candidate_domains(results)

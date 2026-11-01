@@ -77,6 +77,24 @@ def test_cache_negativo_evita_nova_query(monkeypatch):
     assert calls["n"] == 0
 
 
+def test_bloqueio_do_dia_para_o_orcamento(monkeypatch):
+    from backend.services.db import get_connection
+
+    monkeypatch.setattr(brave, "daily_limit", lambda: 5)
+    conn = get_connection()
+    try:
+        conn.execute(
+            "DELETE FROM system_kv WHERE key LIKE 'brave_queries:%' "
+            "OR key LIKE 'brave_blocked:%'"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    brave.block_for_today(429)
+    assert brave.consume_budget() is False
+    assert brave.budget_left() == 5  # contador nao foi gasto
+
+
 def test_cache_expira(monkeypatch):
     city = "TESTBRAVE2"
     brave.cache_set("Old Corp", city, "oldcorp.com", 0.7)
