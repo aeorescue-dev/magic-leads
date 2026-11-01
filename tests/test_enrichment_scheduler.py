@@ -103,6 +103,9 @@ def no_throttle(monkeypatch):
         return None
 
     monkeypatch.setattr(brave_search, "find_domain", _no_brave)
+    monkeypatch.setattr(
+        enrichment_scheduler.owner_email, "find_owner_email", lambda *a, **k: None
+    )
 
 
 @pytest.mark.asyncio

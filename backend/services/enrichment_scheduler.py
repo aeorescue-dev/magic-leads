@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from typing import Iterable, Optional
 
 from ..utils.logger import logger
-from . import brave_search, entity_bridge, licensing_sources, osm_extract
+from . import brave_search, entity_bridge, licensing_sources, osm_extract, owner_email
 from .company_discovery import CompanyDiscovery
 from .db import db_service
 from .domain_resolver import resolve_domain
@@ -130,6 +130,16 @@ async def _email_stage(entity: dict) -> str:
         )
         return "catch_all"
     accepted = list(getattr(validation, "accepted", []) or [])
+    if not accepted and domain:
+        # OSINT do dono quando os padroes genericos falham (mesmo gate RCPT).
+        async with _global_sem:
+            owner_found = await asyncio.to_thread(
+                owner_email.find_owner_email,
+                domain,
+                entity.get("legal_name") or "",
+            )
+        if owner_found:
+            accepted = [owner_found]
     if accepted:
         await db_service.mark_contractor_email_attempt(
             int(entity["id"]), accepted[0], "valid", MAX_ATTEMPTS
@@ -210,6 +220,15 @@ async def _ingest_sources(now: datetime) -> dict:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("[ENRICH-SCHED] licencas falharam: %s", exc)
                 out["licenses"] = {"status": "error"}
+        last = await db_service.get_system_kv("tdlr_last_run")
+        if not last or (now - _parse_day(last)).days >= SOURCE_INTERVAL_DAYS:
+            try:
+                out["tdlr"] = await licensing_sources.ingest_tdlr(limit=12000)
+                await db_service.set_system_kv("tdlr_last_run", day)
+                await db_service.checkpoint()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[ENRICH-SCHED] TDLR falhou: %s", exc)
+                out["tdlr"] = {"status": "error"}
         last = await db_service.get_system_kv("osm_last_run")
         if not last or (now - _parse_day(last)).days >= SOURCE_INTERVAL_DAYS:
             try:

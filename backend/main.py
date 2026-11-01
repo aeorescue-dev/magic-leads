@@ -2432,6 +2432,8 @@ async def admin_contractor_sources_refresh(
     source = (source or "").strip().lower()
     if source == "licenses":
         asyncio.create_task(licensing_sources.ingest_nyc_licenses(limit=4000))
+    elif source == "tdlr":
+        asyncio.create_task(licensing_sources.ingest_tdlr(limit=12000))
     elif source == "osm":
         asyncio.create_task(osm_extract.ingest_all(limit_per_city=800))
     else:
