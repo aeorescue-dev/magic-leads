@@ -864,6 +864,18 @@ CREATE TABLE IF NOT EXISTS system_kv (
   updated_at TEXT
 );
 
+-- Cache de descoberta de dominio por busca (Brave). Negativo (domain NULL) fica
+-- guardado para nao gastar queries a repetir o mesmo nome.
+CREATE TABLE IF NOT EXISTS domain_search_cache (
+  normalized_name TEXT NOT NULL,
+  city TEXT NOT NULL DEFAULT '',
+  domain TEXT,
+  confidence REAL DEFAULT 0,
+  source TEXT,
+  checked_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (normalized_name, city)
+);
+
 CREATE TABLE IF NOT EXISTS sending_mailboxes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   email TEXT NOT NULL UNIQUE,
@@ -3899,6 +3911,77 @@ class DatabaseService:
             return cur.rowcount > 0
         finally:
             conn.close()
+
+    def outbound_capacity(self, days: int = 7) -> dict:
+        """Capacidade de envio vs inventário pronto e fluxo de produção.
+
+        `ready_now` e' estoque; `produced_per_day` e' o fluxo (entidades com
+        e-mail que passaram a ready nos ultimos N dias); `capacity_per_day` e'
+        o teto somado das caixas ligadas. `days_of_cover` diz quantos dias de
+        envio o estoque aguenta ao ritmo de hoje.
+        """
+        window = max(1, min(int(days), 30))
+        cities = ("NYC", "CHICAGO", "BOSTON")
+        config = self.get_outbound_config()
+        mailboxes = self.list_sending_mailboxes(enabled_only=True)
+        per_mailbox_cap = int(config.get("per_mailbox_daily_cap") or 25)
+        capacity = 0
+        for mailbox in mailboxes:
+            if int(mailbox.get("auto_ramp_enabled") or 0):
+                cap = max(0, int(mailbox.get("auto_ramp_cap") or 1))
+                ceiling = max(1, min(int(mailbox.get("auto_ramp_max") or 75), 100))
+                if per_mailbox_cap > 0:
+                    ceiling = min(ceiling, per_mailbox_cap)
+                cap = min(cap, ceiling)
+            else:
+                cap = int(mailbox.get("daily_cap") or 0)
+                if per_mailbox_cap > 0:
+                    cap = min(cap, per_mailbox_cap)
+            capacity += max(0, cap)
+
+        conn = get_connection()
+        try:
+            rows = []
+            total_ready = 0
+            total_produced = 0
+            for city in cities:
+                readiness = self.outbound_readiness(city)
+                produced = conn.execute(
+                    "SELECT COUNT(*) c FROM contractor_entities "
+                    "WHERE UPPER(TRIM(city))=? AND COALESCE(email,'')<>'' "
+                    "AND bridged_at IS NOT NULL "
+                    "AND bridged_at >= datetime('now', ?)",
+                    (city, f"-{window} days"),
+                ).fetchone()["c"]
+                sent = conn.execute(
+                    "SELECT COUNT(*) c FROM outbound_messages "
+                    "WHERE status='sent' AND UPPER(TRIM(COALESCE(city,'')))=? "
+                    "AND sent_at >= datetime('now', ?)",
+                    (city, f"-{window} days"),
+                ).fetchone()["c"]
+                total_ready += int(readiness.get("ready") or 0)
+                total_produced += int(produced)
+                rows.append({
+                    "city": city,
+                    "ready_now": int(readiness.get("ready") or 0),
+                    "produced": int(produced),
+                    "produced_per_day": round(produced / window, 1),
+                    "sent": int(sent),
+                    "sent_per_day": round(sent / window, 1),
+                })
+        finally:
+            conn.close()
+
+        return {
+            "window_days": window,
+            "mailboxes_enabled": len(mailboxes),
+            "capacity_per_day": capacity,
+            "ready_now": total_ready,
+            "produced": total_produced,
+            "produced_per_day": round(total_produced / window, 1),
+            "days_of_cover": round(total_ready / capacity, 1) if capacity else None,
+            "cities": rows,
+        }
 
     def list_entities_for_bridge(self, city: str, limit: int = 50) -> List[dict]:
         conn = get_connection()
@@ -12637,6 +12720,9 @@ class AsyncDatabaseService:
         return await anyio.to_thread.run_sync(
             self._service.count_entities_with_domain, domain, exclude_id
         )
+
+    async def outbound_capacity(self, days: int = 7) -> dict:
+        return await anyio.to_thread.run_sync(self._service.outbound_capacity, days)
 
     async def mark_contractor_bridged(
         self, entity_id: int, contact_id: Optional[int], lead_id: Optional[int]

@@ -83,6 +83,7 @@ import {
   revokeAdminAccess,
   fetchAdminAccessAudit,
   fetchAdminOutboundHealth,
+  fetchAdminOutboundCapacity,
   fetchAdminOutboundReadiness,
   fetchAdminContractorStats,
   runAdminContractorEnrichment,
@@ -95,6 +96,7 @@ import {
   type AdminAccessLookup,
   type AdminAccessAuditEntry,
   type AdminOutboundHealth,
+  type AdminOutboundCapacity,
   type AdminOutboundReadiness,
   type AdminContractorStats,
   type AdminBillingFunnel,
@@ -365,6 +367,7 @@ function OutboundPanel() {
   const [inboxBusy, setInboxBusy] = useState(false);
   const [enrichMsg, setEnrichMsg] = useState<string | null>(null);
   const [readiness, setReadiness] = useState<AdminOutboundReadiness | null>(null);
+  const [capacity, setCapacity] = useState<AdminOutboundCapacity | null>(null);
   const [contractorStats, setContractorStats] = useState<AdminContractorStats | null>(null);
   const [enrichBusy, setEnrichBusy] = useState(false);
   const [controlsBusy, setControlsBusy] = useState<number | null>(null);
@@ -561,7 +564,12 @@ function OutboundPanel() {
       return;
     }
     try {
-      setReadiness(await fetchAdminOutboundReadiness(city, niche || undefined));
+      const [ready, cap] = await Promise.all([
+        fetchAdminOutboundReadiness(city, niche || undefined),
+        fetchAdminOutboundCapacity(7).catch(() => null),
+      ]);
+      setReadiness(ready);
+      setCapacity(cap);
     } catch {
       setReadiness(null);
     }
@@ -909,6 +917,61 @@ function OutboundPanel() {
           </div>
         ) : null}
 
+        {/* capacidade vs inventário: a fila vai secar? */}
+        {capacity ? (
+          <div
+            className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2.5"
+            data-testid="outbound-capacity"
+          >
+            <div className="flex flex-wrap items-baseline gap-3 text-[11px] text-slate-400">
+              <span className="text-[10px] uppercase tracking-wider text-slate-500">
+                Capacidade vs inventário · {capacity.window_days}d
+              </span>
+              <span>
+                prontos agora <b className="text-emerald-300">{capacity.ready_now}</b>
+              </span>
+              <span>
+                produzidos/dia{" "}
+                <b className="text-sky-300">{capacity.produced_per_day}</b>
+              </span>
+              <span>
+                envio/dia <b className="text-indigo-300">{capacity.capacity_per_day}</b>
+              </span>
+              <span>
+                cobertura{" "}
+                <b
+                  className={
+                    capacity.days_of_cover === null || capacity.days_of_cover < 1
+                      ? "text-amber-300"
+                      : "text-emerald-300"
+                  }
+                >
+                  {capacity.days_of_cover === null
+                    ? "sem caixas"
+                    : `${capacity.days_of_cover} dias`}
+                </b>
+              </span>
+              <span className="ml-auto text-slate-500">
+                {capacity.mailboxes_enabled} caixa(s) ligada(s)
+              </span>
+            </div>
+            <p className="mt-1 text-[10px] text-slate-500">
+              {capacity.cities
+                .map(
+                  (c) =>
+                    `${c.city}: ${c.ready_now} prontos · ${c.produced_per_day}/dia produzidos · ${c.sent_per_day}/dia enviados`
+                )
+                .join("  ·  ")}
+            </p>
+            {capacity.days_of_cover !== null && capacity.days_of_cover < 1 ? (
+              <p className="mt-1 text-[11px] text-amber-300">
+                Estoque abaixo de 1 dia de envio: o robô precisa de repor
+                inventário (Brave/quota) antes de subir a rampa.
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
         {/* entidades da Fase 2/3: contagens por estágio */}
         {contractorStats?.cities[city?.toUpperCase()] ? (
           (() => {
@@ -936,7 +999,7 @@ function OutboundPanel() {
                     quarentena <b className="text-amber-300">{by.quarantined ?? 0}</b>
                   </span>
                   <span className="ml-auto">
-                    hoje {stats.state.jobs_today}/300 · enriquecimento{" "}
+                    hoje {stats.state.jobs_today}/{stats.quota ?? 750} · enriquecimento{" "}
                     {stats.enrich_enabled ? "ligado" : "desligado"}
                   </span>
                   <button

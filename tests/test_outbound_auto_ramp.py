@@ -122,6 +122,26 @@ def test_next_stage_cap_respeita_teto():
     assert auto_ramp.next_stage_cap(20, 12) is None
 
 
+def test_curva_acelerada_chega_a_75_em_cerca_de_cinco_semanas():
+    """2-3 dias por degrau no warm-up; ~32-35 dias ate 75/dia."""
+    total = 0
+    cap = 1
+    caminho = []
+    while True:
+        nxt = auto_ramp.next_stage_cap(cap, 75)
+        if nxt is None:
+            break
+        dias = auto_ramp.step_interval_days(cap)
+        caminho.append((cap, dias))
+        total += dias
+        cap = nxt
+    assert cap == 75
+    assert total <= 40, f"curva demasiado lenta: {total} dias ({caminho})"
+    assert auto_ramp.step_interval_days(1) == 2
+    assert auto_ramp.step_interval_days(20) == 3
+    assert auto_ramp.step_interval_days(75) == 7
+
+
 def test_evaluate_hold_por_intervalo():
     mailbox = {
         "enabled": 1,

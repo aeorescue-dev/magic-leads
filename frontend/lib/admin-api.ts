@@ -716,6 +716,7 @@ export interface AdminContractorCityStats {
     last_run_at?: string | null;
   };
   enrich_enabled: boolean;
+  quota?: number;
 }
 
 export interface AdminContractorStats {
@@ -735,6 +736,30 @@ export function runAdminContractorEnrichment(
 ): Promise<{ status: string; processed: number; cities: Record<string, unknown> }> {
   const qs = city ? `?city=${encodeURIComponent(city)}` : "";
   return adminFetch(`/contractors/run${qs}`, { method: "POST" });
+}
+
+export interface AdminOutboundCapacity {
+  window_days: number;
+  mailboxes_enabled: number;
+  capacity_per_day: number;
+  ready_now: number;
+  produced: number;
+  produced_per_day: number;
+  days_of_cover: number | null;
+  cities: Array<{
+    city: string;
+    ready_now: number;
+    produced: number;
+    produced_per_day: number;
+    sent: number;
+    sent_per_day: number;
+  }>;
+}
+
+export function fetchAdminOutboundCapacity(
+  days = 7
+): Promise<AdminOutboundCapacity> {
+  return adminFetch<AdminOutboundCapacity>(`/outbound/capacity?days=${days}`);
 }
 
 export function fetchAdminOutboundReadiness(

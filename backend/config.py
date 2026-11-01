@@ -336,6 +336,9 @@ class Settings(BaseSettings):
     # Segredo HMAC do clique de push (B1). Se vazio, usa CRON_SECRET ou um
     # fallback estavel; definir PUSH_CLICK_SECRET e' recomendado.
     PUSH_CLICK_SECRET: str = ""
+    # Busca de dominio (Brave Web Search). Sem chave o provider fica inerte.
+    BRAVE_SEARCH_API_KEY: str = ""
+    BRAVE_DAILY_QUERIES: int = 450
     # Segredo HMAC do opt-out de outbound (`/unsubscribe?token=`). Vazio usa
     # PUSH_CLICK_SECRET/CRON_SECRET; sem qualquer segredo o link nao e' assinado.
     UNSUBSCRIBE_SECRET: str = ""

@@ -2367,6 +2367,20 @@ async def admin_outbound_mailbox_health(
     }
 
 
+@app.get("/api/admin/outbound/capacity")
+async def admin_outbound_capacity(
+    days: int = 7, _admin: dict = Depends(_require_admin_user)
+):
+    """Capacidade vs inventário: o que o robô produz por dia face ao envio.
+
+    Responde à pergunta operacional "a fila vai secar?": `ready_now` é estoque,
+    `produced_per_day` é o fluxo dos últimos dias e `capacity_per_day` é o teto
+    somado das caixas ligadas (Auto-Ramp incluído).
+    """
+    window = max(1, min(int(days), 30))
+    return await db_service.outbound_capacity(window)
+
+
 @app.get("/api/admin/outbound/readiness")
 async def admin_outbound_readiness(
     city: str, niche: str | None = None, _admin: dict = Depends(_require_admin_user)
@@ -2395,6 +2409,7 @@ async def admin_contractor_stats(
         out[target] = {
             "counts": await db_service.contractor_entity_counts(target),
             "state": await db_service.get_city_enrichment_state(target, day),
+            "quota": enrichment_scheduler.per_city_day(),
             "enrich_enabled": (
                 await db_service.get_outbound_config(target)
             ).get("enrich_enabled")

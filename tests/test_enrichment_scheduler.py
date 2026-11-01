@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from backend.services import enrichment_scheduler, entity_bridge
+from backend.services import brave_search, enrichment_scheduler, entity_bridge
 from backend.services.db import db_service, get_connection
 
 CITY = "TESTCITY"
@@ -98,6 +98,11 @@ def no_throttle(monkeypatch):
     )
     # A ponte nunca deve ir a rede nos testes.
     monkeypatch.setattr(entity_bridge, "_site_snippet", lambda domain: "")
+
+    async def _no_brave(*a, **k):
+        return None
+
+    monkeypatch.setattr(brave_search, "find_domain", _no_brave)
 
 
 @pytest.mark.asyncio

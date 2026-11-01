@@ -15,14 +15,14 @@ from datetime import datetime, timezone
 from typing import Iterable, Optional
 
 from ..utils.logger import logger
-from . import entity_bridge
+from . import brave_search, entity_bridge
 from .company_discovery import CompanyDiscovery
 from .db import db_service
 from .domain_resolver import resolve_domain
 
 DEFAULT_CITIES = ("NYC", "CHICAGO", "BOSTON")
 CONCURRENCY = 4
-PER_CITY_DAY = 300
+PER_CITY_DAY = 750
 TICK_SECONDS = 60
 OVERPASS_MIN_INTERVAL = 1.1
 MAX_ATTEMPTS = 2
@@ -61,7 +61,19 @@ async def _throttle_overpass() -> None:
 async def _domain_stage(entity: dict) -> str:
     async with _global_sem:
         await _throttle_overpass()
-        resolved = await resolve_domain(entity.get("legal_name") or "", entity.get("city") or "")
+        # 1) busca paga (Brave) com cache/orcamento: maior cobertura.
+        try:
+            resolved = await brave_search.find_domain(
+                entity.get("legal_name") or "", entity.get("city") or ""
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[BRAVE] erro inesperado: %s", exc)
+            resolved = None
+        # 2) OSM/Overpass (bloqueado no Railway; circuit breaker).
+        if not resolved:
+            resolved = await resolve_domain(
+                entity.get("legal_name") or "", entity.get("city") or ""
+            )
         if not resolved:
             # Fallback autónomo: heurística de domínio (DNS + site + corroboração)
             # quando o Overpass está bloqueado/indisponível.

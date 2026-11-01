@@ -2,7 +2,8 @@
 
 Regras aprovadas:
   * escada unica: 1,1,1,2,3,5,8,12,20,25,35,50,75;
-  * abaixo de 25/dia a subida e' de warm-up (7 dias + amostra pequena);
+  * abaixo de 25/dia sobe a cada 2-3 dias se a saude estiver limpa
+    (warm-up da caixa/dominio, amostra pequena obrigatoria);
   * a partir de 25/dia exige **>=200 envios** na janela, bounce <1%,
     complaint <0.1% e zero erros de autenticacao nos ultimos 30 dias;
   * teto `auto_ramp_max` definido no Admin (default 75, maximo 100);
@@ -19,7 +20,13 @@ from .db import db_service, get_connection
 AUTO_RAMP_STAGES: tuple[int, ...] = (1, 1, 1, 2, 3, 5, 8, 12, 20, 25, 35, 50, 75)
 GATED_FROM = 25
 MIN_SAMPLE_AFTER_GATE = 200
-STEP_DAYS = 7
+# Dias de permanencia em cada patamar antes do proximo degrau. Abaixo de 25 e'
+# warm-up (2 dias por degrau); acima, a amostra/gates mandam e o intervalo
+# apenas evita subir duas vezes no mesmo dia.
+STEP_INTERVAL_DAYS: dict[int, int] = {
+    1: 2, 2: 2, 3: 2, 5: 2, 8: 2, 12: 3, 20: 3, 25: 4, 35: 5, 50: 7,
+}
+DEFAULT_STEP_INTERVAL_DAYS = 7
 MAX_RAMP = 100
 BOUNCE_LIMIT = 0.01
 COMPLAINT_LIMIT = 0.001
@@ -37,6 +44,11 @@ def _parse_dt(value: Optional[str]) -> Optional[datetime]:
         except ValueError:
             continue
     return None
+
+
+def step_interval_days(current_cap: int) -> int:
+    """Dias a permanecer no patamar antes de tentar o proximo degrau."""
+    return int(STEP_INTERVAL_DAYS.get(int(current_cap), DEFAULT_STEP_INTERVAL_DAYS))
 
 
 def next_stage_cap(current_cap: int, max_cap: int) -> Optional[int]:
@@ -66,7 +78,7 @@ def evaluate_mailbox(
         or mailbox.get("warmup_started_at")
         or mailbox.get("created_at")
     )
-    if last and (now - last) < timedelta(days=STEP_DAYS):
+    if last and (now - last) < timedelta(days=step_interval_days(current)):
         return {"action": "hold", "reason": "interval"}
 
     sent = int(metrics.get("sent") or 0)
