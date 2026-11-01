@@ -79,3 +79,44 @@ de ids das colunas materializadas com `_qualified_where`/`_feed_where`, cobre
 casos (lixo, morada curta, categoria fora, fechado, legado sem `signal_type`) e
 verifica que a escrita recalcula. A verificação pós-deploy compara as contagens
 em produção.
+
+## 7. Fase 23 — frontend (cache, auth global, ondas)
+
+Implementado com SWR 2.5.1:
+
+- **AuthProvider** no layout do locale: `/me` + `/subscription-status` uma vez
+  por sessão de app (antes: em cada página montada). O provider persiste entre
+  navegações; login, passkey e demo atualizam o estado.
+- **SWRConfig** no layout do dashboard: cache sobrevive à troca de rota
+  (`stale-while-revalidate`), `keepPreviousData`, dedupe e polling pausado com
+  a aba oculta.
+- **Onda 1** = feed (`/api/leads/today`) é a única que bloqueia a lista;
+  **onda 2** = stats, resumo, scraper e métricas públicas, com keys fixas —
+  mudar filtros refaz só o feed.
+- `router.prefetch()` no hover/focus de Configurações e do botão de voltar;
+  links passaram a incluir o locale (evita o salto de redirect).
+
+### Medições no browser (demo login, produção, 3 ciclos)
+
+| Métrica | Antes (Fase 22) | Depois (Fase 23) | Ganho |
+|---|---|---|---|
+| Dashboard → Configurações | 733 ms (321–978) | **78 ms** (58–99) | 9,4× |
+| Configurações → Dashboard (shell) | 522 ms (324–1 028) | **55 ms** (40–73) | 9,5× |
+| Configurações → Dashboard (dados prontos) | 1 227 ms (1 124–1 310) | **118 ms** (98–146) | 10,4× |
+| `/me` + `subscription` por transição | 2 chamadas | **0** (1 no load) | — |
+| Feed em 6 transições | 1 por montagem | 1 (resto cache) | — |
+| LCP (hard load) | ~1 140 ms | **428 ms** (240–928) | ~2,7× |
+| CLS | 0,013 | **0,001** | — |
+
+Sem erros de consola em `/pt`, `/pt/dashboard`,
+`/pt/dashboard/settings` e `/pt/auth`.
+
+## Veredicto
+
+**Backend (Fase 22):** feed de 555 ms → **15 ms** (página 0,4 ms, total 13 ms),
+com paridade exata nas 78 112 linhas qualificadas e 94 369 do feed.
+
+**Frontend (Fase 23):** troca de rota de 733/1 227 ms → **78/118 ms**, com o
+cache a pintar de imediato e a revalidação em background. Nenhum pedido de
+`/me` ou subscription por transição.
+

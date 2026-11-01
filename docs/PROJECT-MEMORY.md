@@ -1299,6 +1299,29 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   `docs/PERFORMANCE-AUDIT.md`.
 - **Testes**: 1084 pytest · Ruff limpo.
 
+### Fase 23 — Frontend: SWR, AuthProvider e ondas (2026-11-01)
+
+- **AuthProvider** no layout do locale: `/me` + `/subscription-status` deixam de
+  repetir-se a cada página montada (eram 2 chamadas por transição). Login
+  password/passkey/demo atualizam o provider (o demo passou a chamar
+  `updateUser`).
+- **SWR 2.5.1** (`frontend/package.json`) com `SWRConfig` no layout do
+  dashboard: cache persiste entre rotas, `stale-while-revalidate`,
+  `keepPreviousData`, dedupe de 5 s e polling pausado com a aba oculta.
+- Ondas: o feed é a única chamada que bloqueia a lista; stats/resumo/scraper/
+  métricas públicas entram depois, com keys fixas (mudar filtros refaz só o
+  feed). Interests, notificações, métricas de penalidade e quota diária também
+  passaram a SWR.
+- Links de Configurações/voltar levam o locale e fazem `router.prefetch()` no
+  hover/focus.
+- **Medição no browser (demo, produção, 3 ciclos):** Dashboard → Configurações
+  **733 → 78 ms**; Configurações → Dashboard **522 → 55 ms** (shell) e
+  **1 227 → 118 ms** (dados prontos). LCP **~1 140 → 428 ms** (mediana),
+  CLS **0,013 → 0,001**. 0 chamadas de `/me`/subscription nas transições.
+- Sem erros de consola em landing/dashboard/settings/auth; `npm audit
+  --omit=dev` com 0 vulnerabilidades; build e `tsc` limpos.
+- **Testes**: 1084 pytest · 97 vitest · ESLint 0 erros · Ruff limpo.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
