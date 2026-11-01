@@ -1127,6 +1127,22 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   00:43 — próxima a 03/11.
 - **Testes**: 1045 pytest.
 
+### Fase 13 — Upgrade OSINT dos prontos (2026-11-01)
+
+- `upgrade_contact_email` troca o e-mail genérico por um nominal comprovado
+  (contacto + lead B2B + entidade na mesma transação), com guardas: nunca com
+  mensagem ativa, nunca colide com e-mail existente.
+- Script `upgrade_ready_osint`: **147 prontos analisados → 12 atualizados**
+  (8,2%). Exemplos reais: `tom.graham@airoom.com`, `jake@purevoltage.com`,
+  `tony.halasz@springscaffolding.com`, `dlong@bigskyconstruction.com`.
+- Pool pronto: 136 `import`, 5 `smtp_pattern`, **12 `owner_osint`**.
+- Bug do script corrigido: `list_contractor_entities` tem limite 200 e
+  escondia os prontos; passou a filtrar `status="ready"` no SQL.
+- **Gap operacional identificado**: a fila só recebe lotes quando o Admin
+  clica “Enviar lote real”; não há criação automática de lote. Com 1 mensagem
+  na fila, o envio para quando ela sair.
+- **Testes**: 1048 pytest.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
