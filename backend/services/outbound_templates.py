@@ -468,7 +468,7 @@ _ATTRACTIVE_SERVICES: dict[str, str] = {
     "Gas": "gas line work",
     "Heating": "no-heat emergencies",
     "Mold": "mold remediation",
-    "Unsanitary": "sanitation cleanups",
+    "Unsanitary": "unsanitary conditions",
     "Rodent": "rodent cleanup",
     "Grass": "groundskeeping",
 }
