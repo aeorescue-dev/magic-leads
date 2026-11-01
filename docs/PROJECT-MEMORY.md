@@ -1158,6 +1158,18 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   não a meia-noite de Nova Iorque.
 - **Testes**: 1055 pytest.
 
+### Fase 15 — Dia operacional em Nova Iorque (2026-11-01)
+
+- `timeutil.py`: `day_key`/`day_start_utc`/`next_day_start_utc` com
+  `ZoneInfo("America/New_York")` e fallback UTC. O cap diário, o contador por
+  cidade, o eval do Auto-Ramp e o `retry_at` passam a cortar à meia-noite de
+  NY (antes 00:00 UTC = 20:00 EDT).
+- `count_mailbox_sent_today` compara `sent_at` com o início do dia NY
+  convertido para UTC (DST tratado). Em produção: dia `2026-11-01`, início
+  `04:00 UTC`, próxima meia-noite `2026-11-02 05:00 UTC`.
+- Copy do bloqueio corrigida para “meia-noite de Nova Iorque”.
+- **Testes**: 1055 pytest.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
