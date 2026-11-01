@@ -298,6 +298,101 @@ def render_sequence_email(step: str, context: Mapping[str, str]) -> dict[str, st
     return {"subject": subject, "body": body}
 
 
+# ------------------------------------------------- variantes de copy (passo 1)
+#
+# A/B de TEXTO do primeiro e-mail. As tres variantes traduzem a landing —
+# exclusividade por endereco, telefone "quando encontramos", $120/semana e
+# vagas limitadas por area — e levam o link direto para a lista, porque o site
+# e' o canal de conversao (nao a resposta ao e-mail).
+#
+# `control` = copy atual, com a CTA "reply send": e' a base de comparacao.
+# A atribuicao fica gravada em `outbound_messages.copy_variant`.
+COPY_VARIANTS: tuple[str, ...] = (
+    "control",
+    "five_crews",
+    "owner_asked",
+    "limited_spots",
+)
+
+_COPY_FOOTER = (
+    "{signature}\n"
+    "Magic Leads\n"
+    "{postal_address}\n\n"
+    "https://www.magicleads.app/\n\n"
+    "Unsubscribe: {unsubscribe_url}\n"
+    'To stop receiving these emails, reply "unsubscribe".'
+)
+
+COPY_VARIANT_TEMPLATES: dict[str, dict[str, str]] = {
+    "five_crews": {
+        "subject": "The same job, five crews",
+        "body": (
+            "{greeting}\n\n"
+            "The same job is sold to three, five, even eight contractors, and the "
+            "fastest bid wins instead of the best builder.\n\n"
+            "We do the opposite: {count} {hook_trade} {project_noun} in {city} this "
+            "week, each offered to one contractor only. No auction, no bidding war, "
+            "no race to the bottom. $120 a week, cancel anytime.\n\n"
+            "See this week's list:\n"
+            "{url}\n\n" + _COPY_FOOTER
+        ),
+    },
+    "owner_asked": {
+        "subject": "The owner just asked for the repair",
+        "body": (
+            "{greeting}\n\n"
+            "Every project arrives ready to work: the property address, the owner's "
+            "name and the phone number when we find it. No forms, no sales call, no "
+            "middleman.\n\n"
+            "{count} {hook_trade} {project_noun} in {city} this week. Open the list, "
+            "pick the ones you want and call the owner today. $120 a week.\n\n"
+            "Open this week's list:\n"
+            "{url}\n\n" + _COPY_FOOTER
+        ),
+    },
+    "limited_spots": {
+        "subject": "Limited spots in your area",
+        "body": (
+            "{greeting}\n\n"
+            "We keep the number of contractors per area limited on purpose, so "
+            "projects do not get saturated and each address belongs to one "
+            "contractor at a time.\n\n"
+            "{count} {hook_trade} {project_noun} in {city} this week for $120. It "
+            "unlocks 7 days and pauses on day 8 if you do not renew.\n\n"
+            "See if your area still has a spot:\n"
+            "{url}\n\n" + _COPY_FOOTER
+        ),
+    },
+}
+
+for _variant, _tpl in COPY_VARIANT_TEMPLATES.items():
+    assert_english_only(_tpl["subject"])
+    assert_english_only(_tpl["body"])
+    assert len(_tpl["subject"]) <= SUBJECT_MAX, (
+        f"assunto da variante {_variant!r} passa de {SUBJECT_MAX} caracteres"
+    )
+del _variant, _tpl
+
+
+def pick_copy_variant(offset: int, active: bool) -> str:
+    """Variante do proximo passo 1: controlo com o gate fechado, senao 1:1:1:1."""
+    if not active:
+        return "control"
+    return COPY_VARIANTS[int(offset) % len(COPY_VARIANTS)]
+
+
+def render_copy_variant(variant: str, context: Mapping[str, str]) -> dict[str, str]:
+    """Renderiza o passo 1 de uma variante (nunca a de controlo)."""
+    tpl = COPY_VARIANT_TEMPLATES.get(variant)
+    if not tpl:
+        raise KeyError(f"variante de copy desconhecida: {variant}")
+    subject = render(tpl["subject"], context).strip()
+    body = render(tpl["body"], context).strip()
+    assert_english_only(subject)
+    assert_english_only(body)
+    return {"subject": subject, "body": body}
+
+
 # --------------------------------------------------------------- helpers
 
 # Human-readable market names for the served cities (used inside the copy).
@@ -666,6 +761,7 @@ def build_context(
         "count": copy_count(count),
         "project_noun": noun,
         "city_short": city_short,
+        "hook_trade": hook_trade,
         "offer_subject": offer_subject,
         "sender_name": sender_name,
         "signature": signature or DEFAULT_SIGNATURE,

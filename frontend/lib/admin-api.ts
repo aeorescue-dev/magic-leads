@@ -797,6 +797,21 @@ export interface AdminOutboundMetrics {
     reply_rate: number;
     positive_rate: number;
   }>;
+  by_copy_variant: Array<{
+    variant: string;
+    sent: number;
+    replies: number;
+    positive: number;
+    reply_rate: number;
+    positive_rate: number;
+  }>;
+  copy_variants: {
+    enabled: boolean;
+    min_sends: number;
+    sent_today: number;
+    active: boolean;
+    arms: string[];
+  };
 }
 
 export function fetchAdminOutboundMetrics(

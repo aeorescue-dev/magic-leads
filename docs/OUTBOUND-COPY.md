@@ -162,30 +162,103 @@ the entire week.
 
 ## 6. A/B de copy — estado
 
-**Não há variantes de copy implementadas.** O sistema tem um template por
-nicho (passo 1) e um template de oferta (passo 2). O teste 1:1 em curso é de
-**origem do e-mail**, não de texto.
+Existem **dois testes em paralelo**, em dimensões diferentes:
 
-Variantes propostas para aprovação (a implementar com rotação 50/50 e
-atribuição no lote):
-
-| Braço | Assunto | CTA | Hipótese |
+| Dimensão | Braços | Onde é atribuído | Estado |
 |---|---|---|---|
-| A (controlo) | `50 GC projects open in NYC` | `Reply with "send"` | número + verbo direto |
-| B | `50 GC projects open in NYC this week` | `Reply "send"` | urgência explícita, CTA mais curta |
-| C | `50 GC projects open in NYC - one per contractor` | `Reply with "send"` | escassez no assunto |
+| Origem do e-mail | `owner_osint` vs `smtp_pattern` | `outbound_contacts.email_source` | ativo desde a Fase 12 (1:1 na fila) |
+| Texto do passo 1 | `control`, `five_crews`, `owner_asked`, `limited_spots` | `outbound_messages.copy_variant` | **implementado, com gate de volume** |
 
-Só se declara vencedor com ≥300 envios por braço; com 4–6/dia isso são meses,
-por isso a decisão é entre (a) esperar, ou (b) subir a rampa/volume primeiro.
+### Gate de volume
+
+- Enquanto o dia de Nova Iorque tiver **menos de 20 envios**, todas as mensagens
+  saem em `control` — não se gasta amostra pequena a dividir por quatro textos.
+- A partir de 20 envios/dia, a rotação é **1:1:1:1** por lote: `control` →
+  `five_crews` → `owner_asked` → `limited_spots`.
+- O gate é configurável: `OUTBOUND_COPY_VARIANT_MIN_SENDS` (default 20) e
+  `OUTBOUND_COPY_VARIANTS_ENABLED` (default `true`; `false` força `control`).
+- A variante fica gravada no envio e aparece no cartão de métricas do Admin
+  (`A/B de texto: ativo` ou `inativo · N/20 envios hoje`).
+
+### Braço `control` (copy atual)
+
+Assunto `50 GC projects open in NYC`; CTA `Reply with "send" and I will
+forward this week's verified list.`
+
+### Braço `five_crews` — concorrência e margem
+
+Assunto: `The same job, five crews` (24 caracteres)
+
+```
+The same job is sold to three, five, even eight contractors, and the fastest
+bid wins instead of the best builder.
+
+We do the opposite: 50 construction projects in New York City this week, each
+offered to one contractor only. No auction, no bidding war, no race to the
+bottom. $120 a week, cancel anytime.
+
+See this week's list:
+https://www.magicleads.app/en?city=NYC&niche=general_contractors&step=1
+```
+
+### Braço `owner_asked` — velocidade e contacto direto
+
+Assunto: `The owner just asked for the repair` (35 caracteres)
+
+```
+Every project arrives ready to work: the property address, the owner's name
+and the phone number when we find it. No forms, no sales call, no middleman.
+
+50 construction projects in New York City this week. Open the list, pick the
+ones you want and call the owner today. $120 a week.
+
+Open this week's list:
+https://www.magicleads.app/en?city=NYC&niche=general_contractors&step=1
+```
+
+### Braço `limited_spots` — escassez por área
+
+Assunto: `Limited spots in your area` (26 caracteres)
+
+```
+We keep the number of contractors per area limited on purpose, so projects do
+not get saturated and each address belongs to one contractor at a time.
+
+50 construction projects in New York City this week for $120. It unlocks 7
+days and pauses on day 8 if you do not renew.
+
+See if your area still has a spot:
+https://www.magicleads.app/en?city=NYC&niche=general_contractors&step=1
+```
+
+Todas usam o mesmo rodapé do `control` (assinatura da caixa, morada postal,
+`Unsubscribe:` assinado e `reply "unsubscribe"`).
+
+### Duas frases que mudaram face à proposta inicial
+
+1. `owner_asked` diz **“the phone number when we find it”** — a landing só
+   promete telefone quando existe; prometer sempre seria falso no primeiro
+   lead sem número.
+2. `limited_spots` diz **“each address belongs to one contractor at a time”** —
+   a exclusividade real é a reserva de 1 hora, não a venda única permanente.
+   “Once taken, it is gone” só pode ir ao ar se aplicarmos a invariante de
+   venda única.
+
+### Amostra necessária
+
+Só se declara vencedor com **≥300 envios por braço**. Com 4 braços e 20/dia
+são ~60 dias; a 75/dia são ~16 dias. Até lá, o cartão mostra contagem e taxa,
+nunca “vencedor”.
 
 ## 7. Conformidade (verificada)
 
 | Regra | Estado |
 |---|---|
-| Inglês US, ASCII | ✅ |
-| Sem morada do lead / 311 / violation / report / case | ✅ |
-| Sem termos de fonte/arquitetura | ✅ |
-| Um URL, sem tracking | ✅ |
-| Assunto ≤38 (passo 1), ≤52 (passo 2) | ✅ |
-| Morada postal + opt-out assinado + List-Unsubscribe | ✅ |
-| Alegações verificáveis (contagem, exclusividade) | ✅ |
+| Inglês US, ASCII | OK |
+| Sem morada do lead / 311 / violation / report / case | OK |
+| Sem termos de fonte/arquitetura | OK |
+| Um URL de marketing, sem tracking | OK |
+| Assunto ≤38 (passo 1), ≤52 (passo 2) | OK |
+| Morada postal + opt-out assinado + List-Unsubscribe | OK |
+| Alegações verificáveis (contagem, exclusividade) | OK |
+| Preço só no corpo (nunca no assunto) | OK |

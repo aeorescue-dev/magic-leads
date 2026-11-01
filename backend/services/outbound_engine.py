@@ -326,6 +326,16 @@ class OutboundEngine:
         billed_today = _int(usage.get("enriched"), 0)
         enrichment_left = max(0, daily_enrich_cap - billed_today) if daily_enrich_cap > 0 else 10**9
 
+        # A/B de TEXTO: o gate so' abre com volume diario (dia NY) e a variante
+        # roda 1:1:1:1. Abaixo do limiar fica tudo em 'control' — assim o A/B
+        # nunca come uma amostra pequena.
+        sent_today_for_variants = await db_service.count_outbound_sent_today(today)
+        variants_active = bool(
+            getattr(settings, "OUTBOUND_COPY_VARIANTS_ENABLED", True)
+        ) and sent_today_for_variants >= max(
+            1, _int(getattr(settings, "OUTBOUND_COPY_VARIANT_MIN_SENDS", 20), 20)
+        )
+
         leads = await db_service.list_outbound_leads(city, categories, limit)
         # `{count}` no copy reflecte o inventario REAL da cidade/nicho (mesma
         # fonte da previa do painel), nao o tamanho do lote. Fonte unica para
@@ -367,6 +377,7 @@ class OutboundEngine:
         pending_enrich = 0
         spend_total = 0.0
         billed_batch = 0
+        variant_index = 0
 
         for lead in leads:
             contact = await db_service.get_outbound_contact_by_lead(lead["id"])
@@ -424,7 +435,17 @@ class OutboundEngine:
                     lead, city, lead_niche, copy_count, contact=contact,
                     top_categories=mix_cache.get(lead_niche),
                 )
-                rendered = outbound_templates.render_email(lead_niche, context)
+                context["url"] = outbound_templates.sequence_url(
+                    city, lead_niche, step=1
+                )
+                variant = outbound_templates.pick_copy_variant(
+                    sent_today_for_variants + variant_index, variants_active
+                )
+                variant_index += 1
+                if variant == "control":
+                    rendered = outbound_templates.render_email(lead_niche, context)
+                else:
+                    rendered = outbound_templates.render_copy_variant(variant, context)
             except Exception as e:
                 # Copy tem de ser en-US: um lead com dados non-ASCII e' excluido,
                 # nunca derruba o lote inteiro.
@@ -452,6 +473,7 @@ class OutboundEngine:
                 body_hash=body_hash,
                 sequence_step=1,
                 next_step_at=next_step_at,
+                copy_variant=variant,
             )
             if msg:
                 queued += 1
@@ -858,6 +880,7 @@ class OutboundEngine:
             subject, body = await self._render_message(
                 batch, contact, city, _int(message.get("sequence_step"), 1),
                 sender_name=_signature_for(mailbox),
+                copy_variant=message.get("copy_variant"),
             )
             if body is None:
                 await db_service.update_outbound_message(
@@ -986,6 +1009,7 @@ class OutboundEngine:
         city: str,
         sequence_step: int = 1,
         sender_name: Optional[str] = None,
+        copy_variant: Optional[str] = None,
     ) -> tuple[Optional[str], Optional[str]]:
         """Re-renderiza subject+body a partir do lead real (integridade = hash)."""
         niche = outbound_templates.DEFAULT_NICHE
@@ -1020,6 +1044,12 @@ class OutboundEngine:
                 )
                 rendered = outbound_templates.render_sequence_email(
                     "step2_offer", context
+                )
+            elif copy_variant and copy_variant != "control":
+                # Variante de texto do passo 1 (gravada no enqueue).
+                context["url"] = outbound_templates.sequence_url(city, niche, step=1)
+                rendered = outbound_templates.render_copy_variant(
+                    copy_variant, context
                 )
             else:
                 rendered = outbound_templates.render_email(niche, context)

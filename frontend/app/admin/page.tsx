@@ -185,6 +185,13 @@ const OUTBOUND_LABELS: Record<string, string> = {
   quiet_hours_end: "Hora de silêncio (fim)",
 };
 
+const COPY_VARIANT_LABEL: Record<string, string> = {
+  control: "controlo",
+  five_crews: "5 crews",
+  owner_asked: "owner asked",
+  limited_spots: "limited spots",
+};
+
 const OUTBOUND_FLAGS = new Set([
   "send_enabled",
   "enrich_enabled",
@@ -1086,6 +1093,28 @@ function OutboundPanel() {
                       )})`
                   )
                   .join(" · ")}
+              </p>
+            ) : null}
+            {metrics.copy_variants ? (
+              <p
+                className="mt-1 text-[10px] text-slate-500"
+                data-testid="copy-variants"
+              >
+                A/B de texto:{" "}
+                {metrics.copy_variants.active
+                  ? "ativo"
+                  : `inativo · ${metrics.copy_variants.sent_today}/${metrics.copy_variants.min_sends} envios hoje`}
+                {metrics.by_copy_variant?.length
+                  ? " · " +
+                    metrics.by_copy_variant
+                      .map(
+                        (v) =>
+                          `${COPY_VARIANT_LABEL[v.variant] ?? v.variant} ${
+                            v.replies
+                          }/${v.sent} respostas (${fmtPct(v.reply_rate)})`
+                      )
+                      .join(" · ")
+                  : " · ainda sem envios"}
               </p>
             ) : null}
           </div>

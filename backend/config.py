@@ -288,6 +288,14 @@ class Settings(BaseSettings):
     OUTBOUND_SEQUENCE_STEP2_DELAY_DAYS: int = 3
     OUTBOUND_SEQUENCE_MAX_STEP: int = 2
 
+    # A/B de TEXTO no passo 1 (D+). So' liga quando o volume diario justifica a
+    # amostra: abaixo de `OUTBOUND_COPY_VARIANT_MIN_SENDS` envios/dia (dia NY)
+    # todas as mensagens saem com a copy de controlo. Com o gate aberto, as
+    # quatro variantes rodam 1:1:1:1 por lote e a variante fica gravada em
+    # `outbound_messages.copy_variant` (atribuicao das respostas no Admin).
+    OUTBOUND_COPY_VARIANTS_ENABLED: bool = True
+    OUTBOUND_COPY_VARIANT_MIN_SENDS: int = 20
+
     # Reaper das mensagens presas em 'sending' (o processo morreu a meio do
     # envio). Passados N minutos, a mensagem e' marcada como 'failed' em vez de
     # ficar em 'sending' PARA SEMPRE (credito gasto, e-mail nunca enviado).

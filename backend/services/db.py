@@ -1106,6 +1106,9 @@ CREATE TABLE IF NOT EXISTS outbound_messages (
   -- presa em 'sending' (o processo morreu a meio do envio) e' indistinguivel
   -- de uma em curso — e nao ha como limpa-la.
   claimed_at TEXT,
+  -- Variante de copy do passo 1 (A/B de texto). NULL nas linhas anteriores a
+  -- migracao e no passo 2; lida como 'control'.
+  copy_variant TEXT,
   queued_at TEXT DEFAULT CURRENT_TIMESTAMP,
   sent_at TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -1912,6 +1915,8 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
             conn.execute("ALTER TABLE outbound_messages ADD COLUMN next_step_at TEXT")
         if "claimed_at" not in msg_cols:
             conn.execute("ALTER TABLE outbound_messages ADD COLUMN claimed_at TEXT")
+        if "copy_variant" not in msg_cols:
+            conn.execute("ALTER TABLE outbound_messages ADD COLUMN copy_variant TEXT")
         try:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_outbound_messages_sequence "
@@ -2745,13 +2750,14 @@ class DatabaseService:
         segments: int = 1,
         sequence_step: int = 1,
         next_step_at: Optional[str] = None,
+        copy_variant: Optional[str] = None,
     ) -> Optional[dict]:
         conn = get_connection()
         try:
             cur = conn.execute(
-                "INSERT OR IGNORE INTO outbound_messages (batch_id, contact_id, mailbox_id, city, channel, to_email, subject, body_hash, status, cost_usd, segments, sequence_step, next_step_at) "
-                "VALUES (?, ?, ?, ?, 'email', ?, ?, ?, 'queued', ?, ?, ?, ?)",
-                (batch_id, contact_id, mailbox_id, city, to_email and to_email.lower(), subject, body_hash, float(cost_usd), int(segments), int(sequence_step), next_step_at),
+                "INSERT OR IGNORE INTO outbound_messages (batch_id, contact_id, mailbox_id, city, channel, to_email, subject, body_hash, status, cost_usd, segments, sequence_step, next_step_at, copy_variant) "
+                "VALUES (?, ?, ?, ?, 'email', ?, ?, ?, 'queued', ?, ?, ?, ?, ?)",
+                (batch_id, contact_id, mailbox_id, city, to_email and to_email.lower(), subject, body_hash, float(cost_usd), int(segments), int(sequence_step), next_step_at, copy_variant),
             )
             conn.commit()
             if cur.rowcount == 0:
@@ -2939,6 +2945,57 @@ class DatabaseService:
                 row["positive_rate"] = (
                     round(int(row["positive"] or 0) / contacts, 4) if contacts else 0.0
                 )
+            # A/B de TEXTO (passo 1): atribuicao por variante gravada no envio.
+            by_copy_variant = [
+                dict(r) for r in conn.execute(
+                    "SELECT COALESCE(NULLIF(m.copy_variant,''),'control') AS variant, "
+                    "COUNT(*) AS sent, "
+                    "COUNT(DISTINCT CASE WHEN c.replied_at IS NOT NULL THEN c.id END) AS replies, "
+                    "COUNT(DISTINCT CASE WHEN c.reply_sentiment='positive' THEN c.id END) AS positive "
+                    "FROM outbound_messages m "
+                    "LEFT JOIN outbound_contacts c ON c.id = m.contact_id "
+                    "WHERE m.status='sent' AND m.sequence_step=1 "
+                    "AND m.sent_at >= datetime('now', ?) "
+                    "GROUP BY variant ORDER BY sent DESC",
+                    (win,),
+                ).fetchall()
+            ]
+            for row in by_copy_variant:
+                sent = int(row["sent"] or 0)
+                row["sent"] = sent
+                row["replies"] = int(row["replies"] or 0)
+                row["positive"] = int(row["positive"] or 0)
+                row["reply_rate"] = (
+                    round(row["replies"] / sent, 4) if sent else 0.0
+                )
+                row["positive_rate"] = (
+                    round(row["positive"] / sent, 4) if sent else 0.0
+                )
+
+            # Gate do A/B de texto: so' abre com volume diario suficiente para a
+            # amostra andar (dia operacional de Nova Iorque, o mesmo do cap).
+            from .outbound_templates import COPY_VARIANTS
+            from .timeutil import day_key, day_start_utc
+
+            min_sends = max(
+                1, int(getattr(settings, "OUTBOUND_COPY_VARIANT_MIN_SENDS", 20) or 20)
+            )
+            variants_enabled = bool(
+                getattr(settings, "OUTBOUND_COPY_VARIANTS_ENABLED", True)
+            )
+            today = day_key()
+            sent_today = conn.execute(
+                "SELECT COUNT(*) c FROM outbound_messages "
+                "WHERE status='sent' AND sent_at >= ?",
+                (day_start_utc(today),),
+            ).fetchone()["c"]
+            copy_variants = {
+                "enabled": variants_enabled,
+                "min_sends": min_sends,
+                "sent_today": int(sent_today),
+                "active": bool(variants_enabled and int(sent_today) >= min_sends),
+                "arms": list(COPY_VARIANTS),
+            }
         finally:
             conn.close()
         return {
@@ -2958,6 +3015,8 @@ class DatabaseService:
                     round(total_positive / total_sent, 4) if total_sent else 0.0
                 ),
             },
+            "by_copy_variant": by_copy_variant,
+            "copy_variants": copy_variants,
         }
 
     def claim_outbound_message(self, message_id: int) -> bool:
@@ -4571,6 +4630,25 @@ class DatabaseService:
                 "SELECT COUNT(*) AS c FROM outbound_messages "
                 "WHERE mailbox_id=? AND status='sent' AND sent_at >= ?",
                 (int(mailbox_id), day_start_utc(day)),
+            ).fetchone()
+            return int(row["c"])
+        finally:
+            conn.close()
+
+    def count_outbound_sent_today(self, day: str) -> int:
+        """Envios (todos os passos) desde a meia-noite de Nova Iorque de `day`.
+
+        E' o volume que abre o gate do A/B de texto: so' faz sentido dividir a
+        amostra por variantes quando ja' ha envios suficientes por dia.
+        """
+        from .timeutil import day_start_utc
+
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) AS c FROM outbound_messages "
+                "WHERE status='sent' AND sent_at >= ?",
+                (day_start_utc(day),),
             ).fetchone()
             return int(row["c"])
         finally:
@@ -12770,6 +12848,7 @@ class AsyncDatabaseService:
         segments: int = 1,
         sequence_step: int = 1,
         next_step_at: Optional[str] = None,
+        copy_variant: Optional[str] = None,
     ) -> Optional[dict]:
         return await anyio.to_thread.run_sync(
             self._service.enqueue_outbound_message,
@@ -12784,6 +12863,7 @@ class AsyncDatabaseService:
             segments,
             sequence_step,
             next_step_at,
+            copy_variant,
         )
 
     async def list_outbound_messages_due_for_sequence(
@@ -13043,6 +13123,11 @@ class AsyncDatabaseService:
     async def count_mailbox_sent_today(self, mailbox_id: int, day: str) -> int:
         return await anyio.to_thread.run_sync(
             self._service.count_mailbox_sent_today, mailbox_id, day
+        )
+
+    async def count_outbound_sent_today(self, day: str) -> int:
+        return await anyio.to_thread.run_sync(
+            self._service.count_outbound_sent_today, day
         )
 
     async def outbound_mailbox_health(self, hours: int = 48) -> List[dict]:

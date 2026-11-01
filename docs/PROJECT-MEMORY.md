@@ -1198,6 +1198,28 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   dados reais. Cidades mantém 4 (é um facto conhecido, não uma métrica).
 - **Testes**: 1055 pytest · 93 vitest · tsc limpo · ESLint 0 erros.
 
+### Fase 18 — A/B de texto do passo 1 com gate de volume (2026-11-01)
+
+- Três variantes novas do primeiro e-mail, traduzidas da landing: `five_crews`
+  (concorrência/margem), `owner_asked` (velocidade e contacto direto) e
+  `limited_spots` (escassez por área). `control` mantém a copy atual com CTA
+  “reply send”, como base de comparação.
+- **Gate**: `OUTBOUND_COPY_VARIANT_MIN_SENDS` (default **20** envios no dia de
+  Nova Iorque) e `OUTBOUND_COPY_VARIANTS_ENABLED`. Abaixo do limiar tudo sai em
+  `control`; acima, rotação **1:1:1:1** por lote. O A/B nunca divide uma amostra
+  pequena.
+- Atribuição persistida em `outbound_messages.copy_variant` (nova coluna, com
+  migração `ALTER TABLE`); linhas antigas e passo 2 são lidas como `control`.
+  `outbound_metrics` passa a devolver `by_copy_variant` e o estado do gate,
+  mostrados no cartão de métricas do Admin.
+- Duas frases ajustadas para não prometer o que a landing não promete:
+  `owner_asked` diz “the phone number **when we find it**”; `limited_spots` diz
+  “one contractor **at a time**” (a exclusividade real é a reserva de 1 hora;
+  “once taken, it is gone” exigiria venda única permanente).
+- `docs/OUTBOUND-COPY.md` reescrito: os dois eixos de teste (origem do e-mail e
+  texto), os quatro braços, o gate e a amostra necessária (≥300 envios/braço).
+- **Testes**: 1064 pytest · 97 vitest · tsc limpo · ESLint 0 erros.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
