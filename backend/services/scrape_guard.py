@@ -60,6 +60,7 @@ def seconds_until_next_scrape(
     """
     last_success = parse_dt(last_success_started_at)
     last_run = parse_dt(last_run_started_at)
+    now = parse_dt(now) or datetime.now(timezone.utc)
     interval = max(0.25, float(interval_hours or 6))
 
     due: Optional[datetime] = None
@@ -105,6 +106,7 @@ def freshness_problems(
     stale_cities: Optional[Iterable[str]] = None,
 ) -> list[dict]:
     """Lista de problemas accionáveis, sem duplicar alertas nem tocar na BD."""
+    now = parse_dt(now) or datetime.now(timezone.utc)
     problems: list[dict] = []
     last_dates = city_last_dates or {}
     for city in stale_cities if stale_cities is not None else last_dates.keys():
@@ -187,6 +189,7 @@ def should_force_collection(
     """True quando há problema real e não há um run recente (evita tempestade)."""
     if not list(problems or []):
         return False
+    now = parse_dt(now) or datetime.now(timezone.utc)
     last_run = parse_dt(last_run_started_at)
     if last_run is None:
         return True

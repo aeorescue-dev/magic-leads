@@ -50,6 +50,17 @@ def test_failed_run_retries_after_retry_window():
     assert delay == pytest.approx(25 * 60)
 
 
+def test_naive_now_from_utcnow_is_coerced():
+    """`utcnow()` devolve naive; a aritmética com datas da BD é aware (UTC)."""
+    naive_now = NOW.replace(tzinfo=None)
+    last = _iso(NOW - timedelta(hours=2))
+    delay = sg.seconds_until_next_scrape(
+        naive_now, last, last, 6, max_wake_seconds=10**6
+    )
+    assert delay == pytest.approx(4 * 3600)
+    assert sg.freshness_problems(naive_now, {"NYC": last}, [], interval_hours=6)
+
+
 # --------------------------------------------------------------- zero streak
 def test_zero_insert_streak_counts_consecutive_runs():
     runs = [

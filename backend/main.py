@@ -4291,7 +4291,10 @@ def _run_is_fresh_running(run: dict | None) -> bool:
     if started is None:
         return False
     max_h = max(0.25, float(getattr(settings, "SCRAPER_MAX_HOURS", 3) or 3))
-    return (utcnow() - started).total_seconds() < max_h * 3600
+    now = scrape_guard.parse_dt(utcnow()) or scrape_guard.parse_dt(
+        datetime.now(timezone.utc)
+    )
+    return (now - started).total_seconds() < max_h * 3600
 
 
 async def _run_scrape_watchdog() -> dict:
