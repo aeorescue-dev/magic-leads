@@ -3794,6 +3794,7 @@ class DatabaseService:
         source: Optional[str] = None,
         external_id: Optional[str] = None,
         domain: Optional[str] = None,
+        phone: Optional[str] = None,
     ) -> Optional[dict]:
         """Deduplica por licença (quando existe) ou nome normalizado+estado."""
         from .contractor_entities import (
@@ -3811,6 +3812,7 @@ class DatabaseService:
         city = (city or "").strip()
         st = (state or "").strip().upper() or None
         lic = (license or "").strip() or None
+        tel = (phone or "").strip() or None
         conn = get_connection()
         try:
             conn.execute("BEGIN IMMEDIATE")
@@ -3833,17 +3835,18 @@ class DatabaseService:
                     "legal_name=COALESCE(NULLIF(legal_name,''), ?), "
                     "city=COALESCE(NULLIF(city,''), ?), "
                     "license=COALESCE(license, ?), role=COALESCE(role, ?), "
+                    "phone=COALESCE(phone, ?), "
                     "domain=COALESCE(domain, ?), "
                     "status=CASE WHEN COALESCE(domain,'')<>'' AND status='new' "
                     "            THEN 'domain' ELSE status END, "
                     "updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                    (legal_name, city, lic, role, domain, eid),
+                    (legal_name, city, lic, role, tel, domain, eid),
                 )
             else:
                 cur = conn.execute(
                     "INSERT INTO contractor_entities "
                     "(entity_key, legal_name, normalized_name, license, city, state, "
-                    " role, domain, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " role, phone, domain, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         key,
                         legal_name,
@@ -3852,6 +3855,7 @@ class DatabaseService:
                         city,
                         st,
                         role,
+                        tel,
                         domain,
                         "domain" if domain else "new",
                     ),
@@ -4037,6 +4041,30 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def get_system_kv(self, key: str) -> Optional[str]:
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT value FROM system_kv WHERE key=?", (key,)
+            ).fetchone()
+            return str(row["value"]) if row and row["value"] is not None else None
+        finally:
+            conn.close()
+
+    def set_system_kv(self, key: str, value: str) -> None:
+        conn = get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO system_kv (key, value, updated_at) "
+                "VALUES (?, ?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value, "
+                "updated_at=CURRENT_TIMESTAMP",
+                (key, str(value)),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     def outbound_capacity(self, days: int = 7) -> dict:
         """Capacidade de envio vs inventário pronto e fluxo de produção.
 
@@ -4129,7 +4157,8 @@ class DatabaseService:
                 "SELECT * FROM contractor_entities "
                 "WHERE UPPER(TRIM(city))=? AND status='new' "
                 "AND COALESCE(domain,'')='' AND domain_attempts < 2 "
-                "ORDER BY id LIMIT ?",
+                "ORDER BY (COALESCE(phone,'')<>'') DESC, "
+                "         (license IS NOT NULL) DESC, id LIMIT ?",
                 (city.strip().upper(), max(1, min(int(limit), 50))),
             ).fetchall()
             return [dict(r) for r in rows]
@@ -4144,7 +4173,8 @@ class DatabaseService:
                 "WHERE UPPER(TRIM(city))=? AND status='domain' "
                 "AND COALESCE(domain,'')<>'' AND COALESCE(email,'')='' "
                 "AND email_attempts < 2 "
-                "ORDER BY id LIMIT ?",
+                "ORDER BY (COALESCE(phone,'')<>'') DESC, "
+                "         (license IS NOT NULL) DESC, id LIMIT ?",
                 (city.strip().upper(), max(1, min(int(limit), 50))),
             ).fetchall()
             return [dict(r) for r in rows]
@@ -12583,6 +12613,12 @@ class AsyncDatabaseService:
 
     async def outbound_metrics(self, days: int = 30) -> dict:
         return await anyio.to_thread.run_sync(self._service.outbound_metrics, days)
+
+    async def get_system_kv(self, key: str) -> Optional[str]:
+        return await anyio.to_thread.run_sync(self._service.get_system_kv, key)
+
+    async def set_system_kv(self, key: str, value: str) -> None:
+        return await anyio.to_thread.run_sync(self._service.set_system_kv, key, value)
 
     async def outbound_category_mix(
         self, city: str, categories: Optional[List[str]] = None, limit: int = 3

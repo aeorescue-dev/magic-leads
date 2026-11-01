@@ -17,7 +17,9 @@ from __future__ import annotations
 import re
 from typing import Iterable, Optional
 
+from ..utils.logger import logger
 from .contractor_entities import is_usable_company_name, normalize_role
+from .db import db_service
 
 _COMPANY_HINT_RE = re.compile(
     r"\b(LLC|L L C|INC|CORP|CORPORATION|CO|CONSTRUCTION|CONTRACTING|BUILDERS|"
@@ -161,6 +163,49 @@ def extract_dallas_permits(rows: Iterable[dict]) -> list[dict]:
         if rec:
             out.append(rec)
     return out
+
+
+async def record_entities(records: list[dict], max_records: int = 2000) -> dict:
+    """Deduplica e grava entidades de contractor; nunca levanta.
+
+    Vive no servico (e nao no main) para o scheduler poder ingerir licencas e
+    OSM sem import circular. O scrape nunca cai por causa de uma linha ma.
+    """
+    if not records:
+        return {"saved": 0, "failed": 0, "total": 0, "unique": 0}
+    seen: set[tuple] = set()
+    unique: list[dict] = []
+    for rec in records:
+        key = (
+            (rec.get("license") or "").upper(),
+            (rec.get("legal_name") or "").upper(),
+            (rec.get("state") or "").upper(),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(rec)
+        if len(unique) >= max_records:
+            break
+    saved = 0
+    failed = 0
+    for rec in unique:
+        try:
+            if await db_service.upsert_contractor_entity(**rec):
+                saved += 1
+        except Exception as exc:  # noqa: BLE001
+            failed += 1
+            logger.warning(
+                "[ENTITIES] falha ao gravar %r: %s", rec.get("legal_name"), exc
+            )
+    logger.info(
+        "[ENTITIES] %s/%s guardadas (unicas=%s, falhas=%s)",
+        saved, len(records), len(unique), failed,
+    )
+    return {
+        "saved": saved, "failed": failed,
+        "total": len(records), "unique": len(unique),
+    }
 
 
 def extract_boston_permits(rows: Iterable[dict]) -> list[dict]:

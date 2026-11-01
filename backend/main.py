@@ -2418,6 +2418,27 @@ async def admin_contractor_stats(
     return {"day": day, "cities": out}
 
 
+@app.post("/api/admin/contractors/sources/refresh")
+async def admin_contractor_sources_refresh(
+    source: str = "licenses", _admin: dict = Depends(_require_admin_user)
+):
+    """Dispara a ingestao de uma fonte gratuita (licencas DCWP ou OSM).
+
+    Corre em background: o download do extract OSM leva minutos e nao pode
+    ficar preso ao timeout do proxy.
+    """
+    from backend.services import licensing_sources, osm_extract
+
+    source = (source or "").strip().lower()
+    if source == "licenses":
+        asyncio.create_task(licensing_sources.ingest_nyc_licenses(limit=4000))
+    elif source == "osm":
+        asyncio.create_task(osm_extract.ingest_all(limit_per_city=800))
+    else:
+        raise HTTPException(status_code=400, detail="source invalido")
+    return {"status": "started", "source": source}
+
+
 @app.post("/api/admin/contractors/run")
 async def admin_contractor_run(
     city: str | None = None, _admin: dict = Depends(_require_admin_user)
@@ -4068,48 +4089,10 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
 
 
 async def _record_contractor_entities(records: list[dict]) -> dict:
-    """Grava entidades extraídas; nunca derruba o scrape por causa disto.
+    """Grava entidades extraidas (delegado ao servico, sem duplicar regras)."""
+    from backend.services.contractor_ingest import record_entities
 
-    Deduplica antes de tocar na BD e limita o volume por run para o scrape não
-    ficar preso a gravar dezenas de milhares de linhas.
-    """
-    if not records:
-        return {"saved": 0, "failed": 0, "total": 0}
-    max_records = 2000
-    seen: set[tuple] = set()
-    unique: list[dict] = []
-    for rec in records:
-        key = (
-            (rec.get("license") or "").upper(),
-            (rec.get("legal_name") or "").upper(),
-            (rec.get("state") or "").upper(),
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        unique.append(rec)
-        if len(unique) >= max_records:
-            break
-    saved = 0
-    failed = 0
-    for rec in unique:
-        try:
-            if await db_service.upsert_contractor_entity(**rec):
-                saved += 1
-        except Exception as e:  # noqa: BLE001
-            failed += 1
-            logger.warning(
-                "[ENTITIES] falha ao gravar %r: %s", rec.get("legal_name"), e
-            )
-    logger.info(
-        "[ENTITIES] %s/%s guardadas (únicas=%s, falhas=%s)",
-        saved,
-        len(records),
-        len(unique),
-        failed,
-    )
-    return {"saved": saved, "failed": failed, "total": len(records),
-            "unique": len(unique)}
+    return await record_entities(records)
 
 
 async def _run_scrape_guarded(

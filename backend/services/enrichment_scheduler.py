@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from typing import Iterable, Optional
 
 from ..utils.logger import logger
-from . import brave_search, entity_bridge
+from . import brave_search, entity_bridge, licensing_sources, osm_extract
 from .company_discovery import CompanyDiscovery
 from .db import db_service
 from .domain_resolver import resolve_domain
@@ -31,7 +31,11 @@ _global_sem = asyncio.Semaphore(CONCURRENCY)
 _overpass_lock = asyncio.Lock()
 _last_overpass_at = 0.0
 _run_lock = asyncio.Lock()
+_source_lock = asyncio.Lock()
 _discovery = CompanyDiscovery()
+SOURCE_INTERVAL_DAYS = 7
+LICENSES_PER_RUN = 2000
+OSM_PER_CITY = 800
 
 
 def cities() -> tuple[str, ...]:
@@ -184,6 +188,46 @@ async def run_once(
         return {"status": "ok", "processed": total, "cities": stats}
 
 
+async def _ingest_sources(now: datetime) -> dict:
+    """Licencas (semanal) e OSM (semanal): fontes gratuitas, fora da Brave.
+
+    Corre num task proprio para nunca atrasar o tick de enriquecimento.
+    """
+    if _source_lock.locked():
+        return {"status": "busy"}
+    async with _source_lock:
+        day = now.strftime("%Y-%m-%d")
+        out: dict[str, dict] = {}
+        last = await db_service.get_system_kv("licenses_last_run")
+        if not last or (now - _parse_day(last)).days >= SOURCE_INTERVAL_DAYS:
+            try:
+                out["licenses"] = await licensing_sources.ingest_nyc_licenses(
+                    limit=LICENSES_PER_RUN
+                )
+                await db_service.set_system_kv("licenses_last_run", day)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[ENRICH-SCHED] licencas falharam: %s", exc)
+                out["licenses"] = {"status": "error"}
+        last = await db_service.get_system_kv("osm_last_run")
+        if not last or (now - _parse_day(last)).days >= SOURCE_INTERVAL_DAYS:
+            try:
+                out["osm"] = await osm_extract.ingest_all(limit_per_city=OSM_PER_CITY)
+                await db_service.set_system_kv("osm_last_run", day)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[ENRICH-SCHED] OSM falhou: %s", exc)
+                out["osm"] = {"status": "error"}
+        return out or {"status": "skipped"}
+
+
+def _parse_day(value: str) -> datetime:
+    try:
+        return datetime.strptime(str(value)[:10], "%Y-%m-%d").replace(
+            tzinfo=timezone.utc
+        )
+    except (TypeError, ValueError):
+        return datetime.fromtimestamp(0, tz=timezone.utc)
+
+
 async def scheduler_loop() -> None:
     logger.info(
         "[ENRICH-SCHED] ativo: cidades=%s, concorrência=%s, quota=%s/cidade/dia",
@@ -195,6 +239,7 @@ async def scheduler_loop() -> None:
         try:
             await asyncio.sleep(TICK_SECONDS)
             await run_once()
+            asyncio.create_task(_ingest_sources(datetime.now(timezone.utc)))
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001
