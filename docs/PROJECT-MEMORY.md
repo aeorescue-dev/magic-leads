@@ -1220,6 +1220,20 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   texto), os quatro braços, o gate e a amostra necessária (≥300 envios/braço).
 - **Testes**: 1064 pytest · 97 vitest · tsc limpo · ESLint 0 erros.
 
+### Fase 19 — Teto e número do dia vêm das mensagens (2026-11-01)
+
+- O `/outbound/status` somava `outbound_daily_counters.sent` por cidade e o
+  tick usava esse contador para o `daily_send_cap`. Após o restauro da BD o
+  contador ficou acima da realidade (**8** no cartão para **4** mensagens
+  enviadas), o que inflacionava o número mostrado ao dono e podia bloquear uma
+  cidade cedo demais.
+- Agora `count_outbound_sent_today(day, city=None)` lê `outbound_messages`
+  (`status='sent' AND sent_at >= 00:00 NY`), com filtro opcional de cidade. É a
+  mesma fonte usada pelo gate do A/B de texto.
+- O tick guarda o contador por cidade em cache e incrementa-o no próprio tick
+  após cada envio, para o teto ver a folga gasta de imediato.
+- **Testes**: 1066 pytest (2 novos) · 97 vitest · tsc limpo · Ruff limpo.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

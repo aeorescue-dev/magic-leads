@@ -568,6 +568,36 @@ def test_engine_claim_outbound_message_is_atomic(engine):
     assert svc.get_outbound_message(msg["id"])["status"] == "sending"
 
 
+def test_count_outbound_sent_today_uses_messages_not_legacy_counter(engine):
+    """O teto/numero do dia vem das mensagens: o contador legado derivou."""
+    svc = engine_module.db_service._service
+    day = engine_module.day_key()
+    # Contador inflacionado (o que o restauro da BD deixou para tras).
+    svc.increment_outbound_counter("CAPVILLE", day, sent=9)
+    assert svc.count_outbound_sent_today(day, "CAPVILLE") == 0
+
+    msg = svc.enqueue_outbound_message(
+        batch_id=None, contact_id=None, city="capville",
+        to_email="capville@vitorio.com", subject="s", body_hash="h",
+    )
+    assert msg is not None
+    svc.update_outbound_message(
+        msg["id"], status="sent", sent_at=engine_module._now_str()
+    )
+    assert svc.count_outbound_sent_today(day, "CAPVILLE") == 1
+    assert svc.count_outbound_sent_today(day, "OUTRA CIDADE") == 0
+
+
+@pytest.mark.asyncio
+async def test_status_sent_today_matches_real_messages(engine):
+    """O cartao do Admin nao pode somar contadores inflacionados."""
+    _seed_mailbox()
+    status = await engine.status()
+    day = engine_module.day_key()
+    svc = engine_module.db_service._service
+    assert status["sent_today"] == svc.count_outbound_sent_today(day)
+
+
 # ------------------------------------------------------------------ sequence
 
 

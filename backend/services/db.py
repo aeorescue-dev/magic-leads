@@ -4635,20 +4635,25 @@ class DatabaseService:
         finally:
             conn.close()
 
-    def count_outbound_sent_today(self, day: str) -> int:
+    def count_outbound_sent_today(self, day: str, city: Optional[str] = None) -> int:
         """Envios (todos os passos) desde a meia-noite de Nova Iorque de `day`.
 
-        E' o volume que abre o gate do A/B de texto: so' faz sentido dividir a
-        amostra por variantes quando ja' ha envios suficientes por dia.
+        Fonte unica da verdade para o teto diario e para o numero mostrado no
+        Admin: a tabela `outbound_messages`. O contador
+        `outbound_daily_counters` ficou acima da realidade no restauro da BD.
         """
         from .timeutil import day_start_utc
 
+        where = "status='sent' AND sent_at >= ?"
+        params: List[Any] = [day_start_utc(day)]
+        if city is not None:
+            where += " AND UPPER(TRIM(city))=?"
+            params.append(str(city).strip().upper())
         conn = get_connection()
         try:
             row = conn.execute(
-                "SELECT COUNT(*) AS c FROM outbound_messages "
-                "WHERE status='sent' AND sent_at >= ?",
-                (day_start_utc(day),),
+                f"SELECT COUNT(*) AS c FROM outbound_messages WHERE {where}",
+                params,
             ).fetchone()
             return int(row["c"])
         finally:
@@ -13125,9 +13130,11 @@ class AsyncDatabaseService:
             self._service.count_mailbox_sent_today, mailbox_id, day
         )
 
-    async def count_outbound_sent_today(self, day: str) -> int:
+    async def count_outbound_sent_today(
+        self, day: str, city: Optional[str] = None
+    ) -> int:
         return await anyio.to_thread.run_sync(
-            self._service.count_outbound_sent_today, day
+            self._service.count_outbound_sent_today, day, city
         )
 
     async def outbound_mailbox_health(self, hours: int = 48) -> List[dict]:

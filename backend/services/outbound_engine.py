@@ -772,6 +772,7 @@ class OutboundEngine:
         # mensagem e mantém o mesmo snapshot coerente dentro do tick.
         city_config: dict[str, dict] = {}
         city_snapshot: dict[str, list[dict]] = {}
+        city_sent: dict[str, int] = {}
         blocked_cities: dict[str, str] = {}
 
         stop_reason: Optional[str] = None
@@ -797,9 +798,17 @@ class OutboundEngine:
                 deferred += 1
                 continue
 
-            counter = await db_service.get_outbound_counter(city, day)
+            # Teto da cidade: fonte unica = mensagens com status='sent' (a tabela
+            # e' a verdade). O contador `outbound_daily_counters` derivou no
+            # restauro da BD e inflacionava o numero mostrado no Admin.
+            city_sent_count = city_sent.get(city_key)
+            if city_sent_count is None:
+                city_sent_count = await db_service.count_outbound_sent_today(
+                    day, city_key
+                )
+                city_sent[city_key] = city_sent_count
             daily_cap = _int(config.get("daily_send_cap"), 100)
-            if daily_cap > 0 and _int(counter.get("sent"), 0) >= daily_cap:
+            if daily_cap > 0 and city_sent_count >= daily_cap:
                 blocked_cities[city_key] = "city_daily_cap"
                 deferred += 1
                 continue
@@ -944,6 +953,8 @@ class OutboundEngine:
                 await db_service.update_mailbox_after_send(
                     mailbox["id"], warmup_state=mailbox.get("_warmup_state")
                 )
+                # O teto da cidade tambem tem de ver este envio no mesmo tick.
+                city_sent[city_key] = _int(city_sent.get(city_key), 0) + 1
                 # Consome a folga no snapshot em memória (o próximo pedido do
                 # mesmo tick não pode reutilizar uma unidade já gasta).
                 mailbox["sent_today"] = _int(mailbox.get("sent_today"), 0) + 1
@@ -1101,12 +1112,13 @@ class OutboundEngine:
                 }
             )
         usage = await db_service.get_outbound_counter("", day)
-        sent_today = 0
         enriched_today = 0
         spend_today = _float(usage.get("spend_usd"), 0.0)
+        # Numero mostrado ao dono = mensagens realmente enviadas hoje (tabela),
+        # nao o contador legado, que ficou acima da verdade apos o restauro da BD.
+        sent_today = await db_service.count_outbound_sent_today(day)
         for served_city in SERVED_CITIES:
             counter = await db_service.get_outbound_counter(served_city, day)
-            sent_today += _int(counter.get("sent"), 0)
             enriched_today += _int(counter.get("enriched"), 0)
             spend_today += _float(counter.get("spend_usd"), 0.0)
 
