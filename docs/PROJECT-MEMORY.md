@@ -1170,6 +1170,20 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - Copy do bloqueio corrigida para “meia-noite de Nova Iorque”.
 - **Testes**: 1055 pytest.
 
+### Fase 16 — Primeiro lote 100% autónomo e export de copy (2026-11-01)
+
+- O auto-lote criou sozinho o lote `auto-20261101-1646-dallas-general_contractors`
+  (Dallas/GC): **4 mensagens enfileiradas, 3 enviadas** (limite de capacidade
+  do dia) e 1 em fila. Primeiro envio sem clique humano.
+- A mudança para o dia NY (início 04:00 UTC) reclassificou os 4 envios das
+  00:00 UTC para o dia anterior, libertando capacidade — efeito único da
+  transição, sem violar o cap por dia NY.
+- `docs/OUTBOUND-COPY.md`: export completo dos textos em produção (passo 1,
+  passo 2, variáveis por nicho, exemplos reais, conformidade) e estado do A/B:
+  **não existem variantes de copy**; o 1:1 atual é por origem do e-mail.
+  Três variantes propostas para aprovação.
+- **Testes**: 1055 pytest.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
