@@ -146,8 +146,14 @@ def extract_tdlr_licenses(rows: Iterable[dict]) -> list[dict]:
             row.get("BUSINESS CITY, STATE ZIP")
             or row.get("MAILING ADDRESS CITY, STATE ZIP")
         )
-        if city not in DFW_CITIES:
+        county = _clean(
+            row.get("BUSINESS COUNTY") or row.get("COUNTY")
+        ).upper()
+        # Muitos A/C tem a morada em branco; o condado de Dallas serve de geo.
+        if city not in DFW_CITIES and county != "DALLAS":
             continue
+        if not city:
+            city = "DALLAS"
         key = name.lower()
         if key in seen:
             continue
