@@ -3670,6 +3670,59 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def list_queued_outbound_messages_balanced(
+        self, limit: int = 10
+    ) -> List[dict]:
+        """Fila intercalada por origem do e-mail (owner_osint vs restantes).
+
+        Acelera a amostra do KPI sem enviesar: alterna 1:1 e começa pela origem
+        com menos envios nas ultimas 24 h. Sem as duas origens, mantem FIFO.
+        """
+        conn = get_connection()
+        try:
+            q = (
+                "SELECT m.*, COALESCE(NULLIF(c.email_source,''),'import') AS email_source "
+                "FROM outbound_messages m "
+                "LEFT JOIN outbound_contacts c ON c.id = m.contact_id "
+                "WHERE m.status='queued' "
+                "ORDER BY m.id LIMIT ?"
+            )
+            rows = [dict(r) for r in conn.execute(q, (int(limit),)).fetchall()]
+            if not rows:
+                return []
+            counts = {
+                r["email_source"]: int(r["c"]) for r in conn.execute(
+                    "SELECT COALESCE(NULLIF(c.email_source,''),'import') AS email_source, "
+                    "COUNT(*) AS c FROM outbound_messages m "
+                    "JOIN outbound_contacts c ON c.id = m.contact_id "
+                    "WHERE m.status='sent' AND m.sent_at >= datetime('now','-1 day') "
+                    "GROUP BY 1"
+                ).fetchall()
+            }
+        finally:
+            conn.close()
+
+        owner = [r for r in rows if r["email_source"] == "owner_osint"]
+        other = [r for r in rows if r["email_source"] != "owner_osint"]
+        if not owner or not other:
+            return rows
+        out: list[dict] = []
+        # Comeca pela origem com menos envios hoje; empate -> owner_osint.
+        prefer_owner = counts.get("owner_osint", 0) <= (
+            sum(v for k, v in counts.items() if k != "owner_osint")
+        )
+        i = j = 0
+        while i < len(owner) or j < len(other):
+            take_owner = (prefer_owner and i < len(owner)) or j >= len(other)
+            if take_owner:
+                out.append(owner[i])
+                i += 1
+            else:
+                out.append(other[j])
+                j += 1
+            prefer_owner = not prefer_owner
+        return out
+
     def list_queued_outbound_messages(
         self, limit: int = 10, city: Optional[str] = None
     ) -> List[dict]:
@@ -12831,6 +12884,11 @@ class AsyncDatabaseService:
     ) -> List[dict]:
         return await anyio.to_thread.run_sync(
             self._service.list_queued_outbound_messages, limit, city
+        )
+
+    async def list_queued_outbound_messages_balanced(self, limit: int = 10) -> List[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.list_queued_outbound_messages_balanced, limit
         )
 
     async def get_outbound_message(self, message_id: int) -> Optional[dict]:

@@ -733,7 +733,9 @@ class OutboundEngine:
         # Janela de scan maior do que o chunk: mensagens de cidades bloqueadas
         # (ou inválidas) não podem esconder as que estão atrás delas na fila.
         scan_limit = min(500, max(limit * 10, 200))
-        messages = await db_service.list_queued_outbound_messages(limit=scan_limit)
+        messages = await db_service.list_queued_outbound_messages_balanced(
+            limit=scan_limit
+        )
         day = day_key(now)
         sent = 0
         skipped = 0
