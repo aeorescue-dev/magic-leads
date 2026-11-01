@@ -15,6 +15,7 @@ from ..config import settings
 from ..utils.logger import logger
 from .db import db_service
 from .metrics import push_metrics
+from .translations import normalize
 
 MAX_RETRIES = 3
 BASE_BACKOFF = 1.0  # seconds
@@ -294,12 +295,18 @@ class PushService:
 
     async def send_to_user(self, user_id: int, payload: Dict, kind: str = "custom",
                            ttl: int = 14400, urgency: str = "high",
-                           ios_payload: Optional[Dict] = None) -> int:
+                           ios_payload: Optional[Dict] = None,
+                           payloads_by_locale: Optional[Dict[str, Dict]] = None,
+                           ios_payloads_by_locale: Optional[Dict[str, Dict]] = None) -> int:
         """Envia push para todas as subscriptions de um usuário.
 
         `ios_payload` (opcional) substitui o payload em dispositivos iOS, onde
         a Apple ignora `actions`/`requireInteraction`/`vibrate`. O corpo iOS
-        leva a CTA textual ("Toque para abrir o lead").
+        leva a CTA textual.
+
+        Fase 25 (i18n estrita): `payloads_by_locale`/`ios_payloads_by_locale`
+        escolhem o texto pelo `locale` da subscription (sincronizado com
+        `users.locale`). Sem variante para o locale, usa `payload`.
         """
         if not self.is_configured():
             # Registado aqui e não em _send_single: este early return
@@ -344,12 +351,26 @@ class PushService:
         expired_endpoints = []
         success_endpoints = []
 
+        # Fonte de verdade do idioma: users.locale (nunca um default PT).
+        try:
+            user_locale = normalize(await db_service.get_user_locale(user_id))
+        except Exception:  # pragma: no cover - nunca bloqueia o envio
+            user_locale = "en"
+
         for sub in subscriptions:
-            # iOS não mostra botões: usa o payload com CTA no corpo.
+            # Locale do dispositivo (sincronizado); fallback para o atual do
+            # utilizador e, por fim, EN (nunca PT por omissao).
+            loc = normalize(sub.get("locale") or user_locale)
+            base_payload = (payloads_by_locale or {}).get(loc) or payload
+            ios_base = (
+                (ios_payloads_by_locale or {}).get(loc)
+                if ios_payloads_by_locale
+                else ios_payload
+            )
             effective = (
-                ios_payload
-                if ios_payload is not None and _is_ios_ua(sub.get("user_agent"))
-                else payload
+                ios_base
+                if ios_base is not None and _is_ios_ua(sub.get("user_agent"))
+                else base_payload
             )
             result = await self._send_single(
                 sub, effective, kind, user_id=user_id, ttl=ttl, urgency=urgency

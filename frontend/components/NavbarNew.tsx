@@ -84,7 +84,9 @@ export function NavbarNew() {
                   setLang(l.code);
                   const stored = readStoredUser();
                   if (isLogged && stored?.id) {
-                    updateUserLocale(stored.id, l.code).catch(() => {});
+                    updateUserLocale(stored.id, l.code)
+                      .then(updateUser)
+                      .catch(() => {});
                   }
                 }}
                 title={l.label}

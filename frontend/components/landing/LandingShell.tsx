@@ -4,6 +4,8 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useI18n, type Lang } from "@/lib/i18n";
 import { AuthForm } from "@/components/AuthForm";
+import { readStoredUser, useAuth } from "@/lib/auth";
+import { updateUserLocale } from "@/lib/api-client";
 
 // ------------------------------------------------------------------
 // Shared helpers
@@ -100,6 +102,18 @@ export function useLandingShell() {
 export default function LandingShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { lang, setLang, t } = useI18n();
+  const { updateUser } = useAuth();
+
+  // O idioma escolhido na landing também persiste na conta (users.locale),
+  // para o push/in-app acompanharem. Sem isto, um cliente EN que trocasse
+  // idioma aqui continuaria a receber no idioma antigo.
+  const changeLang = (next: Lang) => {
+    setLang(next);
+    const stored = readStoredUser();
+    if (stored?.id) {
+      updateUserLocale(stored.id, next).then(updateUser).catch(() => {});
+    }
+  };
 
   const localePath = (href: string) => `/${lang}${href}`;
 
@@ -145,7 +159,7 @@ export default function LandingShell({ children }: { children: React.ReactNode }
                 <span className="font-display text-lg font-black text-[#0b1220]">Magic<span className="text-[#10b981]">Leads</span></span>
               </button>
               <div className="flex shrink-0 items-center gap-3">
-                <LangSwitch lang={lang} setLang={setLang} />
+                <LangSwitch lang={lang} setLang={changeLang} />
                 <button onClick={openModal} className="btn-mint hidden px-5 py-2.5 text-[13px] sm:block">{t("landing.start")}</button>
                 <button onClick={() => setMenuOpen(!menuOpen)} className="flex h-10 w-10 items-center justify-center rounded-lg border border-[#e2e8f0] text-[#0b1220] lg:hidden" aria-label="Menu">
                   <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

@@ -1344,6 +1344,25 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   dispositivo.
 - **Testes**: 1093 pytest (9 novos) · 97 vitest · tsc/build/lint limpos.
 
+### Fase 25 — i18n estrita do Web Push (2026-11-01)
+
+- `push_subscriptions.locale`: novo campo com backfill de `users.locale`,
+  preenchido no registo (fallback SQL) e **propagado** por `update_user_locale`
+  a todos os dispositivos. Landing e navbar também persistem a troca de idioma
+  na conta (antes só mudavam a UI).
+- Envio resolve o idioma **por subscription** (`subscription.locale` →
+  `users.locale` → `en`); o mesmo utilizador pode ter Android em EN e iPhone em
+  ES. Nunca há fallback PT por omissão.
+- Alertas, batch, digest, onboarding e ciclo de vida constroem payloads nos 3
+  idiomas (`SUPPORTED`) e `send_to_user` escolhe por dispositivo. `digest`
+  deixou de ter ações hardcoded em PT.
+- Avisos de ciclo de vida (`reveal_*`, `stage_*`) deixaram de gravar texto PT:
+  passam a gravar `msg_key` + `msg_params` (render no locale do destinatário,
+  in-app e push). Linhas antigas sem chave usam fallback genérico localizado.
+- **Testes**: `tests/test_push_i18n.py` (9) valida EN/ES sem vocabulário PT,
+  distância nos 3 idiomas, CTA iOS, propagação do locale na BD e escolha por
+  subscription. Total **1102 pytest** · 97 vitest · tsc/build/lint limpos.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

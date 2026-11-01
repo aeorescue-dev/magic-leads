@@ -515,6 +515,8 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   auth TEXT NOT NULL,
   user_agent TEXT,
   device_label TEXT,
+  -- Locale preferido no momento da subscricao (sincronizado com users.locale).
+  locale TEXT,
   last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP,
   last_success_at TEXT,
   disabled_at TEXT,
@@ -1829,6 +1831,21 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE notifications ADD COLUMN pushed_at TEXT")
     if notif_cols and "ab_variant" not in notif_cols:
         conn.execute("ALTER TABLE notifications ADD COLUMN ab_variant TEXT")
+
+    # Fase 25 (i18n do push): cada dispositivo guarda o locale do destinatario.
+    # Backfill a partir de users.locale; novos registos sao preenchidos em
+    # `add_push_subscription` e sincronizados por `update_user_locale`.
+    sub_cols = {
+        r["name"] for r in conn.execute("PRAGMA table_info(push_subscriptions)").fetchall()
+    }
+    if sub_cols and "locale" not in sub_cols:
+        conn.execute("ALTER TABLE push_subscriptions ADD COLUMN locale TEXT")
+    conn.execute(
+        "UPDATE push_subscriptions SET locale = ("
+        "  SELECT locale FROM users WHERE users.id = push_subscriptions.user_id"
+        ") WHERE locale IS NULL OR TRIM(locale) = ''"
+    )
+    conn.commit()
 
     interest_cols = {
         r["name"] for r in conn.execute("PRAGMA table_info(user_interests)").fetchall()
@@ -5596,13 +5613,29 @@ class DatabaseService:
             conn.close()
 
     def update_user_locale(self, user_id: int, locale: str) -> Optional[dict]:
-        """Atualiza o idioma do usuário (users.locale: pt|en|es)."""
+        """Atualiza o idioma do usuário e propaga aos dispositivos de push."""
         conn = get_connection()
         try:
             conn.execute("UPDATE users SET locale = ? WHERE id = ?", (locale, user_id))
+            # Cada dispositivo herda imediatamente o novo idioma (Fase 25).
+            conn.execute(
+                "UPDATE push_subscriptions SET locale = ? WHERE user_id = ?",
+                (locale, user_id),
+            )
             conn.commit()
             row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
             return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def get_user_locale(self, user_id: int) -> Optional[str]:
+        """Locale atual do utilizador (fonte de verdade no envio)."""
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT locale FROM users WHERE id = ?", (int(user_id),)
+            ).fetchone()
+            return str(row["locale"]) if row and row["locale"] else None
         finally:
             conn.close()
 
@@ -6066,12 +6099,16 @@ class DatabaseService:
     def add_push_subscription(
         self, user_id: int, endpoint: str, p256dh: str, auth: str,
         user_agent: Optional[str] = None, device_label: Optional[str] = None,
+        locale: Optional[str] = None,
     ) -> bool:
         """Salva ou atualiza uma push subscription para o usuário.
 
         B1: guarda a ultima vez que o dispositivo foi visto e mantem no maximo
         5 dispositivos ativos por utilizador (desativa os mais antigos). Sem
         isto, um unico utilizador com 9 browsers recebe 9 copias de cada alerta.
+
+        Fase 25: guarda o `locale` do destinatario no dispositivo. Se nao vier,
+        deriva de `users.locale` na propria SQL (nunca fica PT por omissao).
         """
         conn = get_connection()
         try:
@@ -6079,18 +6116,26 @@ class DatabaseService:
                 """
                 INSERT INTO push_subscriptions
                     (user_id, endpoint, p256dh, auth, user_agent, device_label,
-                     last_seen_at, disabled_at)
-                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, NULL)
+                     locale, last_seen_at, disabled_at)
+                VALUES (?, ?, ?, ?, ?, ?,
+                        COALESCE(?, (SELECT locale FROM users WHERE id = ?)),
+                        CURRENT_TIMESTAMP, NULL)
                 ON CONFLICT(endpoint) DO UPDATE SET
                     p256dh = excluded.p256dh,
                     auth = excluded.auth,
                     user_id = excluded.user_id,
                     user_agent = COALESCE(excluded.user_agent, push_subscriptions.user_agent),
                     device_label = COALESCE(excluded.device_label, push_subscriptions.device_label),
+                    locale = COALESCE(
+                        excluded.locale,
+                        push_subscriptions.locale,
+                        (SELECT locale FROM users WHERE id = excluded.user_id)
+                    ),
                     last_seen_at = CURRENT_TIMESTAMP,
                     disabled_at = NULL
                 """,
-                (user_id, endpoint, p256dh, auth, user_agent, device_label),
+                (user_id, endpoint, p256dh, auth, user_agent, device_label,
+                 locale, user_id),
             )
             # Higiene: no maximo 5 dispositivos ativos, mantendo os mais usados.
             active = conn.execute(
@@ -6134,7 +6179,7 @@ class DatabaseService:
         try:
             rows = conn.execute(
                 "SELECT user_id, endpoint, p256dh, auth, user_agent, device_label, "
-                "last_seen_at, last_success_at, created_at FROM push_subscriptions "
+                "locale, last_seen_at, last_success_at, created_at FROM push_subscriptions "
                 "WHERE user_id = ? AND disabled_at IS NULL "
                 "ORDER BY COALESCE(last_seen_at, created_at) DESC",
                 (user_id,),
@@ -6629,6 +6674,7 @@ class DatabaseService:
             rows = conn.execute(
                 """
                 SELECT n.id, n.user_id, n.type, n.title, n.message, n.lead_id,
+                       n.msg_key, n.msg_params,
                        n.created_at, u.locale, u.subscription_status, u.plan_until
                 FROM notifications n
                 JOIN users u ON u.id = n.user_id
@@ -10597,13 +10643,14 @@ class DatabaseService:
                         (r["lead_id"], r["user_id"]),
                     )
                     conn.execute(
-                        """INSERT INTO notifications (user_id, type, title, message, lead_id)
-                           VALUES (?, 'reveal_timeout', ?, ?, ?)""",
+                        """INSERT INTO notifications (user_id, type, title, message, lead_id, msg_key, msg_params)
+                           VALUES (?, 'reveal_timeout', ?, ?, ?, 'reveal_timeout', ?)""",
                         (
                             r["user_id"],
-                            "🕒 Lead voltou ao pool",
-                            f"{subject} voltou a ficar disponível para outros empreiteiros. Nenhum contato foi sinalizado em 1 hora.",
+                            "🕒 Lead returned to the pool",
+                            f"{subject} is available to other contractors again. No contact was flagged within 1 hour.",
                             r["lead_id"],
+                            json.dumps({"subject": subject}),
                         ),
                     )
                     self._event(conn, r["lead_id"], r["user_id"], "reveal_timeout", f"Lead voltou ao pool após {int(elapsed)}min sem contato")
@@ -10613,13 +10660,14 @@ class DatabaseService:
                         "UPDATE lead_reveals SET notified_45 = 1 WHERE id = ?", (r["id"],)
                     )
                     conn.execute(
-                        """INSERT INTO notifications (user_id, type, title, message, lead_id)
-                           VALUES (?, 'reveal_urgent', ?, ?, ?)""",
+                        """INSERT INTO notifications (user_id, type, title, message, lead_id, msg_key, msg_params)
+                           VALUES (?, 'reveal_urgent', ?, ?, ?, 'reveal_urgent', ?)""",
                         (
                             r["user_id"],
-                            "🚨 Últimos 15 minutos!",
-                            f"Você revelou {subject} ({category}) e ainda não sinalizou contato. Em 15 min o lead volta ao pool.",
+                            "🚨 Last 15 minutes!",
+                            f"You revealed {subject} ({category}) and haven't flagged contact yet. In 15 min the lead returns to the pool.",
                             r["lead_id"],
+                            json.dumps({"subject": subject, "category": category}),
                         ),
                     )
                     processed += 1
@@ -10628,13 +10676,14 @@ class DatabaseService:
                         "UPDATE lead_reveals SET notified_30 = 1 WHERE id = ?", (r["id"],)
                     )
                     conn.execute(
-                        """INSERT INTO notifications (user_id, type, title, message, lead_id)
-                           VALUES (?, 'reveal_followup', ?, ?, ?)""",
+                        """INSERT INTO notifications (user_id, type, title, message, lead_id, msg_key, msg_params)
+                           VALUES (?, 'reveal_followup', ?, ?, ?, 'reveal_followup', ?)""",
                         (
                             r["user_id"],
-                            "⏰ Lead revelado, aguardando você",
-                            f"Faltam 30 min para {subject} ({category}) voltar ao pool. Registre o contato ou ligue agora.",
+                            "⏰ Lead revealed, waiting on you",
+                            f"30 min left before {subject} ({category}) returns to the pool. Flag the contact or call now.",
                             r["lead_id"],
+                            json.dumps({"subject": subject, "category": category}),
                         ),
                     )
                     processed += 1
@@ -10698,26 +10747,42 @@ class DatabaseService:
             for row in pending:
                 expires_dt = self._parse_dt(row["stage_expires_at"]) or (now + timedelta(hours=24))
                 remaining_h = (expires_dt - now).total_seconds() / 3600.0
-                which = "Contactar" if row["lead_status"] == "contacted" else "Negociar"
+                stage_key = "contact" if row["lead_status"] == "contacted" else "negotiate"
                 address = row["address"] or ("lead #" + str(row["id"]))
                 if remaining_h <= 2 and not row["n2"]:
                     conn.execute(
                         "UPDATE lead_reveals SET notified_48h_2 = 1 WHERE id = ?", (row["reveal_id"],)
                     )
+                    msg_key = f"stage_urgent_{stage_key}"
                     conn.execute(
-                        """INSERT INTO notifications (user_id, type, title, message, lead_id)
-                           VALUES (?, 'stage_urgent', ?, ?, ?)""",
-                        (row["reserved_by"], "Últimas 2 horas!", f"A fase {which} do lead {address} expira em 2h.", row["id"]),
+                        """INSERT INTO notifications (user_id, type, title, message, lead_id, msg_key, msg_params)
+                           VALUES (?, 'stage_urgent', ?, ?, ?, ?, ?)""",
+                        (
+                            row["reserved_by"],
+                            "Last 2 hours!",
+                            f"The {'Contact' if stage_key == 'contact' else 'Negotiation'} stage for lead {address} expires in 2h.",
+                            row["id"],
+                            msg_key,
+                            json.dumps({"address": address}),
+                        ),
                     )
                     processed += 1
                 elif remaining_h <= 24 and not row["n24"]:
                     conn.execute(
                         "UPDATE lead_reveals SET notified_48h_24 = 1 WHERE id = ?", (row["reveal_id"],)
                     )
+                    msg_key = f"stage_warning_{stage_key}"
                     conn.execute(
-                        """INSERT INTO notifications (user_id, type, title, message, lead_id)
-                           VALUES (?, 'stage_warning', ?, ?, ?)""",
-                        (row["reserved_by"], "Faltam 24 horas", f"A fase {which} do lead {address} expira em 24h.", row["id"]),
+                        """INSERT INTO notifications (user_id, type, title, message, lead_id, msg_key, msg_params)
+                           VALUES (?, 'stage_warning', ?, ?, ?, ?, ?)""",
+                        (
+                            row["reserved_by"],
+                            "24 hours left",
+                            f"The {'Contact' if stage_key == 'contact' else 'Negotiation'} stage for lead {address} expires in 24h.",
+                            row["id"],
+                            msg_key,
+                            json.dumps({"address": address}),
+                        ),
                     )
                     processed += 1
 
@@ -12127,11 +12192,15 @@ class AsyncDatabaseService:
     async def add_push_subscription(
         self, user_id: int, endpoint: str, p256dh: str, auth: str,
         user_agent: str | None = None, device_label: str | None = None,
+        locale: str | None = None,
     ) -> bool:
         return await anyio.to_thread.run_sync(
             self._service.add_push_subscription, user_id, endpoint, p256dh, auth,
-            user_agent, device_label,
+            user_agent, device_label, locale,
         )
+
+    async def get_user_locale(self, user_id: int) -> str | None:
+        return await anyio.to_thread.run_sync(self._service.get_user_locale, user_id)
 
     async def remove_push_subscription(self, user_id: int, endpoint: str) -> bool:
         return await anyio.to_thread.run_sync(self._service.remove_push_subscription, user_id, endpoint)

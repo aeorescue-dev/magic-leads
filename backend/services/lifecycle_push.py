@@ -5,14 +5,16 @@ sao promovidos a push para quem ativou `lifecycle_push_enabled`. O aviso
 critico `reveal_urgent` (15 min para o lead voltar ao pool) e o unico que
 pode furar o silencio noturno — e a reserva paga do cliente que esta em jogo.
 """
+import json
 from datetime import datetime, timezone
 
 from ..utils.logger import logger
 from .access import is_access_active
-from .alert_planner import _is_quiet_hours
+from .alert_planner import _ios_variant, _is_quiet_hours
 from .db import db_service
 from .push_click import sign_click
 from .push_service import push_service
+from .translations import SUPPORTED, normalize, render
 
 _ICON = "https://www.magicleads.app/icons/push-icon-192.png"
 _BADGE = "https://www.magicleads.app/icons/push-badge-72.png"
@@ -21,6 +23,24 @@ _ACTION_LABELS = {
     "pt": ("Ver lead", "Dispensar"),
     "en": ("View lead", "Dismiss"),
     "es": ("Ver lead", "Descartar"),
+}
+
+_GENERIC_SUBJECT = {
+    "pt": "o seu lead",
+    "en": "your lead",
+    "es": "tu lead",
+}
+_GENERIC_CATEGORY = {
+    "pt": "o seu ofício",
+    "en": "your trade",
+    "es": "tu oficio",
+}
+_LEGACY_GROUPS = {
+    "reveal_timeout",
+    "reveal_urgent",
+    "reveal_followup",
+    "stage_urgent",
+    "stage_warning",
 }
 
 
@@ -48,38 +68,59 @@ async def dispatch_lifecycle_pushes(limit: int = 50) -> int:
             sig = sign_click(nid)
             lead_id = n.get("lead_id")
             url = f"/dashboard?lead={lead_id}&src=push&nid={nid}&sig={sig}"
-            labels = _ACTION_LABELS.get(
-                str(n.get("locale") or "pt").split("-")[0], _ACTION_LABELS["pt"]
-            )
-            payload = {
-                "title": n.get("title") or "Magic Leads",
-                "body": n.get("message") or "",
-                "icon": _ICON,
-                "badge": _BADGE,
-                "tag": f"lifecycle_{nid}",
-                "renotify": True,
-                "silent": False,
-                "leadId": lead_id,
-                "nid": nid,
-                "sig": sig,
-                "url": url,
-                "actions": [
-                    {"action": "open", "title": labels[0]},
-                    {"action": "dismiss", "title": labels[1]},
-                ],
-                "vibrate": [180, 90, 180] if ntype == "reveal_urgent" else [120, 80, 120],
-                "requireInteraction": ntype == "reveal_urgent",
-                "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
-            }
-            from .alert_planner import _ios_variant
-
+            params = {}
+            try:
+                params = json.loads(n.get("msg_params") or "{}")
+            except (TypeError, ValueError):
+                params = {}
+            msg_key = n.get("msg_key")
+            # Avisos antigos (antes da Fase 25) não têm msg_key. Nunca
+            # reenviamos o texto PT gravado: usamos o grupo genérico do tipo.
+            if not msg_key and ntype in _LEGACY_GROUPS:
+                msg_key = ntype
+            payloads = {}
+            for loc in SUPPORTED:
+                loc_params = params
+                if not params and ntype.startswith("reveal"):
+                    loc_params = {
+                        "subject": _GENERIC_SUBJECT[loc],
+                        "category": _GENERIC_CATEGORY[loc],
+                    }
+                rendered = render(msg_key, loc, **loc_params) if msg_key else None
+                title = (rendered or {}).get("title") or n.get("title") or "Magic Leads"
+                body = (rendered or {}).get("message") or n.get("message") or ""
+                view, dismiss = _ACTION_LABELS[loc]
+                payloads[loc] = {
+                    "title": title,
+                    "body": body,
+                    "icon": _ICON,
+                    "badge": _BADGE,
+                    "tag": f"lifecycle_{nid}",
+                    "renotify": True,
+                    "silent": False,
+                    "leadId": lead_id,
+                    "nid": nid,
+                    "sig": sig,
+                    "url": url,
+                    "actions": [
+                        {"action": "open", "title": view},
+                        {"action": "dismiss", "title": dismiss},
+                    ],
+                    "vibrate": [180, 90, 180] if ntype == "reveal_urgent" else [120, 80, 120],
+                    "requireInteraction": ntype == "reveal_urgent",
+                    "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
+                }
+            ios_payloads = {loc: _ios_variant(payloads[loc], loc) for loc in SUPPORTED}
+            loc0 = normalize(n.get("locale"))
             ok = await push_service.send_to_user(
                 int(n["user_id"]),
-                payload,
+                payloads[loc0],
                 "lifecycle",
                 ttl=3600,
                 urgency="high" if ntype == "reveal_urgent" else "normal",
-                ios_payload=_ios_variant(payload, n.get("locale")),
+                ios_payload=ios_payloads[loc0],
+                payloads_by_locale=payloads,
+                ios_payloads_by_locale=ios_payloads,
             )
             if ok:
                 await db_service.mark_notification_pushed(nid)

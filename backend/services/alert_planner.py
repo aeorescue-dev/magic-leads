@@ -39,6 +39,7 @@ from .lead_rules import (
 )
 from .push_click import sign_click
 from .translations import (
+    SUPPORTED,
     alert_confidence_label,
     alert_why_now,
     category_label,
@@ -65,6 +66,13 @@ _CITY_DISPLAY = {
     "CHICAGO": "Chicago",
     "DALLAS": "Dallas",
     "BOSTON": "Boston",
+}
+
+# Rótulos das ações do digest (o Android mostra-os; o iOS ignora-os).
+_DIGEST_ACTIONS = {
+    "pt": ("Ver oportunidades", "Dispensar"),
+    "en": ("View opportunities", "Dismiss"),
+    "es": ("Ver oportunidades", "Descartar"),
 }
 
 
@@ -679,20 +687,27 @@ async def dispatch_interests_onboarding(limit: int = 20) -> int:
         if not is_access_active(u.get("subscription_status"), u.get("plan_until")):
             continue
         locale = normalize(u.get("locale"))
-        title, body = {
+        texts = {
             "pt": (
                 "Escolha os seus ofícios",
                 "Só enviamos alertas das categorias que escolher. Leva 30 segundos.",
+                "Escolher ofícios",
+                "Dispensar",
             ),
             "en": (
                 "Choose your trades",
                 "We only send alerts for the categories you pick. Takes 30 seconds.",
+                "Choose trades",
+                "Dismiss",
             ),
             "es": (
                 "Elige tus oficios",
                 "Solo enviamos alertas de las categorías que elijas. Tarda 30 segundos.",
+                "Elegir oficios",
+                "Descartar",
             ),
-        }[locale]
+        }
+        title, body = texts[locale][0], texts[locale][1]
         try:
             row = await db_service.add_notification_for_user(
                 user_id=u["id"],
@@ -707,32 +722,31 @@ async def dispatch_interests_onboarding(limit: int = 20) -> int:
             if click:
                 url += f"?nid={click['nid']}&sig={click['sig']}"
             url += "#interests-config"
-            payload = {
-                "title": title,
-                "body": body,
-                "icon": _PUSH_ICON,
-                "badge": _PUSH_BADGE,
-                "tag": f"onboarding_{u['id']}",
-                "renotify": True,
-                "silent": False,
-                "url": url,
-                "actions": [
-                    {
-                        "action": "open",
-                        "title": {"pt": "Escolher ofícios", "en": "Choose trades", "es": "Elegir oficios"}[locale],
-                    },
-                    {
-                        "action": "dismiss",
-                        "title": {"pt": "Dispensar", "en": "Dismiss", "es": "Descartar"}[locale],
-                    },
-                ],
-                "vibrate": [120, 80, 120],
-                "timestamp": int(_now_utc().timestamp() * 1000),
-            }
-            payload.update(click)
+            payloads = {}
+            for loc in SUPPORTED:
+                _title, _body, view, dismiss = texts[loc]
+                payloads[loc] = {
+                    "title": _title,
+                    "body": _body,
+                    "icon": _PUSH_ICON,
+                    "badge": _PUSH_BADGE,
+                    "tag": f"onboarding_{u['id']}",
+                    "renotify": True,
+                    "silent": False,
+                    "url": url,
+                    "actions": [
+                        {"action": "open", "title": view},
+                        {"action": "dismiss", "title": dismiss},
+                    ],
+                    "vibrate": [120, 80, 120],
+                    "timestamp": int(_now_utc().timestamp() * 1000),
+                }
+                payloads[loc].update(click)
+            ios_payloads = {loc: _ios_variant(payloads[loc], loc) for loc in SUPPORTED}
             ok = await push_service.send_to_user(
-                u["id"], payload, "onboarding", ttl=settings.PUSH_TTL_DIGEST_S,
-                urgency="normal", ios_payload=_ios_variant(payload, locale),
+                u["id"], payloads[locale], "onboarding", ttl=settings.PUSH_TTL_DIGEST_S,
+                urgency="normal", ios_payload=ios_payloads[locale],
+                payloads_by_locale=payloads, ios_payloads_by_locale=ios_payloads,
             )
             if ok:
                 await db_service.mark_notification_pushed(row["id"])
@@ -789,35 +803,40 @@ async def dispatch_unconfigured_digest(by_cat: dict, quiet: bool, limit: int) ->
                 )
             except (ValueError, TypeError):
                 total_n = count
-            rendered = render(
-                "digest_b" if res.get("ab_variant") == "b" else "digest",
-                locale, n=total_n, limit=limit,
-            ) or {}
             click = _click_fields(res.get("id"))
             url = "/dashboard?src=push&digest=1"
             if click:
                 url += f"&nid={click['nid']}&sig={click['sig']}"
-            payload = {
-                "title": rendered.get("title") or tr("digest.title", locale),
-                "body": rendered.get("message")
-                or tr("digest.main_msg", locale, n=total_n, limit=limit),
-                "icon": _PUSH_ICON,
-                "badge": _PUSH_BADGE,
-                "tag": f"digest_{locale}",
-                "renotify": True,
-                "silent": False,
-                "url": url,
-                "actions": [
-                    {"action": "open", "title": "Ver oportunidades"},
-                    {"action": "dismiss", "title": "Dispensar"},
-                ],
-                "vibrate": [120, 80, 120],
-                "timestamp": int(_now_utc().timestamp() * 1000),
-            }
-            payload.update(click)
+            payloads = {}
+            for loc in SUPPORTED:
+                rendered = render(
+                    "digest_b" if res.get("ab_variant") == "b" else "digest",
+                    loc, n=total_n, limit=limit,
+                ) or {}
+                view, dismiss = _DIGEST_ACTIONS[loc]
+                payloads[loc] = {
+                    "title": rendered.get("title") or tr("digest.title", loc),
+                    "body": rendered.get("message")
+                    or tr("digest.main_msg", loc, n=total_n, limit=limit),
+                    "icon": _PUSH_ICON,
+                    "badge": _PUSH_BADGE,
+                    "tag": f"digest_{loc}",
+                    "renotify": True,
+                    "silent": False,
+                    "url": url,
+                    "actions": [
+                        {"action": "open", "title": view},
+                        {"action": "dismiss", "title": dismiss},
+                    ],
+                    "vibrate": [120, 80, 120],
+                    "timestamp": int(_now_utc().timestamp() * 1000),
+                }
+                payloads[loc].update(click)
+            ios_payloads = {loc: _ios_variant(payloads[loc], loc) for loc in SUPPORTED}
             ok = await push_service.send_to_user(
-                uid, payload, "digest", ttl=settings.PUSH_TTL_DIGEST_S,
-                urgency="normal", ios_payload=_ios_variant(payload, locale),
+                uid, payloads[locale], "digest", ttl=settings.PUSH_TTL_DIGEST_S,
+                urgency="normal", ios_payload=ios_payloads[locale],
+                payloads_by_locale=payloads, ios_payloads_by_locale=ios_payloads,
             )
             if ok:
                 sent += 1
@@ -979,35 +998,42 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
                     # mesmo run.
                     if push_jobs.get(uid):
                         continue
-                    rendered = render("digest", locale, n=total_n, limit=limit) or {}
                     click = _click_fields(res.get("id"))
                     digest_url = "/dashboard?src=push"
                     if click:
                         digest_url += f"&nid={click['nid']}&sig={click['sig']}"
-                    digest_payload = {
-                        "title": rendered.get("title") or tr("digest.title", locale),
-                        "body": rendered.get("message")
-                        or tr("digest.main_msg", locale, n=total_n, limit=limit),
-                        "icon": _PUSH_ICON,
-                        "badge": _PUSH_BADGE,
-                        "tag": f"digest_{normalize(locale)}",
-                        "url": digest_url,
-                        "actions": [
-                            {
-                                "action": "open",
-                                "title": "Ver oportunidades",
-                            },
-                            {"action": "dismiss", "title": "Dispensar"},
-                        ],
+                    digest_payloads = {}
+                    for loc in SUPPORTED:
+                        rendered = render("digest", loc, n=total_n, limit=limit) or {}
+                        view, dismiss = _DIGEST_ACTIONS[loc]
+                        digest_payloads[loc] = {
+                            "title": rendered.get("title") or tr("digest.title", loc),
+                            "body": rendered.get("message")
+                            or tr("digest.main_msg", loc, n=total_n, limit=limit),
+                            "icon": _PUSH_ICON,
+                            "badge": _PUSH_BADGE,
+                            "tag": f"digest_{loc}",
+                            "url": digest_url,
+                            "actions": [
+                                {"action": "open", "title": view},
+                                {"action": "dismiss", "title": dismiss},
+                            ],
+                        }
+                        digest_payloads[loc].update(click)
+                    digest_ios = {
+                        loc: _ios_variant(digest_payloads[loc], loc)
+                        for loc in SUPPORTED
                     }
-                    digest_payload.update(click)
+                    loc0 = normalize(locale)
                     await push_service.send_to_user(
                         uid,
-                        digest_payload,
+                        digest_payloads[loc0],
                         "digest",
                         ttl=settings.PUSH_TTL_DIGEST_S,
                         urgency="normal",
-                        ios_payload=_ios_variant(digest_payload, locale),
+                        ios_payload=digest_ios[loc0],
+                        payloads_by_locale=digest_payloads,
+                        ios_payloads_by_locale=digest_ios,
                     )
         except Exception as e:
             logger.error(f"Digest diário user={uid} falhou: {e}")
@@ -1048,26 +1074,37 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
                     and source in ("gps", "manual", "city")
                     and bool(getattr(settings, "PUSH_DISTANCE_ENABLED", True))
                 )
-                payload = _build_push_payload(
-                    lead,
-                    cat,
-                    signal,
-                    locale,
-                    distance,
-                    show_distance,
-                    pct,
-                    show_address,
-                    notification_id=nid,
-                    distance_source=source,
-                    base_label=base_label,
-                )
+                def _build(loc):
+                    return _build_push_payload(
+                        lead,
+                        cat,
+                        signal,
+                        loc,
+                        distance,
+                        show_distance,
+                        pct,
+                        show_address,
+                        notification_id=nid,
+                        distance_source=source,
+                        base_label=base_label,
+                    )
+
+                # Fase 25: payload pré-construído nos 3 idiomas; cada
+                # subscription recebe o do seu locale (sem fallback PT).
+                payloads = {loc: _build(loc) for loc in SUPPORTED}
+                ios_payloads = {
+                    loc: _ios_variant(payloads[loc], loc) for loc in SUPPORTED
+                }
+                loc0 = normalize(locale)
                 sent = await push_service.send_to_user(
                     uid,
-                    payload,
+                    payloads[loc0],
                     "lead_alert",
                     ttl=settings.PUSH_TTL_LEAD_S,
                     urgency="high" if signal == "legal_obligation" else "normal",
-                    ios_payload=_ios_variant(payload, locale),
+                    ios_payload=ios_payloads[loc0],
+                    payloads_by_locale=payloads,
+                    ios_payloads_by_locale=ios_payloads,
                 )
             else:
                 distances: dict = {}
@@ -1084,22 +1121,31 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
                     sig == "legal_obligation"
                     for (_lead, _cat, _nid, sig) in eligible
                 )
-                payload = _build_batch_payload(
-                    [(lead, cat) for (lead, cat, _nid, _sig) in eligible],
-                    locale,
-                    distances if show_distance else None,
-                    show_distance,
-                    eligible[0][2],
-                    distance_source=source,
-                    base_label=base_label,
-                )
+                def _build_batch(loc):
+                    return _build_batch_payload(
+                        [(lead, cat) for (lead, cat, _nid, _sig) in eligible],
+                        loc,
+                        distances if show_distance else None,
+                        show_distance,
+                        eligible[0][2],
+                        distance_source=source,
+                        base_label=base_label,
+                    )
+
+                batch_payloads = {loc: _build_batch(loc) for loc in SUPPORTED}
+                batch_ios = {
+                    loc: _ios_variant(batch_payloads[loc], loc) for loc in SUPPORTED
+                }
+                loc0 = normalize(locale)
                 sent = await push_service.send_to_user(
                     uid,
-                    payload,
+                    batch_payloads[loc0],
                     "lead_alert",
                     ttl=settings.PUSH_TTL_LEAD_S,
                     urgency="high" if has_legal else "normal",
-                    ios_payload=_ios_variant(payload, locale),
+                    ios_payload=batch_ios[loc0],
+                    payloads_by_locale=batch_payloads,
+                    ios_payloads_by_locale=batch_ios,
                 )
                 if sent:
                     report.batched += 1

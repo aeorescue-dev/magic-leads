@@ -166,6 +166,55 @@ TRANSLATIONS = {
             "push_tag": "enrichment_complete",
         },
     },
+    # Ciclo de vida (watchdog de reveals e fases). Antes eram strings PT
+    # hardcoded na BD; agora têm chave + params e são renderizadas no locale
+    # do destinatário (in-app e push).
+    "reveal_timeout": {
+        "pt": {"title": "🕒 Lead voltou ao pool", "main_msg": "{subject} voltou a ficar disponível para outros empreiteiros. Nenhum contato foi sinalizado em 1 hora."},
+        "en": {"title": "🕒 Lead returned to the pool", "main_msg": "{subject} is available to other contractors again. No contact was flagged within 1 hour."},
+        "es": {"title": "🕒 El lead volvió al pool", "main_msg": "{subject} vuelve a estar disponible para otros contratistas. No se marcó ningún contacto en 1 hora."},
+    },
+    "reveal_urgent": {
+        "pt": {"title": "🚨 Últimos 15 minutos!", "main_msg": "Você revelou {subject} ({category}) e ainda não sinalizou contato. Em 15 min o lead volta ao pool."},
+        "en": {"title": "🚨 Last 15 minutes!", "main_msg": "You revealed {subject} ({category}) and haven't flagged contact yet. In 15 min the lead returns to the pool."},
+        "es": {"title": "🚨 ¡Últimos 15 minutos!", "main_msg": "Revelaste {subject} ({category}) y aún no marcaste contacto. En 15 min el lead vuelve al pool."},
+    },
+    "reveal_followup": {
+        "pt": {"title": "⏰ Lead revelado, aguardando você", "main_msg": "Faltam 30 min para {subject} ({category}) voltar ao pool. Registre o contato ou ligue agora."},
+        "en": {"title": "⏰ Lead revealed, waiting on you", "main_msg": "30 min left before {subject} ({category}) returns to the pool. Flag the contact or call now."},
+        "es": {"title": "⏰ Lead revelado, esperando por ti", "main_msg": "Quedan 30 min para que {subject} ({category}) vuelva al pool. Marca el contacto o llama ahora."},
+    },
+    "stage_urgent_contact": {
+        "pt": {"title": "Últimas 2 horas!", "main_msg": "A fase Contactar do lead {address} expira em 2h."},
+        "en": {"title": "Last 2 hours!", "main_msg": "The Contact stage for lead {address} expires in 2h."},
+        "es": {"title": "¡Últimas 2 horas!", "main_msg": "La fase Contactar del lead {address} expira en 2h."},
+    },
+    "stage_urgent_negotiate": {
+        "pt": {"title": "Últimas 2 horas!", "main_msg": "A fase Negociar do lead {address} expira em 2h."},
+        "en": {"title": "Last 2 hours!", "main_msg": "The Negotiation stage for lead {address} expires in 2h."},
+        "es": {"title": "¡Últimas 2 horas!", "main_msg": "La fase Negociar del lead {address} expira en 2h."},
+    },
+    "stage_warning_contact": {
+        "pt": {"title": "Faltam 24 horas", "main_msg": "A fase Contactar do lead {address} expira em 24h."},
+        "en": {"title": "24 hours left", "main_msg": "The Contact stage for lead {address} expires in 24h."},
+        "es": {"title": "Quedan 24 horas", "main_msg": "La fase Contactar del lead {address} expira en 24h."},
+    },
+    "stage_warning_negotiate": {
+        "pt": {"title": "Faltam 24 horas", "main_msg": "A fase Negociar do lead {address} expira em 24h."},
+        "en": {"title": "24 hours left", "main_msg": "The Negotiation stage for lead {address} expires in 24h."},
+        "es": {"title": "Quedan 24 horas", "main_msg": "La fase Negociar del lead {address} expira en 24h."},
+    },
+    # Fallback para avisos antigos sem msg_key (criados antes da Fase 25).
+    "stage_urgent": {
+        "pt": {"title": "Últimas 2 horas!", "main_msg": "Uma fase do seu lead expira em 2h."},
+        "en": {"title": "Last 2 hours!", "main_msg": "A stage of your lead expires in 2h."},
+        "es": {"title": "¡Últimas 2 horas!", "main_msg": "Una fase de tu lead expira en 2h."},
+    },
+    "stage_warning": {
+        "pt": {"title": "Faltam 24 horas", "main_msg": "Uma fase do seu lead expira em 24h."},
+        "en": {"title": "24 hours left", "main_msg": "A stage of your lead expires in 24h."},
+        "es": {"title": "Quedan 24 horas", "main_msg": "Una fase de tu lead expira en 24h."},
+    },
 }
 
 

@@ -46,6 +46,23 @@ utilizador pode ter Android e iOS e receber payloads diferentes.
 o SW chama `/api/push/click` e o backend regista `push_deliveries.clicked_at`.
 Sem segredo, o clique continua a abrir o lead mas não é medido (fail-closed).
 
+## Idioma (i18n estrita — Fase 25)
+
+- `push_subscriptions.locale` guarda o idioma do destinatário. É preenchido no
+  registo (com fallback SQL para `users.locale`) e **atualizado** sempre que o
+  utilizador muda o idioma (`update_user_locale` → todas as subscriptions).
+- O envio resolve o locale **por dispositivo**: `subscription.locale` →
+  `users.locale` → `en` (nunca PT por omissão). O mesmo utilizador com um
+  Android em EN e um iPhone em ES recebe textos diferentes.
+- Todos os textos do alerta são gerados nesse locale: título (sinal + ofício),
+  morada, distância exata/aproximada, contexto, confiança do telefone, ações e
+  CTA iOS, digest, onboarding e avisos de ciclo de vida.
+- Avisos de ciclo de vida passaram a gravar `msg_key` + `msg_params` (antes
+  eram strings PT hardcoded) e são renderizados nos 3 idiomas. Linhas antigas
+  sem `msg_key` usam um fallback genérico localizado — nunca o texto PT gravado.
+- Testes `tests/test_push_i18n.py`: payloads EN/ES sem vocabulário PT, distância
+  nos 3 idiomas, CTA iOS, propagação do locale na BD e escolha por subscription.
+
 ## Matriz de validação em dispositivo
 
 | Cenário | Esperado |
