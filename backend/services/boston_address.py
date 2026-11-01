@@ -74,6 +74,28 @@ def clean_boston_location(
     return street.strip(" ,"), (zip_match.group(1) if zip_match else fallback)
 
 
+def parcel_filters(
+    num: Optional[str], street_norm: Optional[str]
+) -> Optional[dict]:
+    """Filtros exactos (ST_NUM/ST_NAME) do parcel dataset de Boston.
+
+    A pesquisa `q` do CKAN é OR: `"132 bernard"` devolve imóveis com "132" em
+    qualquer campo (132 Beaver, ...) e o número certo raramente entra no
+    top-50. Os filtros `ST_NUM`+`ST_NAME` são exactos e indexados. `ST_NAME`
+    inclui o prefixo direcional quando existe ("W BROADWAY").
+    """
+    tokens = str(street_norm or "").split()
+    if not num or not tokens:
+        return None
+    if tokens[-1].strip(".,") in _STREET_SUFFIXES:
+        name = " ".join(tokens[:-1]).strip()
+    else:
+        name = " ".join(tokens).strip()
+    if not name:
+        return None
+    return {"ST_NUM": str(num).strip(), "ST_NAME": name}
+
+
 def parcel_match_key(full_address: Optional[str]) -> Optional[tuple[str, str]]:
     """(número, rua) de uma morada do parcel dataset, ignorando a unidade.
 
@@ -93,9 +115,9 @@ def parcel_match_key(full_address: Optional[str]) -> Optional[tuple[str, str]]:
         return None
     num = re.sub(r"\s+", "", match.group(1))
     tokens = match.group(2).split()
-    # Intervalo escrito com espaço ("604 608 COLUMBUS AV"): o primeiro
-    # número é a chave; o segundo é a outra extremidade do intervalo.
-    if len(tokens) > 1 and tokens[0].isdigit():
+    # Intervalo escrito com espaço ("604 608 COLUMBUS AV", "107 -109 SAVIN
+    # HILL AV 1"): o segundo número é a outra extremidade, não a rua.
+    if len(tokens) > 1 and re.fullmatch(r"-?\d+[A-Za-z]?", tokens[0]):
         tokens = tokens[1:]
     cut = None
     for idx, tok in enumerate(tokens):
@@ -107,3 +129,18 @@ def parcel_match_key(full_address: Optional[str]) -> Optional[tuple[str, str]]:
     if not street:
         return None
     return num, street
+
+
+def parcel_has_unit(full_address: Optional[str]) -> bool:
+    """True se a morada do parcel traz unidade/andar depois do sufixo da via."""
+    text = " ".join(str(full_address or "").upper().split())
+    match = _HOUSE_RE.match(text)
+    if not match:
+        return False
+    tokens = match.group(2).split()
+    if len(tokens) > 1 and re.fullmatch(r"-?\d+[A-Za-z]?", tokens[0]):
+        tokens = tokens[1:]
+    for idx, tok in enumerate(tokens):
+        if tok.strip(".,") in _STREET_SUFFIXES:
+            return idx < len(tokens) - 1
+    return False

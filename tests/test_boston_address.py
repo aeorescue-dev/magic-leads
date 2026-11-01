@@ -9,8 +9,13 @@ from __future__ import annotations
 
 import pytest
 
-from backend.services.boston_address import clean_boston_location, parcel_match_key
-from backend.services.enrichment import normalize_street, parse_address
+from backend.services.boston_address import (
+    clean_boston_location,
+    parcel_filters,
+    parcel_has_unit,
+    parcel_match_key,
+)
+from backend.services.enrichment import _number_overlap, normalize_street, parse_address
 
 
 @pytest.mark.parametrize(
@@ -100,3 +105,49 @@ def test_parcel_key_matches_311_after_normalization():
         parcel[0],
         normalize_street(parcel[1]),
     )
+
+
+def test_parcel_filters_strip_suffix_and_keep_directional():
+    assert parcel_filters("357", "MASSACHUSETTS AVE") == {
+        "ST_NUM": "357",
+        "ST_NAME": "MASSACHUSETTS",
+    }
+    assert parcel_filters("81", "CHARLES ST") == {
+        "ST_NUM": "81",
+        "ST_NAME": "CHARLES",
+    }
+    assert parcel_filters("374", "W BROADWAY") == {
+        "ST_NUM": "374",
+        "ST_NAME": "W BROADWAY",
+    }
+    assert parcel_filters("", "CHARLES ST") is None
+    assert parcel_filters("81", "") is None
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("526   COLUMBUS AV 2", True),
+        ("526   COLUMBUS AV ", False),
+        ("980 970 AMERICAN LEGION HW ", False),
+        ("INTERSECTION of X", False),
+    ],
+)
+def test_parcel_has_unit(raw, expected):
+    assert parcel_has_unit(raw) is expected
+
+
+@pytest.mark.parametrize(
+    "num, row_num, expected",
+    [
+        ("970", "980 970", True),
+        ("81-83", "81 83", True),
+        ("132", "132A", True),
+        ("132", "1320", False),
+        ("132", "1132", False),
+        ("132", None, False),
+        (None, "132", False),
+    ],
+)
+def test_number_overlap(num, row_num, expected):
+    assert _number_overlap(num, row_num) is expected

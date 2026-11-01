@@ -1363,6 +1363,35 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   distância nos 3 idiomas, CTA iOS, propagação do locale na BD e escolha por
   subscription. Total **1102 pytest** · 97 vitest · tsc/build/lint limpos.
 
+### Fase 26 — P0/P1 da auditoria de garimpagem (2026-11-01)
+
+- **Boston (moradas)**: `clean_boston_location` remove o sufixo duplicado
+  `, Boston, MA` e separa rua/ZIP na ingestao; `parcel_match_key` ignora a
+  unidade do parcel dataset (`526 COLUMBUS AV 2`); `normalize_street` mapeia
+  `AV` -> `AVE`. Backfill idempotente `backend/scripts/backfill_boston.py`:
+  7.705 moradas normalizadas e owners **4.404 -> 7.206 (71,4%)**; 1.911
+  interseccoes nao sao imoveis. `enrich_enabled=1` para Boston.
+  Residual: ~1.000 duplicados do mesmo imovel cujo UPDATE colide com o indice
+  unico `address+city`; owner preenchido, fusao segura fica para fase propria.
+- **Ingestao**: scheduler interno ancorado ao relogio (ultimo sucesso na BD,
+  dispara logo se vencido, retry 30 min) em vez de `sleep(6h)` pos-boot;
+  arranque do run persistido; webhook com `trigger` real.
+- **Watchdog**: a cada 30 min alerta cidade >24h (`MAX(date_reported)`),
+  2 runs com `inserted=0`, anomalia por cidade e run vencido (~10,5h);
+  dedupe 6h e recolha forcada com cooldown 3h. Anomalia passou a olhar para
+  `inserted`, nao para raw. Primeiro alerta real em producao:
+  `SCRAPER_CITY_STALE:BOSTON` (48,4h) as 22:41 UTC.
+- **Quotas**: dominio por cidade = `BRAVE_DAILY_QUERIES // cidades_activas`
+  (250/4 = 62) e `deferred` sem gastar tentativa quando o orcamento acaba
+  (hoje 780/250, ja esgotado). `domain_jobs_today` separa a quota.
+- **Owners NULL**: backfill em lote com cursor e quota 200/cidade/dia
+  (`owner_backfill.py`), 1 s entre lookups, retry sem abortar o lote.
+- **Numeros de producao (22:5x UTC)**: NYC 51.539 (285 factos 24h, owner
+  85,9%); Chicago 29.137 (645 factos 24h, owner 74,9%); Dallas 16.341
+  (72 factos 24h, owner 60,8%); Boston 10.099 (2 factos 24h, owner 71,4%).
+- **Testes**: **1.148 pytest** (+46; 1 skipped) e CI ruff (em `./backend`)
+  verde. `docs/INGESTION-HEALTH.md` e o runbook.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

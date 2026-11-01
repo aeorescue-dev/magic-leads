@@ -10,6 +10,7 @@ Estratégia multicaminho para máxima consistência:
 Por cidade, usa o dataset Socrata/CKAN que contém owner + endereço no mesmo registro.
 """
 import asyncio
+import json
 import random
 import re
 from datetime import date
@@ -19,7 +20,7 @@ import httpx
 
 from ..config import settings
 from ..utils.logger import logger
-from .boston_address import parcel_match_key
+from .boston_address import parcel_filters, parcel_has_unit, parcel_match_key
 
 # Retry configuration for enrichment
 ENRICHMENT_MAX_RETRIES = 3
@@ -170,6 +171,19 @@ ENRICHMENT_BASE_BACKOFF = 1.0  # seconds
 ENRICHMENT_MAX_BACKOFF = 30.0  # seconds
 
 
+def _number_overlap(num: Optional[str], row_num: Optional[str]) -> bool:
+    """True se os numeros/intervalos se sobrepoem (970 vs 980 970)."""
+
+    def _ints(value: Optional[str]) -> list[int]:
+        return [int(x) for x in re.findall(r"\d+", str(value or ""))]
+
+    a = _ints(num)
+    b = _ints(row_num)
+    if not a or not b:
+        return False
+    return min(a) <= max(b) and min(b) <= max(a)
+
+
 class OwnerEnrichment:
     """Consultas de nome do proprietário + mailing address por endereço (com cache)."""
 
@@ -262,10 +276,14 @@ class OwnerEnrichment:
             logger.debug(f"Sem numero de imovel em {address!r} — owner nao atribuido")
             return None
 
+        # Comparacoes e filtros (ST_NAME, LIKE) sao em maiusculas: as fontes
+        # devolvem moradas em caixa alta e o 311 de Boston em caixa mista.
+        street_norm = normalize_street(street)
+
         if cfg["type"] == "socrata":
-            return await self._lookup_socrata(address, num, street, cfg)
+            return await self._lookup_socrata(address, num, street_norm, cfg)
         elif cfg["type"] == "ckan":
-            return await self._lookup_ckan(address, num, street, cfg)
+            return await self._lookup_ckan(address, num, street_norm, cfg)
         return None
 
     async def _lookup_by_bbl(self, bbl: str, cfg: Dict) -> Optional[Dict[str, Any]]:
@@ -459,7 +477,137 @@ class OwnerEnrichment:
                         return None
         return None
 
-    async def _lookup_ckan(self, original_address: str, num: str, street_norm: str, cfg: Dict) -> Optional[Dict[str, Any]]:
+    async def _ckan_fetch(self, base: str, params: dict) -> Optional[list]:
+        """GET ao CKAN com retry; devolve records ou None (nunca rebenta)."""
+        for attempt in range(ENRICHMENT_MAX_RETRIES + 1):
+            try:
+                async with httpx.AsyncClient(timeout=90) as client:
+                    resp = await client.get(
+                        base, params=params, headers=self._headers()
+                    )
+                    if resp.status_code != 200:
+                        if attempt < ENRICHMENT_MAX_RETRIES:
+                            wait_time = min(
+                                ENRICHMENT_BASE_BACKOFF * (2 ** attempt)
+                                + random.uniform(0, 0.5),
+                                30.0,
+                            )
+                            logger.warning(
+                                "CKAN %s status %s (tentativa %s/%s). Retry em %.1fs",
+                                params.get("resource_id"),
+                                resp.status_code,
+                                attempt + 1,
+                                ENRICHMENT_MAX_RETRIES + 1,
+                                wait_time,
+                            )
+                            await asyncio.sleep(wait_time)
+                            continue
+                        return None
+                    payload = resp.json()
+                    if not payload.get("success"):
+                        return None
+                    return list(payload["result"].get("records") or [])
+            except httpx.HTTPError as e:
+                if attempt < ENRICHMENT_MAX_RETRIES:
+                    wait_time = min(
+                        ENRICHMENT_BASE_BACKOFF * (2 ** attempt)
+                        + random.uniform(0, 0.5),
+                        30.0,
+                    )
+                    logger.warning(
+                        "Erro enrichment CKAN (tentativa %s/%s): %s. Retry em %.1fs",
+                        attempt + 1,
+                        ENRICHMENT_MAX_RETRIES + 1,
+                        e,
+                        wait_time,
+                    )
+                    await asyncio.sleep(wait_time)
+                    continue
+                logger.warning("Erro enrichment CKAN: %s", e)
+                return None
+            except Exception:  # noqa: BLE001
+                logger.warning("Erro inesperado enrichment CKAN")
+                return None
+        return None
+
+    def _match_ckan(
+        self, records: list, cfg: Dict, num: str, street_norm: str,
+        original_address: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Escolhe o registo certo; nunca devolve o vizinho por engano."""
+        street_col = cfg["street_col"]
+        exact = []
+        for row in records:
+            full_addr = str(row.get(street_col) or "").upper()
+            row_key = parcel_match_key(full_addr)
+            if not row_key or not num:
+                continue
+            row_num, row_street = row_key
+            if (
+                row_num == str(num).strip()
+                and normalize_street(row_street) == street_norm
+            ):
+                exact.append(row)
+        if exact:
+            # Condominios: preferir a linha sem unidade (dono do edificio).
+            for row in exact:
+                if not parcel_has_unit(row.get(street_col)):
+                    return self._build_result(row, cfg, original_address)
+            return self._build_result(exact[0], cfg, original_address)
+
+        # Intervalos ("980 970 AMERICAN LEGION HW", "81-83 CHARLES ST") e
+        # números com letra não passam no filtro exacto ST_NUM. Casar por
+        # sobreposição numérica na mesma rua.
+        if num:
+            for row in records:
+                full_addr = str(row.get(street_col) or "").upper()
+                row_key = parcel_match_key(full_addr)
+                if not row_key:
+                    continue
+                _, row_street = row_key
+                if normalize_street(row_street) != street_norm:
+                    continue
+                if _number_overlap(num, row.get("ST_NUM") or row_key[0]):
+                    return self._build_result(row, cfg, original_address)
+
+        for row in records:
+            full_addr = str(row.get(street_col) or "").upper()
+            if street_norm and street_norm in full_addr:
+                if num:
+                    addr_part = full_addr.split(",")[0].strip()
+                    addr_num = (
+                        addr_part.split(" ")[0] if " " in addr_part else addr_part
+                    )
+                    if (
+                        addr_num == num
+                        or addr_num.startswith(num)
+                        or num.startswith(addr_num)
+                    ):
+                        return self._build_result(row, cfg, original_address)
+                else:
+                    return self._build_result(row, cfg, original_address)
+
+        orig_norm = normalize_street(original_address.split(",")[0].strip().upper())
+        for row in records:
+            full_addr = str(row.get(street_col) or "").upper()
+            row_norm = normalize_street(full_addr.split(",")[0].strip())
+            if orig_norm == row_norm:
+                return self._build_result(row, cfg, original_address)
+
+        # Sem correspondencia: so aceitar quando existe um unico candidato.
+        if len(records) == 1:
+            logger.warning(
+                "CKAN %s: a unica resposta para %r nao casou com a rua; "
+                "atribuido por unico candidato",
+                cfg["dataset"],
+                original_address,
+            )
+            return self._build_result(records[0], cfg, original_address)
+        return None
+
+    async def _lookup_ckan(
+        self, original_address: str, num: str, street_norm: str, cfg: Dict
+    ) -> Optional[Dict[str, Any]]:
         domain = cfg["domain"]
         dset = cfg["dataset"]
         base = f"https://{domain}/api/3/action/datastore_search"
@@ -475,98 +623,48 @@ class OwnerEnrichment:
             fields.append(cfg["street_col"])
         if cfg.get("zip_col"):
             fields.append(cfg["zip_col"])
+        # ST_NUM permite casar intervalos ("980 970 AMERICAN LEGION HW").
+        fields.append("ST_NUM")
 
         street_search = street_norm.split()[0] if street_norm else ""
         if not street_search:
             return None
-        # Incluir o número na query: "columbus" devolve 1.092 imóveis e os 10
-        # primeiros nunca incluem o número pedido (Boston tem ruas muito
-        # compridas). "2 columbus" restringe aos candidatos certos.
-        query = f"{num} {street_search}".strip() if num else street_search
-
-        for attempt in range(ENRICHMENT_MAX_RETRIES + 1):
-            try:
-                async with httpx.AsyncClient(timeout=90) as client:
-                    resp = await client.get(base, params={
-                        "resource_id": dset,
-                        "limit": "50",
-                        "fields": ",".join(fields),
-                        "q": query,
-                    }, headers=self._headers())
-                    if resp.status_code != 200:
-                        if attempt < ENRICHMENT_MAX_RETRIES:
-                            wait_time = min(ENRICHMENT_BASE_BACKOFF * (2 ** attempt) + random.uniform(0, 0.5), 30.0)
-                            logger.warning(f"CKAN {domain} status {resp.status_code} (tentativa {attempt + 1}/{ENRICHMENT_MAX_RETRIES + 1}). Retry em {wait_time:.1f}s")
-                            await asyncio.sleep(wait_time)
-                            continue
-                        return None
-                    result = resp.json()
-                    break
-            except httpx.HTTPError as e:
-                if attempt < ENRICHMENT_MAX_RETRIES:
-                    wait_time = min(ENRICHMENT_BASE_BACKOFF * (2 ** attempt) + random.uniform(0, 0.5), 30.0)
-                    logger.warning(f"Erro enrichment CKAN {domain} (tentativa {attempt + 1}/{ENRICHMENT_MAX_RETRIES + 1}): {e}. Retry em {wait_time:.1f}s")
-                    await asyncio.sleep(wait_time)
-                    continue
-                logger.warning(f"Erro enrichment CKAN {domain}: {e}")
-                return None
-            except Exception:
-                logger.warning(f"Erro inesperado enrichment CKAN {domain}")
-                return None
-        else:
-            return None
-
-        if not result.get("success"):
-            return None
-
-        records = result["result"].get("records", [])
-        if not records:
-            return None
-
-        for row in records:
-            full_addr = str(row.get(cfg["street_col"]) or "").upper()
-            row_key = parcel_match_key(full_addr)
-            if row_key and num:
-                row_num, row_street = row_key
-                if (
-                    row_num == str(num).strip()
-                    and normalize_street(row_street) == street_norm
-                ):
-                    return self._build_result(row, cfg, original_address)
-            if street_norm in full_addr:
-                if num:
-                    addr_part = full_addr.split(",")[0].strip()
-                    addr_num = addr_part.split(" ")[0] if " " in addr_part else addr_part
-                    if addr_num == num:
-                        return self._build_result(row, cfg, original_address)
-                    # Fallback: prefix match for house number (e.g. "67" matches "67-69")
-                    if addr_num.startswith(num) or num.startswith(addr_num):
-                        return self._build_result(row, cfg, original_address)
-                return self._build_result(row, cfg, original_address)
-
-        # Fallback 2: try matching by normalized full address comparison
-        orig_norm = normalize_street(original_address.split(",")[0].strip().upper())
-        for row in records:
-            full_addr = str(row.get(cfg["street_col"]) or "").upper()
-            row_norm = normalize_street(full_addr.split(",")[0].strip())
-            if orig_norm == row_norm:
-                return self._build_result(row, cfg, original_address)
-
-        # Nenhum registo casou com a rua nem com o numero. Antes devolvia
-        # records[0] sem condicao: se a consulta trouxesse imoveis de outra
-        # rua, o dono errado era atribuido a este imovel e o cliente pagava
-        # por essa pessoa. So se aceita sem correspondencia quando existe um
-        # unico candidato, em que ele e de facto a resposta da consulta.
-        if len(records) == 1:
-            logger.warning(
-                f"CKAN {cfg['dataset']}: a unica resposta para {original_address!r} "
-                f"nao casou com a rua; atribuido por unico candidato"
+        common = {
+            "resource_id": dset,
+            "limit": "50",
+            "fields": ",".join(fields),
+        }
+        # 1) filtros exactos ST_NUM/ST_NAME (o `q` do CKAN e' OR e falha em
+        # ruas compridas); 2) fallback de texto para ranges/unidades.
+        tries: list[dict] = []
+        filters = parcel_filters(num, street_norm)
+        if filters:
+            tries.append({**common, "filters": json.dumps(filters)})
+            # Rua sem número: apanha intervalos e unidades. Ordenar por
+            # ST_NUM e trazer 500 porque o intervalo pode estar no meio.
+            tries.append(
+                {
+                    **common,
+                    "limit": "500",
+                    "sort": "ST_NUM asc",
+                    "filters": json.dumps({"ST_NAME": filters["ST_NAME"]}),
+                }
             )
-            return self._build_result(records[0], cfg, original_address)
+        query = f"{num} {street_search}".strip() if num else street_search
+        tries.append({**common, "q": query})
+
+        for params in tries:
+            records = await self._ckan_fetch(base, params)
+            if not records:
+                continue
+            match = self._match_ckan(
+                records, cfg, num, street_norm, original_address
+            )
+            if match:
+                return match
 
         logger.warning(
-            f"CKAN {cfg['dataset']}: {len(records)} respostas para "
-            f"{original_address!r} e nenhuma casou com a rua; owner nao atribuido"
+            "CKAN %s: nenhuma resposta casou com %r", dset, original_address
         )
         return None
 
