@@ -32,6 +32,7 @@ _overpass_lock = asyncio.Lock()
 _last_overpass_at = 0.0
 _run_lock = asyncio.Lock()
 _source_lock = asyncio.Lock()
+_ticks = [0]
 _discovery = CompanyDiscovery()
 SOURCE_INTERVAL_DAYS = 7
 LICENSES_PER_RUN = 2000
@@ -205,6 +206,7 @@ async def _ingest_sources(now: datetime) -> dict:
                     limit=LICENSES_PER_RUN
                 )
                 await db_service.set_system_kv("licenses_last_run", day)
+                await db_service.checkpoint()
             except Exception as exc:  # noqa: BLE001
                 logger.warning("[ENRICH-SCHED] licencas falharam: %s", exc)
                 out["licenses"] = {"status": "error"}
@@ -213,6 +215,7 @@ async def _ingest_sources(now: datetime) -> dict:
             try:
                 out["osm"] = await osm_extract.ingest_all(limit_per_city=OSM_PER_CITY)
                 await db_service.set_system_kv("osm_last_run", day)
+                await db_service.checkpoint()
             except Exception as exc:  # noqa: BLE001
                 logger.warning("[ENRICH-SCHED] OSM falhou: %s", exc)
                 out["osm"] = {"status": "error"}
@@ -240,6 +243,9 @@ async def scheduler_loop() -> None:
             await asyncio.sleep(TICK_SECONDS)
             await run_once()
             asyncio.create_task(_ingest_sources(datetime.now(timezone.utc)))
+            _ticks[0] += 1
+            if _ticks[0] % 30 == 0:
+                await db_service.checkpoint()
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001

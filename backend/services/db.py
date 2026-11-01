@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import shutil
 import smtplib
 import socket
 import sqlite3
@@ -1214,6 +1215,9 @@ def get_connection() -> sqlite3.Connection:
         # Evita "database is locked" sob concorrência (scraper + API + webhook).
         conn.execute("PRAGMA busy_timeout=10000;")
         conn.execute("PRAGMA synchronous=NORMAL;")
+        # O volume do Railway e' pequeno (434 MB). Sem este limite o WAL chegou
+        # a 257 MB e encheu o disco, produzindo "disk I/O error" em producao.
+        conn.execute("PRAGMA journal_size_limit=67108864;")
     except sqlite3.OperationalError:
         pass  # fs read-only (serverless) — segue com leitura
     try:
@@ -4040,6 +4044,24 @@ class DatabaseService:
             return cur.rowcount > 0
         finally:
             conn.close()
+
+    def checkpoint(self) -> None:
+        """Forca checkpoint do WAL (disco do Railway e' pequeno)."""
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        try:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+        except sqlite3.OperationalError:
+            pass
+        finally:
+            conn.close()
+
+    def data_free_mb(self) -> int:
+        try:
+            return shutil.disk_usage(os.path.dirname(DB_PATH) or ".").free // (
+                1024 * 1024
+            )
+        except OSError:
+            return 10**6
 
     def get_system_kv(self, key: str) -> Optional[str]:
         conn = get_connection()
@@ -12616,6 +12638,12 @@ class AsyncDatabaseService:
 
     async def get_system_kv(self, key: str) -> Optional[str]:
         return await anyio.to_thread.run_sync(self._service.get_system_kv, key)
+
+    async def checkpoint(self) -> None:
+        return await anyio.to_thread.run_sync(self._service.checkpoint)
+
+    async def data_free_mb(self) -> int:
+        return await anyio.to_thread.run_sync(self._service.data_free_mb)
 
     async def set_system_kv(self, key: str, value: str) -> None:
         return await anyio.to_thread.run_sync(self._service.set_system_kv, key, value)

@@ -173,6 +173,13 @@ async def record_entities(records: list[dict], max_records: int = 2000) -> dict:
     """
     if not records:
         return {"saved": 0, "failed": 0, "total": 0, "unique": 0}
+    free_mb = await db_service.data_free_mb()
+    if free_mb < 120:
+        logger.warning(
+            "[ENTITIES] disco quase cheio (%s MB livres): ingestao adiada", free_mb
+        )
+        return {"saved": 0, "failed": 0, "total": len(records),
+                "unique": 0, "skipped": "disk_full"}
     seen: set[tuple] = set()
     unique: list[dict] = []
     for rec in records:
