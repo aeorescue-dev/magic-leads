@@ -1086,6 +1086,20 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   exportação/parceria.
 - **Testes**: 1041 pytest.
 
+### Fase 10 — Brave 2.000/dia, quota corrigida e ramp (2026-11-01)
+
+- **Brave**: `BRAVE_DAILY_QUERIES=2000` na Railway (≈$10/dia no pico) e
+  disjuntor para 401/402/429: se a Brave recusar por quota/plano, o dia fica
+  marcado em `system_kv` e o provider para de consumir. No primeiro check:
+  758 usadas de 2.000.
+- **Quota por cidade corrigida**: `bump_city_enrichment_state` sobrescrevia
+  `jobs_today` com o valor do último ciclo (mostrava "hoje 4/750" e nunca
+  bloqueava). Agora acumula no mesmo dia e reseta à meia-noite; teste cobre.
+- **Ramp**: as duas caixas mantêm 2/dia e o avaliador devolve `hold: interval`
+  — a subida para 3/dia acontece na janela de 03/11, como desenhado (2 dias
+  por degrau). Bounce 0,0% e complaint 0,0% em 30 dias.
+- **Testes**: 1043 pytest.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
