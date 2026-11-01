@@ -159,7 +159,7 @@ def extract_from_pbf(
 async def download_extract(url: str, dest: str) -> bool:
     """Descarrega o .pbf para /tmp com limite de tamanho. False em falha."""
     try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
             async with client.stream("GET", url) as resp:
                 if resp.status_code != 200:
                     logger.warning("[OSM] HTTP %s em %s", resp.status_code, url)
