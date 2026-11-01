@@ -545,6 +545,13 @@ def test_assinatura_segue_a_caixa_que_envia():
     assert _signature_for({"email": "pedro@magicleads.app"}) == "Pedro"
     assert _signature_for({"email": "ops-team@example.com"}) == "Opsteam"
     assert _signature_for({"email": ""}) == "Pamela"
+    # O display_name manda: "Peter Ross" assina Peter (nao Pedro).
+    assert _signature_for(
+        {"email": "pedro@magicleads.app", "display_name": "Peter Ross"}
+    ) == "Peter"
+    assert _signature_for(
+        {"email": "pamela@magicleads.app", "display_name": "Pamela Clark"}
+    ) == "Pamela"
 
 
 def test_engine_claim_outbound_message_is_atomic(engine):

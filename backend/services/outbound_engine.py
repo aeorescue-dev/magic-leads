@@ -112,10 +112,15 @@ def day_key(now: Optional[datetime] = None) -> str:
 
 
 def _signature_for(mailbox: dict) -> str:
-    """Assinatura = nome da caixa que envia (pamela@ -> 'Pamela').
+    """Assinatura = primeiro nome da caixa (display_name manda).
 
-    Antes era sempre 'Pamela', mesmo quando quem enviava era o Pedro.
+    "Pamela Clark <pamela@...>" assina "Pamela"; "Peter Ross <pedro@...>"
+    assina "Peter" (antes assinava "Pedro", diferente do remetente).
     """
+    display = " ".join(str((mailbox or {}).get("display_name") or "").split())
+    first = display.split(" ")[0] if display else ""
+    if first.isalpha() and len(first) >= 2:
+        return first[:1].upper() + first[1:].lower()
     local = str((mailbox or {}).get("email") or "").split("@")[0]
     local = "".join(ch for ch in local if ch.isalpha())
     if len(local) < 2:
