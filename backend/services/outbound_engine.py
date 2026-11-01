@@ -318,8 +318,9 @@ class OutboundEngine:
         count_for_copy = await db_service.count_qualified_contractors_in_city(
             city, categories
         )
-        if count_for_copy <= 0:
-            count_for_copy = len(leads)
+        # O fallback antigo (`len(leads)`) contava DESTINATARIOS como projetos:
+        # numa cidade sem inventario real o copy diria "50 X projects" com 0.
+        # Destinatario nao e' inventario — sem oportunidades, o lote e' bloqueado.
 
         # BLOQUEIO DURO: sem inventario qualificado nao se cria nem promove lote.
         # Antes disto, um lote vazio saia da mesma forma e o copy dizia "0 ...".

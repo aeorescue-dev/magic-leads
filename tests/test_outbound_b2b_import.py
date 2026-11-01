@@ -208,6 +208,7 @@ async def test_enqueue_enfileira_import_b2b(clean_city):
 
 @pytest.mark.asyncio
 async def test_enqueue_aceita_status_verified_e_import_sem_status(clean_city):
+    _seed_permits(5)  # inventario real: destinatario B2B nao e' "projeto"
     lead_id = _import("peter@peter-ross.com")["lead_id"]
     svc = _svc()
     svc.upsert_outbound_contact(
@@ -228,6 +229,20 @@ async def test_enqueue_aceita_status_verified_e_import_sem_status(clean_city):
 
     result = await OutboundEngine().enqueue_batch(_batch(batch_size=1))
     assert result["queued"] == 1, result
+
+
+@pytest.mark.asyncio
+async def test_sem_inventario_real_bloqueia_lote_mesmo_com_destinatarios(clean_city):
+    """B2B e' destinatario: sem oportunidades reais nao ha lote nem copy."""
+    lead_id = _import("solo@peter-ross.com")["lead_id"]
+    _svc().upsert_outbound_contact(
+        lead_id=lead_id, email="solo@peter-ross.com", city=CITY,
+        email_source="import", email_status="valid",
+    )
+    result = await OutboundEngine().enqueue_batch(_batch(batch_size=1))
+    assert result["status"] == "blocked"
+    assert result["reason"] == "no_inventory"
+    assert result["queued"] == 0
 
 
 def test_is_sendable_contact_regras():
