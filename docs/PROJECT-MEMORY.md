@@ -1368,9 +1368,13 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Boston (moradas)**: `clean_boston_location` remove o sufixo duplicado
   `, Boston, MA` e separa rua/ZIP na ingestao; `parcel_match_key` ignora a
   unidade do parcel dataset (`526 COLUMBUS AV 2`); `normalize_street` mapeia
-  `AV` -> `AVE`. Backfill idempotente `backend/scripts/backfill_boston.py`:
-  7.705 moradas normalizadas e owners **4.404 -> 7.206 (71,4%)**; 1.911
-  interseccoes nao sao imoveis. `enrich_enabled=1` para Boston.
+  `AV` -> `AVE`; `_lookup_ckan` usa filtros exactos `ST_NUM`/`ST_NAME` (o `q`
+  do CKAN é OR), cobre intervalos (`970` vs `980 970`, `81-83` vs `81 83`) e
+  prefere a linha sem unidade. Backfill idempotente
+  `backend/scripts/backfill_boston.py`: 7.705 moradas normalizadas e owners
+  **4.404 -> 7.798 (77,2%)**; 2.301 sem owner (1.054 interseções + ~1.001
+  duplicados cuja linha canónica já tem owner).
+  `enrich_enabled=1` para Boston.
   Residual: ~1.000 duplicados do mesmo imovel cujo UPDATE colide com o indice
   unico `address+city`; owner preenchido, fusao segura fica para fase propria.
 - **Ingestao**: scheduler interno ancorado ao relogio (ultimo sucesso na BD,
@@ -1386,10 +1390,10 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   (hoje 780/250, ja esgotado). `domain_jobs_today` separa a quota.
 - **Owners NULL**: backfill em lote com cursor e quota 200/cidade/dia
   (`owner_backfill.py`), 1 s entre lookups, retry sem abortar o lote.
-- **Numeros de producao (22:5x UTC)**: NYC 51.539 (285 factos 24h, owner
-  85,9%); Chicago 29.137 (645 factos 24h, owner 74,9%); Dallas 16.341
-  (72 factos 24h, owner 60,8%); Boston 10.099 (2 factos 24h, owner 71,4%).
-- **Testes**: **1.148 pytest** (+46; 1 skipped) e CI ruff (em `./backend`)
+- **Numeros de producao (23:0x UTC)**: NYC 51.539 (283 factos 24h, owner
+  85,9%); Chicago 29.137 (642 factos 24h, owner 74,9%); Dallas 16.341
+  (72 factos 24h, owner 60,8%); Boston 10.099 (2 factos 24h, owner 77,2%).
+- **Testes**: **1.166 pytest** (+64; 1 skipped) e CI ruff (em `./backend`)
   verde. `docs/INGESTION-HEALTH.md` e o runbook.
 
 ### P1 (a seguir)

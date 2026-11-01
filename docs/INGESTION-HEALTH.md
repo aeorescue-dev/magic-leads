@@ -78,7 +78,9 @@ O owner é preenchido na mesma; a fusão segura (re-parent de
 apagar leads sem esse merge.
 
 Medição (01/11/2026): 7.705 moradas normalizadas; owners de Boston
-**4.404 → 7.206** (71,4%); 1.911 interseções não são imóveis enriquecíveis.
+**4.404 → 7.798** (77,2%); 2.301 sem owner, dos quais 1.054 são interseções
+(não são imóveis enriquecíveis) e ~1.001 são os duplicados acima (a linha
+canónica já tem owner).
 
 ## 4. Quotas de descoberta (P1)
 
