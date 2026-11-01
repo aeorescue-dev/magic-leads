@@ -89,7 +89,7 @@ def test_singular_quando_ha_um_projeto():
     )
     mail = ot.render_email("roofing", ctx)
     assert "1 roofing project open in NYC" in mail["subject"]
-    assert "1 active roofing project in New York City" in mail["body"]
+    assert "1 active roofing project is open in New York City" in mail["body"]
     assert "1 roofing projects" not in mail["body"]
 
     ctx2 = ot.build_context(
@@ -98,8 +98,27 @@ def test_singular_quando_ha_um_projeto():
     )
     ctx2["url"] = ot.sequence_url("NYC", "roofing", 2)
     step2 = ot.render_sequence_email("step2_offer", ctx2)
-    assert "1 roofing project in New York City" in step2["subject"]
+    assert "1 roofing project in NYC" in step2["subject"]
     assert "1 verified roofing project in New York City" in step2["body"]
+
+
+def test_assuntos_respeitam_limite_em_todas_as_cidades_e_nichos():
+    """Passo 1 <=38 (Gmail move); passo 2 <=52 mas sempre com nicho e cidade."""
+    cidades = ("NYC", "CHICAGO", "BOSTON", "DALLAS")
+    for cidade in cidades:
+        for niche, spec in ot.NICHES.items():
+            ctx = ot.build_context(
+                {"owner_name": "Acme", "address": "B2B contact - x", "city": cidade},
+                cidade, niche, 50,
+                category_override=ot.offer_category(niche),
+            )
+            assert len(ctx["subject"]) <= ot.SUBJECT_MAX, (cidade, niche, ctx["subject"])
+            assert len(ctx["offer_subject"]) <= ot.STEP2_SUBJECT_MAX, (
+                cidade, niche, ctx["offer_subject"]
+            )
+            assert spec["subject_trade"] in ctx["offer_subject"]
+            assert ot.CITY_SHORT.get(cidade, cidade) in ctx["offer_subject"]
+            assert "{" not in ctx["subject"] and "{" not in ctx["offer_subject"]
 
 
 def test_step2_usa_contagem_dinamica_e_categoria_do_nicho():

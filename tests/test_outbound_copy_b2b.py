@@ -33,7 +33,7 @@ def test_b2b_placeholder_address_never_reaches_copy():
     assert "info@skender.com" not in body
     assert "across Chicago" not in body
     # Value-First: a primeira linha abre com o numero e o nicho.
-    assert "10 active construction projects in Chicago this week" in body
+    assert "10 active construction projects are open in Chicago this week" in body
 
 
 def test_real_address_is_not_injected_in_value_first_copy():

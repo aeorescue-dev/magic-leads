@@ -968,7 +968,7 @@ def test_outbound_address_tail_is_conditional():
     body = ot.render(ot.get_template("roofing")["body"], with_addr)
     # Value-First: o corpo abre com o numero e nao interpola o endereco.
     assert "near 329 BERRY STREET" not in body
-    assert "active roofing projects in New York City this week" in body
+    assert "active roofing projects are open in New York City this week" in body
 
     no_addr = ot.build_context(
         {"owner_name": "", "address": "", "issue_category": "Roof"},
@@ -1080,7 +1080,7 @@ def test_outbound_preview_renders_real_data_in_english(admin_client):
     assert "{" not in rendered and "}" not in rendered
     # Dados reais: o endereço aparece na clausula condicional.
     assert "500 N MICHIGAN AVENUE" not in rendered
-    assert "active roofing project in Chicago this week" in rendered
+    assert "active roofing project is open in Chicago this week" in rendered
     # A prévia e' estritamente en-US (mesmo guard dos templates).
     outbound_templates.assert_english_only(subject)
     outbound_templates.assert_english_only(rendered)

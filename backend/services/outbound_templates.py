@@ -132,6 +132,9 @@ CITY_SHORT: dict[str, str] = {
 }
 
 SUBJECT_MAX = 38
+# O passo 2 vai para quem ja' abriu o passo 1; o assunto pode ser mais longo,
+# mas nao tanto que o telemovel corte a promessa final.
+STEP2_SUBJECT_MAX = 52
 
 
 # --------------------------------------------------------------- templates
@@ -242,16 +245,16 @@ del _niche, _tpl
 # cobertura da sua regiao antes de se registar.
 SEQUENCE_TEMPLATES: dict[str, dict[str, str]] = {
     "step2_offer": {
-        "subject": "{count} {category} {project_noun} in {city} - one contractor at a time",
+        "subject": "{offer_subject}",
         "body": (
             "{greeting}\n\n"
             "Following up on my last note with the commercial part.\n\n"
             "Magic Leads gives you {count} verified {category} {project_noun} in {city} "
             "this week, each offered to one contractor at a time, with the "
             "property details and the exact service needed.\n\n"
-            "It is $120 for 7 days. No commitment, and you can cancel whenever "
-            "you want. One closed job covers the week.\n\n"
-            "You can see what this week's list looks like here:\n"
+            "It is $120 for 7 days. No commitment, cancel anytime. One closed "
+            "job covers the entire week.\n\n"
+            "View this week's list here:\n"
             "{url}\n\n"
             "{signature}\n"
             "Magic Leads\n"
@@ -624,10 +627,22 @@ def build_context(
         subject = f"{count_txt} {noun} in {city_short}"
 
     composition = composition_clause(top_categories, count, exclude=hook_trade)
+    verb = "is" if int(count or 0) == 1 else "are"
     hook = (
-        f"{count_txt} active {hook_trade} {noun} in {display_city} this week"
+        f"{count_txt} active {hook_trade} {noun} {verb} open in "
+        f"{display_city} this week"
     )
     hook = f"{hook}{composition}" if composition else f"{hook}."
+
+    # Assunto do passo 2: mantem numero + nicho + cidade. A cauda
+    # "- one contractor per job" e' encurtada quando o assunto passaria do
+    # limite que o telemovel mostra (52); nunca perde o nicho.
+    step2_base = f"{count_txt} {trade_short} {noun} in {city_short}"
+    offer_subject = f"{step2_base} - one contractor per job"
+    if len(offer_subject) > STEP2_SUBJECT_MAX:
+        offer_subject = f"{step2_base} - one each"
+    if len(offer_subject) > STEP2_SUBJECT_MAX:
+        offer_subject = step2_base
 
     from .unsubscribe import unsubscribe_url
 
@@ -638,7 +653,7 @@ def build_context(
     return {
         "subject": subject,
         "hook": hook,
-        "cta": 'Reply with "send" and I will forward this week\'s list.',
+        "cta": 'Reply with "send" and I will forward this week\'s verified list.',
         "audience": audience,
         "company_name": company if company_usable else "your team",
         "contact_name": greeting_name,
@@ -650,6 +665,8 @@ def build_context(
         "address_tail": address_tail,
         "count": copy_count(count),
         "project_noun": noun,
+        "city_short": city_short,
+        "offer_subject": offer_subject,
         "sender_name": sender_name,
         "signature": signature or DEFAULT_SIGNATURE,
         "postal_address": SENDER_POSTAL_ADDRESS,
