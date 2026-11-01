@@ -110,6 +110,18 @@ def day_key(now: Optional[datetime] = None) -> str:
     return _now_dt(now).strftime("%Y-%m-%d")
 
 
+def _signature_for(mailbox: dict) -> str:
+    """Assinatura = nome da caixa que envia (pamela@ -> 'Pamela').
+
+    Antes era sempre 'Pamela', mesmo quando quem enviava era o Pedro.
+    """
+    local = str((mailbox or {}).get("email") or "").split("@")[0]
+    local = "".join(ch for ch in local if ch.isalpha())
+    if len(local) < 2:
+        return outbound_templates.DEFAULT_SIGNATURE
+    return local[:1].upper() + local[1:].lower()
+
+
 def _now_str(now: Optional[datetime] = None) -> str:
     return _now_dt(now).strftime("%Y-%m-%d %H:%M:%S")
 
@@ -839,7 +851,8 @@ class OutboundEngine:
                 )
 
             subject, body = await self._render_message(
-                batch, contact, city, _int(message.get("sequence_step"), 1)
+                batch, contact, city, _int(message.get("sequence_step"), 1),
+                sender_name=_signature_for(mailbox),
             )
             if body is None:
                 await db_service.update_outbound_message(
@@ -967,6 +980,7 @@ class OutboundEngine:
         contact: dict,
         city: str,
         sequence_step: int = 1,
+        sender_name: Optional[str] = None,
     ) -> tuple[Optional[str], Optional[str]]:
         """Re-renderiza subject+body a partir do lead real (integridade = hash)."""
         niche = outbound_templates.DEFAULT_NICHE
@@ -992,6 +1006,7 @@ class OutboundEngine:
             context = outbound_templates.build_context(
                 lead, city, niche, count, contact=contact,
                 category_override=outbound_templates.offer_category(niche),
+                signature=sender_name,
             )
             if sequence_step >= 2:
                 # Passo da sequencia (oferta): template proprio + link da landing.

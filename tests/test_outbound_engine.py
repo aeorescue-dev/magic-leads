@@ -538,6 +538,15 @@ def test_engine_enqueue_skips_leads_already_messaged(engine):
     assert all(r["id"] != lead_id for r in remaining)
 
 
+def test_assinatura_segue_a_caixa_que_envia():
+    from backend.services.outbound_engine import _signature_for
+
+    assert _signature_for({"email": "pamela@magicleads.app"}) == "Pamela"
+    assert _signature_for({"email": "pedro@magicleads.app"}) == "Pedro"
+    assert _signature_for({"email": "ops-team@example.com"}) == "Opsteam"
+    assert _signature_for({"email": ""}) == "Pamela"
+
+
 def test_engine_claim_outbound_message_is_atomic(engine):
     """Claim: queued->sending so' 'e verdadeiro uma vez (sem reenvio)."""
     svc = engine_module.db_service._service
