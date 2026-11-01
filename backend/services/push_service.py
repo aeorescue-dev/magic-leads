@@ -104,8 +104,19 @@ PREFIXES = {
     "test": "🧪 [TESTE]",
 }
 
-ICON_URL = "https://magicleads-oficial.vercel.app/icons/magicleads-brand.svg"
-BADGE_URL = "https://magicleads-oficial.vercel.app/icons/magicleads-brand.svg"
+ICON_URL = "https://www.magicleads.app/icons/push-icon-192.png"
+BADGE_URL = "https://www.magicleads.app/icons/push-badge-72.png"
+
+
+def _is_ios_ua(user_agent: Optional[str]) -> bool:
+    """True para Safari/iOS (inclui iPad que se identifica como Mac)."""
+    ua = (user_agent or "").lower()
+    if not ua:
+        return False
+    if any(token in ua for token in ("iphone", "ipad", "ipod")):
+        return True
+    # iPadOS 13+ identifica-se como "Macintosh"; só conta se for touch.
+    return "macintosh" in ua and "mobile" in ua
 
 
 def _build_payload(title: str, body: str, tag: str, lead_id: int = None, url: str = None, category: str = None, extra: dict = None) -> dict:
@@ -282,8 +293,14 @@ class PushService:
         return False
 
     async def send_to_user(self, user_id: int, payload: Dict, kind: str = "custom",
-                           ttl: int = 14400, urgency: str = "high") -> int:
-        """Envia push para todas as subscriptions de um usuário."""
+                           ttl: int = 14400, urgency: str = "high",
+                           ios_payload: Optional[Dict] = None) -> int:
+        """Envia push para todas as subscriptions de um usuário.
+
+        `ios_payload` (opcional) substitui o payload em dispositivos iOS, onde
+        a Apple ignora `actions`/`requireInteraction`/`vibrate`. O corpo iOS
+        leva a CTA textual ("Toque para abrir o lead").
+        """
         if not self.is_configured():
             # Registado aqui e não em _send_single: este early return
             # impede que a subscripção chegue a ser lida. Sem este record o
@@ -328,8 +345,14 @@ class PushService:
         success_endpoints = []
 
         for sub in subscriptions:
+            # iOS não mostra botões: usa o payload com CTA no corpo.
+            effective = (
+                ios_payload
+                if ios_payload is not None and _is_ios_ua(sub.get("user_agent"))
+                else payload
+            )
             result = await self._send_single(
-                sub, payload, kind, user_id=user_id, ttl=ttl, urgency=urgency
+                sub, effective, kind, user_id=user_id, ttl=ttl, urgency=urgency
             )
             if result is True:
                 sent += 1

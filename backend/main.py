@@ -1588,8 +1588,8 @@ async def send_test_push(payload: SendTestPushRequest, _admin: bool = Depends(_r
         "body": payload.body,
         "tag": payload.tag,
         "url": payload.url,
-        "icon": "https://magicleads-oficial.vercel.app/icons/magicleads-brand.svg",
-        "badge": "https://magicleads-oficial.vercel.app/icons/magicleads-brand.svg"
+        "icon": push_service.ICON_URL,
+        "badge": push_service.BADGE_URL
     }
 
     if payload.user_id is not None:
@@ -2087,8 +2087,8 @@ async def admin_push_test(
         "body": req.body,
         "tag": req.tag,
         "url": req.url,
-        "icon": "https://magicleads-oficial.vercel.app/icons/magicleads-brand.svg",
-        "badge": "https://magicleads-oficial.vercel.app/icons/magicleads-brand.svg",
+        "icon": push_service.ICON_URL,
+        "badge": push_service.BADGE_URL,
     }
     sent = await push_service.send_to_user(admin["id"], push_payload)
     return {"status": "ok", "sent": sent, "subscriptions": len(subs), "configured": True}

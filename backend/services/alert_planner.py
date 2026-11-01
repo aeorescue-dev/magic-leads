@@ -58,7 +58,14 @@ SIGNAL_EMOJI = {
     "authorized_work": "🏗️",
     "open_request": "🔧",
 }
-_PUSH_ICON = "https://magicleads-oficial.vercel.app/icons/magicleads-brand.svg"
+_PUSH_ICON = "https://www.magicleads.app/icons/push-icon-192.png"
+_PUSH_BADGE = "https://www.magicleads.app/icons/push-badge-72.png"
+_CITY_DISPLAY = {
+    "NYC": "New York City",
+    "CHICAGO": "Chicago",
+    "DALLAS": "Dallas",
+    "BOSTON": "Boston",
+}
 
 
 @dataclass
@@ -284,6 +291,84 @@ def _fmt_miles(distance: float, locale: str | None) -> str:
     return txt
 
 
+def _distance_phrase(
+    distance: float, locale: str | None, source: str, base_label: str | None
+) -> str:
+    """Texto da distância: exata (GPS/manual) ou aproximada (centro da cidade).
+
+    `source='city'` usa o centroide guardado no onboarding; a distância é
+    estimada e o texto diz isso ("~11 mi do centro de Chicago") para não
+    prometer precisão de GPS.
+    """
+    loc = normalize(locale)
+    miles = _fmt_miles(distance, loc)
+    if source == "city":
+        raw = (base_label or "").strip()
+        city = _CITY_DISPLAY.get(raw.upper(), raw)
+        if loc == "en":
+            return (
+                f"about {miles} mi from downtown {city}"
+                if city
+                else f"about {miles} mi from the city centre"
+            )
+        if loc == "es":
+            return (
+                f"a unos {miles} mi del centro de {city}"
+                if city
+                else f"a unos {miles} mi del centro de la ciudad"
+            )
+        return (
+            f"~{miles} mi do centro de {city}"
+            if city
+            else f"~{miles} mi do centro da cidade"
+        )
+    return {
+        "pt": f"a {miles} mi de si",
+        "en": f"{miles} mi away",
+        "es": f"a {miles} mi de ti",
+    }[loc]
+
+
+def _batch_distance_phrase(
+    nearest: float, locale: str | None, source: str, base_label: str | None
+) -> str:
+    loc = normalize(locale)
+    miles = _fmt_miles(nearest, loc)
+    if source == "city":
+        raw = (base_label or "").strip()
+        city = _CITY_DISPLAY.get(raw.upper(), raw)
+        if loc == "en":
+            base = f"from downtown {city}" if city else "from the city centre"
+            return f"nearest about {miles} mi {base}"
+        if loc == "es":
+            base = f"del centro de {city}" if city else "del centro de la ciudad"
+            return f"la más cercana a unos {miles} mi {base}"
+        base = f"do centro de {city}" if city else "do centro da cidade"
+        return f"a mais próxima a ~{miles} mi {base}"
+    return {
+        "pt": f"a mais próxima a {miles} mi",
+        "en": f"nearest {miles} mi away",
+        "es": f"la más cercana a {miles} mi",
+    }[loc]
+
+
+def _ios_variant(payload: dict, locale: str | None) -> dict:
+    """Payload para iOS: sem ações, com CTA no corpo (o iOS ignora botões)."""
+    loc = normalize(locale)
+    cta = {
+        "pt": "Toque para abrir o lead.",
+        "en": "Tap to open the lead.",
+        "es": "Toca para abrir el lead.",
+    }[loc]
+    out = dict(payload)
+    body = (out.get("body") or "").rstrip()
+    if cta.lower() not in body.lower():
+        out["body"] = f"{body}\n{cta}" if body else cta
+    for key in ("actions", "requireInteraction", "vibrate"):
+        out.pop(key, None)
+    return out
+
+
 async def _confidence_pct(lead: dict, cache: dict) -> int | None:
     """Percentagem real de sucesso (≥30 amostras), por cidade→classe."""
     city = (lead.get("city") or "").strip()
@@ -338,6 +423,8 @@ def _build_push_payload(
     confidence_pct: int | None,
     show_address: bool,
     notification_id: int | None = None,
+    distance_source: str = "",
+    base_label: str = "",
 ) -> dict:
     loc = normalize(locale)
     cat_label = category_label(category, loc)
@@ -360,9 +447,10 @@ def _build_push_payload(
             }[loc]
         )
     if show_distance and distance_mi is not None:
-        miles = _fmt_miles(distance_mi, loc)
         parts.append(
-            {"pt": f"a {miles} mi", "en": f"{miles} mi away", "es": f"a {miles} mi"}[loc]
+            _distance_phrase(
+                distance_mi, loc, distance_source, base_label
+            )
         )
     why = alert_why_now(
         signal,
@@ -396,7 +484,7 @@ def _build_push_payload(
         "title": title,
         "body": " · ".join(parts),
         "icon": _PUSH_ICON,
-        "badge": _PUSH_ICON,
+        "badge": _PUSH_BADGE,
         "tag": tag,
         "renotify": True,
         "silent": False,
@@ -430,6 +518,8 @@ def _build_batch_payload(
     distances: dict[int, float] | None,
     show_distance: bool,
     notification_id: int | None = None,
+    distance_source: str = "",
+    base_label: str = "",
 ) -> dict:
     """Um unico push para varios leads do mesmo run (coalescencia B1).
 
@@ -493,11 +583,8 @@ def _build_batch_payload(
 
     if show_distance and distances:
         nearest = min(distances.values())
-        miles = _fmt_miles(nearest, loc)
         parts.append(
-            {"pt": f"a mais próxima a {miles} mi",
-             "en": f"nearest {miles} mi away",
-             "es": f"la más cercana a {miles} mi"}[loc]
+            _batch_distance_phrase(nearest, loc, distance_source, base_label)
         )
     parts.append(
         {"pt": "telefones sob consulta",
@@ -514,7 +601,7 @@ def _build_batch_payload(
         "title": title,
         "body": " · ".join(parts),
         "icon": _PUSH_ICON,
-        "badge": _PUSH_ICON,
+        "badge": _PUSH_BADGE,
         "tag": f"batch_{notification_id or n}",
         "renotify": True,
         "silent": False,
@@ -624,7 +711,7 @@ async def dispatch_interests_onboarding(limit: int = 20) -> int:
                 "title": title,
                 "body": body,
                 "icon": _PUSH_ICON,
-                "badge": _PUSH_ICON,
+                "badge": _PUSH_BADGE,
                 "tag": f"onboarding_{u['id']}",
                 "renotify": True,
                 "silent": False,
@@ -645,7 +732,7 @@ async def dispatch_interests_onboarding(limit: int = 20) -> int:
             payload.update(click)
             ok = await push_service.send_to_user(
                 u["id"], payload, "onboarding", ttl=settings.PUSH_TTL_DIGEST_S,
-                urgency="normal",
+                urgency="normal", ios_payload=_ios_variant(payload, locale),
             )
             if ok:
                 await db_service.mark_notification_pushed(row["id"])
@@ -715,7 +802,7 @@ async def dispatch_unconfigured_digest(by_cat: dict, quiet: bool, limit: int) ->
                 "body": rendered.get("message")
                 or tr("digest.main_msg", locale, n=total_n, limit=limit),
                 "icon": _PUSH_ICON,
-                "badge": _PUSH_ICON,
+                "badge": _PUSH_BADGE,
                 "tag": f"digest_{locale}",
                 "renotify": True,
                 "silent": False,
@@ -730,7 +817,7 @@ async def dispatch_unconfigured_digest(by_cat: dict, quiet: bool, limit: int) ->
             payload.update(click)
             ok = await push_service.send_to_user(
                 uid, payload, "digest", ttl=settings.PUSH_TTL_DIGEST_S,
-                urgency="normal",
+                urgency="normal", ios_payload=_ios_variant(payload, locale),
             )
             if ok:
                 sent += 1
@@ -783,6 +870,7 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
     user_locale: dict = {}
     user_base: dict = {}
     user_base_source: dict = {}
+    user_base_label: dict = {}
     user_show_address: dict = {}
     user_gap: dict = {}
     user_digest: dict = {}
@@ -807,6 +895,7 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
                 user_locale[uid] = normalize(u.get("locale"))
                 user_base[uid] = base
                 user_base_source[uid] = (u.get("base_source") or "").strip().lower()
+                user_base_label[uid] = (u.get("base_label") or "").strip()
                 user_show_address[uid] = bool(u.get("show_address_in_push", 1))
                 gap = u.get("push_min_gap_min")
                 user_gap[uid] = 30 if gap is None else int(gap)
@@ -900,7 +989,7 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
                         "body": rendered.get("message")
                         or tr("digest.main_msg", locale, n=total_n, limit=limit),
                         "icon": _PUSH_ICON,
-                        "badge": _PUSH_ICON,
+                        "badge": _PUSH_BADGE,
                         "tag": f"digest_{normalize(locale)}",
                         "url": digest_url,
                         "actions": [
@@ -918,6 +1007,7 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
                         "digest",
                         ttl=settings.PUSH_TTL_DIGEST_S,
                         urgency="normal",
+                        ios_payload=_ios_variant(digest_payload, locale),
                     )
         except Exception as e:
             logger.error(f"Digest diário user={uid} falhou: {e}")
@@ -930,6 +1020,7 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
             locale = user_locale.get(uid)
             base = user_base.get(uid)
             source = user_base_source.get(uid)
+            base_label = user_base_label.get(uid, "")
             show_address = user_show_address.get(uid, True)
 
             eligible: list = []
@@ -954,7 +1045,7 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
                 distance = _distance_miles(base, lead) if base else None
                 show_distance = (
                     distance is not None
-                    and source in ("gps", "manual")
+                    and source in ("gps", "manual", "city")
                     and bool(getattr(settings, "PUSH_DISTANCE_ENABLED", True))
                 )
                 payload = _build_push_payload(
@@ -967,6 +1058,8 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
                     pct,
                     show_address,
                     notification_id=nid,
+                    distance_source=source,
+                    base_label=base_label,
                 )
                 sent = await push_service.send_to_user(
                     uid,
@@ -974,6 +1067,7 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
                     "lead_alert",
                     ttl=settings.PUSH_TTL_LEAD_S,
                     urgency="high" if signal == "legal_obligation" else "normal",
+                    ios_payload=_ios_variant(payload, locale),
                 )
             else:
                 distances: dict = {}
@@ -983,7 +1077,7 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
                         distances[lead["id"]] = d
                 show_distance = (
                     bool(distances)
-                    and source in ("gps", "manual")
+                    and source in ("gps", "manual", "city")
                     and bool(getattr(settings, "PUSH_DISTANCE_ENABLED", True))
                 )
                 has_legal = any(
@@ -996,6 +1090,8 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
                     distances if show_distance else None,
                     show_distance,
                     eligible[0][2],
+                    distance_source=source,
+                    base_label=base_label,
                 )
                 sent = await push_service.send_to_user(
                     uid,
@@ -1003,6 +1099,7 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
                     "lead_alert",
                     ttl=settings.PUSH_TTL_LEAD_S,
                     urgency="high" if has_legal else "normal",
+                    ios_payload=_ios_variant(payload, locale),
                 )
                 if sent:
                     report.batched += 1

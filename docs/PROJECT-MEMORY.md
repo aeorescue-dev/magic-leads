@@ -1322,6 +1322,28 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   --omit=dev` com 0 vulnerabilidades; build e `tsc` limpos.
 - **Testes**: 1084 pytest · 97 vitest · ESLint 0 erros · Ruff limpo.
 
+### Fase 24 — Web Push: distância, iOS e ícones (2026-11-01)
+
+- **Distância**: `source='city'` passou a renderizar distância aproximada com o
+  nome da cidade da base (`~11,0 mi do centro de Chicago`); GPS/manual usam o
+  texto do mockup (`a 2,3 mi de si`). Sem base, o segmento continua omitido.
+  Leads com coordenadas: 114/114 alertas recentes.
+- **iOS**: `send_to_user` aceita `ios_payload` e escolhe por `user_agent` da
+  subscription. A variante iOS remove `actions`/`requireInteraction`/`vibrate`
+  e acrescenta a CTA no corpo (`Toque para abrir o lead.`).
+- **Ícones**: payload, lifecycle e broadcast passam a usar
+  `/icons/push-icon-192.png` e `/icons/push-badge-72.png` (PNG). O badge foi
+  regenerado a 72×72 como silhueta branca (era duplicado do ícone).
+  `manifest.json` e `apple-touch-icon` apontam para ficheiros existentes
+  (antes `/icon-192.png` devolvia HTML); `push-icon-512` foi gerado a partir
+  da marca.
+- **Cliques**: `PUSH_CLICK_SECRET` definido em produção (48 bytes aleatórios,
+  via stdin, sem exposição em logs). `nid`/`sig` passam a ser assinados e
+  `push_deliveries.clicked_at` a ser preenchido.
+- Novo `docs/WEB-PUSH.md` com regras de conteúdo e matriz de validação em
+  dispositivo.
+- **Testes**: 1093 pytest (9 novos) · 97 vitest · tsc/build/lint limpos.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

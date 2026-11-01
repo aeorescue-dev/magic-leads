@@ -14,7 +14,8 @@ from .db import db_service
 from .push_click import sign_click
 from .push_service import push_service
 
-_ICON = "https://magicleads-oficial.vercel.app/icons/magicleads-brand.svg"
+_ICON = "https://www.magicleads.app/icons/push-icon-192.png"
+_BADGE = "https://www.magicleads.app/icons/push-badge-72.png"
 
 _ACTION_LABELS = {
     "pt": ("Ver lead", "Dispensar"),
@@ -54,7 +55,7 @@ async def dispatch_lifecycle_pushes(limit: int = 50) -> int:
                 "title": n.get("title") or "Magic Leads",
                 "body": n.get("message") or "",
                 "icon": _ICON,
-                "badge": _ICON,
+                "badge": _BADGE,
                 "tag": f"lifecycle_{nid}",
                 "renotify": True,
                 "silent": False,
@@ -70,12 +71,15 @@ async def dispatch_lifecycle_pushes(limit: int = 50) -> int:
                 "requireInteraction": ntype == "reveal_urgent",
                 "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
             }
+            from .alert_planner import _ios_variant
+
             ok = await push_service.send_to_user(
                 int(n["user_id"]),
                 payload,
                 "lifecycle",
                 ttl=3600,
                 urgency="high" if ntype == "reveal_urgent" else "normal",
+                ios_payload=_ios_variant(payload, n.get("locale")),
             )
             if ok:
                 await db_service.mark_notification_pushed(nid)
