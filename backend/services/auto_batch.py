@@ -75,6 +75,26 @@ def choose_balanced_niche(mix: list[dict]) -> Optional[str]:
     return str(best.get("niche") or "")
 
 
+def choose_city_niche(
+    readiness: dict[str, dict], mixes: dict[str, list[dict]]
+) -> Optional[tuple[str, str]]:
+    """Par (cidade, nicho) com mais owner_osint e generic no mesmo lote."""
+    best: Optional[tuple[tuple[int, int, int], str, str]] = None
+    for city, rows in (mixes or {}).items():
+        ready = int((readiness.get(city) or {}).get("ready") or 0)
+        if ready <= 0:
+            continue
+        for row in rows or []:
+            osint = int(row.get("osint") or 0)
+            generic = int(row.get("generic") or 0)
+            if osint <= 0 or generic <= 0:
+                continue
+            score = (osint, generic, ready)
+            if best is None or score > best[0]:
+                best = (score, city, str(row.get("niche") or ""))
+    return (best[1], best[2]) if best else None
+
+
 async def maybe_create_batch(now: Optional[datetime] = None) -> dict:
     now = now or datetime.now(timezone.utc)
     config = await db_service.get_outbound_config()
@@ -109,14 +129,16 @@ async def maybe_create_batch(now: Optional[datetime] = None) -> dict:
         city: sum(int(row.get("osint") or 0) for row in mix)
         for city, mix in mixes.items()
     }
-    pick = choose_city(readiness, osint_by_city)
-    if not pick:
-        return {"status": "no_inventory"}
-    city, ready = pick
-    niche = choose_niche(readiness[city])
-    balanced = choose_balanced_niche(mixes.get(city) or [])
-    if balanced:
-        niche = balanced
+    pair = choose_city_niche(readiness, mixes)
+    if pair:
+        city, niche = pair
+        ready = int(readiness[city].get("ready") or 0)
+    else:
+        pick = choose_city(readiness, osint_by_city)
+        if not pick:
+            return {"status": "no_inventory"}
+        city, ready = pick
+        niche = choose_niche(readiness[city])
     size = max(1, min(ready, remaining, DEFAULT_BATCH))
 
     svc = db_service._service
