@@ -90,6 +90,7 @@ from .services import (
     alert_planner,
     analytics,
     auto_batch,
+    auto_dialer,
     auto_ramp,
     b2b_voice,
     contractor_ingest,
@@ -1616,7 +1617,17 @@ async def send_test_push(payload: SendTestPushRequest, _admin: bool = Depends(_r
 # Webhook para rodar scraper manualmente
 # Estado dos runs do scraper (background — o Railway corta conexões longas)
 _scrape_runs: dict = {}
+_voice_campaign_tasks: dict[int, asyncio.Task] = {}
 _MAX_SCRAPE_RUNS = 50
+
+
+def _launch_voice_campaign(campaign_id: int) -> None:
+    """Arranca o worker em background e mantém a referência viva."""
+    task = asyncio.create_task(auto_dialer.run_campaign(campaign_id))
+    _voice_campaign_tasks[campaign_id] = task
+    task.add_done_callback(
+        lambda _task: _voice_campaign_tasks.pop(campaign_id, None)
+    )
 
 
 def _remember_scrape_run(state: dict) -> None:
@@ -3197,6 +3208,103 @@ async def admin_voice_dial(
         payload.get("city"),
         payload.get("trade"),
     )
+
+
+@app.post("/api/admin/voice/ingest")
+async def admin_voice_ingest(
+    request: Request, _admin: dict = Depends(_require_admin_user)
+):
+    """Upload bruto -> parse/clean/dedupe -> rebuild de vitrines -> segmentos."""
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="json inválido")
+    payload = payload or {}
+    csv_text = str(payload.get("csv") or "")
+    if not csv_text.strip():
+        raise HTTPException(status_code=400, detail="csv vazio")
+    if len(csv_text) > 5_000_000:
+        raise HTTPException(status_code=413, detail="csv demasiado grande")
+    imported = await anyio.to_thread.run_sync(
+        b2b_voice.import_licenses_csv,
+        csv_text,
+        str(payload.get("source_name") or "upload"),
+        str(payload.get("source_url") or ""),
+        int(_admin["id"]),
+    )
+    built = await anyio.to_thread.run_sync(showcase.build_pages)
+    segments = await anyio.to_thread.run_sync(b2b_voice.segments)
+    return {
+        "ok": True,
+        "import": imported,
+        "showcase": built,
+        "segments": segments,
+    }
+
+
+@app.get("/api/admin/voice/segments")
+async def admin_voice_segments(
+    city: str = "",
+    trade: str = "",
+    state: str = "",
+    _admin: dict = Depends(_require_admin_user),
+):
+    return {
+        "segments": await anyio.to_thread.run_sync(
+            b2b_voice.segments, city, trade, state
+        )
+    }
+
+
+@app.post("/api/admin/voice/campaigns/start")
+async def admin_voice_campaign_start(
+    request: Request, _admin: dict = Depends(_require_admin_user)
+):
+    """Cria e arranca uma campanha autónoma (dry-run se Telnyx não configurado)."""
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001
+        payload = {}
+    payload = payload or {}
+    city = str(payload.get("city") or "").strip()
+    trade = str(payload.get("trade") or "").strip()
+    max_calls = int(payload.get("max_calls") or 25)
+    name = str(payload.get("name") or "").strip() or (
+        f"Auto {city or 'todas'} {trade or 'todos'}"
+    )
+    campaign = await anyio.to_thread.run_sync(
+        b2b_voice.create_campaign,
+        name,
+        city,
+        trade,
+        max_calls,
+        int(_admin["id"]),
+    )
+    _launch_voice_campaign(int(campaign["id"]))
+    return {"ok": True, "campaign": campaign}
+
+
+@app.get("/api/admin/voice/campaigns")
+async def admin_voice_campaigns(
+    limit: int = 20, _admin: dict = Depends(_require_admin_user)
+):
+    return {
+        "campaigns": await anyio.to_thread.run_sync(
+            b2b_voice.list_campaigns, limit
+        )
+    }
+
+
+@app.post("/api/admin/voice/campaigns/{campaign_id}/stop")
+async def admin_voice_campaign_stop(
+    campaign_id: int, _admin: dict = Depends(_require_admin_user)
+):
+    campaign = await anyio.to_thread.run_sync(
+        b2b_voice.stop_campaign, campaign_id
+    )
+    if not campaign:
+        raise HTTPException(status_code=404, detail="campanha não encontrada")
+    return {"ok": True, "campaign": campaign}
 
 
 @app.get("/api/admin/analytics")
@@ -5026,6 +5134,19 @@ async def _lifespan(app):
             )
     except Exception as e:
         logger.warning("Falha ao fechar runs interrompidos: %s", e)
+
+    # Campanhas de voz a meio de um deploy não podem ficar "running" para sempre.
+    try:
+        interrupted_campaigns = await anyio.to_thread.run_sync(
+            b2b_voice.mark_interrupted_campaigns
+        )
+        if interrupted_campaigns:
+            logger.warning(
+                "Campanhas de voz interrompidas por deploy fechadas: %s",
+                interrupted_campaigns,
+            )
+    except Exception as e:
+        logger.warning("Falha ao fechar campanhas de voz interrompidas: %s", e)
 
     # B1: higiene de dispositivos push (limite de 5). Corrige o estado legado
     # (utilizadores com 9 browsers) sem esperar por um novo subscribe.

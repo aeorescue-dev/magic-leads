@@ -23,6 +23,13 @@ from zoneinfo import ZoneInfo
 VERSION = "2026-11-02.1"
 PILOT_STATES = ("MA", "NY", "TX", "IL")
 DEFAULT_STATE = "MA"
+CITY_ALIASES = {
+    "NYC": "New York",
+    "NEW YORK": "New York",
+    "BOSTON": "Boston",
+    "CHICAGO": "Chicago",
+    "DALLAS": "Dallas",
+}
 STATE_TIMEZONES = {
     "MA": "America/New_York",
     "NY": "America/New_York",
@@ -165,6 +172,34 @@ CREATE TABLE IF NOT EXISTS voice_calls (
 
 CREATE INDEX IF NOT EXISTS idx_voice_calls_company ON voice_calls (company_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_voice_calls_provider ON voice_calls (provider_call_id);
+
+CREATE TABLE IF NOT EXISTS voice_campaigns (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  city TEXT,
+  trade TEXT,
+  status TEXT NOT NULL DEFAULT 'running',
+  max_calls INTEGER NOT NULL DEFAULT 25,
+  calls_started INTEGER NOT NULL DEFAULT 0,
+  showcases_sent INTEGER NOT NULL DEFAULT 0,
+  skipped INTEGER NOT NULL DEFAULT 0,
+  error TEXT,
+  created_by INTEGER,
+  created_at TEXT NOT NULL,
+  started_at TEXT,
+  finished_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_voice_campaigns_status
+  ON voice_campaigns (status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS voice_campaign_skips (
+  campaign_id INTEGER NOT NULL,
+  company_id INTEGER NOT NULL,
+  reason TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE(campaign_id, company_id)
+);
 
 CREATE TABLE IF NOT EXISTS voice_meta (
   key TEXT PRIMARY KEY,
@@ -389,6 +424,10 @@ def import_licenses_csv(
                 "TEXAS": "TX",
                 "ILLINOIS": "IL",
             }.get(state, state)
+            raw_city = _pick(row, ("city", "city_town", "town", "municipality"))
+            city_label = CITY_ALIASES.get(
+                raw_city.strip().upper(), raw_city.strip().title()
+            )
             license_status = _pick(row, ("license_status", "status", "license_state"))
             permit_count = _to_int(
                 _pick(row, ("permit_count", "permits", "permit_total", "projects", "jobs"))
@@ -451,7 +490,7 @@ def import_licenses_csv(
                     phone,
                     _pick(row, ("email", "email_address")),
                     _pick(row, ("website", "url", "site")),
-                    _pick(row, ("city", "city_town", "town", "municipality")),
+                    city_label,
                     state,
                     _pick(row, ("zip_code", "zip", "postal_code")),
                     _pick(row, ("license_number", "license", "license_no", "license_id", "hic", "registration_number")),
@@ -860,6 +899,247 @@ def stats() -> dict:
             "by_trade": sorted(by_trade.values(), key=lambda x: x["total"], reverse=True),
             "campaigns": campaigns,
         }
+    finally:
+        conn.close()
+
+
+def segments(city: str = "", trade: str = "", state: str = "") -> list[dict]:
+    """Agrupa empresas por cidade + nicho e qualifica a vitrine disponível."""
+    from . import showcase
+
+    init()
+    now = _utc_now()
+    conn = get_conn()
+    try:
+        rows = conn.execute("SELECT * FROM prospect_companies").fetchall()
+        groups: dict[tuple[str, str, str], dict] = {}
+        for row in rows:
+            company = _company_dict(row)
+            company_city = (company.get("city") or "—").strip() or "—"
+            company_state = (company.get("state") or "").strip().upper()
+            company_trade = (company.get("trade") or "—").strip() or "—"
+            if city.strip() and company_city.lower() != city.strip().lower():
+                continue
+            if state.strip() and company_state != state.strip().upper():
+                continue
+            if trade.strip() and company_trade.lower() != trade.strip().lower():
+                continue
+            key = (company_city, company_state, company_trade)
+            group = groups.setdefault(
+                key,
+                {
+                    "city": company_city,
+                    "state": company_state,
+                    "trade": company_trade,
+                    "total": 0,
+                    "callable": 0,
+                    "blocked": 0,
+                },
+            )
+            allowed = _eligibility(company, conn, now)["allowed"]
+            group["total"] += 1
+            if allowed:
+                group["callable"] += 1
+            else:
+                group["blocked"] += 1
+    finally:
+        conn.close()
+
+    for group in groups.values():
+        trade_code = showcase.normalize_trade(group["trade"])
+        available = showcase.available(
+            group["city"], trade_code or group["trade"]
+        )
+        if available["available"]:
+            mode = "dedicated"
+        elif available["city_total"] >= available["min_items"]:
+            mode = "city_fallback"
+        else:
+            mode = "no_showcase"
+        group["showcase_mode"] = mode
+        group["showcase_exact"] = available["exact_count"]
+        group["showcase_city_total"] = available["city_total"]
+        group["page_path"] = available["page_path"]
+    return sorted(
+        groups.values(),
+        key=lambda item: (item["callable"], item["total"]),
+        reverse=True,
+    )
+
+
+def create_campaign(
+    name: str,
+    city: str = "",
+    trade: str = "",
+    max_calls: int = 25,
+    created_by: int = 0,
+) -> dict:
+    init()
+    now = _iso()
+    conn = get_conn()
+    try:
+        cur = conn.execute(
+            "INSERT INTO voice_campaigns "
+            "(name, city, trade, status, max_calls, created_by, created_at, started_at) "
+            "VALUES (?, ?, ?, 'running', ?, ?, ?, ?)",
+            (
+                name,
+                city,
+                trade,
+                max(1, min(200, int(max_calls or 25))),
+                int(created_by or 0),
+                now,
+                now,
+            ),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT * FROM voice_campaigns WHERE id=?", (cur.lastrowid,)
+        ).fetchone()
+        return dict(row)
+    finally:
+        conn.close()
+
+
+def get_campaign(campaign_id: int) -> Optional[dict]:
+    init()
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            "SELECT * FROM voice_campaigns WHERE id=?", (int(campaign_id),)
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def list_campaigns(limit: int = 20) -> list[dict]:
+    init()
+    conn = get_conn()
+    try:
+        return [
+            dict(r)
+            for r in conn.execute(
+                "SELECT * FROM voice_campaigns ORDER BY id DESC LIMIT ?",
+                (max(1, min(100, int(limit))),),
+            ).fetchall()
+        ]
+    finally:
+        conn.close()
+
+
+def update_campaign(campaign_id: int, **fields: Any) -> Optional[dict]:
+    init()
+    allowed = {"status", "error", "finished_at", "max_calls", "name", "city", "trade"}
+    updates = {key: value for key, value in fields.items() if key in allowed}
+    if not updates:
+        return get_campaign(campaign_id)
+    conn = get_conn()
+    try:
+        sets = ", ".join(f"{key}=?" for key in updates)
+        conn.execute(
+            f"UPDATE voice_campaigns SET {sets} WHERE id=?",
+            (*updates.values(), int(campaign_id)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return get_campaign(campaign_id)
+
+
+def bump_campaign(
+    campaign_id: int,
+    calls_started: int = 0,
+    showcases_sent: int = 0,
+    skipped: int = 0,
+) -> None:
+    init()
+    conn = get_conn()
+    try:
+        conn.execute(
+            "UPDATE voice_campaigns SET "
+            "calls_started=calls_started+?, "
+            "showcases_sent=showcases_sent+?, "
+            "skipped=skipped+? WHERE id=?",
+            (
+                int(calls_started),
+                int(showcases_sent),
+                int(skipped),
+                int(campaign_id),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def stop_campaign(campaign_id: int) -> Optional[dict]:
+    return update_campaign(
+        campaign_id, status="stopped", finished_at=_iso()
+    )
+
+
+def mark_interrupted_campaigns(self_reason: str = "campanha interrompida (processo reiniciado)") -> int:
+    init()
+    conn = get_conn()
+    try:
+        cur = conn.execute(
+            "UPDATE voice_campaigns SET status='error', error=?, finished_at=? "
+            "WHERE status='running'",
+            (self_reason, _iso()),
+        )
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
+def skip_campaign_company(campaign_id: int, company_id: int, reason: str = "") -> None:
+    init()
+    conn = get_conn()
+    try:
+        conn.execute(
+            "INSERT INTO voice_campaign_skips "
+            "(campaign_id, company_id, reason, created_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(campaign_id, company_id) DO UPDATE SET reason=excluded.reason",
+            (int(campaign_id), int(company_id), reason[:300], _iso()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def campaign_candidates(
+    campaign_id: int,
+    city: str = "",
+    trade: str = "",
+    limit: int = 50,
+) -> list[dict]:
+    init()
+    where = ["status NOT IN ('do_not_call', 'invalid', 'meeting')"]
+    params: list[Any] = []
+    if city.strip():
+        where.append("UPPER(TRIM(city))=UPPER(?)")
+        params.append(city.strip())
+    if trade.strip():
+        where.append("LOWER(TRIM(COALESCE(trade,'')))=LOWER(?)")
+        params.append(trade.strip())
+    where.append(
+        "id NOT IN (SELECT company_id FROM voice_calls WHERE campaign_id=?)"
+    )
+    params.append(str(int(campaign_id)))
+    where.append(
+        "id NOT IN (SELECT company_id FROM voice_campaign_skips WHERE campaign_id=?)"
+    )
+    params.append(int(campaign_id))
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            f"SELECT * FROM prospect_companies WHERE {' AND '.join(where)} "
+            "ORDER BY score DESC, permit_count DESC, id ASC LIMIT ?",
+            (*params, max(1, min(1000, int(limit)))),
+        ).fetchall()
+        return [dict(row) for row in rows]
     finally:
         conn.close()
 

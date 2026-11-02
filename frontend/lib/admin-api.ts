@@ -1723,6 +1723,102 @@ export function dialVoiceContact(
   });
 }
 
+export interface VoiceSegment {
+  city: string;
+  state: string;
+  trade: string;
+  total: number;
+  callable: number;
+  blocked: number;
+  showcase_mode: "dedicated" | "city_fallback" | "no_showcase";
+  showcase_exact: number;
+  showcase_city_total: number;
+  page_path: string;
+}
+
+export interface VoiceCampaign {
+  id: number;
+  name: string;
+  city: string | null;
+  trade: string | null;
+  status: string;
+  max_calls: number;
+  calls_started: number;
+  showcases_sent: number;
+  skipped: number;
+  error: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface VoiceIngestResult {
+  ok: boolean;
+  import: VoiceImportResult;
+  showcase: ShowcaseBuildResult;
+  segments: VoiceSegment[];
+}
+
+export function ingestVoice(
+  csv: string,
+  sourceName: string,
+  sourceUrl: string
+): Promise<VoiceIngestResult> {
+  return adminFetch<VoiceIngestResult>("/voice/ingest", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ csv, source_name: sourceName, source_url: sourceUrl }),
+  });
+}
+
+export function fetchVoiceSegments(
+  city = "",
+  trade = "",
+  state = ""
+): Promise<{ segments: VoiceSegment[] }> {
+  const params = new URLSearchParams();
+  if (city) params.set("city", city);
+  if (trade) params.set("trade", trade);
+  if (state) params.set("state", state);
+  const qs = params.toString();
+  return adminFetch<{ segments: VoiceSegment[] }>(
+    `/voice/segments${qs ? `?${qs}` : ""}`
+  );
+}
+
+export function startVoiceCampaign(payload: {
+  name?: string;
+  city?: string;
+  trade?: string;
+  max_calls?: number;
+}): Promise<{ ok: boolean; campaign: VoiceCampaign }> {
+  return adminFetch<{ ok: boolean; campaign: VoiceCampaign }>(
+    "/voice/campaigns/start",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+}
+
+export function fetchVoiceCampaigns(
+  limit = 20
+): Promise<{ campaigns: VoiceCampaign[] }> {
+  return adminFetch<{ campaigns: VoiceCampaign[] }>(
+    `/voice/campaigns?limit=${limit}`
+  );
+}
+
+export function stopVoiceCampaign(
+  campaignId: number
+): Promise<{ ok: boolean; campaign: VoiceCampaign }> {
+  return adminFetch<{ ok: boolean; campaign: VoiceCampaign }>(
+    `/voice/campaigns/${campaignId}/stop`,
+    { method: "POST" }
+  );
+}
+
 /** Snapshot read-only do System Health (7 camadas + score 0–100). */
 export function fetchSystemHealth(windowHours = 24): Promise<SystemHealth> {
   return adminFetch<SystemHealth>(

@@ -14,8 +14,11 @@ import {
   Phone,
   PhoneCall,
   PhoneOutgoing,
+  Play,
   RefreshCcw,
+  Rocket,
   ShieldCheck,
+  Square,
   Upload,
   Users,
   X,
@@ -30,14 +33,20 @@ import {
   dialVoiceContact,
   downloadVoiceTemplate,
   fetchShowcaseStats,
+  fetchVoiceCampaigns,
   fetchVoiceQueue,
+  fetchVoiceSegments,
   fetchVoiceStats,
   importVoiceDnc,
-  importVoiceLicenses,
+  ingestVoice,
   logVoiceCall,
   sendVoiceShowcase,
+  startVoiceCampaign,
+  stopVoiceCampaign,
   suppressVoicePhone,
+  type VoiceCampaign,
   type VoiceCompany,
+  type VoiceSegment,
 } from "@/lib/admin-api";
 import { fmtWhen } from "@/lib/system-health";
 
@@ -185,6 +194,7 @@ export default function VoiceB2BPage() {
   const [includeBlocked, setIncludeBlocked] = useState(false);
   const [cityFilter, setCityFilter] = useState("");
   const [tradeFilter, setTradeFilter] = useState("");
+  const [maxCalls, setMaxCalls] = useState(25);
   const [selected, setSelected] = useState<VoiceCompany | null>(null);
   const [licenseCsv, setLicenseCsv] = useState("");
   const [licenseName, setLicenseName] = useState("MA HIC / licenças");
@@ -217,6 +227,16 @@ export default function VoiceB2BPage() {
     "showcase-stats",
     fetchShowcaseStats,
     { refreshInterval: 60_000 }
+  );
+  const { data: segmentsData, mutate: mutateSegments } = useSWR(
+    "voice-segments",
+    () => fetchVoiceSegments(),
+    { refreshInterval: 60_000 }
+  );
+  const { data: campaignsData, mutate: mutateCampaigns } = useSWR(
+    "voice-campaigns",
+    () => fetchVoiceCampaigns(20),
+    { refreshInterval: 5_000 }
   );
 
   const refreshAll = async () => {
@@ -251,12 +271,51 @@ export default function VoiceB2BPage() {
     }
   };
 
-  const importLicenses = () =>
+  const ingestAndProcess = () =>
     run("licenses", async () => {
       if (!licenseCsv.trim()) throw new Error("Escolhe um CSV de licenças/permits.");
-      const result = await importVoiceLicenses(licenseCsv, licenseName, licenseUrl);
+      const result = await ingestVoice(licenseCsv, licenseName, licenseUrl);
       setLicenseCsv("");
-      return `Licenças: ${result.imported} novas, ${result.updated ?? 0} atualizadas, ${result.skipped} ignoradas.`;
+      await Promise.all([
+        mutateQueue(),
+        mutateStats(),
+        mutateShowcase(),
+        mutateSegments(),
+      ]);
+      return `Ingestão: ${result.import.imported} novas, ${
+        result.import.updated ?? 0
+      } atualizadas, ${result.import.skipped} ignoradas · ${
+        result.showcase.published
+      } páginas de vitrine · ${result.segments.length} segmentos cidade+nicho.`;
+    });
+
+  const startCampaign = (segment?: VoiceSegment) =>
+    run("campaign-start", async () => {
+      const city =
+        segment && segment.city !== "—" ? segment.city : cityFilter || undefined;
+      const trade =
+        segment && segment.trade !== "—" ? segment.trade : tradeFilter || undefined;
+      const result = await startVoiceCampaign({
+        name: segment
+          ? `Auto ${segment.city} ${segment.trade}`
+          : city || trade
+            ? `Auto ${city || "todas"} ${trade || "todos"}`
+            : undefined,
+        city,
+        trade,
+        max_calls: maxCalls,
+      });
+      await Promise.all([mutateCampaigns(), mutateQueue(), mutateStats()]);
+      return `Campanha #${result.campaign.id} iniciada: ${result.campaign.max_calls} chamadas · ${
+        city || "todas as cidades"
+      } / ${trade || "todos os nichos"}.`;
+    });
+
+  const stopCampaign = (campaignId: number) =>
+    run(`campaign-stop-${campaignId}`, async () => {
+      await stopVoiceCampaign(campaignId);
+      await mutateCampaigns();
+      return `Campanha #${campaignId} parada.`;
     });
 
   const importDnc = () =>
@@ -457,12 +516,12 @@ export default function VoiceB2BPage() {
             </button>
             <button
               type="button"
-              onClick={() => void importLicenses()}
+              onClick={() => void ingestAndProcess()}
               disabled={working === "licenses"}
               className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-500 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-indigo-400 disabled:opacity-50"
             >
               {working === "licenses" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-              Importar
+              Importar e processar
             </button>
           </div>
           <p className="mt-2 text-[10px] text-slate-600">
@@ -547,7 +606,183 @@ export default function VoiceB2BPage() {
       </Card>
 
       <Card
-        title="4. Cobertura por cidade e nicho"
+        title="4. Campanha autónoma"
+        icon={<Rocket className="h-4 w-4 text-amber-400" />}
+        hint="Consome a fila por cidade/nicho, aplica can_call e dispara Telnyx + vitrine. Sem chaves Telnyx corre em dry-run."
+        action={<Badge tone="amber">Auto-scheduler</Badge>}
+      >
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="text-[10px] text-slate-500">
+            Máx. chamadas
+            <input
+              type="number"
+              min={1}
+              max={200}
+              value={maxCalls}
+              onChange={(event) => setMaxCalls(Number(event.target.value))}
+              className="mt-1 block w-24 rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-[11px] text-slate-200"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => void startCampaign()}
+            disabled={working === "campaign-start"}
+            className="inline-flex items-center gap-2 rounded-lg bg-amber-400 px-4 py-2 text-[11px] font-black text-[#1a1405] hover:bg-amber-300 disabled:opacity-50"
+          >
+            {working === "campaign-start" ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Play className="h-3.5 w-3.5" />
+            )}
+            Iniciar campanha autónoma
+          </button>
+          <span className="text-[10px] text-slate-500">
+            Filtros atuais: {cityFilter || "todas as cidades"} ·{" "}
+            {tradeFilter || "todos os nichos"}
+          </span>
+        </div>
+        <div className="mt-4 space-y-2">
+          {(campaignsData?.campaigns ?? []).length ? (
+            (campaignsData?.campaigns ?? []).map((campaign) => (
+              <div
+                key={campaign.id}
+                className="flex flex-wrap items-center gap-2 rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2 text-[10px]"
+              >
+                <span className="font-mono text-slate-500">#{campaign.id}</span>
+                <span className="font-semibold text-slate-200">
+                  {campaign.name}
+                </span>
+                <Badge
+                  tone={
+                    campaign.status === "running"
+                      ? "emerald"
+                      : campaign.status === "completed"
+                        ? "sky"
+                        : campaign.status === "error"
+                          ? "rose"
+                          : "slate"
+                  }
+                >
+                  {campaign.status}
+                </Badge>
+                <span className="text-slate-500">
+                  {campaign.calls_started}/{campaign.max_calls} chamadas ·{" "}
+                  {campaign.showcases_sent} vitrines · {campaign.skipped} saltos
+                </span>
+                <span className="text-slate-600">
+                  {campaign.city || "todas"} / {campaign.trade || "todos"}
+                </span>
+                {campaign.status === "running" ? (
+                  <button
+                    type="button"
+                    onClick={() => void stopCampaign(campaign.id)}
+                    disabled={working === `campaign-stop-${campaign.id}`}
+                    className="ml-auto inline-flex items-center gap-1 rounded-md border border-rose-400/30 bg-rose-500/10 px-2 py-1 text-[9px] font-semibold text-rose-200 hover:bg-rose-500/20 disabled:opacity-50"
+                  >
+                    {working === `campaign-stop-${campaign.id}` ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Square className="h-3 w-3" />
+                    )}
+                    Parar
+                  </button>
+                ) : null}
+              </div>
+            ))
+          ) : (
+            <p className="text-[10px] text-slate-600">
+              Sem campanhas ainda. Inicia uma para consumir a fila automaticamente.
+            </p>
+          )}
+        </div>
+      </Card>
+
+      <Card
+        title="5. Segmentos cidade + nicho"
+        icon={<Rocket className="h-4 w-4 text-sky-400" />}
+        hint="Cada linha é uma fila dinâmica. Iniciar cria uma campanha só para esse segmento."
+      >
+        <div className="max-h-[420px] overflow-y-auto">
+          <table className="w-full min-w-[760px] text-left text-[11px]">
+            <thead className="text-slate-500">
+              <tr>
+                <th className="pb-2 font-semibold">Cidade / nicho</th>
+                <th className="pb-2 font-semibold">Prontos</th>
+                <th className="pb-2 font-semibold">Vitrine</th>
+                <th className="pb-2 text-right font-semibold">Ação</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(segmentsData?.segments ?? []).length ? (
+                (segmentsData?.segments ?? []).map((segment) => (
+                  <tr
+                    key={`${segment.city}-${segment.state}-${segment.trade}`}
+                    className="border-t border-white/5 align-top"
+                  >
+                    <td className="py-2 pr-2">
+                      <p className="font-semibold text-slate-200">
+                        {segment.city}, {segment.state}
+                      </p>
+                      <p className="text-[10px] text-slate-500">
+                        {segment.trade}
+                      </p>
+                    </td>
+                    <td className="py-2 pr-2 text-slate-300">
+                      {segment.callable}/{segment.total}
+                      {segment.blocked > 0 ? (
+                        <span className="text-[9px] text-amber-300">
+                          {" "}
+                          · {segment.blocked} bloqueados
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="py-2 pr-2">
+                      <Badge
+                        tone={
+                          segment.showcase_mode === "dedicated"
+                            ? "emerald"
+                            : segment.showcase_mode === "city_fallback"
+                              ? "amber"
+                              : "rose"
+                        }
+                      >
+                        {segment.showcase_mode === "dedicated"
+                          ? "Dedicada"
+                          : segment.showcase_mode === "city_fallback"
+                            ? "Fallback cidade"
+                            : "Sem vitrine"}
+                      </Badge>
+                      <p className="mt-1 text-[9px] text-slate-600">
+                        {segment.showcase_exact} exatos ·{" "}
+                        {segment.showcase_city_total} na cidade
+                      </p>
+                    </td>
+                    <td className="py-2 text-right">
+                      <button
+                        type="button"
+                        onClick={() => void startCampaign(segment)}
+                        disabled={working === "campaign-start" || segment.callable === 0}
+                        className="inline-flex items-center gap-1 rounded-lg border border-sky-400/30 bg-sky-500/10 px-2.5 py-1 text-[10px] font-semibold text-sky-200 hover:bg-sky-500/20 disabled:opacity-40"
+                      >
+                        <Play className="h-3 w-3" /> Iniciar
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={4} className="py-6 text-center text-[10px] text-slate-600">
+                    Sem segmentos. Importa um CSV para criar as filas cidade+nicho.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      <Card
+        title="6. Cobertura por cidade e nicho"
         icon={<Globe2 className="h-4 w-4 text-sky-400" />}
         hint="Clique numa cidade ou nicho para filtrar a fila. Dados do voice.db."
         action={
@@ -663,7 +898,7 @@ export default function VoiceB2BPage() {
       </Card>
 
       <Card
-        title="5. Fila de chamadas"
+        title="7. Fila de chamadas"
         icon={<Users className="h-4 w-4 text-indigo-400" />}
         hint="Ordenada por score ICP e volume de obras; compliance sempre visível."
         action={

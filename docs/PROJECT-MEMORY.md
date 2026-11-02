@@ -1604,6 +1604,25 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Fase 2B**: guião falado dinâmico por TTS, conversa multi-turn e otimização
   por trade/cidade.
 
+### Automação da Fase 2A (2026-11-02)
+
+- **Ingestão one-click**: `POST /api/admin/voice/ingest` faz parse/clean/dedupe,
+  rebuild de vitrines e devolve segmentos. O botão “Importar e processar” usa
+  este fluxo.
+- **Segmentos cidade+nicho**: `GET /api/admin/voice/segments` agrupa a fila por
+  cidade/estado/nicho e classifica `dedicated`, `city_fallback` ou
+  `no_showcase` via `showcase.available()`.
+- **Auto-scheduler**: `POST /api/admin/voice/campaigns/start` cria campanha e
+  arranca worker em background. O worker consome a fila, aplica `can_call()`,
+  dispara Telnyx + vitrine e respeita max_calls, timezone, DNC, supressão e
+  tentativas. Sem chaves Telnyx corre em dry-run e envia emails em dry-run.
+- **Campanhas**: tabela `voice_campaigns` + `voice_campaign_skips`; status
+  running/completed/stopped/error; deploy fecha campanhas interrompidas.
+- **Admin**: botão “Iniciar campanha autónoma”, tabela de segmentos com
+  “Iniciar” por cidade+nicho, lista de campanhas com contadores e “Parar”.
+- **Testes**: +4 (auto-scheduler, segmentos, campanha interrompida, ingest API)
+  → **1.283 pytest**; cobertura **69,8%**; `auto_dialer.py` 73,3%.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

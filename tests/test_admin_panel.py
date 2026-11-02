@@ -1422,6 +1422,103 @@ def test_admin_voice_import_dnc_queue_and_call(admin_client, monkeypatch):
     assert "company_name" in r.text
 
 
+def test_admin_voice_ingest_builds_segments(admin_client, monkeypatch):
+    """Upload bruto -> import -> build_pages -> segmentos cidade+nicho."""
+    from datetime import datetime, timezone
+
+    from backend.services import b2b_voice, showcase
+
+    client, headers, _ = admin_client
+    monkeypatch.setattr(showcase.settings, "SHOWCASE_MIN_ITEMS", 3)
+    monkeypatch.setattr(showcase.settings, "SHOWCASE_WINDOW_DAYS", 30)
+    phone = "+16175550666"
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM leads WHERE external_id LIKE 'pytest-%'")
+        for idx in range(3):
+            conn.execute(
+                """
+                INSERT INTO leads
+                  (external_id, source_type, address, city, state, zip_code,
+                   issue_category, date_reported, signal_type, signal_status,
+                   owner_name, is_junk)
+                VALUES (?, 'pytest', ?, 'Boston', 'MA', '02118', 'Roof', ?,
+                        'open_request', 'open', 'Ingest Owner', 0)
+                """,
+                (
+                    f"pytest-ingest-{idx}",
+                    f"{500 + idx} Ingest Street",
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    b2b_voice.init()
+    conn = b2b_voice.get_conn()
+    try:
+        conn.execute(
+            "DELETE FROM voice_calls WHERE company_id IN "
+            "(SELECT id FROM prospect_companies WHERE phone=?)",
+            (phone,),
+        )
+        conn.execute("DELETE FROM dnc_checks WHERE phone=?", (phone,))
+        conn.execute("DELETE FROM prospect_companies WHERE phone=?", (phone,))
+        conn.commit()
+    finally:
+        conn.close()
+    showcase._CACHE.clear()
+
+    csv_text = (
+        "company_name,contact_name,phone,email,city,state,license_status,trade,"
+        "permit_count\n"
+        f"Ingest Roofing,Ana,{phone},ana@example.com,Boston,MA,active,Roofing,9\n"
+    )
+    r = client.post(
+        "/api/admin/voice/ingest",
+        headers=headers,
+        json={"csv": csv_text, "source_name": "pytest-ingest"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["import"]["imported"] == 1
+    assert body["showcase"]["published"] >= 1
+    segment = next(
+        s
+        for s in body["segments"]
+        if s["city"] == "Boston" and s["trade"] == "Roofing"
+    )
+    assert segment["total"] >= 1
+    assert segment["showcase_mode"] == "dedicated"
+
+    r = client.get("/api/admin/voice/segments", headers=headers)
+    assert r.status_code == 200, r.text
+    assert any(
+        s["city"] == "Boston" and s["trade"] == "Roofing"
+        for s in r.json()["segments"]
+    )
+
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM leads WHERE external_id LIKE 'pytest-ingest-%'")
+        conn.commit()
+    finally:
+        conn.close()
+    conn = b2b_voice.get_conn()
+    try:
+        conn.execute(
+            "DELETE FROM voice_calls WHERE company_id IN "
+            "(SELECT id FROM prospect_companies WHERE phone=?)",
+            (phone,),
+        )
+        conn.execute("DELETE FROM dnc_checks WHERE phone=?", (phone,))
+        conn.execute("DELETE FROM prospect_companies WHERE phone=?", (phone,))
+        conn.commit()
+    finally:
+        conn.close()
+    showcase._CACHE.clear()
+
+
 def test_admin_voice_requires_admin(admin_client, nonadmin_client):
     client, _, _ = admin_client
     _, nonadmin_headers = nonadmin_client
@@ -1443,7 +1540,7 @@ def test_admin_showcase_build_public_page_and_token_redirect(admin_client, monke
     monkeypatch.setattr(showcase.settings, "SHOWCASE_WINDOW_DAYS", 30)
     conn = get_connection()
     try:
-        conn.execute("DELETE FROM leads WHERE external_id LIKE 'pytest-api-showcase-%'")
+        conn.execute("DELETE FROM leads WHERE external_id LIKE 'pytest-%'")
         for idx in range(3):
             conn.execute(
                 """
@@ -1540,5 +1637,27 @@ def test_admin_showcase_build_public_page_and_token_redirect(admin_client, monke
 
     r = client.post("/api/showcase/checkout", json={"token": "not-a-token"})
     assert r.status_code == 400
+
+    conn = get_connection()
+    try:
+        conn.execute(
+            "DELETE FROM leads WHERE external_id LIKE 'pytest-api-showcase-%'"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    conn = b2b_voice.get_conn()
+    try:
+        conn.execute(
+            "DELETE FROM voice_calls WHERE company_id IN "
+            "(SELECT id FROM prospect_companies WHERE phone=?)",
+            (phone,),
+        )
+        conn.execute("DELETE FROM dnc_checks WHERE phone=?", (phone,))
+        conn.execute("DELETE FROM prospect_companies WHERE phone=?", (phone,))
+        conn.commit()
+    finally:
+        conn.close()
+    showcase._CACHE.clear()
 
 

@@ -76,12 +76,35 @@ Cada import cria/renova o check por 31 dias.
 | GET | `/api/admin/voice/stats` | KPIs e configuração do piloto |
 | POST | `/api/admin/voice/import/licenses` | importar licenças/permits |
 | POST | `/api/admin/voice/import/dnc` | importar lista DNC |
+| POST | `/api/admin/voice/ingest` | importar + rebuild de vitrines + segmentos |
+| GET | `/api/admin/voice/segments` | filas agregadas por cidade+nicho |
+| POST | `/api/admin/voice/campaigns/start` | arrancar campanha autónoma |
+| GET | `/api/admin/voice/campaigns` | listar campanhas |
+| POST | `/api/admin/voice/campaigns/{id}/stop` | parar campanha |
 | POST | `/api/admin/voice/dnc/check` | check manual (limpo/listado) |
 | POST | `/api/admin/voice/contacts/{id}/call` | registar tentativa |
 | POST | `/api/admin/voice/suppress` | suprimir telefone |
 | GET | `/api/admin/voice/template.csv` | template de importação |
 
 Todas exigem sessão **admin** (`_require_admin_user`).
+
+## Automação no Admin
+
+1. **Importar e processar**: sobe o CSV bruto; o backend faz parsing, limpeza,
+   dedupe por telefone, mapeamento de campos, rebuild das vitrines e devolve os
+   segmentos cidade+nicho.
+2. **Segmentos**: cada linha é uma fila por cidade/estado/nicho, classificada
+   como `Dedicada`, `Fallback cidade` ou `Sem vitrine` via
+   `showcase.available()`.
+3. **Iniciar campanha autónoma**: escolhe cidade/nicho (ou usa os filtros da
+   fila), define o máximo de chamadas e arranca. O worker:
+   - consome a fila por score;
+   - aplica `can_call()` (DNC, supressão, tentativas, horário local);
+   - dispara Telnyx + link/email da vitrine;
+   - respeita `VOICE_AUTOSCHED_DELAY_SECONDS` entre chamadas reais;
+   - marca a campanha como `completed`, `stopped` ou `error`.
+4. **Dry-run**: sem chaves Telnyx, as chamadas ficam registadas em `voice_calls`
+   e os emails ficam em dry-run; nenhum contacto real é feito.
 
 ## Operação
 

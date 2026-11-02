@@ -35,7 +35,7 @@ def _clean(monkeypatch):
         conn.close()
     leads = get_connection()
     try:
-        leads.execute("DELETE FROM leads WHERE external_id LIKE 'pytest-showcase-%'")
+        leads.execute("DELETE FROM leads WHERE external_id LIKE 'pytest-%'")
         leads.commit()
     finally:
         leads.close()
