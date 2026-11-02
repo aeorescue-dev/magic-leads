@@ -1270,6 +1270,178 @@ export function fetchAdminAnalytics(
   return adminFetch<AdminAnalytics>(`/analytics?${params.toString()}`);
 }
 
+export interface InvestorPriceBridge {
+  ticket_weekly: number;
+  monthly_factor: number;
+  mrr_per_pass: number;
+  arr_per_pass: number;
+  access_passes: number;
+  pro_active: number;
+  weekly_run_rate_access: number;
+  mrr_normalized_access: number;
+  arr_normalized_access: number;
+  weekly_run_rate_pro: number;
+  mrr_normalized_pro: number;
+  arr_normalized_pro: number;
+}
+
+export interface InvestorRoom {
+  generated_at: string;
+  version: string;
+  checksum: string;
+  viewer_email: string;
+  nda_accepted: boolean;
+  nda_version: string;
+  price_bridge: InvestorPriceBridge;
+  reconciliation: {
+    access_passes: number;
+    pro_active: number;
+    verified_paid_passes: number;
+    completed_checkouts: number;
+    stripe_completed_events: number;
+    cash_30d: number | null;
+    cash_total: number | null;
+    cash_status: string;
+    cash_mode: string | null;
+    status: string;
+    details: string;
+  };
+  asset: {
+    owners: number;
+    fresh7: number;
+    data_low: number;
+    data_high: number;
+    ip_low: number;
+    ip_high: number;
+    compliance_low: number;
+    compliance_high: number;
+    floor_low: number;
+    floor_high: number;
+    basis: string;
+  };
+  going_concern: {
+    access_arr: number;
+    pro_arr: number;
+    access_ev: { low: number; base: number; high: number };
+    pro_ev: { low: number; base: number; high: number };
+    multiple_ranges: { low: number; base: number; high: number };
+  };
+  proof: {
+    truth_score: number;
+    confidence: string;
+    owner_coverage_pct: number;
+    address_coverage_pct: number;
+    fresh7_pct: number;
+    fresh7: number;
+    provenance_pct: number;
+    phone: {
+      status: string;
+      calls: number;
+      success: number;
+      success_pct: number;
+      error: number;
+      error_billed: number;
+      error_pct: number;
+      no_results: number;
+      name_mismatch: number;
+      transport_error: number;
+      cost_30d: number;
+      cost_per_success: number | null;
+    };
+    email: {
+      sent: number;
+      bounces: number;
+      bounce_rate_pct: number;
+      replies_30d: number;
+      suppressions: number;
+      status: string;
+    };
+    operations: {
+      health_status: string;
+      health_score: number;
+      captured_at: string;
+      ingestion: string;
+    };
+    cost_per_owner_cash: number | null;
+    cost_per_owner_loaded: number | null;
+    anti_angi: { status: string; note: string };
+  };
+  metrics: Record<string, any>;
+  analytics: Record<string, number>;
+  assumptions: Record<string, any>;
+  code_inventory: {
+    python_lines: number;
+    typescript_lines: number;
+    pytest_tests: number;
+    vitest_tests: number;
+    test_files: number;
+    docs: number;
+    coverage_backend_pct: number | null;
+    coverage_measured_at: string | null;
+    ci: string;
+    portability: string;
+    known_debt: string[];
+  };
+}
+
+export interface InvestorSimulation {
+  contractors: number;
+  weekly_revenue: number;
+  mrr_normalized: number;
+  arr_normalized: number;
+  searchbug_month: number;
+  payment_fees_month: number;
+  infra_month: number;
+  cogs_month: number;
+  gross_margin_pct: number;
+  net_margin_pct: number;
+  monthly_churn_pct: number;
+  ltv: number | null;
+  valuation: { low: number; base: number; high: number };
+  asset_floor_low: number;
+  asset_floor_high: number;
+  ev_low: number;
+  ev_high: number;
+  notes: string[];
+}
+
+export function fetchInvestorRoom(): Promise<InvestorRoom> {
+  return adminFetch<InvestorRoom>("/investor");
+}
+
+export function refreshInvestorRoom(): Promise<{ ok: boolean; snapshot: InvestorRoom }> {
+  return adminFetch<{ ok: boolean; snapshot: InvestorRoom }>("/investor/refresh", {
+    method: "POST",
+  });
+}
+
+export function acceptInvestorNda(): Promise<{ ok: boolean; version: string }> {
+  return adminFetch<{ ok: boolean; version: string }>("/investor/nda", {
+    method: "POST",
+  });
+}
+
+export function simulateInvestor(
+  inputs: Record<string, number>
+): Promise<InvestorSimulation> {
+  return adminFetch<InvestorSimulation>("/investor/simulate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(inputs),
+  });
+}
+
+export async function downloadInvestorCsv(): Promise<Blob> {
+  const res = await fetch(`${API_URL}/api/admin/investor/export.csv`, {
+    credentials: "include",
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    throw new AdminApiError(res.status, res.statusText || "export failed");
+  }
+  return await res.blob();
+}
+
 /** Snapshot read-only do System Health (7 camadas + score 0–100). */
 export function fetchSystemHealth(windowHours = 24): Promise<SystemHealth> {
   return adminFetch<SystemHealth>(

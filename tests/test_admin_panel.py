@@ -163,6 +163,62 @@ def test_admin_ack_requires_admin(nonadmin_client):
     assert client.post("/api/admin/alerts/1/ack", headers=headers).status_code == 403
 
 
+# ---------------------------------------------------------------- investor
+
+
+def test_admin_investor_snapshot_and_simulate(admin_client, monkeypatch):
+    from backend.services import investor
+
+    monkeypatch.setattr(
+        investor,
+        "_stripe_cash",
+        lambda: {"status": "not_configured", "cash_30d": None, "cash_total": None},
+    )
+    client, headers, _ = admin_client
+    r = client.get("/api/admin/investor", headers=headers)
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["price_bridge"]["ticket_weekly"] == 120
+    assert data["price_bridge"]["mrr_per_pass"] == 520
+    assert data["asset"]["floor_low"] > 0
+    assert "nda_accepted" in data
+
+    r = client.post(
+        "/api/admin/investor/simulate",
+        headers=headers,
+        json={"contractors": 10, "multiple": 3},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["mrr_normalized"] == 5200
+    assert r.json()["arr_normalized"] == 62400
+
+
+def test_admin_investor_export_requires_nda_then_watermarks(admin_client, monkeypatch):
+    from backend.services import investor
+
+    monkeypatch.setattr(
+        investor,
+        "_stripe_cash",
+        lambda: {"status": "not_configured", "cash_30d": None, "cash_total": None},
+    )
+    client, headers, _ = admin_client
+    r = client.post("/api/admin/investor/nda", headers=headers)
+    assert r.status_code == 200, r.text
+    r = client.get("/api/admin/investor/export.csv", headers=headers)
+    assert r.status_code == 200, r.text
+    assert "viewer_email" in r.text
+    assert "doc_id" in r.text
+    assert "@magicleads.app" in r.text
+
+
+def test_admin_investor_requires_session():
+    from fastapi.testclient import TestClient
+    from backend.main import app
+
+    client = TestClient(app)
+    assert client.get("/api/admin/investor").status_code == 401
+
+
 # ---------------------------------------------------------------- dados
 
 

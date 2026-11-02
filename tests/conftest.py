@@ -9,6 +9,7 @@ import tempfile
 
 _TMP_DB = os.path.join(tempfile.gettempdir(), "magicleads_test_leads.db")
 _TMP_ANALYTICS = os.path.join(tempfile.gettempdir(), "magicleads_test_analytics.db")
+_TMP_INVESTOR = os.path.join(tempfile.gettempdir(), "magicleads_test_investor.db")
 for _suffix in ("", "-wal", "-shm"):
     try:
         os.remove(_TMP_DB + _suffix)
@@ -18,9 +19,14 @@ for _suffix in ("", "-wal", "-shm"):
         os.remove(_TMP_ANALYTICS + _suffix)
     except OSError:
         pass
+    try:
+        os.remove(_TMP_INVESTOR + _suffix)
+    except OSError:
+        pass
 
 os.environ["LEADS_DB_PATH"] = _TMP_DB
 os.environ["ANALYTICS_DB_PATH"] = _TMP_ANALYTICS
+os.environ["INVESTOR_DB_PATH"] = _TMP_INVESTOR
 os.environ.pop("LEADS_RESET_ON_BOOT", None)
 os.environ.pop("LEADS_SEED_FILE", None)
 os.environ.pop("DATA_DIR", None)

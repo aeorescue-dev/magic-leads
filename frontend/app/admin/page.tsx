@@ -2617,6 +2617,13 @@ export default function AdminPage() {
           <BarChart3 className="h-4 w-4" />
           Analytics
         </a>
+        <a
+          href="/admin/investor-room"
+          className="inline-flex items-center gap-2 rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-200 hover:bg-amber-500/20"
+        >
+          <Wallet className="h-4 w-4" />
+          Investor Room
+        </a>
         <button
           onClick={() => void load()}
           disabled={busy}

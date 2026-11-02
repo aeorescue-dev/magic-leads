@@ -10,7 +10,7 @@ jobs:
   import-and-syntax-check:
     name: Import & Syntax Check
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
 
     steps:
       - name: Checkout code
@@ -28,13 +28,20 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-asyncio httpx fastapi uvicorn
+          pip install pytest pytest-asyncio pytest-cov httpx fastapi uvicorn
 
       - name: Run full backend test suite
         env:
           PYTHONPATH: .
         run: |
-          pytest tests/ -v --tb=short
+          pytest tests/ -q --cov=backend --cov-report=term --cov-report=json:coverage.json
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: coverage.json
+          if-no-files-found: warn
 
       - name: Syntax check (ruff)
         working-directory: ./backend

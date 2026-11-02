@@ -1463,6 +1463,32 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   **calendário De/Até** (inclusive, UTC, 366d) e **export CSV** long-format.
   Testes: **1.230 pytest**, **109 vitest**.
 
+### Fase 30 — Investor Room 1A (2026-11-02)
+
+- **Gate 0 assinado**: $120/7 dias, normalizacao 52/12 ($520 MRR / $6.240
+  ARR por pass). Stripe = cash; `plan_until` = acesso; passes sem cobranca
+  mapeada ficam fora do MRR verificado.
+- **`investor.db`** separado com snapshots imutaveis (checksum), assumptions
+  versionadas, reconciliacao, NDA e access log. Refresh diario na Control
+  Tower + refresh manual (60 s).
+- **Piso patrimonial**: dados $42k–$127k (84.6k owners), IP $96k–$270k,
+  compliance $10k–$25k; faixa total ~$148k–$422k. E custo de substituicao,
+  nao valor de mercado.
+- **Proof of Performance**: owner 78,4%, frescura 17,1%, operacao 100/100;
+  **Phone Truth em remediação** (73 chamadas, 22 success = 30,1%, 24 errors
+  cobrados, $11,40); e-mail 22 enviados/1 bounce. Numeros negativos visiveis.
+- **Simulador ROI**: N empreiteiros -> WRR/MRR/ARR, COGS, margem bruta/liquida,
+  LTV, valuation 2x-8x e EV range com piso.
+- **NDA 1 clique + CSV watermark** (viewer/exported_at/doc_id); Print-to-PDF
+  com watermark diagonal. Aba Comprador (preview) exige NDA; data room/PDF
+  server-side na 1B.
+- **Cobertura publicada**: `pytest --cov=backend` = **69,2%** (12.768/18.446);
+  doc `docs/TEST-COVERAGE.md`; CI gera/up a artifact `backend-coverage`.
+- **Testes**: **1.241 pytest** (+11; 1 skipped), **109 vitest**;
+  ruff/tsc/build/lint limpos.
+- **Pendente 1B**: reconciliacao Stripe↔utilizador automatica, data room ACL,
+  PDF server-side, links externos e remediacao Searchbug.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

@@ -98,6 +98,7 @@ from .services import (
     freshness,
     geo_lookup,
     inbox_sync,
+    investor,
     lifecycle_push,
     notifier,
     outbound_templates,
@@ -2716,6 +2717,101 @@ async def analytics_ingest(
     return Response(status_code=204)
 
 
+@app.get("/api/admin/investor")
+async def admin_investor(_admin: dict = Depends(_require_admin_user)):
+    """Snapshot do Investor Room (read-only; valores agregados)."""
+    snap = await anyio.to_thread.run_sync(investor.get_snapshot)
+    nda = await anyio.to_thread.run_sync(
+        investor.has_nda, int(_admin["id"]), snap.get("nda_version", "")
+    )
+    return {
+        **snap,
+        "viewer_email": _admin.get("email") or "",
+        "nda_accepted": bool(nda),
+    }
+
+
+@app.post("/api/admin/investor/refresh")
+async def admin_investor_refresh(
+    request: Request, _admin: dict = Depends(_require_admin_user)
+):
+    """Recalcula e grava um snapshot (throttle de 60 s)."""
+    snap = await anyio.to_thread.run_sync(investor.refresh, False)
+    await anyio.to_thread.run_sync(
+        investor.log_access,
+        int(_admin["id"]),
+        _admin.get("email") or "",
+        "refresh",
+        snap.get("checksum") or "",
+        (request.headers.get("x-forwarded-for") or "").split(",")[0].strip(),
+        request.headers.get("user-agent") or "",
+    )
+    return {"ok": True, "snapshot": snap}
+
+
+@app.post("/api/admin/investor/simulate")
+async def admin_investor_simulate(
+    request: Request, _admin: dict = Depends(_require_admin_user)
+):
+    """Simulador puro: não escreve na BD."""
+    try:
+        inputs = await request.json()
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="json inválido")
+    snap = await anyio.to_thread.run_sync(investor.get_snapshot)
+    result = investor.simulate(
+        inputs if isinstance(inputs, dict) else {},
+        snap["assumptions"],
+        snap["asset"],
+    )
+    return result
+
+
+@app.post("/api/admin/investor/nda")
+async def admin_investor_nda(
+    request: Request, _admin: dict = Depends(_require_admin_user)
+):
+    """Aceite de NDA em 1 clique (versionado e auditado)."""
+    await anyio.to_thread.run_sync(
+        investor.accept_nda,
+        int(_admin["id"]),
+        _admin.get("email") or "",
+        (request.headers.get("x-forwarded-for") or "").split(",")[0].strip(),
+        request.headers.get("user-agent") or "",
+    )
+    return {"ok": True, "version": investor.NDA_VERSION}
+
+
+@app.get("/api/admin/investor/export.csv")
+async def admin_investor_export(
+    request: Request, _admin: dict = Depends(_require_admin_user)
+):
+    """CSV com watermark (viewer/data/doc id). Exige NDA aceite."""
+    snap = await anyio.to_thread.run_sync(investor.get_snapshot)
+    accepted = await anyio.to_thread.run_sync(
+        investor.has_nda, int(_admin["id"]), snap.get("nda_version", "")
+    )
+    if not accepted:
+        raise HTTPException(status_code=403, detail="nda_required")
+    content = await anyio.to_thread.run_sync(
+        investor.export_csv,
+        snap,
+        _admin.get("email") or "",
+        (request.headers.get("x-forwarded-for") or "").split(",")[0].strip(),
+        request.headers.get("user-agent") or "",
+        int(_admin["id"]),
+    )
+    return Response(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": (
+                "attachment; filename=\"magicleads-investor-room.csv\""
+            )
+        },
+    )
+
+
 @app.get("/api/admin/analytics")
 async def admin_analytics(
     range: str = "7d",
@@ -4805,6 +4901,10 @@ async def _control_tower_loop():
             await anyio.to_thread.run_sync(analytics.maintenance_if_due)
         except Exception as exc:  # noqa: BLE001
             logger.warning("[CONTROL-TOWER] manutencao analytics falhou: %s", exc)
+        try:
+            await anyio.to_thread.run_sync(investor.refresh_if_due)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[CONTROL-TOWER] snapshot investidor falhou: %s", exc)
         try:
             res = await control_tower.maybe_send_digest()
             if res:

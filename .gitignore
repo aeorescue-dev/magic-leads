@@ -57,3 +57,4 @@ scripts/.shots/
 watch-deploy.log*
 .vercel
 .env*
+coverage.json
