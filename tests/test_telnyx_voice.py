@@ -157,6 +157,39 @@ def test_webhook_secret_fail_closed_e_valida():
     assert telnyx_voice.verify_secret("anything") is False
 
 
+def test_webhook_instrumenta_answered_e_hangup():
+    company = _seed_company()
+    created = telnyx_voice.create_call(company)
+    call_id = created["voice_call_id"]
+    state = base64.b64encode(
+        json.dumps({"voice_call_id": call_id, "company_id": company["id"]}).encode()
+    ).decode()
+
+    def event(event_type: str, body: dict):
+        return {
+            "data": {
+                "event_type": event_type,
+                "payload": {"client_state": state, **body},
+            }
+        }
+
+    answered = telnyx_voice.handle_webhook(event("call.answered", {}))
+    assert answered["ok"] is True
+    hangup = telnyx_voice.handle_webhook(
+        event(
+            "call.hangup",
+            {"duration_millis": 65000, "hangup_cause": "normal_clearing"},
+        )
+    )
+    assert hangup["ok"] is True
+    call = voice.get_voice_call(call_id)
+    assert call["answered_at"] is not None
+    assert call["duration_seconds"] == 65
+    assert call["listen_seconds"] == 65
+    assert call["hangup_cause"] == "normal_clearing"
+    assert call["cost_cents"] == 4
+
+
 def test_email_fallback_cidade_usa_escopo_neutro(monkeypatch):
     """Dallas roofing sem página exata: email não pode dizer 'Roofing 3864'."""
     conn = get_connection()

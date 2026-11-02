@@ -158,3 +158,177 @@ def test_campanha_interrompida_e_fechada_no_arranque():
     final = voice.get_campaign(campaign["id"])
     assert final["status"] == "error"
     assert "interrompida" in (final["error"] or "").lower()
+
+
+def test_cota_total_com_lote_diario_pausa_e_retoma():
+    for idx in range(3):
+        _seed_lead("Boston", "MA", "Roof", "02118", idx)
+    showcase.build_pages()
+    for idx, phone in enumerate(("+16175550111", "+16175550112", "+16175550113")):
+        _import_company(phone, "Boston", "MA")
+    campaign = voice.create_campaign(
+        "Batch 1", "Boston", "Roofing", 3, 0, 3, 1, True, False
+    )
+    asyncio.run(auto_dialer.run_campaign(campaign["id"]))
+    paused = voice.get_campaign(campaign["id"])
+    assert paused["status"] == "paused"
+    assert paused["calls_started"] == 1
+    assert paused["next_batch_at"]
+
+    voice.update_campaign(campaign["id"], status="running", next_batch_at=None)
+    asyncio.run(auto_dialer.run_campaign(campaign["id"]))
+    paused2 = voice.get_campaign(campaign["id"])
+    assert paused2["status"] == "paused"
+    assert paused2["calls_started"] == 2
+
+    voice.update_campaign(campaign["id"], status="running", next_batch_at=None)
+    asyncio.run(auto_dialer.run_campaign(campaign["id"]))
+    final = voice.get_campaign(campaign["id"])
+    assert final["status"] == "completed"
+    assert final["calls_started"] == 3
+
+
+def test_metrics_calcula_funil(monkeypatch):
+    _import_company("+16175550114", "Boston", "MA")
+    conn = voice.get_conn()
+    try:
+        company = dict(
+            conn.execute(
+                "SELECT * FROM prospect_companies WHERE phone='+16175550114'"
+            ).fetchone()
+        )
+    finally:
+        conn.close()
+    answered = voice.create_voice_call(company, provider="pytest", campaign_id="m1")
+    voice.update_voice_call(
+        answered["id"],
+        status="ended",
+        answered_at=NOW.isoformat(),
+        duration_seconds=60,
+        listen_seconds=45,
+        showcase_clicked_at=NOW.isoformat(),
+        checkout_session_id="cs_metrics",
+        revenue_cents=12000,
+        cost_cents=100,
+    )
+    missed = voice.create_voice_call(company, provider="pytest", campaign_id="m1")
+    voice.update_voice_call(
+        missed["id"], status="ended", hangup_cause="no_answer", cost_cents=200
+    )
+    result = voice.metrics(days=30)
+    summary = result["summary"]
+    assert summary["dialed"] == 2
+    assert summary["answered"] == 1
+    assert summary["answer_rate"] == 50.0
+    assert summary["engagement_rate"] == 100.0
+    assert summary["showcase_ctr"] == 100.0
+    assert summary["checkout_rate"] == 100.0
+    assert summary["revenue_usd"] == 120.0
+    assert summary["net_usd"] == 117.0
+    assert result["by_city_trade"]
+
+
+def test_bridge_contractor_entities_preenche_voice_db():
+    leads = get_connection()
+    try:
+        leads.execute(
+            "DELETE FROM contractor_entities WHERE entity_key LIKE 'pytest-bridge-%'"
+        )
+        for idx, (name, phone, city, state, niche) in enumerate(
+            [
+                ("Bridge Roofing LLC", "6175550201", "Boston", "MA", "roofing"),
+                ("Bridge Electric LLC", "2145550202", "Dallas", "TX", "electrical"),
+            ]
+        ):
+            leads.execute(
+                """
+                INSERT INTO contractor_entities
+                  (entity_key, legal_name, normalized_name, city, state, phone,
+                   email, license, niche_key, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'new')
+                """,
+                (
+                    f"pytest-bridge-{idx}",
+                    name,
+                    name.lower(),
+                    city,
+                    state,
+                    phone,
+                    f"bridge{idx}@example.com",
+                    f"LIC-{idx}",
+                    niche,
+                ),
+            )
+        leads.commit()
+    finally:
+        leads.close()
+
+    result = voice.bridge_contractor_entities()
+    assert result["imported"] >= 2
+    conn = voice.get_conn()
+    try:
+        rows = [
+            dict(r)
+            for r in conn.execute(
+                "SELECT company_name, city, state, trade FROM prospect_companies "
+                "WHERE phone IN ('+16175550201','+12145550202')"
+            ).fetchall()
+        ]
+    finally:
+        conn.close()
+    assert len(rows) == 2
+    assert any(r["trade"] == "roofing" for r in rows)
+    assert any(r["trade"] == "electrical" for r in rows)
+
+    leads = get_connection()
+    try:
+        leads.execute(
+            "DELETE FROM contractor_entities WHERE entity_key LIKE 'pytest-bridge-%'"
+        )
+        leads.commit()
+    finally:
+        leads.close()
+
+
+def test_source_http_csv_importa_e_rebuilda_segmentos(monkeypatch):
+    for idx in range(3):
+        _seed_lead("Chicago", "IL", "Paint", "60601", idx)
+    csv_text = (
+        "company_name,contact_name,phone,email,city,state,license_status,trade,"
+        "permit_count\n"
+        "Source Painting,Ana,+13125550121,ana@example.com,Chicago,IL,active,Painting,6\n"
+    )
+
+    class FakeResponse:
+        status_code = 200
+        text = csv_text
+
+        def raise_for_status(self):
+            return None
+
+    monkeypatch.setattr(
+        voice.settings, "VOICE_SOURCE_ALLOWED_HOSTS", "example.com"
+    )
+    monkeypatch.setattr(
+        voice.httpx, "get", lambda *args, **kwargs: FakeResponse()
+    )
+    source = voice.create_source(
+        "Chicago licenses", "http_csv", "https://example.com/licenses.csv"
+    )
+    result = voice.sync_source(source["id"])
+    assert result["ok"] is True
+    assert result["import"]["imported"] == 1
+    assert result["segments"] >= 1
+    conn = voice.get_conn()
+    try:
+        ingest = conn.execute(
+            "SELECT status, imported FROM raw_ingest WHERE source_id=?",
+            (source["id"],),
+        ).fetchone()
+        assert ingest["status"] == "success"
+        assert ingest["imported"] == 1
+    finally:
+        conn.close()
+    segments = voice.cached_segments(city="Chicago", trade="Painting")
+    assert segments
+    assert segments[0]["showcase_mode"] == "dedicated"

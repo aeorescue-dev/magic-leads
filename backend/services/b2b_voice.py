@@ -18,7 +18,12 @@ import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
+
+import httpx
+
+from ..config import settings
 
 VERSION = "2026-11-02.1"
 PILOT_STATES = ("MA", "NY", "TX", "IL")
@@ -167,6 +172,12 @@ CREATE TABLE IF NOT EXISTS voice_calls (
   cost_cents INTEGER DEFAULT 0,
   started_at TEXT,
   ended_at TEXT,
+  answered_at TEXT,
+  duration_seconds INTEGER DEFAULT 0,
+  listen_seconds INTEGER DEFAULT 0,
+  hangup_cause TEXT,
+  showcase_clicked_at TEXT,
+  revenue_cents INTEGER DEFAULT 0,
   created_at TEXT NOT NULL
 );
 
@@ -180,10 +191,15 @@ CREATE TABLE IF NOT EXISTS voice_campaigns (
   trade TEXT,
   status TEXT NOT NULL DEFAULT 'running',
   max_calls INTEGER NOT NULL DEFAULT 25,
+  quota_total INTEGER NOT NULL DEFAULT 0,
+  batch_size INTEGER NOT NULL DEFAULT 25,
+  include_fallback INTEGER NOT NULL DEFAULT 1,
+  dry_run INTEGER NOT NULL DEFAULT 0,
   calls_started INTEGER NOT NULL DEFAULT 0,
   showcases_sent INTEGER NOT NULL DEFAULT 0,
   skipped INTEGER NOT NULL DEFAULT 0,
   error TEXT,
+  next_batch_at TEXT,
   created_by INTEGER,
   created_at TEXT NOT NULL,
   started_at TEXT,
@@ -200,6 +216,57 @@ CREATE TABLE IF NOT EXISTS voice_campaign_skips (
   created_at TEXT NOT NULL,
   UNIQUE(campaign_id, company_id)
 );
+
+CREATE TABLE IF NOT EXISTS voice_segments (
+  city_slug TEXT NOT NULL,
+  trade_slug TEXT NOT NULL,
+  city TEXT NOT NULL,
+  state TEXT NOT NULL,
+  trade_code TEXT NOT NULL,
+  trade_label TEXT,
+  total INTEGER NOT NULL DEFAULT 0,
+  callable INTEGER NOT NULL DEFAULT 0,
+  blocked INTEGER NOT NULL DEFAULT 0,
+  showcase_mode TEXT NOT NULL DEFAULT 'no_showcase',
+  showcase_exact INTEGER NOT NULL DEFAULT 0,
+  showcase_city_total INTEGER NOT NULL DEFAULT 0,
+  page_path TEXT,
+  built_at TEXT NOT NULL,
+  PRIMARY KEY (city_slug, trade_slug)
+);
+
+CREATE INDEX IF NOT EXISTS idx_voice_segments_mode
+  ON voice_segments (showcase_mode, callable DESC);
+
+CREATE TABLE IF NOT EXISTS voice_sources (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'http_csv',
+  url TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  config_json TEXT,
+  last_sync_at TEXT,
+  last_status TEXT,
+  last_error TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS raw_ingest (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_id INTEGER,
+  checksum TEXT,
+  status TEXT NOT NULL DEFAULT 'running',
+  row_count INTEGER DEFAULT 0,
+  imported INTEGER DEFAULT 0,
+  updated INTEGER DEFAULT 0,
+  skipped INTEGER DEFAULT 0,
+  error TEXT,
+  started_at TEXT NOT NULL,
+  finished_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_raw_ingest_source
+  ON raw_ingest (source_id, started_at DESC);
 
 CREATE TABLE IF NOT EXISTS voice_meta (
   key TEXT PRIMARY KEY,
@@ -230,6 +297,36 @@ def get_conn() -> sqlite3.Connection:
     return conn
 
 
+def _ensure_columns(conn: sqlite3.Connection) -> None:
+    """Migra tabelas antigas sem destruir dados."""
+    campaign_cols = {
+        row["name"] for row in conn.execute("PRAGMA table_info(voice_campaigns)")
+    }
+    for name, ddl in (
+        ("quota_total", "INTEGER NOT NULL DEFAULT 0"),
+        ("batch_size", "INTEGER NOT NULL DEFAULT 25"),
+        ("include_fallback", "INTEGER NOT NULL DEFAULT 1"),
+        ("dry_run", "INTEGER NOT NULL DEFAULT 0"),
+        ("next_batch_at", "TEXT"),
+    ):
+        if name not in campaign_cols:
+            conn.execute(f"ALTER TABLE voice_campaigns ADD COLUMN {name} {ddl}")
+
+    call_cols = {
+        row["name"] for row in conn.execute("PRAGMA table_info(voice_calls)")
+    }
+    for name, ddl in (
+        ("answered_at", "TEXT"),
+        ("duration_seconds", "INTEGER DEFAULT 0"),
+        ("listen_seconds", "INTEGER DEFAULT 0"),
+        ("hangup_cause", "TEXT"),
+        ("showcase_clicked_at", "TEXT"),
+        ("revenue_cents", "INTEGER DEFAULT 0"),
+    ):
+        if name not in call_cols:
+            conn.execute(f"ALTER TABLE voice_calls ADD COLUMN {name} {ddl}")
+
+
 def init() -> None:
     path = db_path()
     if _INIT["path"] == path:
@@ -240,6 +337,7 @@ def init() -> None:
         conn = get_conn()
         try:
             conn.executescript(_SCHEMA)
+            _ensure_columns(conn)
             conn.execute(
                 "INSERT INTO voice_meta (key, value) VALUES ('version', ?) "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -973,20 +1071,31 @@ def create_campaign(
     trade: str = "",
     max_calls: int = 25,
     created_by: int = 0,
+    quota_total: Optional[int] = None,
+    batch_size: Optional[int] = None,
+    include_fallback: bool = True,
+    dry_run: bool = False,
 ) -> dict:
     init()
     now = _iso()
+    quota = max(1, min(10000, int(quota_total if quota_total is not None else max_calls)))
+    batch = max(1, min(quota, int(batch_size or quota)))
     conn = get_conn()
     try:
         cur = conn.execute(
             "INSERT INTO voice_campaigns "
-            "(name, city, trade, status, max_calls, created_by, created_at, started_at) "
-            "VALUES (?, ?, ?, 'running', ?, ?, ?, ?)",
+            "(name, city, trade, status, max_calls, quota_total, batch_size, "
+            "include_fallback, dry_run, created_by, created_at, started_at) "
+            "VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
                 city,
                 trade,
-                max(1, min(200, int(max_calls or 25))),
+                quota,
+                quota,
+                batch,
+                1 if include_fallback else 0,
+                1 if dry_run else 0,
                 int(created_by or 0),
                 now,
                 now,
@@ -1030,7 +1139,20 @@ def list_campaigns(limit: int = 20) -> list[dict]:
 
 def update_campaign(campaign_id: int, **fields: Any) -> Optional[dict]:
     init()
-    allowed = {"status", "error", "finished_at", "max_calls", "name", "city", "trade"}
+    allowed = {
+        "status",
+        "error",
+        "finished_at",
+        "max_calls",
+        "quota_total",
+        "batch_size",
+        "include_fallback",
+        "dry_run",
+        "next_batch_at",
+        "name",
+        "city",
+        "trade",
+    }
     updates = {key: value for key, value in fields.items() if key in allowed}
     if not updates:
         return get_campaign(campaign_id)
@@ -1114,6 +1236,7 @@ def campaign_candidates(
     city: str = "",
     trade: str = "",
     limit: int = 50,
+    include_fallback: bool = True,
 ) -> list[dict]:
     init()
     where = ["status NOT IN ('do_not_call', 'invalid', 'meeting')"]
@@ -1134,14 +1257,589 @@ def campaign_candidates(
     params.append(int(campaign_id))
     conn = get_conn()
     try:
-        rows = conn.execute(
-            f"SELECT * FROM prospect_companies WHERE {' AND '.join(where)} "
-            "ORDER BY score DESC, permit_count DESC, id ASC LIMIT ?",
-            (*params, max(1, min(1000, int(limit)))),
-        ).fetchall()
-        return [dict(row) for row in rows]
+        rows = [
+            dict(row)
+            for row in conn.execute(
+                f"SELECT * FROM prospect_companies WHERE {' AND '.join(where)} "
+                "ORDER BY score DESC, permit_count DESC, id ASC LIMIT ?",
+                (*params, max(1, min(1000, int(limit)))),
+            ).fetchall()
+        ]
+        if not include_fallback and rows:
+            from . import showcase
+
+            dedicated = {
+                (row["city_slug"], row["trade_slug"])
+                for row in conn.execute(
+                    "SELECT city_slug, trade_slug FROM voice_segments "
+                    "WHERE showcase_mode='dedicated'"
+                ).fetchall()
+            }
+            filtered = []
+            for row in rows:
+                city_slug = showcase.normalize_city_slug(row.get("city"))
+                trade_code = showcase.normalize_trade(row.get("trade")) or row.get(
+                    "trade"
+                )
+                trade_slug = showcase.slugify(trade_code)
+                if (city_slug, trade_slug) in dedicated:
+                    filtered.append(row)
+            rows = filtered
+        return rows
     finally:
         conn.close()
+
+
+def rebuild_segments() -> int:
+    """Materializa voice_segments a partir do estoque e da vitrine disponível."""
+    from . import showcase
+
+    items = segments()
+    conn = get_conn()
+    try:
+        conn.execute("DELETE FROM voice_segments")
+        for item in items:
+            trade_code = showcase.normalize_trade(item["trade"]) or item["trade"]
+            city_slug = showcase.normalize_city_slug(item["city"])
+            trade_slug = showcase.slugify(trade_code)
+            conn.execute(
+                """
+                INSERT INTO voice_segments
+                  (city_slug, trade_slug, city, state, trade_code, trade_label,
+                   total, callable, blocked, showcase_mode, showcase_exact,
+                   showcase_city_total, page_path, built_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(city_slug, trade_slug) DO UPDATE SET
+                  city=excluded.city,
+                  state=excluded.state,
+                  trade_code=excluded.trade_code,
+                  trade_label=excluded.trade_label,
+                  total=excluded.total,
+                  callable=excluded.callable,
+                  blocked=excluded.blocked,
+                  showcase_mode=excluded.showcase_mode,
+                  showcase_exact=excluded.showcase_exact,
+                  showcase_city_total=excluded.showcase_city_total,
+                  page_path=excluded.page_path,
+                  built_at=excluded.built_at
+                """,
+                (
+                    city_slug,
+                    trade_slug,
+                    item["city"],
+                    item["state"],
+                    trade_code,
+                    showcase.trade_label(trade_code),
+                    item["total"],
+                    item["callable"],
+                    item["blocked"],
+                    item["showcase_mode"],
+                    item["showcase_exact"],
+                    item["showcase_city_total"],
+                    item["page_path"],
+                    _iso(),
+                ),
+            )
+        conn.commit()
+        return len(items)
+    finally:
+        conn.close()
+
+
+def cached_segments(
+    city: str = "", trade: str = "", state: str = ""
+) -> list[dict]:
+    """Lê voice_segments; reconstrói se ainda não existir."""
+    init()
+    conn = get_conn()
+    try:
+        count = int(
+            conn.execute("SELECT COUNT(*) FROM voice_segments").fetchone()[0] or 0
+        )
+    finally:
+        conn.close()
+    if count == 0:
+        rebuild_segments()
+    where = []
+    params: list[Any] = []
+    if city.strip():
+        where.append("UPPER(city)=UPPER(?)")
+        params.append(city.strip())
+    if state.strip():
+        where.append("UPPER(state)=UPPER(?)")
+        params.append(state.strip())
+    if trade.strip():
+        where.append(
+            "(LOWER(trade_code)=LOWER(?) OR LOWER(trade_label)=LOWER(?))"
+        )
+        params.extend([trade.strip(), trade.strip()])
+    clause = (" WHERE " + " AND ".join(where)) if where else ""
+    conn = get_conn()
+    try:
+        rows = [
+            dict(r)
+            for r in conn.execute(
+                f"SELECT * FROM voice_segments{clause} "
+                "ORDER BY callable DESC, total DESC",
+                tuple(params),
+            ).fetchall()
+        ]
+    finally:
+        conn.close()
+    for row in rows:
+        row["trade"] = row.get("trade_label") or row.get("trade_code")
+    return rows
+
+
+def create_source(
+    name: str,
+    kind: str,
+    url: str = "",
+    enabled: bool = True,
+    config: Optional[dict] = None,
+) -> dict:
+    import json
+
+    init()
+    conn = get_conn()
+    try:
+        cur = conn.execute(
+            "INSERT INTO voice_sources "
+            "(name, kind, url, enabled, config_json, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                name,
+                kind,
+                url,
+                1 if enabled else 0,
+                json.dumps(config or {}, ensure_ascii=False),
+                _iso(),
+            ),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT * FROM voice_sources WHERE id=?", (cur.lastrowid,)
+        ).fetchone()
+        return dict(row)
+    finally:
+        conn.close()
+
+
+def list_sources() -> list[dict]:
+    init()
+    conn = get_conn()
+    try:
+        return [
+            dict(r)
+            for r in conn.execute(
+                "SELECT * FROM voice_sources ORDER BY id DESC"
+            ).fetchall()
+        ]
+    finally:
+        conn.close()
+
+
+def get_source(source_id: int) -> Optional[dict]:
+    init()
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            "SELECT * FROM voice_sources WHERE id=?", (int(source_id),)
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def _source_url_allowed(url: str) -> bool:
+    parsed = urlparse(url or "")
+    host = (parsed.hostname or "").lower()
+    allowed = {
+        item.strip().lower()
+        for item in str(settings.VOICE_SOURCE_ALLOWED_HOSTS or "").split(",")
+        if item.strip()
+    }
+    return parsed.scheme == "https" and bool(host) and host in allowed
+
+
+def sync_source(source_id: int) -> dict:
+    """Sincroniza uma fonte http_csv: fetch -> import -> rebuild -> segmentos."""
+    from . import showcase
+
+    init()
+    source = get_source(source_id)
+    if not source:
+        raise ValueError("fonte não encontrada")
+    started = _iso()
+    conn = get_conn()
+    try:
+        cur = conn.execute(
+            "INSERT INTO raw_ingest (source_id, status, started_at) "
+            "VALUES (?, 'running', ?)",
+            (int(source_id), started),
+        )
+        ingest_id = int(cur.lastrowid)
+        conn.commit()
+    finally:
+        conn.close()
+
+    try:
+        kind = source.get("kind")
+        if kind == "http_csv":
+            url = str(source.get("url") or "")
+            if not _source_url_allowed(url):
+                raise ValueError("host não autorizado em VOICE_SOURCE_ALLOWED_HOSTS")
+            response = httpx.get(url, timeout=30, follow_redirects=True)
+            response.raise_for_status()
+            text = response.text
+            checksum = hashlib.sha256(text.encode("utf-8")).hexdigest()[:32]
+            imported = import_licenses_csv(
+                text,
+                source_name=str(source.get("name") or "source"),
+                source_url=url,
+                imported_by=0,
+            )
+        elif kind == "contractor_entities":
+            imported = bridge_contractor_entities()
+            checksum = ""
+        else:
+            raise ValueError(f"kind não suportado: {kind}")
+        built = showcase.build_pages()
+        rebuilt = rebuild_segments()
+        finished = _iso()
+        conn = get_conn()
+        try:
+            conn.execute(
+                "UPDATE raw_ingest SET checksum=?, status='success', row_count=?, "
+                "imported=?, updated=?, skipped=?, finished_at=? WHERE id=?",
+                (
+                    checksum,
+                    imported["total"],
+                    imported["imported"],
+                    imported["updated"],
+                    imported["skipped"],
+                    finished,
+                    ingest_id,
+                ),
+            )
+            conn.execute(
+                "UPDATE voice_sources SET last_sync_at=?, last_status='success', "
+                "last_error=NULL WHERE id=?",
+                (finished, int(source_id)),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return {
+            "ok": True,
+            "source_id": int(source_id),
+            "ingest_id": ingest_id,
+            "import": imported,
+            "showcase": built,
+            "segments": rebuilt,
+        }
+    except Exception as exc:  # noqa: BLE001
+        message = str(exc)[:300]
+        finished = _iso()
+        conn = get_conn()
+        try:
+            conn.execute(
+                "UPDATE raw_ingest SET status='error', error=?, finished_at=? "
+                "WHERE id=?",
+                (message, finished, ingest_id),
+            )
+            conn.execute(
+                "UPDATE voice_sources SET last_sync_at=?, last_status='error', "
+                "last_error=? WHERE id=?",
+                (finished, message, int(source_id)),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return {
+            "ok": False,
+            "source_id": int(source_id),
+            "ingest_id": ingest_id,
+            "error": message,
+        }
+
+
+def sync_enabled_sources() -> dict:
+    results = []
+    for source in list_sources():
+        if int(source.get("enabled") or 0) != 1:
+            continue
+        results.append(sync_source(int(source["id"])))
+    return {"ok": all(item.get("ok") for item in results), "results": results}
+
+
+def _rate(numerator: int, denominator: int) -> float:
+    return round((numerator * 100.0 / denominator), 1) if denominator else 0.0
+
+
+def metrics(days: int = 30, city: str = "", trade: str = "") -> dict:
+    """Métricas de funil por período, cidade e nicho (instrumentação Fase 2)."""
+    init()
+    from . import showcase
+
+    days = max(1, min(365, int(days)))
+    since = (_utc_now() - timedelta(days=days)).isoformat()
+    city_filter = city.strip()
+    trade_code = showcase.normalize_trade(trade) if trade.strip() else ""
+    where = ["datetime(COALESCE(v.created_at, v.started_at)) >= datetime(?)"]
+    params: list[Any] = [since]
+    if city_filter:
+        where.append("UPPER(TRIM(COALESCE(v.city, c.city)))=UPPER(?)")
+        params.append(city_filter)
+    if trade_code:
+        where.append("LOWER(COALESCE(v.trade_code, c.trade))=LOWER(?)")
+        params.append(trade_code)
+    clause = " WHERE " + " AND ".join(where)
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            f"""
+            SELECT
+              COUNT(*) dialed,
+              SUM(CASE WHEN v.answered_at IS NOT NULL THEN 1 ELSE 0 END) answered,
+              SUM(CASE WHEN v.answered_at IS NULL THEN 1 ELSE 0 END) unanswered,
+              AVG(CASE WHEN v.answered_at IS NOT NULL
+                       THEN v.listen_seconds END) avg_listen,
+              SUM(CASE WHEN v.answered_at IS NOT NULL AND v.listen_seconds >= 30
+                       THEN 1 ELSE 0 END) engaged,
+              SUM(CASE WHEN v.showcase_clicked_at IS NOT NULL THEN 1 ELSE 0 END) clicks,
+              SUM(CASE WHEN v.checkout_session_id IS NOT NULL THEN 1 ELSE 0 END) checkouts,
+              COALESCE(SUM(v.revenue_cents),0) revenue_cents,
+              COALESCE(SUM(v.cost_cents),0) cost_cents
+            FROM voice_calls v
+            LEFT JOIN prospect_companies c ON c.id = v.company_id
+            {clause}
+            """,
+            tuple(params),
+        ).fetchone()
+        summary = dict(row) if row else {}
+        dialed = int(summary.get("dialed") or 0)
+        answered = int(summary.get("answered") or 0)
+        engaged = int(summary.get("engaged") or 0)
+        clicks = int(summary.get("clicks") or 0)
+        checkouts = int(summary.get("checkouts") or 0)
+        revenue = int(summary.get("revenue_cents") or 0)
+        cost = int(summary.get("cost_cents") or 0)
+        summary.update(
+            {
+                "answer_rate": _rate(answered, dialed),
+                "drop_rate": _rate(dialed - answered, dialed),
+                "engagement_rate": _rate(engaged, answered),
+                "showcase_ctr": _rate(clicks, answered),
+                "checkout_rate": _rate(checkouts, clicks),
+                "avg_listen_seconds": round(float(summary.get("avg_listen") or 0), 1),
+                "revenue_usd": round(revenue / 100.0, 2),
+                "cost_usd": round(cost / 100.0, 2),
+                "net_usd": round((revenue - cost) / 100.0, 2),
+            }
+        )
+
+        groups = [
+            dict(r)
+            for r in conn.execute(
+                f"""
+                SELECT
+                  COALESCE(v.city, c.city, '—') city,
+                  COALESCE(v.trade_code, c.trade, '—') trade,
+                  COUNT(*) dialed,
+                  SUM(CASE WHEN v.answered_at IS NOT NULL THEN 1 ELSE 0 END) answered,
+                  SUM(CASE WHEN v.answered_at IS NOT NULL AND v.listen_seconds >= 30
+                           THEN 1 ELSE 0 END) engaged,
+                  AVG(CASE WHEN v.answered_at IS NOT NULL
+                           THEN v.listen_seconds END) avg_listen,
+                  SUM(CASE WHEN v.showcase_clicked_at IS NOT NULL THEN 1 ELSE 0 END) clicks,
+                  SUM(CASE WHEN v.checkout_session_id IS NOT NULL THEN 1 ELSE 0 END) checkouts,
+                  COALESCE(SUM(v.revenue_cents),0) revenue_cents,
+                  COALESCE(SUM(v.cost_cents),0) cost_cents
+                FROM voice_calls v
+                LEFT JOIN prospect_companies c ON c.id = v.company_id
+                {clause}
+                GROUP BY 1, 2
+                ORDER BY revenue_cents DESC, dialed DESC
+                """,
+                tuple(params),
+            ).fetchall()
+        ]
+        for group in groups:
+            gd = int(group.get("dialed") or 0)
+            ga = int(group.get("answered") or 0)
+            gc = int(group.get("clicks") or 0)
+            gco = int(group.get("checkouts") or 0)
+            grev = int(group.get("revenue_cents") or 0)
+            gcost = int(group.get("cost_cents") or 0)
+            group.update(
+                {
+                    "answer_rate": _rate(ga, gd),
+                    "engagement_rate": _rate(
+                        int(group.get("engaged") or 0), ga
+                    ),
+                    "showcase_ctr": _rate(gc, ga),
+                    "checkout_rate": _rate(gco, gc),
+                    "avg_listen_seconds": round(
+                        float(group.get("avg_listen") or 0), 1
+                    ),
+                    "revenue_usd": round(grev / 100.0, 2),
+                    "cost_usd": round(gcost / 100.0, 2),
+                    "net_usd": round((grev - gcost) / 100.0, 2),
+                }
+            )
+        return {
+            "days": days,
+            "generated_at": _iso(),
+            "summary": summary,
+            "by_city_trade": groups,
+        }
+    finally:
+        conn.close()
+
+
+def paused_campaigns_due(now: Optional[datetime] = None) -> list[int]:
+    init()
+    reference = (now or _utc_now()).isoformat()
+    conn = get_conn()
+    try:
+        return [
+            int(row["id"])
+            for row in conn.execute(
+                "SELECT id FROM voice_campaigns WHERE status='paused' "
+                "AND next_batch_at IS NOT NULL "
+                "AND datetime(next_batch_at) <= datetime(?)",
+                (reference,),
+            ).fetchall()
+        ]
+    finally:
+        conn.close()
+
+
+def ensure_builtin_source(name: str, kind: str) -> dict:
+    for source in list_sources():
+        if (source.get("kind") or "") == kind:
+            return source
+    return create_source(name, kind, "", True)
+
+
+def _infer_trade(name: str, niche_key: str = "") -> str:
+    from . import showcase
+
+    raw = (niche_key or "").strip().lower()
+    mapping = {
+        "general_contractors": "general_contractor",
+        "restoration": "remediation",
+    }
+    if raw:
+        code = mapping.get(raw, raw)
+        if showcase.normalize_trade(code):
+            return code
+    lowered = (name or "").lower()
+    keywords = (
+        ("elevator", "elevator"),
+        ("sign", "signage"),
+        ("electric", "electrical"),
+        ("air condition", "hvac"),
+        ("heating", "hvac"),
+        ("hvac", "hvac"),
+        ("roof", "roofing"),
+        ("plumb", "plumbing"),
+        ("paint", "painting"),
+        ("landscap", "landscaping"),
+        ("lawn", "landscaping"),
+        ("pest", "pest_control"),
+        ("debris", "debris_removal"),
+        ("clean", "cleaning"),
+        ("window", "windows"),
+        ("door", "windows"),
+        ("restor", "remediation"),
+        ("remodel", "remodeling"),
+        ("construction", "remodeling"),
+        ("builder", "remodeling"),
+        ("builders", "remodeling"),
+    )
+    for token, code in keywords:
+        if token in lowered:
+            return code
+    return "general_contractor"
+
+
+def bridge_contractor_entities(limit: int = 20000) -> dict:
+    """Converte contractor_entities (licenças já ingeridas) em prospect_companies."""
+    import csv as _csv
+
+    from .db import get_connection as get_leads_connection
+    from .showcase import CITY_CANON
+
+    leads = get_leads_connection()
+    try:
+        rows = leads.execute(
+            "SELECT legal_name, city, state, phone, email, license, niche_key, "
+            "status, quarantine_reason FROM contractor_entities "
+            "WHERE COALESCE(TRIM(phone),'')<>'' AND state IN ('MA','NY','TX','IL') "
+            "AND COALESCE(quarantine_reason,'')='' "
+            "ORDER BY id DESC LIMIT ?",
+            (max(1, min(50000, int(limit))),),
+        ).fetchall()
+    finally:
+        leads.close()
+
+    output = io.StringIO()
+    writer = _csv.writer(output)
+    writer.writerow(
+        [
+            "company_name",
+            "phone",
+            "email",
+            "city",
+            "state",
+            "license_number",
+            "license_status",
+            "trade",
+            "notes",
+        ]
+    )
+    used = 0
+    for row in rows:
+        phone = normalize_phone(row["phone"])
+        name = str(row["legal_name"] or "").strip()
+        city_raw = str(row["city"] or "").strip()
+        if not phone or not name or not city_raw:
+            continue
+        city = CITY_CANON.get(city_raw.upper(), city_raw.title())
+        trade = _infer_trade(name, str(row["niche_key"] or ""))
+        writer.writerow(
+            [
+                name,
+                phone,
+                str(row["email"] or "").strip(),
+                city,
+                str(row["state"] or "").strip().upper(),
+                str(row["license"] or "").strip(),
+                "active",
+                trade,
+                "contractor_entities",
+            ]
+        )
+        used += 1
+    if used == 0:
+        return {
+            "ok": True,
+            "total": 0,
+            "imported": 0,
+            "updated": 0,
+            "skipped": 0,
+            "source_id": None,
+        }
+    result = import_licenses_csv(
+        output.getvalue(),
+        source_name="Contractor entities (licenças)",
+        source_url="",
+        imported_by=0,
+    )
+    result["ok"] = True
+    return result
 
 
 def get_company(company_id: int) -> Optional[dict]:
@@ -1205,6 +1903,12 @@ def update_voice_call(voice_call_id: int, **fields: Any) -> Optional[dict]:
         "cost_cents",
         "started_at",
         "ended_at",
+        "answered_at",
+        "duration_seconds",
+        "listen_seconds",
+        "hangup_cause",
+        "showcase_clicked_at",
+        "revenue_cents",
     }
     updates = {key: value for key, value in fields.items() if key in allowed}
     if not updates:

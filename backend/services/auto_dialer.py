@@ -6,6 +6,7 @@ vitrine sem clique individual. Sem chaves Telnyx corre em dry-run.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 
 import anyio
 
@@ -25,14 +26,18 @@ async def run_campaign(campaign_id: int) -> None:
     if not campaign or campaign.get("status") != "running":
         return
 
-    max_calls = max(1, int(campaign.get("max_calls") or 25))
+    max_calls = max(1, int(campaign.get("quota_total") or campaign.get("max_calls") or 25))
+    batch_size = max(1, int(campaign.get("batch_size") or max_calls))
     calls = int(campaign.get("calls_started") or 0)
+    initial_calls = calls
+    batch_end = min(max_calls, calls + batch_size)
+    include_fallback = bool(int(campaign.get("include_fallback", 1)))
     delay = max(0, int(getattr(settings, "VOICE_AUTOSCHED_DELAY_SECONDS", 30)))
     guard = 0
-    max_guard = max_calls * MAX_GUARD_MULTIPLIER + 100
+    max_guard = max(1, batch_end - calls) * MAX_GUARD_MULTIPLIER + 100
 
     try:
-        while calls < max_calls and guard < max_guard:
+        while calls < batch_end and guard < max_guard:
             current = await _run_sync(b2b_voice.get_campaign, campaign_id)
             if not current or current.get("status") != "running":
                 return
@@ -43,7 +48,8 @@ async def run_campaign(campaign_id: int) -> None:
                 campaign_id,
                 city,
                 trade,
-                min(25, max_calls - calls),
+                min(25, batch_end - calls),
+                include_fallback,
             )
             if not batch:
                 break
@@ -52,7 +58,7 @@ async def run_campaign(campaign_id: int) -> None:
                 current = await _run_sync(b2b_voice.get_campaign, campaign_id)
                 if not current or current.get("status") != "running":
                     return
-                if calls >= max_calls:
+                if calls >= batch_end:
                     break
                 result = await _run_sync(
                     telnyx_voice.create_call,
@@ -61,6 +67,7 @@ async def run_campaign(campaign_id: int) -> None:
                     "",
                     city,
                     trade,
+                    bool(campaign.get("dry_run")),
                 )
                 if not result.get("ok"):
                     await _run_sync(
@@ -106,13 +113,26 @@ async def run_campaign(campaign_id: int) -> None:
 
         final = await _run_sync(b2b_voice.get_campaign, campaign_id)
         if final and final.get("status") == "running":
-            await _run_sync(
-                lambda: b2b_voice.update_campaign(
-                    campaign_id,
-                    status="completed",
-                    finished_at=b2b_voice._iso(),
+            if calls >= max_calls or calls <= initial_calls:
+                await _run_sync(
+                    lambda: b2b_voice.update_campaign(
+                        campaign_id,
+                        status="completed",
+                        finished_at=b2b_voice._iso(),
+                        next_batch_at=None,
+                    )
                 )
-            )
+            else:
+                next_batch = (
+                    datetime.now(timezone.utc) + timedelta(days=1)
+                ).isoformat()
+                await _run_sync(
+                    lambda: b2b_voice.update_campaign(
+                        campaign_id,
+                        status="paused",
+                        next_batch_at=next_batch,
+                    )
+                )
     except Exception as exc:  # noqa: BLE001
         logger.error("[AUTO-DIALER] campanha %s falhou: %s", campaign_id, exc)
         message = str(exc)[:300]

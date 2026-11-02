@@ -1623,6 +1623,31 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Testes**: +4 (auto-scheduler, segmentos, campanha interrompida, ingest API)
   → **1.284 pytest**; cobertura **69,9%**; `auto_dialer.py` 73,3%.
 
+### Fase 1/2 — Fundação de dados e instrumentação (2026-11-02)
+
+- **Base pré-carregada**: `contractor_entities` (28.098 empresas; ~11.4k com
+  telefone em NY/TX/IL/MA) é convertida para `prospect_companies` por
+  `bridge_contractor_entities()`, com dedupe, normalização de cidade/estado,
+  trade inferido e fonte auditável.
+- **Fontes**: `voice_sources` + `raw_ingest`; conectores `http_csv` (HTTPS com
+  allowlist `VOICE_SOURCE_ALLOWED_HOSTS`) e `contractor_entities`. Sync manual
+  ou automático; cada execução regista status/erro/linhas.
+- **Segmentos materializados**: `voice_segments` por cidade+nicho com
+  `Dedicada`, `Fallback cidade` ou `Sem vitrine`; `cached_segments()` evita
+  recalcular em cada request.
+- **Cotas**: campanhas com `quota_total` + `batch_size`; worker processa o
+  lote, fecha como `completed` ou `paused`, e “Continuar lote” retoma.
+- **Instrumentação**: `voice_calls` ganhou `answered_at`, `duration_seconds`,
+  `listen_seconds`, `hangup_cause`, `cost_cents`, `showcase_clicked_at`,
+  `checkout_session_id`, `revenue_cents`. Webhooks Telnyx/Stripe e `/r/<token>`
+  alimentam o funil; `metrics()` devolve Answer Rate, Engagement, CTR,
+  Checkout Rate, listen médio, receita/custo/net por cidade+nicho.
+- **Admin**: tabs Visão Geral / Campanhas / Segmentos / Fontes; visão executiva
+  numérica de 30 dias; fontes com sync; cotas totais/lote; campanhas pausadas
+  com retoma.
+- **Testes**: **1.289 pytest**; cobertura **69,9%**; `auto_dialer.py` 76,5%,
+  `b2b_voice.py` 84,9%, `telnyx_voice.py` 69,5%.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

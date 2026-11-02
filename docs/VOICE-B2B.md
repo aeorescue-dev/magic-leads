@@ -78,15 +78,35 @@ Cada import cria/renova o check por 31 dias.
 | POST | `/api/admin/voice/import/dnc` | importar lista DNC |
 | POST | `/api/admin/voice/ingest` | importar + rebuild de vitrines + segmentos |
 | GET | `/api/admin/voice/segments` | filas agregadas por cidade+nicho |
+| GET | `/api/admin/voice/metrics` | funil: answer, engagement, CTR, checkout, receita |
+| GET | `/api/admin/voice/sources` | fontes e último estado |
+| POST | `/api/admin/voice/sources` | criar fonte `http_csv` |
+| POST | `/api/admin/voice/sources/{id}/sync` | sincronizar fonte |
+| POST | `/api/admin/voice/sources/bridge-licensing` | converter contractor_entities |
 | POST | `/api/admin/voice/campaigns/start` | arrancar campanha autónoma |
 | GET | `/api/admin/voice/campaigns` | listar campanhas |
 | POST | `/api/admin/voice/campaigns/{id}/stop` | parar campanha |
+| POST | `/api/admin/voice/campaigns/{id}/resume` | retomar lote pausado |
 | POST | `/api/admin/voice/dnc/check` | check manual (limpo/listado) |
 | POST | `/api/admin/voice/contacts/{id}/call` | registar tentativa |
 | POST | `/api/admin/voice/suppress` | suprimir telefone |
 | GET | `/api/admin/voice/template.csv` | template de importação |
 
 Todas exigem sessão **admin** (`_require_admin_user`).
+
+## Base pré-carregada
+
+- `contractor_entities` guarda licenças já ingeridas (NY/TX/IL/MA). O botão
+  **“Sincronizar licenças existentes”** / `POST /sources/bridge-licensing`
+  converte-as em `prospect_companies`, com dedupe por telefone, cidade/estado
+  normalizados e trade inferido.
+- `voice_sources` + `raw_ingest` registam fontes, checksum, linhas, erros e
+  última sincronização. `http_csv` exige HTTPS e host em
+  `VOICE_SOURCE_ALLOWED_HOSTS`.
+- `voice_segments` materializa cidade+nicho com `Dedicada`, `Fallback cidade`
+  ou `Sem vitrine`; o painel lê esta tabela.
+- O operador não faz upload de CSV no fluxo normal: escolhe cidade/nicho, cota
+  total, lote e inicia.
 
 ## Automação no Admin
 

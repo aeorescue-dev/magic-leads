@@ -3233,11 +3233,13 @@ async def admin_voice_ingest(
         int(_admin["id"]),
     )
     built = await anyio.to_thread.run_sync(showcase.build_pages)
-    segments = await anyio.to_thread.run_sync(b2b_voice.segments)
+    rebuilt = await anyio.to_thread.run_sync(b2b_voice.rebuild_segments)
+    segments = await anyio.to_thread.run_sync(b2b_voice.cached_segments)
     return {
         "ok": True,
         "import": imported,
         "showcase": built,
+        "segments_rebuilt": rebuilt,
         "segments": segments,
     }
 
@@ -3251,7 +3253,7 @@ async def admin_voice_segments(
 ):
     return {
         "segments": await anyio.to_thread.run_sync(
-            b2b_voice.segments, city, trade, state
+            b2b_voice.cached_segments, city, trade, state
         )
     }
 
@@ -3268,7 +3270,10 @@ async def admin_voice_campaign_start(
     payload = payload or {}
     city = str(payload.get("city") or "").strip()
     trade = str(payload.get("trade") or "").strip()
-    max_calls = int(payload.get("max_calls") or 25)
+    quota_total = int(payload.get("quota_total") or payload.get("max_calls") or 100)
+    batch_size = int(payload.get("batch_size") or quota_total)
+    include_fallback = bool(payload.get("include_fallback", True))
+    dry_run = bool(payload.get("dry_run", not telnyx_voice.configured()))
     name = str(payload.get("name") or "").strip() or (
         f"Auto {city or 'todas'} {trade or 'todos'}"
     )
@@ -3277,8 +3282,12 @@ async def admin_voice_campaign_start(
         name,
         city,
         trade,
-        max_calls,
+        quota_total,
         int(_admin["id"]),
+        quota_total,
+        batch_size,
+        include_fallback,
+        dry_run,
     )
     _launch_voice_campaign(int(campaign["id"]))
     return {"ok": True, "campaign": campaign}
@@ -3305,6 +3314,87 @@ async def admin_voice_campaign_stop(
     if not campaign:
         raise HTTPException(status_code=404, detail="campanha não encontrada")
     return {"ok": True, "campaign": campaign}
+
+
+@app.post("/api/admin/voice/campaigns/{campaign_id}/resume")
+async def admin_voice_campaign_resume(
+    campaign_id: int, _admin: dict = Depends(_require_admin_user)
+):
+    campaign = await anyio.to_thread.run_sync(
+        b2b_voice.get_campaign, campaign_id
+    )
+    if not campaign:
+        raise HTTPException(status_code=404, detail="campanha não encontrada")
+    await anyio.to_thread.run_sync(
+        lambda: b2b_voice.update_campaign(
+            campaign_id, status="running", next_batch_at=None, error=None
+        )
+    )
+    _launch_voice_campaign(campaign_id)
+    return {"ok": True, "campaign_id": campaign_id}
+
+
+@app.get("/api/admin/voice/metrics")
+async def admin_voice_metrics(
+    days: int = 30,
+    city: str = "",
+    trade: str = "",
+    _admin: dict = Depends(_require_admin_user),
+):
+    return await anyio.to_thread.run_sync(
+        b2b_voice.metrics, days, city, trade
+    )
+
+
+@app.get("/api/admin/voice/sources")
+async def admin_voice_sources(_admin: dict = Depends(_require_admin_user)):
+    return {"sources": await anyio.to_thread.run_sync(b2b_voice.list_sources)}
+
+
+@app.post("/api/admin/voice/sources")
+async def admin_voice_source_create(
+    request: Request, _admin: dict = Depends(_require_admin_user)
+):
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="json inválido")
+    payload = payload or {}
+    name = str(payload.get("name") or "").strip()
+    kind = str(payload.get("kind") or "http_csv").strip()
+    url = str(payload.get("url") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name obrigatório")
+    if kind == "http_csv" and not url:
+        raise HTTPException(status_code=400, detail="url obrigatória")
+    source = await anyio.to_thread.run_sync(
+        b2b_voice.create_source,
+        name,
+        kind,
+        url,
+        bool(payload.get("enabled", True)),
+    )
+    return {"ok": True, "source": source}
+
+
+@app.post("/api/admin/voice/sources/bridge-licensing")
+async def admin_voice_sources_bridge_licensing(
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Converte contractor_entities já ingeridos em prospect_companies."""
+    source = await anyio.to_thread.run_sync(
+        b2b_voice.ensure_builtin_source,
+        "Licenças estaduais (contractor_entities)",
+        "contractor_entities",
+    )
+    return await anyio.to_thread.run_sync(b2b_voice.sync_source, source["id"])
+
+
+@app.post("/api/admin/voice/sources/{source_id}/sync")
+async def admin_voice_source_sync(
+    source_id: int, _admin: dict = Depends(_require_admin_user)
+):
+    return await anyio.to_thread.run_sync(b2b_voice.sync_source, source_id)
 
 
 @app.get("/api/admin/analytics")
@@ -7064,6 +7154,20 @@ async def stripe_webhook(request: Request, stripe_signature: str | None = Header
             if session_id:
                 await anyio.to_thread.run_sync(
                     showcase.mark_checkout_completed, session_id
+                )
+            voice_call_id = meta.get("voice_call_id")
+            if voice_call_id and session_id:
+                amount_cents = int(
+                    session_obj.get("amount_total")
+                    or settings.PLAN_AMOUNT_CENTS
+                    or 0
+                )
+                await anyio.to_thread.run_sync(
+                    lambda: b2b_voice.update_voice_call(
+                        int(voice_call_id),
+                        checkout_session_id=session_id,
+                        revenue_cents=amount_cents,
+                    )
                 )
             if str(meta.get("new_user") or "") == "1":
                 customer = session_obj.get("customer_details") or {}

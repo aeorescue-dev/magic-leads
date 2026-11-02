@@ -71,6 +71,8 @@ TRADE_LABELS = {
     "remediation": "Remediation",
     "cleaning": "Cleaning",
     "elevator": "Elevator",
+    "general_contractor": "General Contractor",
+    "signage": "Signage",
 }
 
 _SCHEMA = """
@@ -812,6 +814,15 @@ def record_visit(
         conn.commit()
     finally:
         conn.close()
+    if link.get("voice_call_id"):
+        try:
+            from . import b2b_voice
+
+            b2b_voice.update_voice_call(
+                int(link["voice_call_id"]), showcase_clicked_at=now
+            )
+        except Exception:  # noqa: BLE001
+            pass
     return link
 
 

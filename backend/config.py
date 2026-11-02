@@ -35,7 +35,10 @@ class Settings(BaseSettings):
     TELNYX_FROM_NUMBER: str = ""
     TELNYX_WEBHOOK_SECRET: str = ""
     TELNYX_WEBHOOK_URL: str = ""
+    TELNYX_COST_PER_MINUTE_CENTS: int = 2
     VOICE_AUTOSCHED_DELAY_SECONDS: int = 30
+    VOICE_SOURCE_ALLOWED_HOSTS: str = ""
+    VOICE_SYNC_INTERVAL_HOURS: int = 6
 
     # Plano semanal (fonte da verdade do checkout)
     PLAN_NAME: str = "Pro"

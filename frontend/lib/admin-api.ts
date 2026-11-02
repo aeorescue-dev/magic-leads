@@ -1743,13 +1743,71 @@ export interface VoiceCampaign {
   trade: string | null;
   status: string;
   max_calls: number;
+  quota_total?: number;
+  batch_size?: number;
+  include_fallback?: number;
+  dry_run?: number;
   calls_started: number;
   showcases_sent: number;
   skipped: number;
   error: string | null;
+  next_batch_at?: string | null;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
+}
+
+export interface VoiceMetricsGroup {
+  city: string;
+  trade: string;
+  dialed: number;
+  answered: number;
+  engaged: number;
+  clicks: number;
+  checkouts: number;
+  answer_rate: number;
+  engagement_rate: number;
+  showcase_ctr: number;
+  checkout_rate: number;
+  avg_listen_seconds: number;
+  revenue_usd: number;
+  cost_usd: number;
+  net_usd: number;
+}
+
+export interface VoiceMetrics {
+  days: number;
+  generated_at: string;
+  summary: {
+    dialed: number;
+    answered: number;
+    unanswered: number;
+    engaged: number;
+    clicks: number;
+    checkouts: number;
+    answer_rate: number;
+    drop_rate: number;
+    engagement_rate: number;
+    showcase_ctr: number;
+    checkout_rate: number;
+    avg_listen_seconds: number;
+    revenue_usd: number;
+    cost_usd: number;
+    net_usd: number;
+  };
+  by_city_trade: VoiceMetricsGroup[];
+}
+
+export interface VoiceSource {
+  id: number;
+  name: string;
+  kind: string;
+  url: string | null;
+  enabled: number;
+  last_sync_at: string | null;
+  last_status: string | null;
+  last_error: string | null;
+  created_at: string;
 }
 
 export interface VoiceIngestResult {
@@ -1791,6 +1849,10 @@ export function startVoiceCampaign(payload: {
   city?: string;
   trade?: string;
   max_calls?: number;
+  quota_total?: number;
+  batch_size?: number;
+  include_fallback?: boolean;
+  dry_run?: boolean;
 }): Promise<{ ok: boolean; campaign: VoiceCampaign }> {
   return adminFetch<{ ok: boolean; campaign: VoiceCampaign }>(
     "/voice/campaigns/start",
@@ -1800,6 +1862,62 @@ export function startVoiceCampaign(payload: {
       body: JSON.stringify(payload),
     }
   );
+}
+
+export function resumeVoiceCampaign(
+  campaignId: number
+): Promise<{ ok: boolean; campaign_id: number }> {
+  return adminFetch<{ ok: boolean; campaign_id: number }>(
+    `/voice/campaigns/${campaignId}/resume`,
+    { method: "POST" }
+  );
+}
+
+export function fetchVoiceMetrics(
+  days = 30,
+  city = "",
+  trade = ""
+): Promise<VoiceMetrics> {
+  const params = new URLSearchParams({ days: String(days) });
+  if (city) params.set("city", city);
+  if (trade) params.set("trade", trade);
+  return adminFetch<VoiceMetrics>(`/voice/metrics?${params.toString()}`);
+}
+
+export function fetchVoiceSources(): Promise<{ sources: VoiceSource[] }> {
+  return adminFetch<{ sources: VoiceSource[] }>("/voice/sources");
+}
+
+export function createVoiceSource(payload: {
+  name: string;
+  kind: string;
+  url: string;
+  enabled?: boolean;
+}): Promise<{ ok: boolean; source: VoiceSource }> {
+  return adminFetch<{ ok: boolean; source: VoiceSource }>("/voice/sources", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function syncVoiceSource(
+  sourceId: number
+): Promise<{ ok: boolean; source_id: number; error?: string }> {
+  return adminFetch<{ ok: boolean; source_id: number; error?: string }>(
+    `/voice/sources/${sourceId}/sync`,
+    { method: "POST" }
+  );
+}
+
+export function syncLicensingSources(): Promise<{
+  ok: boolean;
+  source_id: number;
+  import?: VoiceImportResult;
+  segments?: number;
+  error?: string;
+}> {
+  return adminFetch("/voice/sources/bridge-licensing", { method: "POST" });
 }
 
 export function fetchVoiceCampaigns(

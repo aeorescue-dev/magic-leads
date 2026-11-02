@@ -7,6 +7,9 @@ import {
   Building2,
   CalendarClock,
   CheckCircle2,
+  Cloud,
+  Database,
+  Gauge,
   Globe2,
   Link2,
   Loader2,
@@ -15,6 +18,7 @@ import {
   PhoneCall,
   PhoneOutgoing,
   Play,
+  Plus,
   RefreshCcw,
   Rocket,
   ShieldCheck,
@@ -30,25 +34,42 @@ import {
   AdminApiError,
   buildShowcasePages,
   checkVoiceDnc,
+  createVoiceSource,
   dialVoiceContact,
   downloadVoiceTemplate,
   fetchShowcaseStats,
   fetchVoiceCampaigns,
+  fetchVoiceMetrics,
   fetchVoiceQueue,
   fetchVoiceSegments,
+  fetchVoiceSources,
   fetchVoiceStats,
   importVoiceDnc,
   ingestVoice,
   logVoiceCall,
+  resumeVoiceCampaign,
   sendVoiceShowcase,
   startVoiceCampaign,
   stopVoiceCampaign,
   suppressVoicePhone,
+  syncLicensingSources,
+  syncVoiceSource,
   type VoiceCampaign,
   type VoiceCompany,
+  type VoiceMetrics,
   type VoiceSegment,
+  type VoiceSource,
 } from "@/lib/admin-api";
 import { fmtWhen } from "@/lib/system-health";
+
+type VoiceTab = "overview" | "campaigns" | "segments" | "sources";
+
+const VOICE_TABS: Array<{ id: VoiceTab; label: string }> = [
+  { id: "overview", label: "Visão Geral" },
+  { id: "campaigns", label: "Campanhas" },
+  { id: "segments", label: "Segmentos" },
+  { id: "sources", label: "Fontes" },
+];
 
 const OUTCOMES: Array<{ value: string; label: string }> = [
   { value: "connected", label: "Falou com responsável" },
@@ -103,15 +124,17 @@ function Card({
   hint,
   action,
   children,
+  className,
 }: {
   title: string;
   icon: ReactNode;
   hint?: string;
   action?: ReactNode;
   children: ReactNode;
+  className?: string;
 }) {
   return (
-    <section className="rounded-2xl border border-white/10 bg-[#10131a] p-4">
+    <section className={cn("rounded-2xl border border-white/10 bg-[#10131a] p-4", className)}>
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
         <div>
           <h2 className="flex items-center gap-2 text-sm font-bold text-slate-100">
@@ -194,7 +217,12 @@ export default function VoiceB2BPage() {
   const [includeBlocked, setIncludeBlocked] = useState(false);
   const [cityFilter, setCityFilter] = useState("");
   const [tradeFilter, setTradeFilter] = useState("");
-  const [maxCalls, setMaxCalls] = useState(25);
+  const [quotaTotal, setQuotaTotal] = useState(100);
+  const [batchSize, setBatchSize] = useState(25);
+  const [includeFallback, setIncludeFallback] = useState(true);
+  const [tab, setTab] = useState<VoiceTab>("overview");
+  const [sourceName, setSourceName] = useState("");
+  const [sourceUrl, setSourceUrl] = useState("");
   const [selected, setSelected] = useState<VoiceCompany | null>(null);
   const [licenseCsv, setLicenseCsv] = useState("");
   const [licenseName, setLicenseName] = useState("MA HIC / licenças");
@@ -237,6 +265,16 @@ export default function VoiceB2BPage() {
     "voice-campaigns",
     () => fetchVoiceCampaigns(20),
     { refreshInterval: 5_000 }
+  );
+  const { data: metrics, mutate: mutateMetrics } = useSWR(
+    "voice-metrics",
+    () => fetchVoiceMetrics(30),
+    { refreshInterval: 60_000 }
+  );
+  const { data: sourcesData, mutate: mutateSources } = useSWR(
+    "voice-sources",
+    fetchVoiceSources,
+    { refreshInterval: 60_000 }
   );
 
   const refreshAll = async () => {
@@ -303,10 +341,17 @@ export default function VoiceB2BPage() {
             : undefined,
         city,
         trade,
-        max_calls: maxCalls,
+        quota_total: quotaTotal,
+        batch_size: batchSize,
+        include_fallback: segment ? true : includeFallback,
       });
-      await Promise.all([mutateCampaigns(), mutateQueue(), mutateStats()]);
-      return `Campanha #${result.campaign.id} iniciada: ${result.campaign.max_calls} chamadas · ${
+      await Promise.all([
+        mutateCampaigns(),
+        mutateQueue(),
+        mutateStats(),
+        mutateMetrics(),
+      ]);
+      return `Campanha #${result.campaign.id} iniciada: cota ${result.campaign.quota_total ?? result.campaign.max_calls}, lote ${result.campaign.batch_size ?? result.campaign.max_calls} · ${
         city || "todas as cidades"
       } / ${trade || "todos os nichos"}.`;
     });
@@ -316,6 +361,63 @@ export default function VoiceB2BPage() {
       await stopVoiceCampaign(campaignId);
       await mutateCampaigns();
       return `Campanha #${campaignId} parada.`;
+    });
+
+  const resumeCampaign = (campaignId: number) =>
+    run(`campaign-resume-${campaignId}`, async () => {
+      await resumeVoiceCampaign(campaignId);
+      await mutateCampaigns();
+      return `Campanha #${campaignId} retomada.`;
+    });
+
+  const addSource = () =>
+    run("source-add", async () => {
+      if (!sourceName.trim() || !sourceUrl.trim()) {
+        throw new Error("Nome e URL https da fonte são obrigatórios.");
+      }
+      const result = await createVoiceSource({
+        name: sourceName.trim(),
+        kind: "http_csv",
+        url: sourceUrl.trim(),
+      });
+      setSourceName("");
+      setSourceUrl("");
+      await mutateSources();
+      return `Fonte #${result.source.id} criada. Sincroniza para importar.`;
+    });
+
+  const syncSource = (sourceId: number) =>
+    run(`source-sync-${sourceId}`, async () => {
+      const result = await syncVoiceSource(sourceId);
+      await Promise.all([
+        mutateSources(),
+        mutateSegments(),
+        mutateStats(),
+        mutateShowcase(),
+        mutateMetrics(),
+      ]);
+      if (!result.ok) {
+        throw new Error(result.error || "Falha ao sincronizar fonte.");
+      }
+      return `Fonte #${sourceId} sincronizada.`;
+    });
+
+  const syncLicensing = () =>
+    run("licensing-sync", async () => {
+      const result = await syncLicensingSources();
+      await Promise.all([
+        mutateSources(),
+        mutateSegments(),
+        mutateStats(),
+        mutateShowcase(),
+        mutateMetrics(),
+      ]);
+      if (!result.ok) {
+        throw new Error(result.error || "Falha ao sincronizar licenças.");
+      }
+      return `Licenças: ${result.import?.imported ?? 0} novas, ${
+        result.import?.updated ?? 0
+      } atualizadas · ${result.segments ?? 0} segmentos.`;
     });
 
   const importDnc = () =>
@@ -480,7 +582,88 @@ export default function VoiceB2BPage() {
         <Stat label="DNC listados" value={String(stats?.dnc_listed ?? 0)} tone="rose" sub={`${stats?.dnc_checked ?? 0} checks`} />
       </section>
 
-      <div className="mb-5 grid gap-4 lg:grid-cols-2">
+      <nav className="mb-5 inline-flex flex-wrap gap-1 rounded-xl border border-white/10 bg-white/[0.02] p-1">
+        {VOICE_TABS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => setTab(item.id)}
+            className={cn(
+              "rounded-lg px-4 py-1.5 text-[11px] font-semibold transition-colors",
+              tab === item.id
+                ? "bg-emerald-500 text-[#052018]"
+                : "text-slate-400 hover:text-slate-200"
+            )}
+          >
+            {item.label}
+          </button>
+        ))}
+      </nav>
+
+      <Card
+        title="Visão executiva do funil"
+        icon={<Gauge className="h-4 w-4 text-emerald-400" />}
+        hint="Últimos 30 dias · voz → clique → checkout → receita"
+        action={<Badge tone="slate">30 dias</Badge>}
+        className={tab === "overview" ? "" : "hidden"}
+      >
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+          <Stat
+            label="Answer Rate"
+            value={`${metrics?.summary.answer_rate ?? 0}%`}
+            sub={`${metrics?.summary.answered ?? 0}/${metrics?.summary.dialed ?? 0} atendidas`}
+            tone="emerald"
+          />
+          <Stat
+            label="Engagement ≥30s"
+            value={`${metrics?.summary.engagement_rate ?? 0}%`}
+            sub={`${metrics?.summary.engaged ?? 0} chamadas`}
+            tone="emerald"
+          />
+          <Stat
+            label="Showcase CTR"
+            value={`${metrics?.summary.showcase_ctr ?? 0}%`}
+            sub={`${metrics?.summary.clicks ?? 0} cliques`}
+            tone="emerald"
+          />
+          <Stat
+            label="Checkout Rate"
+            value={`${metrics?.summary.checkout_rate ?? 0}%`}
+            sub={`${metrics?.summary.checkouts ?? 0} checkouts`}
+            tone="emerald"
+          />
+        </div>
+        <div className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-4">
+          <Stat
+            label="Listen médio"
+            value={`${metrics?.summary.avg_listen_seconds ?? 0}s`}
+            sub="chamadas atendidas"
+          />
+          <Stat
+            label="Receita"
+            value={money0(metrics?.summary.revenue_usd ?? 0)}
+            tone="emerald"
+          />
+          <Stat
+            label="Custo"
+            value={money0(metrics?.summary.cost_usd ?? 0)}
+            tone="amber"
+          />
+          <Stat
+            label="Net"
+            value={money0(metrics?.summary.net_usd ?? 0)}
+            tone={(metrics?.summary.net_usd ?? 0) >= 0 ? "emerald" : "rose"}
+          />
+        </div>
+        {!metrics?.summary.dialed ? (
+          <p className="mt-3 text-[10px] text-slate-600">
+            Sem chamadas no período. Inicia uma campanha em “Campanhas” para
+            alimentar o funil.
+          </p>
+        ) : null}
+      </Card>
+
+      <div className="hidden">
         <Card
           title="1. Importar licenças / permits"
           icon={<Upload className="h-4 w-4 text-indigo-400" />}
@@ -567,7 +750,127 @@ export default function VoiceB2BPage() {
       </div>
 
       <Card
+        title="2. Fontes de dados"
+        icon={<Cloud className="h-4 w-4 text-sky-400" />}
+        hint="Sincronização automática de licenças/permits. Sem upload manual no fluxo do operador."
+        action={<Badge tone="slate">HTTPS + allowlist</Badge>}
+        className={tab === "sources" ? "" : "hidden"}
+      >
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-400/20 bg-emerald-500/[0.06] p-3">
+          <div>
+            <p className="text-[11px] font-bold text-emerald-200">
+              Base de licenças já ingerida
+            </p>
+            <p className="text-[10px] text-slate-500">
+              Converte `contractor_entities` (NY/TX/IL/MA) em empresas da fila,
+              com dedupe, trade inferido, rebuild da vitrine e segmentos.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void syncLicensing()}
+            disabled={working === "licensing-sync"}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-1.5 text-[11px] font-bold text-[#062017] hover:bg-emerald-400 disabled:opacity-50"
+          >
+            {working === "licensing-sync" ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Database className="h-3.5 w-3.5" />
+            )}
+            Sincronizar licenças existentes
+          </button>
+        </div>
+        <div className="mb-3 grid gap-2 sm:grid-cols-[1fr_1.4fr_auto]">
+          <input
+            value={sourceName}
+            onChange={(event) => setSourceName(event.target.value)}
+            placeholder="Nome da fonte"
+            className="rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-[11px] text-slate-200 placeholder:text-slate-600"
+          />
+          <input
+            value={sourceUrl}
+            onChange={(event) => setSourceUrl(event.target.value)}
+            placeholder="https://exemplo.gov/licencas.csv"
+            className="rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-[11px] text-slate-200 placeholder:text-slate-600"
+          />
+          <button
+            type="button"
+            onClick={() => void addSource()}
+            disabled={working === "source-add"}
+            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-sky-500 px-3 py-1.5 text-[11px] font-bold text-[#04141c] hover:bg-sky-400 disabled:opacity-50"
+          >
+            {working === "source-add" ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Plus className="h-3.5 w-3.5" />
+            )}
+            Adicionar
+          </button>
+        </div>
+        <div className="space-y-2">
+          {(sourcesData?.sources ?? []).length ? (
+            (sourcesData?.sources ?? []).map((source: VoiceSource) => (
+              <div
+                key={source.id}
+                className="flex flex-wrap items-center gap-2 rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2 text-[10px]"
+              >
+                <span className="font-mono text-slate-500">#{source.id}</span>
+                <span className="font-semibold text-slate-200">
+                  {source.name}
+                </span>
+                <Badge
+                  tone={
+                    source.last_status === "success"
+                      ? "emerald"
+                      : source.last_status === "error"
+                        ? "rose"
+                        : "slate"
+                  }
+                >
+                  {source.last_status || "por sincronizar"}
+                </Badge>
+                <span className="max-w-[280px] truncate text-slate-500">
+                  {source.url}
+                </span>
+                <span className="text-slate-600">
+                  {source.last_sync_at ? fmtWhen(source.last_sync_at) : "—"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void syncSource(source.id)}
+                  disabled={working === `source-sync-${source.id}`}
+                  className="ml-auto inline-flex items-center gap-1 rounded-md border border-sky-400/30 bg-sky-500/10 px-2 py-1 text-[9px] font-semibold text-sky-200 hover:bg-sky-500/20 disabled:opacity-50"
+                >
+                  {working === `source-sync-${source.id}` ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Cloud className="h-3 w-3" />
+                  )}
+                  Sincronizar
+                </button>
+                {source.last_error ? (
+                  <p className="w-full text-[9px] text-rose-300">
+                    {source.last_error}
+                  </p>
+                ) : null}
+              </div>
+            ))
+          ) : (
+            <p className="text-[10px] text-slate-600">
+              Sem fontes configuradas. Adiciona uma URL CSV e sincroniza; o
+              pipeline faz parse, dedupe, rebuild da vitrine e segmentos.
+            </p>
+          )}
+        </div>
+        <p className="mt-3 text-[9px] text-slate-600">
+          O host tem de estar em `VOICE_SOURCE_ALLOWED_HOSTS`. Fontes de
+          licenças/permits, não dados de homeowners.
+        </p>
+      </Card>
+
+      <Card
         title="3. Vitrine por cidade / nicho"
+        className={tab === "sources" ? "" : "hidden"}
         icon={<Globe2 className="h-4 w-4 text-emerald-400" />}
         hint="Páginas públicas mascaradas, geradas a partir do inventário do leads.db."
         action={
@@ -607,21 +910,42 @@ export default function VoiceB2BPage() {
 
       <Card
         title="4. Campanha autónoma"
+        className={tab === "campaigns" ? "" : "hidden"}
         icon={<Rocket className="h-4 w-4 text-amber-400" />}
         hint="Consome a fila por cidade/nicho, aplica can_call e dispara Telnyx + vitrine. Sem chaves Telnyx corre em dry-run."
         action={<Badge tone="amber">Auto-scheduler</Badge>}
       >
         <div className="flex flex-wrap items-end gap-3">
           <label className="text-[10px] text-slate-500">
-            Máx. chamadas
+            Cota total
             <input
               type="number"
               min={1}
-              max={200}
-              value={maxCalls}
-              onChange={(event) => setMaxCalls(Number(event.target.value))}
+              max={10000}
+              value={quotaTotal}
+              onChange={(event) => setQuotaTotal(Number(event.target.value))}
               className="mt-1 block w-24 rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-[11px] text-slate-200"
             />
+          </label>
+          <label className="text-[10px] text-slate-500">
+            Lote diário
+            <input
+              type="number"
+              min={1}
+              max={500}
+              value={batchSize}
+              onChange={(event) => setBatchSize(Number(event.target.value))}
+              className="mt-1 block w-24 rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-[11px] text-slate-200"
+            />
+          </label>
+          <label className="flex items-center gap-2 pb-2 text-[10px] font-semibold text-slate-400">
+            <input
+              type="checkbox"
+              checked={includeFallback}
+              onChange={(event) => setIncludeFallback(event.target.checked)}
+              className="accent-amber-400"
+            />
+            Incluir fallback de cidade
           </label>
           <button
             type="button"
@@ -637,8 +961,8 @@ export default function VoiceB2BPage() {
             Iniciar campanha autónoma
           </button>
           <span className="text-[10px] text-slate-500">
-            Filtros atuais: {cityFilter || "todas as cidades"} ·{" "}
-            {tradeFilter || "todos os nichos"}
+            {cityFilter || "todas as cidades"} · {tradeFilter || "todos os nichos"} ·{" "}
+            {includeFallback ? "com fallback" : "só vitrine dedicada"}
           </span>
         </div>
         <div className="mt-4 space-y-2">
@@ -666,27 +990,46 @@ export default function VoiceB2BPage() {
                   {campaign.status}
                 </Badge>
                 <span className="text-slate-500">
-                  {campaign.calls_started}/{campaign.max_calls} chamadas ·{" "}
+                  {campaign.calls_started}/
+                  {campaign.quota_total ?? campaign.max_calls} chamadas · lote{" "}
+                  {campaign.batch_size ?? campaign.max_calls} ·{" "}
                   {campaign.showcases_sent} vitrines · {campaign.skipped} saltos
                 </span>
                 <span className="text-slate-600">
                   {campaign.city || "todas"} / {campaign.trade || "todos"}
                 </span>
-                {campaign.status === "running" ? (
-                  <button
-                    type="button"
-                    onClick={() => void stopCampaign(campaign.id)}
-                    disabled={working === `campaign-stop-${campaign.id}`}
-                    className="ml-auto inline-flex items-center gap-1 rounded-md border border-rose-400/30 bg-rose-500/10 px-2 py-1 text-[9px] font-semibold text-rose-200 hover:bg-rose-500/20 disabled:opacity-50"
-                  >
-                    {working === `campaign-stop-${campaign.id}` ? (
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                    ) : (
-                      <Square className="h-3 w-3" />
-                    )}
-                    Parar
-                  </button>
-                ) : null}
+                <div className="ml-auto flex items-center gap-1">
+                  {campaign.status === "running" ? (
+                    <button
+                      type="button"
+                      onClick={() => void stopCampaign(campaign.id)}
+                      disabled={working === `campaign-stop-${campaign.id}`}
+                      className="inline-flex items-center gap-1 rounded-md border border-rose-400/30 bg-rose-500/10 px-2 py-1 text-[9px] font-semibold text-rose-200 hover:bg-rose-500/20 disabled:opacity-50"
+                    >
+                      {working === `campaign-stop-${campaign.id}` ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Square className="h-3 w-3" />
+                      )}
+                      Parar
+                    </button>
+                  ) : null}
+                  {campaign.status === "paused" ? (
+                    <button
+                      type="button"
+                      onClick={() => void resumeCampaign(campaign.id)}
+                      disabled={working === `campaign-resume-${campaign.id}`}
+                      className="inline-flex items-center gap-1 rounded-md border border-emerald-400/30 bg-emerald-500/10 px-2 py-1 text-[9px] font-semibold text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"
+                    >
+                      {working === `campaign-resume-${campaign.id}` ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Play className="h-3 w-3" />
+                      )}
+                      Continuar lote
+                    </button>
+                  ) : null}
+                </div>
               </div>
             ))
           ) : (
@@ -699,6 +1042,7 @@ export default function VoiceB2BPage() {
 
       <Card
         title="5. Segmentos cidade + nicho"
+        className={tab === "segments" ? "" : "hidden"}
         icon={<Rocket className="h-4 w-4 text-sky-400" />}
         hint="Cada linha é uma fila dinâmica. Iniciar cria uma campanha só para esse segmento."
       >
@@ -783,6 +1127,7 @@ export default function VoiceB2BPage() {
 
       <Card
         title="6. Cobertura por cidade e nicho"
+        className={tab === "segments" ? "" : "hidden"}
         icon={<Globe2 className="h-4 w-4 text-sky-400" />}
         hint="Clique numa cidade ou nicho para filtrar a fila. Dados do voice.db."
         action={
@@ -899,6 +1244,7 @@ export default function VoiceB2BPage() {
 
       <Card
         title="7. Fila de chamadas"
+        className={tab === "campaigns" ? "" : "hidden"}
         icon={<Users className="h-4 w-4 text-indigo-400" />}
         hint="Ordenada por score ICP e volume de obras; compliance sempre visível."
         action={

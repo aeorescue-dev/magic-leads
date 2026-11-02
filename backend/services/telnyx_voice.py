@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import hmac
 import json
+import math
 from datetime import datetime, timezone
 from typing import Any, Optional
 from urllib.parse import quote
@@ -67,6 +68,7 @@ def create_call(
     script_id: str = "",
     city: Optional[str] = None,
     trade_code: Optional[str] = None,
+    dry_run: bool = False,
 ) -> dict:
     """Cria uma chamada Telnyx para uma empresa já validada pelo gate."""
     eligibility = b2b_voice.can_call(company)
@@ -87,14 +89,18 @@ def create_call(
         city=city or company.get("city"),
         trade_code=trade,
     )
-    if not configured():
+    if not configured() or dry_run:
         b2b_voice.update_voice_call(call["id"], status="dry_run")
         return {
             "ok": True,
             "dry_run": True,
             "voice_call_id": call["id"],
             "status": "dry_run",
-            "message": "Telnyx não configurado; chamada registada em dry-run.",
+            "message": (
+                "Dry-run forçado pela campanha."
+                if dry_run
+                else "Telnyx não configurado; chamada registada em dry-run."
+            ),
         }
 
     state = _encode_state(
@@ -210,12 +216,41 @@ def handle_webhook(payload: dict) -> dict:
         }
 
     if "answered" in event_type:
-        b2b_voice.update_voice_call(voice_call_id, status="in_call")
+        b2b_voice.update_voice_call(
+            voice_call_id,
+            status="in_call",
+            answered_at=datetime.now(timezone.utc).isoformat(),
+        )
     elif "hangup" in event_type or "call.ended" in event_type or "ended" in event_type:
+        current = b2b_voice.get_voice_call(voice_call_id) or {}
+        duration = int(body.get("duration_seconds") or 0)
+        if not duration:
+            millis = body.get("duration_millis") or body.get("duration_ms")
+            if millis:
+                try:
+                    duration = int(round(float(millis) / 1000.0))
+                except (TypeError, ValueError):
+                    duration = 0
+        answered = bool(current.get("answered_at"))
+        cost_cents = 0
+        if duration > 0:
+            cost_cents = (
+                math.ceil(duration / 60.0)
+                * int(getattr(settings, "TELNYX_COST_PER_MINUTE_CENTS", 2))
+            )
         b2b_voice.update_voice_call(
             voice_call_id,
             status="ended",
             ended_at=datetime.now(timezone.utc).isoformat(),
+            duration_seconds=duration,
+            listen_seconds=duration if answered else 0,
+            hangup_cause=str(
+                body.get("hangup_cause")
+                or body.get("sip_hangup_cause")
+                or body.get("cause")
+                or ""
+            )[:120],
+            cost_cents=cost_cents,
         )
     return {"ok": True, "action": "status", "event_type": event_type}
 
