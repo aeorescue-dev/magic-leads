@@ -323,6 +323,17 @@ def test_alerts_critical_and_old():
     assert layer["status"] == "fail"
 
 
+def test_alerts_only_historical_critical_is_warn_not_fail():
+    alerts = [
+        {"level": "critical", "created_at": _iso(NOW - timedelta(days=8))}
+        for _ in range(4)
+    ]
+    layer = sh.score_alerts(alerts, NOW)
+    assert layer["score"] == 65  # -5 cada histórico -15 mais antigo
+    assert layer["status"] == "warn"
+    assert "histórico" in " ".join(layer["reasons"])
+
+
 # ----------------------------------------------------------------- overall
 def test_overall_weighted_and_worst_status():
     layers = {

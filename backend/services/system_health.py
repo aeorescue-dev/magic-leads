@@ -639,9 +639,26 @@ def score_alerts(alerts: list[dict], now: datetime) -> dict:
     reasons: list[str] = []
     critical = [a for a in alerts if str(a.get("level")).lower() in ("critical", "error", "fail")]
     warnings = [a for a in alerts if str(a.get("level")).lower() in ("warning", "warn")]
-    penalties.append(min(60, 25 * len(critical) + 10 * len(warnings)))
-    if critical:
-        reasons.append(f"{len(critical)} alerta(s) crítico(s)")
+    # Alertas críticos antigos (>7 dias) são dívida de governação, não uma
+    # falha operacional de agora: pesam menos e não pintam o painel de vermelho
+    # para sempre até alguém reconhecer o alerta.
+    critical_recent = [
+        a for a in critical
+        if (_age_hours(a.get("created_at"), now) or 0) <= 24 * 7
+    ]
+    critical_old = len(critical) - len(critical_recent)
+    penalties.append(
+        min(
+            60,
+            25 * len(critical_recent)
+            + 10 * len(warnings)
+            + 5 * critical_old,
+        )
+    )
+    if critical_recent:
+        reasons.append(f"{len(critical_recent)} alerta(s) crítico(s) recente(s)")
+    elif critical_old:
+        reasons.append(f"{critical_old} alerta(s) crítico(s) histórico(s)")
     elif warnings:
         reasons.append(f"{len(warnings)} alerta(s) de atenção")
 
@@ -657,8 +674,21 @@ def score_alerts(alerts: list[dict], now: datetime) -> dict:
     headline = f"{len(alerts)} aberto(s)"
     metrics = [
         _metric("open", "Abertos", len(alerts), "", "ok" if not alerts else "warn"),
-        _metric("critical", "Críticos", len(critical), "", "ok" if not critical else "fail"),
+        _metric(
+            "critical",
+            "Críticos recentes",
+            len(critical_recent),
+            "",
+            "ok" if not critical_recent else "fail",
+        ),
         _metric("warning", "Atenção", len(warnings), "", "ok" if not warnings else "warn"),
+        _metric(
+            "historical",
+            "Críticos >7d",
+            critical_old,
+            "",
+            "ok" if not critical_old else "warn",
+        ),
         _metric(
             "oldest_h",
             "Mais antigo",
@@ -906,9 +936,9 @@ async def build_snapshot(
     now = utcnow_aware()
     raw = await anyio.to_thread.run_sync(_gather_sync)
     try:
-        from . import outbound_engine
+        from .outbound_engine import outbound_engine as engine
 
-        out_status = await outbound_engine.status()
+        out_status = await engine.status()
         out_metrics = await db_service.outbound_metrics(30)
     except Exception as exc:  # noqa: BLE001
         logger.warning("[SYSTEM-HEALTH] outbound indisponível: %s", exc)
