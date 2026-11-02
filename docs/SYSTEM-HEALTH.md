@@ -1,7 +1,9 @@
 # System Health — painel operacional (Fase 27)
 
-Rota: **`/admin/system-health`** (só leitura).
-API: **`GET /api/admin/system-health?window=24`** (sessão + `users.is_admin`).
+Rota: **`/admin/system-health`** (leitura; a única ação é **Reconhecer** um
+alerta).
+API: **`GET /api/admin/system-health?window=24`** e
+**`POST /api/admin/alerts/{id}/ack`** (sessão + `users.is_admin`).
 
 O painel responde a uma pergunta por camada: *“isto ainda está a produzir valor
 ou está parado/degradado sem ninguém notar?”* Todos os números vêm de tabelas
@@ -75,11 +77,13 @@ de auditoria de segurança: aparecem no feed com a etiqueta **auditoria**, mas
 4. **Cotas** (barra Brave, Searchbug, backlog por cidade, owner backfill).
 5. **Outreach** (blocker, caixas, enviados/cap, warm-up, 48h OK/falha).
 6. **Push** (aceites/expiradas/mortas/sem VAPID, subs, cliques).
-7. **Infra** (checks da Control Tower) e **alertas abertos**.
+7. **Infra** (checks da Control Tower) e **alertas abertos** — cada alerta tem
+   o botão **Reconhecer** (o único write do painel; invalida o cache do
+   System Health para o score atualizar de imediato).
 8. Link **System Health** no header do `/admin`.
 
-SWR com refresh de 30 s, `keepPreviousData`; sem botões de escrita nesta fase.
-Tipos/helpers puros em `frontend/lib/system-health.ts` (testados em vitest).
+SWR com refresh de 30 s, `keepPreviousData`. Tipos/helpers puros em
+`frontend/lib/system-health.ts` (testados em vitest).
 
 ## 4. Baseline de produção (02/11/2026 00:09 UTC)
 
@@ -116,4 +120,4 @@ sparkline).
 - Tendências de 7 dias e “pior estado”.
 - Prune de `health_checks` (cresce ~900 linhas/dia; hoje sem limite).
 - Ações guardadas (correr scraper, retomar caixa) — só com confirmação e
-  auditoria; a Fase 1 é estritamente read-only.
+  auditoria. O **Reconhecer alerta** é a única escrita já disponível.

@@ -19,9 +19,10 @@ import {
   Wifi,
 } from "lucide-react";
 import type { ReactNode } from "react";
+import { useState } from "react";
 import useSWR from "swr";
 
-import { AdminApiError, fetchSystemHealth } from "@/lib/admin-api";
+import { AdminApiError, ackAdminAlert, fetchSystemHealth } from "@/lib/admin-api";
 import {
   LAYER_HINTS,
   LAYER_ORDER,
@@ -277,6 +278,8 @@ export default function SystemHealthPage() {
       revalidateOnFocus: true,
     }
   );
+  const [ackingId, setAckingId] = useState<number | null>(null);
+  const [ackError, setAckError] = useState<string | null>(null);
 
   if (error instanceof AdminApiError && (error.status === 401 || error.status === 403)) {
     return (
@@ -313,6 +316,21 @@ export default function SystemHealthPage() {
       </div>
     );
   }
+
+  const handleAck = async (alertId: number) => {
+    setAckingId(alertId);
+    setAckError(null);
+    try {
+      await ackAdminAlert(alertId);
+      await mutate();
+    } catch (err) {
+      setAckError(
+        err instanceof Error ? err.message : "Não foi possível reconhecer o alerta."
+      );
+    } finally {
+      setAckingId(null);
+    }
+  };
 
   const layers = data.layers;
   const overallClasses = scoreClasses(data.overall.score);
@@ -788,8 +806,13 @@ export default function SystemHealthPage() {
         <Section
           title="Alertas abertos"
           icon={<AlertTriangle className="h-4 w-4 text-amber-400" />}
-          hint="Só leitura: reconhecer continua no Admin"
+          hint="Reconhecer diretamente aqui; o resto continua read-only"
         >
+          {ackError ? (
+            <p className="mb-2 rounded-lg border border-rose-500/20 bg-rose-500/10 p-2 text-[11px] text-rose-200">
+              {ackError}
+            </p>
+          ) : null}
           <div className="space-y-2">
             {alertItems.map((alert) => (
               <div
@@ -809,9 +832,24 @@ export default function SystemHealthPage() {
                   >
                     {alert.informational ? "auditoria" : alert.level}
                   </span>
-                  <span className="text-[10px] text-slate-500">
-                    {fmtWhen(alert.created_at)}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-slate-500">
+                      {fmtWhen(alert.created_at)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void handleAck(Number(alert.id))}
+                      disabled={ackingId === Number(alert.id)}
+                      className="inline-flex items-center gap-1 rounded-md border border-white/10 px-2 py-0.5 text-[10px] font-semibold text-slate-300 hover:border-emerald-400/40 hover:bg-emerald-500/10 hover:text-emerald-200 disabled:opacity-50"
+                    >
+                      {ackingId === Number(alert.id) ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <CheckCircle2 className="h-3 w-3" />
+                      )}
+                      Reconhecer
+                    </button>
+                  </div>
                 </div>
                 <p className="mt-1 font-mono text-[10px] text-slate-400">{alert.code}</p>
                 <p className="text-[11px] text-slate-300">{alert.message}</p>
@@ -833,7 +871,7 @@ export default function SystemHealthPage() {
 
       <footer className="mt-6 flex flex-wrap items-center gap-3 text-[10px] text-slate-600">
         <Mail className="h-3 w-3" />
-        <span>Read-only · sem ações de escrita nesta fase.</span>
+        <span>Operação read-only · única escrita: reconhecer alertas.</span>
         <span>·</span>
         <span>Snapshot: 1/15 min, retenção 30 dias.</span>
         <span>·</span>

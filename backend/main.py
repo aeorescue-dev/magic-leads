@@ -3071,6 +3071,23 @@ async def admin_alerts(limit: int = 50, _admin: dict = Depends(_require_admin_us
     return {"alerts": alerts, "count": len(alerts)}
 
 
+@app.post("/api/admin/alerts/{alert_id}/ack")
+async def admin_ack_alert(
+    alert_id: int, _admin: dict = Depends(_require_admin_user)
+):
+    """Reconhece um alerta a partir do painel (sessão de admin).
+
+    Diferente de `/api/system/alerts/{id}/ack` (secret global para cron), esta
+    rota usa o mesmo gate do painel. Invalida o cache do System Health para o
+    score refletir o ack no refresh seguinte.
+    """
+    alert = await db_service.acknowledge_system_alert(alert_id)
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alerta não encontrado")
+    system_health.clear_cache()
+    return {"ok": True, "alert": alert}
+
+
 # ============================================================
 # DLQ (Dead Letter Queue) Helpers
 # ============================================================

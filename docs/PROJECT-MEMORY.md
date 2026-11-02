@@ -1418,7 +1418,9 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   tsc/lint limpos; CI verde.
 - **Micro-lote 02/11**: `ADMIN_ACCESS_*` deixou de pesar no score (fica no
   feed como auditoria). Alertas 66 -> 78 e overall 97 -> 98; reconhecer os 5
-  alertas operacionais leva a 100. Testes: **1.207 pytest**, **104 vitest**.
+  alertas operacionais leva a 100. Botão **Reconhecer** em cada alerta no
+  System Health (`POST /api/admin/alerts/{id}/ack`, sessão de admin, limpa o
+  cache do snapshot). Testes: **1.210 pytest**, **104 vitest**.
 
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.

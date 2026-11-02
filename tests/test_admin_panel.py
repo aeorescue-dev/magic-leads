@@ -131,6 +131,38 @@ def test_admin_routes_reject_non_admin_user(nonadmin_client, path):
     assert client.get(path, headers=headers).status_code == 403
 
 
+# ---------------------------------------------------------------- acks
+
+
+def test_admin_can_ack_system_alert(admin_client):
+    client, headers, _ = admin_client
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            "INSERT INTO system_alerts (level, code, message) "
+            "VALUES ('warning', 'PYTEST_ACK', 'teste de ack')"
+        )
+        alert_id = int(cur.lastrowid)
+        conn.commit()
+    finally:
+        conn.close()
+
+    r = client.post(f"/api/admin/alerts/{alert_id}/ack", headers=headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["alert"]["acknowledged"] == 1
+
+
+def test_admin_ack_unknown_alert_returns_404(admin_client):
+    client, headers, _ = admin_client
+    r = client.post("/api/admin/alerts/99999999/ack", headers=headers)
+    assert r.status_code == 404
+
+
+def test_admin_ack_requires_admin(nonadmin_client):
+    client, headers = nonadmin_client
+    assert client.post("/api/admin/alerts/1/ack", headers=headers).status_code == 403
+
+
 # ---------------------------------------------------------------- dados
 
 

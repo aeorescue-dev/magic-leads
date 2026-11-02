@@ -343,6 +343,15 @@ export function fetchAdminAlerts(limit = 50): Promise<{ alerts: AdminAlert[]; co
   return adminFetch(`/alerts?limit=${limit}`);
 }
 
+export function ackAdminAlert(
+  alertId: number
+): Promise<{ ok: boolean; alert: AdminAlert }> {
+  return adminFetch<{ ok: boolean; alert: AdminAlert }>(
+    `/alerts/${alertId}/ack`,
+    { method: "POST" }
+  );
+}
+
 export function fetchAdminSearchbug(days = 7, recentLimit = 50): Promise<AdminSearchbugMetrics> {
   return adminFetch(`/searchbug?days=${days}&recent_limit=${recentLimit}`);
 }
