@@ -527,10 +527,27 @@ def summary(range_key: str = "7d") -> dict:
             "SELECT COUNT(*) FROM events WHERE name='form_submit' AND ts>=? AND ts<?",
             (start_s, now_s),
         ) or 0)
+        prev_pageviews = int(scalar(
+            "SELECT COUNT(*) FROM events WHERE name='pageview' AND ts>=? AND ts<?",
+            (prev_s, start_s),
+        ) or 0)
+        prev_cta = int(scalar(
+            "SELECT COUNT(*) FROM events WHERE name='cta_click' AND ts>=? AND ts<?",
+            (prev_s, start_s),
+        ) or 0)
+        prev_forms = int(scalar(
+            "SELECT COUNT(*) FROM events WHERE name='form_submit' AND ts>=? AND ts<?",
+            (prev_s, start_s),
+        ) or 0)
         avg_eng = float(scalar(
             "SELECT COALESCE(AVG(engagement_ms),0) FROM sessions "
             "WHERE started_at>=? AND started_at<?",
             (start_s, now_s),
+        ) or 0) / 1000.0
+        prev_avg_eng = float(scalar(
+            "SELECT COALESCE(AVG(engagement_ms),0) FROM sessions "
+            "WHERE started_at>=? AND started_at<?",
+            (prev_s, start_s),
         ) or 0) / 1000.0
         avg_scroll = float(scalar(
             "SELECT COALESCE(AVG(scroll_pct),0) FROM sessions "
@@ -544,7 +561,17 @@ def summary(range_key: str = "7d") -> dict:
             "  AND e.name IN ('cta_click','form_submit')))",
             (start_s, now_s),
         ) or 0)
+        prev_engaged = int(scalar(
+            "SELECT COUNT(*) FROM sessions s WHERE s.started_at>=? AND s.started_at<? "
+            "AND (s.scroll_pct>=50 OR EXISTS ("
+            "  SELECT 1 FROM events e WHERE e.session_id=s.id "
+            "  AND e.name IN ('cta_click','form_submit')))",
+            (prev_s, start_s),
+        ) or 0)
         bounce_rate = round((1 - engaged / visits) * 100, 1) if visits else 0.0
+        prev_bounce = (
+            round((1 - prev_engaged / prev_visits) * 100, 1) if prev_visits else 0.0
+        )
 
         # Série temporal
         rows = conn.execute(
@@ -711,15 +738,20 @@ def summary(range_key: str = "7d") -> dict:
                            "spark": [b["visits"] for b in series]},
                 "visitors": {"value": visitors, "delta_pct": _delta_pct(visitors, prev_visitors),
                              "spark": [b["visits"] for b in series]},
-                "pageviews": {"value": pageviews, "delta_pct": None,
+                "pageviews": {"value": pageviews,
+                              "delta_pct": _delta_pct(pageviews, prev_pageviews),
                               "spark": [b["pageviews"] for b in series]},
-                "cta_clicks": {"value": cta, "delta_pct": None,
+                "cta_clicks": {"value": cta,
+                               "delta_pct": _delta_pct(cta, prev_cta),
                                "spark": [b["cta"] for b in series]},
-                "form_submits": {"value": forms, "delta_pct": None,
+                "form_submits": {"value": forms,
+                                 "delta_pct": _delta_pct(forms, prev_forms),
                                  "spark": [b["forms"] for b in series]},
-                "avg_engagement_s": {"value": round(avg_eng, 1), "delta_pct": None,
+                "avg_engagement_s": {"value": round(avg_eng, 1),
+                                     "delta_pct": _delta_pct(avg_eng, prev_avg_eng),
                                      "spark": []},
-                "bounce_rate": {"value": bounce_rate, "delta_pct": None,
+                "bounce_rate": {"value": bounce_rate,
+                                "delta_pct": _delta_pct(bounce_rate, prev_bounce),
                                 "spark": []},
             },
             "series": series,

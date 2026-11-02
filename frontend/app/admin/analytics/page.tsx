@@ -103,6 +103,7 @@ function Kpi({
   delta,
   spark,
   icon,
+  inverse = false,
 }: {
   label: string;
   value: number;
@@ -110,7 +111,9 @@ function Kpi({
   delta: number | null;
   spark: number[];
   icon: ReactNode;
+  inverse?: boolean;
 }) {
+  const good = delta == null ? null : inverse ? delta <= 0 : delta >= 0;
   return (
     <div className="rounded-2xl border border-white/10 bg-[#10131a] p-3">
       <div className="flex items-center justify-between text-slate-500">
@@ -126,9 +129,9 @@ function Kpi({
       <p
         className={cn(
           "mt-0.5 text-[10px] font-semibold",
-          delta == null
+          good == null
             ? "text-slate-500"
-            : delta >= 0
+            : good
               ? "text-emerald-300"
               : "text-rose-300"
         )}
@@ -338,7 +341,7 @@ export default function AnalyticsPage() {
         <Kpi label="CTA clicks" value={cards.cta_clicks.value} delta={cards.cta_clicks.delta_pct} spark={cards.cta_clicks.spark} icon={<MousePointerClick className="h-3.5 w-3.5" />} />
         <Kpi label="Form submits" value={cards.form_submits.value} delta={cards.form_submits.delta_pct} spark={cards.form_submits.spark} icon={<Send className="h-3.5 w-3.5" />} />
         <Kpi label="Tempo médio" value={cards.avg_engagement_s.value} unit="s" delta={cards.avg_engagement_s.delta_pct} spark={cards.avg_engagement_s.spark} icon={<Clock className="h-3.5 w-3.5" />} />
-        <Kpi label="Bounce" value={cards.bounce_rate.value} unit="%" delta={cards.bounce_rate.delta_pct} spark={cards.bounce_rate.spark} icon={<Activity className="h-3.5 w-3.5" />} />
+        <Kpi label="Bounce" value={cards.bounce_rate.value} unit="%" delta={cards.bounce_rate.delta_pct} spark={cards.bounce_rate.spark} icon={<Activity className="h-3.5 w-3.5" />} inverse />
       </div>
 
       <div className="grid gap-5 xl:grid-cols-2">
