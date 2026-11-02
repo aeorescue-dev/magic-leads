@@ -5,8 +5,10 @@ import {
   AlertTriangle,
   ArrowLeft,
   BarChart3,
+  Calendar,
   CheckCircle2,
   Clock,
+  Download,
   Eye,
   Globe2,
   Loader2,
@@ -21,6 +23,7 @@ import useSWR from "swr";
 
 import { AdminApiError, fetchAdminAnalytics } from "@/lib/admin-api";
 import type { AdminAnalytics } from "@/lib/admin-api";
+import { downloadAnalyticsCsv } from "@/lib/analytics-csv";
 import {
   fmtWhen,
   fmtValue,
@@ -193,11 +196,49 @@ function GateScreen({ status, message }: { status: number; message: string }) {
 
 export default function AnalyticsPage() {
   const [range, setRange] = useState<RangeKey>("7d");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [custom, setCustom] = useState(false);
+  const [dateError, setDateError] = useState<string | null>(null);
+  const today = new Date().toISOString().slice(0, 10);
   const { data, error, isLoading, isValidating, mutate } = useSWR<AdminAnalytics>(
-    ["admin-analytics", range],
-    () => fetchAdminAnalytics(range),
+    ["admin-analytics", range, custom ? fromDate : "", custom ? toDate : ""],
+    () =>
+      fetchAdminAnalytics(
+        range,
+        custom ? fromDate : undefined,
+        custom ? toDate : undefined
+      ),
     { refreshInterval: 30_000, keepPreviousData: true, revalidateOnFocus: true }
   );
+
+  const applyCustom = () => {
+    if (!fromDate || !toDate) {
+      setDateError("Escolhe a data inicial e final.");
+      return;
+    }
+    if (fromDate > toDate) {
+      setDateError("A data inicial tem de ser anterior à final.");
+      return;
+    }
+    const days =
+      Math.round(
+        (Date.parse(toDate) - Date.parse(fromDate)) / (24 * 60 * 60 * 1000)
+      ) + 1;
+    if (days > 366) {
+      setDateError("O intervalo máximo é de 366 dias.");
+      return;
+    }
+    setDateError(null);
+    setCustom(true);
+  };
+
+  const clearCustom = () => {
+    setCustom(false);
+    setFromDate("");
+    setToDate("");
+    setDateError(null);
+  };
 
   if (error instanceof AdminApiError && (error.status === 401 || error.status === 403)) {
     return (
@@ -266,26 +307,82 @@ export default function AnalyticsPage() {
             <BarChart3 className="h-5 w-5 text-indigo-400" /> Web Analytics
           </h1>
           <p className="text-[11px] text-slate-500">
-            First-party, sem cookies · gerado em {fmtWhen(data.generated_at)} · atualiza a cada 30 s
+            First-party, sem cookies · gerado em {fmtWhen(data.generated_at)} · período{" "}
+            {data.start} → {data.end} (UTC){custom ? " · personalizado" : ""} · atualiza a cada 30 s
             {isValidating ? " · a atualizar…" : ""}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <div className="flex rounded-lg border border-white/10 p-0.5">
             {RANGES.map((option) => (
               <button
                 key={option}
                 type="button"
-                onClick={() => setRange(option)}
+                onClick={() => {
+                  setRange(option);
+                  setCustom(false);
+                  setDateError(null);
+                }}
                 className={cn(
                   "rounded-md px-2.5 py-1.5 text-[11px] font-semibold",
-                  range === option ? "bg-indigo-500 text-white" : "text-slate-400 hover:text-slate-200"
+                  !custom && range === option
+                    ? "bg-indigo-500 text-white"
+                    : "text-slate-400 hover:text-slate-200"
                 )}
               >
                 {option}
               </button>
             ))}
           </div>
+          <div className="flex flex-wrap items-center gap-1 rounded-lg border border-white/10 p-1">
+            <Calendar className="ml-1 h-3.5 w-3.5 text-slate-500" />
+            <input
+              type="date"
+              value={fromDate}
+              max={toDate || today}
+              onChange={(event) => setFromDate(event.target.value)}
+              aria-label="Data inicial"
+              style={{ colorScheme: "dark" }}
+              className="rounded bg-transparent px-1 py-1 text-[11px] text-slate-300 outline-none"
+            />
+            <span className="text-[10px] text-slate-500">até</span>
+            <input
+              type="date"
+              value={toDate}
+              min={fromDate || undefined}
+              max={today}
+              onChange={(event) => setToDate(event.target.value)}
+              aria-label="Data final"
+              style={{ colorScheme: "dark" }}
+              className="rounded bg-transparent px-1 py-1 text-[11px] text-slate-300 outline-none"
+            />
+            <button
+              type="button"
+              onClick={applyCustom}
+              disabled={!fromDate || !toDate}
+              className="rounded-md bg-indigo-500 px-2 py-1 text-[10px] font-semibold text-white hover:bg-indigo-400 disabled:opacity-40"
+            >
+              Aplicar
+            </button>
+            {custom ? (
+              <button
+                type="button"
+                onClick={clearCustom}
+                title="Limpar período personalizado"
+                className="rounded-md px-1.5 py-1 text-[12px] font-bold text-slate-400 hover:text-slate-200"
+              >
+                ×
+              </button>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            onClick={() => downloadAnalyticsCsv(data)}
+            className="inline-flex items-center gap-2 rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/20"
+          >
+            <Download className="h-3.5 w-3.5" />
+            CSV
+          </button>
           <button
             type="button"
             onClick={() => void mutate()}
@@ -296,6 +393,9 @@ export default function AnalyticsPage() {
           </button>
         </div>
       </header>
+      {dateError ? (
+        <p className="-mt-3 mb-3 text-[11px] font-semibold text-rose-300">{dateError}</p>
+      ) : null}
 
       <section className="mb-5 rounded-2xl border border-white/10 bg-gradient-to-br from-[#121722] to-[#0d1017] p-5">
         <div className="flex flex-wrap items-center gap-6">

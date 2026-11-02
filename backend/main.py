@@ -2718,10 +2718,22 @@ async def analytics_ingest(
 
 @app.get("/api/admin/analytics")
 async def admin_analytics(
-    range: str = "7d", _admin: dict = Depends(_require_admin_user)
+    range: str = "7d",
+    start: str | None = None,
+    end: str | None = None,
+    _admin: dict = Depends(_require_admin_user),
 ):
-    """Resumo de tráfego/comportamento para o /admin/analytics."""
-    return await anyio.to_thread.run_sync(analytics.get_summary, range)
+    """Resumo de tráfego/comportamento para o /admin/analytics.
+
+    `range` aceita 24h/7d/30d; `start`/`end` (YYYY-MM-DD) definem um período
+    customizado inclusive (UTC) e têm prioridade.
+    """
+    try:
+        return await anyio.to_thread.run_sync(
+            analytics.get_summary, range, start, end
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.get("/api/admin/outbound/health")

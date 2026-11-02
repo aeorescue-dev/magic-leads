@@ -1459,8 +1459,9 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   tsc/lint/ruff limpos.
 - **Refinamento (02/11)**: geografia com CTA/forms por cidade, origem com
   `utm_campaign`/`utm_content`, feed de ações com origem e painel
-  **E-mail → Lead** (`form_submit` por campanha/step/cidade). Testes: 1.228
-  pytest.
+  **E-mail → Lead** (`form_submit` por campanha/step/cidade). Depois:
+  **calendário De/Até** (inclusive, UTC, 366d) e **export CSV** long-format.
+  Testes: **1.230 pytest**, **109 vitest**.
 
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.

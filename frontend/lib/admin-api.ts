@@ -1166,6 +1166,8 @@ export interface AdminAnalyticsSource {
   visits: number;
   visitors: number;
   pageviews: number;
+  cta_clicks: number;
+  form_submits: number;
 }
 
 export interface AdminAnalyticsGeo {
@@ -1212,6 +1214,10 @@ export interface AdminAnalyticsAttribution {
 export interface AdminAnalytics {
   generated_at: string;
   range: string;
+  start: string;
+  end: string;
+  window_start: string;
+  window_end: string;
   overall: {
     score: number;
     status: "ok" | "warn" | "fail";
@@ -1251,10 +1257,17 @@ export interface AdminAnalytics {
   }>;
 }
 
-export function fetchAdminAnalytics(range = "7d"): Promise<AdminAnalytics> {
-  return adminFetch<AdminAnalytics>(
-    `/analytics?range=${encodeURIComponent(range)}`
-  );
+export function fetchAdminAnalytics(
+  range = "7d",
+  start?: string,
+  end?: string
+): Promise<AdminAnalytics> {
+  const params = new URLSearchParams({ range });
+  if (start && end) {
+    params.set("start", start);
+    params.set("end", end);
+  }
+  return adminFetch<AdminAnalytics>(`/analytics?${params.toString()}`);
 }
 
 /** Snapshot read-only do System Health (7 camadas + score 0–100). */

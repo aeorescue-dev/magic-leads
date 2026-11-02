@@ -453,13 +453,46 @@ def ingest(payload: dict, client_ip: str = "") -> dict:
 
 
 # -------------------------------------------------------------- summary
-def _range_start(range_key: str, now: datetime) -> tuple[datetime, datetime, str]:
+def _parse_day(value: str) -> datetime:
+    try:
+        return datetime.strptime(str(value).strip(), "%Y-%m-%d").replace(
+            tzinfo=timezone.utc
+        )
+    except (TypeError, ValueError):
+        raise ValueError("data inválida (use YYYY-MM-DD)")
+
+
+def _range_bounds(
+    range_key: str,
+    now: datetime,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> tuple[datetime, datetime, datetime, str, str]:
+    """(início, fim exclusivo, início do período anterior, bucket, label)."""
+    if start_date or end_date:
+        if not (start_date and end_date):
+            raise ValueError("indique 'start' e 'end' em conjunto")
+        start = _parse_day(start_date)
+        end = _parse_day(end_date) + timedelta(days=1)
+        if end <= start:
+            raise ValueError("'end' tem de ser >= 'start'")
+        if end > now + timedelta(days=1):
+            raise ValueError("'end' no futuro")
+        span = end - start
+        if span > timedelta(days=366):
+            raise ValueError("intervalo máximo de 366 dias")
+        mode = "hour" if span <= timedelta(days=2) else "day"
+        return start, end, start - span, mode, "custom"
+
     key = (range_key or "7d").lower()
     if key == "24h":
-        return now - timedelta(hours=24), now - timedelta(hours=48), "hour"
+        start = now - timedelta(hours=24)
+        return start, now + timedelta(seconds=1), start - timedelta(hours=24), "hour", "24h"
     if key == "30d":
-        return now - timedelta(days=30), now - timedelta(days=60), "day"
-    return now - timedelta(days=7), now - timedelta(days=14), "day"
+        start = now - timedelta(days=30)
+        return start, now + timedelta(seconds=1), start - timedelta(days=30), "day", "30d"
+    start = now - timedelta(days=7)
+    return start, now + timedelta(seconds=1), start - timedelta(days=7), "day", "7d"
 
 
 def _bucket(value: str, mode: str) -> str:
@@ -558,15 +591,19 @@ def _grouped(
     return rows[: max(1, int(limit))]
 
 
-def summary(range_key: str = "7d") -> dict:
+def summary(
+    range_key: str = "7d",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> dict:
     init_db()
     now = datetime.now(timezone.utc)
-    start, prev_start, mode = _range_start(range_key, now)
+    start, end, prev_start, mode, label = _range_bounds(
+        range_key, now, start_date, end_date
+    )
     start_s = start.isoformat(timespec="seconds")
     prev_s = prev_start.isoformat(timespec="seconds")
-    # Inclui eventos do próprio segundo (o beacon pode gravar e o admin
-    # consultar de seguida nos testes).
-    now_s = (now + timedelta(seconds=1)).isoformat(timespec="seconds")
+    now_s = end.isoformat(timespec="seconds")
     conn = get_connection()
     try:
         def scalar(sql: str, params: tuple = ()) -> Any:
@@ -807,7 +844,11 @@ def summary(range_key: str = "7d") -> dict:
         ]
         return {
             "generated_at": now_s,
-            "range": str(range_key or "7d"),
+            "range": label,
+            "start": start.date().isoformat(),
+            "end": (end - timedelta(seconds=1)).date().isoformat(),
+            "window_start": start_s,
+            "window_end": now_s,
             "overall": {
                 "score": overall,
                 "status": status,
@@ -853,14 +894,18 @@ def summary(range_key: str = "7d") -> dict:
         conn.close()
 
 
-def get_summary(range_key: str = "7d") -> dict:
+def get_summary(
+    range_key: str = "7d",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> dict:
     key = (range_key or "7d").lower()
-    cache_key = f"{db_path()}:{key}"
+    cache_key = f"{db_path()}:{key}:{start_date or ''}:{end_date or ''}"
     now = time.monotonic()
     cached = _CACHE.get(cache_key)
     if cached and now - cached[0] < _CACHE_TTL:
         return cached[1]
-    data = summary(key)
+    data = summary(key, start_date, end_date)
     _CACHE[cache_key] = (now, data)
     return data
 

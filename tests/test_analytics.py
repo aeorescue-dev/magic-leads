@@ -210,6 +210,29 @@ def test_summary_campanhas_geo_cta_e_atribuicao_email(clean_db):
     assert snap["recent"][0]["campaign"] == "dallas_roofing"
 
 
+def test_custom_range_e_inclusivo_e_filtra_dias(clean_db):
+    analytics.ingest(_payload("sess-custom-12345"), "203.0.113.60")
+    today = datetime.now(timezone.utc).date().isoformat()
+    snap = analytics.summary("24h", today, today)
+    assert snap["range"] == "custom"
+    assert snap["start"] == today
+    assert snap["end"] == today
+    assert snap["cards"]["visits"]["value"] == 1
+
+    yesterday = (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
+    empty = analytics.summary("24h", yesterday, yesterday)
+    assert empty["cards"]["visits"]["value"] == 0
+
+
+def test_custom_range_rejeita_datas_invalidas():
+    with pytest.raises(ValueError):
+        analytics.summary("7d", "2026-01-01", None)
+    with pytest.raises(ValueError):
+        analytics.summary("7d", "2026-01-10", "2026-01-01")
+    with pytest.raises(ValueError):
+        analytics.summary("7d", "2020-01-01", "2026-01-01")
+
+
 def test_rate_limit_por_ip():
     assert analytics.allow_ingest("198.51.100.77", limit=2, window_s=60) is True
     assert analytics.allow_ingest("198.51.100.77", limit=2, window_s=60) is True

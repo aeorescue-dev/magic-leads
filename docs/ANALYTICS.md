@@ -1,7 +1,8 @@
 # Web Analytics first-party (Fase 29)
 
 Rota: **`/admin/analytics`**. API: **`GET /api/admin/analytics?range=24h|7d|30d`**
-(sessão + `is_admin`). Ingest: **`POST /api/analytics/ingest`** (chave
+ou **`?start=YYYY-MM-DD&end=YYYY-MM-DD`** (inclusive, UTC; máx. 366 dias).
+Sessão + `is_admin`. Ingest: **`POST /api/analytics/ingest`** (chave
 servidor-a-servidor).
 
 ## Princípios
@@ -66,7 +67,10 @@ referrer, locale, device/browser/OS, pageviews, engagement_ms, scroll_pct.
 - Gráficos: tráfego (hora/dia), origens + **campanhas/UTM (campaign/content)**,
   funil, **e-mail → lead** (forms por campanha/step/cidade), geografia com
   **CTA e forms por cidade**, dispositivo/idioma, ações recentes **com a
-  origem (email/UTM/direct)**. Filtros 24h/7d/30d; SWR 30 s; API cache 60 s.
+  origem (email/UTM/direct)**. Filtros 24h/7d/30d **ou período De/Até**
+  (inclusive, UTC, máx. 366 dias); SWR 30 s; API cache 60 s.
+- **Exportar CSV** (long format: `section,metric,label,value`) com o período
+  filtrado, séries, origens, campanhas, geo, funil, atribuição e eventos.
 - `email_attribution` isola as sessões `source='email'` e cruza-as com
   `form_submit`; `campaigns` agrupa por `source/medium/campaign/content`.
 
