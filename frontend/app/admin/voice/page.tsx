@@ -8,7 +8,9 @@ import {
   BarChart3,
   Building2,
   CalendarClock,
+  Check,
   CheckCircle2,
+  ChevronDown,
   Cloud,
   Database,
   Gauge,
@@ -30,7 +32,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import useSWR from "swr";
 
 import {
@@ -187,6 +189,84 @@ function Stat({
         {value}
       </p>
       {sub ? <p className="mt-0.5 text-[10px] text-slate-500">{sub}</p> : null}
+    </div>
+  );
+}
+
+type SelectOption = { value: string; label: string };
+
+function SelectMenu({
+  value,
+  onChange,
+  options,
+  placeholder,
+  className,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: SelectOption[];
+  placeholder?: string;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onDoc = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
+  const selected = options.find((option) => option.value === value);
+  return (
+    <div ref={ref} className={cn("relative", className)}>
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className="flex w-full items-center justify-between gap-2 rounded-lg border border-white/15 bg-[#1a1d24] px-2.5 py-1.5 text-[10px] font-semibold text-white shadow-sm transition-colors hover:border-white/30"
+      >
+        <span className="truncate">{selected?.label ?? placeholder ?? "Selecionar"}</span>
+        <ChevronDown
+          className={cn(
+            "h-3 w-3 shrink-0 text-slate-400 transition-transform",
+            open && "rotate-180"
+          )}
+        />
+      </button>
+      {open ? (
+        <div
+          role="listbox"
+          className="absolute z-50 mt-1 max-h-64 w-full min-w-[190px] overflow-auto rounded-lg border border-white/15 bg-[#1a1d24] p-1 shadow-2xl shadow-black/60"
+        >
+          {options.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="option"
+              aria-selected={option.value === value}
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+              className={cn(
+                "flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-[10px] transition-colors",
+                option.value === value
+                  ? "bg-emerald-500/15 font-bold text-emerald-200"
+                  : "text-slate-200 hover:bg-white/10 hover:text-white"
+              )}
+            >
+              <span className="truncate">{option.label}</span>
+              {option.value === value ? <Check className="h-3 w-3" /> : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -438,6 +518,8 @@ export default function VoiceB2BPage() {
   const [includeBlocked, setIncludeBlocked] = useState(false);
   const [cityFilter, setCityFilter] = useState("");
   const [tradeFilter, setTradeFilter] = useState("");
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
   const [quotaTotal, setQuotaTotal] = useState(100);
   const [batchSize, setBatchSize] = useState(25);
   const [includeFallback, setIncludeFallback] = useState(true);
@@ -458,16 +540,27 @@ export default function VoiceB2BPage() {
   const [notes, setNotes] = useState("");
   const [callbackAt, setCallbackAt] = useState("");
 
-  const queueKey = `voice-queue-${includeBlocked}-${cityFilter}-${tradeFilter}`;
+  const queueKey = `voice-queue-${includeBlocked}-${cityFilter}-${tradeFilter}-${page}`;
   const {
     data: queue,
     error,
     isLoading,
     mutate: mutateQueue,
-  } = useSWR(queueKey, () => fetchVoiceQueue(includeBlocked, 250, cityFilter, tradeFilter), {
-    refreshInterval: 60_000,
-    revalidateOnFocus: true,
-  });
+  } = useSWR(
+    queueKey,
+    () =>
+      fetchVoiceQueue(
+        includeBlocked,
+        pageSize,
+        cityFilter,
+        tradeFilter,
+        (page - 1) * pageSize
+      ),
+    {
+      refreshInterval: 60_000,
+      revalidateOnFocus: true,
+    }
+  );
   const { data: stats, mutate: mutateStats } = useSWR(
     "voice-stats",
     fetchVoiceStats,
@@ -507,6 +600,19 @@ export default function VoiceB2BPage() {
     () => queue?.items.filter((item) => item.eligibility.allowed).length ?? 0,
     [queue]
   );
+
+  useEffect(() => {
+    setPage(1);
+  }, [includeBlocked, cityFilter, tradeFilter]);
+
+  const totalItems = queue?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const pageStart = totalItems === 0 ? 0 : (page - 1) * pageSize + 1;
+  const pageEnd = Math.min(page * pageSize, totalItems);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   if (error instanceof AdminApiError && (error.status === 401 || error.status === 403)) {
     return <GateScreen status={error.status} />;
@@ -845,15 +951,17 @@ export default function VoiceB2BPage() {
         icon={<Gauge className="h-4 w-4 text-emerald-400" />}
         hint="Velocímetros de conversão e saúde operacional"
         action={
-          <select
-            value={metricsDays}
-            onChange={(event) => setMetricsDays(Number(event.target.value))}
-            className="rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-[10px] font-semibold text-slate-300"
-          >
-            <option value={7}>7 dias</option>
-            <option value={30}>30 dias</option>
-            <option value={90}>90 dias</option>
-          </select>
+          <SelectMenu
+            value={String(metricsDays)}
+            onChange={(value) => setMetricsDays(Number(value))}
+            placeholder="30 dias"
+            className="min-w-[110px]"
+            options={[
+              { value: "7", label: "7 dias" },
+              { value: "30", label: "30 dias" },
+              { value: "90", label: "90 dias" },
+            ]}
+          />
         }
         className={tab === "overview" ? "" : "hidden"}
       >
@@ -1593,30 +1701,32 @@ export default function VoiceB2BPage() {
         hint="Ordenada por score ICP e volume de obras; compliance sempre visível."
         action={
           <div className="flex flex-wrap items-center gap-2">
-            <select
+            <SelectMenu
               value={cityFilter}
-              onChange={(event) => setCityFilter(event.target.value)}
-              className="rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-[10px] font-semibold text-slate-300"
-            >
-              <option value="">Todas as cidades</option>
-              {(stats?.by_city ?? []).map((group) => (
-                <option key={`filter-city-${group.name}`} value={group.name}>
-                  {group.name} ({group.total})
-                </option>
-              ))}
-            </select>
-            <select
+              onChange={setCityFilter}
+              placeholder="Todas as cidades"
+              className="min-w-[150px]"
+              options={[
+                { value: "", label: "Todas as cidades" },
+                ...(stats?.by_city ?? []).map((group) => ({
+                  value: group.name,
+                  label: `${group.name} (${group.total})`,
+                })),
+              ]}
+            />
+            <SelectMenu
               value={tradeFilter}
-              onChange={(event) => setTradeFilter(event.target.value)}
-              className="rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-[10px] font-semibold text-slate-300"
-            >
-              <option value="">Todos os nichos</option>
-              {(stats?.by_trade ?? []).map((group) => (
-                <option key={`filter-trade-${group.name}`} value={group.name}>
-                  {group.name} ({group.total})
-                </option>
-              ))}
-            </select>
+              onChange={setTradeFilter}
+              placeholder="Todos os nichos"
+              className="min-w-[150px]"
+              options={[
+                { value: "", label: "Todos os nichos" },
+                ...(stats?.by_trade ?? []).map((group) => ({
+                  value: group.name,
+                  label: `${group.name} (${group.total})`,
+                })),
+              ]}
+            />
             <label className="inline-flex cursor-pointer items-center gap-2 text-[10px] font-semibold text-slate-400">
               <input
                 type="checkbox"
@@ -1638,7 +1748,7 @@ export default function VoiceB2BPage() {
             <Building2 className="mx-auto mb-2 h-6 w-6 text-slate-600" />
             <p className="text-xs text-slate-400">Sem empresas nesta vista.</p>
             <p className="mt-1 text-[10px] text-slate-600">
-              Importa licenças/permits de MA e uma lista DNC para começar.
+              Sincroniza licenças em “Fontes” ou ajusta os filtros.
             </p>
           </div>
         ) : (
@@ -1749,6 +1859,36 @@ export default function VoiceB2BPage() {
             </table>
           </div>
         )}
+        {queue?.items.length ? (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-white/5 pt-3 text-[10px] text-slate-500">
+            <span>
+              Mostrando {pageStart}–{pageEnd} de {totalItems}
+            </span>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+                disabled={page <= 1}
+                className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1 font-semibold text-slate-300 hover:bg-white/[0.08] disabled:opacity-35"
+              >
+                Anterior
+              </button>
+              <span className="rounded-lg border border-white/10 bg-[#1a1d24] px-2.5 py-1 font-semibold text-white">
+                Página {page} de {totalPages}
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  setPage((current) => Math.min(totalPages, current + 1))
+                }
+                disabled={page >= totalPages}
+                className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1 font-semibold text-slate-300 hover:bg-white/[0.08] disabled:opacity-35"
+              >
+                Próxima
+              </button>
+            </div>
+          </div>
+        ) : null}
       </Card>
 
       {selected ? (

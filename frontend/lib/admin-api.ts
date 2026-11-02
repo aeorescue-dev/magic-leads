@@ -1513,6 +1513,7 @@ export interface VoiceQueue {
   items: VoiceCompany[];
   generated_at: string;
   limit: number;
+  offset?: number;
   total: number;
   callable: number;
   include_blocked: boolean;
@@ -1571,11 +1572,13 @@ export function fetchVoiceQueue(
   includeBlocked = false,
   limit = 100,
   city = "",
-  trade = ""
+  trade = "",
+  offset = 0
 ): Promise<VoiceQueue> {
   const params = new URLSearchParams({
     include_blocked: includeBlocked ? "1" : "0",
     limit: String(limit),
+    offset: String(offset),
   });
   if (city) params.set("city", city);
   if (trade) params.set("trade", trade);

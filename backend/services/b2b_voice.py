@@ -950,9 +950,11 @@ def queue(
     city: str = "",
     trade: str = "",
     state: str = "",
+    offset: int = 0,
 ) -> dict:
     init()
     now = _utc_now()
+    offset = max(0, int(offset))
     where: list[str] = []
     params: list[Any] = []
     if city.strip():
@@ -969,8 +971,8 @@ def queue(
     try:
         rows = conn.execute(
             f"SELECT * FROM prospect_companies{clause} "
-            "ORDER BY score DESC, permit_count DESC, id ASC LIMIT ?",
-            (*params, max(1, min(1000, int(limit)))),
+            "ORDER BY score DESC, permit_count DESC, id ASC LIMIT ? OFFSET ?",
+            (*params, max(1, min(1000, int(limit))), offset),
         ).fetchall()
         items = []
         callable_count = 0
@@ -991,6 +993,7 @@ def queue(
             "items": items,
             "generated_at": _iso(now),
             "limit": limit,
+            "offset": offset,
             "total": total,
             "callable": callable_count,
             "include_blocked": include_blocked,

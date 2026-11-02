@@ -199,6 +199,22 @@ def test_queue_e_stats_filtram_cidade_e_nicho():
     assert stats["pilot_state"] == "MA, NY, TX, IL"
 
 
+def test_queue_respeita_offset_de_paginacao():
+    for idx, phone in enumerate(
+        ("+16175550191", "+16175550192", "+16175550193")
+    ):
+        voice.import_licenses_csv(
+            _csv(phone=phone, state="MA", company=f"Paged {idx}")
+        )
+        voice.check_dnc(phone, listed=False, source="pytest")
+    first = voice.queue(limit=1, offset=0, include_blocked=True)
+    second = voice.queue(limit=1, offset=1, include_blocked=True)
+    assert first["total"] == 3
+    assert first["items"][0]["id"] != second["items"][0]["id"]
+    assert first["offset"] == 0
+    assert second["offset"] == 1
+
+
 def test_limite_de_tentativas_7_dias():
     voice.import_licenses_csv(_csv())
     voice.check_dnc("+16175550123", listed=False, source="pytest")

@@ -2833,6 +2833,7 @@ async def admin_voice_queue(
     city: str = "",
     trade: str = "",
     state: str = "",
+    offset: int = 0,
     _admin: dict = Depends(_require_admin_user),
 ):
     """Fila B2B: empresas com gate can_call() aplicado e filtros multi-cidade."""
@@ -2843,6 +2844,7 @@ async def admin_voice_queue(
         city,
         trade,
         state,
+        offset,
     )
 
 

@@ -1668,6 +1668,16 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Testes**: formatos crus, conflito listado/limpo, staging e bloqueio em
   produção → **1.294 pytest**; cobertura **69,9%**.
 
+### Polimento UI/UX — dropdowns e paginação (2026-11-02)
+
+- **Dropdowns de cidade/nicho** substituídos por componente próprio de alto
+  contraste: fundo `#1a1d24`, texto branco, hover, check de seleção e z-index
+  correto (sem depender do render nativo do browser).
+- **Fila paginada**: 20 itens por página, paginação server-side (`offset`),
+  indicador “Mostrando X–Y de Z”, Anterior/Próxima e “Página X de Y”.
+- Filtros de cidade/nicho resetam a página para 1.
+- Testes: **1.295 pytest**; ruff/tsc/build/lint limpos.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
