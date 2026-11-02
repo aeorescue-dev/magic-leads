@@ -1415,7 +1415,7 @@ def test_admin_voice_import_dnc_queue_and_call(admin_client, monkeypatch):
     r = client.get("/api/admin/voice/stats", headers=headers)
     assert r.status_code == 200, r.text
     assert r.json()["total"] >= 1
-    assert r.json()["pilot_state"] == "MA"
+    assert r.json()["pilot_state"] == "MA, NY, TX, IL"
 
     r = client.get("/api/admin/voice/template.csv", headers=headers)
     assert r.status_code == 200

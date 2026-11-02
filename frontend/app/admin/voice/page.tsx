@@ -183,6 +183,8 @@ function GateScreen({ status }: { status: number }) {
 
 export default function VoiceB2BPage() {
   const [includeBlocked, setIncludeBlocked] = useState(false);
+  const [cityFilter, setCityFilter] = useState("");
+  const [tradeFilter, setTradeFilter] = useState("");
   const [selected, setSelected] = useState<VoiceCompany | null>(null);
   const [licenseCsv, setLicenseCsv] = useState("");
   const [licenseName, setLicenseName] = useState("MA HIC / licenças");
@@ -196,13 +198,13 @@ export default function VoiceB2BPage() {
   const [notes, setNotes] = useState("");
   const [callbackAt, setCallbackAt] = useState("");
 
-  const queueKey = includeBlocked ? "voice-queue-blocked" : "voice-queue";
+  const queueKey = `voice-queue-${includeBlocked}-${cityFilter}-${tradeFilter}`;
   const {
     data: queue,
     error,
     isLoading,
     mutate: mutateQueue,
-  } = useSWR(queueKey, () => fetchVoiceQueue(includeBlocked, 250), {
+  } = useSWR(queueKey, () => fetchVoiceQueue(includeBlocked, 250, cityFilter, tradeFilter), {
     refreshInterval: 60_000,
     revalidateOnFocus: true,
   });
@@ -545,19 +547,161 @@ export default function VoiceB2BPage() {
       </Card>
 
       <Card
-        title="4. Fila de chamadas"
+        title="4. Cobertura por cidade e nicho"
+        icon={<Globe2 className="h-4 w-4 text-sky-400" />}
+        hint="Clique numa cidade ou nicho para filtrar a fila. Dados do voice.db."
+        action={
+          cityFilter || tradeFilter ? (
+            <button
+              type="button"
+              onClick={() => {
+                setCityFilter("");
+                setTradeFilter("");
+              }}
+              className="text-[10px] font-semibold text-slate-400 hover:text-slate-200"
+            >
+              Limpar filtros
+            </button>
+          ) : null
+        }
+      >
+        <div className="grid gap-4 md:grid-cols-2">
+          <div>
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+              Por cidade
+            </p>
+            <div className="space-y-1">
+              {(stats?.by_city ?? []).length ? (
+                (stats?.by_city ?? []).map((group) => (
+                  <button
+                    key={`city-${group.name}`}
+                    type="button"
+                    onClick={() =>
+                      setCityFilter((current) =>
+                        current === group.name ? "" : group.name
+                      )
+                    }
+                    className={cn(
+                      "flex w-full items-center justify-between rounded-lg border px-2.5 py-1.5 text-[11px]",
+                      cityFilter === group.name
+                        ? "border-sky-400/30 bg-sky-500/10 text-sky-200"
+                        : "border-white/5 bg-white/[0.02] text-slate-300 hover:bg-white/[0.05]"
+                    )}
+                  >
+                    <span className="font-semibold">{group.name}</span>
+                    <span className="text-[10px] text-slate-500">
+                      {group.callable} prontos · {group.total} total
+                    </span>
+                  </button>
+                ))
+              ) : (
+                <p className="text-[10px] text-slate-600">Sem empresas importadas.</p>
+              )}
+            </div>
+          </div>
+          <div>
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+              Por nicho
+            </p>
+            <div className="space-y-1">
+              {(stats?.by_trade ?? []).length ? (
+                (stats?.by_trade ?? []).map((group) => (
+                  <button
+                    key={`trade-${group.name}`}
+                    type="button"
+                    onClick={() =>
+                      setTradeFilter((current) =>
+                        current === group.name ? "" : group.name
+                      )
+                    }
+                    className={cn(
+                      "flex w-full items-center justify-between rounded-lg border px-2.5 py-1.5 text-[11px]",
+                      tradeFilter === group.name
+                        ? "border-indigo-400/30 bg-indigo-500/10 text-indigo-200"
+                        : "border-white/5 bg-white/[0.02] text-slate-300 hover:bg-white/[0.05]"
+                    )}
+                  >
+                    <span className="font-semibold">{group.name}</span>
+                    <span className="text-[10px] text-slate-500">
+                      {group.callable} prontos · {group.total} total
+                    </span>
+                  </button>
+                ))
+              ) : (
+                <p className="text-[10px] text-slate-600">Sem empresas importadas.</p>
+              )}
+            </div>
+          </div>
+        </div>
+        <div className="mt-4 border-t border-white/5 pt-3">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+            Campanhas
+          </p>
+          {(stats?.campaigns ?? []).length ? (
+            <div className="grid gap-2 sm:grid-cols-2">
+              {(stats?.campaigns ?? []).map((campaign) => (
+                <div
+                  key={campaign.campaign_id}
+                  className="rounded-lg border border-white/5 bg-white/[0.02] px-2.5 py-1.5 text-[10px] text-slate-400"
+                >
+                  <span className="font-semibold text-slate-200">
+                    {campaign.campaign_id}
+                  </span>
+                  <span className="ml-2">
+                    {campaign.calls} chamadas · {campaign.showcases} vitrines ·{" "}
+                    {campaign.intents} intents
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-[10px] text-slate-600">
+              Sem campanhas registadas. O campaign_id é gravado em cada chamada.
+            </p>
+          )}
+        </div>
+      </Card>
+
+      <Card
+        title="5. Fila de chamadas"
         icon={<Users className="h-4 w-4 text-indigo-400" />}
         hint="Ordenada por score ICP e volume de obras; compliance sempre visível."
         action={
-          <label className="inline-flex cursor-pointer items-center gap-2 text-[10px] font-semibold text-slate-400">
-            <input
-              type="checkbox"
-              checked={includeBlocked}
-              onChange={(event) => setIncludeBlocked(event.target.checked)}
-              className="accent-indigo-400"
-            />
-            Mostrar bloqueadas
-          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={cityFilter}
+              onChange={(event) => setCityFilter(event.target.value)}
+              className="rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-[10px] font-semibold text-slate-300"
+            >
+              <option value="">Todas as cidades</option>
+              {(stats?.by_city ?? []).map((group) => (
+                <option key={`filter-city-${group.name}`} value={group.name}>
+                  {group.name} ({group.total})
+                </option>
+              ))}
+            </select>
+            <select
+              value={tradeFilter}
+              onChange={(event) => setTradeFilter(event.target.value)}
+              className="rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-[10px] font-semibold text-slate-300"
+            >
+              <option value="">Todos os nichos</option>
+              {(stats?.by_trade ?? []).map((group) => (
+                <option key={`filter-trade-${group.name}`} value={group.name}>
+                  {group.name} ({group.total})
+                </option>
+              ))}
+            </select>
+            <label className="inline-flex cursor-pointer items-center gap-2 text-[10px] font-semibold text-slate-400">
+              <input
+                type="checkbox"
+                checked={includeBlocked}
+                onChange={(event) => setIncludeBlocked(event.target.checked)}
+                className="accent-indigo-400"
+              />
+              Mostrar bloqueadas
+            </label>
+          </div>
         }
       >
         {isLoading && !queue ? (

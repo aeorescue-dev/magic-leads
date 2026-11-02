@@ -1516,6 +1516,21 @@ export interface VoiceQueue {
   total: number;
   callable: number;
   include_blocked: boolean;
+  filters?: { city: string; trade: string; state: string };
+}
+
+export interface VoiceGroup {
+  name: string;
+  total: number;
+  callable: number;
+  blocked: number;
+}
+
+export interface VoiceCampaign {
+  campaign_id: string;
+  calls: number;
+  showcases: number;
+  intents: number;
 }
 
 export interface VoiceStats {
@@ -1529,9 +1544,13 @@ export interface VoiceStats {
   suppressed: number;
   generated_at: string;
   pilot_state: string;
+  pilot_states?: string[];
   calling_window: string;
   dnc_max_age_days: number;
   max_attempts_7d: number;
+  by_city?: VoiceGroup[];
+  by_trade?: VoiceGroup[];
+  campaigns?: VoiceCampaign[];
 }
 
 export interface VoiceImportResult {
@@ -1547,11 +1566,17 @@ export interface VoiceImportResult {
 
 export function fetchVoiceQueue(
   includeBlocked = false,
-  limit = 100
+  limit = 100,
+  city = "",
+  trade = ""
 ): Promise<VoiceQueue> {
-  return adminFetch<VoiceQueue>(
-    `/voice/queue?include_blocked=${includeBlocked ? 1 : 0}&limit=${limit}`
-  );
+  const params = new URLSearchParams({
+    include_blocked: includeBlocked ? "1" : "0",
+    limit: String(limit),
+  });
+  if (city) params.set("city", city);
+  if (trade) params.set("trade", trade);
+  return adminFetch<VoiceQueue>(`/voice/queue?${params.toString()}`);
 }
 
 export function fetchVoiceStats(): Promise<VoiceStats> {

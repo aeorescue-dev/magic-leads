@@ -35,11 +35,12 @@ def _csv(
     state: str = "MA",
     permits: int = 4,
     company: str = "Example Roofing LLC",
+    city: str = "Boston",
 ) -> str:
     return (
         "company_name,contact_name,phone,city,state,license_status,trade,"
         "permit_count,permit_value_usd,years_active,employee_estimate\n"
-        f"{company},John Smith,{phone},Boston,{state},active,Roofing,"
+        f"{company},John Smith,{phone},{city},{state},active,Roofing,"
         f"{permits},250000,12,8\n"
     )
 
@@ -142,11 +143,60 @@ def test_can_call_bloqueia_fora_do_horario():
 
 
 def test_can_call_bloqueia_estado_fora_do_piloto():
-    voice.import_licenses_csv(_csv(phone="+12125550199", state="NY"))
-    voice.check_dnc("+12125550199", listed=False, source="pytest")
-    result = voice.can_call(_company("+12125550199"), now=NOW)
+    voice.import_licenses_csv(_csv(phone="+14155550199", state="CA"))
+    voice.check_dnc("+14155550199", listed=False, source="pytest")
+    result = voice.can_call(_company("+14155550199"), now=NOW)
     assert result["allowed"] is False
     assert "state_not_enabled" in result["reasons"]
+
+
+@pytest.mark.parametrize(
+    "state,phone",
+    [
+        ("NY", "+12125550198"),
+        ("TX", "+12145550198"),
+        ("IL", "+13125550198"),
+    ],
+)
+def test_can_call_libera_estados_do_piloto(state, phone):
+    voice.import_licenses_csv(_csv(phone=phone, state=state))
+    voice.check_dnc(phone, listed=False, source="pytest")
+    result = voice.can_call(_company(phone), now=NOW)
+    assert result["allowed"] is True, result
+    assert result["checks"]["state_enabled"] is True
+
+
+def test_horario_usa_timezone_do_estado():
+    voice.import_licenses_csv(_csv(phone="+12145550197", state="TX"))
+    voice.check_dnc("+12145550197", listed=False, source="pytest")
+    # 02:00 UTC = 20:00 em Dallas/Chicago (dentro da janela).
+    texas_now = datetime(2026, 11, 2, 2, 0, tzinfo=timezone.utc)
+    result = voice.can_call(_company("+12145550197"), now=texas_now)
+    assert result["allowed"] is True, result
+    assert result["checks"]["within_hours"] is True
+
+
+def test_queue_e_stats_filtram_cidade_e_nicho():
+    voice.import_licenses_csv(
+        _csv(phone="+12145550196", state="TX", city="Dallas", company="Dallas Roofing")
+    )
+    voice.import_licenses_csv(
+        _csv(phone="+16175550195", state="MA", city="Boston", company="Boston Roofing")
+    )
+    voice.check_dnc("+12145550196", listed=False, source="pytest")
+    voice.check_dnc("+16175550195", listed=False, source="pytest")
+
+    dallas = voice.queue(limit=100, city="Dallas")
+    assert dallas["total"] == 1
+    assert dallas["items"][0]["city"] == "Dallas"
+
+    roofing = voice.queue(limit=100, trade="Roofing")
+    assert roofing["total"] == 2
+
+    stats = voice.stats()
+    cities = {group["name"]: group for group in stats["by_city"]}
+    assert "Dallas" in cities and "Boston" in cities
+    assert stats["pilot_state"] == "MA, NY, TX, IL"
 
 
 def test_limite_de_tentativas_7_dias():

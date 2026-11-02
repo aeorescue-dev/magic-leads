@@ -1,4 +1,4 @@
-# Voice B2B — Fase 1 (piloto Massachusetts)
+# Voice B2B — Fase 1/2A (multi-cidade: MA, NY, TX, IL)
 
 Rota: **`/admin/voice`** (link “Voice B2B” no header do `/admin`).
 Base própria: **`voice.db`** (`VOICE_DB_PATH`, default `/data/voice.db`).
@@ -6,7 +6,7 @@ Sem PII de homeowners; apenas pessoas jurídicas/empreiteiros.
 
 ## Âmbito
 
-- Importação de licenças/permits de **Massachusetts** (HIC, trades, permits).
+- Importação de licenças/permits de **Massachusetts, New York, Texas e Illinois** (HIC, trades, permits).
 - Gate **`can_call()` fail-closed** antes de liberar o contacto.
 - Fila ordenada por score ICP e volume de obras.
 - Click-to-call (`tel:`) + registo de tentativa e disposição.
@@ -32,14 +32,15 @@ Bloqueia se qualquer condição falhar:
 
 1. `entity_type != business`
 2. telefone inválido (não `+1` com 10 dígitos)
-3. estado diferente de `MA` (piloto)
+3. estado diferente de `MA`, `NY`, `TX` ou `IL` (piloto multi-cidade)
 4. estado do contacto `do_not_call`, `invalid` ou `meeting`
 5. supressão interna (`voice_suppressions`)
 6. sem check DNC → `dnc_not_checked`
 7. check DNC com mais de **31 dias** → `dnc_stale`
 8. número listado no DNC → `dnc_listed`
 9. **3 tentativas** nos últimos 7 dias → `attempt_cap`
-10. fora de **08:00–21:00 America/New_York** → `outside_hours`
+10. fora de **08:00–21:00 locais** (`America/New_York` para MA/NY;
+    `America/Chicago` para TX/IL) → `outside_hours`
 
 O endpoint de registo também aplica o gate: uma chamada “normal” não pode ser
 registada num contacto bloqueado. Outcomes de supressão continuam permitidos
@@ -84,18 +85,19 @@ Todas exigem sessão **admin** (`_require_admin_user`).
 
 ## Operação
 
-1. Importar licenças/permits de MA.
+1. Importar licenças/permits de MA, NY, TX ou IL.
 2. Importar lista DNC (ou fazer check manual por número).
 3. Abrir `/admin/voice`; a fila mostra só contactos que passam o gate.
-4. Clicar no telefone (`tel:`) e registar o resultado.
-5. “Sem interesse / número errado / não contactar” suprime automaticamente.
+4. Usar os filtros de cidade/nicho e a cobertura agrupada por cidade/nicho.
+5. Clicar no telefone (`tel:`) e registar o resultado.
+6. “Sem interesse / número errado / não contactar” suprime automaticamente.
 
 ## Limites da Fase 1
 
 - Sem dialer automático/predictive: apenas click-to-call manual.
 - Sem gravação de chamadas (Fase 2; exige consentimento all-party em MA).
 - DNC por CSV/manual; provedor licenciado na Fase 2.
-- Piloto restrito a Massachusetts.
+- Piloto restrito a **MA, NY, TX e IL**.
 - Sem importação de dados de homeowners ou de contas de concorrentes.
 
 ## Testes

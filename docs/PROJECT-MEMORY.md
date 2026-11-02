@@ -1575,6 +1575,23 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Testes**: +13 (10 showcase + 3 Telnyx) → **1.273 pytest**; cobertura
   backend **69,7%**; 109 vitest; ruff/tsc/build limpos.
 
+### Multi-cidade (2026-11-02)
+
+- **Cobertura de vitrine em produção**: Boston 7 páginas / 865 itens; Chicago
+  7 / 16.489; Dallas 5 / 3.863; New York 13 / 12.836. `build_pages()` é
+  city-agnostic e publica qualquer combinação com ≥3 oportunidades.
+- **Gate de voz multi-estado**: `PILOT_STATES = MA, NY, TX, IL`; timezone por
+  estado (`America/New_York` para MA/NY, `America/Chicago` para TX/IL).
+- **Normalização de cidade**: `NYC` → `new-york` em `get_page`, `available` e
+  `create_link`; links de NYC deixam de cair em fallback.
+- **Admin**: filtros de cidade/nicho na fila, cobertura agrupada por cidade e
+  nicho, e resumo de campanhas (`campaign_id`, chamadas, vitrines, intents).
+- **Limite de dados**: nem todos os trades têm página exata em todas as
+  cidades (ex.: Dallas roofing cai no fallback da cidade). O guião deve usar
+  `showcase.available(city, trade)`.
+- **Testes**: +6 → **1.279 pytest**; cobertura backend **69,8%**;
+  ruff/tsc/build limpos.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

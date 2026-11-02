@@ -21,7 +21,14 @@ from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 VERSION = "2026-11-02.1"
-PILOT_STATE = "MA"
+PILOT_STATES = ("MA", "NY", "TX", "IL")
+DEFAULT_STATE = "MA"
+STATE_TIMEZONES = {
+    "MA": "America/New_York",
+    "NY": "America/New_York",
+    "TX": "America/Chicago",
+    "IL": "America/Chicago",
+}
 CALL_TZ = ZoneInfo("America/New_York")
 CALL_START_HOUR = 8
 CALL_END_HOUR = 21
@@ -375,9 +382,13 @@ def import_licenses_csv(
                     )
                 continue
 
-            state = (_pick(row, ("state", "st")) or PILOT_STATE).upper()
-            if state in ("MASSACHUSETTS",):
-                state = PILOT_STATE
+            state = (_pick(row, ("state", "st")) or DEFAULT_STATE).upper()
+            state = {
+                "MASSACHUSETTS": "MA",
+                "NEW YORK": "NY",
+                "TEXAS": "TX",
+                "ILLINOIS": "IL",
+            }.get(state, state)
             license_status = _pick(row, ("license_status", "status", "license_state"))
             permit_count = _to_int(
                 _pick(row, ("permit_count", "permits", "permit_total", "projects", "jobs"))
@@ -611,6 +622,10 @@ def _company_dict(row: sqlite3.Row) -> dict:
     return dict(row)
 
 
+def _state_tz(state: str) -> ZoneInfo:
+    return ZoneInfo(STATE_TIMEZONES.get((state or "").upper(), "America/New_York"))
+
+
 def _eligibility(
     company: dict, conn: sqlite3.Connection, now: datetime
 ) -> dict:
@@ -626,7 +641,7 @@ def _eligibility(
     if not checks["business"]:
         reasons.append("not_business")
 
-    checks["state_enabled"] = (company.get("state") or "").upper() == PILOT_STATE
+    checks["state_enabled"] = (company.get("state") or "").upper() in PILOT_STATES
     if not checks["state_enabled"]:
         reasons.append("state_not_enabled")
 
@@ -677,7 +692,7 @@ def _eligibility(
     if not checks["attempts_ok"]:
         reasons.append("attempt_cap")
 
-    local = now.astimezone(CALL_TZ)
+    local = now.astimezone(_state_tz(company.get("state") or ""))
     checks["within_hours"] = CALL_START_HOUR <= local.hour < CALL_END_HOUR
     if not checks["within_hours"]:
         reasons.append("outside_hours")
@@ -702,15 +717,33 @@ def can_call(company: dict, now: Optional[datetime] = None) -> dict:
         conn.close()
 
 
-def queue(limit: int = 50, include_blocked: bool = False) -> dict:
+def queue(
+    limit: int = 50,
+    include_blocked: bool = False,
+    city: str = "",
+    trade: str = "",
+    state: str = "",
+) -> dict:
     init()
     now = _utc_now()
+    where: list[str] = []
+    params: list[Any] = []
+    if city.strip():
+        where.append("UPPER(TRIM(city))=UPPER(?)")
+        params.append(city.strip())
+    if state.strip():
+        where.append("UPPER(TRIM(state))=UPPER(?)")
+        params.append(state.strip())
+    if trade.strip():
+        where.append("LOWER(TRIM(COALESCE(trade,''))) = LOWER(?)")
+        params.append(trade.strip())
+    clause = (" WHERE " + " AND ".join(where)) if where else ""
     conn = get_conn()
     try:
         rows = conn.execute(
-            "SELECT * FROM prospect_companies "
+            f"SELECT * FROM prospect_companies{clause} "
             "ORDER BY score DESC, permit_count DESC, id ASC LIMIT ?",
-            (max(1, min(1000, int(limit))),),
+            (*params, max(1, min(1000, int(limit)))),
         ).fetchall()
         items = []
         callable_count = 0
@@ -722,7 +755,10 @@ def queue(limit: int = 50, include_blocked: bool = False) -> dict:
             if include_blocked or eligibility["allowed"]:
                 items.append({**company, "eligibility": eligibility})
         total = int(
-            conn.execute("SELECT COUNT(*) FROM prospect_companies").fetchone()[0] or 0
+            conn.execute(
+                f"SELECT COUNT(*) FROM prospect_companies{clause}", tuple(params)
+            ).fetchone()[0]
+            or 0
         )
         return {
             "items": items,
@@ -731,6 +767,11 @@ def queue(limit: int = 50, include_blocked: bool = False) -> dict:
             "total": total,
             "callable": callable_count,
             "include_blocked": include_blocked,
+            "filters": {
+                "city": city,
+                "trade": trade,
+                "state": state,
+            },
         }
     finally:
         conn.close()
@@ -745,9 +786,24 @@ def stats() -> dict:
             conn.execute("SELECT COUNT(*) FROM prospect_companies").fetchone()[0] or 0
         )
         callable_count = 0
+        by_city: dict[str, dict] = {}
+        by_trade: dict[str, dict] = {}
         for row in conn.execute("SELECT * FROM prospect_companies").fetchall():
-            if _eligibility(_company_dict(row), conn, now)["allowed"]:
+            company = _company_dict(row)
+            allowed = _eligibility(company, conn, now)["allowed"]
+            if allowed:
                 callable_count += 1
+            city = (company.get("city") or "—").strip() or "—"
+            trade = (company.get("trade") or "—").strip() or "—"
+            for bucket, key in ((by_city, city), (by_trade, trade)):
+                entry = bucket.setdefault(
+                    key, {"name": key, "total": 0, "callable": 0, "blocked": 0}
+                )
+                entry["total"] += 1
+                if allowed:
+                    entry["callable"] += 1
+                else:
+                    entry["blocked"] += 1
         today = now.date().isoformat()
         attempts_today = int(
             conn.execute(
@@ -775,6 +831,16 @@ def stats() -> dict:
         checked = int(
             conn.execute("SELECT COUNT(*) FROM dnc_checks").fetchone()[0] or 0
         )
+        campaigns = [
+            dict(r)
+            for r in conn.execute(
+                "SELECT campaign_id, COUNT(*) calls, "
+                "SUM(CASE WHEN showcase_link_id IS NOT NULL THEN 1 ELSE 0 END) showcases, "
+                "SUM(CASE WHEN intent='showcase' THEN 1 ELSE 0 END) intents "
+                "FROM voice_calls WHERE COALESCE(campaign_id,'')<>'' "
+                "GROUP BY campaign_id ORDER BY calls DESC LIMIT 20"
+            ).fetchall()
+        ]
         return {
             "total": total,
             "callable": callable_count,
@@ -785,10 +851,14 @@ def stats() -> dict:
             "dnc_checked": checked,
             "suppressed": suppressed,
             "generated_at": _iso(now),
-            "pilot_state": PILOT_STATE,
-            "calling_window": f"{CALL_START_HOUR:02d}:00–{CALL_END_HOUR:02d}:00 ET",
+            "pilot_state": ", ".join(PILOT_STATES),
+            "pilot_states": list(PILOT_STATES),
+            "calling_window": f"{CALL_START_HOUR:02d}:00–{CALL_END_HOUR:02d}:00 local (ET/CT)",
             "dnc_max_age_days": DNC_MAX_AGE_DAYS,
             "max_attempts_7d": MAX_ATTEMPTS_7D,
+            "by_city": sorted(by_city.values(), key=lambda x: x["total"], reverse=True),
+            "by_trade": sorted(by_trade.values(), key=lambda x: x["total"], reverse=True),
+            "campaigns": campaigns,
         }
     finally:
         conn.close()

@@ -2819,11 +2819,19 @@ async def admin_investor_export(
 async def admin_voice_queue(
     limit: int = 50,
     include_blocked: int = 0,
+    city: str = "",
+    trade: str = "",
+    state: str = "",
     _admin: dict = Depends(_require_admin_user),
 ):
-    """Fila B2B: empresas de MA com gate can_call() aplicado."""
+    """Fila B2B: empresas com gate can_call() aplicado e filtros multi-cidade."""
     return await anyio.to_thread.run_sync(
-        b2b_voice.queue, limit, bool(include_blocked)
+        b2b_voice.queue,
+        limit,
+        bool(include_blocked),
+        city,
+        trade,
+        state,
     )
 
 

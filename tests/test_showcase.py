@@ -145,6 +145,28 @@ def test_trade_slug_com_hifen_encontra_pagina_exata():
     assert showcase.available("boston", "debris_removal")["available"] is True
 
 
+def test_cidade_nyc_normaliza_para_new_york():
+    for idx in range(3):
+        _seed_lead("NYC", "NY", "Roof", "10001", idx)
+    showcase.build_pages()
+    exact = showcase.get_page("NYC", "roofing")
+    assert exact is not None
+    assert exact["page"]["fallback"] is None
+    assert exact["page"]["city_slug"] == "new-york"
+    assert showcase.available("NYC", "roofing")["available"] is True
+    link = showcase.create_link(
+        company_id=12,
+        email="ny@example.com",
+        city="NYC",
+        trade_code="roofing",
+    )
+    resolved = showcase.resolve_link(link["token"])
+    assert resolved is not None
+    assert "/en/new-york/roofing?vt=" in showcase.redirect_url(
+        resolved, link["token"]
+    )
+
+
 def test_token_cria_regista_visita_e_redireciona():
     for idx in range(3):
         _seed_lead("Boston", "MA", "Roof", "02118", idx)

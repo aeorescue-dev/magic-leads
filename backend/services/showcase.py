@@ -228,6 +228,10 @@ def _city_label(raw: Any) -> str:
     return CITY_CANON.get(text.upper(), text.title()) if text else ""
 
 
+def normalize_city_slug(raw: Any) -> str:
+    return slugify(_city_label(raw) or raw)
+
+
 def _trade_code(raw: Any) -> Optional[str]:
     return TRADE_MAP.get(str(raw or "").strip())
 
@@ -638,7 +642,7 @@ def ensure_built() -> None:
 def get_page(city_slug: str, trade_slug: str) -> Optional[dict]:
     init()
     ensure_built()
-    city_slug = slugify(city_slug)
+    city_slug = normalize_city_slug(city_slug)
     trade_slug = slugify(trade_slug)
     conn = get_conn()
     try:
@@ -654,7 +658,7 @@ def available(city_slug: str, trade_slug: str) -> dict:
     """Consulta rápida para o guião de voz antes de prometer uma vitrine."""
     init()
     ensure_built()
-    city_slug = slugify(city_slug)
+    city_slug = normalize_city_slug(city_slug)
     trade_slug = slugify(trade_slug)
     conn = get_conn()
     try:
@@ -698,7 +702,8 @@ def create_link(
     campaign_id: str = "",
 ) -> dict:
     init()
-    city_slug = slugify(city)
+    city_label = _city_label(city)
+    city_slug = slugify(city_label)
     trade_slug = slugify(trade_code)
     token = secrets.token_urlsafe(24)
     now = _utc_now()
