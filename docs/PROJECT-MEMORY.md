@@ -1506,6 +1506,27 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   vivo; o workflow so falha se o run final nao for `success` (timeout de poll
   nao falha).
 
+### Polimento executivo + Claims Register (2026-11-02, commit `be7c79a`)
+
+- **Comprador** deixou de ser tabela crua: Executive Tech Summary com código
+  (82,4k LOC), 1.353 testes, 4/4 gates CI/CD, portabilidade 5/5, segurança
+  (WAL, CSP/CORS, passkeys, TTL, segredos fail-closed, rate limit),
+  composição Python/TS e roadmap 30/60/90. Dívida técnica só em due diligence
+  colapsada.
+- **Premissas** passaram a cartões executivos (receita $120 → $520 → $6.240,
+  múltiplos 2×/3,5×/8×, inputs do piso, unit economics, infra e governança),
+  sem tabela SQL.
+- **Nova aba Comparativo**: matriz Magic Leads vs. Angi em 7 dimensões
+  (custo por lead, exclusividade, cobrança sem fecho, transparência,
+  fidelização, propriedade do ativo, qualidade/acurácia) + **Claims Register**
+  com 10 claims, cada um com URL, data, citação, publisher e estado.
+- **Fontes oficiais**: Angi Help Center FAQ, Angi Pro Agreement (06/10/2026)
+  e FTC (ordem de $7,2M, 23/01/2023). A faixa $15–$85/lead é estimativa de
+  terceiros e está marcada como `estimate`; nenhum preço hardcoded sem fonte.
+- Claims e matriz entram no snapshot (`claims_register`, `competitive`) e no
+  CSV; testes de contrato garantem URL/data/citação e source_ids válidos.
+- **Testes**: **1.246 pytest** (+2), 109 vitest; ruff/tsc/build/lint limpos.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
