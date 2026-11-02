@@ -137,6 +137,28 @@ CREATE TABLE IF NOT EXISTS call_attempts (
 CREATE INDEX IF NOT EXISTS idx_call_attempts_company ON call_attempts (company_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_call_attempts_at ON call_attempts (started_at);
 
+CREATE TABLE IF NOT EXISTS voice_calls (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  provider TEXT NOT NULL DEFAULT 'telnyx',
+  provider_call_id TEXT UNIQUE,
+  company_id INTEGER REFERENCES prospect_companies(id) ON DELETE CASCADE,
+  campaign_id TEXT,
+  script_id TEXT,
+  city TEXT,
+  trade_code TEXT,
+  status TEXT NOT NULL DEFAULT 'queued',
+  intent TEXT,
+  showcase_link_id INTEGER,
+  checkout_session_id TEXT,
+  cost_cents INTEGER DEFAULT 0,
+  started_at TEXT,
+  ended_at TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_voice_calls_company ON voice_calls (company_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_voice_calls_provider ON voice_calls (provider_call_id);
+
 CREATE TABLE IF NOT EXISTS voice_meta (
   key TEXT PRIMARY KEY,
   value TEXT
@@ -768,6 +790,99 @@ def stats() -> dict:
             "dnc_max_age_days": DNC_MAX_AGE_DAYS,
             "max_attempts_7d": MAX_ATTEMPTS_7D,
         }
+    finally:
+        conn.close()
+
+
+def get_company(company_id: int) -> Optional[dict]:
+    init()
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            "SELECT * FROM prospect_companies WHERE id=?", (int(company_id),)
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def create_voice_call(
+    company: dict,
+    provider: str = "telnyx",
+    campaign_id: str = "",
+    script_id: str = "",
+    city: Optional[str] = None,
+    trade_code: Optional[str] = None,
+) -> dict:
+    init()
+    now = _iso()
+    conn = get_conn()
+    try:
+        cur = conn.execute(
+            """
+            INSERT INTO voice_calls
+              (provider, company_id, campaign_id, script_id, city, trade_code,
+               status, started_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?)
+            """,
+            (
+                provider,
+                int(company["id"]),
+                campaign_id,
+                script_id,
+                city or company.get("city"),
+                trade_code or company.get("trade"),
+                now,
+                now,
+            ),
+        )
+        conn.commit()
+        call_id = int(cur.lastrowid)
+        row = conn.execute("SELECT * FROM voice_calls WHERE id=?", (call_id,)).fetchone()
+        return dict(row)
+    finally:
+        conn.close()
+
+
+def update_voice_call(voice_call_id: int, **fields: Any) -> Optional[dict]:
+    init()
+    allowed = {
+        "provider_call_id",
+        "status",
+        "intent",
+        "showcase_link_id",
+        "checkout_session_id",
+        "cost_cents",
+        "started_at",
+        "ended_at",
+    }
+    updates = {key: value for key, value in fields.items() if key in allowed}
+    if not updates:
+        return get_voice_call(voice_call_id)
+    conn = get_conn()
+    try:
+        sets = ", ".join(f"{key}=?" for key in updates)
+        conn.execute(
+            f"UPDATE voice_calls SET {sets} WHERE id=?",
+            (*updates.values(), int(voice_call_id)),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT * FROM voice_calls WHERE id=?", (int(voice_call_id),)
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def get_voice_call(voice_call_id: int) -> Optional[dict]:
+    init()
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            "SELECT * FROM voice_calls WHERE id=?", (int(voice_call_id),)
+        ).fetchone()
+        return dict(row) if row else None
     finally:
         conn.close()
 

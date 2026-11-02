@@ -1548,6 +1548,33 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Testes**: +13 (11 de serviço + 2 de API) → **1.260 pytest**; 109 vitest;
   ruff/tsc/build/lint limpos.
 
+### Fase 32 — Vitrine pública + atribuição (2026-11-02)
+
+- **Fonte**: inventário de `leads.db` (oportunidades abertas, 30 d) separado do
+  `voice.db`; estado público em `showcase.db`.
+- **Publicação**: ≥3 oportunidades por cidade × trade; fallback cidade →
+  trade → 404. Páginas em `/{locale}/{city}/{trade}` (EN default).
+- **Mascaramento**: bairro/ZIP parcial, categoria, data e valor (quando
+  existir); sem owner, morada exata ou ID externo. Copy neutra “property
+  opportunity” porque a base atual é 311/open requests; “approved work” só com
+  `authorized_work`.
+- **Atribuição**: token opaco por chamada/empresa, `/r/<token>` regista clique
+  e 302 para `?vt=<token>`; Stripe Checkout leva `source=voice_showcase`,
+  `voice_call_id`, `showcase_link_id`, `company_id`, `user_id`, `city`,
+  `trade_code`, `new_user`. Webhook fecha `showcase_checkouts` e, para novos
+  users, envia link de acesso.
+- **Email**: Resend via `EMAIL_API_KEY`/`EMAIL_FROM`; dry-run sem canal.
+- **Telnyx**: adaptador (`/dial`) com gate `can_call`, `client_state` e webhook
+  DTMF 1 → cria link + email. Sem chaves, dry-run. Segredo partilhado
+  fail-closed.
+- **Admin**: `/admin/voice` ganhou stats de vitrine, “Rebuild pages”, “Enviar
+  vitrine” e “Ligar Telnyx” no drawer.
+- **Build real**: 25 páginas de 26 combinações; Boston landscaping 656,
+  Boston city fallback 670. Sem página exata de roofing em Boston (inventário
+  <3), pelo que o guião deve usar `available()` antes de prometer.
+- **Testes**: +12 (9 showcase + 3 Telnyx) → **1.272 pytest**; cobertura
+  backend **69,7%**; 109 vitest; ruff/tsc/build limpos.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

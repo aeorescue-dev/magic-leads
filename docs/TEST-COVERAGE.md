@@ -6,8 +6,8 @@ Comando:
 pytest tests -q --cov=backend --cov-report=json:coverage.json
 ```
 
-- **Total backend: 69,6%** (13 140 / 18 888 statements).
-- **1 260 pytest**, **109 vitest**; CI verde.
+- **Total backend: 69,7%** (13 579 / 19 470 statements).
+- **1 272 pytest**, **109 vitest**; CI verde.
 - O CI gera `coverage.json` e publica-o como artifact `backend-coverage`.
 
 ## Módulos fortes
@@ -21,6 +21,7 @@ pytest tests -q --cov=backend --cov-report=json:coverage.json
 | `services/outbound_templates.py` | 93,9% |
 | `services/auto_ramp.py` | 92,7% |
 | `services/b2b_voice.py` | 77,1% |
+| `services/showcase.py` | 88,3% |
 | `services/unsubscribe.py` | 93,3% |
 | `services/niche_classifier.py` | 94,1% |
 
@@ -33,6 +34,7 @@ pytest tests -q --cov=backend --cov-report=json:coverage.json
 | `services/control_tower.py` | 51,6% | queue_age, backup, tokens, freshness |
 | `main.py` | 52,7% | endpoints admin/investor/analytics (auth, erros, export) |
 | `services/investor.py` | novo | valuation, reconcilição Stripe, NDA, CSV |
+| `services/telnyx_voice.py` | 61,5% | webhook Ed25519, retries e estados de chamada |
 | `services/enrichment_queue.py` | 36,3% | retry/backoff e estados |
 | `services/phone_lookup.py` | 46,4% | outcomes Searchbug e billing |
 | `services/inbox_sync.py` | 50,0% | parser DSN/ARF e supressão |

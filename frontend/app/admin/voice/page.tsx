@@ -7,10 +7,13 @@ import {
   Building2,
   CalendarClock,
   CheckCircle2,
+  Globe2,
+  Link2,
   Loader2,
   MapPin,
   Phone,
   PhoneCall,
+  PhoneOutgoing,
   RefreshCcw,
   ShieldCheck,
   Upload,
@@ -22,13 +25,17 @@ import useSWR from "swr";
 
 import {
   AdminApiError,
+  buildShowcasePages,
   checkVoiceDnc,
+  dialVoiceContact,
   downloadVoiceTemplate,
+  fetchShowcaseStats,
   fetchVoiceQueue,
   fetchVoiceStats,
   importVoiceDnc,
   importVoiceLicenses,
   logVoiceCall,
+  sendVoiceShowcase,
   suppressVoicePhone,
   type VoiceCompany,
 } from "@/lib/admin-api";
@@ -204,6 +211,11 @@ export default function VoiceB2BPage() {
     fetchVoiceStats,
     { refreshInterval: 60_000 }
   );
+  const { data: showcaseStats, mutate: mutateShowcase } = useSWR(
+    "showcase-stats",
+    fetchShowcaseStats,
+    { refreshInterval: 60_000 }
+  );
 
   const refreshAll = async () => {
     await Promise.all([mutateQueue(), mutateStats()]);
@@ -300,6 +312,56 @@ export default function VoiceB2BPage() {
       setErrorMsg(err instanceof Error ? err.message : "Falha ao descarregar template.");
     }
   };
+
+  const buildShowcase = () =>
+    run("showcase-build", async () => {
+      const result = await buildShowcasePages();
+      await mutateShowcase();
+      return `Vitrine: ${result.published} páginas publicadas de ${result.combos} combinações (mín. ${result.min_items} obras).`;
+    });
+
+  const sendShowcase = () =>
+    run("showcase-send", async () => {
+      if (!selected) throw new Error("Sem empresa selecionada.");
+      const result = await sendVoiceShowcase(selected.id, {
+        city: selected.city || undefined,
+        trade: selected.trade || undefined,
+      });
+      if (!result.ok) {
+        throw new Error(
+          result.reason === "no_inventory"
+            ? "Sem inventário suficiente para esta cidade/nicho."
+            : result.reason || "Falha ao gerar vitrine."
+        );
+      }
+      setSelected(null);
+      const emailState = result.email?.sent
+        ? "email enviado"
+        : result.email?.dry_run
+          ? "email em dry-run"
+          : `email não enviado (${result.email?.reason || "sem canal"})`;
+      return `Vitrine gerada: ${result.link?.url} · ${emailState}`;
+    });
+
+  const dialTelnyx = () =>
+    run("dial", async () => {
+      if (!selected) throw new Error("Sem empresa selecionada.");
+      const result = await dialVoiceContact(selected.id, {
+        city: selected.city || undefined,
+        trade: selected.trade || undefined,
+      });
+      if (!result.ok) {
+        throw new Error(
+          result.reason_labels?.join(" · ") ||
+            result.reason ||
+            "Chamada bloqueada."
+        );
+      }
+      setSelected(null);
+      return result.dry_run
+        ? `Chamada registada em dry-run (#${result.voice_call_id}).`
+        : `Chamada Telnyx #${result.voice_call_id} (${result.status}).`;
+    });
 
   return (
     <main className="mx-auto max-w-[1400px] px-4 py-6 text-slate-200">
@@ -444,7 +506,46 @@ export default function VoiceB2BPage() {
       </div>
 
       <Card
-        title="3. Fila de chamadas"
+        title="3. Vitrine por cidade / nicho"
+        icon={<Globe2 className="h-4 w-4 text-emerald-400" />}
+        hint="Páginas públicas mascaradas, geradas a partir do inventário do leads.db."
+        action={
+          <button
+            type="button"
+            onClick={() => void buildShowcase()}
+            disabled={working === "showcase-build"}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-semibold text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"
+          >
+            {working === "showcase-build" ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <RefreshCcw className="h-3 w-3" />
+            )}
+            Rebuild pages
+          </button>
+        }
+      >
+        <div className="grid grid-cols-3 gap-2 md:grid-cols-6">
+          <Stat label="Páginas" value={String(showcaseStats?.pages ?? 0)} tone="emerald" />
+          <Stat label="Links" value={String(showcaseStats?.links ?? 0)} />
+          <Stat label="Visitas" value={String(showcaseStats?.visits ?? 0)} />
+          <Stat label="Checkouts" value={String(showcaseStats?.checkouts ?? 0)} />
+          <Stat label="Pagos" value={String(showcaseStats?.completed ?? 0)} tone="emerald" />
+          <Stat
+            label="Receita"
+            value={money0((showcaseStats?.revenue_cents ?? 0) / 100)}
+            tone="emerald"
+          />
+        </div>
+        <p className="mt-3 text-[10px] text-slate-600">
+          A vitrine só publica com ≥3 oportunidades abertas em 30 dias. Usa
+          “Enviar vitrine” no drawer da empresa para gerar o link rastreado e o
+          email.
+        </p>
+      </Card>
+
+      <Card
+        title="4. Fila de chamadas"
         icon={<Users className="h-4 w-4 text-indigo-400" />}
         hint="Ordenada por score ICP e volume de obras; compliance sempre visível."
         action={
@@ -697,6 +798,35 @@ export default function VoiceB2BPage() {
                   <Ban className="h-3 w-3" /> Suprimir
                 </button>
               </div>
+            </div>
+
+            <div className="mb-3 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => void sendShowcase()}
+                disabled={working === "showcase-send"}
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-[10px] font-semibold text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"
+              >
+                {working === "showcase-send" ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Link2 className="h-3.5 w-3.5" />
+                )}
+                Enviar vitrine
+              </button>
+              <button
+                type="button"
+                onClick={() => void dialTelnyx()}
+                disabled={!selected.eligibility.allowed || working === "dial"}
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-indigo-400/30 bg-indigo-500/10 px-3 py-2 text-[10px] font-semibold text-indigo-200 hover:bg-indigo-500/20 disabled:opacity-40"
+              >
+                {working === "dial" ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <PhoneOutgoing className="h-3.5 w-3.5" />
+                )}
+                Ligar Telnyx
+              </button>
             </div>
 
             {selected.eligibility.allowed ? (

@@ -24,7 +24,7 @@ from fastapi import (
     Request,
     Response,
 )
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, EmailStr
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -106,7 +106,9 @@ from .services import (
     owner_backfill,
     scrape_guard,
     security,
+    showcase,
     system_health,
+    telnyx_voice,
 )
 from .services.boston_address import clean_boston_location
 from .services.db import (  # noqa: F401  — usados nos filtros de qualificação
@@ -2974,6 +2976,218 @@ async def admin_voice_template(_admin: dict = Depends(_require_admin_user)):
                 "attachment; filename=\"magic-leads-voice-template.csv\""
             )
         },
+    )
+
+
+@app.get("/api/showcase/{city}/{trade}")
+@limiter.limit("120/minute")
+async def public_showcase_page(
+    request: Request, city: str, trade: str, vt: str = ""
+):
+    """Vitrine pública mascarada por cidade/nicho (sem PII)."""
+    if vt:
+        await anyio.to_thread.run_sync(
+            showcase.record_visit,
+            vt,
+            f"/api/showcase/{city}/{trade}",
+            request.headers.get("referer") or "",
+            (request.headers.get("x-forwarded-for") or "").split(",")[0].strip(),
+            request.headers.get("user-agent") or "",
+        )
+    page = await anyio.to_thread.run_sync(showcase.get_page, city, trade)
+    if not page:
+        raise HTTPException(status_code=404, detail="showcase_not_found")
+    attribution = {"token": vt, "token_valid": False}
+    if vt:
+        link = await anyio.to_thread.run_sync(showcase.resolve_link, vt)
+        if link:
+            attribution.update(
+                {
+                    "token_valid": True,
+                    "city_slug": link["city_slug"],
+                    "trade_slug": link["trade_slug"],
+                    "link_id": link["id"],
+                }
+            )
+    page["attribution"] = attribution
+    return page
+
+
+@app.get("/r/{token}")
+async def showcase_redirect(token: str, request: Request):
+    """Regista o clique e redireciona para a vitrine no frontend."""
+    link = await anyio.to_thread.run_sync(
+        showcase.record_visit,
+        token,
+        f"/r/{token}",
+        request.headers.get("referer") or "",
+        (request.headers.get("x-forwarded-for") or "").split(",")[0].strip(),
+        request.headers.get("user-agent") or "",
+    )
+    if not link:
+        raise HTTPException(status_code=404, detail="link_invalid_or_expired")
+    return RedirectResponse(
+        url=showcase.redirect_url(link, token), status_code=302
+    )
+
+
+@app.post("/api/showcase/checkout")
+@limiter.limit("20/minute")
+async def public_showcase_checkout(request: Request):
+    """Cria Stripe Checkout para o passe de $120/semana com atribuição de voz."""
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="json inválido")
+    payload = payload or {}
+    token = str(payload.get("token") or "").strip()
+    link = await anyio.to_thread.run_sync(showcase.resolve_link, token)
+    if not link:
+        raise HTTPException(status_code=400, detail="token_inválido")
+    email = (link.get("email") or "").strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="email_em_falta")
+
+    if not (
+        settings.STRIPE_API_KEY
+        and settings.STRIPE_PRICE_ID_PRO
+        and settings.STRIPE_PRICE_ID_PRO != "price_..."
+    ):
+        raise HTTPException(status_code=503, detail="stripe_not_configured")
+
+    user = await db_service.get_user_by_email(email)
+    new_user = False
+    if not user:
+        password_hash = hashlib.sha256(secrets.token_bytes(32)).hexdigest()
+        created = await db_service.create_user(
+            email,
+            password_hash,
+            link.get("company_name") or "",
+            plan="free",
+            subscription_status="expired",
+            locale="en",
+        )
+        user = created or await db_service.get_user_by_email(email)
+        new_user = created is not None
+    if not user:
+        raise HTTPException(status_code=500, detail="user_creation_failed")
+
+    stripe.api_key = settings.STRIPE_API_KEY
+    frontend = (settings.FRONTEND_URL or "https://www.magicleads.app").rstrip("/")
+    try:
+        session = stripe.checkout.Session.create(
+            mode="payment",
+            currency="usd",
+            line_items=[{"price": settings.STRIPE_PRICE_ID_PRO, "quantity": 1}],
+            customer_email=email,
+            client_reference_id=str(user["id"]),
+            success_url=f"{frontend}/en/dashboard?paid=1&showcase=1",
+            cancel_url=(
+                f"{frontend}/en/{link['city_slug']}/{link['trade_slug']}?vt={token}"
+            ),
+            locale="en",
+            metadata={
+                "user_id": str(user["id"]),
+                "source": "voice_showcase",
+                "showcase_link_id": str(link["id"]),
+                "voice_call_id": str(link.get("voice_call_id") or ""),
+                "company_id": str(link.get("company_id") or ""),
+                "city": link.get("city") or "",
+                "trade_code": link.get("trade_code") or "",
+                "new_user": "1" if new_user else "0",
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[SHOWCASE] Stripe checkout falhou: %s", type(exc).__name__)
+        raise HTTPException(status_code=502, detail="stripe_error")
+
+    await anyio.to_thread.run_sync(
+        lambda: showcase.record_checkout(
+            link_id=link["id"],
+            session_id=session.id,
+            user_id=int(user["id"]),
+            email=email,
+            amount_cents=int(settings.PLAN_AMOUNT_CENTS or 0),
+        )
+    )
+    return {"ok": True, "checkout_url": session.url, "session_id": session.id}
+
+
+@app.post("/api/voice/telnyx/webhook")
+async def telnyx_webhook(request: Request, secret: str = ""):
+    """Webhook Telnyx: DTMF 1 dispara a vitrine + email."""
+    header_secret = request.headers.get("x-webhook-secret") or ""
+    if not telnyx_voice.verify_secret(secret or header_secret):
+        raise HTTPException(status_code=403, detail="invalid_webhook_secret")
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="json inválido")
+    return await anyio.to_thread.run_sync(telnyx_voice.handle_webhook, payload)
+
+
+@app.post("/api/admin/showcase/build")
+async def admin_showcase_build(_admin: dict = Depends(_require_admin_user)):
+    """Recalcula inventário e páginas da vitrine a partir do leads.db."""
+    return await anyio.to_thread.run_sync(showcase.build_pages)
+
+
+@app.get("/api/admin/showcase/stats")
+async def admin_showcase_stats(_admin: dict = Depends(_require_admin_user)):
+    return await anyio.to_thread.run_sync(showcase.attribution_stats)
+
+
+@app.post("/api/admin/voice/contacts/{company_id}/showcase")
+async def admin_voice_send_showcase(
+    company_id: int, request: Request, _admin: dict = Depends(_require_admin_user)
+):
+    """Cria o link da vitrine e envia o email para uma empresa da fila."""
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001
+        payload = {}
+    payload = payload or {}
+    company = await anyio.to_thread.run_sync(b2b_voice.get_company, company_id)
+    if not company:
+        raise HTTPException(status_code=404, detail="empresa não encontrada")
+    call = await anyio.to_thread.run_sync(
+        b2b_voice.create_voice_call,
+        company,
+        "manual",
+        str(payload.get("campaign_id") or ""),
+        str(payload.get("script_id") or ""),
+        payload.get("city"),
+        payload.get("trade"),
+    )
+    result = await anyio.to_thread.run_sync(
+        telnyx_voice.send_showcase_for_call,
+        call["id"],
+        payload.get("city"),
+        payload.get("trade"),
+    )
+    return result
+
+
+@app.post("/api/admin/voice/contacts/{company_id}/dial")
+async def admin_voice_dial(
+    company_id: int, request: Request, _admin: dict = Depends(_require_admin_user)
+):
+    """Dispara uma chamada Telnyx (dry-run se não configurado)."""
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001
+        payload = {}
+    payload = payload or {}
+    company = await anyio.to_thread.run_sync(b2b_voice.get_company, company_id)
+    if not company:
+        raise HTTPException(status_code=404, detail="empresa não encontrada")
+    return await anyio.to_thread.run_sync(
+        telnyx_voice.create_call,
+        company,
+        str(payload.get("campaign_id") or ""),
+        str(payload.get("script_id") or ""),
+        payload.get("city"),
+        payload.get("trade"),
     )
 
 
@@ -6667,6 +6881,7 @@ async def stripe_webhook(request: Request, stripe_signature: str | None = Header
     if event_type == "checkout.session.completed":
         session_obj = (event.get("data") or {}).get("object") or {}
         meta = session_obj.get("metadata") or {}
+        is_showcase = meta.get("source") == "voice_showcase"
         user_id_raw = meta.get("user_id") or session_obj.get("client_reference_id")
         if not user_id_raw:
             await db_service.record_stripe_event(event_id, event_type, None)
@@ -6714,6 +6929,27 @@ async def stripe_webhook(request: Request, stripe_signature: str | None = Header
 
         # O efeito foi aplicado: agora sim, o evento fica como processado.
         await db_service.mark_stripe_event_granted(event_id)
+
+        if is_showcase:
+            session_id = session_obj.get("id")
+            if session_id:
+                await anyio.to_thread.run_sync(
+                    showcase.mark_checkout_completed, session_id
+                )
+            if str(meta.get("new_user") or "") == "1":
+                customer = session_obj.get("customer_details") or {}
+                email = (
+                    customer.get("email")
+                    or session_obj.get("customer_email")
+                    or ""
+                ).strip().lower()
+                if email:
+                    token = await db_service.create_password_reset_token(email)
+                    if token:
+                        await db_service.send_password_reset_email(email, token)
+                        logger.info(
+                            "[SHOWCASE] Link de acesso enviado para %s", email
+                        )
 
         customer_id = session_obj.get("customer")
         if customer_id:

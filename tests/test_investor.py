@@ -1,8 +1,6 @@
 """Investor Room (Fase 30): preço semanal, valuation, proof, NDA e watermark."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 import pytest
 
 from backend.services import investor

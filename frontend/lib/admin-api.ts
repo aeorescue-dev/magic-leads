@@ -1635,6 +1635,69 @@ export async function downloadVoiceTemplate(): Promise<Blob> {
   return await res.blob();
 }
 
+export interface ShowcaseStats {
+  pages: number;
+  links: number;
+  visits: number;
+  checkouts: number;
+  completed: number;
+  revenue_cents: number;
+}
+
+export interface ShowcaseBuildResult {
+  ok: boolean;
+  published: number;
+  combos: number;
+  min_items: number;
+  window_days: number;
+  built_at: string;
+}
+
+export interface ShowcaseSendResult {
+  ok: boolean;
+  reason?: string;
+  link?: { link_id: number; url: string; token: string };
+  email?: { sent: boolean; dry_run?: boolean; reason?: string; link_url?: string };
+  page?: { count: number; title: string };
+}
+
+export function buildShowcasePages(): Promise<ShowcaseBuildResult> {
+  return adminFetch<ShowcaseBuildResult>("/showcase/build", { method: "POST" });
+}
+
+export function fetchShowcaseStats(): Promise<ShowcaseStats> {
+  return adminFetch<ShowcaseStats>("/showcase/stats");
+}
+
+export function sendVoiceShowcase(
+  companyId: number,
+  payload: { city?: string; trade?: string; campaign_id?: string } = {}
+): Promise<ShowcaseSendResult> {
+  return adminFetch<ShowcaseSendResult>(`/voice/contacts/${companyId}/showcase`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function dialVoiceContact(
+  companyId: number,
+  payload: { city?: string; trade?: string; campaign_id?: string } = {}
+): Promise<{
+  ok: boolean;
+  dry_run?: boolean;
+  voice_call_id?: number;
+  status?: string;
+  reason?: string;
+  reason_labels?: string[];
+}> {
+  return adminFetch(`/voice/contacts/${companyId}/dial`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
 /** Snapshot read-only do System Health (7 camadas + score 0–100). */
 export function fetchSystemHealth(windowHours = 24): Promise<SystemHealth> {
   return adminFetch<SystemHealth>(

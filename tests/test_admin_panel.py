@@ -213,6 +213,7 @@ def test_admin_investor_export_requires_nda_then_watermarks(admin_client, monkey
 
 def test_admin_investor_requires_session():
     from fastapi.testclient import TestClient
+
     from backend.main import app
 
     client = TestClient(app)
@@ -1429,5 +1430,115 @@ def test_admin_voice_requires_admin(admin_client, nonadmin_client):
         client.get("/api/admin/voice/queue", headers=nonadmin_headers).status_code
         == 403
     )
+
+
+def test_admin_showcase_build_public_page_and_token_redirect(admin_client, monkeypatch):
+    """Fluxo Fase 2A: build -> página pública mascarada -> token -> redirect."""
+    from datetime import datetime, timezone
+
+    from backend.services import b2b_voice, showcase
+
+    client, headers, _ = admin_client
+    monkeypatch.setattr(showcase.settings, "SHOWCASE_MIN_ITEMS", 3)
+    monkeypatch.setattr(showcase.settings, "SHOWCASE_WINDOW_DAYS", 30)
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM leads WHERE external_id LIKE 'pytest-api-showcase-%'")
+        for idx in range(3):
+            conn.execute(
+                """
+                INSERT INTO leads
+                  (external_id, source_type, address, city, state, zip_code,
+                   issue_category, date_reported, signal_type, signal_status,
+                   owner_name, is_junk)
+                VALUES (?, 'pytest', ?, 'Boston', 'MA', '02118', 'Roof', ?,
+                        'open_request', 'open', 'API Owner Leak', 0)
+                """,
+                (
+                    f"pytest-api-showcase-{idx}",
+                    f"{300 + idx} Test Street",
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    showcase.init()
+    conn = showcase.get_conn()
+    try:
+        for table in (
+            "showcase_checkouts",
+            "showcase_visits",
+            "showcase_links",
+            "showcase_items",
+            "showcase_pages",
+            "market_inventory",
+        ):
+            conn.execute(f"DELETE FROM {table}")
+        conn.commit()
+    finally:
+        conn.close()
+    showcase._CACHE.clear()
+
+    r = client.post("/api/admin/showcase/build", headers=headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["published"] >= 1
+
+    r = client.get("/api/showcase/boston/roofing")
+    assert r.status_code == 200, r.text
+    payload = r.json()
+    assert payload["page"]["count"] == 3
+    assert "items" in payload
+    assert "API Owner Leak" not in r.text
+    assert "Test Street" not in r.text
+
+    phone = "+16175550777"
+    b2b_voice.init()
+    conn = b2b_voice.get_conn()
+    try:
+        conn.execute(
+            "DELETE FROM voice_calls WHERE company_id IN "
+            "(SELECT id FROM prospect_companies WHERE phone=?)",
+            (phone,),
+        )
+        conn.execute("DELETE FROM dnc_checks WHERE phone=?", (phone,))
+        conn.execute("DELETE FROM prospect_companies WHERE phone=?", (phone,))
+        conn.commit()
+    finally:
+        conn.close()
+    csv_text = (
+        "company_name,contact_name,phone,email,city,state,license_status,trade,"
+        "permit_count\n"
+        f"Showcase API Roofing,Ana,{phone},ana@example.com,Boston,MA,active,Roofing,5\n"
+    )
+    r = client.post(
+        "/api/admin/voice/import/licenses",
+        headers=headers,
+        json={"csv": csv_text, "source_name": "pytest"},
+    )
+    assert r.status_code == 200, r.text
+    r = client.post(
+        "/api/admin/voice/dnc/check",
+        headers=headers,
+        json={"phone": phone, "listed": False, "source": "pytest"},
+    )
+    assert r.status_code == 200, r.text
+    r = client.get("/api/admin/voice/queue?limit=1000", headers=headers)
+    company = next(i for i in r.json()["items"] if i["phone"] == phone)
+
+    r = client.post(
+        f"/api/admin/voice/contacts/{company['id']}/showcase", headers=headers, json={}
+    )
+    assert r.status_code == 200, r.text
+    result = r.json()
+    assert result["ok"] is True
+    token = result["link"]["token"]
+
+    r = client.get(f"/r/{token}", follow_redirects=False)
+    assert r.status_code == 302
+    assert "/en/boston/roofing?vt=" in r.headers["location"]
+
+    r = client.post("/api/showcase/checkout", json={"token": "not-a-token"})
+    assert r.status_code == 400
 
 

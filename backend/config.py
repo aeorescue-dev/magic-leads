@@ -22,6 +22,20 @@ class Settings(BaseSettings):
     STRIPE_WEBHOOK_SECRET: str = ""
     STRIPE_PRICE_ID_PRO: str = "price_..."  # Configurar após criar produto no Stripe
 
+    # Vitrine pública (Fase 2A): inventário de leads, páginas e atribuição.
+    SHOWCASE_BASE_URL: str = ""  # default: PUBLIC_API_URL
+    SHOWCASE_MIN_ITEMS: int = 3
+    SHOWCASE_WINDOW_DAYS: int = 30
+    SHOWCASE_SIGNAL_TYPES: str = "open_request,authorized_work"
+    PUBLIC_API_URL: str = "https://magic-leads-production.up.railway.app"
+
+    # Telnyx Voice AI (Fase 2). Sem chaves, o adaptador funciona em dry-run.
+    TELNYX_API_KEY: str = ""
+    TELNYX_CONNECTION_ID: str = ""
+    TELNYX_FROM_NUMBER: str = ""
+    TELNYX_WEBHOOK_SECRET: str = ""
+    TELNYX_WEBHOOK_URL: str = ""
+
     # Plano semanal (fonte da verdade do checkout)
     PLAN_NAME: str = "Pro"
     PLAN_INTERVAL: str = "week"
