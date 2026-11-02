@@ -1396,6 +1396,27 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Testes**: **1.166 pytest** (+64; 1 skipped) e CI ruff (em `./backend`)
   verde. `docs/INGESTION-HEALTH.md` e o runbook.
 
+### Fase 27 — System Health no Admin (2026-11-02)
+
+- Nova rota **`/admin/system-health`** (read-only) + `GET
+  /api/admin/system-health?window=24` (sessao admin, cache 30 s).
+- **7 camadas** com score 0-100 e estado: ingestao 20, enriquecimento 15,
+  outreach 20, push 10, cotas 10, infra 15, alertas 10. Score global =
+  media ponderada; estado global = pior camada. UI com anel/barra por topico.
+- **Snapshots** compactos a cada 15 min em `system_health_snapshots`
+  (retencao 30 dias, prune diario na Control Tower) e sparkline de 24 h.
+- Ingestao olha para `inserted` e frescura por cidade; outreach mostra
+  `queue_blocker` (cap/quiet hours nao penalizam); push conta
+  `expired`/`rejected_dead`, nao `accepted`; cotas mostram Brave e Searchbug;
+  infra usa os checks da Control Tower (worker/backup/disco/tokens); alertas
+  criticos >7d pesam como governance (-5), nao como falha atual.
+- **Baseline producao (00:09 UTC)**: overall **97 warn** (4 criticos
+  historicos); ingest/enrichment/outreach/push/quotas/infra a **100**;
+  alertas 66. 165 prontos, 24.433 por enriquecer, Brave 16/250, 21 entregas
+  push/24h, 12 dispositivos ativos.
+- **Testes**: **1.204 pytest** (+38; 1 skipped) e **103 vitest** (+6);
+  tsc/lint limpos; CI verde.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
