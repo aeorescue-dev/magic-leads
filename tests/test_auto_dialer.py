@@ -225,6 +225,10 @@ def test_metrics_calcula_funil(monkeypatch):
     assert summary["checkout_rate"] == 100.0
     assert summary["revenue_usd"] == 120.0
     assert summary["net_usd"] == 117.0
+    assert result["funnel"]["dialed"] == 2
+    assert result["funnel"]["answered"] == 1
+    assert result["retention"][1]["seconds"] == 30
+    assert result["retention"][1]["count"] == 1
     assert result["by_city_trade"]
 
 

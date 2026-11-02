@@ -1775,6 +1775,12 @@ export interface VoiceMetricsGroup {
   net_usd: number;
 }
 
+export interface VoiceRetentionBucket {
+  seconds: number;
+  count: number;
+  pct_of_answered: number;
+}
+
 export interface VoiceMetrics {
   days: number;
   generated_at: string;
@@ -1794,6 +1800,15 @@ export interface VoiceMetrics {
     revenue_usd: number;
     cost_usd: number;
     net_usd: number;
+  };
+  retention: VoiceRetentionBucket[];
+  funnel: {
+    dialed: number;
+    answered: number;
+    engaged: number;
+    clicks: number;
+    checkouts: number;
+    revenue_usd: number;
   };
   by_city_trade: VoiceMetricsGroup[];
 }

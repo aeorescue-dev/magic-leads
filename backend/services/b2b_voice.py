@@ -1607,6 +1607,14 @@ def metrics(days: int = 30, city: str = "", trade: str = "") -> dict:
                        THEN v.listen_seconds END) avg_listen,
               SUM(CASE WHEN v.answered_at IS NOT NULL AND v.listen_seconds >= 30
                        THEN 1 ELSE 0 END) engaged,
+              SUM(CASE WHEN v.answered_at IS NOT NULL AND v.listen_seconds >= 15
+                       THEN 1 ELSE 0 END) ge15,
+              SUM(CASE WHEN v.answered_at IS NOT NULL AND v.listen_seconds >= 30
+                       THEN 1 ELSE 0 END) ge30,
+              SUM(CASE WHEN v.answered_at IS NOT NULL AND v.listen_seconds >= 60
+                       THEN 1 ELSE 0 END) ge60,
+              SUM(CASE WHEN v.answered_at IS NOT NULL AND v.listen_seconds >= 90
+                       THEN 1 ELSE 0 END) ge90,
               SUM(CASE WHEN v.showcase_clicked_at IS NOT NULL THEN 1 ELSE 0 END) clicks,
               SUM(CASE WHEN v.checkout_session_id IS NOT NULL THEN 1 ELSE 0 END) checkouts,
               COALESCE(SUM(v.revenue_cents),0) revenue_cents,
@@ -1640,6 +1648,14 @@ def metrics(days: int = 30, city: str = "", trade: str = "") -> dict:
                 "net_usd": round((revenue - cost) / 100.0, 2),
             }
         )
+        retention = [
+            {
+                "seconds": seconds,
+                "count": int(summary.get(key) or 0),
+                "pct_of_answered": _rate(int(summary.get(key) or 0), answered),
+            }
+            for seconds, key in ((15, "ge15"), (30, "ge30"), (60, "ge60"), (90, "ge90"))
+        ]
 
         groups = [
             dict(r)
@@ -1694,6 +1710,15 @@ def metrics(days: int = 30, city: str = "", trade: str = "") -> dict:
             "days": days,
             "generated_at": _iso(),
             "summary": summary,
+            "retention": retention,
+            "funnel": {
+                "dialed": dialed,
+                "answered": answered,
+                "engaged": engaged,
+                "clicks": clicks,
+                "checkouts": checkouts,
+                "revenue_usd": round(revenue / 100.0, 2),
+            },
             "by_city_trade": groups,
         }
     finally:

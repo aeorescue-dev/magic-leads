@@ -2,8 +2,10 @@
 
 import {
   AlertTriangle,
+  Activity,
   ArrowLeft,
   Ban,
+  BarChart3,
   Building2,
   CalendarClock,
   CheckCircle2,
@@ -23,6 +25,7 @@ import {
   Rocket,
   ShieldCheck,
   Square,
+  TrendingUp,
   Upload,
   Users,
   X,
@@ -57,6 +60,8 @@ import {
   type VoiceCampaign,
   type VoiceCompany,
   type VoiceMetrics,
+  type VoiceMetricsGroup,
+  type VoiceRetentionBucket,
   type VoiceSegment,
   type VoiceSource,
 } from "@/lib/admin-api";
@@ -185,6 +190,221 @@ function Stat({
   );
 }
 
+type GaugeTone = "emerald" | "amber" | "rose";
+
+const GAUGE_TONES: Record<GaugeTone, { ring: string; text: string }> = {
+  emerald: { ring: "stroke-emerald-400", text: "text-emerald-300" },
+  amber: { ring: "stroke-amber-400", text: "text-amber-300" },
+  rose: { ring: "stroke-rose-400", text: "text-rose-300" },
+};
+
+function gaugeTone(value: number, green: number, amber: number): GaugeTone {
+  if (value >= green) return "emerald";
+  if (value >= amber) return "amber";
+  return "rose";
+}
+
+function GaugeCard({
+  label,
+  value,
+  sub,
+  tone,
+}: {
+  label: string;
+  value: number;
+  sub: string;
+  tone: GaugeTone;
+}) {
+  const clamped = Math.max(0, Math.min(100, value));
+  const colors = GAUGE_TONES[tone];
+  return (
+    <div className="rounded-xl border border-white/5 bg-white/[0.02] p-3 text-center">
+      <svg viewBox="0 0 120 70" className="mx-auto w-full max-w-[150px]">
+        <path
+          d="M12 60 A48 48 0 0 1 108 60"
+          fill="none"
+          strokeWidth={10}
+          strokeLinecap="round"
+          className="stroke-white/10"
+        />
+        <path
+          d="M12 60 A48 48 0 0 1 108 60"
+          fill="none"
+          strokeWidth={10}
+          strokeLinecap="round"
+          pathLength={100}
+          strokeDasharray={`${clamped} 100`}
+          className={colors.ring}
+        />
+      </svg>
+      <div className="-mt-7">
+        <p className={cn("text-2xl font-black tabular-nums", colors.text)}>
+          {value.toFixed(1)}%
+        </p>
+        <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">
+          {label}
+        </p>
+      </div>
+      <p className="mt-2 text-[10px] text-slate-500">{sub}</p>
+    </div>
+  );
+}
+
+function RetentionChart({
+  buckets,
+  answered,
+}: {
+  buckets: VoiceRetentionBucket[];
+  answered: number;
+}) {
+  if (!answered) {
+    return (
+      <div className="rounded-xl border border-dashed border-white/10 p-6 text-center text-[11px] text-slate-600">
+        Sem chamadas atendidas para medir retenção de áudio.
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-3">
+      {buckets.map((bucket) => (
+        <div key={bucket.seconds}>
+          <div className="flex items-center justify-between text-[10px]">
+            <span className="font-semibold text-slate-300">
+              ≥ {bucket.seconds}s
+            </span>
+            <span className="text-slate-500 tabular-nums">
+              {bucket.pct_of_answered.toFixed(1)}% · {bucket.count} chamadas
+            </span>
+          </div>
+          <div className="mt-1 h-2 overflow-hidden rounded-full bg-white/10">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-sky-400 to-emerald-400"
+              style={{ width: `${Math.min(100, bucket.pct_of_answered)}%` }}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function FunnelChart({
+  funnel,
+}: {
+  funnel: VoiceMetrics["funnel"];
+}) {
+  const steps = [
+    { label: "Discadas", value: funnel.dialed, tone: "bg-sky-500/80" },
+    { label: "Atendidas", value: funnel.answered, tone: "bg-cyan-500/80" },
+    { label: "Ouviram ≥30s", value: funnel.engaged, tone: "bg-emerald-500/80" },
+    { label: "Clique na vitrine", value: funnel.clicks, tone: "bg-teal-500/80" },
+    { label: "Checkout", value: funnel.checkouts, tone: "bg-amber-500/80" },
+  ];
+  const max = Math.max(1, funnel.dialed);
+  return (
+    <div className="space-y-2">
+      {steps.map((step, index) => {
+        const prev = index === 0 ? step.value : steps[index - 1].value;
+        const width = Math.max(4, (step.value / max) * 100);
+        const conversion = prev > 0 ? (step.value / prev) * 100 : 0;
+        return (
+          <div key={step.label}>
+            <div className="flex items-center justify-between text-[10px]">
+              <span className="font-semibold text-slate-300">{step.label}</span>
+              <span className="text-slate-500 tabular-nums">
+                {step.value}
+                {index > 0 ? ` · ${conversion.toFixed(1)}% do passo anterior` : ""}
+              </span>
+            </div>
+            <div className="mt-1 h-6 overflow-hidden rounded-lg bg-white/[0.04]">
+              <div
+                className={cn("h-full rounded-lg", step.tone)}
+                style={{ width: `${width}%` }}
+              />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function heatCell(value: number, green: number, amber: number) {
+  if (value >= green) return "bg-emerald-500/15 text-emerald-200";
+  if (value >= amber) return "bg-amber-500/15 text-amber-200";
+  return "bg-rose-500/15 text-rose-200";
+}
+
+function HeatmapMatrix({ rows }: { rows: VoiceMetricsGroup[] }) {
+  if (!rows.length) {
+    return (
+      <div className="rounded-xl border border-dashed border-white/10 p-6 text-center text-[11px] text-slate-600">
+        Sem chamadas por cidade/nicho no período. Inicia uma campanha para
+        alimentar a matriz.
+      </div>
+    );
+  }
+  const sorted = [...rows].sort((a, b) => b.net_usd - a.net_usd);
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[860px] text-left text-[10px]">
+        <thead className="text-slate-500">
+          <tr>
+            <th className="pb-2 font-semibold">Cidade / nicho</th>
+            <th className="pb-2 text-right font-semibold">Answer</th>
+            <th className="pb-2 text-right font-semibold">Engagement</th>
+            <th className="pb-2 text-right font-semibold">CTR</th>
+            <th className="pb-2 text-right font-semibold">Checkout</th>
+            <th className="pb-2 text-right font-semibold">Receita</th>
+            <th className="pb-2 text-right font-semibold">Custo</th>
+            <th className="pb-2 text-right font-semibold">Net</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((row) => (
+            <tr
+              key={`${row.city}-${row.trade}`}
+              className="border-t border-white/5"
+            >
+              <td className="py-2 pr-2">
+                <p className="font-semibold text-slate-200">{row.city}</p>
+                <p className="text-[9px] text-slate-500">{row.trade}</p>
+              </td>
+              <td className={cn("px-2 py-2 text-right tabular-nums", heatCell(row.answer_rate, 40, 25))}>
+                {row.answer_rate.toFixed(1)}%
+              </td>
+              <td className={cn("px-2 py-2 text-right tabular-nums", heatCell(row.engagement_rate, 50, 30))}>
+                {row.engagement_rate.toFixed(1)}%
+              </td>
+              <td className={cn("px-2 py-2 text-right tabular-nums", heatCell(row.showcase_ctr, 15, 8))}>
+                {row.showcase_ctr.toFixed(1)}%
+              </td>
+              <td className={cn("px-2 py-2 text-right tabular-nums", heatCell(row.checkout_rate, 5, 2))}>
+                {row.checkout_rate.toFixed(1)}%
+              </td>
+              <td className="px-2 py-2 text-right text-emerald-200 tabular-nums">
+                {money0(row.revenue_usd)}
+              </td>
+              <td className="px-2 py-2 text-right text-amber-200 tabular-nums">
+                {money0(row.cost_usd)}
+              </td>
+              <td
+                className={cn(
+                  "px-2 py-2 text-right font-bold tabular-nums",
+                  row.net_usd >= 0 ? "text-emerald-300" : "text-rose-300"
+                )}
+              >
+                {money0(row.net_usd)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+
 function GateScreen({ status }: { status: number }) {
   return (
     <div className="flex min-h-screen items-center justify-center p-6">
@@ -220,6 +440,7 @@ export default function VoiceB2BPage() {
   const [quotaTotal, setQuotaTotal] = useState(100);
   const [batchSize, setBatchSize] = useState(25);
   const [includeFallback, setIncludeFallback] = useState(true);
+  const [metricsDays, setMetricsDays] = useState(30);
   const [tab, setTab] = useState<VoiceTab>("overview");
   const [sourceName, setSourceName] = useState("");
   const [sourceUrl, setSourceUrl] = useState("");
@@ -267,8 +488,8 @@ export default function VoiceB2BPage() {
     { refreshInterval: 5_000 }
   );
   const { data: metrics, mutate: mutateMetrics } = useSWR(
-    "voice-metrics",
-    () => fetchVoiceMetrics(30),
+    `voice-metrics-${metricsDays}`,
+    () => fetchVoiceMetrics(metricsDays),
     { refreshInterval: 60_000 }
   );
   const { data: sourcesData, mutate: mutateSources } = useSWR(
@@ -601,39 +822,61 @@ export default function VoiceB2BPage() {
       </nav>
 
       <Card
-        title="Visão executiva do funil"
+        title="Command Center"
         icon={<Gauge className="h-4 w-4 text-emerald-400" />}
-        hint="Últimos 30 dias · voz → clique → checkout → receita"
-        action={<Badge tone="slate">30 dias</Badge>}
+        hint="Velocímetros de conversão e saúde operacional"
+        action={
+          <select
+            value={metricsDays}
+            onChange={(event) => setMetricsDays(Number(event.target.value))}
+            className="rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-[10px] font-semibold text-slate-300"
+          >
+            <option value={7}>7 dias</option>
+            <option value={30}>30 dias</option>
+            <option value={90}>90 dias</option>
+          </select>
+        }
         className={tab === "overview" ? "" : "hidden"}
       >
-        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-          <Stat
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
+          <GaugeCard
             label="Answer Rate"
-            value={`${metrics?.summary.answer_rate ?? 0}%`}
+            value={metrics?.summary.answer_rate ?? 0}
             sub={`${metrics?.summary.answered ?? 0}/${metrics?.summary.dialed ?? 0} atendidas`}
-            tone="emerald"
+            tone={gaugeTone(metrics?.summary.answer_rate ?? 0, 40, 25)}
           />
-          <Stat
+          <GaugeCard
+            label="Drop / Voicemail"
+            value={metrics?.summary.drop_rate ?? 0}
+            sub={`${metrics?.summary.unanswered ?? 0} sem resposta`}
+            tone={
+              (metrics?.summary.drop_rate ?? 0) <= 40
+                ? "emerald"
+                : (metrics?.summary.drop_rate ?? 0) <= 60
+                  ? "amber"
+                  : "rose"
+            }
+          />
+          <GaugeCard
             label="Engagement ≥30s"
-            value={`${metrics?.summary.engagement_rate ?? 0}%`}
+            value={metrics?.summary.engagement_rate ?? 0}
             sub={`${metrics?.summary.engaged ?? 0} chamadas`}
-            tone="emerald"
+            tone={gaugeTone(metrics?.summary.engagement_rate ?? 0, 50, 30)}
           />
-          <Stat
+          <GaugeCard
             label="Showcase CTR"
-            value={`${metrics?.summary.showcase_ctr ?? 0}%`}
+            value={metrics?.summary.showcase_ctr ?? 0}
             sub={`${metrics?.summary.clicks ?? 0} cliques`}
-            tone="emerald"
+            tone={gaugeTone(metrics?.summary.showcase_ctr ?? 0, 15, 8)}
           />
-          <Stat
+          <GaugeCard
             label="Checkout Rate"
-            value={`${metrics?.summary.checkout_rate ?? 0}%`}
+            value={metrics?.summary.checkout_rate ?? 0}
             sub={`${metrics?.summary.checkouts ?? 0} checkouts`}
-            tone="emerald"
+            tone={gaugeTone(metrics?.summary.checkout_rate ?? 0, 5, 2)}
           />
         </div>
-        <div className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-4">
+        <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
           <Stat
             label="Listen médio"
             value={`${metrics?.summary.avg_listen_seconds ?? 0}s`}
@@ -661,6 +904,51 @@ export default function VoiceB2BPage() {
             alimentar o funil.
           </p>
         ) : null}
+      </Card>
+
+      <div
+        className={cn(
+          "mb-5 grid gap-4 lg:grid-cols-2",
+          tab === "overview" ? "" : "hidden"
+        )}
+      >
+        <Card
+          title="Funil de conversão"
+          icon={<TrendingUp className="h-4 w-4 text-sky-400" />}
+          hint="Discadas → atendidas → escuta → vitrine → checkout"
+        >
+          <FunnelChart
+            funnel={
+              metrics?.funnel ?? {
+                dialed: 0,
+                answered: 0,
+                engaged: 0,
+                clicks: 0,
+                checkouts: 0,
+                revenue_usd: 0,
+              }
+            }
+          />
+        </Card>
+        <Card
+          title="Retenção de áudio"
+          icon={<Activity className="h-4 w-4 text-emerald-400" />}
+          hint="% de chamadas atendidas que continuam a ouvir"
+        >
+          <RetentionChart
+            buckets={metrics?.retention ?? []}
+            answered={metrics?.summary.answered ?? 0}
+          />
+        </Card>
+      </div>
+
+      <Card
+        title="Matriz de conversão cidade × nicho"
+        icon={<BarChart3 className="h-4 w-4 text-indigo-400" />}
+        hint="Verde = lucro; vermelho = burn. Ordenado por net."
+        className={tab === "overview" ? "" : "hidden"}
+      >
+        <HeatmapMatrix rows={metrics?.by_city_trade ?? []} />
       </Card>
 
       <div
