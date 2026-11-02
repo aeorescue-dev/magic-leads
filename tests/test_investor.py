@@ -113,6 +113,43 @@ async def test_snapshot_e_export_csv_com_watermark(monkeypatch):
     assert "ticket_weekly" in csv_text
 
 
+def test_claims_register_tem_fonte_data_e_citacao():
+    """Nenhum claim concorrencial pode existir sem URL, data e citação."""
+    ids = set()
+    for claim in investor.CLAIMS_REGISTER:
+        ids.add(claim["id"])
+        assert claim["source_url"].startswith("https://")
+        assert claim["source_publisher"]
+        assert claim["source_date"]
+        assert claim["captured_at"] == investor.CLAIMS_CAPTURED_AT
+        assert claim["quote"]
+        assert claim["status"] in ("verified", "estimate", "pending_legal")
+    assert ids
+    for row in investor.COMPETITIVE_MATRIX:
+        assert row["dimension"]
+        assert row["magic"]
+        assert row["angi"]
+        assert row["edge"] in ("magic", "neutral", "angi")
+        assert row["source_ids"]
+        assert set(row["source_ids"]) <= ids
+
+
+def test_snapshot_publica_claims_e_comparativo(monkeypatch):
+    monkeypatch.setattr(
+        investor,
+        "_stripe_cash",
+        lambda: {"status": "not_configured", "cash_30d": None, "cash_total": None},
+    )
+    snap = investor.build_snapshot()
+    assert snap["claims_register"]["version"] == investor.CLAIMS_VERSION
+    assert len(snap["claims_register"]["items"]) == len(investor.CLAIMS_REGISTER)
+    assert len(snap["competitive"]) == len(investor.COMPETITIVE_MATRIX)
+    assert any(
+        item["source_url"].startswith("https://www.ftc.gov/")
+        for item in snap["claims_register"]["items"]
+    )
+
+
 def test_nda_e_idempotente():
     investor.init()
     assert investor.has_nda(12345, investor.NDA_VERSION) is False

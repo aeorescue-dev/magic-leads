@@ -1285,6 +1285,31 @@ export interface InvestorPriceBridge {
   arr_normalized_pro: number;
 }
 
+export interface InvestorClaim {
+  id: string;
+  topic: string;
+  title: string;
+  our_position: string;
+  competitor_position: string;
+  competitor: string;
+  source_title: string;
+  source_publisher: string;
+  source_url: string;
+  source_date: string;
+  captured_at: string;
+  status: "verified" | "estimate" | "pending_legal";
+  quote: string;
+  note?: string;
+}
+
+export interface InvestorCompetitiveRow {
+  dimension: string;
+  magic: string;
+  angi: string;
+  edge: "magic" | "neutral" | "angi";
+  source_ids: string[];
+}
+
 export interface InvestorRoom {
   generated_at: string;
   version: string;
@@ -1382,6 +1407,12 @@ export interface InvestorRoom {
     portability: string;
     known_debt: string[];
   };
+  claims_register: {
+    version: string;
+    captured_at: string;
+    items: InvestorClaim[];
+  };
+  competitive: InvestorCompetitiveRow[];
 }
 
 export interface InvestorSimulation {

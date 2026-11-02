@@ -32,6 +32,273 @@ MONTHLY_FACTOR = WEEKS_PER_YEAR / 12.0
 MRR_PER_PASS = PRICE_WEEKLY * MONTHLY_FACTOR
 ARR_PER_PASS = MRR_PER_PASS * 12.0
 
+# ---------------------------------------------------------------------------
+# Claims Register — cada afirmação concorrencial tem de ter fonte, data e
+# citação. Nada de preços ou acurácias inventadas. As fontes oficiais são da
+# Angi/FTC; a estimativa de terceiros vai marcada como tal.
+# ---------------------------------------------------------------------------
+CLAIMS_VERSION = "claims-2026-11-02"
+CLAIMS_CAPTURED_AT = "2026-11-02"
+
+CLAIMS_REGISTER: list[dict[str, Any]] = [
+    {
+        "id": "ANGI-SHARED-5",
+        "topic": "exclusividade",
+        "title": "Pedido partilhado com até 5 profissionais",
+        "our_position": "1 negócio por endereço/cidade; o lead não é revendido.",
+        "competitor_position": "Cada pedido é combinado com no máximo 5 profissionais.",
+        "competitor": "Angi",
+        "source_title": "Opportunities and Leads: Frequently Asked Questions",
+        "source_publisher": "Angi Help Center",
+        "source_url": (
+            "https://intercom.help/angi/en/articles/6221483-opportunities-and-"
+            "leads-frequently-asked-questions"
+        ),
+        "source_date": "2026-04-20",
+        "captured_at": CLAIMS_CAPTURED_AT,
+        "status": "verified",
+        "quote": (
+            "Each time a homeowner submits a project request, we will match them "
+            "with no more than five pros."
+        ),
+        "note": "FAQ oficial da Angi; consultada em 02/11/2026.",
+    },
+    {
+        "id": "ANGI-PAY-NO-WIN",
+        "topic": "cobrança",
+        "title": "Paga o lead mesmo sem fechar o negócio",
+        "our_position": "O passe semanal dá acesso; não há taxa por lead perdido.",
+        "competitor_position": "O profissional paga o lead mesmo que não ganhe o trabalho.",
+        "competitor": "Angi",
+        "source_title": "Angi Pro Agreement — FAQ",
+        "source_publisher": "Angi Pro (HomeAdvisor, Inc.)",
+        "source_url": "https://angiads.pactsafe.io/versions/6ac568925ab7ef3fa4859c92.pdf",
+        "source_date": "2026-10-06",
+        "captured_at": CLAIMS_CAPTURED_AT,
+        "status": "verified",
+        "quote": (
+            "Yes. You will pay for the leads you receive, even if you do not win "
+            "the job. Leads are not guaranteed jobs."
+        ),
+        "note": "Contrato oficial atualizado em 06/10/2026.",
+    },
+    {
+        "id": "ANGI-NOT-EXCLUSIVE",
+        "topic": "exclusividade",
+        "title": "Contrato não exclusivo",
+        "our_position": "Exclusividade por endereço/cidade no nosso modelo de dados.",
+        "competitor_position": "A Angi pode contratar e apresentar outros profissionais.",
+        "competitor": "Angi",
+        "source_title": "Angi Pro Agreement — Competition",
+        "source_publisher": "Angi Pro (HomeAdvisor, Inc.)",
+        "source_url": "https://angiads.pactsafe.io/versions/6ac568925ab7ef3fa4859c92.pdf",
+        "source_date": "2026-10-06",
+        "captured_at": CLAIMS_CAPTURED_AT,
+        "status": "verified",
+        "quote": (
+            "Angi is free to contract with other Pros as this is not an "
+            "exclusive contract."
+        ),
+        "note": "Cláusula de concorrência do contrato oficial.",
+    },
+    {
+        "id": "ANGI-NO-GUARANTEE",
+        "topic": "qualidade",
+        "title": "Sem garantia de volume ou de fecho",
+        "our_position": "Métricas de qualidade publicadas (Truth Score + Phone Truth).",
+        "competitor_position": "Sem garantia de quantos leads ou trabalhos o profissional recebe.",
+        "competitor": "Angi",
+        "source_title": "Angi Pro Agreement — FAQ",
+        "source_publisher": "Angi Pro (HomeAdvisor, Inc.)",
+        "source_url": "https://angiads.pactsafe.io/versions/6ac568925ab7ef3fa4859c92.pdf",
+        "source_date": "2026-10-06",
+        "captured_at": CLAIMS_CAPTURED_AT,
+        "status": "verified",
+        "quote": (
+            "No, we do not make any warranties about our services, including how "
+            "many leads you will receive or how many jobs you will win."
+        ),
+        "note": "FAQ do contrato oficial.",
+    },
+    {
+        "id": "ANGI-PRICE-VARIES",
+        "topic": "preço",
+        "title": "Preço por lead não publicado",
+        "our_position": "Tabela pública: $120 por 7 dias.",
+        "competitor_position": "A taxa por lead varia por tarefa, localização e demanda.",
+        "competitor": "Angi",
+        "source_title": "Opportunities and Leads: Frequently Asked Questions",
+        "source_publisher": "Angi Help Center",
+        "source_url": (
+            "https://intercom.help/angi/en/articles/6221483-opportunities-and-"
+            "leads-frequently-asked-questions"
+        ),
+        "source_date": "2026-04-20",
+        "captured_at": CLAIMS_CAPTURED_AT,
+        "status": "verified",
+        "quote": (
+            "Lead fees change based on task, homeowner location, and demand for "
+            "the work."
+        ),
+        "note": "A Angi não publica tarifa única por lead.",
+    },
+    {
+        "id": "ANGI-ETF",
+        "topic": "contrato",
+        "title": "Taxa de cancelamento antecipado",
+        "our_position": "Passe de 7 dias, sem fidelização.",
+        "competitor_position": "Pode existir ETF definida no contrato de onboarding.",
+        "competitor": "Angi",
+        "source_title": "Angi Pro Agreement — FAQ",
+        "source_publisher": "Angi Pro (HomeAdvisor, Inc.)",
+        "source_url": "https://angiads.pactsafe.io/versions/6ac568925ab7ef3fa4859c92.pdf",
+        "source_date": "2026-10-06",
+        "captured_at": CLAIMS_CAPTURED_AT,
+        "status": "verified",
+        "quote": (
+            "An ETF is an Early Termination Fee, which, if applicable, will be "
+            "set forth in the Contract you sign during your onboarding with Angi."
+        ),
+        "note": "A ETF depende do contrato específico de cada profissional.",
+    },
+    {
+        "id": "FTC-LEADS-7.2M",
+        "topic": "qualidade",
+        "title": "FTC: ordem de $7,2M por marketing enganoso de leads",
+        "our_position": "Publicamos limitações e erros cobrados em vez de prometer precisão.",
+        "competitor_position": "HomeAdvisor/Angi foi ordenada a pagar até $7,2M por práticas enganosas.",
+        "competitor": "Angi / HomeAdvisor",
+        "source_title": (
+            "FTC Order Requires HomeAdvisor to Pay Up To $7.2 Million and Stop "
+            "Deceptively Marketing its Leads"
+        ),
+        "source_publisher": "Federal Trade Commission",
+        "source_url": (
+            "https://www.ftc.gov/news-events/news/press-releases/2023/01/"
+            "ftc-order-requires-homeadvisor-pay-72-million-stop-deceptively-"
+            "marketing-its-leads-home-improvement"
+        ),
+        "source_date": "2023-01-23",
+        "captured_at": CLAIMS_CAPTURED_AT,
+        "status": "verified",
+        "quote": (
+            "pay up to $7.2 million for using a wide range of deceptive and "
+            "misleading tactics in selling home improvement project leads"
+        ),
+        "note": "A ordem final foi aprovada em abril de 2023.",
+    },
+    {
+        "id": "FTC-MEMBERSHIP-FEE",
+        "topic": "preço",
+        "title": "Membresia anual + taxa por lead",
+        "our_position": "Um único passe semanal, sem membresia anual.",
+        "competitor_position": "Em 2023, a FTC registou membresia anual de $287,99 mais taxa por lead.",
+        "competitor": "Angi / HomeAdvisor",
+        "source_title": (
+            "FTC Order Requires HomeAdvisor to Pay Up To $7.2 Million and Stop "
+            "Deceptively Marketing its Leads"
+        ),
+        "source_publisher": "Federal Trade Commission",
+        "source_url": (
+            "https://www.ftc.gov/news-events/news/press-releases/2023/01/"
+            "ftc-order-requires-homeadvisor-pay-72-million-stop-deceptively-"
+            "marketing-its-leads-home-improvement"
+        ),
+        "source_date": "2023-01-23",
+        "captured_at": CLAIMS_CAPTURED_AT,
+        "status": "verified",
+        "quote": (
+            "annual membership fee of $287.99, in addition to a separate fee for "
+            "each lead they receive"
+        ),
+        "note": "Valor histórico de 2023; a estrutura atual pode variar.",
+    },
+    {
+        "id": "ANGI-ESTIMATE-15-85",
+        "topic": "preço",
+        "title": "Estimativa de terceiros: $15–$85 por lead",
+        "our_position": "Preço publicado e previsível: $120/semana.",
+        "competitor_position": "Estimativa de terceiros para o custo por lead da Angi.",
+        "competitor": "Angi",
+        "source_title": "Is Angi Worth It for Contractors? Angi Leads Cost and Terms (2026)",
+        "source_publisher": "Sesklo (terceiro)",
+        "source_url": "https://www.sesklo.com/for-service-providers/compare/angi",
+        "source_date": "2026-10-05",
+        "captured_at": CLAIMS_CAPTURED_AT,
+        "status": "estimate",
+        "quote": "Third-party estimate: $15–$85 a lead",
+        "note": "Não é fonte oficial da Angi; apresentado apenas como faixa indicativa.",
+    },
+    {
+        "id": "ANGI-SCALE-1.5M",
+        "topic": "escala",
+        "title": "Escala do marketplace",
+        "our_position": "107.960 registos proprietários; 84.632 owners identificados.",
+        "competitor_position": "Mais de 1,5M de oportunidades na Angi no último mês.",
+        "competitor": "Angi",
+        "source_title": "Angi Pro — Get Leads, Win Jobs",
+        "source_publisher": "Angi",
+        "source_url": "https://signup.angi.com/pro",
+        "source_date": "consultado 2026-11-02",
+        "captured_at": CLAIMS_CAPTURED_AT,
+        "status": "verified",
+        "quote": "Over 1.5M opportunities on Angi last month",
+        "note": "Página oficial de aquisição de profissionais.",
+    },
+]
+
+COMPETITIVE_MATRIX: list[dict[str, Any]] = [
+    {
+        "dimension": "Custo por lead",
+        "magic": "Passe de $120/semana; sem taxa por lead",
+        "angi": "Não publicado; varia por tarefa, localização e demanda",
+        "edge": "magic",
+        "source_ids": ["ANGI-PRICE-VARIES", "ANGI-ESTIMATE-15-85"],
+    },
+    {
+        "dimension": "Exclusividade",
+        "magic": "1 negócio por endereço/cidade",
+        "angi": "Pedido partilhado com até 5 profissionais",
+        "edge": "magic",
+        "source_ids": ["ANGI-SHARED-5", "ANGI-NOT-EXCLUSIVE"],
+    },
+    {
+        "dimension": "Cobrança sem fechar",
+        "magic": "Sem taxa por lead perdido",
+        "angi": "Paga o lead mesmo sem ganhar o trabalho",
+        "edge": "magic",
+        "source_ids": ["ANGI-PAY-NO-WIN"],
+    },
+    {
+        "dimension": "Transparência de preço",
+        "magic": "Tabela pública: $120 / 7 dias",
+        "angi": "Preço por cotação; sem tarifa pública",
+        "edge": "magic",
+        "source_ids": ["ANGI-PRICE-VARIES"],
+    },
+    {
+        "dimension": "Fidelização",
+        "magic": "Passe de 7 dias, sem fidelização",
+        "angi": "Contrato com renovação; ETF conforme contrato",
+        "edge": "magic",
+        "source_ids": ["ANGI-ETF"],
+    },
+    {
+        "dimension": "Propriedade do ativo",
+        "magic": "Base e pipeline proprietários",
+        "angi": "Marketplace de leads por pedido",
+        "edge": "neutral",
+        "source_ids": ["ANGI-SCALE-1.5M"],
+    },
+    {
+        "dimension": "Qualidade / acurácia",
+        "magic": "Truth Score e Phone Truth publicados",
+        "angi": "Sem métrica pública; FTC exigiu cessar claims não substanciados",
+        "edge": "magic",
+        "source_ids": ["FTC-LEADS-7.2M", "ANGI-NO-GUARANTEE"],
+    },
+]
+
 DEFAULT_ASSUMPTIONS: dict[str, Any] = {
     "version": VERSION,
     "approved_by": "Gate 0 — 2026-11-02",
@@ -66,7 +333,7 @@ DEFAULT_ASSUMPTIONS: dict[str, Any] = {
     "code_inventory": {
         "python_lines": 60968,
         "typescript_lines": 21445,
-        "pytest_tests": 1241,
+        "pytest_tests": 1246,
         "vitest_tests": 109,
         "test_files": 121,
         "docs": 19,
@@ -731,6 +998,12 @@ def _snapshot_payload(metrics: dict, cash: dict) -> dict:
         },
         "code_inventory": assumptions_["code_inventory"],
         "nda_version": assumptions_["nda_version"],
+        "claims_register": {
+            "version": CLAIMS_VERSION,
+            "captured_at": CLAIMS_CAPTURED_AT,
+            "items": CLAIMS_REGISTER,
+        },
+        "competitive": COMPETITIVE_MATRIX,
     }
     return payload
 
@@ -970,5 +1243,13 @@ def export_csv(
         if isinstance(value, list):
             continue
         row("code", key, "", value)
+    claims = snapshot.get("claims_register") or {}
+    for item in claims.get("items", []):
+        claim_id = item.get("id", "")
+        row("claim", claim_id, "topic", item.get("topic", ""))
+        row("claim", claim_id, "status", item.get("status", ""))
+        row("claim", claim_id, "source_url", item.get("source_url", ""))
+        row("claim", claim_id, "source_date", item.get("source_date", ""))
+        row("claim", claim_id, "captured_at", item.get("captured_at", ""))
     log_access(user_id, viewer_email, "export_csv", doc_id, ip, ua)
     return "\ufeff" + out.getvalue()

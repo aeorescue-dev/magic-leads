@@ -6,12 +6,15 @@ import {
   ArrowLeft,
   BadgeDollarSign,
   BookOpen,
+  Boxes,
   Building2,
+  Check,
   CheckCircle2,
   CircleDollarSign,
   Container,
   Database,
   Download,
+  ExternalLink,
   FileText,
   FlaskConical,
   Gauge,
@@ -20,10 +23,13 @@ import {
   Loader2,
   Lock,
   Printer,
+  Quote,
   RefreshCcw,
+  Scale,
   ShieldCheck,
   Sparkles,
   TrendingUp,
+  Workflow,
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import useSWR from "swr";
@@ -35,16 +41,19 @@ import {
   fetchInvestorRoom,
   refreshInvestorRoom,
   simulateInvestor,
+  type InvestorClaim,
+  type InvestorCompetitiveRow,
   type InvestorRoom,
   type InvestorSimulation,
 } from "@/lib/admin-api";
 import { fmtWhen, scoreClasses } from "@/lib/system-health";
 
-type Tab = "overview" | "buyer" | "assumptions";
+type Tab = "overview" | "buyer" | "competitive" | "assumptions";
 
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: "overview", label: "Overview" },
   { id: "buyer", label: "Comprador" },
+  { id: "competitive", label: "Comparativo" },
   { id: "assumptions", label: "Premissas" },
 ];
 
@@ -473,6 +482,660 @@ function NdaBanner({
           Aceitar NDA
         </button>
       </div>
+    </div>
+  );
+}
+
+function BuyerExecutiveSummary({
+  inventory,
+  totalLeads,
+  owners,
+  provenancePct,
+}: {
+  inventory: InvestorRoom["code_inventory"];
+  totalLeads: number;
+  owners: number;
+  provenancePct: number;
+}) {
+  const totalLoc = inventory.python_lines + inventory.typescript_lines;
+  const pythonShare = totalLoc
+    ? (inventory.python_lines / totalLoc) * 100
+    : 0;
+  const totalTests = inventory.pytest_tests + inventory.vitest_tests;
+
+  return (
+    <div className="space-y-5">
+      <section className="grid gap-3 sm:grid-cols-3">
+        {[
+          {
+            label: "Código proprietário",
+            value: kNum(totalLoc),
+            sub: "linhas Python + TypeScript",
+            accent: "border-indigo-400/20 from-indigo-500/[0.14]",
+          },
+          {
+            label: "Testes automatizados",
+            value: totalTests.toLocaleString("en-US"),
+            sub: `${inventory.test_files} ficheiros de teste`,
+            accent: "border-emerald-400/20 from-emerald-500/[0.12]",
+          },
+          {
+            label: "Gates de qualidade",
+            value: "4 / 4",
+            sub: "pytest · tsc · build · lint",
+            accent: "border-sky-400/20 from-sky-500/[0.12]",
+          },
+        ].map((item) => (
+          <div
+            key={item.label}
+            className={cn(
+              "rounded-2xl border bg-gradient-to-br to-transparent p-4",
+              item.accent
+            )}
+          >
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+              {item.label}
+            </p>
+            <p className="mt-2 text-3xl font-black tracking-tight text-white tabular-nums">
+              {item.value}
+            </p>
+            <p className="mt-0.5 text-[10px] text-slate-500">{item.sub}</p>
+          </div>
+        ))}
+      </section>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card
+          title="Portabilidade"
+          icon={<Boxes className="h-4 w-4 text-indigo-400" />}
+          hint="Sem dependência de dados licenciados"
+          action={<Badge tone="emerald">Alta</Badge>}
+        >
+          <div className="mb-3">
+            <Bar value={5} max={5} tone="bg-emerald-400" />
+          </div>
+          <div className="grid grid-cols-1 gap-1.5 text-[11px] text-slate-300 sm:grid-cols-2">
+            {[
+              "Docker",
+              "SQLite WAL",
+              "Next.js / Vercel",
+              "Variáveis de ambiente",
+              "Adaptadores de fontes públicas",
+            ].map((item) => (
+              <span key={item} className="flex items-center gap-1.5">
+                <Check className="h-3 w-3 text-emerald-300" /> {item}
+              </span>
+            ))}
+          </div>
+          <p className="mt-3 text-[10px] text-slate-500">
+            {inventory.portability}
+          </p>
+        </Card>
+
+        <Card
+          title="Segurança & infraestrutura"
+          icon={<ShieldCheck className="h-4 w-4 text-emerald-400" />}
+          hint="Controlos ativos em produção"
+          action={<Badge tone="emerald">Endurecida</Badge>}
+        >
+          <div className="grid grid-cols-1 gap-1.5 text-[11px] text-slate-300 sm:grid-cols-2">
+            {[
+              "SQLite WAL + backup API",
+              "CSP, CORS exato e headers",
+              "Passkeys WebAuthn",
+              "Sessões com TTL deslizante",
+              "Segredos fail-closed",
+              "Rate limit por endpoint",
+            ].map((item) => (
+              <span key={item} className="flex items-center gap-1.5">
+                <Check className="h-3 w-3 text-emerald-300" /> {item}
+              </span>
+            ))}
+          </div>
+        </Card>
+
+        <Card
+          title="Resiliência CI/CD"
+          icon={<Workflow className="h-4 w-4 text-sky-400" />}
+          hint="Pipeline bloqueante em cada push"
+          action={<Badge tone="emerald">Verde</Badge>}
+        >
+          <div className="space-y-2">
+            {[
+              ["pytest", `${inventory.pytest_tests.toLocaleString("en-US")} testes`],
+              ["TypeScript", "tsc --noEmit"],
+              ["Build", "next build"],
+              ["Lint", "0 erros"],
+            ].map(([step, detail]) => (
+              <div key={step} className="flex items-center gap-2">
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-300">
+                  <Check className="h-3 w-3" />
+                </span>
+                <span className="text-[11px] font-semibold text-slate-200">
+                  {step}
+                </span>
+                <span className="text-[10px] text-slate-500">{detail}</span>
+                <span className="ml-auto text-[9px] font-semibold uppercase tracking-wide text-emerald-300">
+                  verde
+                </span>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-[10px] text-slate-500">
+            Cobertura publicada como artifact `coverage.json`.
+          </p>
+        </Card>
+
+        <Card
+          title="Documentação & governança"
+          icon={<BookOpen className="h-4 w-4 text-slate-300" />}
+          hint="Transferência de conhecimento incluída"
+          action={<Badge tone="indigo">{inventory.docs} docs</Badge>}
+        >
+          <div className="grid grid-cols-2 gap-2">
+            <Kpi label="Runbooks" value="Incluídos" />
+            <Kpi label="NDA" value="Versionado" />
+            <Kpi label="Access log" value="Auditável" />
+            <Kpi label="Cobertura" value="Publicada" tone="sky" />
+          </div>
+        </Card>
+      </div>
+
+      <Card
+        title="Composição técnica"
+        icon={<Layers className="h-4 w-4 text-indigo-400" />}
+        hint={`${totalLeads.toLocaleString("en-US")} registos · ${owners.toLocaleString(
+          "en-US"
+        )} proprietários · ${pct(provenancePct, 0)} proveniência`}
+      >
+        <div className="flex h-3 overflow-hidden rounded-full">
+          <div
+            className="bg-indigo-400"
+            style={{ width: `${pythonShare}%` }}
+            title={`Python ${pct(pythonShare, 0)}`}
+          />
+          <div
+            className="bg-sky-400"
+            style={{ width: `${100 - pythonShare}%` }}
+            title={`TypeScript ${pct(100 - pythonShare, 0)}`}
+          />
+        </div>
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-500">
+          <span className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-indigo-400" /> Python{" "}
+            {inventory.python_lines.toLocaleString("en-US")} (
+            {pct(pythonShare, 0)})
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-sky-400" /> TypeScript{" "}
+            {inventory.typescript_lines.toLocaleString("en-US")} (
+            {pct(100 - pythonShare, 0)})
+          </span>
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <Kpi
+            label="Cobertura backend"
+            value={
+              inventory.coverage_backend_pct == null
+                ? "A medir"
+                : pct(inventory.coverage_backend_pct)
+            }
+            tone="amber"
+          />
+          <Kpi
+            label="Ficheiros de teste"
+            value={String(inventory.test_files)}
+          />
+          <Kpi
+            label="Pytest"
+            value={inventory.pytest_tests.toLocaleString("en-US")}
+            tone="emerald"
+          />
+          <Kpi
+            label="Vitest"
+            value={String(inventory.vitest_tests)}
+            tone="emerald"
+          />
+        </div>
+      </Card>
+
+      <Card
+        title="Roadmap de transição"
+        icon={<TrendingUp className="h-4 w-4 text-indigo-400" />}
+        hint="Integração do comprador em 90 dias"
+      >
+        <div className="grid gap-3 md:grid-cols-3">
+          {[
+            {
+              step: "01",
+              title: "30 dias",
+              text: "Acesso, shadowing, credenciais, backups e runbooks.",
+            },
+            {
+              step: "02",
+              title: "60 dias",
+              text: "Deploy independente, migração de infraestrutura e validação de dados.",
+            },
+            {
+              step: "03",
+              title: "90 dias",
+              text: "Cutover, suporte, escrow e encerramento.",
+            },
+          ].map((item) => (
+            <div
+              key={item.step}
+              className="rounded-xl border border-white/5 bg-white/[0.02] p-3"
+            >
+              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-indigo-500/15 text-[10px] font-black text-indigo-200">
+                {item.step}
+              </span>
+              <p className="mt-2 text-sm font-black text-slate-100">
+                {item.title}
+              </p>
+              <p className="mt-1 text-[11px] text-slate-400">{item.text}</p>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <details className="rounded-xl border border-white/5 bg-white/[0.02] px-4 py-3">
+        <summary className="cursor-pointer text-[11px] font-semibold text-slate-400">
+          Notas de due diligence
+        </summary>
+        <ul className="mt-2 space-y-1 text-[10px] text-slate-500">
+          {inventory.known_debt.map((item) => (
+            <li key={item}>• {item}</li>
+          ))}
+        </ul>
+      </details>
+    </div>
+  );
+}
+
+function AssumptionsExecutive({
+  assumptions,
+}: {
+  assumptions: Record<string, any>;
+}) {
+  const num = (key: string, fallback = 0) =>
+    Number(assumptions[key] ?? fallback);
+  const moneyFactor = (value: number) => money2(value);
+
+  return (
+    <div className="space-y-5">
+      <Card
+        title="Modelo de receita"
+        icon={<CircleDollarSign className="h-4 w-4 text-emerald-400" />}
+        hint="Weekly pass com normalização 52/12"
+        action={<Badge tone="emerald">Gate 0</Badge>}
+      >
+        <div className="grid gap-3 sm:grid-cols-3">
+          {[
+            {
+              label: "Ticket",
+              value: money(num("ticket_price_weekly", 120)),
+              sub: "por 7 dias / empreiteiro",
+            },
+            {
+              label: "MRR normalizado",
+              value: money(num("normalized_mrr_per_pass", 520)),
+              sub: "120 × 52/12",
+            },
+            {
+              label: "ARR",
+              value: money(num("arr_per_pass", 6240)),
+              sub: "520 × 12",
+            },
+          ].map((item) => (
+            <div
+              key={item.label}
+              className="rounded-xl border border-emerald-400/15 bg-emerald-500/[0.04] p-3"
+            >
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-200/80">
+                {item.label}
+              </p>
+              <p className="mt-1 text-2xl font-black text-white tabular-nums">
+                {item.value}
+              </p>
+              <p className="text-[10px] text-slate-500">{item.sub}</p>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card
+          title="Múltiplos de valuation"
+          icon={<Scale className="h-4 w-4 text-indigo-400" />}
+          hint="Faixa usada no going concern e no simulador"
+        >
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              ["Conservador", "2×", "bg-slate-400/60"],
+              ["Base", `${num("multiple_base", 3.5)}×`, "bg-indigo-400"],
+              ["Expansão", "8×", "bg-violet-400"],
+            ].map(([label, value, tone]) => (
+              <div
+                key={label}
+                className="rounded-xl border border-white/5 bg-white/[0.02] p-3 text-center"
+              >
+                <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">
+                  {label}
+                </p>
+                <p className="mt-1 text-xl font-black text-white tabular-nums">
+                  {value}
+                </p>
+                <div className={cn("mx-auto mt-2 h-1.5 w-10 rounded-full", tone)} />
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        <Card
+          title="Inputs do piso patrimonial"
+          icon={<Building2 className="h-4 w-4 text-indigo-400" />}
+          hint="Custo de substituição, não valor de mercado"
+        >
+          <div className="space-y-2 text-[11px]">
+            {[
+              [
+                "Substituição por owner",
+                `${moneyFactor(
+                  num("replacement_owner_low", 0.5)
+                )} – ${moneyFactor(num("replacement_owner_high", 1.5))}`,
+              ],
+              [
+                "Engenharia",
+                `${num("ip_months_low", 12)}–${num(
+                  "ip_months_high",
+                  18
+                )} meses × ${money(num("ip_rate_low", 8000))}–${money(
+                  num("ip_rate_high", 15000)
+                )}`,
+              ],
+              [
+                "Compliance",
+                `${money(num("compliance_low", 10000))} – ${money(
+                  num("compliance_high", 25000)
+                )}`,
+              ],
+            ].map(([label, value]) => (
+              <div
+                key={label}
+                className="flex items-baseline justify-between gap-2 border-b border-white/5 pb-2 last:border-0 last:pb-0"
+              >
+                <span className="text-slate-400">{label}</span>
+                <span className="text-right font-semibold text-slate-200 tabular-nums">
+                  {value}
+                </span>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        <Card
+          title="Unit economics"
+          icon={<Activity className="h-4 w-4 text-emerald-400" />}
+          hint="Variáveis que entram no simulador"
+        >
+          <div className="grid grid-cols-2 gap-2">
+            <Kpi
+              label="Churn mensal"
+              value={pct(num("monthly_churn", 0.08) * 100, 1)}
+            />
+            <Kpi
+              label="Fees de pagamento"
+              value={`${pct(num("payment_fee_pct", 0.029) * 100, 1)} + ${money2(
+                num("payment_fee_fixed", 0.3)
+              )}`}
+            />
+            <Kpi
+              label="Searchbug / success"
+              value={money2(num("searchbug_cost_per_success", 0.52))}
+            />
+            <Kpi
+              label="Revelações / mês"
+              value={String(num("reveals_per_contractor_month", 2))}
+            />
+          </div>
+        </Card>
+
+        <Card
+          title="Infraestrutura"
+          icon={<Container className="h-4 w-4 text-sky-400" />}
+          hint="Custos fixos e por unidade"
+        >
+          <div className="grid grid-cols-2 gap-2">
+            <Kpi
+              label="Fixo mensal"
+              value={money(num("infra_fixed_monthly", 150))}
+            />
+            <Kpi
+              label="Por mailbox"
+              value={money(num("infra_per_mailbox", 10))}
+            />
+            <Kpi
+              label="Por cidade"
+              value={money(num("infra_per_city", 25))}
+            />
+            <Kpi
+              label="Opex fixo"
+              value={money(num("opex_monthly", 0))}
+            />
+          </div>
+        </Card>
+      </div>
+
+      <Card
+        title="Governança das premissas"
+        icon={<ShieldCheck className="h-4 w-4 text-emerald-400" />}
+        hint="Alterações de preço exigem nova versão e aprovação"
+        action={<Badge tone="indigo">Versionadas</Badge>}
+      >
+        <div className="grid gap-3 text-[11px] sm:grid-cols-3">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+              Aprovação
+            </p>
+            <p className="mt-0.5 text-slate-200">
+              {String(assumptions.approved_by ?? "Gate 0")}
+            </p>
+          </div>
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+              NDA
+            </p>
+            <p className="mt-0.5 text-slate-200">
+              {String(assumptions.nda_version ?? "versionado")}
+            </p>
+          </div>
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+              Normalização
+            </p>
+            <p className="mt-0.5 text-slate-200">
+              52 semanas / 12 meses (não 4 semanas)
+            </p>
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+const CLAIM_STATUS: Record<
+  InvestorClaim["status"],
+  { label: string; tone: BadgeTone }
+> = {
+  verified: { label: "Verificado", tone: "emerald" },
+  estimate: { label: "Estimativa", tone: "amber" },
+  pending_legal: { label: "Revisão legal", tone: "slate" },
+};
+
+function CompetitiveSection({
+  rows,
+  claims,
+  version,
+  capturedAt,
+}: {
+  rows: InvestorCompetitiveRow[];
+  claims: InvestorClaim[];
+  version: string;
+  capturedAt: string;
+}) {
+  const official = claims.filter((claim) => claim.status === "verified").slice(0, 3);
+  return (
+    <div className="space-y-5">
+      <section className="overflow-hidden rounded-2xl border border-indigo-400/20 bg-gradient-to-br from-indigo-500/[0.14] via-[#10131a] to-[#0b0e14] p-5">
+        <Badge tone="indigo">Comparativo estratégico</Badge>
+        <h2 className="mt-2 max-w-3xl text-xl font-black tracking-tight text-white">
+          Exclusividade por endereço. Preço público. Sem cobrança por lead
+          perdido.
+        </h2>
+        <p className="mt-1 max-w-3xl text-[11px] text-slate-400">
+          O modelo da Angi é um marketplace de leads partilhados. O nosso é um
+          passe semanal sobre uma base proprietária, com preço de tabela e
+          métricas de qualidade publicadas.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {official.map((claim) => (
+            <a
+              key={claim.id}
+              href={claim.source_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[10px] font-semibold text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
+            >
+              {claim.source_publisher}
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          ))}
+        </div>
+      </section>
+
+      <Card
+        title="Magic Leads vs. Angi"
+        icon={<Scale className="h-4 w-4 text-indigo-400" />}
+        hint="Comparação por dimensão de negócio"
+        action={<Badge tone="slate">Fontes oficiais</Badge>}
+      >
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[680px] border-separate border-spacing-0 text-left text-[11px]">
+            <thead>
+              <tr>
+                <th className="w-[24%] pb-2 pr-3 font-semibold text-slate-500">
+                  Dimensão
+                </th>
+                <th className="w-[38%] rounded-t-xl bg-indigo-500/10 px-3 pb-2 font-bold text-indigo-200">
+                  Magic Leads
+                </th>
+                <th className="w-[38%] px-3 pb-2 font-semibold text-slate-500">
+                  Angi
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.dimension}>
+                  <td className="border-t border-white/5 py-3 pr-3 align-top">
+                    <p className="font-semibold text-slate-300">
+                      {row.dimension}
+                    </p>
+                    <Badge tone={row.edge === "magic" ? "emerald" : "slate"}>
+                      {row.edge === "magic" ? "Vantagem" : "Neutro"}
+                    </Badge>
+                  </td>
+                  <td className="border-t border-white/5 bg-indigo-500/[0.04] px-3 py-3 align-top">
+                    <div className="flex items-start gap-2">
+                      <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-300" />
+                      <span className="text-slate-100">{row.magic}</span>
+                    </div>
+                  </td>
+                  <td className="border-t border-white/5 px-3 py-3 align-top text-slate-400">
+                    {row.angi}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-3 text-[10px] text-slate-500">
+          Cada célula da Angi tem uma ou mais fontes no Claims Register abaixo.
+          A coluna “Vantagem” é qualitativa, não uma estimativa de mercado.
+        </p>
+      </Card>
+
+      <Card
+        title="Claims Register auditável"
+        icon={<Quote className="h-4 w-4 text-indigo-400" />}
+        hint={`Versão ${version} · fontes consultadas em ${capturedAt}`}
+        action={<Badge tone="emerald">{claims.length} claims</Badge>}
+      >
+        <div className="grid gap-3 lg:grid-cols-2">
+          {claims.map((claim) => {
+            const status = CLAIM_STATUS[claim.status];
+            return (
+              <article
+                key={claim.id}
+                className="flex flex-col rounded-xl border border-white/5 bg-white/[0.02] p-4"
+              >
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <Badge tone="indigo">{claim.topic}</Badge>
+                  <Badge tone={status.tone}>{status.label}</Badge>
+                  <span className="ml-auto text-[9px] font-semibold uppercase tracking-wide text-slate-600">
+                    {claim.competitor}
+                  </span>
+                </div>
+                <h3 className="mt-2 text-[12px] font-bold text-slate-100">
+                  {claim.title}
+                </h3>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <div className="rounded-lg border border-emerald-400/10 bg-emerald-500/[0.05] p-2">
+                    <p className="text-[9px] font-semibold uppercase tracking-wide text-emerald-300">
+                      Magic Leads
+                    </p>
+                    <p className="mt-0.5 text-[10px] text-slate-300">
+                      {claim.our_position}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-white/5 bg-white/[0.02] p-2">
+                    <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">
+                      Angi
+                    </p>
+                    <p className="mt-0.5 text-[10px] text-slate-400">
+                      {claim.competitor_position}
+                    </p>
+                  </div>
+                </div>
+                <blockquote className="mt-2 border-l-2 border-indigo-400/40 pl-2 text-[10px] italic leading-relaxed text-slate-500">
+                  “{claim.quote}”
+                </blockquote>
+                <div className="mt-auto flex flex-wrap items-center gap-2 pt-2 text-[9px] text-slate-600">
+                  <span>{claim.source_publisher}</span>
+                  <span>·</span>
+                  <span>{claim.source_date}</span>
+                  <a
+                    href={claim.source_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="ml-auto inline-flex items-center gap-1 font-semibold text-indigo-300 transition-colors hover:text-indigo-200"
+                  >
+                    Abrir fonte <ExternalLink className="h-3 w-3" />
+                  </a>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+        <div className="mt-4 rounded-lg border border-white/5 bg-white/[0.02] p-3 text-[10px] text-slate-500">
+          <p>
+            <strong className="text-slate-300">Metodologia:</strong> cada claim
+            tem URL, data de consulta e citação. Valores oficiais da Angi/FTC
+            estão marcados como verificados; faixas de terceiros aparecem como
+            estimativa. Não há preços de concorrentes hardcoded sem fonte.
+          </p>
+        </div>
+      </Card>
     </div>
   );
 }
@@ -1189,10 +1852,6 @@ export default function InvestorRoomPage() {
               </div>
             </div>
 
-            <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
-              <Badge tone="amber">Claims · Em Remediação Técnica</Badge>
-              <span>{proof.anti_angi.note}</span>
-            </div>
           </Card>
         </div>
       ) : null}
@@ -1205,224 +1864,32 @@ export default function InvestorRoomPage() {
               icon={<Lock className="h-4 w-4 text-amber-400" />}
             >
               <p className="text-sm text-slate-400">
-                Aceita o NDA para ver o inventário de ativos, a cobertura de
-                testes e a portabilidade.
+                Aceita o NDA para ver o Executive Tech Summary, a cobertura de
+                testes e o roadmap de transição.
               </p>
             </Card>
           ) : (
-            <>
-              <Card
-                title="Inventário de Ativos"
-                icon={<FileText className="h-4 w-4 text-indigo-400" />}
-                hint="Código, testes, infraestrutura e documentação"
-                action={<Badge tone="emerald">CI/CD verde</Badge>}
-              >
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-[11px]">
-                    <thead className="text-slate-500">
-                      <tr>
-                        <th className="pb-2 font-semibold">Ativo</th>
-                        <th className="pb-2 font-semibold">Métrica</th>
-                        <th className="pb-2 text-right font-semibold">
-                          Estado
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {[
-                        {
-                          icon: <FileText className="h-3.5 w-3.5 text-indigo-300" />,
-                          asset: "Código backend",
-                          metric: `${inventory.python_lines.toLocaleString(
-                            "en-US"
-                          )} linhas Python`,
-                          status: "Entregue",
-                          tone: "emerald" as BadgeTone,
-                        },
-                        {
-                          icon: <FileText className="h-3.5 w-3.5 text-sky-300" />,
-                          asset: "Código frontend",
-                          metric: `${inventory.typescript_lines.toLocaleString(
-                            "en-US"
-                          )} linhas TS/TSX`,
-                          status: "Entregue",
-                          tone: "emerald" as BadgeTone,
-                        },
-                        {
-                          icon: <FlaskConical className="h-3.5 w-3.5 text-emerald-300" />,
-                          asset: "Testes backend",
-                          metric: `${inventory.pytest_tests.toLocaleString(
-                            "en-US"
-                          )} pytest · ${inventory.test_files} ficheiros`,
-                          status: "Verde",
-                          tone: "emerald" as BadgeTone,
-                        },
-                        {
-                          icon: <FlaskConical className="h-3.5 w-3.5 text-emerald-300" />,
-                          asset: "Testes frontend",
-                          metric: `${inventory.vitest_tests} vitest`,
-                          status: "Verde",
-                          tone: "emerald" as BadgeTone,
-                        },
-                        {
-                          icon: <Gauge className="h-3.5 w-3.5 text-amber-300" />,
-                          asset: "Cobertura backend",
-                          metric:
-                            inventory.coverage_backend_pct == null
-                              ? "A medir"
-                              : pct(inventory.coverage_backend_pct),
-                          status: "Publicada",
-                          tone: "sky" as BadgeTone,
-                        },
-                        {
-                          icon: <GitBranch className="h-3.5 w-3.5 text-indigo-300" />,
-                          asset: "CI/CD",
-                          metric: inventory.ci,
-                          status: "Verde",
-                          tone: "emerald" as BadgeTone,
-                        },
-                        {
-                          icon: <Container className="h-3.5 w-3.5 text-sky-300" />,
-                          asset: "Infraestrutura",
-                          metric: inventory.portability,
-                          status: "Portável",
-                          tone: "indigo" as BadgeTone,
-                        },
-                        {
-                          icon: <BookOpen className="h-3.5 w-3.5 text-slate-300" />,
-                          asset: "Documentação",
-                          metric: `${inventory.docs} documentos + runbooks`,
-                          status: "Incluída",
-                          tone: "slate" as BadgeTone,
-                        },
-                        {
-                          icon: <Database className="h-3.5 w-3.5 text-emerald-300" />,
-                          asset: "Ativo de dados",
-                          metric: `${leadsTotal.toLocaleString(
-                            "en-US"
-                          )} registos · ${asset.owners.toLocaleString(
-                            "en-US"
-                          )} owners`,
-                          status: `${pct(proof.provenance_pct, 0)} proveniência`,
-                          tone: "emerald" as BadgeTone,
-                        },
-                      ].map((row) => (
-                        <tr
-                          key={row.asset}
-                          className="border-t border-white/5 align-top"
-                        >
-                          <td className="py-2.5">
-                            <div className="flex items-center gap-2 font-semibold text-slate-200">
-                              {row.icon}
-                              {row.asset}
-                            </div>
-                          </td>
-                          <td className="py-2.5 text-slate-400">
-                            {row.metric}
-                          </td>
-                          <td className="py-2.5 text-right">
-                            <Badge tone={row.tone}>{row.status}</Badge>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </Card>
-
-              <details className="rounded-xl border border-white/5 bg-white/[0.02] px-4 py-3">
-                <summary className="cursor-pointer text-[11px] font-semibold text-slate-400">
-                  Notas de due diligence
-                </summary>
-                <ul className="mt-2 space-y-1 text-[10px] text-slate-500">
-                  {inventory.known_debt.map((item) => (
-                    <li key={item}>• {item}</li>
-                  ))}
-                </ul>
-              </details>
-
-              <Card
-                title="Transição 30 / 60 / 90"
-                icon={<TrendingUp className="h-4 w-4 text-indigo-400" />}
-                hint="Plano de integração para o comprador"
-              >
-                <div className="grid gap-3 md:grid-cols-3">
-                  {[
-                    {
-                      step: "30 dias",
-                      text: "Acesso, shadowing, credenciais, backups e runbooks.",
-                    },
-                    {
-                      step: "60 dias",
-                      text: "Deploy independente, migração de infraestrutura e validação de dados.",
-                    },
-                    {
-                      step: "90 dias",
-                      text: "Cutover, suporte, escrow e encerramento.",
-                    },
-                  ].map((item) => (
-                    <div
-                      key={item.step}
-                      className="rounded-xl border border-white/5 bg-white/[0.02] p-3"
-                    >
-                      <p className="text-sm font-black text-indigo-200">
-                        {item.step}
-                      </p>
-                      <p className="mt-1 text-[11px] text-slate-400">
-                        {item.text}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </Card>
-            </>
+            <BuyerExecutiveSummary
+              inventory={inventory}
+              totalLeads={leadsTotal}
+              owners={asset.owners}
+              provenancePct={proof.provenance_pct}
+            />
           )}
         </div>
       ) : null}
 
+      {tab === "competitive" ? (
+        <CompetitiveSection
+          rows={data.competitive}
+          claims={data.claims_register.items}
+          version={data.claims_register.version}
+          capturedAt={data.claims_register.captured_at}
+        />
+      ) : null}
+
       {tab === "assumptions" ? (
-        <Card
-          title="Premissas versionadas — Gate 0"
-          icon={<CheckCircle2 className="h-4 w-4 text-emerald-400" />}
-          hint={`Aprovado por ${data.assumptions.approved_by}`}
-        >
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-[11px]">
-              <thead className="text-slate-500">
-                <tr>
-                  <th className="pb-2 font-semibold">Chave</th>
-                  <th className="pb-2 font-semibold">Valor</th>
-                  <th className="pb-2 font-semibold">Nota</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[
-                  ["ticket_price_weekly", "$120", "7 dias por empreiteiro"],
-                  ["monthlyization_factor", "52/12 = 4,3333", "não usar 4 semanas"],
-                  ["normalized_mrr_per_pass", "$520", "120 × 52/12"],
-                  ["arr_per_pass", "$6.240", "520 × 12"],
-                  ["multiple_low / base / high", "2× / 3,5× / 8×", "benchmark versionado"],
-                  ["replacement_owner_low/high", "$0,50 / $1,50", "custo de substituição"],
-                  ["ip_months_low/high", "12 / 18", "engenharia"],
-                  ["ip_rate_low/high", "$8k / $15k", "rate mensal"],
-                  [
-                    "infra_fixed_monthly",
-                    money2(data.assumptions.infra_fixed_monthly),
-                    "custo fixo input",
-                  ],
-                ].map(([key, value, note]) => (
-                  <tr key={key} className="border-t border-white/5">
-                    <td className="py-2 font-mono text-[10px] text-slate-400">
-                      {key}
-                    </td>
-                    <td className="py-2 text-slate-200">{value}</td>
-                    <td className="py-2 text-slate-500">{note}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+        <AssumptionsExecutive assumptions={data.assumptions} />
       ) : null}
 
       <footer className="mt-8 flex flex-wrap items-center gap-2 border-t border-white/5 pt-4 text-[10px] text-slate-600">

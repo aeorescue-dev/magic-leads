@@ -43,8 +43,14 @@ o piso é o argumento de negociação.
   custo/sucesso. Não declarar precisão sem amostra.
 - E-mail: enviados, bounces, respostas, supressões.
 - System Health 100/100.
-- Anti-Angi: **Claims Register** pendente de URL/data/legal; sem preços
-  hardcoded.
+- **Claims Register auditável**: cada claim tem URL, data, citação e estado
+  (`verified` / `estimate` / `pending_legal`). Fontes oficiais: Angi Help
+  Center, Angi Pro Agreement e FTC. A estimativa de terceiros ($15–$85/lead)
+  está marcada como `estimate`; não há preço hardcoded sem fonte.
+- **Comparativo Magic Leads vs. Angi**: custo por lead, exclusividade,
+  cobrança sem fecho, transparência, fidelização, propriedade do ativo e
+  qualidade/acurácia. A vantagem é qualitativa; não é uma estimativa de
+  mercado.
 
 ## Simulador
 
