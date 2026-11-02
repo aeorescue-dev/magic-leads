@@ -1473,6 +1473,168 @@ export async function downloadInvestorCsv(): Promise<Blob> {
   return await res.blob();
 }
 
+export interface VoiceEligibility {
+  allowed: boolean;
+  reasons: string[];
+  reason_labels: string[];
+  checks: Record<string, boolean>;
+  local_time: string;
+}
+
+export interface VoiceCompany {
+  id: number;
+  company_name: string;
+  contact_name: string | null;
+  phone: string;
+  email: string | null;
+  website: string | null;
+  city: string | null;
+  state: string;
+  zip_code: string | null;
+  license_number: string | null;
+  license_status: string | null;
+  trade: string | null;
+  permit_count: number;
+  permit_value_usd: number;
+  years_active: number | null;
+  employee_estimate: number | null;
+  entity_type: string;
+  consent_basis: string;
+  status: string;
+  score: number;
+  last_attempt_at: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  eligibility: VoiceEligibility;
+}
+
+export interface VoiceQueue {
+  items: VoiceCompany[];
+  generated_at: string;
+  limit: number;
+  total: number;
+  callable: number;
+  include_blocked: boolean;
+}
+
+export interface VoiceStats {
+  total: number;
+  callable: number;
+  blocked: number;
+  attempts_today: number;
+  meetings: number;
+  dnc_listed: number;
+  dnc_checked: number;
+  suppressed: number;
+  generated_at: string;
+  pilot_state: string;
+  calling_window: string;
+  dnc_max_age_days: number;
+  max_attempts_7d: number;
+}
+
+export interface VoiceImportResult {
+  ok: boolean;
+  source_id?: number;
+  imported: number;
+  updated?: number;
+  skipped: number;
+  total: number;
+  listed?: number;
+  errors?: Array<{ row: number; reason: string }>;
+}
+
+export function fetchVoiceQueue(
+  includeBlocked = false,
+  limit = 100
+): Promise<VoiceQueue> {
+  return adminFetch<VoiceQueue>(
+    `/voice/queue?include_blocked=${includeBlocked ? 1 : 0}&limit=${limit}`
+  );
+}
+
+export function fetchVoiceStats(): Promise<VoiceStats> {
+  return adminFetch<VoiceStats>("/voice/stats");
+}
+
+export function importVoiceLicenses(
+  csv: string,
+  sourceName: string,
+  sourceUrl: string
+): Promise<VoiceImportResult> {
+  return adminFetch<VoiceImportResult>("/voice/import/licenses", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ csv, source_name: sourceName, source_url: sourceUrl }),
+  });
+}
+
+export function importVoiceDnc(
+  csv: string,
+  source: string
+): Promise<VoiceImportResult> {
+  return adminFetch<VoiceImportResult>("/voice/import/dnc", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ csv, source }),
+  });
+}
+
+export function checkVoiceDnc(
+  phone: string,
+  listed: boolean,
+  source: string
+): Promise<{ ok: boolean; phone: string; listed: boolean }> {
+  return adminFetch<{ ok: boolean; phone: string; listed: boolean }>(
+    "/voice/dnc/check",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone, listed, source }),
+    }
+  );
+}
+
+export function logVoiceCall(
+  companyId: number,
+  payload: { outcome: string; notes?: string; callback_at?: string | null }
+): Promise<{ ok: boolean; status: string }> {
+  return adminFetch<{ ok: boolean; status: string }>(
+    `/voice/contacts/${companyId}/call`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+}
+
+export function suppressVoicePhone(
+  phone: string,
+  reason: string
+): Promise<{ ok: boolean; phone: string; reason: string }> {
+  return adminFetch<{ ok: boolean; phone: string; reason: string }>(
+    "/voice/suppress",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone, reason }),
+    }
+  );
+}
+
+export async function downloadVoiceTemplate(): Promise<Blob> {
+  const res = await fetch(`${API_URL}/api/admin/voice/template.csv`, {
+    credentials: "include",
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    throw new AdminApiError(res.status, res.statusText || "template failed");
+  }
+  return await res.blob();
+}
+
 /** Snapshot read-only do System Health (7 camadas + score 0–100). */
 export function fetchSystemHealth(windowHours = 24): Promise<SystemHealth> {
   return adminFetch<SystemHealth>(

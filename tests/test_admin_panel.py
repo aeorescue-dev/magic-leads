@@ -1344,3 +1344,90 @@ def test_admin_outbound_status_exposes_sequence_config(admin_client):
     assert "max_step" in seq
 
 
+def test_admin_voice_import_dnc_queue_and_call(admin_client, monkeypatch):
+    """Fluxo Fase 1: importar licença -> DNC -> fila -> registar chamada."""
+    monkeypatch.setenv("VOICE_NOW_ISO", "2026-11-02T16:00:00+00:00")
+    from backend.services import b2b_voice
+
+    client, headers, _ = admin_client
+    phone = "+16175550999"
+    b2b_voice.init()
+    conn = b2b_voice.get_conn()
+    try:
+        conn.execute(
+            "DELETE FROM call_attempts WHERE company_id IN "
+            "(SELECT id FROM prospect_companies WHERE phone=?)",
+            (phone,),
+        )
+        conn.execute("DELETE FROM voice_suppressions WHERE value=?", (phone,))
+        conn.execute("DELETE FROM dnc_checks WHERE phone=?", (phone,))
+        conn.execute("DELETE FROM prospect_companies WHERE phone=?", (phone,))
+        conn.commit()
+    finally:
+        conn.close()
+
+    csv_text = (
+        "company_name,contact_name,phone,city,state,license_status,trade,"
+        "permit_count,permit_value_usd,years_active,employee_estimate\n"
+        f"Voice Test LLC,Ana Silva,{phone},Boston,MA,active,Roofing,"
+        "12,400000,9,6\n"
+    )
+    r = client.post(
+        "/api/admin/voice/import/licenses",
+        headers=headers,
+        json={
+            "csv": csv_text,
+            "source_name": "pytest",
+            "source_url": "https://example.gov",
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["imported"] == 1
+
+    r = client.get(
+        "/api/admin/voice/queue?include_blocked=1&limit=1000", headers=headers
+    )
+    assert r.status_code == 200, r.text
+    item = next(i for i in r.json()["items"] if i["phone"] == phone)
+    assert item["eligibility"]["allowed"] is False
+    assert "dnc_not_checked" in item["eligibility"]["reasons"]
+
+    r = client.post(
+        "/api/admin/voice/dnc/check",
+        headers=headers,
+        json={"phone": phone, "listed": False, "source": "pytest"},
+    )
+    assert r.status_code == 200, r.text
+
+    r = client.get("/api/admin/voice/queue?limit=1000", headers=headers)
+    item = next(i for i in r.json()["items"] if i["phone"] == phone)
+    assert item["eligibility"]["allowed"] is True, item["eligibility"]
+
+    r = client.post(
+        f"/api/admin/voice/contacts/{item['id']}/call",
+        headers=headers,
+        json={"outcome": "no_answer", "notes": "pytest"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "called"
+
+    r = client.get("/api/admin/voice/stats", headers=headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["total"] >= 1
+    assert r.json()["pilot_state"] == "MA"
+
+    r = client.get("/api/admin/voice/template.csv", headers=headers)
+    assert r.status_code == 200
+    assert "company_name" in r.text
+
+
+def test_admin_voice_requires_admin(admin_client, nonadmin_client):
+    client, _, _ = admin_client
+    _, nonadmin_headers = nonadmin_client
+    assert client.get("/api/admin/voice/queue").status_code == 401
+    assert (
+        client.get("/api/admin/voice/queue", headers=nonadmin_headers).status_code
+        == 403
+    )
+
+

@@ -340,11 +340,11 @@ DEFAULT_ASSUMPTIONS: dict[str, Any] = {
     "code_inventory": {
         "python_lines": 60968,
         "typescript_lines": 21445,
-        "pytest_tests": 1246,
+        "pytest_tests": 1260,
         "vitest_tests": 109,
         "test_files": 121,
         "docs": 19,
-        "coverage_backend_pct": 69.2,
+        "coverage_backend_pct": 69.6,
         "coverage_measured_at": "2026-11-02",
         "coverage_command": "pytest tests --cov=backend --cov-report=json:coverage.json",
         "coverage_modules": {

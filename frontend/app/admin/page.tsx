@@ -2624,6 +2624,13 @@ export default function AdminPage() {
           <Wallet className="h-4 w-4" />
           Investor Room
         </a>
+        <a
+          href="/admin/voice"
+          className="inline-flex items-center gap-2 rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/20"
+        >
+          <Phone className="h-4 w-4" />
+          Voice B2B
+        </a>
         <button
           onClick={() => void load()}
           disabled={busy}

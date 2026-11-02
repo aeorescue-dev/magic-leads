@@ -1,0 +1,106 @@
+# Voice B2B — Fase 1 (piloto Massachusetts)
+
+Rota: **`/admin/voice`** (link “Voice B2B” no header do `/admin`).
+Base própria: **`voice.db`** (`VOICE_DB_PATH`, default `/data/voice.db`).
+Sem PII de homeowners; apenas pessoas jurídicas/empreiteiros.
+
+## Âmbito
+
+- Importação de licenças/permits de **Massachusetts** (HIC, trades, permits).
+- Gate **`can_call()` fail-closed** antes de liberar o contacto.
+- Fila ordenada por score ICP e volume de obras.
+- Click-to-call (`tel:`) + registo de tentativa e disposição.
+- Supressão automática em “sem interesse”, “número errado” e “não contactar”.
+
+## Schema (`voice.db`)
+
+| Tabela | Função |
+|---|---|
+| `prospect_sources` | fonte, URL, data de captura, checksum, linhas |
+| `prospect_companies` | empresa, responsável, telefone E.164, trade, licença, obras, score |
+| `dnc_checks` | check DNC por telefone (federal/estadual/manual), validade 31 dias |
+| `voice_suppressions` | opt-out interno por telefone |
+| `call_attempts` | tentativa, agente, outcome, notas, callback |
+| `voice_meta` | versão do módulo |
+
+Dedupe por **telefone E.164**. Reimportar atualiza a empresa e preserva
+`do_not_call`.
+
+## Gate `can_call()`
+
+Bloqueia se qualquer condição falhar:
+
+1. `entity_type != business`
+2. telefone inválido (não `+1` com 10 dígitos)
+3. estado diferente de `MA` (piloto)
+4. estado do contacto `do_not_call`, `invalid` ou `meeting`
+5. supressão interna (`voice_suppressions`)
+6. sem check DNC → `dnc_not_checked`
+7. check DNC com mais de **31 dias** → `dnc_stale`
+8. número listado no DNC → `dnc_listed`
+9. **3 tentativas** nos últimos 7 dias → `attempt_cap`
+10. fora de **08:00–21:00 America/New_York** → `outside_hours`
+
+O endpoint de registo também aplica o gate: uma chamada “normal” não pode ser
+registada num contacto bloqueado. Outcomes de supressão continuam permitidos
+para documentar o opt-out.
+
+## CSV de licenças/permits
+
+Obrigatórios: `company_name`, `phone`.
+
+Opcionais:
+`contact_name`, `email`, `website`, `city`, `state` (default `MA`), `zip_code`,
+`license_number`, `license_status`, `trade`, `permit_count`,
+`permit_value_usd`, `years_active`, `employee_estimate`, `entity_type`
+(default `business`), `consent_basis` (default `b2b_legit_interest`), `notes`.
+
+Template: `GET /api/admin/voice/template.csv`.
+
+## CSV DNC
+
+`phone, listed` — `listed` aceita `1/0`, `yes/no`, `true/false`, `sim/não`.
+Cada import cria/renova o check por 31 dias.
+
+> **Produção:** o piloto aceita importação de lista e check manual. Antes de
+> escalar, ligar um provedor DNC licenciado (federal + estadual) com auditoria
+> por chamada. O gate já está preparado para isso: basta gravar o resultado em
+> `dnc_checks` com `provider` e `checked_at`.
+
+## API
+
+| Método | Rota | Função |
+|---|---|---|
+| GET | `/api/admin/voice/queue` | fila + elegibilidade |
+| GET | `/api/admin/voice/stats` | KPIs e configuração do piloto |
+| POST | `/api/admin/voice/import/licenses` | importar licenças/permits |
+| POST | `/api/admin/voice/import/dnc` | importar lista DNC |
+| POST | `/api/admin/voice/dnc/check` | check manual (limpo/listado) |
+| POST | `/api/admin/voice/contacts/{id}/call` | registar tentativa |
+| POST | `/api/admin/voice/suppress` | suprimir telefone |
+| GET | `/api/admin/voice/template.csv` | template de importação |
+
+Todas exigem sessão **admin** (`_require_admin_user`).
+
+## Operação
+
+1. Importar licenças/permits de MA.
+2. Importar lista DNC (ou fazer check manual por número).
+3. Abrir `/admin/voice`; a fila mostra só contactos que passam o gate.
+4. Clicar no telefone (`tel:`) e registar o resultado.
+5. “Sem interesse / número errado / não contactar” suprime automaticamente.
+
+## Limites da Fase 1
+
+- Sem dialer automático/predictive: apenas click-to-call manual.
+- Sem gravação de chamadas (Fase 2; exige consentimento all-party em MA).
+- DNC por CSV/manual; provedor licenciado na Fase 2.
+- Piloto restrito a Massachusetts.
+- Sem importação de dados de homeowners ou de contas de concorrentes.
+
+## Testes
+
+- `tests/test_b2b_voice.py`: importação/dedupe, DNC, supressão, horário,
+  estado, limite de tentativas, supressão automática.
+- `tests/test_admin_panel.py`: fluxo API completo (importar → DNC → fila →
+  chamada → stats) e gate de admin.

@@ -1527,6 +1527,27 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   CSV; testes de contrato garantem URL/data/citação e source_ids válidos.
 - **Testes**: **1.246 pytest** (+2), 109 vitest; ruff/tsc/build/lint limpos.
 
+### Fase 31 — Voice B2B Fase 1 (2026-11-02)
+
+- **Âmbito**: prospeção de **pessoas jurídicas** em Massachusetts; zero PII de
+  homeowners e zero extração de contas de concorrentes.
+- **`voice.db`** isolado: fontes, empresas, checks DNC, supressões e tentativas.
+  Dedupe por telefone E.164; reimportação preserva `do_not_call`.
+- **Gate `can_call()` fail-closed**: business-only, `+1` válido, MA, sem
+  supressão, DNC fresco (31 d), não listado, <3 tentativas/7 d e janela
+  08:00–21:00 ET. O endpoint de registo também aplica o gate; outcomes de
+  supressão continuam permitidos para documentar opt-out.
+- **Importação**: CSV de licenças/permits de MA e CSV DNC (`phone, listed`).
+  Template em `/api/admin/voice/template.csv`.
+- **Fila + click-to-call** em `/admin/voice`: score ICP, obras, categoria,
+  telefone, compliance visível, drawer com gate, DNC manual, supressão e
+  disposição (connected/voicemail/callback/meeting/…).
+- **Supressão automática** em sem interesse, número errado e não contactar.
+- **Limites**: sem dialer preditivo/gravação na Fase 1; DNC por CSV/manual até
+  ligar provedor licenciado. Piloto restrito a MA.
+- **Testes**: +13 (11 de serviço + 2 de API) → **1.260 pytest**; 109 vitest;
+  ruff/tsc/build/lint limpos.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

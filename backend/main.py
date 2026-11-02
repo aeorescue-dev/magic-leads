@@ -91,6 +91,7 @@ from .services import (
     analytics,
     auto_batch,
     auto_ramp,
+    b2b_voice,
     contractor_ingest,
     control_tower,
     enrichment_queue,
@@ -2807,6 +2808,170 @@ async def admin_investor_export(
         headers={
             "Content-Disposition": (
                 "attachment; filename=\"magicleads-investor-room.csv\""
+            )
+        },
+    )
+
+
+@app.get("/api/admin/voice/queue")
+async def admin_voice_queue(
+    limit: int = 50,
+    include_blocked: int = 0,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Fila B2B: empresas de MA com gate can_call() aplicado."""
+    return await anyio.to_thread.run_sync(
+        b2b_voice.queue, limit, bool(include_blocked)
+    )
+
+
+@app.get("/api/admin/voice/stats")
+async def admin_voice_stats(_admin: dict = Depends(_require_admin_user)):
+    return await anyio.to_thread.run_sync(b2b_voice.stats)
+
+
+@app.post("/api/admin/voice/import/licenses")
+async def admin_voice_import_licenses(
+    request: Request, _admin: dict = Depends(_require_admin_user)
+):
+    """Importa CSV de licenças/permits de MA (dedupe por telefone)."""
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="json inválido")
+    csv_text = str((payload or {}).get("csv") or "")
+    if not csv_text.strip():
+        raise HTTPException(status_code=400, detail="csv vazio")
+    if len(csv_text) > 5_000_000:
+        raise HTTPException(status_code=413, detail="csv demasiado grande")
+    try:
+        return await anyio.to_thread.run_sync(
+            b2b_voice.import_licenses_csv,
+            csv_text,
+            str((payload or {}).get("source_name") or "MA HIC / licenças"),
+            str((payload or {}).get("source_url") or ""),
+            int(_admin["id"]),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/admin/voice/import/dnc")
+async def admin_voice_import_dnc(
+    request: Request, _admin: dict = Depends(_require_admin_user)
+):
+    """Importa lista DNC (phone, listed). Fail-closed continua a exigir check."""
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="json inválido")
+    csv_text = str((payload or {}).get("csv") or "")
+    if not csv_text.strip():
+        raise HTTPException(status_code=400, detail="csv vazio")
+    if len(csv_text) > 5_000_000:
+        raise HTTPException(status_code=413, detail="csv demasiado grande")
+    try:
+        return await anyio.to_thread.run_sync(
+            b2b_voice.import_dnc_csv,
+            csv_text,
+            str((payload or {}).get("source") or "import"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/admin/voice/dnc/check")
+async def admin_voice_dnc_check(
+    request: Request, _admin: dict = Depends(_require_admin_user)
+):
+    """Regista um check DNC manual (após consulta ao provedor/lista)."""
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="json inválido")
+    payload = payload or {}
+    raw_listed = payload.get("listed")
+    if isinstance(raw_listed, str):
+        listed = raw_listed.strip().lower() in {"1", "true", "yes", "sim", "listed"}
+    else:
+        listed = bool(raw_listed)
+    try:
+        return await anyio.to_thread.run_sync(
+            b2b_voice.check_dnc,
+            str(payload.get("phone") or ""),
+            listed,
+            str(payload.get("source") or "manual"),
+            str(payload.get("provider") or "manual"),
+            str(payload.get("raw_status") or ""),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/admin/voice/contacts/{company_id}/call")
+async def admin_voice_log_call(
+    company_id: int,
+    request: Request,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Regista a tentativa e aplica supressão automática quando aplicável."""
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="json inválido")
+    payload = payload or {}
+    try:
+        return await anyio.to_thread.run_sync(
+            b2b_voice.log_attempt,
+            company_id,
+            int(_admin["id"]),
+            str(payload.get("outcome") or ""),
+            str(payload.get("notes") or ""),
+            payload.get("callback_at"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/admin/voice/suppress")
+async def admin_voice_suppress(
+    request: Request, _admin: dict = Depends(_require_admin_user)
+):
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="json inválido")
+    payload = payload or {}
+    try:
+        return await anyio.to_thread.run_sync(
+            b2b_voice.suppress,
+            str(payload.get("phone") or ""),
+            str(payload.get("reason") or "manual"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/admin/voice/template.csv")
+async def admin_voice_template(_admin: dict = Depends(_require_admin_user)):
+    header = (
+        "company_name,contact_name,phone,email,website,city,state,zip_code,"
+        "license_number,license_status,trade,permit_count,permit_value_usd,"
+        "years_active,employee_estimate,entity_type,consent_basis,"
+        "source_url,notes\n"
+    )
+    example = (
+        "Example Roofing LLC,John Smith,+16175550123,john@example.com,"
+        "https://example.com,Boston,MA,02118,HIC-123456,active,Roofing,"
+        "42,1250000,12,8,business,b2b_legit_interest,"
+        "https://www.mass.gov/example,\n"
+    )
+    return Response(
+        content="\ufeff" + header + example,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": (
+                "attachment; filename=\"magic-leads-voice-template.csv\""
             )
         },
     )
