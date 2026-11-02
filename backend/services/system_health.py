@@ -650,9 +650,9 @@ def score_alerts(alerts: list[dict], now: datetime) -> dict:
     penalties.append(
         min(
             60,
-            25 * len(critical_recent)
-            + 10 * len(warnings)
-            + 5 * critical_old,
+            30 * len(critical_recent)
+            + 5 * critical_old
+            + 2 * len(warnings),
         )
     )
     if critical_recent:
@@ -667,9 +667,15 @@ def score_alerts(alerts: list[dict], now: datetime) -> dict:
         age = _age_hours(alert.get("created_at"), now)
         if age is not None and (oldest_age is None or age > oldest_age):
             oldest_age = age
-    if oldest_age is not None and oldest_age > 24:
-        penalties.append(15)
-        reasons.append(f"Alerta aberto há {oldest_age:.0f}h")
+    # O alerta mais antigo só pesa se for de um alerta ainda "vivo" (crítico
+    # recente ou warning); históricos já são contados em `critical_old`.
+    live_ages = [
+        _age_hours(a.get("created_at"), now) for a in (critical_recent + warnings)
+    ]
+    live_ages = [a for a in live_ages if a is not None]
+    if live_ages and max(live_ages) > 24:
+        penalties.append(10)
+        reasons.append(f"Alerta aberto há {max(live_ages):.0f}h")
 
     headline = f"{len(alerts)} aberto(s)"
     metrics = [
