@@ -663,9 +663,15 @@ export default function VoiceB2BPage() {
         ) : null}
       </Card>
 
-      <div className="hidden">
+      <div
+        className={cn(
+          "mb-5 grid gap-4 lg:grid-cols-2",
+          tab === "sources" ? "" : "hidden"
+        )}
+      >
         <Card
           title="1. Importar licenças / permits"
+        className="hidden"
           icon={<Upload className="h-4 w-4 text-indigo-400" />}
           hint="CSV de Massachusetts (HIC, trades ou permits). Dedupe por telefone."
         >

@@ -1628,7 +1628,8 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Base pré-carregada**: `contractor_entities` (28.098 empresas; ~11.4k com
   telefone em NY/TX/IL/MA) é convertida para `prospect_companies` por
   `bridge_contractor_entities()`, com dedupe, normalização de cidade/estado,
-  trade inferido e fonte auditável.
+  trade inferido e fonte auditável. Em produção: **9.870 empresas** e **28
+  segmentos** cidade+nicho; 0 chamáveis até importar DNC.
 - **Fontes**: `voice_sources` + `raw_ingest`; conectores `http_csv` (HTTPS com
   allowlist `VOICE_SOURCE_ALLOWED_HOSTS`) e `contractor_entities`. Sync manual
   ou automático; cada execução regista status/erro/linhas.
