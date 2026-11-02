@@ -1489,6 +1489,23 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Pendente 1B**: reconciliacao Stripe↔utilizador automatica, data room ACL,
   PDF server-side, links externos e remediacao Searchbug.
 
+### Hotfix — ingestao apos deploy (2026-11-02, commit `2a21970`)
+
+- Sintoma: o deploy das 15:50 matou o run `253b3d48b473` a meio; a linha ficou
+  `running` para sempre, o scheduler esperou por um processo morto e o workflow
+  do GitHub (run 202) falhou as 15:57 com `.active=false`.
+- Correcção: `mark_interrupted_scraper_runs()` no arranque fecha **todos** os
+  `running` orfaos como `error` (`run interrompido (processo reiniciado)`),
+  emite `SCRAPER_INTERRUPTED` com run/trigger/started_at e o `scrape_guard`
+  devolve **0 s** quando o ultimo run foi interrompido sem success posterior
+  (catch-up imediato). Erros genericos continuam a respeitar o retry de 30 min.
+- Verificado em producao: run orfao fechado as 16:07:05, alerta criado, novo
+  run `5ecba44b4db6` arrancou no mesmo segundo e `/health` 200.
+- Testes: +1 regressao de orfaos, +2 de cadencia -> **1.244 pytest**.
+- Nota: `last_run.status=running` continua a ser legitimo enquanto o run esta
+  vivo; o workflow so falha se o run final nao for `success` (timeout de poll
+  nao falha).
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
