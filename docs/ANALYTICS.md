@@ -77,7 +77,8 @@ ANALYTICS_DB_PATH=/data/analytics.db   # opcional
 
 - Sem `ANALYTICS_INGEST_KEY`, o ingest responde **503** (fail-closed) e o
   proxy descarta o lote em silêncio; a landing nunca quebra.
-- O proxy na Vercel tem o mesmo `ANALYTICS_INGEST_KEY` e injeta geo/UA/IP.
+- O proxy na Vercel tem o mesmo `ANALYTICS_INGEST_KEY` e injeta geo/UA/IP
+  (projeto de produção **`magic-leads-frontend-final`**).
 - Bot filter no servidor (UA): Googlebot, headless, preview, curl, etc.
 - Rate limit: 120 lotes/min por IP.
 - Limites: 20 eventos/lote, 24 KB no proxy, 32 KB no backend.
