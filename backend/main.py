@@ -2931,6 +2931,40 @@ async def admin_voice_dnc_check(
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+@app.post("/api/admin/voice/dnc/scrub")
+async def admin_voice_dnc_scrub(
+    request: Request, _admin: dict = Depends(_require_admin_user)
+):
+    """Importa a lista oficial e aplica-a a toda a base (listados/limpos)."""
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="json inválido")
+    payload = payload or {}
+    text = str(payload.get("text") or payload.get("csv") or "")
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="lista vazia")
+    if len(text) > 5_000_000:
+        raise HTTPException(status_code=413, detail="lista demasiado grande")
+    source = str(payload.get("source") or "official")
+    try:
+        imported = await anyio.to_thread.run_sync(
+            b2b_voice.import_dnc_text, text, source
+        )
+        scrub = await anyio.to_thread.run_sync(
+            b2b_voice.scrub_prospects_with_dnc_text, text, source
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    rebuilt = await anyio.to_thread.run_sync(b2b_voice.rebuild_segments)
+    return {
+        "ok": True,
+        "import": imported,
+        "scrub": scrub,
+        "segments": rebuilt,
+    }
+
+
 @app.post("/api/admin/voice/dnc/staging-clear")
 async def admin_voice_dnc_staging_clear(
     _admin: dict = Depends(_require_admin_user),

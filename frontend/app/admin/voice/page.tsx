@@ -53,6 +53,7 @@ import {
   ingestVoice,
   logVoiceCall,
   resumeVoiceCampaign,
+  scrubDnc,
   sendVoiceShowcase,
   startVoiceCampaign,
   stagingClearDnc,
@@ -533,6 +534,7 @@ export default function VoiceB2BPage() {
   const [licenseUrl, setLicenseUrl] = useState("");
   const [dncCsv, setDncCsv] = useState("");
   const [dncSource, setDncSource] = useState("manual_csv");
+  const [dncScrub, setDncScrub] = useState(true);
   const [working, setWorking] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -751,12 +753,19 @@ export default function VoiceB2BPage() {
   const importDnc = () =>
     run("dnc", async () => {
       if (!dncCsv.trim()) throw new Error("Cola ou escolhe uma lista DNC.");
-      const result = await importVoiceDnc(dncCsv, dncSource);
+      const result = dncScrub
+        ? await scrubDnc(dncCsv, dncSource)
+        : { import: await importVoiceDnc(dncCsv, dncSource), scrub: null };
       setDncCsv("");
       await Promise.all([mutateStats(), mutateSegments(), mutateMetrics()]);
-      return `DNC: ${result.imported} números · ${
-        result.listed ?? 0
-      } listados · ${result.cleaned ?? 0} limpos · ${result.skipped} ignorados.`;
+      const scrub = result.scrub;
+      return `DNC: ${result.import.imported} números · ${
+        result.import.listed ?? 0
+      } listados · ${result.import.cleaned ?? 0} limpos${
+        scrub
+          ? ` · base: ${scrub.cleared} limpos / ${scrub.listed} listados`
+          : ""
+      } · ${result.import.skipped} ignorados.`;
     });
 
   const stagingClear = () =>
@@ -1153,6 +1162,18 @@ export default function VoiceB2BPage() {
             placeholder="Ou cola aqui a lista crua: 617-555-0123, (214) 555-0199, ..."
             className="mb-2 w-full rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-[11px] text-slate-200 placeholder:text-slate-600"
           />
+          <label className="mb-2 flex items-start gap-2 text-[10px] text-slate-400">
+            <input
+              type="checkbox"
+              checked={dncScrub}
+              onChange={(event) => setDncScrub(event.target.checked)}
+              className="mt-0.5 accent-emerald-500"
+            />
+            <span>
+              Lista oficial completa — aplicar à base (scrub). Números fora da
+              lista ficam limpos; listados ficam bloqueados.
+            </span>
+          </label>
           <div className="flex items-center gap-2">
             <input
               value={dncSource}

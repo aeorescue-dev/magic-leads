@@ -1662,11 +1662,15 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   bloqueados; Telnyx fica forçado em dry-run mesmo com chaves.
 - **Desobstrução auditável**: `POST /api/admin/voice/dnc/staging-clear` grava
   checks `source='staging'` e reconstrói segmentos; recusa 403 fora de staging.
+- **Scrub da base**: ao importar a lista oficial completa, o toggle “aplicar à
+  base” executa `scrub_prospects_with_dnc_text`: números na lista ficam
+  bloqueados; os restantes ficam limpos (`source='dnc_scrub'`). Sem scrub, o
+  gate continua fail-closed para números sem check.
 - **UI**: card DNC aceita ficheiro ou texto colado, mostra listados/limpos e
   botão “Desobstruir staging” quando ativo; badge “Staging · dry-run” no header.
   Em staging, o email da vitrine também fica em dry-run.
 - **Testes**: formatos crus, conflito listado/limpo, staging e bloqueio em
-  produção → **1.294 pytest**; cobertura **69,9%**.
+  produção → **1.296 pytest**; cobertura **69,9%**.
 
 ### Polimento UI/UX — dropdowns e paginação (2026-11-02)
 

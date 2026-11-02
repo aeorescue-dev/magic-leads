@@ -1621,6 +1621,28 @@ export function stagingClearDnc(): Promise<{
   return adminFetch("/voice/dnc/staging-clear", { method: "POST" });
 }
 
+export function scrubDnc(
+  text: string,
+  source: string
+): Promise<{
+  ok: boolean;
+  import: VoiceImportResult;
+  scrub: {
+    ok: boolean;
+    prospects: number;
+    listed: number;
+    cleared: number;
+    dnc_numbers: number;
+  };
+  segments: number;
+}> {
+  return adminFetch("/voice/dnc/scrub", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, source }),
+  });
+}
+
 export function checkVoiceDnc(
   phone: string,
   listed: boolean,

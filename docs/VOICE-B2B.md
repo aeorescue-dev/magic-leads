@@ -70,6 +70,11 @@ O backend deteta telefones, normaliza para E.164, deduplica e interpreta
 `clean/clear/no/false/0` como limpo; em conflito, prevalece “listado”. Linhas
 sem telefone são ignoradas. Cada import cria/renova o check por 31 dias.
 
+Ao importar a **lista oficial completa**, manter ativo **“Aplicar à base
+(scrub)”**: os números presentes na lista ficam bloqueados e os restantes
+ficam limpos (`source='dnc_scrub'`). Sem scrub, os números sem check continuam
+bloqueados por fail-closed.
+
 > **Produção:** o piloto aceita importação de lista e check manual. Antes de
 > escalar, ligar um provedor DNC licenciado (federal + estadual) com auditoria
 > por chamada. O gate já está preparado para isso: basta gravar o resultado em

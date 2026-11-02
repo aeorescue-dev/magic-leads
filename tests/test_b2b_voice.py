@@ -314,3 +314,30 @@ def test_staging_clear_recusa_fora_de_staging(monkeypatch):
     monkeypatch.setattr(voice.settings, "VOICE_STAGING_MODE", False)
     with pytest.raises(ValueError):
         voice.staging_clear_dnc()
+
+
+def test_scrub_dnc_aplica_lista_a_toda_a_base():
+    for phone in ("+16175550181", "+16175550182", "+16175550183"):
+        voice.import_licenses_csv(_csv(phone=phone, state="MA"))
+    result = voice.scrub_prospects_with_dnc_text(
+        "617-555-0182\n", source="pytest-official"
+    )
+    assert result["prospects"] == 3
+    assert result["listed"] == 1
+    assert result["cleared"] == 2
+    conn = voice.get_conn()
+    try:
+        listed = conn.execute(
+            "SELECT listed FROM dnc_checks WHERE phone='+16175550182'"
+        ).fetchone()
+        clean = conn.execute(
+            "SELECT listed FROM dnc_checks WHERE phone='+16175550181'"
+        ).fetchone()
+        assert listed["listed"] == 1
+        assert clean["listed"] == 0
+    finally:
+        conn.close()
+    assert voice.can_call(_company("+16175550181"), now=NOW)["allowed"] is True
+    blocked = voice.can_call(_company("+16175550182"), now=NOW)
+    assert blocked["allowed"] is False
+    assert "dnc_listed" in blocked["reasons"]

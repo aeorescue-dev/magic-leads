@@ -773,6 +773,65 @@ def import_dnc_csv(csv_text: str, source: str = "import") -> dict:
     return import_dnc_text(csv_text, source)
 
 
+def scrub_prospects_with_dnc_text(text: str, source: str = "official") -> dict:
+    """Aplica a lista DNC à base: listados bloqueiam, não listados ficam limpos.
+
+    Assume que a lista é a registry oficial completa. Para listas parciais,
+    usar apenas `import_dnc_text` (não scrub).
+    """
+    init()
+    found, _ = _extract_dnc_entries(text)
+    if not found:
+        raise ValueError("nenhum telefone detetado na lista DNC")
+    now = _utc_now()
+    expires = now + timedelta(days=DNC_MAX_AGE_DAYS)
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT phone FROM prospect_companies WHERE COALESCE(TRIM(phone),'')<>''"
+        ).fetchall()
+        listed = cleared = 0
+        for row in rows:
+            phone = str(row["phone"])
+            is_listed = bool(found.get(phone, False))
+            conn.execute(
+                """
+                INSERT INTO dnc_checks
+                  (phone, listed, source, provider, checked_at, expires_at, raw_status)
+                VALUES (?, ?, 'dnc_scrub', 'file', ?, ?, ?)
+                ON CONFLICT(phone) DO UPDATE SET
+                  listed=excluded.listed,
+                  source=excluded.source,
+                  provider=excluded.provider,
+                  checked_at=excluded.checked_at,
+                  expires_at=excluded.expires_at,
+                  raw_status=excluded.raw_status
+                """,
+                (
+                    phone,
+                    1 if is_listed else 0,
+                    _iso(now),
+                    _iso(expires),
+                    "listed" if is_listed else "scrub_clear",
+                ),
+            )
+            if is_listed:
+                listed += 1
+            else:
+                cleared += 1
+        conn.commit()
+    finally:
+        conn.close()
+    return {
+        "ok": True,
+        "prospects": len(rows),
+        "listed": listed,
+        "cleared": cleared,
+        "dnc_numbers": len(found),
+        "source": source,
+    }
+
+
 def staging_clear_dnc() -> dict:
     """Marca todos os telefones como DNC limpo em staging (auditável)."""
     if not staging_mode():
