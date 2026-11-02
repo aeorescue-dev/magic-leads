@@ -37,7 +37,37 @@ def clean_db():
     analytics.clear_cache()
 
 
-def _payload(sid: str, *, cta: bool = True, engagement_ms: int = 45000):
+def _payload(
+    sid: str, *, cta: bool = True, engagement_ms: int = 45000, form: bool = False
+):
+    events = [
+        {
+            "uid": f"{sid}-pageview",
+            "name": "pageview",
+            "ts": (NOW - timedelta(minutes=5)).isoformat(),
+            "path": "/en",
+        }
+    ]
+    if cta:
+        events.append(
+            {
+                "uid": f"{sid}-cta",
+                "name": "cta_click",
+                "ts": (NOW - timedelta(minutes=4)).isoformat(),
+                "path": "/en",
+                "label": "hero_cta",
+            }
+        )
+    if form:
+        events.append(
+            {
+                "uid": f"{sid}-form",
+                "name": "form_submit",
+                "ts": (NOW - timedelta(minutes=3)).isoformat(),
+                "path": "/en",
+                "label": "auth",
+            }
+        )
     return {
         "session": {
             "id": sid,
@@ -54,27 +84,7 @@ def _payload(sid: str, *, cta: bool = True, engagement_ms: int = 45000):
                 "campaign": "dallas_roofing",
             },
         },
-        "events": [
-            {
-                "uid": f"{sid}-pageview",
-                "name": "pageview",
-                "ts": (NOW - timedelta(minutes=5)).isoformat(),
-                "path": "/en",
-            }
-        ]
-        + (
-            [
-                {
-                    "uid": f"{sid}-cta",
-                    "name": "cta_click",
-                    "ts": (NOW - timedelta(minutes=4)).isoformat(),
-                    "path": "/en",
-                    "label": "hero_cta",
-                }
-            ]
-            if cta
-            else []
-        ),
+        "events": events,
         "context": {
             "ua": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -170,6 +180,34 @@ def test_summary_conta_visitas_cta_e_funil(clean_db):
     assert funnel["Visitas"] == 2
     assert funnel["CTA click"] == 1
     assert snap["overall"]["score"] > 0
+
+
+def test_summary_campanhas_geo_cta_e_atribuicao_email(clean_db):
+    analytics.ingest(
+        _payload("sess-form-12345", cta=True, form=True), "203.0.113.50"
+    )
+    analytics.ingest(_payload("sess-nform-12345", cta=False), "203.0.113.51")
+    snap = analytics.summary("24h")
+
+    geo = {row["city"]: row for row in snap["geo"]}
+    assert geo["Dallas"]["cta_clicks"] == 1
+    assert geo["Dallas"]["visits"] == 2
+
+    campaign = next(
+        row for row in snap["campaigns"] if row["campaign"] == "dallas_roofing"
+    )
+    assert campaign["visits"] == 2
+    assert campaign["cta_clicks"] == 1
+    assert campaign["form_submits"] == 1
+
+    email = snap["email_attribution"]
+    assert email["visits"] == 2
+    assert email["cta_clicks"] == 1
+    assert email["form_submits"] == 1
+    assert email["form_rate"] == 50.0
+
+    assert snap["recent"][0]["source"] == "email"
+    assert snap["recent"][0]["campaign"] == "dallas_roofing"
 
 
 def test_rate_limit_por_ip():

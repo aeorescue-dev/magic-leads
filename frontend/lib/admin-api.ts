@@ -1174,6 +1174,39 @@ export interface AdminAnalyticsGeo {
   city: string;
   visits: number;
   visitors: number;
+  cta_clicks: number;
+  form_submits: number;
+}
+
+export interface AdminAnalyticsCampaign {
+  source: string;
+  medium: string;
+  campaign: string;
+  content: string;
+  visits: number;
+  visitors: number;
+  cta_clicks: number;
+  form_submits: number;
+  form_rate: number;
+  cta_rate: number;
+}
+
+export interface AdminAnalyticsAttribution {
+  visits: number;
+  cta_clicks: number;
+  form_submits: number;
+  form_rate: number;
+  rows: Array<{
+    campaign: string;
+    content: string;
+    city: string;
+    visits: number;
+    visitors: number;
+    cta_clicks: number;
+    form_submits: number;
+    form_rate: number;
+    cta_rate: number;
+  }>;
 }
 
 export interface AdminAnalytics {
@@ -1198,6 +1231,8 @@ export interface AdminAnalytics {
     forms: number;
   }>;
   sources: AdminAnalyticsSource[];
+  campaigns: AdminAnalyticsCampaign[];
+  email_attribution: AdminAnalyticsAttribution;
   geo: AdminAnalyticsGeo[];
   funnel: Array<{ step: string; count: number; rate: number }>;
   events: Array<{ name: string; count: number; sessions: number }>;
@@ -1208,6 +1243,11 @@ export interface AdminAnalytics {
     name: string;
     path: string | null;
     label: string | null;
+    source: string;
+    medium: string;
+    campaign: string;
+    content: string;
+    city: string;
   }>;
 }
 

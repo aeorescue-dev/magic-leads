@@ -1457,6 +1457,10 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   a todos os links; teste de compliance atualizado.
 - **Testes**: **1.227 pytest** (+11; 1 skipped), **107 vitest** (+3);
   tsc/lint/ruff limpos.
+- **Refinamento (02/11)**: geografia com CTA/forms por cidade, origem com
+  `utm_campaign`/`utm_content`, feed de ações com origem e painel
+  **E-mail → Lead** (`form_submit` por campanha/step/cidade). Testes: 1.228
+  pytest.
 
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.

@@ -63,8 +63,12 @@ referrer, locale, device/browser/OS, pageviews, engagement_ms, scroll_pct.
   engagement (tempo + scroll), 30% conversão (CTA + formulário).
 - Cards: visitas, únicos, pageviews, cliques CTA, formulários, tempo médio,
   bounce — com sparkline e delta.
-- Gráficos: tráfego (hora/dia), origens, funil, geografia, dispositivo/idioma,
-  ações recentes. Filtros 24h/7d/30d; SWR 30 s; API cache 60 s.
+- Gráficos: tráfego (hora/dia), origens + **campanhas/UTM (campaign/content)**,
+  funil, **e-mail → lead** (forms por campanha/step/cidade), geografia com
+  **CTA e forms por cidade**, dispositivo/idioma, ações recentes **com a
+  origem (email/UTM/direct)**. Filtros 24h/7d/30d; SWR 30 s; API cache 60 s.
+- `email_attribution` isola as sessões `source='email'` e cruza-as com
+  `form_submit`; `campaigns` agrupa por `source/medium/campaign/content`.
 
 ## Operação
 

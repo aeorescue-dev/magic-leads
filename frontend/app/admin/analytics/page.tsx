@@ -243,6 +243,15 @@ export default function AnalyticsPage() {
   const overall = data.overall;
   const overallClasses = scoreClasses(overall.score);
   const maxSource = Math.max(1, ...data.sources.map((s) => s.visits));
+  const campaignRows = [...data.campaigns]
+    .filter((campaign) => campaign.campaign && campaign.campaign !== "(none)")
+    .sort(
+      (a, b) =>
+        Number(b.source === "email") - Number(a.source === "email") ||
+        b.visits - a.visits
+    )
+    .slice(0, 8);
+  const email = data.email_attribution;
   const maxGeo = Math.max(1, ...data.geo.map((g) => g.visits));
   const funnelMax = Math.max(1, ...data.funnel.map((f) => f.count));
 
@@ -395,6 +404,41 @@ export default function AnalyticsPage() {
           ) : (
             <p className="py-8 text-center text-xs text-slate-500">Sem origens registadas.</p>
           )}
+          <h3 className="mt-4 mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+            Campanhas / passo do e-mail
+          </h3>
+          {campaignRows.length ? (
+            <div className="space-y-2">
+              {campaignRows.map((campaign) => (
+                <div
+                  key={`${campaign.source}-${campaign.medium}-${campaign.campaign}-${campaign.content}`}
+                  className="rounded-lg border border-white/5 bg-white/[0.02] p-2"
+                >
+                  <div className="flex items-center justify-between gap-2 text-[11px]">
+                    <span className="truncate font-mono text-[10px] text-slate-300">
+                      {campaign.campaign}
+                    </span>
+                    <span className="shrink-0 text-slate-500">
+                      {campaign.content || "—"}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 flex items-center justify-between text-[10px] text-slate-500">
+                    <span>
+                      {campaign.source}/{campaign.medium}
+                    </span>
+                    <span>
+                      {campaign.visits} visitas · {campaign.cta_clicks} CTA ·{" "}
+                      {campaign.form_submits} forms
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="py-4 text-center text-[11px] text-slate-500">
+              Sem campanhas UTM ainda. Os links de outreach já saem com UTM.
+            </p>
+          )}
         </Section>
 
         <Section title="Funil de conversão" icon={<Activity className="h-4 w-4 text-indigo-400" />} hint="Sessões distintas em cada passo">
@@ -418,6 +462,61 @@ export default function AnalyticsPage() {
           </div>
         </Section>
 
+        <Section title="E-mail → Lead" icon={<Send className="h-4 w-4 text-indigo-400" />} hint="Formulários preenchidos por campanha, passo e cidade">
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+            {[
+              ["Visitas email", email.visits, ""],
+              ["CTA", email.cta_clicks, ""],
+              ["Forms", email.form_submits, ""],
+              ["Taxa", email.form_rate, "%"],
+            ].map(([label, value, unit]) => (
+              <div key={String(label)} className="rounded-lg border border-white/5 bg-white/[0.02] p-2">
+                <p className="text-[10px] text-slate-500">{label}</p>
+                <p className="text-lg font-bold text-slate-100">
+                  {fmtValue(value as number, String(unit))}
+                </p>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full text-left text-[11px]">
+              <thead className="text-slate-500">
+                <tr>
+                  <th className="pb-1">Campanha</th>
+                  <th className="pb-1">Step</th>
+                  <th className="pb-1">Cidade</th>
+                  <th className="pb-1 text-right">Visitas</th>
+                  <th className="pb-1 text-right">CTA</th>
+                  <th className="pb-1 text-right">Forms</th>
+                  <th className="pb-1 text-right">Taxa</th>
+                </tr>
+              </thead>
+              <tbody>
+                {email.rows.map((row) => (
+                  <tr key={`${row.campaign}-${row.content}-${row.city}`} className="border-t border-white/5">
+                    <td className="max-w-[160px] truncate py-1.5 font-mono text-[10px] text-slate-300">
+                      {row.campaign}
+                    </td>
+                    <td className="py-1.5 text-slate-400">{row.content || "—"}</td>
+                    <td className="py-1.5 text-slate-400">{row.city || "—"}</td>
+                    <td className="py-1.5 text-right text-slate-300">{row.visits}</td>
+                    <td className="py-1.5 text-right text-slate-300">{row.cta_clicks}</td>
+                    <td className="py-1.5 text-right font-semibold text-emerald-300">{row.form_submits}</td>
+                    <td className="py-1.5 text-right text-slate-400">{row.form_rate.toFixed(1)}%</td>
+                  </tr>
+                ))}
+                {!email.rows.length ? (
+                  <tr>
+                    <td colSpan={7} className="py-6 text-center text-slate-500">
+                      Sem formulários atribuídos a e-mail no período.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </Section>
+
         <Section title="Geografia" icon={<Globe2 className="h-4 w-4 text-indigo-400" />} hint="País/região/cidade (cidade-level, sem coordenadas)">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-[11px]">
@@ -427,6 +526,8 @@ export default function AnalyticsPage() {
                   <th className="pb-1">Cidade</th>
                   <th className="pb-1 text-right">Visitas</th>
                   <th className="pb-1 text-right">Únicos</th>
+                  <th className="pb-1 text-right">CTA</th>
+                  <th className="pb-1 text-right">Forms</th>
                 </tr>
               </thead>
               <tbody>
@@ -438,11 +539,13 @@ export default function AnalyticsPage() {
                     </td>
                     <td className="py-1.5 text-right text-slate-300">{row.visits}</td>
                     <td className="py-1.5 text-right text-slate-400">{row.visitors}</td>
+                    <td className="py-1.5 text-right text-slate-300">{row.cta_clicks}</td>
+                    <td className="py-1.5 text-right text-emerald-300">{row.form_submits}</td>
                   </tr>
                 ))}
                 {!data.geo.length ? (
                   <tr>
-                    <td colSpan={4} className="py-6 text-center text-slate-500">
+                    <td colSpan={6} className="py-6 text-center text-slate-500">
                       Sem dados geográficos.
                     </td>
                   </tr>
@@ -482,6 +585,7 @@ export default function AnalyticsPage() {
                 <tr>
                   <th className="pb-1">Quando</th>
                   <th className="pb-1">Evento</th>
+                  <th className="pb-1">Origem</th>
                   <th className="pb-1">Label</th>
                   <th className="pb-1">Página</th>
                 </tr>
@@ -493,13 +597,28 @@ export default function AnalyticsPage() {
                     <td className="py-1.5 font-semibold text-slate-300">
                       {EVENT_LABELS[row.name] || row.name}
                     </td>
+                    <td className="py-1.5 text-[10px] text-slate-400">
+                      {row.source === "email" ? (
+                        <>
+                          <span className="font-semibold text-emerald-300">email</span>
+                          <span className="text-slate-500">
+                            {" "}· {row.campaign || "?"} · {row.content || "?"}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="font-semibold text-slate-300">{row.source}</span>
+                      )}
+                      {row.city ? (
+                        <div className="text-[9px] text-slate-500">{row.city}</div>
+                      ) : null}
+                    </td>
                     <td className="py-1.5 text-slate-400">{row.label || "—"}</td>
                     <td className="py-1.5 text-slate-500">{row.path || "—"}</td>
                   </tr>
                 ))}
                 {!data.recent.length ? (
                   <tr>
-                    <td colSpan={4} className="py-6 text-center text-slate-500">
+                    <td colSpan={5} className="py-6 text-center text-slate-500">
                       Sem eventos no período.
                     </td>
                   </tr>

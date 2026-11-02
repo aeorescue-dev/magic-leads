@@ -482,6 +482,82 @@ def _score_ratio(current: float, previous: float) -> int:
     return max(0, min(100, int(round(50 + 50 * (current - previous) / previous))))
 
 
+def _grouped(
+    conn: sqlite3.Connection,
+    cols: list[str],
+    start_s: str,
+    now_s: str,
+    limit: int,
+    extra_where: str = "",
+) -> list[dict]:
+    """Agrupa sessões + eventos (cliques/formulários) sem duplicar visitas."""
+    col_sql = ", ".join(
+        f"COALESCE(NULLIF(TRIM(s.{col}),''),'(none)') AS {col}" for col in cols
+    )
+    group_sql = ", ".join(str(i + 1) for i in range(len(cols)))
+    where = f"AND {extra_where}" if extra_where else ""
+    sessions = conn.execute(
+        f"""
+        SELECT {col_sql}, COUNT(*) visits,
+               COUNT(DISTINCT COALESCE(s.visitor_hash, s.session_key)) visitors,
+               SUM(s.pageviews) pageviews
+        FROM sessions s
+        WHERE s.started_at>=? AND s.started_at<? {where}
+        GROUP BY {group_sql}
+        """,
+        (start_s, now_s),
+    ).fetchall()
+    events = conn.execute(
+        f"""
+        SELECT {col_sql},
+               SUM(CASE WHEN e.name='cta_click' THEN 1 ELSE 0 END) cta_clicks,
+               SUM(CASE WHEN e.name='form_submit' THEN 1 ELSE 0 END) form_submits,
+               COUNT(DISTINCT CASE WHEN e.name='cta_click' THEN e.session_id END)
+                 cta_sessions,
+               COUNT(DISTINCT CASE WHEN e.name='form_submit' THEN e.session_id END)
+                 form_sessions
+        FROM events e JOIN sessions s ON s.id=e.session_id
+        WHERE e.ts>=? AND e.ts<? {where}
+        GROUP BY {group_sql}
+        """,
+        (start_s, now_s),
+    ).fetchall()
+    by_key = {
+        tuple(row[col] for col in cols): {
+            **{col: row[col] for col in cols},
+            "visits": int(row["visits"] or 0),
+            "visitors": int(row["visitors"] or 0),
+            "pageviews": int(row["pageviews"] or 0),
+            "cta_clicks": 0,
+            "form_submits": 0,
+            "cta_sessions": 0,
+            "form_sessions": 0,
+        }
+        for row in sessions
+    }
+    for row in events:
+        key = tuple(row[col] for col in cols)
+        item = by_key.setdefault(
+            key,
+            {
+                **{col: row[col] for col in cols},
+                "visits": 0, "visitors": 0, "pageviews": 0,
+                "cta_clicks": 0, "form_submits": 0,
+                "cta_sessions": 0, "form_sessions": 0,
+            },
+        )
+        item["cta_clicks"] = int(row["cta_clicks"] or 0)
+        item["form_submits"] = int(row["form_submits"] or 0)
+        item["cta_sessions"] = int(row["cta_sessions"] or 0)
+        item["form_sessions"] = int(row["form_sessions"] or 0)
+    rows = sorted(by_key.values(), key=lambda r: (r["visits"], r["cta_clicks"]), reverse=True)
+    for row in rows:
+        visits = row["visits"]
+        row["form_rate"] = round(row["form_sessions"] * 100 / visits, 1) if visits else 0.0
+        row["cta_rate"] = round(row["cta_sessions"] * 100 / visits, 1) if visits else 0.0
+    return rows[: max(1, int(limit))]
+
+
 def summary(range_key: str = "7d") -> dict:
     init_db()
     now = datetime.now(timezone.utc)
@@ -609,29 +685,32 @@ def summary(range_key: str = "7d") -> dict:
                 buckets[key]["forms"] += int(row["c"])
         series = [buckets[k] for k in sorted(buckets)]
 
-        sources = [
-            dict(r) for r in conn.execute(
-                """
-                SELECT source, medium, COUNT(*) visits,
-                       COUNT(DISTINCT COALESCE(visitor_hash, session_key)) visitors,
-                       SUM(pageviews) pageviews
-                FROM sessions WHERE started_at>=? AND started_at<?
-                GROUP BY source, medium ORDER BY visits DESC LIMIT 12
-                """,
-                (start_s, now_s),
-            ).fetchall()
-        ]
-        geo = [
-            dict(r) for r in conn.execute(
-                """
-                SELECT country, region, city, COUNT(*) visits,
-                       COUNT(DISTINCT COALESCE(visitor_hash, session_key)) visitors
-                FROM sessions WHERE started_at>=? AND started_at<?
-                GROUP BY country, region, city ORDER BY visits DESC LIMIT 15
-                """,
-                (start_s, now_s),
-            ).fetchall()
-        ]
+        sources = _grouped(conn, ["source", "medium"], start_s, now_s, 12)
+        geo = _grouped(conn, ["country", "region", "city"], start_s, now_s, 15)
+        campaigns = _grouped(
+            conn, ["source", "medium", "campaign", "content"], start_s, now_s, 15
+        )
+        attribution_rows = _grouped(
+            conn,
+            ["campaign", "content", "city"],
+            start_s,
+            now_s,
+            15,
+            extra_where="s.source='email'",
+        )
+        email_visits = sum(int(r["visits"] or 0) for r in attribution_rows)
+        email_cta = sum(int(r["cta_clicks"] or 0) for r in attribution_rows)
+        email_forms = sum(int(r["form_sessions"] or 0) for r in attribution_rows)
+        email_attribution = {
+            "visits": email_visits,
+            "cta_clicks": email_cta,
+            "form_submits": email_forms,
+            "form_rate": round(email_forms * 100 / email_visits, 1)
+            if email_visits
+            else 0.0,
+            "rows": attribution_rows,
+        }
+
         devices = [
             dict(r) for r in conn.execute(
                 "SELECT device, COUNT(*) visits FROM sessions "
@@ -656,8 +735,13 @@ def summary(range_key: str = "7d") -> dict:
         ]
         recent = [
             dict(r) for r in conn.execute(
-                "SELECT ts, name, path, label FROM events "
-                "WHERE ts>=? AND ts<? ORDER BY ts DESC LIMIT 15",
+                """
+                SELECT e.ts, e.name, e.path, e.label,
+                       s.source, s.medium, s.campaign, s.content, s.city
+                FROM events e JOIN sessions s ON s.id=e.session_id
+                WHERE e.ts>=? AND e.ts<?
+                ORDER BY e.ts DESC LIMIT 15
+                """,
                 (start_s, now_s),
             ).fetchall()
         ]
@@ -756,6 +840,8 @@ def summary(range_key: str = "7d") -> dict:
             },
             "series": series,
             "sources": sources,
+            "campaigns": campaigns,
+            "email_attribution": email_attribution,
             "geo": geo,
             "funnel": funnel,
             "events": events,
