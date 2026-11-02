@@ -89,7 +89,16 @@ async def check_mailboxes(now: Optional[datetime] = None) -> dict:
                 paused += 1
                 continue
         events = await db_service.last_bounce_events(mid, 2)
-        if len(events) == 2 and all(e.get("kind") == "bounce" for e in events):
+        distinct_emails = {
+            str(event.get("email") or "").lower()
+            for event in events
+            if event.get("email")
+        }
+        if (
+            len(events) == 2
+            and all(e.get("kind") == "bounce" for e in events)
+            and len(distinct_emails) >= 2
+        ):
             await _pause(
                 mailbox,
                 "consecutive_bounces",

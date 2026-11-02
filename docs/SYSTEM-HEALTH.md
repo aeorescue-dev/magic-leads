@@ -39,8 +39,10 @@ owner backfill sem run em 6h `-10`.
 
 **Outreach** — caixa pausada `-30` cada (cap 60); motor desligado com fila
 `-30`; bounce >2% `-40` (>1% `-20`); complaint >0,1% `-50`; fila >3h com
-blocker inesperado `-20`. `mailbox_cap` e `quiet_hours` são esperados: não
-penalizam, mas o blocker fica visível.
+blocker inesperado `-20`. Bounce/complaint só penalizam com **≥20 envios por
+caixa** (a mesma amostra do disjuntor); abaixo disso a taxa fica visível como
+aviso de amostra (`amostra X/20`), sem derrubar a camada. `mailbox_cap` e
+`quiet_hours` são esperados: não penalizam, mas o blocker fica visível.
 
 **Push** — `not_configured` `-60`; zero entregas com subs ativas `-25`;
 >20% mortas (≥10 entregas) `-30`; zero subs `-15`.

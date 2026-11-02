@@ -1422,6 +1422,22 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   System Health (`POST /api/admin/alerts/{id}/ack`, sessão de admin, limpa o
   cache do snapshot). Testes: **1.210 pytest**, **104 vitest**.
 
+### Fase 28 — bounce duplicado + queue_age esperado (2026-11-02)
+
+- **Bounce:** 1 endereço real (`info@alliedroofingtexas.com`) devolveu
+  `user is over quota` (4,5% = 1/22). Foi suprimido e o contacto ficou
+  `unsubscribed=1`. O inbox sync relia o mesmo DSN de 5 em 5 min e criava
+  eventos duplicados; o segundo evento disparou
+  `consecutive_bounces` e pausou Pedro (falso positivo).
+- **Correções:** `inbox_processed_messages` (message-id processado uma vez),
+  índice único `(mailbox_id, lower(email), kind)` + migração de dedupe,
+  `mailbox_guard` exige 2 e-mails **distintos**, e o score de Outreach usa a
+  amostra de **20 envios por caixa** (igual ao disjuntor).
+- **queue_age:** blockers `quiet hours` e `limite de caixa` passam a `ok`
+  ("retenção esperada"); `send_enabled=0`/cidade desligada continuam `warn`.
+- Detalhe do incidente em `docs/INCIDENT-2026-11-02-BOUNCE.md`.
+- **Testes:** **1.216 pytest** (+6; 1 skipped); ruff limpo.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

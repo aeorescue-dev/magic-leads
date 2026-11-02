@@ -91,3 +91,34 @@ def test_classify_does_not_treat_own_bounce_text_as_reply():
         _payload(BOUNCE_HEADERS, BOUNCE_BODY), {"info@skender.com"}
     )
     assert kind == "bounce"
+
+
+def test_processed_message_registry_is_idempotent():
+    message_id = "pytest-inbox-msg-001"
+    con = ib.get_connection()
+    try:
+        con.execute(
+            "DELETE FROM inbox_processed_messages WHERE message_id=?", (message_id,)
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    assert ib._is_processed(message_id) is False
+    ib._mark_processed(message_id)
+    assert ib._is_processed(message_id) is True
+    ib._mark_processed(message_id)  # não rebenta nem duplica
+
+    con = ib.get_connection()
+    try:
+        count = con.execute(
+            "SELECT COUNT(*) FROM inbox_processed_messages WHERE message_id=?",
+            (message_id,),
+        ).fetchone()[0]
+        con.execute(
+            "DELETE FROM inbox_processed_messages WHERE message_id=?", (message_id,)
+        )
+        con.commit()
+    finally:
+        con.close()
+    assert count == 1

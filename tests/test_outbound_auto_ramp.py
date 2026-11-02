@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from backend.services import auto_ramp, mailbox_guard
+from backend.services import auto_ramp, inbox_sync, mailbox_guard
 from backend.services.db import db_service, get_connection
 from backend.services.outbound_engine import effective_mailbox_cap
 
@@ -282,11 +282,11 @@ async def test_bounce_rate_pausa_caixa(clean_mailboxes, monkeypatch):
     mailbox = _mailbox()
     conn = get_connection()
     try:
-        for _ in range(3):
+        for idx in range(3):
             conn.execute(
-                "INSERT INTO mailbox_bounce_events (mailbox_id, email, kind) "
-                "VALUES (?, 'x@example.com', 'bounce')",
-                (mailbox["id"],),
+                "INSERT OR IGNORE INTO mailbox_bounce_events (mailbox_id, email, kind) "
+                "VALUES (?, ?, 'bounce')",
+                (mailbox["id"], f"x{idx}@example.com"),
             )
         conn.commit()
     finally:
@@ -310,11 +310,11 @@ async def test_dois_bounces_consecutivos_pausam(clean_mailboxes, monkeypatch):
     mailbox = _mailbox()
     conn = get_connection()
     try:
-        for _ in range(2):
+        for idx in range(2):
             conn.execute(
-                "INSERT INTO mailbox_bounce_events (mailbox_id, email, kind) "
-                "VALUES (?, 'x@example.com', 'bounce')",
-                (mailbox["id"],),
+                "INSERT OR IGNORE INTO mailbox_bounce_events (mailbox_id, email, kind) "
+                "VALUES (?, ?, 'bounce')",
+                (mailbox["id"], f"y{idx}@example.com"),
             )
         conn.commit()
     finally:
@@ -330,6 +330,53 @@ async def test_dois_bounces_consecutivos_pausam(clean_mailboxes, monkeypatch):
     row = db_service._service.list_sending_mailboxes()[0]
     assert row["enabled"] == 0
     assert row["paused_reason"] == "consecutive_bounces"
+
+
+@pytest.mark.asyncio
+async def test_bounce_duplicado_do_mesmo_email_nao_pausa(clean_mailboxes, monkeypatch):
+    """O mesmo DSN re-lido não pode valer por dois bounces consecutivos."""
+    mailbox = _mailbox()
+    conn = get_connection()
+    try:
+        for _ in range(2):
+            conn.execute(
+                "INSERT OR IGNORE INTO mailbox_bounce_events (mailbox_id, email, kind) "
+                "VALUES (?, 'dup@example.com', 'bounce')",
+                (mailbox["id"],),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    async def fake_metrics(mailbox_id, days=30):
+        return _metrics(sent=3, bounces=2)
+
+    monkeypatch.setattr(
+        mailbox_guard.db_service, "mailbox_metrics", fake_metrics, raising=False
+    )
+    await mailbox_guard.check_mailboxes(NOW)
+    row = db_service._service.list_sending_mailboxes()[0]
+    assert row["enabled"] == 1
+    assert row["paused_reason"] is None
+
+
+def test_suppress_e_idempotente_para_o_mesmo_bounce(clean_mailboxes):
+    mailbox = _mailbox()
+    inbox_sync._suppress("dup@example.com", "bounce", mailbox["id"])
+    inbox_sync._suppress("dup@example.com", "bounce", mailbox["id"])
+
+    conn = get_connection()
+    try:
+        events = conn.execute(
+            "SELECT COUNT(*) FROM mailbox_bounce_events WHERE lower(email)='dup@example.com'"
+        ).fetchone()[0]
+        suppressions = conn.execute(
+            "SELECT COUNT(*) FROM suppressions WHERE lower(value)='dup@example.com'"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert events == 1
+    assert suppressions == 1
 
 
 @pytest.mark.asyncio

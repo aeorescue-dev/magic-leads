@@ -162,7 +162,15 @@ def _metrics(sent=100, bounced=1, complaints=0):
             "bounced": bounced,
             "complaints": complaints,
             "bounce_rate": bounced / sent if sent else 0,
-        }
+        },
+        "mailboxes": [
+            {
+                "sent": sent,
+                "bounced": bounced,
+                "complaints": complaints,
+                "bounce_rate": bounced / sent if sent else 0,
+            }
+        ],
     }
 
 
@@ -189,6 +197,23 @@ def test_outreach_bounce_and_complaint_are_fail():
     layer = sh.score_outreach(_out(), _metrics(sent=100, bounced=3, complaints=1), NOW)
     assert layer["score"] == 10  # -40 bounce -50 complaint
     assert layer["status"] == "fail"
+
+
+def test_outreach_bounce_below_sample_is_warn_not_penalised():
+    """1 bounce em 10 envios é visível, mas não é amostra para falhar."""
+    layer = sh.score_outreach(_out(), _metrics(sent=10, bounced=1), NOW)
+    assert layer["score"] == 100
+    assert layer["status"] == "ok"
+    metric = next(m for m in layer["metrics"] if m["key"] == "bounce_rate")
+    assert metric["status"] == "warn"
+    assert "amostra 10/20" in metric["threshold"]
+
+
+def test_outreach_bounce_with_sample_penalises():
+    layer = sh.score_outreach(_out(), _metrics(sent=20, bounced=1), NOW)
+    assert layer["score"] == 60  # 1/20 = 5%
+    assert layer["status"] == "warn"
+    assert "amostra ≥20" in " ".join(layer["reasons"])
 
 
 def test_outreach_cap_blocker_is_expected_not_penalised():

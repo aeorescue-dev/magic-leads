@@ -65,6 +65,9 @@ STATUS_LABELS = {
 # Códigos de auditoria de segurança/administração: ficam visíveis no feed, mas
 # não são falhas operacionais e não podem baixar o score da torre.
 NON_OPERATIONAL_ALERT_PREFIXES = ("ADMIN_ACCESS_",)
+# Mesma amostra minima do disjuntor (`mailbox_guard.MIN_SAMPLE`): uma taxa de
+# bounce so e' acionavel com >=20 envios na caixa, nao com 1 bounce em 22.
+MIN_BOUNCE_SAMPLE = 20
 CACHE_TTL_SECONDS = 30.0
 _CACHE: dict[str, Any] = {"at": 0.0, "window": 0, "data": None}
 
@@ -358,15 +361,55 @@ def score_outreach(out: dict, metrics: dict, now: datetime) -> dict:
     bounce_rate = float(totals.get("bounce_rate") or 0.0)
     complaints = int(totals.get("complaints") or 0)
     complaint_rate = (complaints / sent) if sent else 0.0
-    if sent >= 20 and bounce_rate > 0.02:
+
+    # O disjuntor só avalia taxa com >=20 envios POR CAIXA. O painel usa a
+    # mesma amostra: com 11 envios numa caixa, 1 bounce (4,5% agregado) não é
+    # um sinal estatístico e não deve pintar Outreach de vermelho.
+    mailbox_rows = (metrics or {}).get("mailboxes") or []
+    sampled = [
+        m for m in mailbox_rows if int(m.get("sent") or 0) >= MIN_BOUNCE_SAMPLE
+    ]
+    max_sample_sent = max(
+        (int(m.get("sent") or 0) for m in mailbox_rows), default=0
+    )
+    max_bounce = max(
+        (float(m.get("bounce_rate") or 0.0) for m in sampled), default=None
+    )
+    max_complaint = None
+    for m in sampled:
+        row_sent = int(m.get("sent") or 0)
+        if row_sent:
+            rate = int(m.get("complaints") or 0) / row_sent
+            max_complaint = rate if max_complaint is None else max(max_complaint, rate)
+
+    if max_bounce is not None and max_bounce > 0.02:
         penalties.append(40)
-        reasons.append(f"Bounce {bounce_rate * 100:.1f}%")
-    elif sent >= 20 and bounce_rate > 0.01:
+        reasons.append(f"Bounce {max_bounce * 100:.1f}% (amostra ≥20/caixa)")
+    elif max_bounce is not None and max_bounce > 0.01:
         penalties.append(20)
-        reasons.append(f"Bounce {bounce_rate * 100:.1f}%")
-    if sent >= 20 and complaint_rate > 0.001:
+        reasons.append(f"Bounce {max_bounce * 100:.1f}% (amostra ≥20/caixa)")
+    if max_complaint is not None and max_complaint > 0.001:
         penalties.append(50)
-        reasons.append(f"Complaint {complaint_rate * 100:.2f}%")
+        reasons.append(f"Complaint {max_complaint * 100:.2f}% (amostra ≥20/caixa)")
+
+    bounce_status = "ok"
+    bounce_threshold = "2%"
+    if max_bounce is not None and max_bounce > 0.02:
+        bounce_status = "fail"
+    elif bounce_rate > 0.02:
+        bounce_status = "warn"
+        bounce_threshold = f"amostra {max_sample_sent}/{MIN_BOUNCE_SAMPLE} por caixa"
+    if max_complaint is not None and max_complaint > 0.001:
+        complaint_status = "fail"
+    elif complaint_rate > 0.001:
+        complaint_status = "warn"
+    else:
+        complaint_status = "ok"
+    sampled_note = (
+        f"amostra {max_sample_sent}/{MIN_BOUNCE_SAMPLE} por caixa"
+        if max_sample_sent < MIN_BOUNCE_SAMPLE
+        else "amostra ≥20/caixa"
+    )
 
     blocker = out.get("queue_blocker") or {}
     blocker_reason = str(blocker.get("reason") or "")
@@ -398,15 +441,15 @@ def score_outreach(out: dict, metrics: dict, now: datetime) -> dict:
             "Bounce 30d",
             round(bounce_rate * 100, 2),
             "%",
-            "ok" if bounce_rate <= 0.02 else "fail",
-            "2%",
+            bounce_status,
+            bounce_threshold,
         ),
         _metric(
             "complaint_rate",
             "Complaint 30d",
             round(complaint_rate * 100, 2),
             "%",
-            "ok" if complaint_rate <= 0.001 else "fail",
+            complaint_status,
             "0,1%",
         ),
     ]
@@ -421,6 +464,11 @@ def score_outreach(out: dict, metrics: dict, now: datetime) -> dict:
             "quiet_hours_now": out.get("quiet_hours_now"),
             "mailboxes": mailboxes,
             "totals": totals,
+            "bounce_gate": {
+                "sample_max": max_sample_sent,
+                "min_sample": MIN_BOUNCE_SAMPLE,
+                "note": sampled_note,
+            },
         },
     )
 

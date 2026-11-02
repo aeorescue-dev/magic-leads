@@ -1011,6 +1011,16 @@ CREATE TABLE IF NOT EXISTS mailbox_bounce_events (
 CREATE INDEX IF NOT EXISTS idx_mailbox_bounce_mb
   ON mailbox_bounce_events (mailbox_id, created_at);
 
+-- Idempotencia do inbox sync: cada message-id do Gmail e' processado uma vez.
+-- Sem isto, o mesmo bounce (que fica 2 dias na inbox) era contado a cada
+-- varrimento de 5 min, inflacionando a taxa e o disjuntor.
+CREATE TABLE IF NOT EXISTS inbox_processed_messages (
+  message_id TEXT PRIMARY KEY,
+  processed_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_inbox_processed_at
+  ON inbox_processed_messages (processed_at);
+
 -- Auditoria das subidas de Auto-Ramp (append-only).
 CREATE TABLE IF NOT EXISTS mailbox_ramp_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2191,6 +2201,23 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
             "ALTER TABLE city_enrichment_state "
             "ADD COLUMN domain_jobs_today INTEGER DEFAULT 0"
         )
+
+    # Um bounce/complaint conta uma vez por (caixa, email, tipo). Sem isto, o
+    # mesmo DSN re-lido pelo inbox sync inflacionava a taxa e disparava o
+    # disjuntor de "2 bounces consecutivos" para o mesmo endereco.
+    try:
+        conn.execute(
+            "DELETE FROM mailbox_bounce_events WHERE id NOT IN ("
+            "  SELECT MIN(id) FROM mailbox_bounce_events "
+            "  GROUP BY mailbox_id, lower(email), kind"
+            ")"
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_mailbox_bounce_unique "
+            "ON mailbox_bounce_events (mailbox_id, lower(email), kind)"
+        )
+    except sqlite3.OperationalError as exc:
+        logger.warning("Migracao de mailbox_bounce_events falhou: %s", exc)
 
 
 

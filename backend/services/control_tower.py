@@ -462,8 +462,17 @@ def _check_queue() -> list[dict]:
 
             base = f"{row['n']} na fila; mais antiga {age_h:.0f}h"
             if blocked_reason:
-                detail = f"{base} · parada por {blocked_reason}: {blocked_detail}"
-                status = "warn"
+                if blocked_reason in ("quiet hours", "limite de caixa"):
+                    # Backpressure planeada: a fila espera pela janela/cap.
+                    # Não é falha operacional e não deve pintar o digest.
+                    detail = (
+                        f"{base} · retenção esperada ({blocked_reason}): "
+                        f"{blocked_detail}"
+                    )
+                    status = "ok"
+                else:
+                    detail = f"{base} · parada por {blocked_reason}: {blocked_detail}"
+                    status = "warn"
             elif age_h > QUEUE_WARN_H:
                 detail = (
                     f"{base} · há capacidade ({capacity['remaining']} envio(s) hoje) "

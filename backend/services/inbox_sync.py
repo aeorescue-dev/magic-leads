@@ -209,11 +209,52 @@ def _suppress(email: str, reason: str, mailbox_id: Optional[int] = None) -> None
         )
         if mailbox_id is not None:
             # Base do disjuntor: bounce/complaint por caixa (30 dias).
+            # O indice unico (mailbox_id, lower(email), kind) + OR IGNORE
+            # impedem que o mesmo DSN re-lido conte duas vezes.
             con.execute(
-                "INSERT INTO mailbox_bounce_events (mailbox_id, email, kind) "
+                "INSERT OR IGNORE INTO mailbox_bounce_events (mailbox_id, email, kind) "
                 "VALUES (?, ?, ?)",
                 (int(mailbox_id), email.lower(), reason),
             )
+        con.commit()
+    finally:
+        con.close()
+
+
+def _is_processed(message_id: str) -> bool:
+    con = get_connection()
+    try:
+        return (
+            con.execute(
+                "SELECT 1 FROM inbox_processed_messages WHERE message_id=?",
+                (message_id,),
+            ).fetchone()
+            is not None
+        )
+    finally:
+        con.close()
+
+
+def _mark_processed(message_id: str) -> None:
+    con = get_connection()
+    try:
+        con.execute(
+            "INSERT OR IGNORE INTO inbox_processed_messages (message_id) VALUES (?)",
+            (message_id,),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+
+def _prune_processed(days: int = 30) -> None:
+    con = get_connection()
+    try:
+        con.execute(
+            "DELETE FROM inbox_processed_messages "
+            "WHERE processed_at < datetime('now', ?)",
+            (f"-{max(1, int(days))} days",),
+        )
         con.commit()
     finally:
         con.close()
@@ -241,6 +282,7 @@ async def sync_inbox(days: int = 2, max_messages: int = 40) -> dict:
         return {"status": "skipped", "reason": "sem caixas ativas"}
 
     emails, by_email = _contact_emails()
+    _prune_processed(30)
     stats = {"mailboxes": 0, "scanned": 0, "replies": 0, "bounces": 0,
              "complaints": 0, "no_permission": 0, "errors": []}
 
@@ -280,6 +322,8 @@ async def sync_inbox(days: int = 2, max_messages: int = 40) -> dict:
                 mid = ref.get("id")
                 if not mid:
                     continue
+                if _is_processed(mid):
+                    continue
                 try:
                     mr = await client.get(
                         f"{GMAIL_API}/users/{mb['email']}/messages/{mid}",
@@ -305,6 +349,7 @@ async def sync_inbox(days: int = 2, max_messages: int = 40) -> dict:
                         if addr in by_email:
                             _suppress(addr, kind, mb["id"])
                             stats["bounces" if kind == "bounce" else "complaints"] += 1
+                _mark_processed(mid)
 
     _kv_set(KV_LAST_SYNC, "ok")
     if stats["replies"] or stats["bounces"] or stats["complaints"]:

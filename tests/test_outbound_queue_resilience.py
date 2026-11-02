@@ -401,5 +401,34 @@ def test_control_tower_explains_cap_instead_of_failing(clean_engine):
     )
 
     checks = {c["name"]: c for c in control_tower._check_queue()}
-    assert checks["queue_age"]["status"] == "warn"
+    assert checks["queue_age"]["status"] == "ok"
     assert "limite de caixa" in checks["queue_age"]["detail"]
+    assert "retenção esperada" in checks["queue_age"]["detail"]
+
+
+def test_control_tower_treats_quiet_hours_as_expected(clean_engine, monkeypatch):
+    """Fila parada por quiet hours é backpressure planeada, não falha."""
+    _config(send_enabled="1")
+    _mailbox("ct-quiet@example.com", daily_cap=25)
+
+    lead = _lead("BOSTON", "res-bos-quiet", "77 QUIET TEST AVE 2026")
+    _contact(lead, "quiet@vitorio.com", "BOSTON")
+    msg = _queue("BOSTON", "quiet@vitorio.com")
+    old = (datetime.now(timezone.utc) - timedelta(hours=15)).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE outbound_messages SET queued_at=? WHERE id=?",
+            (old, msg["id"]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    monkeypatch.setattr(engine_module, "is_quiet_hours", lambda *a, **k: True)
+    checks = {c["name"]: c for c in control_tower._check_queue()}
+    assert checks["queue_age"]["status"] == "ok"
+    assert "quiet hours" in checks["queue_age"]["detail"]
+    assert "retenção esperada" in checks["queue_age"]["detail"]
