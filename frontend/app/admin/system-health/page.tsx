@@ -800,12 +800,14 @@ export default function SystemHealthPage() {
                   <span
                     className={ClassNames(
                       "text-[10px] font-bold uppercase",
-                      String(alert.level).toLowerCase().includes("crit")
-                        ? "text-rose-300"
-                        : "text-amber-300"
+                      alert.informational
+                        ? "text-slate-400"
+                        : String(alert.level).toLowerCase().includes("crit")
+                          ? "text-rose-300"
+                          : "text-amber-300"
                     )}
                   >
-                    {alert.level}
+                    {alert.informational ? "auditoria" : alert.level}
                   </span>
                   <span className="text-[10px] text-slate-500">
                     {fmtWhen(alert.created_at)}
@@ -813,6 +815,11 @@ export default function SystemHealthPage() {
                 </div>
                 <p className="mt-1 font-mono text-[10px] text-slate-400">{alert.code}</p>
                 <p className="text-[11px] text-slate-300">{alert.message}</p>
+                {alert.informational ? (
+                  <p className="mt-1 text-[10px] text-slate-500">
+                    Registo de auditoria — não afeta o score operacional.
+                  </p>
+                ) : null}
               </div>
             ))}
             {!alertItems.length ? (

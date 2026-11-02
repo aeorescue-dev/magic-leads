@@ -62,6 +62,9 @@ STATUS_LABELS = {
     "fail": "Crítico",
     "unknown": "Sem dados",
 }
+# Códigos de auditoria de segurança/administração: ficam visíveis no feed, mas
+# não são falhas operacionais e não podem baixar o score da torre.
+NON_OPERATIONAL_ALERT_PREFIXES = ("ADMIN_ACCESS_",)
 CACHE_TTL_SECONDS = 30.0
 _CACHE: dict[str, Any] = {"at": 0.0, "window": 0, "data": None}
 
@@ -634,11 +637,24 @@ def score_infra(
     )
 
 
+def _is_operational_alert(alert: dict) -> bool:
+    code = str((alert or {}).get("code") or "").upper()
+    return not any(code.startswith(p) for p in NON_OPERATIONAL_ALERT_PREFIXES)
+
+
 def score_alerts(alerts: list[dict], now: datetime) -> dict:
     penalties: list[float] = []
     reasons: list[str] = []
-    critical = [a for a in alerts if str(a.get("level")).lower() in ("critical", "error", "fail")]
-    warnings = [a for a in alerts if str(a.get("level")).lower() in ("warning", "warn")]
+    operational = [a for a in alerts if _is_operational_alert(a)]
+    informational = [a for a in alerts if not _is_operational_alert(a)]
+    critical = [
+        a for a in operational
+        if str(a.get("level")).lower() in ("critical", "error", "fail")
+    ]
+    warnings = [
+        a for a in operational
+        if str(a.get("level")).lower() in ("warning", "warn")
+    ]
     # Alertas críticos antigos (>7 dias) são dívida de governação, não uma
     # falha operacional de agora: pesam menos e não pintam o painel de vermelho
     # para sempre até alguém reconhecer o alerta.
@@ -663,7 +679,7 @@ def score_alerts(alerts: list[dict], now: datetime) -> dict:
         reasons.append(f"{len(warnings)} alerta(s) de atenção")
 
     oldest_age = None
-    for alert in alerts:
+    for alert in operational:
         age = _age_hours(alert.get("created_at"), now)
         if age is not None and (oldest_age is None or age > oldest_age):
             oldest_age = age
@@ -678,8 +694,16 @@ def score_alerts(alerts: list[dict], now: datetime) -> dict:
         reasons.append(f"Alerta aberto há {max(live_ages):.0f}h")
 
     headline = f"{len(alerts)} aberto(s)"
+    if informational:
+        headline += f" ({len(informational)} informativo(s))"
     metrics = [
-        _metric("open", "Abertos", len(alerts), "", "ok" if not alerts else "warn"),
+        _metric(
+            "open",
+            "Abertos",
+            len(alerts),
+            "",
+            "ok" if not operational else "warn",
+        ),
         _metric(
             "critical",
             "Críticos recentes",
@@ -696,6 +720,14 @@ def score_alerts(alerts: list[dict], now: datetime) -> dict:
             "ok" if not critical_old else "warn",
         ),
         _metric(
+            "informational",
+            "Auditoria (info)",
+            len(informational),
+            "",
+            "ok",
+            "não pesa no score",
+        ),
+        _metric(
             "oldest_h",
             "Mais antigo",
             round(oldest_age, 1) if oldest_age is not None else None,
@@ -710,7 +742,12 @@ def score_alerts(alerts: list[dict], now: datetime) -> dict:
         reasons,
         headline,
         metrics,
-        {"items": alerts[:10]},
+        {
+            "items": [
+                {**alert, "informational": not _is_operational_alert(alert)}
+                for alert in alerts[:10]
+            ]
+        },
     )
 
 

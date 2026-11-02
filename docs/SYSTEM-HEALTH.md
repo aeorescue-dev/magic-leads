@@ -52,7 +52,9 @@ VPS `-20`; disco >90% `-30`, >80% `-15`.
 
 **Alertas** — crítico recente `-30`; crítico >7d `-5` (cap 20); warning `-2`;
 alerta vivo >24h `-10`. Os históricos continuam no feed, mas não pintam o
-painel inteiro de vermelho para sempre.
+painel inteiro de vermelho para sempre. Códigos `ADMIN_ACCESS_*` são registos
+de auditoria de segurança: aparecem no feed com a etiqueta **auditoria**, mas
+**não entram no score nem nas razões** (não são falhas operacionais).
 
 ## 2. Snapshot e histórico
 
@@ -82,15 +84,19 @@ Tipos/helpers puros em `frontend/lib/system-health.ts` (testados em vitest).
 ## 4. Baseline de produção (02/11/2026 00:09 UTC)
 
 ```
-overall 97 warn  (4 críticos históricos + alerta vivo >24h)
+overall 98 warn  (4 críticos históricos + 1 warning operacional; 1 auditoria info)
 ingest      100 4/4 cidades frescas · último run há 2,2h
 enrichment  100 165 prontos · 24.433 por enriquecer · domínio 0/248
 outreach    100 4/4 envios hoje · fila 1 (blocker mailbox_cap, esperado)
 push        100 21 entregas 24h · 12 dispositivos ativos
 quotas      100 Brave 16/250 · Searchbug $0,00/24h
 infra       100 worker OK · backup 12h · disco 21%
-alerts       66 6 abertos (4 históricos >7d)
+alerts       78 6 abertos (4 históricos >7d + 1 warning; 1 auditoria informativa)
 ```
+
+Depois de reconhecer os 5 alertas operacionais no Admin, a camada de Alertas
+vai a 100 e o score geral a 100. A concessão de acesso (`ADMIN_ACCESS_*`)
+continua visível no feed como auditoria, sem afetar o score.
 
 ## 5. Verificação
 

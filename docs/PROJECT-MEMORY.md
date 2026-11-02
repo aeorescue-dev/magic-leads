@@ -1416,6 +1416,9 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   push/24h, 12 dispositivos ativos.
 - **Testes**: **1.204 pytest** (+38; 1 skipped) e **103 vitest** (+6);
   tsc/lint limpos; CI verde.
+- **Micro-lote 02/11**: `ADMIN_ACCESS_*` deixou de pesar no score (fica no
+  feed como auditoria). Alertas 66 -> 78 e overall 97 -> 98; reconhecer os 5
+  alertas operacionais leva a 100. Testes: **1.207 pytest**, **104 vitest**.
 
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.

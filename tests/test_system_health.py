@@ -334,6 +334,47 @@ def test_alerts_only_historical_critical_is_warn_not_fail():
     assert "histórico" in " ".join(layer["reasons"])
 
 
+def test_admin_access_alerts_are_informational_and_do_not_penalise():
+    alerts = [
+        {
+            "level": "warn",
+            "code": "ADMIN_ACCESS_GRANT",
+            "message": "Concessão manual de 365 dias",
+            "created_at": _iso(NOW - timedelta(hours=33)),
+        }
+    ]
+    layer = sh.score_alerts(alerts, NOW)
+    assert layer["score"] == 100
+    assert layer["status"] == "ok"
+    assert layer["reasons"] == []
+    assert layer["headline"] == "1 aberto(s) (1 informativo(s))"
+    assert layer["detail"]["items"][0]["informational"] is True
+    metrics = {m["key"]: m for m in layer["metrics"]}
+    assert metrics["informational"]["value"] == 1
+    assert metrics["open"]["status"] == "ok"
+    assert metrics["oldest_h"]["value"] is None  # só conta alertas operacionais
+
+
+def test_admin_access_does_not_hide_operational_warning():
+    alerts = [
+        {
+            "level": "warn",
+            "code": "ADMIN_ACCESS_GRANT",
+            "created_at": _iso(NOW - timedelta(hours=40)),
+        },
+        {
+            "level": "warning",
+            "code": "SCRAPER_CITY_STALE:BOSTON",
+            "created_at": _iso(NOW - timedelta(hours=30)),
+        },
+    ]
+    layer = sh.score_alerts(alerts, NOW)
+    assert layer["score"] == 88  # -2 warning -10 alerta vivo >24h
+    assert "atenção" in " ".join(layer["reasons"])
+    metrics = {m["key"]: m for m in layer["metrics"]}
+    assert metrics["oldest_h"]["value"] == 30.0
+
+
 # ----------------------------------------------------------------- overall
 def test_overall_weighted_and_worst_status():
     layers = {
