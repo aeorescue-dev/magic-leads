@@ -92,7 +92,29 @@ Todas exigem sessão **admin** (`_require_admin_user`).
 5. Clicar no telefone (`tel:`) e registar o resultado.
 6. “Sem interesse / número errado / não contactar” suprime automaticamente.
 
-## Limites da Fase 1
+## Checklist de ativação (piloto real)
+
+1. **Railway env**
+   - `TELNYX_API_KEY`
+   - `TELNYX_CONNECTION_ID`
+   - `TELNYX_FROM_NUMBER`
+   - `TELNYX_WEBHOOK_SECRET`
+   - `TELNYX_WEBHOOK_URL` (ou `PUBLIC_API_URL`)
+   - `EMAIL_API_KEY` / `EMAIL_FROM` (Resend) para envio real
+2. **Importar CSV B2B** em `/admin/voice` (company_name, phone, city,
+   state, trade, license_status, permit_count, email).
+3. **Importar DNC** (`phone, listed`) ou fazer check manual por número.
+4. **Rebuild pages** em `/admin/voice` se a ingestão tiver mudado.
+5. **Testar uma empresa**:
+   - `showcase.available(city, trade)` → `available=true`
+   - “Enviar vitrine” → link `/r/<token>` + email
+   - abrir `/r/<token>` → 302 para `/en/<city>/<trade>?vt=...`
+6. **Ligar Telnyx** em dry-run primeiro; confirmar `voice_calls` e o webhook
+   DTMF 1 antes de ativar chamadas reais.
+7. **Confirmar filtros** de cidade/nicho e a cobertura agrupada no
+   `/admin/voice`.
+
+## Limites da Fase 1/2A
 
 - Sem dialer automático/predictive: apenas click-to-call manual.
 - Sem gravação de chamadas (Fase 2; exige consentimento all-party em MA).

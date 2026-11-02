@@ -1592,6 +1592,18 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Testes**: +6 → **1.279 pytest**; cobertura backend **69,8%**;
   ruff/tsc/build limpos.
 
+### Fecho da Fase 2A (2026-11-02)
+
+- **Aprovada** a entrega multi-cidade: 32 páginas de vitrine, 34.053
+  oportunidades (NY 12.836; Chicago 16.489; Boston 865; Dallas 3.863),
+  filtros de cidade/nicho, fusos EST/CST e Investor Room v2026-11-02.4.
+- **Piloto inicial** usa a Fase 2A: operador/click-to-call, gate
+  `showcase.available()`, link `/r/<token>` e checkout Stripe.
+- **Ativação**: inserir variáveis Telnyx no Railway e importar o primeiro CSV
+  B2B + DNC em `/admin/voice`.
+- **Fase 2B**: guião falado dinâmico por TTS, conversa multi-turn e otimização
+  por trade/cidade.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
