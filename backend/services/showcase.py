@@ -255,6 +255,11 @@ def normalize_trade(value: Any) -> Optional[str]:
     return None
 
 
+def trade_label(value: Any) -> str:
+    code = normalize_trade(value) or str(value or "")
+    return _trade_label(code)
+
+
 def _public_base() -> str:
     return (
         getattr(settings, "SHOWCASE_BASE_URL", "")
@@ -909,6 +914,7 @@ def send_showcase_email(
     trade_code: str,
     count: int,
     link_url: str,
+    scope_label: str = "",
 ) -> dict:
     """Envia o link da vitrine via Resend. Fail-soft em dev/teste."""
     email = (to_email or "").strip().lower()
@@ -920,12 +926,12 @@ def send_showcase_email(
         logger.info("[SHOWCASE] Email em modo logs (sem EMAIL_API_KEY): %s", link_url)
         return {"sent": False, "dry_run": True, "link_url": link_url}
 
-    trade_label = _trade_label(trade_code)
     noun = "opportunity" if count == 1 else "opportunities"
-    subject = f"{count} {trade_label} {noun} in {city} this week"
+    scope = (scope_label or _trade_label(trade_code)).strip() or "property"
+    subject = f"{count} {scope} {noun} in {city} this week"
     body = (
         f"Hi {company_name or 'there'},\n\n"
-        f"We found {count} active {trade_label.lower()} {noun} in {city} "
+        f"We found {count} {scope} {noun} in {city} "
         "from public records this week.\n\n"
         f"See the masked list here: {link_url}\n\n"
         "Magic Leads gives contractors a weekly pass: one business per address, "

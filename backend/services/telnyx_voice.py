@@ -254,13 +254,23 @@ def send_showcase_for_call(
         voice_call_id=voice_call_id,
         campaign_id=str(call.get("campaign_id") or ""),
     )
+    page_data = page["page"]
+    fallback = page_data.get("fallback")
+    email_city = page_data.get("city") or resolved_city
+    page_trade = page_data.get("trade_code") or resolved_trade
+    scope_label = (
+        "active property"
+        if fallback == "city"
+        else showcase.trade_label(page_trade)
+    )
     email_result = showcase.send_showcase_email(
         to_email=email,
         company_name=company.get("company_name") or "",
-        city=resolved_city,
-        trade_code=resolved_trade,
-        count=int(page["page"]["count"]),
+        city=email_city,
+        trade_code=page_trade,
+        count=int(page_data["count"]),
         link_url=link["url"],
+        scope_label=scope_label,
     )
     b2b_voice.update_voice_call(
         voice_call_id, showcase_link_id=link["link_id"], status="showcase_sent"

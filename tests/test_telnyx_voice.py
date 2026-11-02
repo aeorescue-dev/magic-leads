@@ -155,3 +155,61 @@ def test_webhook_secret_fail_closed_e_valida():
     assert telnyx_voice.verify_secret("wrong") is False
     telnyx_voice.settings.TELNYX_WEBHOOK_SECRET = ""
     assert telnyx_voice.verify_secret("anything") is False
+
+
+def test_email_fallback_cidade_usa_escopo_neutro(monkeypatch):
+    """Dallas roofing sem página exata: email não pode dizer 'Roofing 3864'."""
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM leads WHERE external_id LIKE 'pytest-telnyx-dallas-%'")
+        for idx in range(3):
+            conn.execute(
+                """
+                INSERT INTO leads
+                  (external_id, source_type, address, city, state, zip_code,
+                   issue_category, date_reported, signal_type, signal_status,
+                   owner_name, is_junk)
+                VALUES (?, 'pytest', ?, 'Dallas', 'TX', '75201', 'Structure', ?,
+                        'open_request', 'open', 'Dallas Owner', 0)
+                """,
+                (
+                    f"pytest-telnyx-dallas-{idx}",
+                    f"{600 + idx} Dallas Ave",
+                    NOW.isoformat(),
+                ),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    showcase.build_pages()
+    csv_text = (
+        "company_name,contact_name,phone,email,city,state,license_status,trade,"
+        "permit_count\n"
+        "Dallas Roofing,Ana,+12145550188,ana@example.com,Dallas,TX,active,Roofing,4\n"
+    )
+    voice.import_licenses_csv(csv_text, source_name="pytest")
+    voice.check_dnc("+12145550188", listed=False, source="pytest")
+    conn = voice.get_conn()
+    try:
+        company = dict(
+            conn.execute(
+                "SELECT * FROM prospect_companies WHERE phone='+12145550188'"
+            ).fetchone()
+        )
+    finally:
+        conn.close()
+    created = telnyx_voice.create_call(company)
+    captured: dict = {}
+
+    def fake_email(**kwargs):
+        captured.update(kwargs)
+        return {"sent": False, "dry_run": True}
+
+    monkeypatch.setattr(showcase, "send_showcase_email", fake_email)
+    result = telnyx_voice.send_showcase_for_call(
+        created["voice_call_id"], "Dallas", "roofing"
+    )
+    assert result["ok"] is True
+    assert captured["scope_label"] == "active property"
+    assert captured["city"] == "Dallas"
+    assert captured["trade_code"] == "roofing"

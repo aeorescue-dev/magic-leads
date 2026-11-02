@@ -1621,7 +1621,7 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Admin**: botão “Iniciar campanha autónoma”, tabela de segmentos com
   “Iniciar” por cidade+nicho, lista de campanhas com contadores e “Parar”.
 - **Testes**: +4 (auto-scheduler, segmentos, campanha interrompida, ingest API)
-  → **1.283 pytest**; cobertura **69,8%**; `auto_dialer.py` 73,3%.
+  → **1.284 pytest**; cobertura **69,9%**; `auto_dialer.py` 73,3%.
 
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
