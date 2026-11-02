@@ -277,6 +277,13 @@ COMPETITIVE_MATRIX: list[dict[str, Any]] = [
         "source_ids": ["ANGI-PRICE-VARIES"],
     },
     {
+        "dimension": "Margem",
+        "magic": "90%+ alvo com COGS variável controlado",
+        "angi": "n/d; margem por lead não divulgada",
+        "edge": "neutral",
+        "source_ids": ["ANGI-PRICE-VARIES"],
+    },
+    {
         "dimension": "Fidelização",
         "magic": "Passe de 7 dias, sem fidelização",
         "angi": "Contrato com renovação; ETF conforme contrato",
