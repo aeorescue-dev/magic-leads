@@ -1649,6 +1649,24 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Testes**: **1.289 pytest**; cobertura **69,9%**; `auto_dialer.py` 76,5%,
   `b2b_voice.py` 84,9%, `telnyx_voice.py` 69,5%.
 
+### DNC universal + staging (2026-11-02)
+
+- **Parser universal** (`import_dnc_text`): aceita CSV, TSV, TXT, uma coluna,
+  linhas soltas, cabeçalhos arbitrários, números com `+1`, parênteses, hífens e
+  extensões. Deteta telefones por regex, deduplica, interpreta
+  `clean/clear/no/false/0` como limpo e, em conflito, prevalece “listado”.
+- **Normalização**: todos os números ficam em E.164 (`+1XXXXXXXXXX`); linhas
+  sem telefone são ignoradas e contabilizadas.
+- **Staging mode** (`VOICE_STAGING_MODE=true`): DNC em falta/expirado é
+  auto-limpo no gate (`dnc_staging_bypass`), mas números listados continuam
+  bloqueados; Telnyx fica forçado em dry-run mesmo com chaves.
+- **Desobstrução auditável**: `POST /api/admin/voice/dnc/staging-clear` grava
+  checks `source='staging'` e reconstrói segmentos; recusa 403 fora de staging.
+- **UI**: card DNC aceita ficheiro ou texto colado, mostra listados/limpos e
+  botão “Desobstruir staging” quando ativo; badge “Staging · dry-run” no header.
+- **Testes**: formatos crus, conflito listado/limpo, staging e bloqueio em
+  produção → **1.293 pytest**; cobertura **69,9%**.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

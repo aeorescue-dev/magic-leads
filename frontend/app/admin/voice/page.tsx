@@ -53,6 +53,7 @@ import {
   resumeVoiceCampaign,
   sendVoiceShowcase,
   startVoiceCampaign,
+  stagingClearDnc,
   stopVoiceCampaign,
   suppressVoicePhone,
   syncLicensingSources,
@@ -643,10 +644,25 @@ export default function VoiceB2BPage() {
 
   const importDnc = () =>
     run("dnc", async () => {
-      if (!dncCsv.trim()) throw new Error("Escolhe um CSV DNC.");
+      if (!dncCsv.trim()) throw new Error("Cola ou escolhe uma lista DNC.");
       const result = await importVoiceDnc(dncCsv, dncSource);
       setDncCsv("");
-      return `DNC: ${result.imported} números carregados, ${result.listed ?? 0} listados.`;
+      await Promise.all([mutateStats(), mutateSegments(), mutateMetrics()]);
+      return `DNC: ${result.imported} números · ${
+        result.listed ?? 0
+      } listados · ${result.cleaned ?? 0} limpos · ${result.skipped} ignorados.`;
+    });
+
+  const stagingClear = () =>
+    run("staging-clear", async () => {
+      const result = await stagingClearDnc();
+      await Promise.all([
+        mutateStats(),
+        mutateSegments(),
+        mutateMetrics(),
+        mutateQueue(),
+      ]);
+      return `Staging: ${result.cleared} telefones desbloqueados · ${result.segments} segmentos.`;
     });
 
   const markDnc = (listed: boolean) =>
@@ -762,6 +778,9 @@ export default function VoiceB2BPage() {
               <PhoneCall className="h-6 w-6 text-emerald-400" /> Voice B2B
             </h1>
             <Badge tone="indigo">Piloto {stats?.pilot_state ?? "MA"}</Badge>
+            {stats?.staging_mode ? (
+              <Badge tone="amber">Staging · dry-run</Badge>
+            ) : null}
             <Badge tone="slate">{stats?.calling_window ?? "08:00–21:00 ET"}</Badge>
           </div>
           <p className="mt-1 text-[11px] text-slate-500">
@@ -1011,13 +1030,20 @@ export default function VoiceB2BPage() {
         <Card
           title="2. Importar lista DNC"
           icon={<ShieldCheck className="h-4 w-4 text-emerald-400" />}
-          hint="Sem check DNC fresco, a empresa fica bloqueada (fail-closed)."
+          hint="Qualquer lista crua: CSV, TXT, uma coluna ou linhas soltas. O backend deteta telefones e DNC/clean."
         >
           <input
             type="file"
-            accept=".csv,text/csv"
+            accept=".csv,.txt,.tsv,text/csv,text/plain"
             onChange={(event) => void readFile(event.target.files?.[0], setDncCsv)}
             className="mb-2 block w-full text-[11px] text-slate-400 file:mr-2 file:rounded-lg file:border-0 file:bg-emerald-500/15 file:px-3 file:py-1.5 file:text-[11px] file:font-semibold file:text-emerald-200"
+          />
+          <textarea
+            value={dncCsv}
+            onChange={(event) => setDncCsv(event.target.value)}
+            rows={3}
+            placeholder="Ou cola aqui a lista crua: 617-555-0123, (214) 555-0199, ..."
+            className="mb-2 w-full rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-[11px] text-slate-200 placeholder:text-slate-600"
           />
           <div className="flex items-center gap-2">
             <input
@@ -1036,9 +1062,33 @@ export default function VoiceB2BPage() {
               Importar DNC
             </button>
           </div>
+          {stats?.staging_mode ? (
+            <div className="mt-3 rounded-lg border border-amber-400/20 bg-amber-500/10 p-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-[10px] text-amber-200">
+                  Staging ativo: DNC em falta é auto-limpo e o Telnyx fica em
+                  dry-run.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void stagingClear()}
+                  disabled={working === "staging-clear"}
+                  className="inline-flex items-center gap-1 rounded-md bg-amber-400 px-2.5 py-1 text-[9px] font-bold text-[#1a1405] hover:bg-amber-300 disabled:opacity-50"
+                >
+                  {working === "staging-clear" ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="h-3 w-3" />
+                  )}
+                  Desobstruir staging
+                </button>
+              </div>
+            </div>
+          ) : null}
           <p className="mt-2 text-[10px] text-slate-600">
-            Formato: phone, listed (1/0). Para um único número, abre a empresa na
-            fila e usa “DNC limpo” ou “DNC listado”.
+            Exemplos aceites: lista de números, CSV com cabeçalhos arbitrários,
+            TSV, `phone,listed`, ou números com “clean”/“DNC”. Duplicados são
+            consolidados; se houver conflito, prevalece “listado”.
           </p>
         </Card>
       </div>

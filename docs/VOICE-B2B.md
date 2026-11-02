@@ -58,15 +58,34 @@ Opcionais:
 
 Template: `GET /api/admin/voice/template.csv`.
 
-## CSV DNC
+## DNC universal
 
-`phone, listed` — `listed` aceita `1/0`, `yes/no`, `true/false`, `sim/não`.
-Cada import cria/renova o check por 31 dias.
+O importador aceita **qualquer lista crua**:
+- CSV, TSV, TXT ou uma coluna;
+- cabeçalhos arbitrários ou sem cabeçalho;
+- linhas soltas com telefones;
+- números com `+1`, parênteses, hífens, pontos ou extensões.
+
+O backend deteta telefones, normaliza para E.164, deduplica e interpreta
+`clean/clear/no/false/0` como limpo; em conflito, prevalece “listado”. Linhas
+sem telefone são ignoradas. Cada import cria/renova o check por 31 dias.
 
 > **Produção:** o piloto aceita importação de lista e check manual. Antes de
 > escalar, ligar um provedor DNC licenciado (federal + estadual) com auditoria
 > por chamada. O gate já está preparado para isso: basta gravar o resultado em
 > `dnc_checks` com `provider` e `checked_at`.
+
+## Staging (dry-run)
+
+Com `VOICE_STAGING_MODE=true`:
+- DNC em falta/expirado é auto-limpo no gate (`dnc_staging_bypass`);
+- números listados continuam bloqueados;
+- Telnyx fica **forçado em dry-run**, mesmo com chaves configuradas;
+- o botão **“Desobstruir staging”** grava checks auditáveis
+  (`source='staging'`) e reconstrói os segmentos.
+
+**Nunca** ativar produção com `VOICE_STAGING_MODE=true`. Para chamadas reais:
+`VOICE_STAGING_MODE=false`, DNC licenciado importado e chaves Telnyx.
 
 ## API
 

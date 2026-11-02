@@ -359,6 +359,10 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def staging_mode() -> bool:
+    return bool(getattr(settings, "VOICE_STAGING_MODE", False))
+
+
 def _iso(value: Optional[datetime] = None) -> str:
     return (value or _utc_now()).isoformat()
 
@@ -676,29 +680,61 @@ def check_dnc(
     }
 
 
-def import_dnc_csv(csv_text: str, source: str = "import") -> dict:
-    """Importa uma lista DNC (phone, listed[, source])."""
+_PHONE_RE = re.compile(
+    r"(?:\+?1[\s.\-()]*)?\(?\d{3}\)?[\s.\-]*\d{3}[\s.\-]*\d{4}"
+)
+_CLEAN_RE = re.compile(
+    r"\b(clean|clear|not[_\s-]?listed|no|false|0|allow|ok|safe)\b", re.I
+)
+
+
+def _extract_dnc_entries(text: str) -> tuple[dict[str, bool], int]:
+    """Aceita qualquer lista: CSV, TSV, uma coluna ou linhas soltas."""
+    found: dict[str, bool] = {}
+    skipped = 0
+    for line in (text or "").lstrip("\ufeff").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        phones: list[str] = []
+        for match in _PHONE_RE.finditer(line):
+            phone = normalize_phone(match.group(0))
+            if phone and phone.startswith("+1") and len(phone) == 12:
+                phones.append(phone)
+        if not phones:
+            for token in re.split(r"[,;\t|]+", line):
+                phone = normalize_phone(token)
+                if phone and phone.startswith("+1") and len(phone) == 12:
+                    phones.append(phone)
+        if not phones:
+            skipped += 1
+            continue
+        clean = bool(_CLEAN_RE.search(line))
+        for phone in phones:
+            # Se o mesmo número aparecer como listado e limpo, prevalece listado.
+            found[phone] = found.get(phone, False) or (not clean)
+    return found, skipped
+
+
+def import_dnc_text(text: str, source: str = "raw") -> dict:
+    """Importa DNC de qualquer formato, sem exigir cabeçalho ou colunas."""
     init()
-    rows = _rows_from_csv(csv_text)
-    if not rows:
-        raise ValueError("CSV vazio ou sem cabeçalho")
-    imported = skipped = listed_count = 0
+    found, skipped = _extract_dnc_entries(text)
+    if not found:
+        raise ValueError(
+            "nenhum telefone detetado; aceita CSV, TXT, uma coluna ou linhas soltas"
+        )
     now = _utc_now()
     expires = now + timedelta(days=DNC_MAX_AGE_DAYS)
+    listed_count = 0
     conn = get_conn()
     try:
-        for row in rows:
-            phone = normalize_phone(_pick(row, ("phone", "phone_number", "telephone", "number")))
-            if not phone:
-                skipped += 1
-                continue
-            raw_listed = _pick(row, ("listed", "dnc", "is_listed", "status"))
-            listed = _parse_bool(raw_listed)
+        for phone, listed in found.items():
             conn.execute(
                 """
                 INSERT INTO dnc_checks
                   (phone, listed, source, provider, checked_at, expires_at, raw_status)
-                VALUES (?, ?, ?, 'csv', ?, ?, ?)
+                VALUES (?, ?, ?, 'raw_import', ?, ?, ?)
                 ON CONFLICT(phone) DO UPDATE SET
                   listed=excluded.listed,
                   source=excluded.source,
@@ -710,13 +746,12 @@ def import_dnc_csv(csv_text: str, source: str = "import") -> dict:
                 (
                     phone,
                     1 if listed else 0,
-                    _pick(row, ("source", "list_source")) or source,
+                    source or "raw",
                     _iso(now),
                     _iso(expires),
-                    raw_listed or ("listed" if listed else "clear"),
+                    "listed" if listed else "clear",
                 ),
             )
-            imported += 1
             if listed:
                 listed_count += 1
         conn.commit()
@@ -724,11 +759,55 @@ def import_dnc_csv(csv_text: str, source: str = "import") -> dict:
         conn.close()
     return {
         "ok": True,
-        "imported": imported,
+        "imported": len(found),
         "skipped": skipped,
         "listed": listed_count,
-        "total": len(rows),
+        "cleaned": len(found) - listed_count,
+        "total": len(found) + skipped,
+        "format": "raw",
     }
+
+
+def import_dnc_csv(csv_text: str, source: str = "import") -> dict:
+    """Compatibilidade: qualquer texto é aceite pelo parser universal."""
+    return import_dnc_text(csv_text, source)
+
+
+def staging_clear_dnc() -> dict:
+    """Marca todos os telefones como DNC limpo em staging (auditável)."""
+    if not staging_mode():
+        raise ValueError("staging_mode_disabled")
+    init()
+    now = _utc_now()
+    expires = now + timedelta(days=DNC_MAX_AGE_DAYS)
+    conn = get_conn()
+    try:
+        phones = [
+            str(row["phone"])
+            for row in conn.execute(
+                "SELECT phone FROM prospect_companies WHERE COALESCE(TRIM(phone),'')<>''"
+            ).fetchall()
+        ]
+        for phone in phones:
+            conn.execute(
+                """
+                INSERT INTO dnc_checks
+                  (phone, listed, source, provider, checked_at, expires_at, raw_status)
+                VALUES (?, 0, 'staging', 'staging', ?, ?, 'staging_clear')
+                ON CONFLICT(phone) DO UPDATE SET
+                  listed=0,
+                  source='staging',
+                  provider='staging',
+                  checked_at=excluded.checked_at,
+                  expires_at=excluded.expires_at,
+                  raw_status='staging_clear'
+                """,
+                (phone, _iso(now), _iso(expires)),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "cleared": len(phones), "mode": "staging"}
 
 
 def suppress(phone: str, reason: str = "manual") -> dict:
@@ -801,18 +880,29 @@ def _eligibility(
     dnc = conn.execute(
         "SELECT listed, expires_at, source FROM dnc_checks WHERE phone=?", (phone,)
     ).fetchone()
+    staging = staging_mode()
     if dnc is None:
-        checks["dnc_checked"] = False
-        checks["dnc_fresh"] = False
-        checks["dnc_clear"] = False
-        reasons.append("dnc_not_checked")
+        if staging:
+            checks["dnc_checked"] = True
+            checks["dnc_fresh"] = True
+            checks["dnc_clear"] = True
+            checks["dnc_staging_bypass"] = True
+        else:
+            checks["dnc_checked"] = False
+            checks["dnc_fresh"] = False
+            checks["dnc_clear"] = False
+            reasons.append("dnc_not_checked")
     else:
         expires = parse_dt(dnc["expires_at"])
         checks["dnc_checked"] = True
         checks["dnc_fresh"] = bool(expires and expires > now)
         checks["dnc_clear"] = int(dnc["listed"] or 0) == 0
         if not checks["dnc_fresh"]:
-            reasons.append("dnc_stale")
+            if staging:
+                checks["dnc_fresh"] = True
+                checks["dnc_staging_bypass"] = True
+            else:
+                reasons.append("dnc_stale")
         if not checks["dnc_clear"]:
             reasons.append("dnc_listed")
 
@@ -990,6 +1080,7 @@ def stats() -> dict:
             "generated_at": _iso(now),
             "pilot_state": ", ".join(PILOT_STATES),
             "pilot_states": list(PILOT_STATES),
+            "staging_mode": staging_mode(),
             "calling_window": f"{CALL_START_HOUR:02d}:00–{CALL_END_HOUR:02d}:00 local (ET/CT)",
             "dnc_max_age_days": DNC_MAX_AGE_DAYS,
             "max_attempts_7d": MAX_ATTEMPTS_7D,

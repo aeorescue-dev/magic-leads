@@ -255,3 +255,46 @@ def test_import_dnc_csv_normaliza_e_marca_listados():
         assert row is not None and row["listed"] == 1
     finally:
         conn.close()
+
+
+def test_import_dnc_text_aceita_qualquer_formato():
+    text = (
+        "# lista crua\n"
+        "617-555-0147\n"
+        "(214) 555-0148, DNC\n"
+        "phone,listed\n"
+        "3125550149,clean\n"
+        "+1 646 555 0150\n"
+    )
+    result = voice.import_dnc_text(text, source="pytest-raw")
+    assert result["imported"] == 4
+    assert result["listed"] == 3
+    assert result["cleaned"] == 1
+    assert result["skipped"] >= 1
+
+
+def test_staging_mode_desbloqueia_sem_dnc_real(monkeypatch):
+    monkeypatch.setattr(voice.settings, "VOICE_STAGING_MODE", True)
+    voice.import_licenses_csv(_csv(phone="+16175550123", state="MA"))
+    result = voice.can_call(_company("+16175550123"), now=NOW)
+    assert result["allowed"] is True
+    assert result["checks"].get("dnc_staging_bypass") is True
+
+    cleared = voice.staging_clear_dnc()
+    assert cleared["cleared"] >= 1
+    conn = voice.get_conn()
+    try:
+        row = conn.execute(
+            "SELECT source, listed FROM dnc_checks WHERE phone=?",
+            ("+16175550123",),
+        ).fetchone()
+        assert row["source"] == "staging"
+        assert row["listed"] == 0
+    finally:
+        conn.close()
+
+
+def test_staging_clear_recusa_fora_de_staging(monkeypatch):
+    monkeypatch.setattr(voice.settings, "VOICE_STAGING_MODE", False)
+    with pytest.raises(ValueError):
+        voice.staging_clear_dnc()

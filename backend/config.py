@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     VOICE_AUTOSCHED_DELAY_SECONDS: int = 30
     VOICE_SOURCE_ALLOWED_HOSTS: str = ""
     VOICE_SYNC_INTERVAL_HOURS: int = 6
+    VOICE_STAGING_MODE: bool = False
 
     # Plano semanal (fonte da verdade do checkout)
     PLAN_NAME: str = "Pro"

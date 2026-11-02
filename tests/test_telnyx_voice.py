@@ -157,6 +157,14 @@ def test_webhook_secret_fail_closed_e_valida():
     assert telnyx_voice.verify_secret("anything") is False
 
 
+def test_staging_mode_forca_dry_run(monkeypatch):
+    monkeypatch.setattr(telnyx_voice.settings, "VOICE_STAGING_MODE", True)
+    monkeypatch.setattr(telnyx_voice.settings, "TELNYX_API_KEY", "sk_test_dummy")
+    monkeypatch.setattr(telnyx_voice.settings, "TELNYX_CONNECTION_ID", "conn")
+    monkeypatch.setattr(telnyx_voice.settings, "TELNYX_FROM_NUMBER", "+16175550000")
+    assert telnyx_voice.configured() is False
+
+
 def test_webhook_instrumenta_answered_e_hangup():
     company = _seed_company()
     created = telnyx_voice.create_call(company)

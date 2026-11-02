@@ -27,6 +27,8 @@ API_BASE = "https://api.telnyx.com/v2"
 
 
 def configured() -> bool:
+    if bool(getattr(settings, "VOICE_STAGING_MODE", False)):
+        return False
     return bool(
         getattr(settings, "TELNYX_API_KEY", "")
         and getattr(settings, "TELNYX_CONNECTION_ID", "")
@@ -91,15 +93,20 @@ def create_call(
     )
     if not configured() or dry_run:
         b2b_voice.update_voice_call(call["id"], status="dry_run")
+        staging = bool(getattr(settings, "VOICE_STAGING_MODE", False))
         return {
             "ok": True,
             "dry_run": True,
             "voice_call_id": call["id"],
             "status": "dry_run",
             "message": (
-                "Dry-run forçado pela campanha."
-                if dry_run
-                else "Telnyx não configurado; chamada registada em dry-run."
+                "Staging mode: chamada registada em dry-run."
+                if staging
+                else (
+                    "Dry-run forçado pela campanha."
+                    if dry_run
+                    else "Telnyx não configurado; chamada registada em dry-run."
+                )
             ),
         }
 

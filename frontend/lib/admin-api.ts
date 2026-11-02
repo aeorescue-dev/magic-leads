@@ -1545,6 +1545,7 @@ export interface VoiceStats {
   generated_at: string;
   pilot_state: string;
   pilot_states?: string[];
+  staging_mode?: boolean;
   calling_window: string;
   dnc_max_age_days: number;
   max_attempts_7d: number;
@@ -1561,6 +1562,8 @@ export interface VoiceImportResult {
   skipped: number;
   total: number;
   listed?: number;
+  cleaned?: number;
+  format?: string;
   errors?: Array<{ row: number; reason: string }>;
 }
 
@@ -1602,8 +1605,17 @@ export function importVoiceDnc(
   return adminFetch<VoiceImportResult>("/voice/import/dnc", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ csv, source }),
+    body: JSON.stringify({ text: csv, source }),
   });
+}
+
+export function stagingClearDnc(): Promise<{
+  ok: boolean;
+  cleared: number;
+  mode: string;
+  segments: number;
+}> {
+  return adminFetch("/voice/dnc/staging-clear", { method: "POST" });
 }
 
 export function checkVoiceDnc(

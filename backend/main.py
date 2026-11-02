@@ -2886,16 +2886,16 @@ async def admin_voice_import_dnc(
         payload = await request.json()
     except Exception:  # noqa: BLE001
         raise HTTPException(status_code=400, detail="json inválido")
-    csv_text = str((payload or {}).get("csv") or "")
+    csv_text = str((payload or {}).get("text") or (payload or {}).get("csv") or "")
     if not csv_text.strip():
-        raise HTTPException(status_code=400, detail="csv vazio")
+        raise HTTPException(status_code=400, detail="lista vazia")
     if len(csv_text) > 5_000_000:
-        raise HTTPException(status_code=413, detail="csv demasiado grande")
+        raise HTTPException(status_code=413, detail="lista demasiado grande")
     try:
         return await anyio.to_thread.run_sync(
-            b2b_voice.import_dnc_csv,
+            b2b_voice.import_dnc_text,
             csv_text,
-            str((payload or {}).get("source") or "import"),
+            str((payload or {}).get("source") or "raw"),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -2927,6 +2927,19 @@ async def admin_voice_dnc_check(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/admin/voice/dnc/staging-clear")
+async def admin_voice_dnc_staging_clear(
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Desobstrução auditável em staging; recusa se VOICE_STAGING_MODE=false."""
+    try:
+        result = await anyio.to_thread.run_sync(b2b_voice.staging_clear_dnc)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    rebuilt = await anyio.to_thread.run_sync(b2b_voice.rebuild_segments)
+    return {**result, "segments": rebuilt}
 
 
 @app.post("/api/admin/voice/contacts/{company_id}/call")
