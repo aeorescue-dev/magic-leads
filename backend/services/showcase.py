@@ -306,7 +306,8 @@ def _collect_inventory(days: Optional[int] = None) -> dict[tuple[str, str, str],
         if not city or not state or not trade:
             continue
         city_slug = slugify(city)
-        key = (city_slug, trade, state)
+        trade_slug = slugify(trade)
+        key = (city_slug, trade_slug, state)
         bucket = grouped.setdefault(
             key,
             {
@@ -314,6 +315,7 @@ def _collect_inventory(days: Optional[int] = None) -> dict[tuple[str, str, str],
                 "state": state,
                 "city_slug": city_slug,
                 "trade_code": trade,
+                "trade_slug": trade_slug,
                 "items": [],
             },
         )
@@ -376,8 +378,10 @@ def build_pages(days: Optional[int] = None) -> dict:
     conn = get_conn()
     try:
         conn.execute("UPDATE showcase_pages SET status='draft'")
-        for (city_slug, trade, state), bucket in inventory.items():
+        conn.execute("DELETE FROM market_inventory")
+        for (city_slug, trade_slug, state), bucket in inventory.items():
             count = int(bucket["count"])
+            trade_code = bucket["trade_code"]
             conn.execute(
                 """
                 INSERT INTO market_inventory
@@ -394,10 +398,10 @@ def build_pages(days: Optional[int] = None) -> dict:
                 """,
                 (
                     city_slug,
-                    trade,
+                    trade_slug,
                     bucket["city"],
                     state,
-                    trade,
+                    trade_code,
                     count,
                     bucket["last_observed_at"],
                     now,
@@ -405,8 +409,8 @@ def build_pages(days: Optional[int] = None) -> dict:
             )
             if count < min_items:
                 continue
-            title = _page_title(bucket["city"], _trade_label(trade), count)
-            slug = f"{city_slug}-{trade}"
+            title = _page_title(bucket["city"], _trade_label(trade_code), count)
+            slug = f"{city_slug}-{trade_slug}"
             conn.execute(
                 """
                 INSERT INTO showcase_pages
@@ -425,10 +429,10 @@ def build_pages(days: Optional[int] = None) -> dict:
                 """,
                 (
                     city_slug,
-                    trade,
+                    trade_slug,
                     bucket["city"],
                     state,
-                    trade,
+                    trade_code,
                     slug,
                     title,
                     _page_subtitle(),
@@ -470,6 +474,7 @@ def build_pages(days: Optional[int] = None) -> dict:
             "DELETE FROM showcase_items WHERE page_id IN "
             "(SELECT id FROM showcase_pages WHERE status='draft')"
         )
+        conn.execute("DELETE FROM showcase_pages WHERE status='draft'")
         conn.commit()
     finally:
         conn.close()
@@ -554,7 +559,7 @@ def _fallback_page(city_slug: str, trade_slug: str) -> Optional[dict]:
 
     city_buckets = [
         bucket
-        for (cs, _trade, _state), bucket in inventory.items()
+        for (cs, _trade_slug, _state), bucket in inventory.items()
         if cs == city_slug and int(bucket["count"]) >= min_items
     ]
     if city_buckets:
@@ -569,7 +574,7 @@ def _fallback_page(city_slug: str, trade_slug: str) -> Optional[dict]:
             "city": city,
             "state": state,
             "city_slug": city_slug,
-            "trade_code": trade_slug,
+            "trade_code": normalize_trade(trade_slug) or trade_slug.replace("-", "_"),
             "title": _page_title(city, None, total_count),
             "subtitle": _page_subtitle(),
             "inventory_count": total_count,
@@ -595,8 +600,10 @@ def _fallback_page(city_slug: str, trade_slug: str) -> Optional[dict]:
             "city": bucket["city"],
             "state": bucket["state"],
             "city_slug": bucket["city_slug"],
-            "trade_code": trade_slug,
-            "title": _page_title(bucket["city"], _trade_label(trade_slug), bucket["count"]),
+            "trade_code": bucket["trade_code"],
+            "title": _page_title(
+                bucket["city"], _trade_label(bucket["trade_code"]), bucket["count"]
+            ),
             "subtitle": _page_subtitle(),
             "inventory_count": int(bucket["count"]),
             "signal_label": bucket["signal_label"],
@@ -607,7 +614,7 @@ def _fallback_page(city_slug: str, trade_slug: str) -> Optional[dict]:
             bucket["items"][:12],
             fallback="trade",
             fallback_label=(
-                f"No { _trade_label(trade_slug) } inventory in this city yet; "
+                f"No {_trade_label(bucket['trade_code'])} inventory in this city yet; "
                 f"showing {bucket['city']}"
             ),
         )

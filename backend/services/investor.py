@@ -340,7 +340,7 @@ DEFAULT_ASSUMPTIONS: dict[str, Any] = {
     "code_inventory": {
         "python_lines": 60968,
         "typescript_lines": 21445,
-        "pytest_tests": 1272,
+        "pytest_tests": 1273,
         "vitest_tests": 109,
         "test_files": 121,
         "docs": 19,

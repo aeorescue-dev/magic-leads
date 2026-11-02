@@ -134,6 +134,17 @@ def test_available_para_guiao_de_voz():
     assert missing["available"] is False
 
 
+def test_trade_slug_com_hifen_encontra_pagina_exata():
+    for idx in range(3):
+        _seed_lead("Boston", "MA", "Debris", "02120", idx)
+    showcase.build_pages()
+    exact = showcase.get_page("boston", "debris-removal")
+    assert exact is not None
+    assert exact["page"]["fallback"] is None
+    assert exact["page"]["trade_code"] == "debris_removal"
+    assert showcase.available("boston", "debris_removal")["available"] is True
+
+
 def test_token_cria_regista_visita_e_redireciona():
     for idx in range(3):
         _seed_lead("Boston", "MA", "Roof", "02118", idx)

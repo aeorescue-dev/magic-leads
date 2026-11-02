@@ -1572,7 +1572,7 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Build real**: 25 páginas de 26 combinações; Boston landscaping 656,
   Boston city fallback 670. Sem página exata de roofing em Boston (inventário
   <3), pelo que o guião deve usar `available()` antes de prometer.
-- **Testes**: +12 (9 showcase + 3 Telnyx) → **1.272 pytest**; cobertura
+- **Testes**: +13 (10 showcase + 3 Telnyx) → **1.273 pytest**; cobertura
   backend **69,7%**; 109 vitest; ruff/tsc/build limpos.
 
 ### P1 (a seguir)
