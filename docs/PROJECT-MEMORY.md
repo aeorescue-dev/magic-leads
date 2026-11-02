@@ -1438,6 +1438,26 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - Detalhe do incidente em `docs/INCIDENT-2026-11-02-BOUNCE.md`.
 - **Testes:** **1.216 pytest** (+6; 1 skipped); ruff limpo.
 
+### Fase 29 — Web Analytics first-party (2026-11-02)
+
+- **Rota `/admin/analytics`**: saúde do tráfego (volume/engagement/conversão),
+  cards com sparkline, origens/UTM, funil, geo cidade, dispositivo/idioma e
+  ações recentes. Filtros 24h/7d/30d, SWR 30 s.
+- **Coleta**: beacon first-party sem cookies; `POST /api/track` na Vercel
+  (same-origin) injeta geo/UA/IP e encaminha com chave para
+  `POST /api/analytics/ingest` no Railway. Lote após idle/pagehide;
+  `sendBeacon`; zero requests antes do LCP.
+- **Privacidade**: sessão em `sessionStorage`; único diário por HMAC com salt
+  diário; sem IP/PII em repouso; DNT/GPC respeitados; bot filter; rate limit.
+- **BD separada** `analytics.db`: `sessions`, `events` (idempotente por
+  `event_uid`), `meta`; retenção 90d eventos / 180d sessões, purge diário na
+  Control Tower.
+- **UTM no outreach**: `sequence_url()`/`build_context()` acrescentam
+  `utm_source=magicleads&utm_medium=outreach&utm_campaign=<cidade>_<nicho>&utm_content=stepN`
+  a todos os links; teste de compliance atualizado.
+- **Testes**: **1.227 pytest** (+11; 1 skipped), **107 vitest** (+3);
+  tsc/lint/ruff limpos.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

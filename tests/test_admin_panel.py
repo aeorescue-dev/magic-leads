@@ -1015,17 +1015,24 @@ def test_outbound_address_tail_is_conditional():
 
 
 def test_outbound_hardened_copy_has_signature_and_optout():
-    """Assinatura fixa + URL unica + opt-out obrigatorio em todos os nichos."""
+    """Assinatura fixa + URL unica com UTM + opt-out em todos os nichos."""
     from backend.services import outbound_templates as ot
 
     for niche, tpl in ot.TEMPLATES.items():
-        body = tpl["body"]
+        ctx = ot.build_context(
+            {"owner_name": "Acme Roofing", "address": "1 MAIN ST"},
+            "NYC",
+            niche,
+            3,
+        )
+        body = ot.render(tpl["body"], ctx)
         assert "Magic Leads" in body, niche
         assert "https://www.magicleads.app/" in body, niche
         assert 'reply "unsubscribe"' in body, niche
-        # Uma unica URL (sem tracking/UTM).
-        assert body.count("http") == 1, niche
-        assert "utm_" not in body.lower(), niche
+        # Uma unica URL de landing, agora com UTM de atribuicao de outreach.
+        assert body.count("https://www.magicleads.app/en?") == 1, niche
+        assert "utm_source=magicleads" in body, niche
+        assert "utm_medium=outreach" in body, niche
 
 
 def test_outbound_hardened_copy_has_no_trigger_words():

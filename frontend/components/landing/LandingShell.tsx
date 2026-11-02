@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useI18n, type Lang } from "@/lib/i18n";
 import { AuthForm } from "@/components/AuthForm";
+import AnalyticsBeacon from "@/components/AnalyticsBeacon";
 import { readStoredUser, useAuth } from "@/lib/auth";
 import { updateUserLocale } from "@/lib/api-client";
 
@@ -69,6 +70,7 @@ function LangSwitch({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void 
         <button
           key={l.id}
           onClick={() => setLang(l.id)}
+          data-track={`language_${l.id}`}
           aria-label={l.label}
           aria-pressed={lang === l.id}
           className={`grid h-10 w-11 place-items-center rounded-[12px] transition ${lang === l.id ? "bg-[#0f2a24] ring-2 ring-[#2feaa8]" : "opacity-70 hover:opacity-100"}`}
@@ -160,7 +162,7 @@ export default function LandingShell({ children }: { children: React.ReactNode }
               </button>
               <div className="flex shrink-0 items-center gap-3">
                 <LangSwitch lang={lang} setLang={changeLang} />
-                <button onClick={openModal} className="btn-mint hidden px-5 py-2.5 text-[13px] sm:block">{t("landing.start")}</button>
+                <button onClick={openModal} data-track="header_cta" className="btn-mint hidden px-5 py-2.5 text-[13px] sm:block">{t("landing.start")}</button>
                 <button onClick={() => setMenuOpen(!menuOpen)} className="flex h-10 w-10 items-center justify-center rounded-lg border border-[#e2e8f0] text-[#0b1220] lg:hidden" aria-label="Menu">
                   <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     {menuOpen ? <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" /> : <path d="M4 7h16M4 12h16M4 17h16" strokeLinecap="round" />}
@@ -180,7 +182,7 @@ export default function LandingShell({ children }: { children: React.ReactNode }
                 {navPairs.map(([label, id]) => (
                   <button key={id} onClick={() => scrollTo(id)} className="rounded-lg px-3 py-2.5 text-left text-sm font-semibold text-[#54617a] hover:bg-[#f1f4f9]">{label}</button>
                 ))}
-                <button onClick={openModal} className="btn-mint mt-2 py-3 text-sm">{t("landing.start")}</button>
+                <button onClick={openModal} data-track="mobile_menu_cta" className="btn-mint mt-2 py-3 text-sm">{t("landing.start")}</button>
               </div>
             </div>
           )}
@@ -209,7 +211,7 @@ export default function LandingShell({ children }: { children: React.ReactNode }
                 <div className="mt-4 flex flex-col gap-2.5">
                   {navPairs.slice(4).map(([label, id]) => <button key={id} onClick={() => scrollTo(id)} className="text-left hover:text-white">{label}</button>)}
                   <a href="mailto:contato@magicleads.app" className="hover:text-white">{t("landing.talk")}</a>
-                  <button onClick={openModal} className="text-left font-semibold text-[#34e0a1]">{t("landing.startWeek")}</button>
+                  <button onClick={openModal} data-track="footer_start_week" className="text-left font-semibold text-[#34e0a1]">{t("landing.startWeek")}</button>
                 </div>
               </div>
             </div>
@@ -241,6 +243,7 @@ export default function LandingShell({ children }: { children: React.ReactNode }
           </div>
         )}
       </div>
+      <AnalyticsBeacon />
     </Ctx.Provider>
   );
 }

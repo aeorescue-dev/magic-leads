@@ -5,6 +5,7 @@ import {
   Activity,
   AlertTriangle,
   Ban,
+  BarChart3,
   BellRing,
   CheckCircle2,
   Database,
@@ -2608,6 +2609,13 @@ export default function AdminPage() {
         >
           <Activity className="h-4 w-4" />
           System Health
+        </a>
+        <a
+          href="/admin/analytics"
+          className="inline-flex items-center gap-2 rounded-lg border border-indigo-400/30 bg-indigo-500/10 px-3 py-2 text-xs font-semibold text-indigo-200 hover:bg-indigo-500/20"
+        >
+          <BarChart3 className="h-4 w-4" />
+          Analytics
         </a>
         <button
           onClick={() => void load()}

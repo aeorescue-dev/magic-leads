@@ -228,11 +228,11 @@ export default function LandingPage() {
           </h1>
           <p className="fade-up mx-auto mt-8 max-w-2xl text-lg leading-relaxed text-[#54617a] sm:text-xl">{t("landing.heroSub")}</p>
           <div className="fade-up mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
-            <button onClick={openModal} className="btn-mint flex w-full items-center justify-center gap-2.5 px-9 py-4 text-base sm:w-auto">
+            <button onClick={openModal} data-track="hero_cta" className="btn-mint flex w-full items-center justify-center gap-2.5 px-9 py-4 text-base sm:w-auto">
               {t("landing.ctaPanel")}
               <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" /></svg>
             </button>
-            <button onClick={() => scrollTo("simulador")} className="btn-outline flex w-full items-center justify-center px-7 py-4 text-sm sm:w-auto">{t("landing.ctaSample")}</button>
+            <button onClick={() => scrollTo("simulador")} data-track="sample_cta" className="btn-outline flex w-full items-center justify-center px-7 py-4 text-sm sm:w-auto">{t("landing.ctaSample")}</button>
           </div>
           <div className="fade-up mt-8 flex flex-wrap items-center justify-center gap-x-8 gap-y-2 text-sm font-medium text-[#54617a]">
             {L.trust.map((item) => (
@@ -338,7 +338,7 @@ export default function LandingPage() {
             <div className="flex flex-col items-start gap-6 md:flex-row md:items-center">
               <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-[#10b981] text-white"><svg className="h-7 w-7" viewBox="0 0 24 24" fill="currentColor"><path d="m13 2-9 12h7l-1 8 10-13h-7V2Z" /></svg></span>
               <p className="text-xl font-bold leading-snug text-white sm:text-2xl">{t("landing.flip")}</p>
-              <button onClick={openModal} className="btn-mint shrink-0 px-6 py-3.5 text-sm">{t("landing.seeHow")}</button>
+              <button onClick={openModal} data-track="how_cta" className="btn-mint shrink-0 px-6 py-3.5 text-sm">{t("landing.seeHow")}</button>
             </div>
           </div>
         </div>
@@ -418,12 +418,12 @@ export default function LandingPage() {
                             <p className="font-mono text-base font-black text-[#34e0a1]">{lead.ownerPhone}</p>
                             <p className="mt-1 text-[10px] text-[#64748b]">{lead.address}</p>
                           </div>
-                          <button onClick={() => setWhatsappLead(lead)} className="btn-mint w-full py-2.5 text-xs uppercase tracking-wider">{t("landing.openWa")}</button>
+                          <button onClick={() => setWhatsappLead(lead)} data-track="open_whatsapp" className="btn-mint w-full py-2.5 text-xs uppercase tracking-wider">{t("landing.openWa")}</button>
                         </div>
                       ) : (
                         <div className="space-y-2">
                           <div className="flex items-center justify-between text-[11px] text-[#9aa7ba]"><span>{t("landing.address")}</span><span className="font-mono text-white">{lead.address}</span></div>
-                          <button onClick={() => { setReservedLeadId(lead.id); setTimerSeconds(3600); }} className="flex w-full items-center justify-center rounded-lg border border-[#10b981]/40 bg-[#10b981]/10 py-2.5 text-xs font-bold text-[#34e0a1] hover:bg-[#10b981] hover:text-white">{t("landing.reserveHour")}</button>
+                          <button onClick={() => { setReservedLeadId(lead.id); setTimerSeconds(3600); }} data-track="reserve_hour" className="flex w-full items-center justify-center rounded-lg border border-[#10b981]/40 bg-[#10b981]/10 py-2.5 text-xs font-bold text-[#34e0a1] hover:bg-[#10b981] hover:text-white">{t("landing.reserveHour")}</button>
                         </div>
                       )}
                     </div>
@@ -433,7 +433,7 @@ export default function LandingPage() {
             </div>
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 bg-[#0a0f1a] p-4 text-xs sm:px-6">
               <span className="text-[#9aa7ba]">{t("landing.payOk")}</span>
-              <button onClick={openModal} className="font-bold text-[#34e0a1] hover:underline">{t("landing.unlock4")}</button>
+              <button onClick={openModal} data-track="unlock_cta" className="font-bold text-[#34e0a1] hover:underline">{t("landing.unlock4")}</button>
             </div>
           </div>
         </div>
@@ -568,7 +568,7 @@ export default function LandingPage() {
                 <div className="flex justify-between"><span className="text-white/80">{t("landing.costDelivered")}</span><span>~$2.29</span></div>
                 <div className="flex justify-between text-base"><span>{t("landing.onePays")}</span><span className="rounded-lg bg-[#04231a] px-2.5 py-0.5 text-[#34e0a1]">{monthsPaid} {t("landing.months")}</span></div>
               </div>
-              <button onClick={openModal} className="w-full rounded-xl bg-white py-4 text-sm font-black uppercase tracking-wider text-[#0a8f65]">{t("landing.calcCta")}</button>
+              <button onClick={openModal} data-track="calc_cta" className="w-full rounded-xl bg-white py-4 text-sm font-black uppercase tracking-wider text-[#0a8f65]">{t("landing.calcCta")}</button>
             </div>
           </div>
         </div>
@@ -621,7 +621,7 @@ export default function LandingPage() {
                   </li>
                 ))}
               </ul>
-              <button onClick={openModal} className="btn-mint mt-8 w-full py-4 text-base uppercase tracking-wider">{t("landing.planCta")}</button>
+              <button onClick={openModal} data-track="plan_cta" className="btn-mint mt-8 w-full py-4 text-base uppercase tracking-wider">{t("landing.planCta")}</button>
               <p className="mt-3 text-center text-xs text-[#64748b]">{t("landing.planSafe")}</p>
             </div>
             <div className="flex flex-col gap-6">
@@ -655,7 +655,7 @@ export default function LandingPage() {
             <Kicker color="#f43f5e">{t("landing.faqKicker")}</Kicker>
             <h2 className="font-display mt-5 text-4xl font-black sm:text-5xl">{t("landing.faqTitle")}</h2>
             <p className="mt-6 text-[15px] text-[#54617a]">{t("landing.faqSub")}</p>
-            <button onClick={openModal} className="btn-dark mt-7 px-6 py-3.5 text-sm">{t("landing.faqCta")}</button>
+            <button onClick={openModal} data-track="faq_cta" className="btn-dark mt-7 px-6 py-3.5 text-sm">{t("landing.faqCta")}</button>
           </div>
           <div className="space-y-3">
             {L.faqs.map((f, i) => {
@@ -684,7 +684,7 @@ export default function LandingPage() {
           </div>
           <h2 className="font-display mt-6 text-4xl font-black sm:text-6xl">{t("landing.finalTitle")}<br /><span className="hl">{t("landing.finalHl")}</span></h2>
           <p className="mx-auto mt-6 max-w-xl text-lg text-[#9aa7ba]">{t("landing.finalSub")}</p>
-          <button onClick={openModal} className="btn-mint mx-auto mt-9 inline-flex items-center gap-2.5 px-9 py-4 text-base uppercase tracking-wider">{t("landing.finalCta")}</button>
+          <button onClick={openModal} data-track="final_cta" className="btn-mint mx-auto mt-9 inline-flex items-center gap-2.5 px-9 py-4 text-base uppercase tracking-wider">{t("landing.finalCta")}</button>
           <p className="mt-4 text-xs text-[#64748b]">{t("landing.finalFoot")}</p>
         </div>
       </section>
@@ -696,7 +696,7 @@ export default function LandingPage() {
             <p className="font-display text-lg font-black leading-none">$120<span className="text-xs font-bold text-[#94a3b8]">{t("landing.week")}</span></p>
             <p className="text-[11px] font-bold text-[#10b981]">{t("landing.stickyArea")}</p>
           </div>
-          <button onClick={openModal} className="btn-mint flex-1 py-3 text-sm">{t("landing.stickyNow")}</button>
+          <button onClick={openModal} data-track="sticky_cta" className="btn-mint flex-1 py-3 text-sm">{t("landing.stickyNow")}</button>
         </div>
       </div>
 
@@ -712,7 +712,7 @@ export default function LandingPage() {
             <div className="my-4 rounded-2xl bg-[#dcf8c6] p-4 text-sm leading-relaxed">
               {L.waMsg(whatsappLead.ownerName.split(" ")[0], whatsappLead.category.toLowerCase(), whatsappLead.address)}
             </div>
-            <button onClick={() => { setWhatsappLead(null); openModal(); }} className="btn-mint w-full py-3.5 text-sm uppercase tracking-wider">{t("landing.activateSend")}</button>
+            <button onClick={() => { setWhatsappLead(null); openModal(); }} data-track="activate_send" className="btn-mint w-full py-3.5 text-sm uppercase tracking-wider">{t("landing.activateSend")}</button>
           </div>
         </div>
       )}

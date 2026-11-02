@@ -183,7 +183,7 @@ _BODY = (
     "{signature}\n"
     "Magic Leads\n"
     "{postal_address}\n\n"
-    "https://www.magicleads.app/\n\n"
+    "{url}\n\n"
     "Unsubscribe: {unsubscribe_url}\n"
     'To stop receiving these emails, reply "unsubscribe".'
 )
@@ -260,7 +260,6 @@ SEQUENCE_TEMPLATES: dict[str, dict[str, str]] = {
             "{signature}\n"
             "Magic Leads\n"
             "{postal_address}\n\n"
-            "https://www.magicleads.app/\n\n"
             "Unsubscribe: {unsubscribe_url}\n"
             'To stop receiving these emails, reply "unsubscribe".'
         ),
@@ -276,21 +275,36 @@ del _step, _tpl
 SEQUENCE_LANDING_BASE = "https://www.magicleads.app/en"
 
 
-def sequence_url(city: Optional[str], niche: Optional[str], step: int = 2) -> str:
-    """URL da landing para o passo da sequencia, com cidade e nicho.
+def tracking_landing_url(
+    city: Optional[str], niche: Optional[str], step: int = 1
+) -> str:
+    """URL da landing com UTM de outreach (atribuição first-party).
 
-    Usa `urlencode`: um token com `&`, espaco ou acento nunca parte o link (o
-    redirecionamento continua valido em 100% dos lotes). Para os tokens reais
-    (`NYC`, `DALLAS`, `general_contractors`, ...) o resultado e' identico ao
-    formato literal.
+    O Gmail remove o Referer; sem UTM o canal de e-mail aparecia como
+    "direto" no analytics. `city`/`niche` continuam na query para a landing
+    personalizar a amostra.
     """
-    params: dict[str, str] = {}
-    if city:
-        params["city"] = str(city).strip().upper()
-    if niche:
-        params["niche"] = str(niche).strip()
+    city_token = (city or "").strip().upper()
+    niche_token = (niche or "").strip()
+    params: dict[str, str] = {
+        "utm_source": "magicleads",
+        "utm_medium": "outreach",
+        "utm_campaign": (
+            f"{(city_token or 'all').lower()}_{(niche_token or 'general').lower()}"
+        ),
+        "utm_content": f"step{int(step)}",
+    }
+    if city_token:
+        params["city"] = city_token
+    if niche_token:
+        params["niche"] = niche_token
     params["step"] = str(int(step))
     return f"{SEQUENCE_LANDING_BASE}?{urlencode(params)}"
+
+
+def sequence_url(city: Optional[str], niche: Optional[str], step: int = 2) -> str:
+    """URL da landing para o passo da sequencia, com cidade, nicho e UTM."""
+    return tracking_landing_url(city, niche, step)
 
 
 def render_sequence_email(step: str, context: Mapping[str, str]) -> dict[str, str]:
@@ -325,7 +339,6 @@ _COPY_FOOTER = (
     "{signature}\n"
     "Magic Leads\n"
     "{postal_address}\n\n"
-    "https://www.magicleads.app/\n\n"
     "Unsubscribe: {unsubscribe_url}\n"
     'To stop receiving these emails, reply "unsubscribe".'
 )
@@ -774,6 +787,7 @@ def build_context(
         "signature": signature or DEFAULT_SIGNATURE,
         "postal_address": SENDER_POSTAL_ADDRESS,
         "unsubscribe_url": unsubscribe_url(recipient_email),
+        "url": tracking_landing_url(city, niche, 1),
     }
 
 

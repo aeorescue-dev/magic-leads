@@ -88,6 +88,7 @@ from .scrapers.socrata_311 import socrata_scraper
 from .scrapers.socrata_discovery import socrata_discovery
 from .services import (
     alert_planner,
+    analytics,
     auto_batch,
     auto_ramp,
     contractor_ingest,
@@ -2680,6 +2681,49 @@ async def admin_system_health(
     return await system_health.get_snapshot(window)
 
 
+@app.post("/api/analytics/ingest", status_code=204)
+async def analytics_ingest(
+    request: Request,
+    x_analytics_key: str | None = Header(None),
+):
+    """Ingest first-party do beacon (chave partilhada com o proxy Vercel).
+
+    Público apenas no sentido de ser chamado pelo proxy; sem a chave devolve
+    401 e sem `ANALYTICS_INGEST_KEY` configurada devolve 503 (fail-closed).
+    """
+    if not getattr(settings, "ANALYTICS_ENABLED", True):
+        return Response(status_code=204)
+    expected = (getattr(settings, "ANALYTICS_INGEST_KEY", "") or "").strip()
+    if not expected:
+        raise HTTPException(status_code=503, detail="analytics ingest fechado")
+    if not x_analytics_key or not secrets.compare_digest(x_analytics_key, expected):
+        raise HTTPException(status_code=401, detail="nao autorizado")
+
+    raw = await request.body()
+    if len(raw) > 32_000:
+        raise HTTPException(status_code=413, detail="payload demasiado grande")
+    client_ip = (
+        (request.headers.get("x-analytics-client-ip") or "").split(",")[0].strip()
+        or (request.client.host if request.client else "")
+    )
+    if not analytics.allow_ingest(client_ip):
+        raise HTTPException(status_code=429, detail="rate limit")
+    try:
+        payload = json.loads(raw or b"{}")
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="json invalido")
+    await anyio.to_thread.run_sync(analytics.ingest, payload, client_ip)
+    return Response(status_code=204)
+
+
+@app.get("/api/admin/analytics")
+async def admin_analytics(
+    range: str = "7d", _admin: dict = Depends(_require_admin_user)
+):
+    """Resumo de tráfego/comportamento para o /admin/analytics."""
+    return await anyio.to_thread.run_sync(analytics.get_summary, range)
+
+
 @app.get("/api/admin/outbound/health")
 async def admin_outbound_health(_admin: dict = Depends(_require_admin_user)):
     """Ultimo snapshot de saude do motor + digest textual (sem enviar)."""
@@ -4745,6 +4789,10 @@ async def _control_tower_loop():
             await system_health.capture_snapshot()
         except Exception as exc:  # noqa: BLE001
             logger.warning("[CONTROL-TOWER] snapshot de sistema falhou: %s", exc)
+        try:
+            await anyio.to_thread.run_sync(analytics.maintenance_if_due)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[CONTROL-TOWER] manutencao analytics falhou: %s", exc)
         try:
             res = await control_tower.maybe_send_digest()
             if res:

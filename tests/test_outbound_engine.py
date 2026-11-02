@@ -706,7 +706,8 @@ def test_outbound_step2_template_is_english_and_has_offer():
     rendered = ot.render_sequence_email("step2_offer", ctx)
     assert "New York City" in rendered["body"]
     assert "roofing" in rendered["body"]
-    assert "magicleads.app/en?city=NYC&niche=roofing&step=2" in rendered["body"]
+    assert ctx["url"] in rendered["body"]
+    assert "utm_source=magicleads" in rendered["body"]
     assert "{" not in rendered["body"] and "}" not in rendered["body"]
 
 

@@ -363,6 +363,10 @@ class Settings(BaseSettings):
     # Segredo HMAC do opt-out de outbound (`/unsubscribe?token=`). Vazio usa
     # PUSH_CLICK_SECRET/CRON_SECRET; sem qualquer segredo o link nao e' assinado.
     UNSUBSCRIBE_SECRET: str = ""
+    # Web Analytics first-party (Fase 29). Sem chave, o ingest fica fechado
+    # (503) e o beacon do frontend descarta os lotes em silêncio.
+    ANALYTICS_ENABLED: bool = True
+    ANALYTICS_INGEST_KEY: str = ""
 
     @field_validator("PUSH_DAILY_LIMIT")
     @classmethod

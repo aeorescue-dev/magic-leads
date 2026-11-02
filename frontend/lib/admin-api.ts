@@ -1154,6 +1154,69 @@ export function fetchAdminAccessAudit(
   );
 }
 
+export interface AdminAnalyticsCard {
+  value: number;
+  delta_pct: number | null;
+  spark: number[];
+}
+
+export interface AdminAnalyticsSource {
+  source: string;
+  medium: string;
+  visits: number;
+  visitors: number;
+  pageviews: number;
+}
+
+export interface AdminAnalyticsGeo {
+  country: string;
+  region: string;
+  city: string;
+  visits: number;
+  visitors: number;
+}
+
+export interface AdminAnalytics {
+  generated_at: string;
+  range: string;
+  overall: {
+    score: number;
+    status: "ok" | "warn" | "fail";
+    status_label: string;
+    reasons: string[];
+    volume: number;
+    engagement: number;
+    conversion: number;
+  };
+  cards: Record<string, AdminAnalyticsCard>;
+  series: Array<{
+    t: string;
+    visits: number;
+    visitors: number;
+    pageviews: number;
+    cta: number;
+    forms: number;
+  }>;
+  sources: AdminAnalyticsSource[];
+  geo: AdminAnalyticsGeo[];
+  funnel: Array<{ step: string; count: number; rate: number }>;
+  events: Array<{ name: string; count: number; sessions: number }>;
+  devices: Array<{ device: string; visits: number }>;
+  locales: Array<{ locale: string; visits: number }>;
+  recent: Array<{
+    ts: string;
+    name: string;
+    path: string | null;
+    label: string | null;
+  }>;
+}
+
+export function fetchAdminAnalytics(range = "7d"): Promise<AdminAnalytics> {
+  return adminFetch<AdminAnalytics>(
+    `/analytics?range=${encodeURIComponent(range)}`
+  );
+}
+
 /** Snapshot read-only do System Health (7 camadas + score 0–100). */
 export function fetchSystemHealth(windowHours = 24): Promise<SystemHealth> {
   return adminFetch<SystemHealth>(

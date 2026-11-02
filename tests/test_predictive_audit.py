@@ -31,11 +31,16 @@ def test_url_de_cada_cidade_e_nicho_tem_os_tokens_certos():
             for step in (1, 2):
                 url = t.sequence_url(city, niche, step)
                 assert url.startswith(CAMPAIGN_PREFIX)
-                assert _query(url) == {
-                    "city": [city],
-                    "niche": [niche],
-                    "step": [str(step)],
-                }
+                query = _query(url)
+                assert query["city"] == [city]
+                assert query["niche"] == [niche]
+                assert query["step"] == [str(step)]
+                assert query["utm_source"] == ["magicleads"]
+                assert query["utm_medium"] == ["outreach"]
+                assert query["utm_campaign"] == [
+                    f"{city.lower()}_{niche.lower()}"
+                ]
+                assert query["utm_content"] == [f"step{step}"]
 
 
 def test_url_codifica_tokens_em_vez_de_os_partir():
