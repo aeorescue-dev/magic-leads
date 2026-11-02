@@ -666,6 +666,8 @@ export default function SystemHealthPage() {
                         <span className="font-semibold text-rose-300">
                           {row.paused_reason || "pausada"}
                         </span>
+                      ) : Number(row.enabled) === 0 ? (
+                        <span className="font-semibold text-slate-400">desligada</span>
                       ) : (
                         <span className="font-semibold text-emerald-300">ativa</span>
                       )}

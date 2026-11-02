@@ -7,6 +7,7 @@ import {
   scoreClasses,
   scoreTone,
   sparkPoints,
+  toUtcDate,
 } from "@/lib/system-health";
 
 describe("System Health — score e formatação", () => {
@@ -43,6 +44,22 @@ describe("System Health — score e formatação", () => {
   it("formata datas em UTC", () => {
     expect(fmtWhen("2026-11-02T16:00:00+00:00")).toContain("UTC");
     expect(fmtWhen(null)).toBe("—");
+  });
+
+  it("trata timestamps naive da BD como UTC (não como hora local)", () => {
+    expect(toUtcDate("2026-11-02 05:00:00")?.toISOString()).toBe(
+      "2026-11-02T05:00:00.000Z"
+    );
+    expect(toUtcDate("2026-11-02T05:00:00+00:00")?.toISOString()).toBe(
+      "2026-11-02T05:00:00.000Z"
+    );
+    expect(toUtcDate("2026-11-02T00:00:00-05:00")?.toISOString()).toBe(
+      "2026-11-02T05:00:00.000Z"
+    );
+    expect(toUtcDate("invalido")).toBeNull();
+    expect(fmtWhen("2026-11-02 05:00:00")).toBe(
+      fmtWhen("2026-11-02T05:00:00Z")
+    );
   });
 
   it("gera polyline válida", () => {

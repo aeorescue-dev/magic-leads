@@ -128,9 +128,8 @@ export function fmtAge(hours: number | null | undefined): string {
 }
 
 export function fmtWhen(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  const dt = new Date(iso);
-  if (Number.isNaN(dt.getTime())) return "—";
+  const dt = toUtcDate(iso);
+  if (!dt) return "—";
   return `${dt.toLocaleString("pt-PT", {
     timeZone: "UTC",
     day: "2-digit",
@@ -138,6 +137,26 @@ export function fmtWhen(iso: string | null | undefined): string {
     hour: "2-digit",
     minute: "2-digit",
   })} UTC`;
+}
+
+/**
+ * Parse de timestamps do backend.
+ *
+ * A BD guarda UTC **naive** (`"2026-11-02 05:00:00"`). O `new Date()` do
+ * browser interpreta isso como hora LOCAL; num admin em Nova Iorque o valor
+ * aparecia 5h adiantado (ex.: Boston 00:07 UTC mostrava 05:07 UTC). Sem
+ * timezone explícita, assumimos UTC.
+ */
+export function toUtcDate(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(text);
+  const normalized = hasTimezone
+    ? text
+    : `${text.replace(" ", "T")}Z`;
+  const dt = new Date(normalized);
+  return Number.isNaN(dt.getTime()) ? null : dt;
 }
 
 export function fmtValue(
