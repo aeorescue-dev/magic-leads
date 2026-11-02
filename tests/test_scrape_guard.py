@@ -50,6 +50,39 @@ def test_failed_run_retries_after_retry_window():
     assert delay == pytest.approx(25 * 60)
 
 
+def test_run_interrupted_by_deploy_fires_immediately():
+    """Um deploy a meio não pode deixar o scheduler à espera 6h."""
+    last_success = _iso(NOW - timedelta(hours=7))
+    last_run = _iso(NOW - timedelta(minutes=10))
+    delay = sg.seconds_until_next_scrape(
+        NOW,
+        last_success,
+        last_run,
+        6,
+        retry_minutes=30,
+        max_wake_seconds=10**6,
+        last_run_status="error",
+        last_run_error="run interrompido (processo reiniciado)",
+    )
+    assert delay == 0.0
+
+
+def test_generic_error_still_waits_retry_window():
+    last_success = _iso(NOW - timedelta(hours=7))
+    last_run = _iso(NOW - timedelta(minutes=5))
+    delay = sg.seconds_until_next_scrape(
+        NOW,
+        last_success,
+        last_run,
+        6,
+        retry_minutes=30,
+        max_wake_seconds=10**6,
+        last_run_status="error",
+        last_run_error="boom",
+    )
+    assert delay == pytest.approx(25 * 60)
+
+
 def test_naive_now_from_utcnow_is_coerced():
     """`utcnow()` devolve naive; a aritmética com datas da BD é aware (UTC)."""
     naive_now = NOW.replace(tzinfo=None)

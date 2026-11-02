@@ -50,11 +50,15 @@ def seconds_until_next_scrape(
     *,
     retry_minutes: int = 30,
     max_wake_seconds: float = 900.0,
+    last_run_status: Optional[str] = None,
+    last_run_error: Optional[str] = None,
 ) -> float:
     """Segundos até ao próximo run, com base no relógio (não no tempo de boot).
 
     - Cadência normal: `last_success + interval`.
     - Um run falhado não deve esperar 6h: permite retry após `retry_minutes`.
+    - Um run **interrompido por deploy** (sem success posterior) dispara já,
+      para o workflow não ficar à espera de um processo que já morreu.
     - Devolve 0 quando já está vencido (arranque após deploy recupera atraso).
     - Acorda no máximo a cada `max_wake_seconds` para reavaliar o relógio.
     """
@@ -62,6 +66,17 @@ def seconds_until_next_scrape(
     last_run = parse_dt(last_run_started_at)
     now = parse_dt(now) or datetime.now(timezone.utc)
     interval = max(0.25, float(interval_hours or 6))
+
+    if (
+        str(last_run_status or "").lower() in ("error", "interrupted")
+        and last_run is not None
+        and (last_success is None or last_run > last_success)
+        and any(
+            marker in str(last_run_error or "").lower()
+            for marker in ("interrompido", "reiniciado")
+        )
+    ):
+        return 0.0
 
     due: Optional[datetime] = None
     if last_success is not None:

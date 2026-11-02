@@ -9999,6 +9999,52 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def mark_interrupted_scraper_runs(self) -> int:
+        """Marca como erro os runs 'running' órfãos de um processo anterior.
+
+        Um deploy mata o processo a meio; a linha ficava `running` e o
+        scheduler (e o workflow do GitHub) esperavam por um run que já não
+        existe. No arranque não há runs deste processo, portanto qualquer
+        `running` é órfão (Railway corre uma réplica).
+        """
+        import json
+
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT run_id, trigger, started_at FROM scraper_runs "
+                "WHERE status='running'"
+            ).fetchall()
+            if not rows:
+                return 0
+            finished = utcnow().isoformat()
+            for row in rows:
+                conn.execute(
+                    "UPDATE scraper_runs SET status='error', "
+                    "error='run interrompido (processo reiniciado)', "
+                    "finished_at=? WHERE run_id=? AND status='running'",
+                    (finished, row["run_id"]),
+                )
+                conn.execute(
+                    "INSERT INTO system_alerts (level, code, message, context) "
+                    "VALUES ('warning', 'SCRAPER_INTERRUPTED', ?, ?)",
+                    (
+                        f"Ingestão interrompida pelo deploy (run {row['run_id']})",
+                        json.dumps(
+                            {
+                                "run_id": row["run_id"],
+                                "trigger": row["trigger"],
+                                "started_at": row["started_at"],
+                            },
+                            ensure_ascii=False,
+                        ),
+                    ),
+                )
+            conn.commit()
+            return len(rows)
+        finally:
+            conn.close()
+
     # ===== SYSTEM ALERTS (Dead Man's Switch / auditoria de fluxo) =====
 
     def record_system_alert(
@@ -12312,6 +12358,11 @@ class AsyncDatabaseService:
     async def mark_stale_scraper_runs(self, older_than_minutes: int = 180) -> int:
         return await anyio.to_thread.run_sync(
             self._service.mark_stale_scraper_runs, older_than_minutes
+        )
+
+    async def mark_interrupted_scraper_runs(self) -> int:
+        return await anyio.to_thread.run_sync(
+            self._service.mark_interrupted_scraper_runs
         )
 
     async def get_city_health(self, city: str) -> dict:

@@ -4435,6 +4435,8 @@ async def _scheduler_loop():
                 (last_run or {}).get("started_at"),
                 interval_hours,
                 retry_minutes=retry_minutes,
+                last_run_status=(last_run or {}).get("status"),
+                last_run_error=(last_run or {}).get("error"),
             )
             if delay > 0:
                 await asyncio.sleep(delay)
@@ -4625,6 +4627,18 @@ async def _lifespan(app):
             logger.warning("Runs do scraper presos em running fechados: %s", stale_runs)
     except Exception as e:
         logger.warning("Falha ao fechar runs presos do scraper: %s", e)
+
+    # Deploy a meio de um run mata o processo, mas a linha `running` ficava
+    # visível e o scheduler/workflow esperavam por ela. No arranque não há
+    # runs deste processo: fecha os órfãos e deixa o scheduler recuperar.
+    try:
+        interrupted = await db_service.mark_interrupted_scraper_runs()
+        if interrupted:
+            logger.warning(
+                "Runs do scraper interrompidos por deploy fechados: %s", interrupted
+            )
+    except Exception as e:
+        logger.warning("Falha ao fechar runs interrompidos: %s", e)
 
     # B1: higiene de dispositivos push (limite de 5). Corrige o estado legado
     # (utilizadores com 9 browsers) sem esperar por um novo subscribe.
