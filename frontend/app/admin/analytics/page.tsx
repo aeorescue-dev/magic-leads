@@ -321,6 +321,8 @@ export default function AnalyticsPage() {
                 onClick={() => {
                   setRange(option);
                   setCustom(false);
+                  setFromDate("");
+                  setToDate("");
                   setDateError(null);
                 }}
                 className={cn(
