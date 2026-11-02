@@ -24,7 +24,7 @@ from ..utils.logger import logger
 from . import analytics
 from .db import get_connection
 
-VERSION = "2026-11-02.11"
+VERSION = "2026-11-02.12"
 NDA_VERSION = "investor-nda-2026-11-02"
 PRICE_WEEKLY = 120.0
 WEEKS_PER_YEAR = 52.0
@@ -340,11 +340,11 @@ DEFAULT_ASSUMPTIONS: dict[str, Any] = {
     "code_inventory": {
         "python_lines": 60968,
         "typescript_lines": 21445,
-        "pytest_tests": 1296,
+        "pytest_tests": 1302,
         "vitest_tests": 109,
         "test_files": 121,
         "docs": 19,
-        "coverage_backend_pct": 69.9,
+        "coverage_backend_pct": 69.7,
         "coverage_measured_at": "2026-11-02",
         "coverage_command": "pytest tests --cov=backend --cov-report=json:coverage.json",
         "coverage_modules": {

@@ -110,6 +110,7 @@ from .services import (
     showcase,
     system_health,
     telnyx_voice,
+    voice_scripts,
 )
 from .services.boston_address import clean_boston_location
 from .services.db import (  # noqa: F401  — usados nos filtros de qualificação
@@ -3444,6 +3445,138 @@ async def admin_voice_source_sync(
     source_id: int, _admin: dict = Depends(_require_admin_user)
 ):
     return await anyio.to_thread.run_sync(b2b_voice.sync_source, source_id)
+
+
+@app.get("/api/admin/voice/scripts")
+async def admin_voice_scripts(_admin: dict = Depends(_require_admin_user)):
+    return {"scripts": await anyio.to_thread.run_sync(voice_scripts.list_scripts)}
+
+
+@app.put("/api/admin/voice/scripts/{trade_code}")
+async def admin_voice_script_save(
+    trade_code: str, request: Request, _admin: dict = Depends(_require_admin_user)
+):
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="json inválido")
+    payload = payload or {}
+    try:
+        script = await anyio.to_thread.run_sync(
+            voice_scripts.save_draft,
+            trade_code,
+            str(payload.get("body") or ""),
+            str(payload.get("disclosure") or ""),
+            str(payload.get("assistant_id") or ""),
+            str(payload.get("voice_id") or ""),
+            int(_admin["id"]),
+        )
+        return {"ok": True, "script": script}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/admin/voice/scripts/{trade_code}/approve")
+async def admin_voice_script_approve(
+    trade_code: str, _admin: dict = Depends(_require_admin_user)
+):
+    try:
+        script = await anyio.to_thread.run_sync(
+            voice_scripts.approve, trade_code, int(_admin["id"])
+        )
+        return {"ok": True, "script": script}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/admin/voice/scripts/{trade_code}/preview")
+async def admin_voice_script_preview(
+    trade_code: str, request: Request, _admin: dict = Depends(_require_admin_user)
+):
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001
+        payload = {}
+    payload = payload or {}
+    try:
+        return await anyio.to_thread.run_sync(
+            voice_scripts.render,
+            trade_code,
+            str(payload.get("company") or ""),
+            str(payload.get("city") or ""),
+            int(payload.get("permit_count") or 0),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/admin/voice/scripts/{trade_code}/sync-telnyx")
+async def admin_voice_script_sync(
+    trade_code: str, _admin: dict = Depends(_require_admin_user)
+):
+    try:
+        return await anyio.to_thread.run_sync(
+            voice_scripts.sync_to_telnyx, trade_code
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/admin/voice/test-call")
+async def admin_voice_test_call(
+    request: Request, _admin: dict = Depends(_require_admin_user)
+):
+    """Uma chamada real controlada; exige staging off + allowlist + confirmação."""
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="json inválido")
+    payload = payload or {}
+    if not bool(payload.get("confirm")):
+        raise HTTPException(status_code=400, detail="confirm=true obrigatório")
+    if b2b_voice.staging_mode():
+        raise HTTPException(
+            status_code=409,
+            detail="VOICE_STAGING_MODE=true; desliga o staging para teste real",
+        )
+    if not telnyx_voice.configured():
+        raise HTTPException(status_code=503, detail="Telnyx não configurado")
+    phone = b2b_voice.normalize_phone(payload.get("phone"))
+    allowed = {
+        b2b_voice.normalize_phone(item.strip())
+        for item in str(getattr(settings, "VOICE_TEST_NUMBERS", "")).split(",")
+        if item.strip()
+    }
+    if not phone or phone not in allowed:
+        raise HTTPException(
+            status_code=403,
+            detail="número fora de VOICE_TEST_NUMBERS",
+        )
+    trade = showcase.normalize_trade(payload.get("trade")) or "remodeling"
+    b2b_voice.check_dnc(phone, listed=False, source="test_call")
+    company = {
+        "id": 0,
+        "company_name": "Magic Leads Test Call",
+        "phone": phone,
+        "city": str(payload.get("city") or "Boston"),
+        "state": str(payload.get("state") or "MA").upper(),
+        "trade": trade,
+        "entity_type": "business",
+        "status": "ready",
+        "email": "",
+    }
+    result = await anyio.to_thread.run_sync(
+        telnyx_voice.create_call,
+        company,
+        "test_call",
+        "",
+        company["city"],
+        trade,
+        False,
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=409, detail=result)
+    return result
 
 
 @app.get("/api/admin/analytics")

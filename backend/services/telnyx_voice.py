@@ -83,17 +83,32 @@ def create_call(
         }
 
     trade = showcase.normalize_trade(trade_code or company.get("trade"))
+    from . import voice_scripts
+
+    script = voice_scripts.approved_for_trade(trade) if trade else None
+    assistant_id = (script or {}).get("assistant_id") or ""
+    staging = bool(getattr(settings, "VOICE_STAGING_MODE", False))
+    if configured() and not dry_run and (not script or not assistant_id):
+        return {
+            "ok": False,
+            "reason": "script_not_approved",
+            "script_status": (script or {}).get("status"),
+            "message": (
+                "Roteiro aprovado com assistant_id Telnyx é obrigatório para "
+                "chamadas reais."
+            ),
+        }
     call = b2b_voice.create_voice_call(
         company,
         provider="telnyx",
         campaign_id=campaign_id,
-        script_id=script_id,
+        script_id=(script or {}).get("trade_code") or script_id,
         city=city or company.get("city"),
         trade_code=trade,
+        assistant_id=assistant_id,
     )
     if not configured() or dry_run:
         b2b_voice.update_voice_call(call["id"], status="dry_run")
-        staging = bool(getattr(settings, "VOICE_STAGING_MODE", False))
         return {
             "ok": True,
             "dry_run": True,
@@ -117,6 +132,7 @@ def create_call(
             "city": call.get("city"),
             "trade_code": call.get("trade_code"),
             "campaign_id": campaign_id,
+            "assistant_id": assistant_id,
         }
     )
     payload = {
@@ -180,6 +196,42 @@ def verify_secret(secret: Optional[str]) -> bool:
     return bool(secret) and hmac.compare_digest(str(expected), str(secret))
 
 
+def _call_action(call_control_id: str, action: str, payload: dict) -> dict:
+    if not configured() or not call_control_id:
+        return {"ok": False, "reason": "not_configured"}
+    try:
+        response = httpx.post(
+            f"{API_BASE}/calls/{call_control_id}/actions/{action}",
+            headers={
+                "Authorization": f"Bearer {settings.TELNYX_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=15,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[TELNYX] ação %s falhou: %s", action, type(exc).__name__)
+        return {"ok": False, "reason": "network_error"}
+    if response.status_code >= 300:
+        logger.warning(
+            "[TELNYX] ação %s HTTP %s", action, response.status_code
+        )
+        return {"ok": False, "reason": f"http_{response.status_code}"}
+    return {"ok": True}
+
+
+def start_ai_assistant(call_control_id: str, assistant_id: str) -> dict:
+    if not assistant_id:
+        return {"ok": False, "reason": "missing_assistant_id"}
+    return _call_action(
+        call_control_id, "ai_assistant_start", {"assistant": {"id": assistant_id}}
+    )
+
+
+def hangup_call(call_control_id: str) -> dict:
+    return _call_action(call_control_id, "hangup", {})
+
+
 def handle_webhook(payload: dict) -> dict:
     """Normaliza eventos Telnyx e executa a ação de showcase no DTMF 1."""
     data = payload.get("data") if isinstance(payload, dict) else {}
@@ -223,11 +275,45 @@ def handle_webhook(payload: dict) -> dict:
         }
 
     if "answered" in event_type:
+        current = b2b_voice.get_voice_call(voice_call_id) or {}
         b2b_voice.update_voice_call(
             voice_call_id,
             status="in_call",
             answered_at=datetime.now(timezone.utc).isoformat(),
         )
+        call_control_id = str(
+            body.get("call_control_id") or current.get("provider_call_id") or ""
+        )
+        assistant_id = str(current.get("assistant_id") or "")
+        assistant_result = None
+        if configured() and call_control_id:
+            if assistant_id:
+                assistant_result = start_ai_assistant(
+                    call_control_id, assistant_id
+                )
+                if not assistant_result.get("ok"):
+                    b2b_voice.update_voice_call(
+                        voice_call_id,
+                        status="ended",
+                        hangup_cause="assistant_start_failed",
+                    )
+                    hangup_call(call_control_id)
+            else:
+                # Segurança: nunca deixar uma chamada real em silêncio.
+                b2b_voice.update_voice_call(
+                    voice_call_id,
+                    status="ended",
+                    hangup_cause="missing_assistant",
+                )
+                hangup_call(call_control_id)
+        return {
+            "ok": True,
+            "action": "answered",
+            "voice_call_id": voice_call_id,
+            "assistant_started": bool(
+                assistant_result and assistant_result.get("ok")
+            ),
+        }
     elif "hangup" in event_type or "call.ended" in event_type or "ended" in event_type:
         current = b2b_voice.get_voice_call(voice_call_id) or {}
         duration = int(body.get("duration_seconds") or 0)

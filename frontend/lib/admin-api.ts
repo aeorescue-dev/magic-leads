@@ -1989,6 +1989,83 @@ export function stopVoiceCampaign(
   );
 }
 
+export interface VoiceScript {
+  trade_code: string;
+  version: number;
+  status: string;
+  body: string;
+  disclosure: string | null;
+  voice_id: string | null;
+  assistant_id: string | null;
+  approved_by: number | null;
+  approved_at: string | null;
+  updated_at: string;
+}
+
+export interface VoiceScriptPreview {
+  trade_code: string;
+  version: number;
+  status: string;
+  assistant_id: string;
+  body: string;
+  disclosure: string;
+  variables: Record<string, string>;
+}
+
+export function fetchVoiceScripts(): Promise<{ scripts: VoiceScript[] }> {
+  return adminFetch<{ scripts: VoiceScript[] }>("/voice/scripts");
+}
+
+export function saveVoiceScript(
+  tradeCode: string,
+  payload: {
+    body: string;
+    disclosure?: string;
+    assistant_id?: string;
+    voice_id?: string;
+  }
+): Promise<{ ok: boolean; script: VoiceScript }> {
+  return adminFetch<{ ok: boolean; script: VoiceScript }>(
+    `/voice/scripts/${tradeCode}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+}
+
+export function approveVoiceScript(
+  tradeCode: string
+): Promise<{ ok: boolean; script: VoiceScript }> {
+  return adminFetch<{ ok: boolean; script: VoiceScript }>(
+    `/voice/scripts/${tradeCode}/approve`,
+    { method: "POST" }
+  );
+}
+
+export function previewVoiceScript(
+  tradeCode: string,
+  payload: { company?: string; city?: string; permit_count?: number }
+): Promise<VoiceScriptPreview> {
+  return adminFetch<VoiceScriptPreview>(
+    `/voice/scripts/${tradeCode}/preview`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+}
+
+export function syncVoiceScript(
+  tradeCode: string
+): Promise<{ ok: boolean; mode: string; assistant_id: string }> {
+  return adminFetch(`/voice/scripts/${tradeCode}/sync-telnyx`, {
+    method: "POST",
+  });
+}
+
 /** Snapshot read-only do System Health (7 camadas + score 0–100). */
 export function fetchSystemHealth(windowHours = 24): Promise<SystemHealth> {
   return adminFetch<SystemHealth>(

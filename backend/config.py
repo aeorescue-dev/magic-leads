@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     TELNYX_WEBHOOK_SECRET: str = ""
     TELNYX_WEBHOOK_URL: str = ""
     TELNYX_COST_PER_MINUTE_CENTS: int = 2
+    TELNYX_ASSISTANT_MODEL: str = ""
+    TELNYX_ASSISTANT_VOICE: str = ""
+    VOICE_TEST_NUMBERS: str = ""
     VOICE_AUTOSCHED_DELAY_SECONDS: int = 30
     VOICE_SOURCE_ALLOWED_HOSTS: str = ""
     VOICE_SYNC_INTERVAL_HOURS: int = 6

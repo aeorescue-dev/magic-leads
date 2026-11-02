@@ -13,6 +13,7 @@ import {
   ChevronDown,
   Cloud,
   Database,
+  FileText,
   Gauge,
   Globe2,
   Link2,
@@ -37,6 +38,7 @@ import useSWR from "swr";
 
 import {
   AdminApiError,
+  approveVoiceScript,
   buildShowcasePages,
   checkVoiceDnc,
   createVoiceSource,
@@ -46,13 +48,16 @@ import {
   fetchVoiceCampaigns,
   fetchVoiceMetrics,
   fetchVoiceQueue,
+  fetchVoiceScripts,
   fetchVoiceSegments,
   fetchVoiceSources,
   fetchVoiceStats,
   importVoiceDnc,
   ingestVoice,
   logVoiceCall,
+  previewVoiceScript,
   resumeVoiceCampaign,
+  saveVoiceScript,
   scrubDnc,
   sendVoiceShowcase,
   startVoiceCampaign,
@@ -60,23 +65,27 @@ import {
   stopVoiceCampaign,
   suppressVoicePhone,
   syncLicensingSources,
+  syncVoiceScript,
   syncVoiceSource,
   type VoiceCampaign,
   type VoiceCompany,
   type VoiceMetrics,
   type VoiceMetricsGroup,
   type VoiceRetentionBucket,
+  type VoiceScript,
+  type VoiceScriptPreview,
   type VoiceSegment,
   type VoiceSource,
 } from "@/lib/admin-api";
 import { fmtWhen } from "@/lib/system-health";
 
-type VoiceTab = "overview" | "campaigns" | "segments" | "sources";
+type VoiceTab = "overview" | "campaigns" | "segments" | "scripts" | "sources";
 
 const VOICE_TABS: Array<{ id: VoiceTab; label: string }> = [
   { id: "overview", label: "Visão Geral" },
   { id: "campaigns", label: "Campanhas" },
   { id: "segments", label: "Segmentos" },
+  { id: "scripts", label: "Roteiros" },
   { id: "sources", label: "Fontes" },
 ];
 
@@ -528,6 +537,13 @@ export default function VoiceB2BPage() {
   const [tab, setTab] = useState<VoiceTab>("overview");
   const [sourceName, setSourceName] = useState("");
   const [sourceUrl, setSourceUrl] = useState("");
+  const [scriptTrade, setScriptTrade] = useState("remodeling");
+  const [scriptBody, setScriptBody] = useState("");
+  const [scriptDisclosure, setScriptDisclosure] = useState("");
+  const [scriptAssistantId, setScriptAssistantId] = useState("");
+  const [scriptPreview, setScriptPreview] = useState<VoiceScriptPreview | null>(null);
+  const [previewCity, setPreviewCity] = useState("New York");
+  const [previewCompany, setPreviewCompany] = useState("Example Contracting");
   const [selected, setSelected] = useState<VoiceCompany | null>(null);
   const [licenseCsv, setLicenseCsv] = useState("");
   const [licenseName, setLicenseName] = useState("MA HIC / licenças");
@@ -593,6 +609,22 @@ export default function VoiceB2BPage() {
     fetchVoiceSources,
     { refreshInterval: 60_000 }
   );
+  const { data: scriptsData, mutate: mutateScripts } = useSWR(
+    "voice-scripts",
+    fetchVoiceScripts,
+    { refreshInterval: 60_000 }
+  );
+  const scripts = scriptsData?.scripts ?? [];
+  const currentScript =
+    scripts.find((item) => item.trade_code === scriptTrade) ?? null;
+
+  useEffect(() => {
+    if (!currentScript) return;
+    setScriptBody(currentScript.body);
+    setScriptDisclosure(currentScript.disclosure || "");
+    setScriptAssistantId(currentScript.assistant_id || "");
+    setScriptPreview(null);
+  }, [currentScript?.trade_code, currentScript?.version]);
 
   const refreshAll = async () => {
     await Promise.all([mutateQueue(), mutateStats()]);
@@ -748,6 +780,46 @@ export default function VoiceB2BPage() {
       return `Licenças: ${result.import?.imported ?? 0} novas, ${
         result.import?.updated ?? 0
       } atualizadas · ${result.segments ?? 0} segmentos.`;
+    });
+
+  const saveScript = () =>
+    run("script-save", async () => {
+      if (!currentScript) throw new Error("Seleciona um roteiro.");
+      const result = await saveVoiceScript(scriptTrade, {
+        body: scriptBody,
+        disclosure: scriptDisclosure,
+        assistant_id: scriptAssistantId,
+      });
+      await mutateScripts();
+      return `Roteiro ${scriptTrade} v${result.script.version} guardado como draft.`;
+    });
+
+  const approveScript = () =>
+    run("script-approve", async () => {
+      if (!currentScript) throw new Error("Seleciona um roteiro.");
+      await approveVoiceScript(scriptTrade);
+      await mutateScripts();
+      return `Roteiro ${scriptTrade} aprovado para uso em chamadas.`;
+    });
+
+  const previewScript = () =>
+    run("script-preview", async () => {
+      if (!currentScript) throw new Error("Seleciona um roteiro.");
+      const result = await previewVoiceScript(scriptTrade, {
+        company: previewCompany,
+        city: previewCity,
+        permit_count: 12,
+      });
+      setScriptPreview(result);
+      return "Preview do roteiro atualizado.";
+    });
+
+  const syncScript = () =>
+    run("script-sync", async () => {
+      if (!currentScript) throw new Error("Seleciona um roteiro.");
+      const result = await syncVoiceScript(scriptTrade);
+      await mutateScripts();
+      return `Telnyx ${result.mode}: ${result.assistant_id}`;
     });
 
   const importDnc = () =>
@@ -1221,6 +1293,161 @@ export default function VoiceB2BPage() {
           </p>
         </Card>
       </div>
+
+      <Card
+        title="Roteiros de voz"
+        icon={<FileText className="h-4 w-4 text-indigo-400" />}
+        hint="Inglês US, versionado. Só um roteiro Approved pode ser usado em chamadas reais."
+        action={
+          <Badge tone="emerald">
+            {scripts.filter((item) => item.status === "approved").length} aprovados
+          </Badge>
+        }
+        className={tab === "scripts" ? "" : "hidden"}
+      >
+        <div className="grid gap-4 lg:grid-cols-[230px_1fr]">
+          <div className="max-h-[560px] space-y-1 overflow-y-auto pr-1">
+            {scripts.map((item) => (
+              <button
+                key={item.trade_code}
+                type="button"
+                onClick={() => setScriptTrade(item.trade_code)}
+                className={cn(
+                  "flex w-full items-center justify-between gap-2 rounded-lg border px-2.5 py-2 text-left text-[10px]",
+                  scriptTrade === item.trade_code
+                    ? "border-indigo-400/30 bg-indigo-500/10 text-indigo-100"
+                    : "border-white/5 bg-white/[0.02] text-slate-300 hover:bg-white/[0.05]"
+                )}
+              >
+                <span className="font-semibold">{item.trade_code}</span>
+                <span className="flex items-center gap-1">
+                  <Badge tone={item.status === "approved" ? "emerald" : "amber"}>
+                    {item.status}
+                  </Badge>
+                  <span className="text-[9px] text-slate-500">v{item.version}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+
+          <div className="space-y-3">
+            {currentScript ? (
+              <>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-black text-white">
+                    {currentScript.trade_code}
+                  </p>
+                  <Badge
+                    tone={currentScript.status === "approved" ? "emerald" : "amber"}
+                  >
+                    {currentScript.status}
+                  </Badge>
+                  <span className="text-[10px] text-slate-500">
+                    versão {currentScript.version}
+                  </span>
+                </div>
+
+                <label className="block text-[10px] text-slate-500">
+                  Telnyx Assistant ID
+                  <input
+                    value={scriptAssistantId}
+                    onChange={(event) => setScriptAssistantId(event.target.value)}
+                    placeholder="assistant-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 font-mono text-[10px] text-slate-200 placeholder:text-slate-600"
+                  />
+                </label>
+
+                <label className="block text-[10px] text-slate-500">
+                  Disclosure legal (EN)
+                  <textarea
+                    value={scriptDisclosure}
+                    onChange={(event) => setScriptDisclosure(event.target.value)}
+                    rows={2}
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-[10px] text-slate-200"
+                  />
+                </label>
+
+                <label className="block text-[10px] text-slate-500">
+                  Prompt / instructions (EN)
+                  <textarea
+                    value={scriptBody}
+                    onChange={(event) => setScriptBody(event.target.value)}
+                    rows={16}
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-black/20 px-2.5 py-2 font-mono text-[10px] leading-relaxed text-slate-200"
+                  />
+                </label>
+
+                <div className="flex flex-wrap items-end gap-2">
+                  <label className="text-[10px] text-slate-500">
+                    Empresa (preview)
+                    <input
+                      value={previewCompany}
+                      onChange={(event) => setPreviewCompany(event.target.value)}
+                      className="mt-1 block w-40 rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-[10px] text-slate-200"
+                    />
+                  </label>
+                  <label className="text-[10px] text-slate-500">
+                    Cidade (preview)
+                    <input
+                      value={previewCity}
+                      onChange={(event) => setPreviewCity(event.target.value)}
+                      className="mt-1 block w-36 rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-[10px] text-slate-200"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => void previewScript()}
+                    disabled={working === "script-preview"}
+                    className="rounded-lg border border-sky-400/30 bg-sky-500/10 px-3 py-1.5 text-[10px] font-semibold text-sky-200 hover:bg-sky-500/20 disabled:opacity-50"
+                  >
+                    Preview
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void saveScript()}
+                    disabled={working === "script-save"}
+                    className="rounded-lg border border-white/10 px-3 py-1.5 text-[10px] font-semibold text-slate-300 hover:bg-white/5 disabled:opacity-50"
+                  >
+                    Guardar draft
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void approveScript()}
+                    disabled={working === "script-approve"}
+                    className="rounded-lg bg-emerald-500 px-3 py-1.5 text-[10px] font-bold text-[#062017] hover:bg-emerald-400 disabled:opacity-50"
+                  >
+                    Aprovar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void syncScript()}
+                    disabled={working === "script-sync"}
+                    className="rounded-lg border border-indigo-400/30 bg-indigo-500/10 px-3 py-1.5 text-[10px] font-semibold text-indigo-200 hover:bg-indigo-500/20 disabled:opacity-50"
+                  >
+                    Sync Telnyx
+                  </button>
+                </div>
+
+                {scriptPreview ? (
+                  <div className="rounded-xl border border-white/10 bg-[#0b0f15] p-3">
+                    <p className="mb-2 text-[9px] font-semibold uppercase tracking-wide text-slate-500">
+                      Preview renderizado · {scriptPreview.status} · v
+                      {scriptPreview.version}
+                    </p>
+                    <pre className="max-h-72 overflow-auto whitespace-pre-wrap text-[10px] leading-relaxed text-slate-300">
+                      {scriptPreview.body}
+                    </pre>
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <p className="text-[11px] text-slate-600">
+                Ainda sem roteiros. O seed inicial cria drafts por trade.
+              </p>
+            )}
+          </div>
+        </div>
+      </Card>
 
       <Card
         title="2. Fontes de dados"

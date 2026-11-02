@@ -6,8 +6,8 @@ Comando:
 pytest tests -q --cov=backend --cov-report=json:coverage.json
 ```
 
-- **Total backend: 69,9%** (14 074 / 20 130 statements).
-- **1 296 pytest**, **109 vitest**; CI verde.
+- **Total backend: 69,7%** (14 235 / 20 418 statements).
+- **1 302 pytest**, **109 vitest**; CI verde.
 - O CI gera `coverage.json` e publica-o como artifact `backend-coverage`.
 
 ## Módulos fortes
@@ -35,7 +35,8 @@ pytest tests -q --cov=backend --cov-report=json:coverage.json
 | `services/control_tower.py` | 51,6% | queue_age, backup, tokens, freshness |
 | `main.py` | 52,7% | endpoints admin/investor/analytics (auth, erros, export) |
 | `services/investor.py` | novo | valuation, reconcilição Stripe, NDA, CSV |
-| `services/telnyx_voice.py` | 70,2% | webhook Ed25519, retries e estados de chamada |
+| `services/telnyx_voice.py` | 67,7% | webhook Ed25519, retries e estados de chamada |
+| `services/voice_scripts.py` | 70,2% | CRUD, preview e sync Telnyx |
 | `services/enrichment_queue.py` | 36,3% | retry/backoff e estados |
 | `services/phone_lookup.py` | 46,4% | outcomes Searchbug e billing |
 | `services/inbox_sync.py` | 50,0% | parser DSN/ARF e supressão |

@@ -1682,6 +1682,30 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - Filtros de cidade/nicho resetam a página para 1.
 - Testes: **1.295 pytest**; ruff/tsc/build/lint limpos.
 
+### Fase 2B — Roteiros e Telnyx AI (2026-11-02)
+
+- **15 roteiros default em inglês** (remodeling, roofing, electrical, painting,
+  HVAC, plumbing, landscaping, windows, general contractor, remediation,
+  cleaning, pest control, debris, elevator, signage). Status inicial `draft`,
+  versão 1, disclosure de IA e opt-out.
+- **Variáveis**: `{{company}}`, `{{city}}`, `{{trade}}`, `{{permit_count}}`,
+  `{{showcase_line}}`, `{{price_weekly}}`, `{{price_monthly}}`. A
+  `showcase_line` é calculada por cidade/nicho e nunca promete o nicho quando
+  só existe fallback de cidade.
+- **Registry**: `voice_scripts` + `voice_script_versions`; guardar incrementa
+  versão e volta a `draft`; aprovar marca `approved` com autor/data.
+- **Admin**: tab **Roteiros** com lista por trade, editor, disclosure,
+  assistant_id, preview por empresa/cidade, Guardar draft, Aprovar e Sync
+  Telnyx.
+- **Telnyx**: `create_call` resolve o roteiro aprovado, guarda `assistant_id` e
+  bloqueia chamada real sem roteiro aprovado/assistant. No webhook
+  `call.answered`, inicia `ai_assistant_start`; se falhar, desliga a chamada
+  para não ficar em silêncio.
+- **Teste real controlado**: `POST /api/admin/voice/test-call` exige
+  `VOICE_STAGING_MODE=false`, Telnyx configurado, `confirm=true` e telefone em
+  `VOICE_TEST_NUMBERS`.
+- **Testes**: **1.302 pytest**; cobertura **69,7%**; `voice_scripts.py` 70,2%.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

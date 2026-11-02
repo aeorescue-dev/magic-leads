@@ -111,6 +111,12 @@ Com `VOICE_STAGING_MODE=true`:
 | GET | `/api/admin/voice/campaigns` | listar campanhas |
 | POST | `/api/admin/voice/campaigns/{id}/stop` | parar campanha |
 | POST | `/api/admin/voice/campaigns/{id}/resume` | retomar lote pausado |
+| GET | `/api/admin/voice/scripts` | listar roteiros |
+| PUT | `/api/admin/voice/scripts/{trade}` | guardar draft |
+| POST | `/api/admin/voice/scripts/{trade}/approve` | aprovar roteiro |
+| POST | `/api/admin/voice/scripts/{trade}/preview` | renderizar variáveis |
+| POST | `/api/admin/voice/scripts/{trade}/sync-telnyx` | criar/atualizar assistant |
+| POST | `/api/admin/voice/test-call` | 1 chamada real controlada |
 | POST | `/api/admin/voice/dnc/check` | check manual (limpo/listado) |
 | POST | `/api/admin/voice/contacts/{id}/call` | registar tentativa |
 | POST | `/api/admin/voice/suppress` | suprimir telefone |
@@ -149,6 +155,19 @@ Todas exigem sessão **admin** (`_require_admin_user`).
    - marca a campanha como `completed`, `stopped` ou `error`.
 4. **Dry-run**: sem chaves Telnyx, as chamadas ficam registadas em `voice_calls`
    e os emails ficam em dry-run; nenhum contacto real é feito.
+
+## Roteiros de voz
+
+- 15 roteiros default em **inglês US**, status `draft`, versão 1.
+- Variáveis: `{{company}}`, `{{city}}`, `{{trade}}`, `{{permit_count}}`,
+  `{{showcase_line}}`, `{{price_weekly}}`, `{{price_monthly}}`.
+- Aba **Roteiros** no `/admin/voice`: editar, pré-visualizar por cidade/empresa,
+  guardar draft, aprovar e sincronizar com a Telnyx.
+- Só roteiro `approved` com `assistant_id` pode ser usado em chamada real.
+- No `call.answered`, o backend inicia o assistant; se falhar, desliga a
+  chamada para não ficar em silêncio.
+- Teste real: `POST /voice/test-call` com `confirm=true`, telefone em
+  `VOICE_TEST_NUMBERS`, staging off e Telnyx configurado.
 
 ## Operação
 

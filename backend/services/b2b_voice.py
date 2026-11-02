@@ -169,6 +169,7 @@ CREATE TABLE IF NOT EXISTS voice_calls (
   intent TEXT,
   showcase_link_id INTEGER,
   checkout_session_id TEXT,
+  assistant_id TEXT,
   cost_cents INTEGER DEFAULT 0,
   started_at TEXT,
   ended_at TEXT,
@@ -322,6 +323,7 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         ("hangup_cause", "TEXT"),
         ("showcase_clicked_at", "TEXT"),
         ("revenue_cents", "INTEGER DEFAULT 0"),
+        ("assistant_id", "TEXT"),
     ):
         if name not in call_cols:
             conn.execute(f"ALTER TABLE voice_calls ADD COLUMN {name} {ddl}")
@@ -2041,6 +2043,7 @@ def create_voice_call(
     script_id: str = "",
     city: Optional[str] = None,
     trade_code: Optional[str] = None,
+    assistant_id: Optional[str] = None,
 ) -> dict:
     init()
     now = _iso()
@@ -2050,16 +2053,17 @@ def create_voice_call(
             """
             INSERT INTO voice_calls
               (provider, company_id, campaign_id, script_id, city, trade_code,
-               status, started_at, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?)
+               assistant_id, status, started_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
             """,
             (
                 provider,
-                int(company["id"]),
+                int(company["id"]) if company.get("id") else None,
                 campaign_id,
                 script_id,
                 city or company.get("city"),
                 trade_code or company.get("trade"),
+                assistant_id or "",
                 now,
                 now,
             ),
@@ -2089,6 +2093,7 @@ def update_voice_call(voice_call_id: int, **fields: Any) -> Optional[dict]:
         "hangup_cause",
         "showcase_clicked_at",
         "revenue_cents",
+        "assistant_id",
     }
     updates = {key: value for key, value in fields.items() if key in allowed}
     if not updates:
