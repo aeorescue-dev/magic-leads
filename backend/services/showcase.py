@@ -931,6 +931,14 @@ def send_showcase_email(
     email = (to_email or "").strip().lower()
     if not email or "@" not in email:
         return {"sent": False, "reason": "no_email", "link_url": link_url}
+    if bool(getattr(settings, "VOICE_STAGING_MODE", False)):
+        logger.info("[SHOWCASE] Email em staging (dry-run): %s", link_url)
+        return {
+            "sent": False,
+            "dry_run": True,
+            "reason": "staging_mode",
+            "link_url": link_url,
+        }
     if not getattr(settings, "EMAIL_API_KEY", "") or not getattr(
         settings, "EMAIL_FROM", ""
     ):

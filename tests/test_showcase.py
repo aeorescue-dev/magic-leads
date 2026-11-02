@@ -241,6 +241,23 @@ def test_email_sem_canal_e_dry_run(monkeypatch):
     assert result.get("dry_run") is True
 
 
+def test_email_staging_forca_dry_run(monkeypatch):
+    monkeypatch.setattr(showcase.settings, "VOICE_STAGING_MODE", True)
+    monkeypatch.setattr(showcase.settings, "EMAIL_API_KEY", "re_test")
+    monkeypatch.setattr(showcase.settings, "EMAIL_FROM", "Magic Leads <x@example.com>")
+    result = showcase.send_showcase_email(
+        to_email="contractor@example.com",
+        company_name="Example Roofing",
+        city="Boston",
+        trade_code="roofing",
+        count=3,
+        link_url="https://magicleads.app/r/test",
+    )
+    assert result["sent"] is False
+    assert result["dry_run"] is True
+    assert result["reason"] == "staging_mode"
+
+
 def test_checkout_grava_atribuicao():
     showcase.record_checkout(
         link_id=1,

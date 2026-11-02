@@ -1664,8 +1664,9 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   checks `source='staging'` e reconstrói segmentos; recusa 403 fora de staging.
 - **UI**: card DNC aceita ficheiro ou texto colado, mostra listados/limpos e
   botão “Desobstruir staging” quando ativo; badge “Staging · dry-run” no header.
+  Em staging, o email da vitrine também fica em dry-run.
 - **Testes**: formatos crus, conflito listado/limpo, staging e bloqueio em
-  produção → **1.293 pytest**; cobertura **69,9%**.
+  produção → **1.294 pytest**; cobertura **69,9%**.
 
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
