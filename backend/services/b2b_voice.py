@@ -1618,6 +1618,8 @@ def metrics(days: int = 30, city: str = "", trade: str = "") -> dict:
             tuple(params),
         ).fetchone()
         summary = dict(row) if row else {}
+        for key in ("answered", "unanswered", "engaged", "clicks", "checkouts"):
+            summary[key] = int(summary.get(key) or 0)
         dialed = int(summary.get("dialed") or 0)
         answered = int(summary.get("answered") or 0)
         engaged = int(summary.get("engaged") or 0)
