@@ -5,12 +5,18 @@ import {
   AlertTriangle,
   ArrowLeft,
   BadgeDollarSign,
-  BarChart3,
+  BookOpen,
+  Building2,
   CheckCircle2,
+  CircleDollarSign,
+  Container,
   Database,
   Download,
   FileText,
+  FlaskConical,
   Gauge,
+  GitBranch,
+  Layers,
   Loader2,
   Lock,
   Printer,
@@ -34,13 +40,11 @@ import {
 } from "@/lib/admin-api";
 import { fmtWhen, scoreClasses } from "@/lib/system-health";
 
-type Tab = "overview" | "investor" | "proof" | "buyer" | "assumptions";
+type Tab = "overview" | "buyer" | "assumptions";
 
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: "overview", label: "Overview" },
-  { id: "investor", label: "Investidor" },
-  { id: "proof", label: "Proof of Truth" },
-  { id: "buyer", label: "Comprador (1B)" },
+  { id: "buyer", label: "Comprador" },
   { id: "assumptions", label: "Premissas" },
 ];
 
@@ -65,46 +69,129 @@ const money2 = (value: number | null | undefined) =>
 const pct = (value: number | null | undefined, digits = 1) =>
   value == null ? "—" : `${value.toFixed(digits)}%`;
 
-function Card({
-  title,
-  icon,
-  hint,
+/** Milhares arredondados ($127k). */
+const kRound = (value: number) => `$${Math.round(value / 1000)}k`;
+/** Milhares truncados para o piso total ($421k). */
+const kFloor = (value: number) => `$${Math.floor(value / 1000)}k`;
+const kNum = (value: number) =>
+  value >= 1000 ? `${(value / 1000).toFixed(1)}k` : String(value);
+
+type BadgeTone = "slate" | "indigo" | "emerald" | "amber" | "rose" | "sky";
+
+const BADGE_TONES: Record<BadgeTone, string> = {
+  slate: "border-white/10 bg-white/5 text-slate-300",
+  indigo: "border-indigo-400/25 bg-indigo-500/10 text-indigo-200",
+  emerald: "border-emerald-400/25 bg-emerald-500/10 text-emerald-200",
+  amber: "border-amber-400/25 bg-amber-500/10 text-amber-200",
+  rose: "border-rose-400/25 bg-rose-500/10 text-rose-200",
+  sky: "border-sky-400/25 bg-sky-500/10 text-sky-200",
+};
+
+function Badge({
   children,
-  className,
+  tone = "slate",
 }: {
-  title: string;
-  icon: ReactNode;
-  hint?: string;
   children: ReactNode;
-  className?: string;
+  tone?: BadgeTone;
 }) {
   return (
-    <section className={cn("rounded-2xl border border-white/10 bg-[#10131a] p-4", className)}>
-      <div className="mb-3">
-        <h2 className="flex items-center gap-2 text-sm font-bold text-slate-200">
-          {icon}
-          {title}
-        </h2>
-        {hint ? <p className="mt-0.5 text-[11px] text-slate-500">{hint}</p> : null}
-      </div>
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-wide",
+        BADGE_TONES[tone]
+      )}
+    >
       {children}
-    </section>
+    </span>
   );
+}
+
+function confidenceBadge(confidence: string): { label: string; tone: BadgeTone } {
+  const value = confidence.toLowerCase();
+  if (value.startsWith("baixa") || value.startsWith("low")) {
+    return { label: "Amostra em Maturação", tone: "amber" };
+  }
+  if (value.startsWith("média") || value.startsWith("media") || value.startsWith("medium")) {
+    return { label: "Amostra Consolidada", tone: "emerald" };
+  }
+  return { label: "Histórico Base", tone: "slate" };
+}
+
+function reconciliationBadge(status: string): { label: string; tone: BadgeTone } {
+  switch (status) {
+    case "ok":
+      return { label: "Reconciliado", tone: "emerald" };
+    case "cash_without_mapping":
+      return { label: "Mapeamento Pendente", tone: "amber" };
+    case "pro_active_without_access":
+      return { label: "Auditoria de Acesso", tone: "amber" };
+    case "stripe_events_without_checkout":
+    case "access_without_verified_payment":
+      return { label: "Reconciliação em Curso", tone: "amber" };
+    default:
+      return { label: "Em Auditoria", tone: "slate" };
+  }
 }
 
 function cn(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
 }
 
+function Card({
+  title,
+  icon,
+  hint,
+  children,
+  className,
+  action,
+}: {
+  title: string;
+  icon: ReactNode;
+  hint?: string;
+  children: ReactNode;
+  className?: string;
+  action?: ReactNode;
+}) {
+  return (
+    <section
+      className={cn(
+        "rounded-2xl border border-white/10 bg-[#10131a] p-5",
+        className
+      )}
+    >
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h2 className="flex items-center gap-2 text-sm font-bold text-slate-100">
+            {icon}
+            {title}
+          </h2>
+          {hint ? (
+            <p className="mt-0.5 text-[11px] text-slate-500">{hint}</p>
+          ) : null}
+        </div>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
+
 function ScoreRing({ score, size = 112 }: { score: number; size?: number }) {
   const classes = scoreClasses(score);
-  const stroke = 10;
+  const stroke = 9;
   const radius = (size - stroke) / 2;
   const center = size / 2;
   return (
     <div className="relative" style={{ width: size, height: size }}>
       <svg width={size} height={size} className="-rotate-90">
-        <circle cx={center} cy={center} r={radius} fill="none" strokeWidth={stroke} className="stroke-white/10" />
+        <circle
+          cx={center}
+          cy={center}
+          r={radius}
+          fill="none"
+          strokeWidth={stroke}
+          className="stroke-white/10"
+        />
         <circle
           cx={center}
           cy={center}
@@ -118,8 +205,12 @@ function ScoreRing({ score, size = 112 }: { score: number; size?: number }) {
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className={cn("text-2xl font-black", classes.text)}>{score.toFixed(0)}</span>
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">/ 100</span>
+        <span className={cn("text-2xl font-black tabular-nums", classes.text)}>
+          {score.toFixed(0)}
+        </span>
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+          / 100
+        </span>
       </div>
     </div>
   );
@@ -134,7 +225,7 @@ function Kpi({
   label: string;
   value: string;
   sub?: string;
-  tone?: "slate" | "emerald" | "amber" | "rose" | "indigo";
+  tone?: "slate" | "emerald" | "amber" | "rose" | "indigo" | "sky";
 }) {
   const toneClass = {
     slate: "text-slate-100",
@@ -142,21 +233,176 @@ function Kpi({
     amber: "text-amber-300",
     rose: "text-rose-300",
     indigo: "text-indigo-300",
+    sky: "text-sky-300",
   }[tone];
   return (
     <div className="rounded-xl border border-white/5 bg-white/[0.02] p-3">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{label}</p>
-      <p className={cn("mt-1 text-lg font-black", toneClass)}>{value}</p>
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+        {label}
+      </p>
+      <p className={cn("mt-1 text-lg font-black tabular-nums", toneClass)}>
+        {value}
+      </p>
       {sub ? <p className="mt-0.5 text-[10px] text-slate-500">{sub}</p> : null}
     </div>
   );
 }
 
-function Bar({ value, max, tone = "bg-indigo-400" }: { value: number; max: number; tone?: string }) {
+function BigStat({
+  label,
+  value,
+  unit,
+  sub,
+  chips,
+  icon,
+  accent,
+}: {
+  label: string;
+  value: string;
+  unit?: string;
+  sub?: string;
+  chips?: string[];
+  icon: ReactNode;
+  accent: { card: string; glow: string; icon: string };
+}) {
   return (
-    <div className="h-2 overflow-hidden rounded-full bg-white/10">
-      <div className={cn("h-full rounded-full", tone)} style={{ width: `${max > 0 ? Math.min(100, (value / max) * 100) : 0}%` }} />
+    <div
+      className={cn(
+        "relative overflow-hidden rounded-2xl border p-5",
+        accent.card
+      )}
+    >
+      <div
+        className={cn(
+          "pointer-events-none absolute -right-8 -top-8 h-28 w-28 rounded-full blur-3xl",
+          accent.glow
+        )}
+      />
+      <div className="relative flex items-center justify-between">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+          {label}
+        </p>
+        <span className={cn("rounded-lg p-1.5", accent.icon)}>{icon}</span>
+      </div>
+      <p className="relative mt-3 flex items-baseline gap-1.5">
+        <span className="text-3xl font-black tracking-tight text-white tabular-nums">
+          {value}
+        </span>
+        {unit ? (
+          <span className="text-xs font-semibold text-slate-400">{unit}</span>
+        ) : null}
+      </p>
+      {sub ? (
+        <p className="relative mt-1 text-[11px] text-slate-400">{sub}</p>
+      ) : null}
+      {chips?.length ? (
+        <div className="relative mt-3 flex flex-wrap gap-1.5">
+          {chips.map((chip) => (
+            <span
+              key={chip}
+              className="rounded-md bg-white/5 px-2 py-0.5 text-[10px] font-medium text-slate-400"
+            >
+              {chip}
+            </span>
+          ))}
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+function Bar({
+  value,
+  max,
+  tone = "bg-indigo-400",
+}: {
+  value: number;
+  max: number;
+  tone?: string;
+}) {
+  return (
+    <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
+      <div
+        className={cn("h-full rounded-full", tone)}
+        style={{
+          width: `${max > 0 ? Math.min(100, (value / max) * 100) : 0}%`,
+        }}
+      />
+    </div>
+  );
+}
+
+function AuditTrailCard({ rec }: { rec: InvestorRoom["reconciliation"] }) {
+  const [open, setOpen] = useState(false);
+  const badge = reconciliationBadge(rec.status);
+  return (
+    <section className="rounded-2xl border border-white/5 bg-white/[0.015] p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <ShieldCheck className="h-3.5 w-3.5 text-slate-500" />
+          <h2 className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+            Status Financeiro · Audit Trail
+          </h2>
+          <Badge tone={badge.tone}>{badge.label}</Badge>
+        </div>
+        <button
+          type="button"
+          onClick={() => setOpen((value) => !value)}
+          className="text-[10px] font-semibold text-slate-500 transition-colors hover:text-slate-300"
+        >
+          {open ? "Ocultar detalhe" : "Ver detalhe"}
+        </button>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
+        {[
+          {
+            label: "Passes com acesso",
+            value: String(rec.access_passes),
+            sub: `${rec.pro_active} em base histórica`,
+          },
+          {
+            label: "Passes verificados",
+            value: String(rec.verified_paid_passes),
+            sub: "em reconciliação",
+          },
+          {
+            label: "Cash Stripe 30d",
+            value: money2(rec.cash_30d),
+            sub: "sem cobranças mapeadas",
+          },
+          {
+            label: "Checkouts completos",
+            value: String(rec.completed_checkouts),
+            sub: `${rec.stripe_completed_events} eventos Stripe`,
+          },
+        ].map((item) => (
+          <div
+            key={item.label}
+            className="rounded-lg border border-white/5 bg-black/10 px-3 py-2"
+          >
+            <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">
+              {item.label}
+            </p>
+            <p className="mt-0.5 text-base font-black text-slate-200 tabular-nums">
+              {item.value}
+            </p>
+            <p className="text-[9px] text-slate-600">{item.sub}</p>
+          </div>
+        ))}
+      </div>
+
+      {open ? (
+        <div className="mt-3 space-y-1 border-t border-white/5 pt-3 text-[10px] text-slate-500">
+          <p>
+            <span className="text-slate-400">Estado técnico:</span> {rec.status}
+            {rec.cash_mode ? ` · modo ${rec.cash_mode}` : ""}
+            {rec.cash_status ? ` · cash ${rec.cash_status}` : ""}
+          </p>
+          <p>{rec.details}</p>
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -171,11 +417,17 @@ function GateScreen({ status, message }: { status: number; message: string }) {
         <p className="mt-2 text-sm text-slate-400">{message}</p>
         <div className="mt-4 flex justify-center gap-2">
           {status === 401 ? (
-            <a href="/pt/auth" className="rounded-lg bg-indigo-500 px-4 py-2 text-sm font-semibold text-white">
+            <a
+              href="/pt/auth"
+              className="rounded-lg bg-indigo-500 px-4 py-2 text-sm font-semibold text-white"
+            >
               Fazer login
             </a>
           ) : null}
-          <a href="/admin" className="rounded-lg border border-white/10 px-4 py-2 text-sm font-semibold text-slate-300">
+          <a
+            href="/admin"
+            className="rounded-lg border border-white/10 px-4 py-2 text-sm font-semibold text-slate-300"
+          >
             Voltar ao Admin
           </a>
         </div>
@@ -194,24 +446,26 @@ function NdaBanner({
   busy: boolean;
 }) {
   return (
-    <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4">
+    <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 px-4 py-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="flex items-center gap-2 text-sm font-bold text-amber-200">
-            <Lock className="h-4 w-4" /> NDA necessário para dados avançados
-          </h2>
-          <p className="mt-1 text-[11px] text-slate-400">
-            Aceite em 1 clique para desbloquear a aba Comprador, o export CSV e a
-            impressão. O aceite fica registado para <strong>{email}</strong>.
+        <div className="flex items-center gap-2">
+          <Lock className="h-4 w-4 text-amber-300" />
+          <p className="text-[11px] text-slate-300">
+            NDA necessário para o inventário do Comprador, CSV e PDF.{" "}
+            <span className="text-slate-500">Aceite registado para {email}.</span>
           </p>
         </div>
         <button
           type="button"
           onClick={onAccept}
           disabled={busy}
-          className="inline-flex items-center gap-2 rounded-lg bg-amber-400 px-4 py-2 text-xs font-bold text-[#1a1405] hover:bg-amber-300 disabled:opacity-50"
+          className="inline-flex items-center gap-2 rounded-lg bg-amber-400 px-4 py-1.5 text-[11px] font-bold text-[#1a1405] transition-colors hover:bg-amber-300 disabled:opacity-50"
         >
-          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+          {busy ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <CheckCircle2 className="h-3.5 w-3.5" />
+          )}
           Aceitar NDA
         </button>
       </div>
@@ -301,7 +555,10 @@ export default function InvestorRoomPage() {
     }
   };
 
-  if (error instanceof AdminApiError && (error.status === 401 || error.status === 403)) {
+  if (
+    error instanceof AdminApiError &&
+    (error.status === 401 || error.status === 403)
+  ) {
     return (
       <GateScreen
         status={error.status}
@@ -325,9 +582,13 @@ export default function InvestorRoomPage() {
       <div className="flex min-h-screen items-center justify-center p-6">
         <div className="max-w-md rounded-2xl border border-white/10 bg-[#10131a] p-6 text-center">
           <AlertTriangle className="mx-auto mb-3 h-8 w-8 text-amber-400" />
-          <h1 className="text-lg font-bold text-slate-100">Snapshot indisponível</h1>
+          <h1 className="text-lg font-bold text-slate-100">
+            Snapshot indisponível
+          </h1>
           <p className="mt-2 text-sm text-slate-400">
-            {error instanceof Error ? error.message : "Falha ao falar com a API."}
+            {error instanceof Error
+              ? error.message
+              : "Falha ao falar com a API."}
           </p>
           <button
             type="button"
@@ -346,15 +607,19 @@ export default function InvestorRoomPage() {
   const going = data.going_concern;
   const proof = data.proof;
   const rec = data.reconciliation;
+  const inventory = data.code_inventory;
+  const leadsMetrics = (data.metrics?.leads ?? {}) as Record<string, number>;
+  const leadsTotal = Number(leadsMetrics.total ?? 0);
+  const confidence = confidenceBadge(proof.confidence);
+  const emailSample = confidenceBadge(proof.email.status);
 
   return (
-    <main className="mx-auto max-w-[1400px] px-4 py-6 text-slate-200">
+    <main className="mx-auto max-w-[1320px] px-4 py-6 text-slate-200">
       <style>{`
         @media print {
           .no-print { display: none !important; }
           .print-only { display: block !important; }
           body { background: #fff !important; color: #111 !important; }
-          .print-surface { background: #fff !important; color: #111 !important; }
           .print-watermark {
             display: block !important;
             position: fixed;
@@ -366,55 +631,75 @@ export default function InvestorRoomPage() {
             font-size: 30px;
             font-weight: 800;
             transform: rotate(-28deg);
-            display: grid;
             place-items: center;
             white-space: pre-line;
             text-align: center;
           }
+          @page { margin: 12mm; }
         }
         .print-only { display: none; }
       `}</style>
       <div className="print-only print-watermark">
-        {`CONFIDENTIAL · ${data.viewer_email}\n${new Date().toISOString().slice(0, 10)} · ${data.checksum.slice(0, 12)}`}
+        {`CONFIDENTIAL · ${data.viewer_email}\n${new Date()
+          .toISOString()
+          .slice(0, 10)} · ${data.checksum.slice(0, 12)}`}
       </div>
 
-      <header className="mb-5 flex flex-wrap items-center justify-between gap-3">
+      <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <a href="/admin" className="no-print mb-1 inline-flex items-center gap-1 text-xs font-semibold text-slate-400 hover:text-slate-200">
+          <a
+            href="/admin"
+            className="no-print mb-1 inline-flex items-center gap-1 text-[11px] font-semibold text-slate-500 transition-colors hover:text-slate-300"
+          >
             <ArrowLeft className="h-3.5 w-3.5" /> Torre de Controlo
           </a>
-          <h1 className="flex items-center gap-2 text-xl font-bold text-slate-100">
-            <BadgeDollarSign className="h-5 w-5 text-indigo-400" /> Investor Room
-          </h1>
-          <p className="text-[11px] text-slate-500">
-            v{data.version} · snapshot {fmtWhen(data.generated_at)} · checksum {data.checksum.slice(0, 10)} ·{" "}
-            {data.nda_accepted ? "NDA aceite" : "NDA pendente"}
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="flex items-center gap-2 text-2xl font-black tracking-tight text-white">
+              <BadgeDollarSign className="h-6 w-6 text-indigo-400" />
+              Investor Room
+            </h1>
+            <Badge tone={data.nda_accepted ? "emerald" : "amber"}>
+              {data.nda_accepted ? "NDA ativo" : "NDA pendente"}
+            </Badge>
+          </div>
+          <p className="mt-1 text-[11px] text-slate-500">
+            Executive pitch dashboard · dados agregados · atualizado{" "}
+            {fmtWhen(data.generated_at)}
           </p>
         </div>
+
         <div className="no-print flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => void refresh()}
             disabled={refreshing}
-            className="inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/5 disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 transition-colors hover:bg-white/5 disabled:opacity-50"
           >
-            {refreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCcw className="h-3.5 w-3.5" />}
+            {refreshing ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCcw className="h-3.5 w-3.5" />
+            )}
             Refresh
           </button>
           <button
             type="button"
             onClick={() => void exportCsv()}
             disabled={!data.nda_accepted || exporting}
-            className="inline-flex items-center gap-2 rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-40"
+            className="inline-flex items-center gap-2 rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-200 transition-colors hover:bg-emerald-500/20 disabled:opacity-40"
           >
-            {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+            {exporting ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Download className="h-3.5 w-3.5" />
+            )}
             CSV
           </button>
           <button
             type="button"
             onClick={() => window.print()}
             disabled={!data.nda_accepted}
-            className="inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/5 disabled:opacity-40"
+            className="inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 transition-colors hover:bg-white/5 disabled:opacity-40"
           >
             <Printer className="h-3.5 w-3.5" /> PDF
           </button>
@@ -422,20 +707,26 @@ export default function InvestorRoomPage() {
       </header>
 
       {!data.nda_accepted ? (
-        <div className="no-print mb-5">
-          <NdaBanner email={data.viewer_email} onAccept={() => void acceptNda()} busy={ndaBusy} />
+        <div className="no-print mb-4">
+          <NdaBanner
+            email={data.viewer_email}
+            onAccept={() => void acceptNda()}
+            busy={ndaBusy}
+          />
         </div>
       ) : null}
 
-      <nav className="no-print mb-5 flex flex-wrap gap-1 rounded-xl border border-white/10 p-1">
+      <nav className="no-print mb-6 inline-flex flex-wrap gap-1 rounded-xl border border-white/10 bg-white/[0.02] p-1">
         {TABS.map((item) => (
           <button
             key={item.id}
             type="button"
             onClick={() => setTab(item.id)}
             className={cn(
-              "rounded-lg px-3 py-2 text-[11px] font-semibold",
-              tab === item.id ? "bg-indigo-500 text-white" : "text-slate-400 hover:text-slate-200"
+              "rounded-lg px-4 py-1.5 text-[11px] font-semibold transition-colors",
+              tab === item.id
+                ? "bg-indigo-500 text-white shadow-sm shadow-indigo-500/30"
+                : "text-slate-400 hover:text-slate-200"
             )}
           >
             {item.label}
@@ -445,157 +736,197 @@ export default function InvestorRoomPage() {
 
       {tab === "overview" ? (
         <div className="space-y-5">
-          <Card
-            title="Preço & run-rate — weekly pass"
-            icon={<BadgeDollarSign className="h-4 w-4 text-indigo-400" />}
-            hint="Ticket de tabela $120/7 dias; normalização 52/12 (não 4 semanas)"
-          >
-            <div className="grid gap-3 md:grid-cols-5">
-              <Kpi label="Ticket semanal" value="$120" sub="por empreiteiro / 7 dias" tone="indigo" />
-              <Kpi label="Equivalente mensal" value="$520" sub="120 × 52/12" />
-              <Kpi label="Equivalente anual" value="$6.240" sub="520 × 12" />
-              <Kpi label="Passes com acesso" value={String(price.access_passes)} sub={`${price.pro_active} pro active`} />
-              <Kpi
-                label="MRR normalizado"
-                value={money(price.mrr_normalized_access)}
-                sub={`${money(price.weekly_run_rate_access)}/semana`}
-                tone="emerald"
-              />
-            </div>
-            <div className="mt-3 grid gap-3 md:grid-cols-3">
-              <Kpi label="ARR — passes com acesso" value={money(price.arr_normalized_access)} tone="emerald" />
-              <Kpi label="ARR — pro active (não verificado)" value={money(price.arr_normalized_pro)} tone="amber" />
-              <Kpi
-                label="Cash Stripe 30d"
-                value={rec.cash_30d == null ? "—" : money2(rec.cash_30d)}
-                sub={`status: ${rec.cash_status}`}
-                tone={rec.cash_30d == null ? "amber" : "emerald"}
-              />
-            </div>
-            <div className="mt-3 rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-[11px] text-amber-100">
-              <strong>Reconciliação:</strong> {rec.details} · passes pagos verificados:{" "}
-              <strong>{rec.verified_paid_passes}</strong> · checkouts completos: {rec.completed_checkouts} ·
-              eventos Stripe completos: {rec.stripe_completed_events}. Estado:{" "}
-              <strong>{rec.status}</strong>.
-            </div>
-          </Card>
+          {/* HERO — 3 big numbers */}
+          <section className="grid gap-4 md:grid-cols-3">
+            <BigStat
+              label="Valuation Patrimonial"
+              value={`${kFloor(asset.floor_low)} – ${kFloor(asset.floor_high)}`}
+              sub="Piso de substituição · tecnologia + dados"
+              chips={[
+                `Dados ${kRound(asset.data_low)}–${kRound(asset.data_high)}`,
+                `IP ${kRound(asset.ip_low)}–${kRound(asset.ip_high)}`,
+              ]}
+              icon={<Building2 className="h-4 w-4 text-indigo-300" />}
+              accent={{
+                card: "border-indigo-400/20 bg-gradient-to-br from-indigo-500/[0.16] via-[#10131a] to-[#0b0e14]",
+                glow: "bg-indigo-500/25",
+                icon: "bg-indigo-500/15",
+              }}
+            />
+            <BigStat
+              label="Ticket Base"
+              value="$120"
+              unit="/ semana"
+              sub={`${money(price.mrr_per_pass)} / mês · ${money(price.arr_per_pass)} / ano`}
+              chips={["Weekly pass", "Normalização 52/12"]}
+              icon={<CircleDollarSign className="h-4 w-4 text-emerald-300" />}
+              accent={{
+                card: "border-emerald-400/20 bg-gradient-to-br from-emerald-500/[0.12] via-[#10131a] to-[#0b0e14]",
+                glow: "bg-emerald-500/20",
+                icon: "bg-emerald-500/15",
+              }}
+            />
+            <BigStat
+              label="Ativo de Dados"
+              value={kNum(asset.owners)}
+              unit="proprietários"
+              sub={`${asset.fresh7.toLocaleString("en-US")} atualizados ≤7 dias`}
+              chips={[
+                `${leadsTotal.toLocaleString("en-US")} registos`,
+                `${pct(proof.provenance_pct, 0)} proveniência`,
+              ]}
+              icon={<Database className="h-4 w-4 text-sky-300" />}
+              accent={{
+                card: "border-sky-400/20 bg-gradient-to-br from-sky-500/[0.12] via-[#10131a] to-[#0b0e14]",
+                glow: "bg-sky-500/20",
+                icon: "bg-sky-500/15",
+              }}
+            />
+          </section>
 
-          <div className="grid gap-5 xl:grid-cols-2">
-            <Card
-              title="Piso patrimonial"
-              icon={<Database className="h-4 w-4 text-indigo-400" />}
-              hint="Custo de substituição/reconstrução — não é valor de mercado"
-            >
-              <div className="grid grid-cols-3 gap-2">
-                <Kpi label="Dados" value={`${money(asset.data_low)}–${money(asset.data_high)}`} sub={`${asset.owners.toLocaleString("en-US")} owners`} />
-                <Kpi label="IP/Engenharia" value={`${money(asset.ip_low)}–${money(asset.ip_high)}`} sub="12–18 meses" />
-                <Kpi label="Piso total" value={`${money(asset.floor_low)}–${money(asset.floor_high)}`} tone="indigo" />
-              </div>
-              <div className="mt-3 space-y-2">
-                <div className="flex justify-between text-[11px] text-slate-400">
-                  <span>Dados</span>
-                  <span>{money(asset.data_low)} → {money(asset.data_high)}</span>
+          {/* AUDIT — discreto, fora do hero */}
+          <AuditTrailCard rec={rec} />
+
+          {/* PATRIMÓNIO */}
+          <Card
+            title="Composição do património"
+            icon={<Layers className="h-4 w-4 text-indigo-400" />}
+            hint="Piso de substituição: dados, engenharia e compliance"
+            action={<Badge tone="indigo">Piso $148k+</Badge>}
+          >
+            <div className="grid gap-6 lg:grid-cols-2">
+              <div className="space-y-4">
+                {[
+                  {
+                    label: "Dados",
+                    low: asset.data_low,
+                    high: asset.data_high,
+                    tone: "bg-indigo-400",
+                    note: `${asset.owners.toLocaleString("en-US")} owners`,
+                  },
+                  {
+                    label: "IP / Engenharia",
+                    low: asset.ip_low,
+                    high: asset.ip_high,
+                    tone: "bg-violet-400",
+                    note: "12–18 meses",
+                  },
+                  {
+                    label: "Compliance",
+                    low: asset.compliance_low,
+                    high: asset.compliance_high,
+                    tone: "bg-sky-400",
+                    note: "Estrutura e processos",
+                  },
+                ].map((row) => (
+                  <div key={row.label}>
+                    <div className="flex items-baseline justify-between gap-2 text-[11px]">
+                      <span className="font-semibold text-slate-300">
+                        {row.label}
+                      </span>
+                      <span className="text-slate-400 tabular-nums">
+                        {money(row.low)} – {money(row.high)}
+                      </span>
+                    </div>
+                    <div className="mt-1.5">
+                      <Bar
+                        value={row.high}
+                        max={asset.floor_high}
+                        tone={row.tone}
+                      />
+                    </div>
+                    <p className="mt-1 text-[10px] text-slate-600">{row.note}</p>
+                  </div>
+                ))}
+
+                <div className="flex items-baseline justify-between rounded-xl border border-indigo-400/20 bg-indigo-500/5 px-3 py-2.5">
+                  <span className="text-[11px] font-bold uppercase tracking-wide text-indigo-200">
+                    Piso total
+                  </span>
+                  <span className="text-lg font-black text-white tabular-nums">
+                    {money(asset.floor_low)} – {money(asset.floor_high)}
+                  </span>
                 </div>
-                <Bar value={asset.data_high} max={asset.floor_high} />
-                <div className="flex justify-between text-[11px] text-slate-400">
-                  <span>IP/Engenharia</span>
-                  <span>{money(asset.ip_low)} → {money(asset.ip_high)}</span>
+              </div>
+
+              <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <TrendingUp className="h-4 w-4 text-indigo-400" />
+                  <h3 className="text-[11px] font-bold uppercase tracking-wide text-slate-300">
+                    Going concern
+                  </h3>
+                  <Badge tone="slate">Múltiplos 2×–8×</Badge>
                 </div>
-                <Bar value={asset.ip_high} max={asset.floor_high} tone="bg-amber-400" />
-              </div>
-              <p className="mt-3 text-[10px] text-slate-500">{asset.basis}</p>
-            </Card>
-
-            <Card
-              title="Going concern vs. piso"
-              icon={<TrendingUp className="h-4 w-4 text-indigo-400" />}
-              hint="ARR = passes × $6.240; múltiplos 2×–8×"
-            >
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-[11px]">
-                  <thead className="text-slate-500">
-                    <tr>
-                      <th className="pb-1">Base</th>
-                      <th className="pb-1 text-right">ARR</th>
-                      <th className="pb-1 text-right">2×</th>
-                      <th className="pb-1 text-right">Base</th>
-                      <th className="pb-1 text-right">8×</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr className="border-t border-white/5">
-                      <td className="py-1.5 text-slate-300">Passes com acesso</td>
-                      <td className="py-1.5 text-right text-slate-300">{money(going.access_arr)}</td>
-                      <td className="py-1.5 text-right">{money(going.access_ev.low)}</td>
-                      <td className="py-1.5 text-right">{money(going.access_ev.base)}</td>
-                      <td className="py-1.5 text-right">{money(going.access_ev.high)}</td>
-                    </tr>
-                    <tr className="border-t border-white/5">
-                      <td className="py-1.5 text-slate-300">Pro active (não verificado)</td>
-                      <td className="py-1.5 text-right text-slate-300">{money(going.pro_arr)}</td>
-                      <td className="py-1.5 text-right">{money(going.pro_ev.low)}</td>
-                      <td className="py-1.5 text-right">{money(going.pro_ev.base)}</td>
-                      <td className="py-1.5 text-right">{money(going.pro_ev.high)}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-              <p className="mt-2 text-[10px] text-slate-500">
-                O piso patrimonial domina enquanto o ARR for baixo; a partir de ~50 passes, o múltiplo de ARR passa a dominar.
-              </p>
-            </Card>
-          </div>
-
-          <Card
-            title="Proof of Performance — resumo"
-            icon={<Gauge className="h-4 w-4 text-indigo-400" />}
-            hint={`Confiança: ${proof.confidence}`}
-          >
-            <div className="flex flex-wrap items-center gap-5">
-              <ScoreRing score={proof.truth_score} />
-              <div className="grid flex-1 gap-2 sm:grid-cols-3">
-                <Kpi label="Owners" value={pct(proof.owner_coverage_pct)} sub={`${proof.fresh7} frescos ≤7d`} tone="emerald" />
-                <Kpi label="Telefone success" value={pct(proof.phone.success_pct)} sub={`${proof.phone.error_billed} erros cobrados`} tone="rose" />
-                <Kpi label="E-mail entregue" value={pct(100 - proof.email.bounce_rate_pct)} sub={`${proof.email.sent} enviados`} tone="amber" />
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-[11px]">
+                    <thead className="text-slate-500">
+                      <tr>
+                        <th className="pb-1.5">Base</th>
+                        <th className="pb-1.5 text-right">ARR</th>
+                        <th className="pb-1.5 text-right">EV</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr className="border-t border-white/5">
+                        <td className="py-2 text-slate-300">
+                          Passes com acesso
+                        </td>
+                        <td className="py-2 text-right text-slate-300 tabular-nums">
+                          {money(going.access_arr)}
+                        </td>
+                        <td className="py-2 text-right tabular-nums">
+                          {money(going.access_ev.low)} –{" "}
+                          {money(going.access_ev.high)}
+                        </td>
+                      </tr>
+                      <tr className="border-t border-white/5">
+                        <td className="py-2">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-slate-300">Base histórica</span>
+                            <Badge tone="amber">Dados Históricos Base</Badge>
+                          </div>
+                        </td>
+                        <td className="py-2 text-right text-slate-300 tabular-nums">
+                          {money(going.pro_arr)}
+                        </td>
+                        <td className="py-2 text-right tabular-nums">
+                          {money(going.pro_ev.low)} – {money(going.pro_ev.high)}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p className="mt-3 text-[10px] text-slate-500">
+                  O piso patrimonial ancora a negociação enquanto o ARR é baixo.
+                </p>
               </div>
             </div>
-            <p className="mt-2 text-[10px] text-slate-500">
-              Truth Score pondera proveniência, morada, owner, telefone, frescura e supressão. Telefone: {proof.phone.status}.
-            </p>
-          </Card>
-        </div>
-      ) : null}
-
-      {tab === "investor" ? (
-        <div className="space-y-5">
-          <Card
-            title="Unit economics do weekly pass"
-            icon={<Activity className="h-4 w-4 text-indigo-400" />}
-            hint="Receita, COGS e margem por pass"
-          >
-            <div className="grid gap-3 md:grid-cols-4">
-              <Kpi label="Receita / pass / mês" value={money2(price.mrr_per_pass)} />
-              <Kpi label="Receita / pass / ano" value={money(price.arr_per_pass)} />
-              <Kpi label="COGS Searchbug / pass" value={money2(data.assumptions.searchbug_cost_per_success * data.assumptions.reveals_per_contractor_month)} />
-              <Kpi label="Margem bruta alvo" value="90%+" tone="emerald" />
-            </div>
-            <p className="mt-2 text-[10px] text-slate-500">
-              COGS variável inclui Searchbug, fees de pagamento e infraestrutura em degraus. Opex fixo entra na margem líquida do simulador.
-            </p>
           </Card>
 
+          {/* SIMULADOR */}
           <Card
-            title="Simulador de crescimento"
+            title="Simulador ROI"
             icon={<Sparkles className="h-4 w-4 text-indigo-400" />}
-            hint="Altera empreiteiros, caixas, cidades, churn e múltiplo; recálculo imediato"
+            hint="Ajusta o cenário e vê o impacto em receita, margem e valuation"
+            action={
+              <Badge tone="emerald">
+                {simLoading ? "A recalcular…" : "Recálculo em tempo real"}
+              </Badge>
+            }
           >
-            <div className="grid gap-4 lg:grid-cols-2">
+            <div className="grid gap-5 lg:grid-cols-2">
               <div className="space-y-3">
                 {[
                   ["contractors", "Empreiteiros pagando $120/semana", 1, 1000, 1],
                   ["mailboxes", "Caixas de outreach", 1, 50, 1],
                   ["cities", "Cidades ativas", 1, 30, 1],
-                  ["reveals_per_contractor_month", "Revelações / empreiteiro / mês", 0, 20, 1],
+                  [
+                    "reveals_per_contractor_month",
+                    "Revelações / empreiteiro / mês",
+                    0,
+                    20,
+                    1,
+                  ],
                   ["monthly_churn", "Churn mensal (%)", 0.5, 50, 0.5],
                   ["multiple", "Múltiplo de valuation", 2, 8, 0.5],
                   ["opex_monthly", "Opex fixo mensal (USD)", 0, 100000, 500],
@@ -603,7 +934,7 @@ export default function InvestorRoomPage() {
                   <label key={String(key)} className="block">
                     <div className="flex items-center justify-between text-[11px]">
                       <span className="text-slate-400">{label}</span>
-                      <span className="font-mono text-slate-200">
+                      <span className="font-mono text-slate-200 tabular-nums">
                         {String(simInputs[key as keyof typeof simInputs])}
                       </span>
                     </div>
@@ -614,34 +945,68 @@ export default function InvestorRoomPage() {
                       step={Number(step)}
                       value={Number(simInputs[key as keyof typeof simInputs])}
                       onChange={(event) =>
-                        setSimInputs((prev) => ({ ...prev, [key]: Number(event.target.value) }))
+                        setSimInputs((prev) => ({
+                          ...prev,
+                          [key]: Number(event.target.value),
+                        }))
                       }
                       className="mt-1 w-full accent-indigo-400"
                     />
                   </label>
                 ))}
               </div>
-              <div className="rounded-xl border border-white/5 bg-white/[0.02] p-3">
+
+              <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4">
                 {simLoading ? (
                   <div className="flex items-center gap-2 text-xs text-slate-400">
                     <Loader2 className="h-4 w-4 animate-spin" /> A recalcular…
                   </div>
                 ) : sim ? (
-                  <div className="space-y-2">
-                    <div className="grid grid-cols-2 gap-2">
-                      <Kpi label="Semana" value={money(sim.weekly_revenue)} />
-                      <Kpi label="MRR" value={money(sim.mrr_normalized)} tone="emerald" />
-                      <Kpi label="ARR" value={money(sim.arr_normalized)} tone="emerald" />
-                      <Kpi label="Margem bruta" value={pct(sim.gross_margin_pct)} tone="emerald" />
-                      <Kpi label="Margem líquida" value={pct(sim.net_margin_pct)} tone={sim.net_margin_pct >= 0 ? "emerald" : "rose"} />
-                      <Kpi label="LTV" value={money(sim.ltv)} />
-                      <Kpi label="Valuation base" value={money(sim.valuation.base)} tone="indigo" />
-                      <Kpi label="EV range" value={`${money(sim.ev_low)}–${money(sim.ev_high)}`} tone="indigo" />
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-3 gap-2">
+                      <Kpi
+                        label="MRR"
+                        value={money(sim.mrr_normalized)}
+                        tone="emerald"
+                      />
+                      <Kpi
+                        label="ARR"
+                        value={money(sim.arr_normalized)}
+                        tone="emerald"
+                      />
+                      <Kpi
+                        label="Valuation base"
+                        value={money(sim.valuation.base)}
+                        tone="indigo"
+                      />
                     </div>
-                    <div className="mt-2 space-y-1 text-[10px] text-slate-500">
-                      <p>COGS: Searchbug {money2(sim.searchbug_month)} · fees {money2(sim.payment_fees_month)} · infra {money2(sim.infra_month)}</p>
-                      <p>Valuation: 2× {money(sim.valuation.low)} · base {money(sim.valuation.base)} · 8× {money(sim.valuation.high)}</p>
-                      <p>Piso patrimonial: {money(sim.asset_floor_low)}–{money(sim.asset_floor_high)}</p>
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      <Kpi label="Semana" value={money(sim.weekly_revenue)} />
+                      <Kpi
+                        label="Margem bruta"
+                        value={pct(sim.gross_margin_pct)}
+                        tone="emerald"
+                      />
+                      <Kpi
+                        label="Margem líquida"
+                        value={pct(sim.net_margin_pct)}
+                        tone={sim.net_margin_pct >= 0 ? "emerald" : "rose"}
+                      />
+                      <Kpi label="LTV" value={money(sim.ltv)} />
+                    </div>
+                    <div className="space-y-1 border-t border-white/5 pt-2 text-[10px] text-slate-500">
+                      <p>
+                        EV range:{" "}
+                        <span className="text-slate-300">
+                          {money(sim.ev_low)} – {money(sim.ev_high)}
+                        </span>
+                        {" · "}COGS {money2(sim.cogs_month)}/mês
+                      </p>
+                      <p>
+                        Valuation 2× {money(sim.valuation.low)} · base{" "}
+                        {money(sim.valuation.base)} · 8×{" "}
+                        {money(sim.valuation.high)}
+                      </p>
                     </div>
                   </div>
                 ) : (
@@ -651,87 +1016,179 @@ export default function InvestorRoomPage() {
             </div>
           </Card>
 
+          {/* PROVA DE DADOS */}
           <Card
-            title="Valor patrimonial vs. projeção"
-            icon={<BarChart3 className="h-4 w-4 text-indigo-400" />}
-            hint="O piso não desaparece com o ARR; é o argumento de negociação"
-          >
-            <div className="grid gap-3 md:grid-cols-3">
-              <Kpi label="Piso patrimonial" value={`${money(asset.floor_low)}–${money(asset.floor_high)}`} tone="indigo" />
-              <Kpi label="ARR — passes com acesso" value={money(going.access_arr)} />
-              <Kpi label="EV — pro active 8×" value={money(going.pro_ev.high)} tone="amber" />
-            </div>
-            <p className="mt-2 text-[10px] text-slate-500">
-              Oferta/negociação = faixa entre o piso e o going concern + prémio estratégico.
-            </p>
-          </Card>
-        </div>
-      ) : null}
-
-      {tab === "proof" ? (
-        <div className="space-y-5">
-          <Card
-            title="Phone Truth — em remediação"
-            icon={<Activity className="h-4 w-4 text-rose-400" />}
-            hint="Searchbug 30d — não escondemos os erros cobrados"
-          >
-            <div className="grid gap-3 md:grid-cols-5">
-              <Kpi label="Chamadas" value={String(proof.phone.calls)} />
-              <Kpi label="Success" value={pct(proof.phone.success_pct)} tone="emerald" />
-              <Kpi label="Errors" value={String(proof.phone.error)} tone="rose" sub={`${proof.phone.error_billed} cobrados`} />
-              <Kpi label="No results" value={String(proof.phone.no_results)} tone="amber" />
-              <Kpi label="Custo / success" value={money2(proof.phone.cost_per_success)} />
-            </div>
-            <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-slate-400 md:grid-cols-4">
-              <span>name mismatch: {proof.phone.name_mismatch}</span>
-              <span>transport: {proof.phone.transport_error}</span>
-              <span>custo 30d: {money2(proof.phone.cost_30d)}</span>
-              <span>erros cobrados: {pct(proof.phone.error_pct)}</span>
-            </div>
-            <p className="mt-2 text-[10px] text-amber-300">
-              Selo “em remediação”: separar success/error, reconciliar cobrança e testar provider alternativo.
-            </p>
-          </Card>
-
-          <div className="grid gap-5 xl:grid-cols-2">
-            <Card title="Descoberta & frescura" icon={<Database className="h-4 w-4 text-indigo-400" />}>
-              <div className="grid gap-3 md:grid-cols-2">
-                <Kpi label="Owner coverage" value={pct(proof.owner_coverage_pct)} tone="emerald" />
-                <Kpi label="Morada" value={pct(proof.address_coverage_pct)} />
-                <Kpi label="Frescura ≤7d" value={pct(proof.fresh7_pct)} tone="amber" />
-                <Kpi label="Proveniência" value={pct(proof.provenance_pct)} />
-              </div>
-              <p className="mt-2 text-[10px] text-slate-500">
-                {proof.fresh7.toLocaleString("en-US")} factos frescos; proveniência = source_type + external_id.
-              </p>
-            </Card>
-
-            <Card title="E-mail & operação" icon={<ShieldCheck className="h-4 w-4 text-indigo-400" />}>
-              <div className="grid gap-3 md:grid-cols-2">
-                <Kpi label="Enviados" value={String(proof.email.sent)} />
-                <Kpi label="Bounce" value={pct(proof.email.bounce_rate_pct)} tone="amber" />
-                <Kpi label="Respostas 30d" value={String(proof.email.replies_30d)} />
-                <Kpi label="System Health" value={`${proof.operations.health_score ?? "—"}/100`} tone="emerald" />
-              </div>
-              <p className="mt-2 text-[10px] text-slate-500">
-                Amostra de e-mail: {proof.email.status}. Supressões: {proof.email.suppressions}.
-              </p>
-            </Card>
-          </div>
-
-          <Card
-            title="Custo por owner & anti-Angi"
+            title="Prova de Dados"
             icon={<Gauge className="h-4 w-4 text-indigo-400" />}
-            hint="Claims de concorrentes exigem URL, data e revisão legal"
+            hint="Qualidade, cobertura e operação da base"
+            action={<Badge tone={confidence.tone}>{confidence.label}</Badge>}
           >
-            <div className="grid gap-3 md:grid-cols-3">
-              <Kpi label="Cash / owner" value={money2(proof.cost_per_owner_cash)} />
-              <Kpi label="Fully loaded / owner" value={money2(proof.cost_per_owner_loaded)} />
-              <Kpi label="Claims" value="pendente" tone="amber" sub={proof.anti_angi.status} />
+            <div className="grid gap-5 lg:grid-cols-[auto_1fr]">
+              <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-white/5 bg-white/[0.02] px-6 py-4">
+                <ScoreRing score={proof.truth_score} size={96} />
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  Truth Score
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <Kpi
+                  label="Owners"
+                  value={pct(proof.owner_coverage_pct)}
+                  sub={`${proof.fresh7.toLocaleString("en-US")} frescos`}
+                  tone="emerald"
+                />
+                <Kpi
+                  label="Morada"
+                  value={pct(proof.address_coverage_pct)}
+                  sub="Cobertura da base"
+                />
+                <Kpi
+                  label="Telefone"
+                  value={pct(proof.phone.success_pct)}
+                  sub={`${proof.phone.error_billed} erros cobrados`}
+                  tone="amber"
+                />
+                <Kpi
+                  label="E-mail entregue"
+                  value={pct(100 - proof.email.bounce_rate_pct)}
+                  sub={`${proof.email.sent} enviados`}
+                  tone="sky"
+                />
+                <Kpi
+                  label="Frescura ≤7d"
+                  value={pct(proof.fresh7_pct)}
+                  tone="amber"
+                />
+                <Kpi
+                  label="Proveniência"
+                  value={pct(proof.provenance_pct)}
+                  tone="emerald"
+                />
+                <Kpi
+                  label="System Health"
+                  value={`${proof.operations.health_score ?? "—"}/100`}
+                  tone="emerald"
+                />
+                <Kpi
+                  label="Respostas 30d"
+                  value={String(proof.email.replies_30d)}
+                  sub={`${proof.email.suppressions} supressões`}
+                />
+              </div>
             </div>
-            <p className="mt-2 text-[10px] text-slate-500">
-              {proof.anti_angi.note}
-            </p>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <div className="rounded-xl border border-white/5 bg-white/[0.02] p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    <Activity className="h-3 w-3 text-amber-300" /> Telefonia
+                  </span>
+                  <Badge tone="amber">Em Remediação Técnica</Badge>
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-1.5 text-[11px] text-slate-400">
+                  <span>
+                    Chamadas{" "}
+                    <strong className="text-slate-200 tabular-nums">
+                      {proof.phone.calls}
+                    </strong>
+                  </span>
+                  <span>
+                    Custo 30d{" "}
+                    <strong className="text-slate-200 tabular-nums">
+                      {money2(proof.phone.cost_30d)}
+                    </strong>
+                  </span>
+                  <span>
+                    Erros{" "}
+                    <strong className="text-amber-200 tabular-nums">
+                      {proof.phone.error}
+                    </strong>
+                  </span>
+                  <span>
+                    Custo / success{" "}
+                    <strong className="text-slate-200 tabular-nums">
+                      {money2(proof.phone.cost_per_success)}
+                    </strong>
+                  </span>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-white/5 bg-white/[0.02] p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    E-mail
+                  </span>
+                  <Badge tone={emailSample.tone}>{emailSample.label}</Badge>
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-1.5 text-[11px] text-slate-400">
+                  <span>
+                    Enviados{" "}
+                    <strong className="text-slate-200 tabular-nums">
+                      {proof.email.sent}
+                    </strong>
+                  </span>
+                  <span>
+                    Bounce{" "}
+                    <strong className="text-slate-200 tabular-nums">
+                      {pct(proof.email.bounce_rate_pct)}
+                    </strong>
+                  </span>
+                  <span>
+                    Respostas{" "}
+                    <strong className="text-slate-200 tabular-nums">
+                      {proof.email.replies_30d}
+                    </strong>
+                  </span>
+                  <span>
+                    Supressões{" "}
+                    <strong className="text-slate-200 tabular-nums">
+                      {proof.email.suppressions}
+                    </strong>
+                  </span>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-white/5 bg-white/[0.02] p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    Operação
+                  </span>
+                  <Badge tone="emerald">
+                    {proof.operations.health_status ?? "ok"}
+                  </Badge>
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-1.5 text-[11px] text-slate-400">
+                  <span>
+                    Health{" "}
+                    <strong className="text-emerald-200 tabular-nums">
+                      {proof.operations.health_score ?? "—"}/100
+                    </strong>
+                  </span>
+                  <span>
+                    Ingestão{" "}
+                    <strong className="text-slate-200">ativa</strong>
+                  </span>
+                  <span>
+                    Snapshot{" "}
+                    <strong className="text-slate-200">
+                      {fmtWhen(proof.operations.captured_at)}
+                    </strong>
+                  </span>
+                  <span>
+                    Custo / owner{" "}
+                    <strong className="text-slate-200 tabular-nums">
+                      {money2(proof.cost_per_owner_cash)}
+                    </strong>
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
+              <Badge tone="amber">Claims · Em Remediação Técnica</Badge>
+              <span>{proof.anti_angi.note}</span>
+            </div>
           </Card>
         </div>
       ) : null}
@@ -739,38 +1196,179 @@ export default function InvestorRoomPage() {
       {tab === "buyer" ? (
         <div className="space-y-5">
           {!data.nda_accepted ? (
-            <Card title="Comprador — NDA necessário" icon={<Lock className="h-4 w-4 text-amber-400" />}>
+            <Card
+              title="Comprador — NDA necessário"
+              icon={<Lock className="h-4 w-4 text-amber-400" />}
+            >
               <p className="text-sm text-slate-400">
-                Aceita o NDA para ver a auditoria de código, dívida técnica e portabilidade.
+                Aceita o NDA para ver o inventário de ativos, a cobertura de
+                testes e a portabilidade.
               </p>
             </Card>
           ) : (
             <>
-              <Card title="Inventário técnico" icon={<FileText className="h-4 w-4 text-indigo-400" />} hint="Fase 1B completa o data room e o PDF server-side">
-                <div className="grid gap-3 md:grid-cols-4">
-                  <Kpi label="Python LOC" value={data.code_inventory.python_lines.toLocaleString("en-US")} />
-                  <Kpi label="TS/TSX LOC" value={data.code_inventory.typescript_lines.toLocaleString("en-US")} />
-                  <Kpi label="Pytest" value={String(data.code_inventory.pytest_tests)} />
-                  <Kpi label="Vitest" value={String(data.code_inventory.vitest_tests)} />
-                  <Kpi label="Ficheiros teste" value={String(data.code_inventory.test_files)} />
-                  <Kpi label="Docs" value={String(data.code_inventory.docs)} />
-                  <Kpi label="Cobertura backend" value={data.code_inventory.coverage_backend_pct == null ? "a medir" : pct(data.code_inventory.coverage_backend_pct)} tone="amber" />
-                  <Kpi label="CI" value="verde" tone="emerald" sub={data.code_inventory.ci} />
+              <Card
+                title="Inventário de Ativos"
+                icon={<FileText className="h-4 w-4 text-indigo-400" />}
+                hint="Código, testes, infraestrutura e documentação"
+                action={<Badge tone="emerald">CI/CD verde</Badge>}
+              >
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-[11px]">
+                    <thead className="text-slate-500">
+                      <tr>
+                        <th className="pb-2 font-semibold">Ativo</th>
+                        <th className="pb-2 font-semibold">Métrica</th>
+                        <th className="pb-2 text-right font-semibold">
+                          Estado
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[
+                        {
+                          icon: <FileText className="h-3.5 w-3.5 text-indigo-300" />,
+                          asset: "Código backend",
+                          metric: `${inventory.python_lines.toLocaleString(
+                            "en-US"
+                          )} linhas Python`,
+                          status: "Entregue",
+                          tone: "emerald" as BadgeTone,
+                        },
+                        {
+                          icon: <FileText className="h-3.5 w-3.5 text-sky-300" />,
+                          asset: "Código frontend",
+                          metric: `${inventory.typescript_lines.toLocaleString(
+                            "en-US"
+                          )} linhas TS/TSX`,
+                          status: "Entregue",
+                          tone: "emerald" as BadgeTone,
+                        },
+                        {
+                          icon: <FlaskConical className="h-3.5 w-3.5 text-emerald-300" />,
+                          asset: "Testes backend",
+                          metric: `${inventory.pytest_tests.toLocaleString(
+                            "en-US"
+                          )} pytest · ${inventory.test_files} ficheiros`,
+                          status: "Verde",
+                          tone: "emerald" as BadgeTone,
+                        },
+                        {
+                          icon: <FlaskConical className="h-3.5 w-3.5 text-emerald-300" />,
+                          asset: "Testes frontend",
+                          metric: `${inventory.vitest_tests} vitest`,
+                          status: "Verde",
+                          tone: "emerald" as BadgeTone,
+                        },
+                        {
+                          icon: <Gauge className="h-3.5 w-3.5 text-amber-300" />,
+                          asset: "Cobertura backend",
+                          metric:
+                            inventory.coverage_backend_pct == null
+                              ? "A medir"
+                              : pct(inventory.coverage_backend_pct),
+                          status: "Publicada",
+                          tone: "sky" as BadgeTone,
+                        },
+                        {
+                          icon: <GitBranch className="h-3.5 w-3.5 text-indigo-300" />,
+                          asset: "CI/CD",
+                          metric: inventory.ci,
+                          status: "Verde",
+                          tone: "emerald" as BadgeTone,
+                        },
+                        {
+                          icon: <Container className="h-3.5 w-3.5 text-sky-300" />,
+                          asset: "Infraestrutura",
+                          metric: inventory.portability,
+                          status: "Portável",
+                          tone: "indigo" as BadgeTone,
+                        },
+                        {
+                          icon: <BookOpen className="h-3.5 w-3.5 text-slate-300" />,
+                          asset: "Documentação",
+                          metric: `${inventory.docs} documentos + runbooks`,
+                          status: "Incluída",
+                          tone: "slate" as BadgeTone,
+                        },
+                        {
+                          icon: <Database className="h-3.5 w-3.5 text-emerald-300" />,
+                          asset: "Ativo de dados",
+                          metric: `${leadsTotal.toLocaleString(
+                            "en-US"
+                          )} registos · ${asset.owners.toLocaleString(
+                            "en-US"
+                          )} owners`,
+                          status: `${pct(proof.provenance_pct, 0)} proveniência`,
+                          tone: "emerald" as BadgeTone,
+                        },
+                      ].map((row) => (
+                        <tr
+                          key={row.asset}
+                          className="border-t border-white/5 align-top"
+                        >
+                          <td className="py-2.5">
+                            <div className="flex items-center gap-2 font-semibold text-slate-200">
+                              {row.icon}
+                              {row.asset}
+                            </div>
+                          </td>
+                          <td className="py-2.5 text-slate-400">
+                            {row.metric}
+                          </td>
+                          <td className="py-2.5 text-right">
+                            <Badge tone={row.tone}>{row.status}</Badge>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-                <p className="mt-3 text-[11px] text-slate-400">{data.code_inventory.portability}</p>
               </Card>
-              <Card title="Dívida técnica registada" icon={<AlertTriangle className="h-4 w-4 text-amber-400" />}>
-                <ul className="space-y-1 text-[11px] text-slate-400">
-                  {data.code_inventory.known_debt.map((item) => (
+
+              <details className="rounded-xl border border-white/5 bg-white/[0.02] px-4 py-3">
+                <summary className="cursor-pointer text-[11px] font-semibold text-slate-400">
+                  Notas de due diligence
+                </summary>
+                <ul className="mt-2 space-y-1 text-[10px] text-slate-500">
+                  {inventory.known_debt.map((item) => (
                     <li key={item}>• {item}</li>
                   ))}
                 </ul>
-              </Card>
-              <Card title="Transição 30/60/90" icon={<TrendingUp className="h-4 w-4 text-indigo-400" />}>
-                <div className="grid gap-3 md:grid-cols-3 text-[11px] text-slate-400">
-                  <div><strong className="text-slate-200">30 dias</strong><br />Acesso, shadowing, credenciais, backups, runbooks.</div>
-                  <div><strong className="text-slate-200">60 dias</strong><br />Deploy independente, migração de infraestrutura, validação de dados.</div>
-                  <div><strong className="text-slate-200">90 dias</strong><br />Cutover, suporte, escrow e encerramento.</div>
+              </details>
+
+              <Card
+                title="Transição 30 / 60 / 90"
+                icon={<TrendingUp className="h-4 w-4 text-indigo-400" />}
+                hint="Plano de integração para o comprador"
+              >
+                <div className="grid gap-3 md:grid-cols-3">
+                  {[
+                    {
+                      step: "30 dias",
+                      text: "Acesso, shadowing, credenciais, backups e runbooks.",
+                    },
+                    {
+                      step: "60 dias",
+                      text: "Deploy independente, migração de infraestrutura e validação de dados.",
+                    },
+                    {
+                      step: "90 dias",
+                      text: "Cutover, suporte, escrow e encerramento.",
+                    },
+                  ].map((item) => (
+                    <div
+                      key={item.step}
+                      className="rounded-xl border border-white/5 bg-white/[0.02] p-3"
+                    >
+                      <p className="text-sm font-black text-indigo-200">
+                        {item.step}
+                      </p>
+                      <p className="mt-1 text-[11px] text-slate-400">
+                        {item.text}
+                      </p>
+                    </div>
+                  ))}
                 </div>
               </Card>
             </>
@@ -779,50 +1377,61 @@ export default function InvestorRoomPage() {
       ) : null}
 
       {tab === "assumptions" ? (
-        <div className="space-y-5">
-          <Card
-            title="Premissas versionadas — Gate 0"
-            icon={<CheckCircle2 className="h-4 w-4 text-emerald-400" />}
-            hint={`Aprovado por ${data.assumptions.approved_by} em ${data.assumptions.approved_at}`}
-          >
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-[11px]">
-                <thead className="text-slate-500">
-                  <tr><th className="pb-1">Chave</th><th className="pb-1">Valor</th><th className="pb-1">Nota</th></tr>
-                </thead>
-                <tbody>
-                  {[
-                    ["ticket_price_weekly", "$120", "7 dias por empreiteiro"],
-                    ["monthlyization_factor", "52/12 = 4,3333", "não usar 4 semanas"],
-                    ["normalized_mrr_per_pass", "$520", "120 × 52/12"],
-                    ["arr_per_pass", "$6.240", "520 × 12"],
-                    ["multiple_low / base / high", "2× / 3,5× / 8×", "benchmark versionado"],
-                    ["replacement_owner_low/high", "$0,50 / $1,50", "custo de substituição"],
-                    ["ip_months_low/high", "12 / 18", "engenharia"],
-                    ["ip_rate_low/high", "$8k / $15k", "rate mensal"],
-                    ["infra_fixed_monthly", money2(data.assumptions.infra_fixed_monthly), "custo fixo input"],
-                  ].map(([key, value, note]) => (
-                    <tr key={key} className="border-t border-white/5">
-                      <td className="py-1.5 font-mono text-[10px] text-slate-400">{key}</td>
-                      <td className="py-1.5 text-slate-200">{value}</td>
-                      <td className="py-1.5 text-slate-500">{note}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className="mt-3 text-[10px] text-slate-500">
-              Snapshot v{data.version} · checksum {data.checksum.slice(0, 16)}. Alterações de preço exigem nova versão e aprovação.
-            </p>
-          </Card>
-        </div>
+        <Card
+          title="Premissas versionadas — Gate 0"
+          icon={<CheckCircle2 className="h-4 w-4 text-emerald-400" />}
+          hint={`Aprovado por ${data.assumptions.approved_by}`}
+        >
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-[11px]">
+              <thead className="text-slate-500">
+                <tr>
+                  <th className="pb-2 font-semibold">Chave</th>
+                  <th className="pb-2 font-semibold">Valor</th>
+                  <th className="pb-2 font-semibold">Nota</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[
+                  ["ticket_price_weekly", "$120", "7 dias por empreiteiro"],
+                  ["monthlyization_factor", "52/12 = 4,3333", "não usar 4 semanas"],
+                  ["normalized_mrr_per_pass", "$520", "120 × 52/12"],
+                  ["arr_per_pass", "$6.240", "520 × 12"],
+                  ["multiple_low / base / high", "2× / 3,5× / 8×", "benchmark versionado"],
+                  ["replacement_owner_low/high", "$0,50 / $1,50", "custo de substituição"],
+                  ["ip_months_low/high", "12 / 18", "engenharia"],
+                  ["ip_rate_low/high", "$8k / $15k", "rate mensal"],
+                  [
+                    "infra_fixed_monthly",
+                    money2(data.assumptions.infra_fixed_monthly),
+                    "custo fixo input",
+                  ],
+                ].map(([key, value, note]) => (
+                  <tr key={key} className="border-t border-white/5">
+                    <td className="py-2 font-mono text-[10px] text-slate-400">
+                      {key}
+                    </td>
+                    <td className="py-2 text-slate-200">{value}</td>
+                    <td className="py-2 text-slate-500">{note}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
       ) : null}
 
-      <footer className="mt-6 flex flex-wrap items-center gap-3 text-[10px] text-slate-600">
+      <footer className="mt-8 flex flex-wrap items-center gap-2 border-t border-white/5 pt-4 text-[10px] text-slate-600">
         <ShieldCheck className="h-3 w-3" />
-        <span>Read-only · dados agregados · NDA para export/Buyer · watermark dinâmica.</span>
+        <span>Snapshot v{data.version}</span>
         <span>·</span>
-        <span>52 semanas/ano; weekly pass, não subscrição mensal.</span>
+        <span>checksum {data.checksum.slice(0, 12)}</span>
+        <span>·</span>
+        <span>{fmtWhen(data.generated_at)}</span>
+        <span>·</span>
+        <span>{data.nda_accepted ? "NDA ativo" : "NDA pendente"}</span>
+        <span>·</span>
+        <span>dados agregados · read-only</span>
       </footer>
     </main>
   );
