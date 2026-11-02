@@ -108,7 +108,11 @@ function Badge({
 
 function confidenceBadge(confidence: string): { label: string; tone: BadgeTone } {
   const value = confidence.toLowerCase();
-  if (value.startsWith("baixa") || value.startsWith("low")) {
+  if (
+    value.includes("amostra") ||
+    value.startsWith("baixa") ||
+    value.startsWith("low")
+  ) {
     return { label: "Amostra em Maturação", tone: "amber" };
   }
   if (value.startsWith("média") || value.startsWith("media") || value.startsWith("medium")) {
@@ -792,7 +796,7 @@ export default function InvestorRoomPage() {
             title="Composição do património"
             icon={<Layers className="h-4 w-4 text-indigo-400" />}
             hint="Piso de substituição: dados, engenharia e compliance"
-            action={<Badge tone="indigo">Piso $148k+</Badge>}
+            action={<Badge tone="indigo">Piso {kFloor(asset.floor_low)}+</Badge>}
           >
             <div className="grid gap-6 lg:grid-cols-2">
               <div className="space-y-4">
