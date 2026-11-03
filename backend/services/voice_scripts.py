@@ -57,18 +57,43 @@ TOOL_GUIDANCE = (
     "## Operational rules\n"
     "You are on a live outbound phone call. Follow the approved script above "
     "exactly; do not add claims, prices, or promises that are not in it.\n"
-    "- If the caller agrees to receive the link, call send_showcase_link.\n"
-    "- If the caller gives an email address, call capture_email with that "
-    "exact address. Never invent or guess an email.\n"
+    "- Email handling, in this order (this overrides the generic \"If Yes / "
+    "Press 1\" line when an email is on file):\n"
+    "  1. If the call context below includes an email on file, confirm it out "
+    "loud exactly once: \"Great! Can I send it to [say the email on file]?\". "
+    "Wait for an explicit yes. Do not ask \"What is the best email address?\" "
+    "in this case.\n"
+    "  2. After the caller confirms the email on file, call "
+    "send_showcase_link. Do not ask them to dictate the address again.\n"
+    "  3. If there is no email on file, or the caller wants a different "
+    "address, ask them to say it slowly. Repeat it back and ask "
+    "\"Is that correct?\". Only after they confirm, call capture_email with "
+    "the exact address.\n"
+    "  4. Never invent, guess, or silently correct an email. If capture_email "
+    "returns invalid_email, apologize and ask the caller to repeat it.\n"
     "- If the caller says no, stop, or asks to be removed, call "
     "remove_from_list and end politely.\n"
     "- Pressing 1 is equivalent to saying yes. DTMF input arrives as text.\n"
 )
 
 
-def build_instructions(body: str) -> str:
-    """Script aprovado + regras operacionais das tools."""
-    return f"{str(body or '').strip()}\n\n{TOOL_GUIDANCE}"
+def build_instructions(body: str, email_on_file: str = "") -> str:
+    """Script aprovado + regras operacionais + contexto de email da chamada."""
+    email = str(email_on_file or "").strip()
+    if email:
+        context = (
+            "## Call context\n"
+            f"Email on file for this business: {email}\n"
+            "Start by confirming this address; only use dictation if the caller "
+            "declines it or asks for another address.\n"
+        )
+    else:
+        context = (
+            "## Call context\n"
+            "Email on file for this business: none.\n"
+            "Ask the caller for the best email address and read it back.\n"
+        )
+    return f"{str(body or '').strip()}\n\n{TOOL_GUIDANCE}\n{context}"
 
 
 def opening_for_greeting(body: str) -> str:
@@ -522,6 +547,7 @@ def render(
     city: str = "",
     permit_count: int = 0,
     state: str = "",
+    email: str = "",
 ) -> dict:
     script = get_effective_script(trade_code, city, state)
     if not script:
@@ -566,7 +592,7 @@ def render(
         "assistant_id": script.get("assistant_id") or "",
         "voice_id": _assistant_voice(script),
         "body": body,
-        "instructions": build_instructions(body),
+        "instructions": build_instructions(body, email_on_file=email),
         "greeting": opening_for_greeting(body),
         "disclosure": disclosure,
         "variables": replacements,
@@ -625,25 +651,43 @@ def _assistant_tools() -> list[dict]:
         tool(
             "send_showcase_link",
             (
-                "Send the Magic Leads showcase website link to this business. "
-                "Call it as soon as the caller agrees to receive the link."
+                "Send the Magic Leads showcase link to the email already on "
+                "file for this business. Use it only after the caller confirms "
+                "the address on file out loud. Do not use it when there is no "
+                "email on file."
             ),
-            {},
-            [],
+            {
+                "confirmed_email": {
+                    "type": "string",
+                    "description": (
+                        "The email on file that the caller just confirmed."
+                    ),
+                }
+            },
+            ["confirmed_email"],
         ),
         tool(
             "capture_email",
             (
-                "Save the email address spoken by the caller and immediately "
-                "send the showcase link to it. Never invent or guess an email."
+                "Save a new email dictated by the caller and send the showcase "
+                "link to it. Use only when there is no email on file or the "
+                "caller explicitly wants a different address. Never invent, "
+                "guess, or auto-correct an email."
             ),
             {
                 "email": {
                     "type": "string",
-                    "description": "Email address dictated by the caller.",
-                }
+                    "description": "Email address dictated and confirmed by the caller.",
+                },
+                "confirmed": {
+                    "type": "boolean",
+                    "description": (
+                        "True only after the assistant read the address back "
+                        "and the caller confirmed it."
+                    ),
+                },
             },
-            ["email"],
+            ["email", "confirmed"],
         ),
         tool(
             "remove_from_list",

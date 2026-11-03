@@ -1738,6 +1738,23 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   as chaves Telnyx no Railway, sincronizar e definir `VOICE_TEST_NUMBERS`.
 - **Testes**: **1.311 pytest**; cobertura **70,0%**.
 
+### Fase 2D - Email HTML e confirmacao de email (2026-11-02)
+
+- **Email aprovado (Opcao C)**: assunto `Here is your link: {count} active
+  {trade} opportunities in {city}`; HTML branded com botao `ACCESS YOUR
+  EXCLUSIVE OPPORTUNITIES`, fallback texto, assinatura `Magic Leads Team`,
+  morada `100 Main St, Suite 500, Boston, MA 02110` e unsubscribe.
+- **Link branded**: `https://www.magicleads.app/r/<token>` via rewrite
+  `/r/:path*` no frontend + `SHOWCASE_BASE_URL`.
+- **Confirmacao primeiro**: o instructions da chamada inclui o email da ficha.
+  O assistant pergunta "Can I send it to <email>?"; so depois chama
+  `send_showcase_link`, que exige `confirmed_email` igual ao da ficha.
+- **Ditado como fallback**: `capture_email` exige `confirmed=true` (read-back)
+  e devolve `email_not_confirmed` se o assistant tentar saltar a confirmacao.
+- **Anti-erro**: validacao de sintaxe, normalizacao para lowercase, nunca
+  inventar/corrigir email em silencio, e mensagens de erro que pedem repeticao.
+- **Testes**: **1.316 pytest**; cobertura **70,0%**.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

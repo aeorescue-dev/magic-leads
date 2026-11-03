@@ -13,6 +13,16 @@ const nextConfig = {
         source: '/api/:path*',
         destination: 'https://magic-leads-production.up.railway.app/api/:path*',
       },
+      {
+        // Links branded da vitrine: www.magicleads.app/r/<token> -> backend.
+        source: '/r/:path*',
+        destination: 'https://magic-leads-production.up.railway.app/r/:path*',
+      },
+      {
+        // Opt-out branded: www.magicleads.app/unsubscribe -> backend.
+        source: '/unsubscribe',
+        destination: 'https://magic-leads-production.up.railway.app/unsubscribe',
+      },
     ];
   },
   async headers() {

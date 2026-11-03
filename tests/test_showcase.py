@@ -258,6 +258,95 @@ def test_email_staging_forca_dry_run(monkeypatch):
     assert result["reason"] == "staging_mode"
 
 
+def _capture_email(monkeypatch) -> dict:
+    monkeypatch.setattr(showcase.settings, "VOICE_STAGING_MODE", False)
+    monkeypatch.setattr(showcase.settings, "EMAIL_API_KEY", "re_test")
+    monkeypatch.setattr(
+        showcase.settings, "EMAIL_FROM", "Magic Leads <support@magicleads.app>"
+    )
+    captured: dict = {}
+
+    class Response:
+        status_code = 202
+        content = b"{}"
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        captured["url"] = url
+        captured["payload"] = json
+        return Response()
+
+    monkeypatch.setattr(showcase.httpx, "post", fake_post)
+    return captured
+
+
+def test_email_html_oficial_com_link_e_endereco(monkeypatch):
+    captured = _capture_email(monkeypatch)
+    result = showcase.send_showcase_email(
+        to_email="owner@example.com",
+        company_name="Acme Roofing",
+        city="New York",
+        trade_code="roofing",
+        count=45,
+        link_url="https://www.magicleads.app/r/token-123",
+        scope_label="Roofing",
+    )
+    assert result["sent"] is True
+    payload = captured["payload"]
+    assert payload["from"] == "Magic Leads <support@magicleads.app>"
+    assert payload["subject"] == (
+        "Here is your link: 45 active roofing opportunities in New York"
+    )
+    html = payload["html"]
+    assert "As discussed on our call" in html
+    assert "ACCESS YOUR EXCLUSIVE OPPORTUNITIES" in html
+    assert "https://www.magicleads.app/r/token-123" in html
+    assert "only one contractor per address before any competitor finds out" in html
+    assert "7-day pass ($120 for 7 days)" in html
+    assert "100 Main St, Suite 500, Boston, MA 02110" in html
+    assert "Unsubscribe" in html
+    text = payload["text"]
+    assert "Here is your link" not in text
+    assert "https://www.magicleads.app/r/token-123" in text
+    assert "100 Main St, Suite 500, Boston, MA 02110" in text
+    assert "Unsubscribe:" in text
+
+
+def test_email_fallback_nao_duplica_active(monkeypatch):
+    captured = _capture_email(monkeypatch)
+    showcase.send_showcase_email(
+        to_email="owner@example.com",
+        company_name="Dallas Roofing",
+        city="Dallas",
+        trade_code="roofing",
+        count=3,
+        link_url="https://www.magicleads.app/r/token-123",
+        scope_label="active property",
+    )
+    assert captured["payload"]["subject"] == (
+        "Here is your link: 3 active property opportunities in Dallas"
+    )
+
+
+def test_email_html_escapa_nome_da_empresa(monkeypatch):
+    captured = _capture_email(monkeypatch)
+    showcase.send_showcase_email(
+        to_email="owner@example.com",
+        company_name="<b>Acme & Sons</b>",
+        city="Boston",
+        trade_code="roofing",
+        count=1,
+        link_url="https://www.magicleads.app/r/token-123",
+        scope_label="Roofing",
+    )
+    payload = captured["payload"]
+    assert payload["subject"] == (
+        "Here is your link: 1 active roofing opportunity in Boston"
+    )
+    assert "&lt;b&gt;Acme &amp; Sons&lt;/b&gt;" in payload["html"]
+    assert "<b>Acme" not in payload["html"]
+    assert "Hi <b>Acme & Sons</b>," in payload["text"]
+
+
 def test_checkout_grava_atribuicao():
     showcase.record_checkout(
         link_id=1,

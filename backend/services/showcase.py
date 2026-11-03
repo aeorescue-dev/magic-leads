@@ -17,6 +17,7 @@ import secrets
 import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
+from html import escape
 from typing import Any, Optional
 from urllib.parse import quote
 
@@ -946,19 +947,63 @@ def send_showcase_email(
         return {"sent": False, "dry_run": True, "link_url": link_url}
 
     noun = "opportunity" if count == 1 else "opportunities"
-    scope = (scope_label or _trade_label(trade_code)).strip() or "property"
-    subject = f"{count} {scope} {noun} in {city} this week"
-    body = (
+    scope = (scope_label or _trade_label(trade_code)).strip().lower() or "property"
+    scope = re.sub(r"^active\s+", "", scope, flags=re.I) or "property"
+    subject = f"Here is your link: {count} active {scope} {noun} in {city}"
+    safe_company = escape(company_name or "there")
+    safe_city = escape(city or "your city")
+    safe_scope = escape(scope)
+    safe_link = escape(link_url, quote=True)
+    safe_unsub = escape(unsubscribe_url(email), quote=True)
+    text_body = (
         f"Hi {company_name or 'there'},\n\n"
-        f"We found {count} {scope} {noun} in {city} "
-        "from public records this week.\n\n"
-        f"See the masked list here: {link_url}\n\n"
-        "Magic Leads gives contractors a weekly pass: one business per address, "
-        "with owner details when you subscribe. $120 for 7 days.\n\n"
-        f"Unsubscribe: {unsubscribe_url(email)}\n\n"
-        "— Magic Leads\n"
-        "Boston, MA\n"
+        f"As discussed on our call, here is your direct link to view the "
+        f"{count} active {scope} {noun} currently available in "
+        f"{city or 'your city'}.\n\n"
+        "As a reminder, these project details are completely exclusive — "
+        "delivered to only one contractor per address before any competitor "
+        "finds out.\n\n"
+        f"ACCESS YOUR EXCLUSIVE OPPORTUNITIES: {link_url}\n\n"
+        "Click the link above to review the project locations and unlock full "
+        "owner details with your 7-day pass ($120 for 7 days).\n\n"
+        "Best regards,\n\n"
+        "Magic Leads Team\n\n"
+        "100 Main St, Suite 500, Boston, MA 02110\n\n"
+        f"Unsubscribe: {unsubscribe_url(email)}\n"
     )
+    html_body = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your Magic Leads link</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f6f5;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f5;padding:28px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border-radius:12px;padding:36px 32px;">
+          <tr>
+            <td>
+              <p style="margin:0 0 16px;font-size:16px;line-height:1.6;">Hi {safe_company},</p>
+              <p style="margin:0 0 16px;font-size:16px;line-height:1.6;">As discussed on our call, here is your direct link to view the {count} active {safe_scope} {noun} currently available in {safe_city}.</p>
+              <p style="margin:0 0 24px;font-size:16px;line-height:1.6;">As a reminder, these project details are completely exclusive &mdash; delivered to only one contractor per address before any competitor finds out.</p>
+              <p style="margin:0 0 28px;text-align:center;">
+                <a href="{safe_link}" style="display:inline-block;background:#10b981;color:#062017;font-size:14px;font-weight:700;letter-spacing:.02em;text-decoration:none;padding:15px 28px;border-radius:8px;">ACCESS YOUR EXCLUSIVE OPPORTUNITIES</a>
+              </p>
+              <p style="margin:0 0 16px;font-size:16px;line-height:1.6;">Click the link above to review the project locations and unlock full owner details with your 7-day pass ($120 for 7 days).</p>
+              <p style="margin:0 0 4px;font-size:16px;line-height:1.6;">Best regards,</p>
+              <p style="margin:0;font-size:16px;font-weight:700;">Magic Leads Team</p>
+              <p style="margin:20px 0 0;font-size:12px;line-height:1.6;color:#64748b;">100 Main St, Suite 500, Boston, MA 02110</p>
+              <p style="margin:8px 0 0;font-size:12px;line-height:1.6;"><a href="{safe_unsub}" style="color:#64748b;">Unsubscribe</a></p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>"""
     try:
         resp = httpx.post(
             "https://api.resend.com/emails",
@@ -970,7 +1015,8 @@ def send_showcase_email(
                 "from": settings.EMAIL_FROM,
                 "to": [email],
                 "subject": subject,
-                "text": body,
+                "text": text_body,
+                "html": html_body,
             },
             timeout=15,
         )

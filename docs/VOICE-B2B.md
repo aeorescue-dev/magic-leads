@@ -124,6 +124,9 @@ Variaveis de ambiente:
 | `TELNYX_ASSISTANT_EXPRESSIVE_MODE` | nao | `true` para Ultra expressive |
 | `VOICE_TEST_NUMBERS` | teste | allowlist E.164 separada por virgulas |
 | `VOICE_STAGING_MODE` | sim | `false` so durante o teste real |
+| `EMAIL_API_KEY` | sim | Resend para o email da vitrine |
+| `EMAIL_FROM` | sim | ex. `Magic Leads <support@magicleads.app>` |
+| `SHOWCASE_BASE_URL` | sim | `https://www.magicleads.app` (link branded) |
 
 `sync_to_telnyx` cria/atualiza o assistant com:
 - `instructions` = script aprovado + regras operacionais;
@@ -144,6 +147,49 @@ Variaveis de ambiente:
   o contacto atender e autorizar, para nao enviar links sem consentimento.
 - Os tool calls chegam com `x-telnyx-call-control-id`, correlacionado com
   `voice_calls.provider_call_id`.
+
+## Email da vitrine (HTML aprovado)
+
+Assunto:
+
+```text
+Here is your link: {count} active {trade} opportunities in {city}
+```
+
+Corpo (HTML + fallback texto), com botao `ACCESS YOUR EXCLUSIVE
+OPPORTUNITIES`, link `https://www.magicleads.app/r/<token>`, assinatura
+`Magic Leads Team`, morada `100 Main St, Suite 500, Boston, MA 02110` e link
+de unsubscribe. O assunto e o corpo usam plural correto (`1 ... opportunity`).
+
+O email e disparado por:
+
+- `send_showcase_link` — so envia para o email **que ja esta na ficha** e exige
+  `confirmed_email` igual ao endereco em ficha. Se nao bater, devolve
+  `email_confirmation_mismatch` e o assistant confirma de novo.
+- `capture_email` — so aceita um endereco ditado com `confirmed=true`, depois
+  de o assistant o ler de volta. Sem isso devolve `email_not_confirmed`.
+
+### Confirmacao primeiro (anti-erro de transcricao)
+
+No arranque da chamada, o backend injeta no instructions o email da ficha:
+
+```text
+Email on file for this business: info@apexroofing.com
+```
+
+Fluxo:
+
+1. Cliente diz "yes" ou prime 1.
+2. Se existe email na ficha, o assistant pergunta:
+   "Great! Can I send it to info@apexroofing.com?"
+3. Se o cliente confirma, chama `send_showcase_link` com esse endereco.
+4. Se nao existe email, ou o cliente quer outro, o assistant pede o endereco,
+   le de volta ("Is that correct?") e chama `capture_email` com
+   `confirmed=true`.
+
+O ditado fica assim reservado aos casos sem email ou a pedido explicito, o que
+reduz drasticamente erros de ASR. O backend nunca inventa nem corrige um email
+em silencio.
 
 ## Chamada de teste controlada
 

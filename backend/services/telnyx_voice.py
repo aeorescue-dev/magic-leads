@@ -342,6 +342,7 @@ def _render_for_call(current: dict, client_state: dict) -> dict:
             city=city,
             permit_count=permit_count,
             state=state,
+            email=str(company.get("email") or ""),
         )
     except ValueError:
         return {}
@@ -352,6 +353,10 @@ def _valid_email(value: Any) -> str:
     if re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
         return email
     return ""
+
+
+def _truthy(value: Any) -> bool:
+    return str(value or "").strip().lower() in ("1", "true", "yes", "y")
 
 
 def handle_webhook(payload: dict) -> dict:
@@ -567,11 +572,33 @@ def handle_tool_call(
     name = str(tool_name or "").strip()
 
     if name == "send_showcase_link":
+        company = b2b_voice.get_company(company_id) if company_id else {}
+        on_file = _valid_email((company or {}).get("email"))
+        if not on_file:
+            return {
+                "ok": False,
+                "reason": "email_required",
+                "message": (
+                    "There is no email on file. Ask the caller for the best "
+                    "email address, read it back, and use capture_email."
+                ),
+            }
+        confirmed = _valid_email(payload.get("confirmed_email"))
+        if confirmed != on_file:
+            return {
+                "ok": False,
+                "reason": "email_confirmation_mismatch",
+                "email_on_file": on_file,
+                "message": (
+                    f"The email on file is {on_file}. Confirm that exact "
+                    "address with the caller before sending."
+                ),
+            }
         result = send_showcase_for_call(voice_call_id)
         if result.get("ok"):
             return {
                 "ok": True,
-                "message": "The showcase link was sent to the email on file.",
+                "message": "The showcase link was sent to the confirmed email.",
             }
         if result.get("reason") == "email_required":
             return {
@@ -594,6 +621,16 @@ def handle_tool_call(
                 "message": (
                     "That email did not sound valid. Ask the caller to repeat "
                     "it slowly."
+                ),
+            }
+        if not _truthy(payload.get("confirmed")):
+            return {
+                "ok": False,
+                "reason": "email_not_confirmed",
+                "email": email,
+                "message": (
+                    "Read the address back and ask \"Is that correct?\" before "
+                    "saving or sending."
                 ),
             }
         if company_id:

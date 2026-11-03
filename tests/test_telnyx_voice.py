@@ -265,7 +265,9 @@ def test_tool_capture_email_guarda_e_envia(monkeypatch):
     _seed_showcase()
     call = _registered_call(company)
     result = telnyx_voice.handle_tool_call(
-        "capture_email", {"email": "boss@newmail.com"}, "v3:tool-call"
+        "capture_email",
+        {"email": "boss@newmail.com", "confirmed": True},
+        "v3:tool-call",
     )
     assert result["ok"] is True
     assert result["email"] == "boss@newmail.com"
@@ -274,6 +276,41 @@ def test_tool_capture_email_guarda_e_envia(monkeypatch):
     current = voice.get_voice_call(call["id"])
     assert current["status"] == "showcase_sent"
     assert current["showcase_link_id"]
+
+
+def test_tool_capture_email_exige_readback_confirmado():
+    company = _seed_company()
+    _seed_showcase()
+    _registered_call(company)
+    result = telnyx_voice.handle_tool_call(
+        "capture_email", {"email": "boss@newmail.com"}, "v3:tool-call"
+    )
+    assert result["ok"] is False
+    assert result["reason"] == "email_not_confirmed"
+    assert voice.get_company(company["id"])["email"] == "jane@example.com"
+
+
+def test_tool_send_showcase_confirma_email_da_ficha():
+    company = _seed_company()
+    _seed_showcase()
+    call = _registered_call(company)
+    mismatch = telnyx_voice.handle_tool_call(
+        "send_showcase_link",
+        {"confirmed_email": "wrong@example.com"},
+        "v3:tool-call",
+    )
+    assert mismatch["ok"] is False
+    assert mismatch["reason"] == "email_confirmation_mismatch"
+    assert mismatch["email_on_file"] == "jane@example.com"
+    assert voice.get_voice_call(call["id"])["showcase_link_id"] is None
+
+    ok = telnyx_voice.handle_tool_call(
+        "send_showcase_link",
+        {"confirmed_email": "JANE@example.com"},
+        "v3:tool-call",
+    )
+    assert ok["ok"] is True
+    assert voice.get_voice_call(call["id"])["showcase_link_id"]
 
 
 def test_tool_send_showcase_sem_email_pede_email():
@@ -402,4 +439,8 @@ def test_answered_envia_script_renderizado_ao_assistant(monkeypatch):
     ]
     assert sent["greeting"].startswith("Hi Telnyx Roofing")
     assert sent["voice_settings"]["voice"] == "Telnyx.Ultra.Callie"
+    assert "Email on file for this business: jane@example.com" in sent[
+        "instructions"
+    ]
+    assert "send_showcase_link" in sent["instructions"]
 

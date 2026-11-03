@@ -6,8 +6,8 @@ Comando:
 pytest tests -q --cov=backend --cov-report=json:coverage.json
 ```
 
-- **Total backend: 70,0%** (14 479 / 20 694 statements).
-- **1 311 pytest**, **109 vitest**; CI verde.
+- **Total backend: 70,0%** (14 507 / 20 715 statements).
+- **1 316 pytest**, **109 vitest**; CI verde.
 - O CI gera `coverage.json` e publica-o como artifact `backend-coverage`.
 
 ## Módulos fortes
@@ -21,7 +21,7 @@ pytest tests -q --cov=backend --cov-report=json:coverage.json
 | `services/outbound_templates.py` | 93,9% |
 | `services/auto_ramp.py` | 92,7% |
 | `services/b2b_voice.py` | 86,0% |
-| `services/showcase.py` | 88,6% |
+| `services/showcase.py` | 91,0% |
 | `services/auto_dialer.py` | 76,5% |
 | `services/unsubscribe.py` | 93,3% |
 | `services/niche_classifier.py` | 94,1% |
