@@ -338,6 +338,7 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         ("showcase_clicked_at", "TEXT"),
         ("revenue_cents", "INTEGER DEFAULT 0"),
         ("assistant_id", "TEXT"),
+        ("fallback_audio_started_at", "TEXT"),
     ):
         if name not in call_cols:
             conn.execute(f"ALTER TABLE voice_calls ADD COLUMN {name} {ddl}")
@@ -2225,6 +2226,26 @@ def claim_assistant_start(voice_call_id: int) -> bool:
         conn.close()
 
 
+def claim_fallback_playback(voice_call_id: int) -> bool:
+    """Reclama o playback do MP3 uma unica vez (conversation.ended vs timer)."""
+    init()
+    conn = get_conn()
+    try:
+        cur = conn.execute(
+            "UPDATE voice_calls SET fallback_audio_started_at=?, "
+            "status='fallback_playing' "
+            "WHERE id=? AND fallback_audio_started_at IS NULL",
+            (
+                datetime.now(timezone.utc).isoformat(),
+                int(voice_call_id),
+            ),
+        )
+        conn.commit()
+        return cur.rowcount == 1
+    finally:
+        conn.close()
+
+
 def update_voice_call(voice_call_id: int, **fields: Any) -> Optional[dict]:
     init()
     allowed = {
@@ -2243,6 +2264,7 @@ def update_voice_call(voice_call_id: int, **fields: Any) -> Optional[dict]:
         "showcase_clicked_at",
         "revenue_cents",
         "assistant_id",
+        "fallback_audio_started_at",
     }
     updates = {key: value for key, value in fields.items() if key in allowed}
     if not updates:

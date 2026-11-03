@@ -183,11 +183,11 @@ por trade.
   like a different email.".
 - Tecla **1**: se houver email na ficha, o backend envia o link imediatamente
   (`send_showcase_for_call`), sem depender de LLM/ASR.
-- Tecla **2**: marca `intent=website_redirect`, para o assistant
-  (`ai_assistant_stop`) e toca o MP3 deterministico da Callie
-  (`/api/voice/fallback.mp3`). No `call.playback.ended`, desliga a chamada. O
-  texto e sempre o mesmo, sem variacao do LLM. Se o playback falhar, usa
-  `speak` com o mesmo texto como fallback.
+- Tecla **2**: marca `intent=website_redirect` e para o assistant
+  (`ai_assistant_stop`). O MP3 deterministico da Callie
+  (`/api/voice/fallback.mp3`) so arranca no `call.conversation.ended` (ou num
+  timer de 2s), evitando sobreposicao de vozes. No `call.playback.ended`,
+  desliga a chamada. Se o playback falhar, usa `speak` com o mesmo texto.
 - Se o cliente recusa o email da ficha, quer outro endereco, ou nao ha email na
   ficha, o assistant **nao pede email nenhum**: diz o script de fallback exato
   e termina. Nao existe ditado de email nem `capture_email`.

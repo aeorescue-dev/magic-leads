@@ -329,13 +329,26 @@ def fallback_audio_url() -> str:
     return f"{base}/api/voice/fallback.mp3"
 
 
-def play_fallback_audio(call_control_id: str) -> dict:
-    """Para o assistant e toca o MP3 exato; fallback para speak se falhar."""
+def stop_assistant_for_fallback(call_control_id: str) -> dict:
+    """Para o assistant antes de tocar o MP3 (sem sobrepor vozes)."""
+    if not call_control_id:
+        return {"ok": False, "reason": "missing_call_control_id"}
+    return _call_action(call_control_id, "ai_assistant_stop", {})
+
+
+def start_fallback_playback(
+    voice_call_id: int, call_control_id: str
+) -> dict:
+    """Toca o MP3 exato depois de o assistant parar; fallback para speak."""
     from .voice_scripts import FALLBACK_SCRIPT
 
     if not call_control_id:
         return {"ok": False, "reason": "missing_call_control_id"}
-    stop = _call_action(call_control_id, "ai_assistant_stop", {})
+    current = b2b_voice.get_voice_call(voice_call_id) or {}
+    if current.get("intent") != "website_redirect":
+        return {"ok": False, "reason": "not_website_redirect"}
+    if not b2b_voice.claim_fallback_playback(voice_call_id):
+        return {"ok": False, "reason": "already_started"}
     play = _call_action(
         call_control_id,
         "playback_start",
@@ -343,10 +356,11 @@ def play_fallback_audio(call_control_id: str) -> dict:
             "audio_url": fallback_audio_url(),
             "audio_type": "mp3",
             "cache_audio": True,
+            "stop": "all",
         },
     )
     if play.get("ok"):
-        return {"ok": True, "mode": "playback", "stop": stop, "play": play}
+        return {"ok": True, "mode": "playback", "play": play}
     speak = _call_action(
         call_control_id,
         "speak",
@@ -359,10 +373,26 @@ def play_fallback_audio(call_control_id: str) -> dict:
     return {
         "ok": bool(speak.get("ok")),
         "mode": "speak",
-        "stop": stop,
         "play": play,
         "speak": speak,
     }
+
+
+def schedule_fallback_playback(
+    voice_call_id: int, call_control_id: str, delay_seconds: int = 2
+) -> None:
+    """Se conversation.ended nao chegar, toca o MP3 2s depois do stop."""
+
+    def _run() -> None:
+        time.sleep(delay_seconds)
+        current = b2b_voice.get_voice_call(voice_call_id) or {}
+        if (
+            current.get("intent") == "website_redirect"
+            and not current.get("fallback_audio_started_at")
+        ):
+            start_fallback_playback(voice_call_id, call_control_id)
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def _render_for_call(current: dict, client_state: dict) -> dict:
@@ -523,6 +553,28 @@ def handle_webhook(payload: dict) -> dict:
             "result": result,
             "event_type": event_type,
         }
+    if "conversation.ended" in event_type:
+        # O assistant parou; se foi a tecla 2, toca o MP3 agora (sem overlap).
+        call_control_id = str(
+            body.get("call_control_id") or data.get("call_control_id") or ""
+        )
+        if not voice_call_id and call_control_id:
+            found = b2b_voice.get_voice_call_by_provider_id(call_control_id)
+            if found:
+                voice_call_id = found["id"]
+        if voice_call_id:
+            current = b2b_voice.get_voice_call(voice_call_id) or {}
+            if (
+                current.get("intent") == "website_redirect"
+                and not current.get("fallback_audio_started_at")
+            ):
+                start_fallback_playback(voice_call_id, call_control_id)
+        return {
+            "ok": True,
+            "action": "conversation_ended",
+            "voice_call_id": voice_call_id,
+            "event_type": event_type,
+        }
     if "playback.ended" in event_type or "speak.ended" in event_type:
         # Alguns eventos de media não trazem client_state; correlaciona pelo
         # call_control_id antes de exigir voice_call_id.
@@ -552,21 +604,29 @@ def handle_webhook(payload: dict) -> dict:
     if "dtmf" in event_type:
         digit = str(body.get("dtmf_digit") or body.get("digit") or "").strip()
         if digit == "2":
-            # Bifurcacao deterministica: email errado -> fallback para o site.
-            b2b_voice.update_voice_call(voice_call_id, intent="website_redirect")
+            # Bifurcacao deterministica: email errado -> parar assistant e,
+            # so depois, tocar o MP3. Evita sobreposicao de vozes.
+            b2b_voice.update_voice_call(
+                voice_call_id,
+                intent="website_redirect",
+                status="fallback_pending",
+            )
             current = b2b_voice.get_voice_call(voice_call_id) or {}
             call_control_id = str(
                 body.get("call_control_id")
                 or current.get("provider_call_id")
                 or ""
             )
-            fallback = play_fallback_audio(call_control_id)
+            stop = stop_assistant_for_fallback(call_control_id)
+            schedule_fallback_playback(
+                voice_call_id, call_control_id, delay_seconds=2
+            )
             return {
                 "ok": True,
                 "action": "website_redirect",
                 "voice_call_id": voice_call_id,
                 "digit": digit,
-                "playback": fallback,
+                "stop": stop,
             }
         if digit == "1":
             # Tecla 1 e confirmacao explicita: se ha email na ficha, envia ja

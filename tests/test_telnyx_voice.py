@@ -219,7 +219,7 @@ def test_hangup_sem_duracao_usa_answered_at():
     assert call["cost_cents"] > 0
 
 
-def test_webhook_dtmf_2_toca_mp3_e_nao_envia_email():
+def test_webhook_dtmf_2_para_assistant_e_toca_mp3_no_ended():
     company = _seed_company()
     created = telnyx_voice.create_call(company)
     call_id = created["voice_call_id"]
@@ -247,9 +247,22 @@ def test_webhook_dtmf_2_toca_mp3_e_nao_envia_email():
                 }
             }
         )
+        assert result["action"] == "website_redirect"
+        assert [action for action, _ in actions] == ["ai_assistant_stop"]
+        ended = telnyx_voice.handle_webhook(
+            {
+                "data": {
+                    "event_type": "call.conversation.ended",
+                    "payload": {
+                        "client_state": state,
+                        "call_control_id": "v3:test-dtmf2",
+                    },
+                }
+            }
+        )
+        assert ended["action"] == "conversation_ended"
     finally:
         telnyx_voice._call_action = original
-    assert result["action"] == "website_redirect"
     assert [action for action, _ in actions] == [
         "ai_assistant_stop",
         "playback_start",
@@ -258,6 +271,7 @@ def test_webhook_dtmf_2_toca_mp3_e_nao_envia_email():
     assert actions[1][1]["audio_type"] == "mp3"
     call = voice.get_voice_call(call_id)
     assert call["intent"] == "website_redirect"
+    assert call["fallback_audio_started_at"]
     assert call["showcase_link_id"] is None
 
 

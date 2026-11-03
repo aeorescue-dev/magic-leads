@@ -1880,6 +1880,18 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   pela API atual; o adiamento e feito no backend.
 - **Testes**: **1.328 pytest**; cobertura **70,0%**.
 
+### Fase 2L - Tecla 2 sem sobreposicao de audio (2026-11-03)
+
+- **Problema**: a tecla 2 chamava `ai_assistant_stop` e `playback_start` no mesmo
+  instante; o assistant ainda estava a falar e o MP3 entrava por cima.
+- **Solucao**: a tecla 2 so para o assistant e marca `fallback_pending`. O MP3
+  arranca no evento `call.conversation.ended` (assistant ja parado) ou, se esse
+  evento nao chegar, num timer de 2s. `claim_fallback_playback` garante uma
+  unica reproducao; `call.playback.ended` desliga a chamada.
+- **Resultado**: sem vozes sobrepostas; o MP3 deterministico da Callie toca
+  limpo e a chamada fecha no fim.
+- **Testes**: **1.328 pytest**; cobertura **70,0%**.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
