@@ -257,7 +257,7 @@ def test_sync_inclui_voz_nativa_tools_e_dtmf(monkeypatch):
     assert result["assistant_id"] == "assistant-new"
     body = captured["body"]
     assert body["voice_settings"]["voice"] == "Telnyx.Ultra.Asher"
-    assert body["telephony_settings"]["disable_dtmf"] is False
+    assert body["telephony_settings"]["disable_dtmf"] is True
     assert body["transcription"]["model"] == "deepgram/nova-3"
     assert "gmail.com" in body["transcription"]["settings"]["keyterm"]
     assert body["telephony_settings"]["noise_suppression"] == "krisp"

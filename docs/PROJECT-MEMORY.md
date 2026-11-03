@@ -1886,14 +1886,16 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 ### Fase 2L - Tecla 2 sem sobreposicao de audio (2026-11-03)
 
 - **Problema**: a tecla 2 chamava `ai_assistant_stop` e `playback_start` no mesmo
-  instante; o assistant ainda estava a falar e o MP3 entrava por cima.
-- **Solucao**: a tecla 2 so para o assistant e marca `fallback_pending`. O MP3
-  arranca no evento `call.conversation.ended` (assistant ja parado) ou, se esse
-  evento nao chegar, num timer de 2s. `claim_fallback_playback` garante uma
-  unica reproducao; `call.playback.ended` desliga a chamada.
-- **Resultado**: sem vozes sobrepostas; o MP3 deterministico da Callie toca
-  limpo e a chamada fecha no fim.
-- **Testes**: **1.328 pytest**; cobertura **70,0%**.
+  instante; alem disso, o assistant recebia o DTMF 2 como texto e comecava uma
+  resposta que era cortada pelo stop (o "lixo" antes do MP3).
+- **Solucao**: `disable_dtmf=true` no assistant; o backend recebe 1/2 via Call
+  Control. A tecla 2 so para o assistant e marca `fallback_pending`. O MP3
+  arranca no `call.conversation.ended` ou, se esse evento nao chegar, num timer
+  de 2s. `claim_fallback_playback` garante uma unica reproducao;
+  `call.playback.ended` desliga a chamada.
+- **Resultado**: sem resposta cortada do LLM nem vozes sobrepostas; o MP3
+  deterministico da Callie toca limpo e a chamada fecha no fim.
+- **Testes**: **1.329 pytest**; cobertura **70,0%**.
 
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.

@@ -774,7 +774,10 @@ def sync_to_telnyx(trade_code: str) -> dict:
         "instructions": build_instructions(script["body"]),
         "tools": _assistant_tools(),
         "telephony_settings": {
-            "disable_dtmf": False,
+            # O assistant nao deve receber DTMF: 1/2 sao tratados pelo backend
+            # (1 envia o link, 2 para o assistant e toca o MP3). Assim o LLM
+            # nao comeca uma resposta que seria cortada pelo stop.
+            "disable_dtmf": True,
             "voicemail_detection": {
                 "on_voicemail_detected": {"action": "stop_assistant"}
             },

@@ -379,7 +379,7 @@ def start_fallback_playback(
 
 
 def schedule_fallback_playback(
-    voice_call_id: int, call_control_id: str, delay_seconds: int = 2
+    voice_call_id: int, call_control_id: str, delay_seconds: float = 2
 ) -> None:
     """Se conversation.ended nao chegar, toca o MP3 2s depois do stop."""
 

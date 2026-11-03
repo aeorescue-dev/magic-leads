@@ -143,7 +143,8 @@ Variaveis de ambiente:
 `sync_to_telnyx` cria/atualiza o assistant com:
 - `instructions` = script aprovado + regras operacionais;
 - `voice_settings.voice` nativo;
-- `telephony_settings.disable_dtmf=false` (DTMF ativo por defeito);
+- `telephony_settings.disable_dtmf=true` (o backend trata 1/2; o LLM nao recebe
+  os tons, evitando respostas cortadas);
 - tools webhook `send_showcase_link` e `remove_from_list`.
 
 ## Limite de assistants e modo shared
@@ -179,7 +180,8 @@ por trade.
 
 ## DTMF e tools
 
-- O assistant recebe DTMF como texto. O arranque da chamada diz: "I have your
+- O backend recebe os DTMF via Call Control (`call.dtmf.received`); o assistant
+  nao os recebe (`disable_dtmf=true`). O arranque da chamada diz: "I have your
   email on file as <email>. Press 1 if that's correct, or press 2 if you'd
   like a different email.".
 - Tecla **1**: se houver email na ficha, o backend envia o link imediatamente
