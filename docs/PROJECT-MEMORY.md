@@ -1861,6 +1861,22 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   correlacionado pelo `call_control_id` mesmo sem `client_state`.
 - **Testes**: **1.326 pytest**; cobertura **70,0%**.
 
+### Fase 2K - AMD / voicemail (2026-11-03)
+
+- **Dial**: `answering_machine_detection="premium"` com
+  `total_analysis_time_millis=5000` em todas as chamadas.
+- **Assistant**: `voicemail_detection.on_voicemail_detected.action =
+  stop_assistant` e `greeting_delay_ms=5000`; o greeting espera pelo AMD antes
+  de falar.
+- **Webhook AMD**: `call.machine.premium.detection.ended` /
+  `call.machine.detection.ended`; `machine/silence/fax_detected/beep` ->
+  `intent=voicemail`, `hangup_cause=voicemail_detected` e hangup imediato.
+  `human/human_residence/human_business/not_sure` seguem normalmente.
+  Correlaciona pelo `call_control_id` quando falta `client_state`.
+- **Resultado**: o assistant nao conversa com voicemail nem envia links nesse
+  caso; chamadas humanas mantem o fluxo 1/2.
+- **Testes**: **1.328 pytest**; cobertura **70,0%**.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

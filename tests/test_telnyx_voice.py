@@ -323,6 +323,71 @@ def test_webhook_playback_ended_sem_client_state_desliga():
     assert calls == ["hangup"]
 
 
+def test_amd_machine_desliga_e_marca_voicemail():
+    company = _seed_company()
+    call = _registered_call(company)
+    calls: list[str] = []
+
+    def fake_action(call_control_id, action, payload):
+        calls.append(action)
+        return {"ok": True}
+
+    original = telnyx_voice._call_action
+    telnyx_voice._call_action = fake_action
+    try:
+        result = telnyx_voice.handle_webhook(
+            {
+                "data": {
+                    "event_type": "call.machine.premium.detection.ended",
+                    "payload": {
+                        "call_control_id": "v3:tool-call",
+                        "result": "machine",
+                    },
+                }
+            }
+        )
+    finally:
+        telnyx_voice._call_action = original
+    assert result["action"] == "voicemail_hangup"
+    assert calls == ["hangup"]
+    current = voice.get_voice_call(call["id"])
+    assert current["intent"] == "voicemail"
+    assert current["hangup_cause"] == "voicemail_detected"
+
+
+def test_amd_human_nao_desliga():
+    company = _seed_company()
+    call = _registered_call(company)
+    state = base64.b64encode(
+        json.dumps({"voice_call_id": call["id"], "company_id": company["id"]}).encode()
+    ).decode()
+    calls: list[str] = []
+
+    def fake_action(call_control_id, action, payload):
+        calls.append(action)
+        return {"ok": True}
+
+    original = telnyx_voice._call_action
+    telnyx_voice._call_action = fake_action
+    try:
+        result = telnyx_voice.handle_webhook(
+            {
+                "data": {
+                    "event_type": "call.machine.premium.detection.ended",
+                    "payload": {
+                        "client_state": state,
+                        "call_control_id": "v3:tool-call",
+                        "result": "human_business",
+                    },
+                }
+            }
+        )
+    finally:
+        telnyx_voice._call_action = original
+    assert result["action"] == "amd_human"
+    assert calls == []
+
+
 def test_fallback_audio_existe_e_url_publica():
     from pathlib import Path
 

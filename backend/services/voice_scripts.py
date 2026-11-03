@@ -773,8 +773,20 @@ def sync_to_telnyx(trade_code: str) -> dict:
         ),
         "instructions": build_instructions(script["body"]),
         "tools": _assistant_tools(),
-        "telephony_settings": {"disable_dtmf": False},
+        "telephony_settings": {
+            "disable_dtmf": False,
+            "voicemail_detection": {
+                "on_voicemail_detected": {"action": "stop_assistant"}
+            },
+        },
     }
+    greeting_delay = int(
+        getattr(settings, "TELNYX_ASSISTANT_GREETING_DELAY_MS", 5000) or 0
+    )
+    if greeting_delay > 0:
+        body["telephony_settings"]["greeting_delay_ms"] = min(
+            10000, greeting_delay
+        )
     transcription_model = str(
         getattr(settings, "TELNYX_ASSISTANT_TRANSCRIPTION_MODEL", "") or ""
     ).strip()

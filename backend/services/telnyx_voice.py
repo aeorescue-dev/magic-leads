@@ -161,6 +161,10 @@ def create_call(
         "webhook_url": _webhook_url(),
         "client_state": state,
         "timeout_secs": 30,
+        "answering_machine_detection": "premium",
+        "answering_machine_detection_config": {
+            "total_analysis_time_millis": 5000
+        },
     }
     try:
         resp = httpx.post(
@@ -421,6 +425,46 @@ def handle_webhook(payload: dict) -> dict:
         body.get("client_state") or data.get("client_state") or payload.get("client_state")
     )
     voice_call_id = state.get("voice_call_id")
+    if "machine" in event_type and (
+        "detection.ended" in event_type or "greeting.ended" in event_type
+    ):
+        # AMD premium: maquina/voicemail -> desliga; humano/not_sure -> segue.
+        result = str(body.get("result") or data.get("result") or "").lower()
+        call_control_id = str(
+            body.get("call_control_id") or data.get("call_control_id") or ""
+        )
+        if not voice_call_id and call_control_id:
+            found = b2b_voice.get_voice_call_by_provider_id(call_control_id)
+            if found:
+                voice_call_id = found["id"]
+        is_machine = (
+            result in {"machine", "silence", "fax_detected"}
+            or "beep" in result
+            or "greeting.ended" in event_type
+        )
+        if is_machine:
+            if voice_call_id:
+                b2b_voice.update_voice_call(
+                    voice_call_id,
+                    intent="voicemail",
+                    hangup_cause="voicemail_detected",
+                )
+            if call_control_id:
+                hangup_call(call_control_id)
+            return {
+                "ok": True,
+                "action": "voicemail_hangup",
+                "voice_call_id": voice_call_id,
+                "result": result,
+                "event_type": event_type,
+            }
+        return {
+            "ok": True,
+            "action": "amd_human",
+            "voice_call_id": voice_call_id,
+            "result": result,
+            "event_type": event_type,
+        }
     if "playback.ended" in event_type or "speak.ended" in event_type:
         # Alguns eventos de media não trazem client_state; correlaciona pelo
         # call_control_id antes de exigir voice_call_id.
@@ -577,6 +621,7 @@ def handle_webhook(payload: dict) -> dict:
                 body.get("hangup_cause")
                 or body.get("sip_hangup_cause")
                 or body.get("cause")
+                or current.get("hangup_cause")
                 or ""
             )[:120],
             cost_cents=cost_cents,
