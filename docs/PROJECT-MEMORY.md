@@ -1799,6 +1799,10 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   meia-noite de Nova Iorque, em vez do contador legado. O digest ganhou a linha
   **FILA** com o motivo da retencao (quiet hours/cap) para explicar filas
   antigas sem as pintar de vermelho.
+- **Janela de e-mail**: `quiet_hours_start=20:00` e `quiet_hours_end=09:00`
+  (America/New_York), portanto o outbound so envia entre **09:00 e 20:00 ET**,
+  alinhado com a voz. Aplicado em `outbound_config` a 2026-11-03; os 7 envios
+  das 07:01 ET foram anteriores a esta mudanca.
 - **Testes**: **1.321 pytest**; cobertura **70,0%**.
 
 ### P1 (a seguir)
