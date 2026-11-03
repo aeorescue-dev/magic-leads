@@ -283,17 +283,17 @@ def render(
     available = showcase.available(city_label, code)
     if available["available"]:
         showcase_line = (
-            f"We have {available['exact_count']} active {trade_label.lower()} "
-            f"opportunities in {city_label} this week."
+            f"{available['exact_count']} active {trade_label.lower()} "
+            f"opportunities in {city_label} this week"
         )
     elif available["city_total"]:
         showcase_line = (
-            f"We have {available['city_total']} active property opportunities "
-            f"in {city_label} this week."
+            f"{available['city_total']} active property opportunities "
+            f"in {city_label} this week"
         )
     else:
         showcase_line = (
-            f"We have new property opportunities in {city_label} this week."
+            f"new property opportunities in {city_label} this week"
         )
     replacements = {
         "{{company}}": company or "your company",
