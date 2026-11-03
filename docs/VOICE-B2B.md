@@ -147,6 +147,10 @@ Variaveis de ambiente:
 | `EMAIL_FROM` | sim | ex. `Magic Leads <support@magicleads.app>` |
 | `SHOWCASE_BASE_URL` | sim | `https://www.magicleads.app` (link branded) |
 
+- **Caller ID ativo:** `+1 929 256 2550` (NYC, overlay 718/347; rate center
+  New York City). O `+1 518 942 9910` fica como backup. Em 2026-11-03 os DDDs
+  212/646/718 exatos estavam esgotados na Telnyx; 929 e o local NYC disponivel.
+
 `sync_to_telnyx` cria/atualiza o assistant com:
 - `instructions` = script aprovado + regras operacionais;
 - `voice_settings.voice` nativo;

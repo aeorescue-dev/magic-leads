@@ -78,3 +78,10 @@ $5.00 − $3.22 ≈ $1.78, exatamente o saldo atual. A diferença para o
   desligar poupa uma fração por chamada, mas não é o problema.
 - Para operação real: carregar saldo, definir spend limits e só depois subir
   para os 9.870 contactos.
+
+## Atualização 2026-11-03 (noite)
+
+- Número NYC `+1 929 256 2550`: $1 ativação + $1/mês. O antigo `+1 518 942 9910`
+  fica como backup; o caller ID da campanha #3 passa a ser o 929.
+- Chamada de teste #34 (voicemail, AMD `machine`): 2c.
+- Saldo disponível após a compra e os testes: ~$9,02.

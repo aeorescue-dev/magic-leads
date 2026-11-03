@@ -1940,6 +1940,24 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   (meia-noite NY). O loop tenta de hora a hora e dispara às 09:00 ET.
 - **Saldo Telnyx no arranque**: **$11,30**.
 
+### Fase 2P - Numero NYC e decisao SMS (2026-11-03)
+
+- **Caller ID**: comprado `+1 929 256 2550` (NYC, overlay 718/347, rate
+  center New York City). 212/646/718 exatos estavam esgotados na Telnyx.
+  Numero ativo, associado a connection `Magic Leads Voice`, HD voice.
+  `TELNYX_FROM_NUMBER` atualizado; o 518 fica como backup.
+- **Teste**: chamada #34 do 929 para o numero de teste; caiu em voicemail,
+  AMD `machine`, desligou, 2c. Valida numero + connection + webhook + AMD.
+  O audio com humano fica por validar (ninguem atendeu o teste).
+- **Campanha #3**: continua `paused`, 8 chamadas, proximo lote as 09:00 ET
+  de 2026-11-04, ja com o caller ID 929.
+- **SMS**: decisao de manter **apenas email**. Para A2P nos EUA o 10DLC e
+  mandatorio na pratica; nao ha bypass tecnico/legal. Sole Proprietor nao
+  pede EIN mas exige identidade pessoal + mobile US/CA + OTP; standard brand
+  exige EIN; toll-free verification passou a exigir BRN (EIN/BN/VAT) em
+  2026-02-17. Sem codigo SMS escrito.
+- **Saldo Telnyx**: ~**$9,02** (numero + teste + custos da campanha).
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
