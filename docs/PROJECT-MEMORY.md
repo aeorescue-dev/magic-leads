@@ -1833,11 +1833,16 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   expoe ao modelo.
 - **Tools**: `send_showcase_link` e `remove_from_list`.
 - **Greeting deterministico**: o arranque inclui o script aprovado + "I have
-  your email on file as <email>. Is that the best address to send the link?".
-  O modelo nao precisa de gerar a pergunta de confirmacao.
-- **DTMF 1**: se ha email na ficha, o backend envia o link imediatamente
+  your email on file as <email>. Press 1 if that's correct, or press 2 if
+  you'd like a different email.".
+- **Tecla 1**: se ha email na ficha, o backend envia o link imediatamente
   (`send_showcase_for_call`), sem depender de LLM/ASR. `send_showcase_link` e
   idempotente por `voice_call_id` (nao duplica emails).
+- **Tecla 2**: marca `intent=website_redirect` e injeta o fallback exato no
+  assistant ativo via `ai_assistant_add_messages` (Callie continua a falar).
+  O cliente tem sempre uma saida clara quando o email esta errado.
+- **Opt-out**: um "no" ao email da ficha NAO e opt-out; so "remove me/stop
+  calling/do not call" chama `remove_from_list`.
 - **Empresa de teste**: `prospect_companies.id=9959` (Boston/MA, remodeling,
   email `support@magicleads.app`). O endpoint `test-call` passou a aceitar
   `company_id`, para a Callie ler o email da ficha.

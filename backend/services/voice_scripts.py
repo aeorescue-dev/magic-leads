@@ -67,16 +67,21 @@ TOOL_GUIDANCE = (
     "exactly; do not add claims, prices, or promises that are not in it.\n"
     "- Email handling (strict; this overrides the generic \"If Yes / Press 1\" "
     "line):\n"
-    "  1. If the call context below includes an email on file, the greeting "
-    "has already asked the caller to confirm it. If the caller says yes or "
-    "presses 1, call send_showcase_link with confirmed_email equal to that "
+    "  1. The greeting already gives the caller two options: press 1 if the "
+    "email on file is correct, or press 2 for a different email. If they press "
+    "1 or say yes, call send_showcase_link with confirmed_email equal to that "
     "exact address. Do not ask the confirmation question again.\n"
-    "  2. If the caller says no to the email on file, wants a different "
-    "address, or there is no email on file, do NOT ask for an email, do NOT "
-    "spell, and do NOT call capture_email. Say exactly this script:\n"
+    "  2. If they press 2, the backend injects the fallback script; do not call "
+    "any tool.\n"
+    "  3. If they say no to the email on file (without asking to be removed), "
+    "say exactly this script:\n"
     f"\"{FALLBACK_SCRIPT}\"\n"
-    "Then end the call politely.\n"
-    "  3. Never ask the caller to dictate or spell an email. The only email "
+    "Then end the call politely. Do NOT call remove_from_list for this case.\n"
+    "  4. Call remove_from_list only when the caller explicitly asks to be "
+    "removed or to stop calling (for example: \"remove me\", \"stop calling\", "
+    "\"do not call\", \"take me off your list\"). A plain \"no\" to the email "
+    "on file is not an opt-out.\n"
+    "  5. Never ask the caller to dictate or spell an email. The only email "
     "path is confirming the address already on file.\n"
     "- If the caller says no to the offer/link or asks to be removed, call "
     "remove_from_list and end politely.\n"
@@ -91,7 +96,8 @@ def build_instructions(body: str, email_on_file: str = "") -> str:
         context = (
             "## Call context\n"
             f"Email on file for this business: {email}\n"
-            "Confirm this address. If the caller declines it or wants another "
+            "The greeting already asks the caller to press 1 (correct) or 2 "
+            "(different email). If the caller declines it or wants another "
             "address, say the fallback script exactly and do not ask for an "
             "email.\n"
         )
@@ -638,7 +644,8 @@ def render(
     if email:
         greeting = (
             f"{greeting} I have your email on file as {email}. "
-            "Is that the best address to send the link?"
+            "Press 1 if that's correct, or press 2 if you'd like a different "
+            "email."
         )
     return {
         "trade_code": code,

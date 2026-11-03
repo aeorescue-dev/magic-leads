@@ -164,17 +164,21 @@ por trade.
 
 ## DTMF e tools
 
-- O assistant recebe DTMF como texto. A tecla **1** conta como "sim" e, se
-  houver email na ficha, o backend envia o link imediatamente
+- O assistant recebe DTMF como texto. O arranque da chamada diz: "I have your
+  email on file as <email>. Press 1 if that's correct, or press 2 if you'd
+  like a different email.".
+- Tecla **1**: se houver email na ficha, o backend envia o link imediatamente
   (`send_showcase_for_call`), sem depender de LLM/ASR.
-- Se existe email na ficha, o arranque da chamada ja pergunta "I have your email
-  on file as <email>. Is that the best address to send the link?".
+- Tecla **2**: marca `intent=website_redirect` e injeta o fallback exato no
+  assistant ativo via `ai_assistant_add_messages`; o cliente nunca fica preso.
 - Se o cliente recusa o email da ficha, quer outro endereco, ou nao ha email na
   ficha, o assistant **nao pede email nenhum**: diz o script de fallback exato
   e termina. Nao existe ditado de email nem `capture_email`.
 - `send_showcase_link` e idempotente por `voice_call_id`; a tecla 1 e a tool nao
   duplicam o email.
-- `remove_from_list` cria supressao e marca a empresa `do_not_call`.
+- `remove_from_list` cria supressao e marca a empresa `do_not_call`, mas um
+  "no" ao email da ficha **nao** e opt-out; so "remove me/stop calling/do not
+  call" o aciona.
 - O auto-scheduler **nao** envia a vitrine ao discar; o email so sai depois de
   o contacto atender e autorizar, para nao enviar links sem consentimento.
 - Os tool calls chegam com `x-telnyx-call-control-id`, correlacionado com
@@ -209,13 +213,16 @@ Email on file for this business: info@apexroofing.com
 Fluxo:
 
 1. O arranque da chamada inclui o script aprovado e, se houver email na ficha:
-   "I have your email on file as info@apexroofing.com. Is that the best address
-   to send the link?".
-2. Cliente diz "yes" ou prime 1.
-3. Se disser "yes", o assistant chama `send_showcase_link` com esse endereco.
-   Se premir 1, o backend envia imediatamente, sem depender de LLM/ASR.
-4. Se o cliente recusa o email da ficha, quer outro endereco, ou nao ha email
-   na ficha, o assistant **nao pede email** e diz exatamente:
+   "I have your email on file as info@apexroofing.com. Press 1 if that's
+   correct, or press 2 if you'd like a different email.".
+2. **Tecla 1 / "yes"**: se disser "yes", o assistant chama
+   `send_showcase_link` com esse endereco. Se premir 1, o backend envia
+   imediatamente, sem depender de LLM/ASR.
+3. **Tecla 2**: o backend marca `intent=website_redirect` e injeta o fallback
+   exato no assistant ativo; a Callie diz o script e termina. O cliente nunca
+   fica bloqueado se o email estiver errado.
+4. Se o cliente recusa o email da ficha por voz, quer outro endereco, ou nao ha
+   email na ficha, o assistant **nao pede email** e diz exatamente:
 
 ```text
 No problem at all! Just visit MagicLeads.app to check out the best active

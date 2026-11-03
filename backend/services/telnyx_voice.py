@@ -313,6 +313,25 @@ def hangup_call(call_control_id: str) -> dict:
     return _call_action(call_control_id, "hangup", {})
 
 
+def send_fallback_script(call_control_id: str) -> dict:
+    """Injeta o script de fallback no assistant ativo (tecla 2)."""
+    from .voice_scripts import FALLBACK_SCRIPT
+
+    if not call_control_id:
+        return {"ok": False, "reason": "missing_call_control_id"}
+    content = (
+        "[SYSTEM: The caller pressed 2 because the email on file is not "
+        "correct. Say exactly, word for word: \""
+        + FALLBACK_SCRIPT
+        + "\" Then end the call politely. Do not call any tool.]"
+    )
+    return _call_action(
+        call_control_id,
+        "ai_assistant_add_messages",
+        {"messages": [{"role": "user", "content": content}]},
+    )
+
+
 def _render_for_call(current: dict, client_state: dict) -> dict:
     """Renderiza o script aprovado para esta chamada (override incluído)."""
     from . import voice_scripts
@@ -384,6 +403,23 @@ def handle_webhook(payload: dict) -> dict:
 
     if "dtmf" in event_type:
         digit = str(body.get("dtmf_digit") or body.get("digit") or "").strip()
+        if digit == "2":
+            # Bifurcacao deterministica: email errado -> fallback para o site.
+            b2b_voice.update_voice_call(voice_call_id, intent="website_redirect")
+            current = b2b_voice.get_voice_call(voice_call_id) or {}
+            call_control_id = str(
+                body.get("call_control_id")
+                or current.get("provider_call_id")
+                or ""
+            )
+            fallback = send_fallback_script(call_control_id)
+            return {
+                "ok": True,
+                "action": "website_redirect",
+                "voice_call_id": voice_call_id,
+                "digit": digit,
+                "fallback": fallback,
+            }
         if digit == "1":
             # Tecla 1 e confirmacao explicita: se ha email na ficha, envia ja
             # o link sem depender do LLM/ASR. A tool send_showcase_link fica

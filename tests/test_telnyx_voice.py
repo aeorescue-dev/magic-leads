@@ -219,6 +219,47 @@ def test_hangup_sem_duracao_usa_answered_at():
     assert call["cost_cents"] > 0
 
 
+def test_webhook_dtmf_2_injeta_fallback_do_site():
+    company = _seed_company()
+    created = telnyx_voice.create_call(company)
+    call_id = created["voice_call_id"]
+    state = base64.b64encode(
+        json.dumps({"voice_call_id": call_id, "company_id": company["id"]}).encode()
+    ).decode()
+    captured: dict = {}
+
+    def fake_action(call_control_id, action, payload):
+        captured["call_control_id"] = call_control_id
+        captured["action"] = action
+        captured["payload"] = payload
+        return {"ok": True}
+
+    original = telnyx_voice._call_action
+    telnyx_voice._call_action = fake_action
+    try:
+        result = telnyx_voice.handle_webhook(
+            {
+                "data": {
+                    "event_type": "call.dtmf.received",
+                    "payload": {
+                        "client_state": state,
+                        "dtmf_digit": "2",
+                        "call_control_id": "v3:test-dtmf2",
+                    },
+                }
+            }
+        )
+    finally:
+        telnyx_voice._call_action = original
+    assert result["action"] == "website_redirect"
+    assert captured["action"] == "ai_assistant_add_messages"
+    assert captured["call_control_id"] == "v3:test-dtmf2"
+    content = captured["payload"]["messages"][0]["content"]
+    assert "No problem at all! Just visit MagicLeads.app" in content
+    call = voice.get_voice_call(call_id)
+    assert call["intent"] == "website_redirect"
+
+
 def test_email_fallback_cidade_usa_escopo_neutro(monkeypatch):
     """Dallas roofing sem página exata: email não pode dizer 'Roofing 3864'."""
     conn = get_connection()
@@ -476,6 +517,7 @@ def test_answered_envia_script_renderizado_ao_assistant(monkeypatch):
         "instructions"
     ]
     assert sent["greeting"].startswith("Hi Telnyx Roofing")
+    assert "Press 1 if that's correct, or press 2" in sent["greeting"]
     assert sent["voice_settings"]["voice"] == (
         "Telnyx.Ultra.00a77add-48d5-4ef6-8157-71e5437b282d"
     )
