@@ -6,6 +6,7 @@ iniciado na chamada quando o contacto atende.
 """
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import quote
@@ -443,6 +444,47 @@ def sync_all() -> dict:
             "errors": [],
         }
     scripts = [item for item in list_scripts() if item["status"] == "approved"]
+    shared_id = str(
+        getattr(settings, "TELNYX_SHARED_ASSISTANT_ID", "") or ""
+    ).strip()
+    if shared_id and scripts:
+        # Plano Telnyx limita TeXML Applications: um assistant serve os 15
+        # roteiros; as instructions sao renderizadas por chamada.
+        try:
+            sync_to_telnyx(scripts[0]["trade_code"])
+        except ValueError as exc:
+            return {
+                "ok": False,
+                "status": "partial",
+                "synced": 0,
+                "total": len(scripts),
+                "shared": True,
+                "assistant_id": shared_id,
+                "errors": [
+                    {
+                        "trade_code": scripts[0]["trade_code"],
+                        "error": str(exc)[:300],
+                    }
+                ],
+            }
+        conn = b2b_voice.get_conn()
+        try:
+            conn.execute(
+                "UPDATE voice_scripts SET assistant_id=? WHERE status='approved'",
+                (shared_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return {
+            "ok": True,
+            "status": "ok",
+            "synced": len(scripts),
+            "total": len(scripts),
+            "shared": True,
+            "assistant_id": shared_id,
+            "errors": [],
+        }
     synced = 0
     errors: list[dict] = []
     for script in scripts:
@@ -733,9 +775,16 @@ def sync_to_telnyx(trade_code: str) -> dict:
     key = getattr(settings, "TELNYX_API_KEY", "")
     if not key:
         raise ValueError("TELNYX_API_KEY não configurada")
-    assistant_id = (script.get("assistant_id") or "").strip()
+    shared_id = str(
+        getattr(settings, "TELNYX_SHARED_ASSISTANT_ID", "") or ""
+    ).strip()
+    assistant_id = shared_id or (script.get("assistant_id") or "").strip()
     body = {
-        "name": f"Magic Leads — {showcase.trade_label(script['trade_code'])}",
+        "name": (
+            "Magic Leads — Voice"
+            if shared_id
+            else f"Magic Leads — {showcase.trade_label(script['trade_code'])}"
+        ),
         "instructions": build_instructions(script["body"]),
         "tools": _assistant_tools(),
         "telephony_settings": {"disable_dtmf": False},
@@ -751,7 +800,7 @@ def sync_to_telnyx(trade_code: str) -> dict:
                 json=body,
                 timeout=30,
             )
-            mode = "updated"
+            mode = "shared" if shared_id else "updated"
         else:
             model = str(getattr(settings, "TELNYX_ASSISTANT_MODEL", "") or "").strip()
             if model:
@@ -764,9 +813,15 @@ def sync_to_telnyx(trade_code: str) -> dict:
             )
             mode = "created"
         if response.status_code >= 300:
-            raise ValueError(f"Telnyx HTTP {response.status_code}")
+            detail = ""
+            try:
+                detail = json.dumps(response.json(), ensure_ascii=False)[:300]
+            except Exception:  # noqa: BLE001
+                detail = response.text[:300]
+            raise ValueError(f"Telnyx HTTP {response.status_code}: {detail}")
         data = response.json() if response.content else {}
-        payload = data.get("data") if isinstance(data, dict) else {}
+        nested = data.get("data") if isinstance(data, dict) else None
+        payload = nested if isinstance(nested, dict) else data
         new_id = (payload or {}).get("id") or assistant_id
         if new_id:
             conn = b2b_voice.get_conn()

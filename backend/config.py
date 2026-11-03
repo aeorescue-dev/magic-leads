@@ -49,6 +49,10 @@ class Settings(BaseSettings):
         "Telnyx.Ultra.00a77add-48d5-4ef6-8157-71e5437b282d"
     )
     TELNYX_ASSISTANT_EXPRESSIVE_MODE: bool = False
+    # Plano Telnyx limita TeXML Applications (10). Quando definido, todos os
+    # roteiros usam este assistant unico; as instructions sao renderizadas por
+    # chamada no ai_assistant_start.
+    TELNYX_SHARED_ASSISTANT_ID: str = ""
     VOICE_TEST_NUMBERS: str = ""
     # Janela de chamada no fuso local do estado (TCPA-friendly). Fim exclusivo.
     VOICE_CALL_START_HOUR: int = 9

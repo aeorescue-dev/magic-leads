@@ -188,6 +188,45 @@ def test_chamada_real_exige_roteiro_aprovado(monkeypatch):
     assert result["reason"] == "script_not_approved"
 
 
+def test_sync_all_shared_assistant_atribui_aos_15(monkeypatch):
+    voice_scripts.approve_all(user_id=7)
+    monkeypatch.setattr(voice_scripts.settings, "TELNYX_API_KEY", "key")
+    monkeypatch.setattr(
+        voice_scripts.settings, "TELNYX_SHARED_ASSISTANT_ID", "assistant-shared"
+    )
+    monkeypatch.setattr(
+        voice_scripts.settings, "TELNYX_WEBHOOK_SECRET", "tool-secret"
+    )
+    monkeypatch.setattr(
+        voice_scripts.settings, "TELNYX_ASSISTANT_VOICE", "Telnyx.Ultra.test"
+    )
+    calls: list[str] = []
+
+    class Response:
+        status_code = 200
+        content = b'{"id":"assistant-shared"}'
+
+        def json(self):
+            return {"id": "assistant-shared"}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        calls.append(url)
+        return Response()
+
+    monkeypatch.setattr(voice_scripts.httpx, "post", fake_post)
+    result = voice_scripts.sync_all()
+    assert result["ok"] is True
+    assert result["shared"] is True
+    assert result["synced"] == 15
+    assert result["assistant_id"] == "assistant-shared"
+    assert len(calls) == 1
+    assert calls[0].endswith("/ai/assistants/assistant-shared")
+    assert all(
+        item["assistant_id"] == "assistant-shared"
+        for item in voice_scripts.list_scripts()
+    )
+
+
 def test_sync_inclui_voz_nativa_tools_e_dtmf(monkeypatch):
     voice_scripts.approve_all(user_id=7)
     monkeypatch.setattr(voice_scripts.settings, "TELNYX_API_KEY", "key")
