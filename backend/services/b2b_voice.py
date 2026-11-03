@@ -339,6 +339,7 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         ("revenue_cents", "INTEGER DEFAULT 0"),
         ("assistant_id", "TEXT"),
         ("fallback_audio_started_at", "TEXT"),
+        ("amd_result", "TEXT"),
     ):
         if name not in call_cols:
             conn.execute(f"ALTER TABLE voice_calls ADD COLUMN {name} {ddl}")
@@ -2265,6 +2266,7 @@ def update_voice_call(voice_call_id: int, **fields: Any) -> Optional[dict]:
         "revenue_cents",
         "assistant_id",
         "fallback_audio_started_at",
+        "amd_result",
     }
     updates = {key: value for key, value in fields.items() if key in allowed}
     if not updates:

@@ -1871,14 +1871,17 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   arranca o assistant. O AMD humano arranca-o; o AMD maquina desliga. Se o AMD
   nao chegar em 8s, um timer fail-open arranca o assistant.
 - **Webhook AMD**: `call.machine.premium.detection.ended` /
-  `call.machine.detection.ended`; `machine/silence/fax_detected/beep` ->
-  `intent=voicemail`, `hangup_cause=voicemail_detected` e hangup imediato.
-  `human/human_residence/human_business/not_sure` seguem normalmente.
-  Correlaciona pelo `call_control_id` quando falta `client_state`.
+  `call.machine.detection.ended`; `machine/fax_detected/beep` ->
+  `intent=voicemail`, `hangup_cause=voicemail_detected`, `amd_result` e hangup
+  imediato. `human/human_residence/human_business/not_sure/**silence**` seguem
+  e arrancam o assistant; `silence` NAO e tratado como maquina (um humano pode
+  estar calado). Correlaciona pelo `call_control_id` quando falta `client_state`.
+- **Auditoria**: `voice_calls.amd_result` guarda o resultado do AMD de cada
+  chamada; `logger.info` regista o evento.
 - **Resultado**: o assistant nao conversa com voicemail nem envia links nesse
   caso; chamadas humanas mantem o fluxo 1/2. O `greeting_delay_ms` nao e aceite
   pela API atual; o adiamento e feito no backend.
-- **Testes**: **1.328 pytest**; cobertura **70,0%**.
+- **Testes**: **1.329 pytest**; cobertura **70,0%**.
 
 ### Fase 2L - Tecla 2 sem sobreposicao de audio (2026-11-03)
 

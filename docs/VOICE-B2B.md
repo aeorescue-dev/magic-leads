@@ -171,9 +171,10 @@ por trade.
   `voicemail_detection.on_voicemail_detected.action="stop_assistant"`.
 - `call.answered` marca `assistant_pending` e **nao** arranca o assistant. O
   AMD humano arranca-o; se o AMD nao chegar em 8s, um timer fail-open arranca.
-- No webhook AMD, `machine/silence/fax_detected/beep` marcam
-  `intent=voicemail`, `hangup_cause=voicemail_detected` e desligam a chamada.
-  `human/human_residence/human_business/not_sure` seguem para o fluxo normal.
+- No webhook AMD, `machine/fax_detected/beep` marcam
+  `intent=voicemail`, `hangup_cause=voicemail_detected`, `amd_result` e desligam
+  a chamada. `human/human_residence/human_business/not_sure/silence` seguem
+  para o fluxo normal; `silence` nao e maquina.
 - Assim o assistant nao fala com voicemail nem envia links sem um humano.
 
 ## DTMF e tools

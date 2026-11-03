@@ -402,6 +402,54 @@ def test_amd_human_nao_desliga():
     assert calls == []
 
 
+def test_amd_silence_arranca_assistant_e_nao_desliga(monkeypatch):
+    monkeypatch.setattr(telnyx_voice.settings, "VOICE_STAGING_MODE", False)
+    monkeypatch.setattr(telnyx_voice.settings, "TELNYX_API_KEY", "key")
+    monkeypatch.setattr(telnyx_voice.settings, "TELNYX_CONNECTION_ID", "conn")
+    monkeypatch.setattr(telnyx_voice.settings, "TELNYX_FROM_NUMBER", "+16175550000")
+    company = _seed_company()
+    created = voice.create_voice_call(company, provider="pytest")
+    call_id = created["id"]
+    voice.update_voice_call(
+        call_id,
+        assistant_id="assistant-123",
+        provider_call_id="v3:amd-silence",
+        status="assistant_pending",
+    )
+    state = base64.b64encode(
+        json.dumps({"voice_call_id": call_id, "company_id": company["id"]}).encode()
+    ).decode()
+    actions: list[str] = []
+
+    def fake_action(call_control_id, action, payload):
+        actions.append(action)
+        return {"ok": True}
+
+    original = telnyx_voice._call_action
+    telnyx_voice._call_action = fake_action
+    try:
+        result = telnyx_voice.handle_webhook(
+            {
+                "data": {
+                    "event_type": "call.machine.premium.detection.ended",
+                    "payload": {
+                        "client_state": state,
+                        "call_control_id": "v3:amd-silence",
+                        "result": "silence",
+                    },
+                }
+            }
+        )
+    finally:
+        telnyx_voice._call_action = original
+    assert result["action"] == "amd_human"
+    assert "hangup" not in actions
+    assert "ai_assistant_start" in actions
+    current = voice.get_voice_call(call_id)
+    assert current["amd_result"] == "silence"
+    assert current["status"] == "in_call"
+
+
 def test_fallback_audio_existe_e_url_publica():
     from pathlib import Path
 

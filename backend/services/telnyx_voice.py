@@ -512,8 +512,15 @@ def handle_webhook(payload: dict) -> dict:
     if "machine" in event_type and (
         "detection.ended" in event_type or "greeting.ended" in event_type
     ):
-        # AMD premium: maquina/voicemail -> desliga; humano/not_sure -> segue.
+        # AMD premium: maquina/voicemail -> desliga; humano/silencio/not_sure
+        # seguem. "silence" NAO e maquina: um humano pode estar calado.
         result = str(body.get("result") or data.get("result") or "").lower()
+        logger.info(
+            "[TELNYX] AMD result=%s event=%s voice_call=%s",
+            result,
+            event_type,
+            voice_call_id,
+        )
         call_control_id = str(
             body.get("call_control_id") or data.get("call_control_id") or ""
         )
@@ -522,7 +529,7 @@ def handle_webhook(payload: dict) -> dict:
             if found:
                 voice_call_id = found["id"]
         is_machine = (
-            result in {"machine", "silence", "fax_detected"}
+            result in {"machine", "fax_detected"}
             or "beep" in result
             or "greeting.ended" in event_type
         )
@@ -532,6 +539,7 @@ def handle_webhook(payload: dict) -> dict:
                     voice_call_id,
                     intent="voicemail",
                     hangup_cause="voicemail_detected",
+                    amd_result=result,
                 )
             if call_control_id:
                 hangup_call(call_control_id)
@@ -543,6 +551,7 @@ def handle_webhook(payload: dict) -> dict:
                 "event_type": event_type,
             }
         if voice_call_id:
+            b2b_voice.update_voice_call(voice_call_id, amd_result=result)
             _start_assistant_for_call(
                 voice_call_id, call_control_id, state
             )
