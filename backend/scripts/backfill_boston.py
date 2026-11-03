@@ -11,14 +11,14 @@ import time
 
 import httpx
 
-from backend.services.boston_address import (
+from ..services.boston_address import (
     clean_boston_location,
     parcel_has_unit,
     parcel_match_key,
     parcel_number_variants,
 )
-from backend.services.db import db_service, get_connection
-from backend.services.enrichment import normalize_street
+from ..services.db import db_service, get_connection
+from ..services.enrichment import normalize_street
 
 CKAN = "https://data.boston.gov/api/3/action/datastore_search"
 RESOURCE = "bdb17c2b-e9ab-44e4-a070-bf804a0e1a7f"
