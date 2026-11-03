@@ -42,8 +42,22 @@ STATE_TIMEZONES = {
     "IL": "America/Chicago",
 }
 CALL_TZ = ZoneInfo("America/New_York")
-CALL_START_HOUR = 8
-CALL_END_HOUR = 21
+CALL_START_HOUR = 9
+CALL_END_HOUR = 20
+
+
+def _call_window() -> tuple[int, int]:
+    """Janela local configurável; fail-safe em 9-20."""
+    try:
+        start = int(getattr(settings, "VOICE_CALL_START_HOUR", 9))
+        end = int(getattr(settings, "VOICE_CALL_END_HOUR", 20))
+    except (TypeError, ValueError):
+        return CALL_START_HOUR, CALL_END_HOUR
+    start = max(0, min(23, start))
+    end = max(1, min(24, end))
+    if end <= start:
+        return CALL_START_HOUR, CALL_END_HOUR
+    return start, end
 DNC_MAX_AGE_DAYS = 31
 MAX_ATTEMPTS_7D = 3
 
@@ -981,7 +995,8 @@ def _eligibility(
         reasons.append("attempt_cap")
 
     local = now.astimezone(_state_tz(company.get("state") or ""))
-    checks["within_hours"] = CALL_START_HOUR <= local.hour < CALL_END_HOUR
+    start_hour, end_hour = _call_window()
+    checks["within_hours"] = start_hour <= local.hour < end_hour
     if not checks["within_hours"]:
         reasons.append("outside_hours")
 
@@ -1145,7 +1160,10 @@ def stats() -> dict:
             "pilot_state": ", ".join(PILOT_STATES),
             "pilot_states": list(PILOT_STATES),
             "staging_mode": staging_mode(),
-            "calling_window": f"{CALL_START_HOUR:02d}:00–{CALL_END_HOUR:02d}:00 local (ET/CT)",
+            "calling_window": (
+                f"{_call_window()[0]:02d}:00–{_call_window()[1]:02d}:00 "
+                "local (ET/CT)"
+            ),
             "dnc_max_age_days": DNC_MAX_AGE_DAYS,
             "max_attempts_7d": MAX_ATTEMPTS_7D,
             "by_city": sorted(by_city.values(), key=lambda x: x["total"], reverse=True),
@@ -1770,6 +1788,7 @@ def metrics(days: int = 30, city: str = "", trade: str = "") -> dict:
                        THEN 1 ELSE 0 END) ge60,
               SUM(CASE WHEN v.answered_at IS NOT NULL AND v.listen_seconds >= 90
                        THEN 1 ELSE 0 END) ge90,
+              SUM(CASE WHEN v.intent='showcase' THEN 1 ELSE 0 END) accepts,
               SUM(CASE WHEN v.showcase_clicked_at IS NOT NULL THEN 1 ELSE 0 END) clicks,
               SUM(CASE WHEN v.checkout_session_id IS NOT NULL THEN 1 ELSE 0 END) checkouts,
               COALESCE(SUM(v.revenue_cents),0) revenue_cents,
@@ -1781,11 +1800,19 @@ def metrics(days: int = 30, city: str = "", trade: str = "") -> dict:
             tuple(params),
         ).fetchone()
         summary = dict(row) if row else {}
-        for key in ("answered", "unanswered", "engaged", "clicks", "checkouts"):
+        for key in (
+            "answered",
+            "unanswered",
+            "engaged",
+            "accepts",
+            "clicks",
+            "checkouts",
+        ):
             summary[key] = int(summary.get(key) or 0)
         dialed = int(summary.get("dialed") or 0)
         answered = int(summary.get("answered") or 0)
         engaged = int(summary.get("engaged") or 0)
+        accepts = int(summary.get("accepts") or 0)
         clicks = int(summary.get("clicks") or 0)
         checkouts = int(summary.get("checkouts") or 0)
         revenue = int(summary.get("revenue_cents") or 0)
@@ -1795,10 +1822,15 @@ def metrics(days: int = 30, city: str = "", trade: str = "") -> dict:
                 "answer_rate": _rate(answered, dialed),
                 "drop_rate": _rate(dialed - answered, dialed),
                 "engagement_rate": _rate(engaged, answered),
+                "accept_rate": _rate(accepts, answered),
                 "showcase_ctr": _rate(clicks, answered),
                 "checkout_rate": _rate(checkouts, clicks),
+                "subscription_rate": _rate(checkouts, accepts),
                 "avg_listen_seconds": round(float(summary.get("avg_listen") or 0), 1),
                 "revenue_usd": round(revenue / 100.0, 2),
+                "revenue_per_accept_usd": (
+                    round((revenue / 100.0) / accepts, 2) if accepts else 0.0
+                ),
                 "cost_usd": round(cost / 100.0, 2),
                 "net_usd": round((revenue - cost) / 100.0, 2),
             }
@@ -1812,17 +1844,19 @@ def metrics(days: int = 30, city: str = "", trade: str = "") -> dict:
             for seconds, key in ((15, "ge15"), (30, "ge30"), (60, "ge60"), (90, "ge90"))
         ]
 
-        groups = [
+        rows = [
             dict(r)
             for r in conn.execute(
                 f"""
                 SELECT
+                  COALESCE(c.state, '—') state,
                   COALESCE(v.city, c.city, '—') city,
                   COALESCE(v.trade_code, c.trade, '—') trade,
                   COUNT(*) dialed,
                   SUM(CASE WHEN v.answered_at IS NOT NULL THEN 1 ELSE 0 END) answered,
                   SUM(CASE WHEN v.answered_at IS NOT NULL AND v.listen_seconds >= 30
                            THEN 1 ELSE 0 END) engaged,
+                  SUM(CASE WHEN v.intent='showcase' THEN 1 ELSE 0 END) accepts,
                   AVG(CASE WHEN v.answered_at IS NOT NULL
                            THEN v.listen_seconds END) avg_listen,
                   SUM(CASE WHEN v.showcase_clicked_at IS NOT NULL THEN 1 ELSE 0 END) clicks,
@@ -1832,35 +1866,118 @@ def metrics(days: int = 30, city: str = "", trade: str = "") -> dict:
                 FROM voice_calls v
                 LEFT JOIN prospect_companies c ON c.id = v.company_id
                 {clause}
-                GROUP BY 1, 2
-                ORDER BY revenue_cents DESC, dialed DESC
+                GROUP BY 1, 2, 3
                 """,
                 tuple(params),
             ).fetchall()
         ]
-        for group in groups:
-            gd = int(group.get("dialed") or 0)
-            ga = int(group.get("answered") or 0)
-            gc = int(group.get("clicks") or 0)
-            gco = int(group.get("checkouts") or 0)
-            grev = int(group.get("revenue_cents") or 0)
-            gcost = int(group.get("cost_cents") or 0)
-            group.update(
-                {
-                    "answer_rate": _rate(ga, gd),
-                    "engagement_rate": _rate(
-                        int(group.get("engaged") or 0), ga
-                    ),
-                    "showcase_ctr": _rate(gc, ga),
-                    "checkout_rate": _rate(gco, gc),
-                    "avg_listen_seconds": round(
-                        float(group.get("avg_listen") or 0), 1
-                    ),
-                    "revenue_usd": round(grev / 100.0, 2),
-                    "cost_usd": round(gcost / 100.0, 2),
-                    "net_usd": round((grev - gcost) / 100.0, 2),
-                }
+
+        def _empty_group(extra: dict) -> dict:
+            return {
+                "city": "",
+                "trade": "",
+                "state": "",
+                **extra,
+                "dialed": 0,
+                "answered": 0,
+                "engaged": 0,
+                "accepts": 0,
+                "clicks": 0,
+                "checkouts": 0,
+                "avg_listen_total": 0.0,
+                "avg_listen_count": 0,
+                "revenue_cents": 0,
+                "cost_cents": 0,
+            }
+
+        def _add(bucket: dict, row: dict) -> None:
+            answered_row = int(row.get("answered") or 0)
+            bucket["dialed"] += int(row.get("dialed") or 0)
+            bucket["answered"] += answered_row
+            bucket["engaged"] += int(row.get("engaged") or 0)
+            bucket["accepts"] += int(row.get("accepts") or 0)
+            bucket["clicks"] += int(row.get("clicks") or 0)
+            bucket["checkouts"] += int(row.get("checkouts") or 0)
+            bucket["revenue_cents"] += int(row.get("revenue_cents") or 0)
+            bucket["cost_cents"] += int(row.get("cost_cents") or 0)
+            listen = row.get("avg_listen")
+            if listen is not None and answered_row:
+                bucket["avg_listen_total"] += float(listen) * answered_row
+                bucket["avg_listen_count"] += answered_row
+
+        def _finalize(bucket: dict) -> dict:
+            gd = int(bucket["dialed"])
+            ga = int(bucket["answered"])
+            ge = int(bucket["engaged"])
+            gac = int(bucket["accepts"])
+            gc = int(bucket["clicks"])
+            gco = int(bucket["checkouts"])
+            grev = int(bucket["revenue_cents"])
+            gcost = int(bucket["cost_cents"])
+            listen_count = int(bucket["avg_listen_count"])
+            avg_listen = (
+                bucket["avg_listen_total"] / listen_count if listen_count else 0.0
             )
+            return {
+                **{
+                    key: value
+                    for key, value in bucket.items()
+                    if key
+                    not in (
+                        "avg_listen_total",
+                        "avg_listen_count",
+                        "revenue_cents",
+                        "cost_cents",
+                    )
+                },
+                "answer_rate": _rate(ga, gd),
+                "accept_rate": _rate(gac, ga),
+                "engagement_rate": _rate(ge, ga),
+                "showcase_ctr": _rate(gc, ga),
+                "checkout_rate": _rate(gco, gc),
+                "subscription_rate": _rate(gco, gac),
+                "avg_listen_seconds": round(avg_listen, 1),
+                "revenue_usd": round(grev / 100.0, 2),
+                "cost_usd": round(gcost / 100.0, 2),
+                "net_usd": round((grev - gcost) / 100.0, 2),
+                "revenue_per_accept_usd": (
+                    round((grev / 100.0) / gac, 2) if gac else 0.0
+                ),
+            }
+
+        by_state: dict[str, dict] = {}
+        by_city: dict[tuple[str, str], dict] = {}
+        by_trade: dict[str, dict] = {}
+        by_city_trade: dict[tuple[str, str, str], dict] = {}
+        for row in rows:
+            state = str(row.get("state") or "—")
+            city_name = str(row.get("city") or "—")
+            trade_name = str(row.get("trade") or "—")
+            for store, key, extra in (
+                (by_state, state, {"state": state}),
+                (by_city, (city_name, state), {"city": city_name, "state": state}),
+                (by_trade, trade_name, {"trade": trade_name}),
+                (
+                    by_city_trade,
+                    (city_name, trade_name, state),
+                    {"city": city_name, "trade": trade_name, "state": state},
+                ),
+            ):
+                if key not in store:
+                    store[key] = _empty_group(extra)
+                _add(store[key], row)
+
+        def _sorted_groups(store: dict) -> list[dict]:
+            groups = [_finalize(bucket) for bucket in store.values()]
+            groups.sort(
+                key=lambda g: (
+                    -float(g["revenue_usd"]),
+                    -float(g["accept_rate"]),
+                    -int(g["dialed"]),
+                )
+            )
+            return groups
+
         return {
             "days": days,
             "generated_at": _iso(),
@@ -1870,11 +1987,15 @@ def metrics(days: int = 30, city: str = "", trade: str = "") -> dict:
                 "dialed": dialed,
                 "answered": answered,
                 "engaged": engaged,
+                "accepts": accepts,
                 "clicks": clicks,
                 "checkouts": checkouts,
                 "revenue_usd": round(revenue / 100.0, 2),
             },
-            "by_city_trade": groups,
+            "by_state": _sorted_groups(by_state),
+            "by_city": _sorted_groups(by_city),
+            "by_trade": _sorted_groups(by_trade),
+            "by_city_trade": _sorted_groups(by_city_trade),
         }
     finally:
         conn.close()

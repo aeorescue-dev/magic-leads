@@ -388,6 +388,7 @@ function FunnelChart({
   const steps = [
     { label: "Discadas", value: funnel.dialed, tone: "bg-sky-500/80" },
     { label: "Atendidas", value: funnel.answered, tone: "bg-cyan-500/80" },
+    { label: "Aceite (1/Yes)", value: funnel.accepts, tone: "bg-lime-500/80" },
     { label: "Ouviram ≥30s", value: funnel.engaged, tone: "bg-emerald-500/80" },
     { label: "Clique na vitrine", value: funnel.clicks, tone: "bg-teal-500/80" },
     { label: "Checkout", value: funnel.checkouts, tone: "bg-amber-500/80" },
@@ -439,14 +440,15 @@ function HeatmapMatrix({ rows }: { rows: VoiceMetricsGroup[] }) {
   const sorted = [...rows].sort((a, b) => b.net_usd - a.net_usd);
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[860px] text-left text-[10px]">
+      <table className="w-full min-w-[1040px] text-left text-[10px]">
         <thead className="text-slate-500">
           <tr>
             <th className="pb-2 font-semibold">Cidade / nicho</th>
             <th className="pb-2 text-right font-semibold">Answer</th>
+            <th className="pb-2 text-right font-semibold">Aceite</th>
             <th className="pb-2 text-right font-semibold">Engagement</th>
             <th className="pb-2 text-right font-semibold">CTR</th>
-            <th className="pb-2 text-right font-semibold">Checkout</th>
+            <th className="pb-2 text-right font-semibold">Assin.</th>
             <th className="pb-2 text-right font-semibold">Receita</th>
             <th className="pb-2 text-right font-semibold">Custo</th>
             <th className="pb-2 text-right font-semibold">Net</th>
@@ -455,7 +457,7 @@ function HeatmapMatrix({ rows }: { rows: VoiceMetricsGroup[] }) {
         <tbody>
           {sorted.map((row) => (
             <tr
-              key={`${row.city}-${row.trade}`}
+              key={`${row.city}-${row.trade}-${row.state ?? ""}`}
               className="border-t border-white/5"
             >
               <td className="py-2 pr-2">
@@ -465,14 +467,17 @@ function HeatmapMatrix({ rows }: { rows: VoiceMetricsGroup[] }) {
               <td className={cn("px-2 py-2 text-right tabular-nums", heatCell(row.answer_rate, 40, 25))}>
                 {row.answer_rate.toFixed(1)}%
               </td>
+              <td className={cn("px-2 py-2 text-right tabular-nums", heatCell(row.accept_rate ?? 0, 30, 15))}>
+                {(row.accept_rate ?? 0).toFixed(1)}%
+              </td>
               <td className={cn("px-2 py-2 text-right tabular-nums", heatCell(row.engagement_rate, 50, 30))}>
                 {row.engagement_rate.toFixed(1)}%
               </td>
               <td className={cn("px-2 py-2 text-right tabular-nums", heatCell(row.showcase_ctr, 15, 8))}>
                 {row.showcase_ctr.toFixed(1)}%
               </td>
-              <td className={cn("px-2 py-2 text-right tabular-nums", heatCell(row.checkout_rate, 5, 2))}>
-                {row.checkout_rate.toFixed(1)}%
+              <td className={cn("px-2 py-2 text-right tabular-nums", heatCell(row.subscription_rate ?? 0, 10, 3))}>
+                {(row.subscription_rate ?? 0).toFixed(1)}%
               </td>
               <td className="px-2 py-2 text-right text-emerald-200 tabular-nums">
                 {money0(row.revenue_usd)}
@@ -490,6 +495,90 @@ function HeatmapMatrix({ rows }: { rows: VoiceMetricsGroup[] }) {
               </td>
             </tr>
           ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+
+function BreakdownTable({
+  rows,
+  label,
+}: {
+  rows: VoiceMetricsGroup[];
+  label: (row: VoiceMetricsGroup) => string;
+}) {
+  if (!rows.length) {
+    return (
+      <div className="rounded-xl border border-dashed border-white/10 p-5 text-center text-[10px] text-slate-600">
+        Sem chamadas no período.
+      </div>
+    );
+  }
+  const sorted = [...rows].sort(
+    (a, b) =>
+      (b.accept_rate ?? 0) - (a.accept_rate ?? 0) ||
+      (b.subscription_rate ?? 0) - (a.subscription_rate ?? 0) ||
+      b.dialed - a.dialed
+  );
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[520px] text-left text-[10px]">
+        <thead className="text-slate-500">
+          <tr>
+            <th className="pb-2 font-semibold">Segmento</th>
+            <th className="pb-2 text-right font-semibold">Atend.</th>
+            <th className="pb-2 text-right font-semibold">Aceites</th>
+            <th className="pb-2 text-right font-semibold">Aceite</th>
+            <th className="pb-2 text-right font-semibold">Assin.</th>
+            <th className="pb-2 text-right font-semibold">Conv.</th>
+            <th className="pb-2 text-right font-semibold">Receita</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((row, index) => {
+            const accept = row.accept_rate ?? 0;
+            const conversion = row.subscription_rate ?? 0;
+            return (
+              <tr
+                key={`${label(row)}-${index}`}
+                className="border-t border-white/5"
+              >
+                <td className="py-2 pr-2 font-semibold text-slate-200">
+                  {label(row)}
+                </td>
+                <td className="px-2 py-2 text-right tabular-nums text-slate-400">
+                  {row.answered}
+                </td>
+                <td className="px-2 py-2 text-right tabular-nums text-slate-300">
+                  {row.accepts ?? 0}
+                </td>
+                <td
+                  className={cn(
+                    "px-2 py-2 text-right tabular-nums",
+                    heatCell(accept, 30, 15)
+                  )}
+                >
+                  {accept.toFixed(1)}%
+                </td>
+                <td className="px-2 py-2 text-right tabular-nums text-slate-300">
+                  {row.checkouts}
+                </td>
+                <td
+                  className={cn(
+                    "px-2 py-2 text-right tabular-nums",
+                    heatCell(conversion, 10, 3)
+                  )}
+                >
+                  {conversion.toFixed(1)}%
+                </td>
+                <td className="px-2 py-2 text-right tabular-nums text-emerald-200">
+                  {money0(row.revenue_usd)}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -1059,7 +1148,7 @@ export default function VoiceB2BPage() {
         }
         className={tab === "overview" ? "" : "hidden"}
       >
-        <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
           <GaugeCard
             label="Answer Rate"
             value={metrics?.summary.answer_rate ?? 0}
@@ -1091,10 +1180,16 @@ export default function VoiceB2BPage() {
             tone={gaugeTone(metrics?.summary.showcase_ctr ?? 0, 15, 8)}
           />
           <GaugeCard
-            label="Checkout Rate"
-            value={metrics?.summary.checkout_rate ?? 0}
-            sub={`${metrics?.summary.checkouts ?? 0} checkouts`}
-            tone={gaugeTone(metrics?.summary.checkout_rate ?? 0, 5, 2)}
+            label="Voice Accept"
+            value={metrics?.summary.accept_rate ?? 0}
+            sub={`${metrics?.summary.accepts ?? 0} aceites / ${metrics?.summary.answered ?? 0} atendidas`}
+            tone={gaugeTone(metrics?.summary.accept_rate ?? 0, 30, 15)}
+          />
+          <GaugeCard
+            label="Assinatura"
+            value={metrics?.summary.subscription_rate ?? 0}
+            sub={`${metrics?.summary.checkouts ?? 0} assinaturas / ${metrics?.summary.accepts ?? 0} aceites`}
+            tone={gaugeTone(metrics?.summary.subscription_rate ?? 0, 10, 3)}
           />
         </div>
         <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
@@ -1144,6 +1239,7 @@ export default function VoiceB2BPage() {
                 dialed: 0,
                 answered: 0,
                 engaged: 0,
+                accepts: 0,
                 clicks: 0,
                 checkouts: 0,
                 revenue_usd: 0,
@@ -1171,6 +1267,44 @@ export default function VoiceB2BPage() {
       >
         <HeatmapMatrix rows={metrics?.by_city_trade ?? []} />
       </Card>
+
+      <div
+        className={cn(
+          "mb-5 grid gap-4 xl:grid-cols-3",
+          tab === "overview" ? "" : "hidden"
+        )}
+      >
+        <Card
+          title="Aceite por estado"
+          icon={<MapPin className="h-4 w-4 text-sky-400" />}
+          hint="Aceite = pressionou 1 ou disse yes; assinatura = Stripe concluído."
+        >
+          <BreakdownTable
+            rows={metrics?.by_state ?? []}
+            label={(row) => row.state || "—"}
+          />
+        </Card>
+        <Card
+          title="Aceite por cidade"
+          icon={<Building2 className="h-4 w-4 text-indigo-400" />}
+          hint="Ordenado por taxa de aceite da voz."
+        >
+          <BreakdownTable
+            rows={metrics?.by_city ?? []}
+            label={(row) => `${row.city}, ${row.state || "—"}`}
+          />
+        </Card>
+        <Card
+          title="Aceite por nicho"
+          icon={<BarChart3 className="h-4 w-4 text-emerald-400" />}
+          hint="Quais trades aceitam mais e convertem em $120."
+        >
+          <BreakdownTable
+            rows={metrics?.by_trade ?? []}
+            label={(row) => row.trade}
+          />
+        </Card>
+      </div>
 
       <div
         className={cn(

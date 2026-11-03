@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     TELNYX_ASSISTANT_VOICE: str = "Telnyx.Ultra.Callie"
     TELNYX_ASSISTANT_EXPRESSIVE_MODE: bool = False
     VOICE_TEST_NUMBERS: str = ""
+    # Janela de chamada no fuso local do estado (TCPA-friendly). Fim exclusivo.
+    VOICE_CALL_START_HOUR: int = 9
+    VOICE_CALL_END_HOUR: int = 20
     VOICE_AUTOSCHED_DELAY_SECONDS: int = 30
     VOICE_SOURCE_ALLOWED_HOSTS: str = ""
     VOICE_SYNC_INTERVAL_HOURS: int = 6

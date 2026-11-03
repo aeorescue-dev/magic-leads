@@ -169,11 +169,25 @@ def test_can_call_libera_estados_do_piloto(state, phone):
 def test_horario_usa_timezone_do_estado():
     voice.import_licenses_csv(_csv(phone="+12145550197", state="TX"))
     voice.check_dnc("+12145550197", listed=False, source="pytest")
-    # 02:00 UTC = 20:00 em Dallas/Chicago (dentro da janela).
-    texas_now = datetime(2026, 11, 2, 2, 0, tzinfo=timezone.utc)
+    # 01:00 UTC = 19:00 em Dallas/Chicago (dentro da janela 09:00-20:00).
+    texas_now = datetime(2026, 11, 2, 1, 0, tzinfo=timezone.utc)
     result = voice.can_call(_company("+12145550197"), now=texas_now)
     assert result["allowed"] is True, result
     assert result["checks"]["within_hours"] is True
+
+
+def test_janela_local_9_20_e_fim_exclusivo(monkeypatch):
+    monkeypatch.setattr(voice.settings, "VOICE_CALL_START_HOUR", 9)
+    monkeypatch.setattr(voice.settings, "VOICE_CALL_END_HOUR", 20)
+    voice.import_licenses_csv(_csv())
+    voice.check_dnc("+16175550123", listed=False, source="pytest")
+    company = _company("+16175550123")
+    eight_et = datetime(2026, 11, 2, 13, 0, tzinfo=timezone.utc)
+    nine_et = datetime(2026, 11, 2, 14, 0, tzinfo=timezone.utc)
+    eight_pm_et = datetime(2026, 11, 3, 1, 0, tzinfo=timezone.utc)
+    assert "outside_hours" in voice.can_call(company, now=eight_et)["reasons"]
+    assert voice.can_call(company, now=nine_et)["allowed"] is True
+    assert "outside_hours" in voice.can_call(company, now=eight_pm_et)["reasons"]
 
 
 def test_queue_e_stats_filtram_cidade_e_nicho():

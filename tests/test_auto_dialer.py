@@ -204,6 +204,7 @@ def test_metrics_calcula_funil(monkeypatch):
     voice.update_voice_call(
         answered["id"],
         status="ended",
+        intent="showcase",
         answered_at=NOW.isoformat(),
         duration_seconds=60,
         listen_seconds=45,
@@ -222,15 +223,25 @@ def test_metrics_calcula_funil(monkeypatch):
     assert summary["answered"] == 1
     assert summary["answer_rate"] == 50.0
     assert summary["engagement_rate"] == 100.0
+    assert summary["accepts"] == 1
+    assert summary["accept_rate"] == 100.0
     assert summary["showcase_ctr"] == 100.0
     assert summary["checkout_rate"] == 100.0
+    assert summary["subscription_rate"] == 100.0
+    assert summary["revenue_per_accept_usd"] == 120.0
     assert summary["revenue_usd"] == 120.0
     assert summary["net_usd"] == 117.0
     assert result["funnel"]["dialed"] == 2
     assert result["funnel"]["answered"] == 1
+    assert result["funnel"]["accepts"] == 1
     assert result["retention"][1]["seconds"] == 30
     assert result["retention"][1]["count"] == 1
     assert result["by_city_trade"]
+    assert result["by_city_trade"][0]["accept_rate"] == 100.0
+    assert result["by_state"][0]["state"] == "MA"
+    assert result["by_state"][0]["subscription_rate"] == 100.0
+    assert result["by_city"][0]["city"] == "Boston"
+    assert result["by_trade"][0]["trade"] == "Roofing"
 
 
 def test_bridge_contractor_entities_preenche_voice_db():

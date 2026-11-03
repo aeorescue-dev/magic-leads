@@ -39,8 +39,15 @@ Bloqueia se qualquer condição falhar:
 7. check DNC com mais de **31 dias** → `dnc_stale`
 8. número listado no DNC → `dnc_listed`
 9. **3 tentativas** nos últimos 7 dias → `attempt_cap`
-10. fora de **08:00–21:00 locais** (`America/New_York` para MA/NY;
+10. fora de **09:00–20:00 locais** (`America/New_York` para MA/NY;
     `America/Chicago` para TX/IL) → `outside_hours`
+
+A janela é configurável por `VOICE_CALL_START_HOUR=9` e
+`VOICE_CALL_END_HOUR=20` (fim exclusivo). O fuso vem do **estado** da empresa
+(MA/NY → ET; TX/IL → CT). Não usamos ZIP: os 4 estados do piloto têm um único
+fuso, por isso o mapeamento por estado é exato e não há ambiguidade. Se o
+piloto entrar num estado com vários fusos (ex.: FL, TX com El Paso), aí sim
+será preciso um mapa por ZIP/cidade.
 
 O endpoint de registo também aplica o gate: uma chamada “normal” não pode ser
 registada num contacto bloqueado. Outcomes de supressão continuam permitidos
@@ -190,6 +197,32 @@ Fluxo:
 O ditado fica assim reservado aos casos sem email ou a pedido explicito, o que
 reduz drasticamente erros de ASR. O backend nunca inventa nem corrige um email
 em silencio.
+
+## Analytics de aceite e conversao
+
+`GET /api/admin/voice/metrics?days=30` devolve:
+
+- `summary.accepts` e `accept_rate` — chamadas atendidas em que o contacto
+  prime 1 ou diz que sim (`voice_calls.intent='showcase'`).
+- `summary.checkouts` e `subscription_rate` — assinaturas Stripe concluidas
+  (`checkout_session_id` preenchido) sobre aceites.
+- `summary.revenue_per_accept_usd` — receita media por aceite.
+- `by_state`, `by_city`, `by_trade` e `by_city_trade` — cada grupo com
+  `answered`, `accepts`, `accept_rate`, `checkouts`, `subscription_rate`,
+  `revenue_usd` e `net_usd`.
+
+No `/admin/voice`, a overview mostra os gauges **Voice Accept** e
+**Assinatura**, o funil com o passo **Aceite (1/Yes)** e tres tabelas:
+**Aceite por estado**, **Aceite por cidade** e **Aceite por nicho**. A matriz
+cidade x nicho tambem ganhou as colunas Aceite e Assinatura.
+
+Definicoes:
+
+- **Aceite** = `intent='showcase'` na chamada (DTMF 1 ou yes falado).
+- **Assinatura** = `checkout_session_id` preenchido no webhook Stripe
+  `checkout.session.completed` com `source=voice_showcase`.
+- **Conversao** = assinaturas / aceites (nao sobre cliques), para medir a
+  qualidade do lead de voz.
 
 ## Chamada de teste controlada
 

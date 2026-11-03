@@ -1797,17 +1797,22 @@ export interface VoiceCampaign {
 export interface VoiceMetricsGroup {
   city: string;
   trade: string;
+  state?: string;
   dialed: number;
   answered: number;
   engaged: number;
+  accepts?: number;
   clicks: number;
   checkouts: number;
   answer_rate: number;
+  accept_rate?: number;
   engagement_rate: number;
   showcase_ctr: number;
   checkout_rate: number;
+  subscription_rate?: number;
   avg_listen_seconds: number;
   revenue_usd: number;
+  revenue_per_accept_usd?: number;
   cost_usd: number;
   net_usd: number;
 }
@@ -1826,15 +1831,19 @@ export interface VoiceMetrics {
     answered: number;
     unanswered: number;
     engaged: number;
+    accepts: number;
     clicks: number;
     checkouts: number;
     answer_rate: number;
     drop_rate: number;
     engagement_rate: number;
+    accept_rate: number;
     showcase_ctr: number;
     checkout_rate: number;
+    subscription_rate: number;
     avg_listen_seconds: number;
     revenue_usd: number;
+    revenue_per_accept_usd: number;
     cost_usd: number;
     net_usd: number;
   };
@@ -1843,10 +1852,14 @@ export interface VoiceMetrics {
     dialed: number;
     answered: number;
     engaged: number;
+    accepts: number;
     clicks: number;
     checkouts: number;
     revenue_usd: number;
   };
+  by_state: VoiceMetricsGroup[];
+  by_city: VoiceMetricsGroup[];
+  by_trade: VoiceMetricsGroup[];
   by_city_trade: VoiceMetricsGroup[];
 }
 

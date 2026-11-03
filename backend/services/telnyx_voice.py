@@ -542,7 +542,10 @@ def send_showcase_for_call(
         scope_label=scope_label,
     )
     b2b_voice.update_voice_call(
-        voice_call_id, showcase_link_id=link["link_id"], status="showcase_sent"
+        voice_call_id,
+        showcase_link_id=link["link_id"],
+        status="showcase_sent",
+        intent="showcase",
     )
     campaign_id = str(call.get("campaign_id") or "")
     if campaign_id.isdigit():

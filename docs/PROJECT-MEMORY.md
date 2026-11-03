@@ -1755,6 +1755,21 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   inventar/corrigir email em silencio, e mensagens de erro que pedem repeticao.
 - **Testes**: **1.316 pytest**; cobertura **70,0%**.
 
+### Fase 2E - Fuso, remetente e analytics de aceite (2026-11-02)
+
+- **Janela de chamada**: 09:00-20:00 no fuso **do estado** (MA/NY ET,
+  TX/IL CT), configuravel por `VOICE_CALL_START_HOUR`/`VOICE_CALL_END_HOUR`.
+  Sem ZIP porque os 4 estados do piloto tem um unico fuso.
+- **Remetente**: `Magic Leads Team <support@magicleads.app>`.
+- **Analytics**: `summary.accepts`, `accept_rate`, `subscription_rate`,
+  `revenue_per_accept_usd`; `by_state`, `by_city`, `by_trade` e
+  `by_city_trade`. Aceite = `intent='showcase'`; assinatura =
+  `checkout_session_id` preenchido no Stripe.
+- **Admin**: gauges **Voice Accept** e **Assinatura**, funil com passo
+  **Aceite (1/Yes)**, tres tabelas por estado/cidade/nicho e colunas de aceite
+  na matriz cidade x nicho.
+- **Testes**: **1.317 pytest**; cobertura **70,0%**.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
