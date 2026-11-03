@@ -118,7 +118,7 @@ def test_create_call_dry_run_sem_chaves():
     assert call["provider"] == "telnyx"
 
 
-def test_webhook_dtmf_1_gera_link_e_email_dry_run():
+def test_webhook_dtmf_1_marca_intent_sem_duplicar_email():
     company = _seed_company()
     _seed_showcase()
     created = telnyx_voice.create_call(company, campaign_id="pilot")
@@ -137,17 +137,13 @@ def test_webhook_dtmf_1_gera_link_e_email_dry_run():
     }
     result = telnyx_voice.handle_webhook(payload)
     assert result["ok"] is True
-    assert result["action"] == "showcase"
-    assert result["showcase"]["ok"] is True
-    assert result["showcase"]["link"]["url"].endswith(
-        "/r/" + result["showcase"]["link"]["token"]
-    )
-    assert result["showcase"]["email"]["sent"] is False
-    assert result["showcase"]["email"].get("dry_run") is True
+    assert result["action"] == "dtmf_yes"
+    assert result["digit"] == "1"
 
     call = voice.get_voice_call(call_id)
     assert call["intent"] == "showcase"
-    assert call["showcase_link_id"] == result["showcase"]["link"]["link_id"]
+    # O envio fica a cargo da tool capture_email (o assistant pergunta o email).
+    assert call["showcase_link_id"] is None
 
 
 def test_webhook_secret_fail_closed_e_valida():
@@ -254,3 +250,156 @@ def test_email_fallback_cidade_usa_escopo_neutro(monkeypatch):
     assert captured["scope_label"] == "active property"
     assert captured["city"] == "Dallas"
     assert captured["trade_code"] == "roofing"
+
+
+def _registered_call(company: dict, provider_id: str = "v3:tool-call") -> dict:
+    created = telnyx_voice.create_call(company, campaign_id="pilot")
+    voice.update_voice_call(
+        created["voice_call_id"], provider_call_id=provider_id, status="in_call"
+    )
+    return voice.get_voice_call(created["voice_call_id"]) or {}
+
+
+def test_tool_capture_email_guarda_e_envia(monkeypatch):
+    company = _seed_company()
+    _seed_showcase()
+    call = _registered_call(company)
+    result = telnyx_voice.handle_tool_call(
+        "capture_email", {"email": "boss@newmail.com"}, "v3:tool-call"
+    )
+    assert result["ok"] is True
+    assert result["email"] == "boss@newmail.com"
+    updated = voice.get_company(company["id"])
+    assert updated["email"] == "boss@newmail.com"
+    current = voice.get_voice_call(call["id"])
+    assert current["status"] == "showcase_sent"
+    assert current["showcase_link_id"]
+
+
+def test_tool_send_showcase_sem_email_pede_email():
+    company = _seed_company()
+    _seed_showcase()
+    conn = voice.get_conn()
+    try:
+        conn.execute(
+            "UPDATE prospect_companies SET email='' WHERE id=?", (company["id"],)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    _registered_call(company)
+    result = telnyx_voice.handle_tool_call(
+        "send_showcase_link", {}, "v3:tool-call"
+    )
+    assert result["ok"] is False
+    assert result["reason"] == "email_required"
+
+
+def test_tool_remove_from_list_suprime_numero():
+    company = _seed_company()
+    _registered_call(company)
+    result = telnyx_voice.handle_tool_call(
+        "remove_from_list", {}, "v3:tool-call"
+    )
+    assert result["ok"] is True
+    updated = voice.get_company(company["id"])
+    assert updated["status"] == "do_not_call"
+    conn = voice.get_conn()
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM voice_suppressions WHERE value=?",
+            (company["phone"],),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None
+
+
+def test_tool_chamada_desconhecida_falha():
+    result = telnyx_voice.handle_tool_call("capture_email", {}, "v3:unknown")
+    assert result["ok"] is False
+    assert result["error"] == "call_not_found"
+
+
+def test_assinatura_ed25519_valida_e_rejeita_tamper(monkeypatch):
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+        Ed25519PrivateKey,
+    )
+
+    private = Ed25519PrivateKey.generate()
+    public = private.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    monkeypatch.setattr(
+        telnyx_voice.settings,
+        "TELNYX_PUBLIC_KEY",
+        base64.b64encode(public).decode(),
+    )
+    body = b'{"data":{"event_type":"call.answered"}}'
+    timestamp = str(int(__import__("time").time()))
+    signature = base64.b64encode(
+        private.sign(timestamp.encode() + b"|" + body)
+    ).decode()
+    assert telnyx_voice.verify_signature(signature, timestamp, body) is True
+    assert telnyx_voice.verify_signature(signature, timestamp, body + b" ") is False
+    bad_ts = str(int(timestamp) - 3600)
+    old_sig = base64.b64encode(private.sign(bad_ts.encode() + b"|" + body)).decode()
+    assert telnyx_voice.verify_signature(old_sig, bad_ts, body) is False
+
+
+def test_answered_envia_script_renderizado_ao_assistant(monkeypatch):
+    company = _seed_company()
+    _seed_showcase()
+    created = telnyx_voice.create_call(company)
+    call_id = created["voice_call_id"]
+    voice.update_voice_call(
+        call_id,
+        assistant_id="assistant-123",
+        provider_call_id="v3:answered",
+    )
+    monkeypatch.setattr(telnyx_voice.settings, "VOICE_STAGING_MODE", False)
+    monkeypatch.setattr(telnyx_voice.settings, "TELNYX_API_KEY", "key")
+    monkeypatch.setattr(telnyx_voice.settings, "TELNYX_CONNECTION_ID", "conn")
+    monkeypatch.setattr(telnyx_voice.settings, "TELNYX_FROM_NUMBER", "+16175550000")
+    captured: dict = {}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        captured["url"] = url
+        captured["json"] = json
+
+        class Resp:
+            status_code = 200
+            content = b"{}"
+
+            def json(self):
+                return {}
+
+        return Resp()
+
+    monkeypatch.setattr(telnyx_voice.httpx, "post", fake_post)
+    state = base64.b64encode(
+        json.dumps({"voice_call_id": call_id, "company_id": company["id"]}).encode()
+    ).decode()
+    result = telnyx_voice.handle_webhook(
+        {
+            "data": {
+                "event_type": "call.answered",
+                "payload": {
+                    "client_state": state,
+                    "call_control_id": "v3:answered",
+                },
+            }
+        }
+    )
+    assert result["assistant_started"] is True
+    sent = captured["json"]["assistant"]
+    assert sent["id"] == "assistant-123"
+    assert "Telnyx Roofing" in sent["instructions"]
+    assert "active roofing opportunities in Boston this week" in sent[
+        "instructions"
+    ]
+    assert sent["greeting"].startswith("Hi Telnyx Roofing")
+    assert sent["voice_settings"]["voice"] == "Telnyx.Ultra.Callie"
+

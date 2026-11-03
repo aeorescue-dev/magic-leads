@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Optional
+from urllib.parse import quote
 
 import httpx
 
@@ -51,6 +52,32 @@ TRADES = (
 )
 
 DEFAULT_SCRIPTS: dict[str, str] = {trade: DEFAULT_TEMPLATE for trade in TRADES}
+
+TOOL_GUIDANCE = (
+    "## Operational rules\n"
+    "You are on a live outbound phone call. Follow the approved script above "
+    "exactly; do not add claims, prices, or promises that are not in it.\n"
+    "- If the caller agrees to receive the link, call send_showcase_link.\n"
+    "- If the caller gives an email address, call capture_email with that "
+    "exact address. Never invent or guess an email.\n"
+    "- If the caller says no, stop, or asks to be removed, call "
+    "remove_from_list and end politely.\n"
+    "- Pressing 1 is equivalent to saying yes. DTMF input arrives as text.\n"
+)
+
+
+def build_instructions(body: str) -> str:
+    """Script aprovado + regras operacionais das tools."""
+    return f"{str(body or '').strip()}\n\n{TOOL_GUIDANCE}"
+
+
+def opening_for_greeting(body: str) -> str:
+    """Primeira fala, sem o label 'Opening & Pitch:'."""
+    first = str(body or "").split("\n\nIf Yes", 1)[0].strip()
+    if first.lower().startswith("opening & pitch:"):
+        first = first.split(":", 1)[1].strip()
+    return first
+
 
 
 def _apply_template(conn) -> None:
@@ -213,6 +240,16 @@ def get_effective_script(
             ).fetchone()
             if row:
                 result = dict(row)
+                # Override por cidade/estado herda assistant/voz do global
+                # quando não define os seus próprios.
+                result["assistant_id"] = (
+                    result.get("assistant_id")
+                    or global_script.get("assistant_id")
+                    or ""
+                )
+                result["voice_id"] = (
+                    result.get("voice_id") or global_script.get("voice_id") or ""
+                )
                 result["scope"] = scope_type
                 result["scope_value"] = scope_value
                 return result
@@ -527,7 +564,10 @@ def render(
         "version": script["version"],
         "status": script["status"],
         "assistant_id": script.get("assistant_id") or "",
+        "voice_id": _assistant_voice(script),
         "body": body,
+        "instructions": build_instructions(body),
+        "greeting": opening_for_greeting(body),
         "disclosure": disclosure,
         "variables": replacements,
     }
@@ -542,6 +582,92 @@ def approved_for_trade(
     return None
 
 
+def _assistant_voice(script: dict) -> str:
+    return (
+        (script.get("voice_id") or "").strip()
+        or str(getattr(settings, "TELNYX_ASSISTANT_VOICE", "") or "").strip()
+    )
+
+
+def _tools_base_url() -> str:
+    base = str(getattr(settings, "TELNYX_TOOLS_URL", "") or "").strip()
+    if not base:
+        public = str(getattr(settings, "PUBLIC_API_URL", "") or "").rstrip("/")
+        base = f"{public}/api/voice/telnyx/tools"
+    return base.rstrip("/")
+
+
+def _assistant_tools() -> list[dict]:
+    """Tools webhook que ligam a conversa ao backend (link, email, opt-out)."""
+    base = _tools_base_url()
+    secret = str(getattr(settings, "TELNYX_WEBHOOK_SECRET", "") or "")
+
+    def tool(name: str, description: str, properties: dict, required: list[str]):
+        url = f"{base}/{name}"
+        if secret:
+            url = f"{url}?secret={quote(secret)}"
+        return {
+            "type": "webhook",
+            "webhook": {
+                "name": name,
+                "description": description,
+                "url": url,
+                "method": "POST",
+                "body_parameters": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": required,
+                },
+            },
+        }
+
+    return [
+        tool(
+            "send_showcase_link",
+            (
+                "Send the Magic Leads showcase website link to this business. "
+                "Call it as soon as the caller agrees to receive the link."
+            ),
+            {},
+            [],
+        ),
+        tool(
+            "capture_email",
+            (
+                "Save the email address spoken by the caller and immediately "
+                "send the showcase link to it. Never invent or guess an email."
+            ),
+            {
+                "email": {
+                    "type": "string",
+                    "description": "Email address dictated by the caller.",
+                }
+            },
+            ["email"],
+        ),
+        tool(
+            "remove_from_list",
+            (
+                "Register that the caller asked to stop. Call it when the "
+                "caller says no, stop, or asks to be removed."
+            ),
+            {},
+            [],
+        ),
+    ]
+
+
+def _voice_settings(script: dict) -> dict:
+    voice = _assistant_voice(script)
+    if not voice:
+        return {}
+    settings_payload: dict = {"voice": voice}
+    if bool(getattr(settings, "TELNYX_ASSISTANT_EXPRESSIVE_MODE", False)):
+        if voice.startswith("Telnyx.Ultra."):
+            settings_payload["expressive_mode"] = True
+    return settings_payload
+
+
 def sync_to_telnyx(trade_code: str) -> dict:
     script = get_script(trade_code)
     if not script:
@@ -554,11 +680,13 @@ def sync_to_telnyx(trade_code: str) -> dict:
     assistant_id = (script.get("assistant_id") or "").strip()
     body = {
         "name": f"Magic Leads — {showcase.trade_label(script['trade_code'])}",
-        "instructions": script["body"],
+        "instructions": build_instructions(script["body"]),
+        "tools": _assistant_tools(),
+        "telephony_settings": {"disable_dtmf": False},
     }
-    voice = getattr(settings, "TELNYX_ASSISTANT_VOICE", "")
-    if voice and not assistant_id:
-        body["voice"] = voice
+    voice_settings = _voice_settings(script)
+    if voice_settings:
+        body["voice_settings"] = voice_settings
     try:
         if assistant_id:
             response = httpx.post(
@@ -569,12 +697,9 @@ def sync_to_telnyx(trade_code: str) -> dict:
             )
             mode = "updated"
         else:
-            model = getattr(settings, "TELNYX_ASSISTANT_MODEL", "")
-            if not model:
-                raise ValueError(
-                    "define TELNYX_ASSISTANT_MODEL ou cola um assistant_id"
-                )
-            body["model"] = model
+            model = str(getattr(settings, "TELNYX_ASSISTANT_MODEL", "") or "").strip()
+            if model:
+                body["model"] = model
             response = httpx.post(
                 "https://api.telnyx.com/v2/ai/assistants",
                 headers={"Authorization": f"Bearer {key}"},

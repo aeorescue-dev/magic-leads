@@ -1686,9 +1686,9 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 
 - **15 roteiros default em inglês** com o template oficial aprovado:
   “Hi {{company}}, this is an automated assistant from Magic Leads. On our
-  website right now, we have {{showcase_line}}…”. Todos em `draft`, versão
-  atualizada para 2 em produção, com labels Opening/Pitch, Yes/Press 1 e
-  No/Stop. O `assistant_id` é preservado em reedições.
+  website right now, we have {{showcase_line}}…”. Todos **aprovados** em
+  produção (versão 2), com labels Opening/Pitch, Yes/Press 1 e No/Stop. O
+  `assistant_id` é preservado em reedições.
 - **Variáveis**: `{{company}}`, `{{city}}`, `{{trade}}`, `{{permit_count}}`,
   `{{showcase_line}}`, `{{price_weekly}}`, `{{price_monthly}}`. A
   `showcase_line` é calculada por cidade/nicho e nunca promete o nicho quando
@@ -1712,6 +1712,31 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   `VOICE_STAGING_MODE=false`, Telnyx configurado, `confirm=true` e telefone em
   `VOICE_TEST_NUMBERS`.
 - **Testes**: **1.302 pytest**; cobertura **69,7%**; `voice_scripts.py` 70,2%.
+
+### Fase 2C — Voz nativa Telnyx e tools (2026-11-02)
+
+- **Voz nativa apenas**: `TELNYX_ASSISTANT_VOICE` default
+  `Telnyx.Ultra.Callie`; alternativas documentadas `Telnyx.Ultra.Asher`,
+  `Telnyx.Ultra.Callie` e `Telnyx.Ultra.Clara`. Sem ElevenLabs/Deepgram
+  externos. `TELNYX_ASSISTANT_EXPRESSIVE_MODE` liga expressive mode em Ultra.
+- **Script por chamada**: no `call.answered`, o backend renderiza o roteiro
+  efetivo (override incluído) e envia `instructions`, `greeting` e
+  `voice_settings` no `ai_assistant_start`. O assistant já não fala
+  `{{company}}`/`{{showcase_line}}` em bruto.
+- **Tools**: `send_showcase_link`, `capture_email` e `remove_from_list`
+  registadas no assistant via `sync_to_telnyx`; endpoint
+  `/api/voice/telnyx/tools/{tool}` correlaciona
+  `x-telnyx-call-control-id` com `voice_calls.provider_call_id`.
+- **DTMF**: `disable_dtmf=false`. A tecla 1 só marca `intent=showcase`; o envio
+  fica em `capture_email`, evitando email duplicado. O assistant recebe o tom
+  como texto e pergunta o email.
+- **Webhook Ed25519**: `TELNYX_PUBLIC_KEY` verifica
+  `telnyx-signature-ed25519`/`telnyx-timestamp`; o segredo partilhado continua
+  a proteger os tool calls.
+- **Teste real**: sem `assistant_id` devolve `assistant_missing`; se
+  `ai_assistant_start` falhar, a chamada é desligada. Falta apenas configurar
+  as chaves Telnyx no Railway, sincronizar e definir `VOICE_TEST_NUMBERS`.
+- **Testes**: **1.311 pytest**; cobertura **70,0%**.
 
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.

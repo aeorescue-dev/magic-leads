@@ -2126,6 +2126,59 @@ def get_voice_call(voice_call_id: int) -> Optional[dict]:
         conn.close()
 
 
+def get_voice_call_by_provider_id(provider_call_id: str) -> Optional[dict]:
+    """Encontra a chamada pelo call_control_id da Telnyx (usado pelas tools)."""
+    value = str(provider_call_id or "").strip()
+    if not value:
+        return None
+    init()
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            "SELECT * FROM voice_calls WHERE provider_call_id=? "
+            "ORDER BY id DESC LIMIT 1",
+            (value,),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def set_company_email(company_id: int, email: str) -> bool:
+    """Guarda o email ditado na chamada, para reutilizar no envio da vitrine."""
+    value = str(email or "").strip().lower()
+    if not value or "@" not in value or not company_id:
+        return False
+    init()
+    conn = get_conn()
+    try:
+        cur = conn.execute(
+            "UPDATE prospect_companies SET email=?, updated_at=? WHERE id=?",
+            (value, _iso(), int(company_id)),
+        )
+        conn.commit()
+        return bool(cur.rowcount)
+    finally:
+        conn.close()
+
+
+def mark_company_do_not_call(company_id: int, reason: str = "caller_opt_out") -> bool:
+    if not company_id:
+        return False
+    init()
+    conn = get_conn()
+    try:
+        cur = conn.execute(
+            "UPDATE prospect_companies SET status='do_not_call', notes=?, "
+            "updated_at=? WHERE id=?",
+            (str(reason)[:200], _iso(), int(company_id)),
+        )
+        conn.commit()
+        return bool(cur.rowcount)
+    finally:
+        conn.close()
+
+
 def log_attempt(
     company_id: int,
     user_id: int,

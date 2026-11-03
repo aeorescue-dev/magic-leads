@@ -84,25 +84,8 @@ async def run_campaign(campaign_id: int) -> None:
                 calls += 1
                 progressed = True
                 await _run_sync(b2b_voice.bump_campaign, campaign_id, 1, 0, 0)
-                showcase_result = await _run_sync(
-                    telnyx_voice.send_showcase_for_call,
-                    result["voice_call_id"],
-                    city,
-                    trade,
-                )
-                if showcase_result.get("ok"):
-                    await _run_sync(
-                        b2b_voice.bump_campaign, campaign_id, 0, 1, 0
-                    )
-                else:
-                    logger.warning(
-                        "[AUTO-DIALER] vitrine falhou para empresa %s: %s",
-                        company["id"],
-                        showcase_result.get("reason"),
-                    )
-                    await _run_sync(
-                        b2b_voice.bump_campaign, campaign_id, 0, 0, 1
-                    )
+                # A vitrine so e enviada depois de o contacto atender e dar
+                # consentimento (tool capture_email), nunca no dial.
 
                 if not result.get("dry_run") and delay:
                     await asyncio.sleep(delay)

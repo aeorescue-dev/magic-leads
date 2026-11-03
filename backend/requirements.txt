@@ -11,6 +11,8 @@ pywebpush==2.5.0
 webauthn>=2.8.0,<3.0.0
 anyio>=3.7.1,<5.0.0
 stripe>=7.0.0,<13.0.0
+# Verificação Ed25519 dos webhooks Telnyx (TELNYX_PUBLIC_KEY).
+cryptography>=41.0.0,<51.0.0
 
 # Descoberta de e-mail (company_discovery). Sem estes, `extract_text` e o
 # resolvedor DNS falham em silencio e a heuristica nunca aceita um dominio:

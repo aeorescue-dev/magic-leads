@@ -3184,15 +3184,45 @@ async def public_showcase_checkout(request: Request):
 
 @app.post("/api/voice/telnyx/webhook")
 async def telnyx_webhook(request: Request, secret: str = ""):
-    """Webhook Telnyx: DTMF 1 dispara a vitrine + email."""
+    """Webhook Telnyx: lifecycle, DTMF e assinatura Ed25519."""
+    header_secret = request.headers.get("x-webhook-secret") or ""
+    raw_body = await request.body()
+    if not telnyx_voice.webhook_authorized(
+        secret or header_secret,
+        signature=request.headers.get("telnyx-signature-ed25519") or "",
+        timestamp=request.headers.get("telnyx-timestamp") or "",
+        raw_body=raw_body,
+    ):
+        raise HTTPException(status_code=403, detail="invalid_webhook_signature")
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="json inválido")
+    return await anyio.to_thread.run_sync(telnyx_voice.handle_webhook, payload)
+
+
+@app.post("/api/voice/telnyx/tools/{tool_name}")
+async def telnyx_assistant_tool(
+    tool_name: str, request: Request, secret: str = ""
+):
+    """Webhook tools do AI Assistant (link, email, opt-out).
+
+    A Telnyx identifica a chamada no header `x-telnyx-call-control-id`. O
+    segredo partilhado protege o endpoint; as tools não são assinadas.
+    """
     header_secret = request.headers.get("x-webhook-secret") or ""
     if not telnyx_voice.verify_secret(secret or header_secret):
         raise HTTPException(status_code=403, detail="invalid_webhook_secret")
     try:
         payload = await request.json()
     except Exception:  # noqa: BLE001
-        raise HTTPException(status_code=400, detail="json inválido")
-    return await anyio.to_thread.run_sync(telnyx_voice.handle_webhook, payload)
+        payload = {}
+    call_control_id = request.headers.get("x-telnyx-call-control-id") or ""
+    if not call_control_id:
+        call_control_id = str(payload.get("call_control_id") or "")
+    return await anyio.to_thread.run_sync(
+        telnyx_voice.handle_tool_call, tool_name, payload or {}, call_control_id
+    )
 
 
 @app.post("/api/admin/showcase/build")

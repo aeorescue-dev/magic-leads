@@ -35,9 +35,18 @@ class Settings(BaseSettings):
     TELNYX_FROM_NUMBER: str = ""
     TELNYX_WEBHOOK_SECRET: str = ""
     TELNYX_WEBHOOK_URL: str = ""
+    # Chave publica Ed25519 da Telnyx (base64). Se definida, o webhook passa a
+    # ser verificado por assinatura; o segredo partilhado continua a valer para
+    # os tool calls, que nao trazem assinatura.
+    TELNYX_PUBLIC_KEY: str = ""
+    # URL base dos tool calls do assistant. Vazio deriva de PUBLIC_API_URL.
+    TELNYX_TOOLS_URL: str = ""
     TELNYX_COST_PER_MINUTE_CENTS: int = 2
+    # Modelo nativo Telnyx. Vazio deixa a Telnyx aplicar o default da conta.
     TELNYX_ASSISTANT_MODEL: str = ""
-    TELNYX_ASSISTANT_VOICE: str = ""
+    # Voz nativa Telnyx (sem ElevenLabs/Deepgram externos).
+    TELNYX_ASSISTANT_VOICE: str = "Telnyx.Ultra.Callie"
+    TELNYX_ASSISTANT_EXPRESSIVE_MODE: bool = False
     VOICE_TEST_NUMBERS: str = ""
     VOICE_AUTOSCHED_DELAY_SECONDS: int = 30
     VOICE_SOURCE_ALLOWED_HOSTS: str = ""

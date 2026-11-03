@@ -92,6 +92,73 @@ Com `VOICE_STAGING_MODE=true`:
 **Nunca** ativar produção com `VOICE_STAGING_MODE=true`. Para chamadas reais:
 `VOICE_STAGING_MODE=false`, DNC licenciado importado e chaves Telnyx.
 
+## Voz nativa Telnyx (AI Engine)
+
+O assistente usa **apenas vozes nativas da Telnyx**. Nao ha ElevenLabs,
+Deepgram Aura nem outro TTS externo.
+
+| Definicao | Valor |
+|---|---|
+| Voz default masculina | `Telnyx.Ultra.Asher` (en, male) |
+| Voz default feminina | `Telnyx.Ultra.Callie` (en, female) |
+| Alternativa feminina en-US | `Telnyx.Ultra.Clara` (en-US, female) |
+| Modelo | default da conta Telnyx (`TELNYX_ASSISTANT_MODEL` vazio) |
+| Formato | `Telnyx.Ultra.<voice_id>` |
+
+O default do codigo e `Telnyx.Ultra.Callie` (`TELNYX_ASSISTANT_VOICE`). Cada
+roteiro pode fixar a sua voz em `voice_id`. A voz tambem e enviada no
+`ai_assistant_start`, com o script ja renderizado para a chamada.
+
+Variaveis de ambiente:
+
+| Variavel | Obrigatoria | Funcao |
+|---|---|---|
+| `TELNYX_API_KEY` | sim | criar chamadas, assistants e tools |
+| `TELNYX_CONNECTION_ID` | sim | Call Control App |
+| `TELNYX_FROM_NUMBER` | sim | numero de origem E.164 |
+| `TELNYX_WEBHOOK_SECRET` | sim | assinatura dos tool calls |
+| `TELNYX_PUBLIC_KEY` | recomendada | verificacao Ed25519 do webhook |
+| `PUBLIC_API_URL` | sim | base dos webhooks/tools |
+| `TELNYX_ASSISTANT_VOICE` | nao | `Telnyx.Ultra.Callie` por defeito |
+| `TELNYX_ASSISTANT_MODEL` | nao | vazio usa o default Telnyx |
+| `TELNYX_ASSISTANT_EXPRESSIVE_MODE` | nao | `true` para Ultra expressive |
+| `VOICE_TEST_NUMBERS` | teste | allowlist E.164 separada por virgulas |
+| `VOICE_STAGING_MODE` | sim | `false` so durante o teste real |
+
+`sync_to_telnyx` cria/atualiza o assistant com:
+- `instructions` = script aprovado + regras operacionais;
+- `voice_settings.voice` nativo;
+- `telephony_settings.disable_dtmf=false` (DTMF ativo por defeito);
+- tools webhook `send_showcase_link`, `capture_email` e `remove_from_list`.
+
+## DTMF e tools
+
+- O assistant recebe DTMF como texto. A tecla **1** conta como "sim"; o
+  backend apenas marca `intent=showcase` e **nao** envia email nesse momento.
+- O assistant pergunta o email e chama `capture_email`; so essa tool envia o
+  link, evitando emails duplicados.
+- `send_showcase_link` envia para o email ja existente; sem email devolve
+  `email_required` e o assistant pede o endereco.
+- `remove_from_list` cria supressao e marca a empresa `do_not_call`.
+- O auto-scheduler **nao** envia a vitrine ao discar; o email so sai depois de
+  o contacto atender e autorizar, para nao enviar links sem consentimento.
+- Os tool calls chegam com `x-telnyx-call-control-id`, correlacionado com
+  `voice_calls.provider_call_id`.
+
+## Chamada de teste controlada
+
+1. Configurar `TELNYX_API_KEY`, `TELNYX_CONNECTION_ID`, `TELNYX_FROM_NUMBER`,
+   `TELNYX_WEBHOOK_SECRET`, `TELNYX_PUBLIC_KEY` e `PUBLIC_API_URL`.
+2. `VOICE_TEST_NUMBERS=+1...` com o telemovel de teste.
+3. **Aprovar Todos** e **Sync Telnyx** para preencher os 15 `assistant_id`.
+4. `VOICE_STAGING_MODE=false`.
+5. `POST /api/admin/voice/test-call` com `{"confirm": true, "phone": "+1..."}`.
+6. Validar audio, disclosure, latencia, tecla 1, email, opt-out e hangup.
+7. Reativar `VOICE_STAGING_MODE=true` se nao houver mais testes.
+
+Sem `assistant_id` a chamada real e bloqueada com `assistant_missing`. Se o
+`ai_assistant_start` falhar, a chamada e desligada para nunca ficar em silencio.
+
 ## API
 
 | Método | Rota | Função |

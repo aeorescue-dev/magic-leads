@@ -6,8 +6,8 @@ Comando:
 pytest tests -q --cov=backend --cov-report=json:coverage.json
 ```
 
-- **Total backend: 69,7%** (14 235 / 20 418 statements).
-- **1 304 pytest**, **109 vitest**; CI verde.
+- **Total backend: 70,0%** (14 479 / 20 694 statements).
+- **1 311 pytest**, **109 vitest**; CI verde.
 - O CI gera `coverage.json` e publica-o como artifact `backend-coverage`.
 
 ## Módulos fortes
@@ -20,7 +20,7 @@ pytest tests -q --cov=backend --cov-report=json:coverage.json
 | `services/mailbox_guard.py` | 94,0% |
 | `services/outbound_templates.py` | 93,9% |
 | `services/auto_ramp.py` | 92,7% |
-| `services/b2b_voice.py` | 85,7% |
+| `services/b2b_voice.py` | 86,0% |
 | `services/showcase.py` | 88,6% |
 | `services/auto_dialer.py` | 76,5% |
 | `services/unsubscribe.py` | 93,3% |
@@ -35,8 +35,8 @@ pytest tests -q --cov=backend --cov-report=json:coverage.json
 | `services/control_tower.py` | 51,6% | queue_age, backup, tokens, freshness |
 | `main.py` | 52,7% | endpoints admin/investor/analytics (auth, erros, export) |
 | `services/investor.py` | novo | valuation, reconcilição Stripe, NDA, CSV |
-| `services/telnyx_voice.py` | 67,7% | webhook Ed25519, retries e estados de chamada |
-| `services/voice_scripts.py` | 70,2% | CRUD, preview e sync Telnyx |
+| `services/telnyx_voice.py` | 74,0% | Ed25519, tools e estados de chamada |
+| `services/voice_scripts.py` | 87,0% | CRUD, preview, overrides e sync Telnyx |
 | `services/enrichment_queue.py` | 36,3% | retry/backoff e estados |
 | `services/phone_lookup.py` | 46,4% | outcomes Searchbug e billing |
 | `services/inbox_sync.py` | 50,0% | parser DSN/ARF e supressão |

@@ -49,6 +49,17 @@ import pytest  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
+def _voice_clock(monkeypatch):
+    """Congela o relogio da voz num horario permitido (08:00-21:00 ET).
+
+    Sem isto, testes de fila/chamada falham conforme a hora real do CI.
+    Ficheiros que precisam de outro instante sobrepoem com o seu monkeypatch.
+    """
+    monkeypatch.setenv("VOICE_NOW_ISO", "2026-11-02T16:00:00+00:00")
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _clear_perf_caches():
     """Fase 22: isola os caches in-process entre testes.
 

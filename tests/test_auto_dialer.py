@@ -100,7 +100,7 @@ def _import_company(phone: str, city: str, state: str) -> None:
     voice.check_dnc(phone, listed=False, source="pytest")
 
 
-def test_auto_dialer_dry_run_dispara_chamadas_e_vitrines():
+def test_auto_dialer_dry_run_dispara_chamadas_sem_vitrine_precoce():
     for idx in range(3):
         _seed_lead("Boston", "MA", "Roof", "02118", idx)
     showcase.build_pages()
@@ -114,7 +114,8 @@ def test_auto_dialer_dry_run_dispara_chamadas_e_vitrines():
     assert final is not None
     assert final["status"] == "completed"
     assert final["calls_started"] == 2
-    assert final["showcases_sent"] == 2
+    # A vitrine so sai depois do consentimento (tool capture_email).
+    assert final["showcases_sent"] == 0
 
     conn = voice.get_conn()
     try:
@@ -122,8 +123,8 @@ def test_auto_dialer_dry_run_dispara_chamadas_e_vitrines():
             "SELECT * FROM voice_calls WHERE campaign_id=?", (str(campaign["id"]),)
         ).fetchall()
         assert len(calls) == 2
-        assert all(row["showcase_link_id"] for row in calls)
-        assert all(row["status"] == "showcase_sent" for row in calls)
+        assert all(row["showcase_link_id"] is None for row in calls)
+        assert all(row["status"] == "dry_run" for row in calls)
     finally:
         conn.close()
 

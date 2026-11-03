@@ -7,7 +7,8 @@ from backend.services import b2b_voice, showcase, telnyx_voice, voice_scripts
 
 
 @pytest.fixture(autouse=True)
-def _clean():
+def _clean(monkeypatch):
+    monkeypatch.setenv("VOICE_NOW_ISO", "2026-11-02T16:00:00+00:00")
     b2b_voice.init()
     voice_scripts.init()
     conn = b2b_voice.get_conn()
@@ -185,3 +186,46 @@ def test_chamada_real_exige_roteiro_aprovado(monkeypatch):
     result = telnyx_voice.create_call(company, dry_run=False)
     assert result["ok"] is False
     assert result["reason"] == "script_not_approved"
+
+
+def test_sync_inclui_voz_nativa_tools_e_dtmf(monkeypatch):
+    voice_scripts.approve_all(user_id=7)
+    monkeypatch.setattr(voice_scripts.settings, "TELNYX_API_KEY", "key")
+    monkeypatch.setattr(
+        voice_scripts.settings, "TELNYX_WEBHOOK_SECRET", "tool-secret"
+    )
+    monkeypatch.setattr(
+        voice_scripts.settings, "TELNYX_ASSISTANT_VOICE", "Telnyx.Ultra.Asher"
+    )
+    monkeypatch.setattr(voice_scripts.settings, "TELNYX_ASSISTANT_MODEL", "")
+    captured: dict = {}
+
+    class Response:
+        status_code = 200
+        content = b'{"data":{"id":"assistant-new"}}'
+
+        def json(self):
+            return {"data": {"id": "assistant-new"}}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        captured["url"] = url
+        captured["body"] = json
+        return Response()
+
+    monkeypatch.setattr(voice_scripts.httpx, "post", fake_post)
+    result = voice_scripts.sync_to_telnyx("roofing")
+    assert result["ok"] is True
+    assert result["assistant_id"] == "assistant-new"
+    body = captured["body"]
+    assert body["voice_settings"]["voice"] == "Telnyx.Ultra.Asher"
+    assert body["telephony_settings"]["disable_dtmf"] is False
+    assert "model" not in body
+    assert "send_showcase_link" in body["instructions"]
+    names = {tool["webhook"]["name"] for tool in body["tools"]}
+    assert names == {"send_showcase_link", "capture_email", "remove_from_list"}
+    for tool in body["tools"]:
+        assert tool["webhook"]["url"].endswith(
+            "/api/voice/telnyx/tools/" + tool["webhook"]["name"]
+            + "?secret=tool-secret"
+        )
+

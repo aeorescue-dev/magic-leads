@@ -13,6 +13,8 @@ import base64
 import hmac
 import json
 import math
+import re
+import time
 from datetime import datetime, timezone
 from typing import Any, Optional
 from urllib.parse import quote
@@ -141,7 +143,10 @@ def create_call(
         {
             "voice_call_id": call["id"],
             "company_id": call["company_id"],
+            "company_name": company.get("company_name") or "",
             "city": call.get("city"),
+            "state": company.get("state") or "",
+            "permit_count": int(company.get("permit_count") or 0),
             "trade_code": call.get("trade_code"),
             "campaign_id": campaign_id,
             "assistant_id": assistant_id,
@@ -208,6 +213,50 @@ def verify_secret(secret: Optional[str]) -> bool:
     return bool(secret) and hmac.compare_digest(str(expected), str(secret))
 
 
+def verify_signature(
+    signature: str, timestamp: str, raw_body: bytes, tolerance_seconds: int = 300
+) -> bool:
+    """Verifica a assinatura Ed25519 oficial da Telnyx.
+
+    A Telnyx assina `"{timestamp}|{raw_body}"` e envia os headers
+    `telnyx-signature-ed25519` e `telnyx-timestamp`.
+    """
+    public_key = str(getattr(settings, "TELNYX_PUBLIC_KEY", "") or "").strip()
+    if not public_key or not signature or not timestamp:
+        return False
+    try:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+            Ed25519PublicKey,
+        )
+
+        ts = int(str(timestamp).strip())
+        if abs(time.time() - ts) > int(tolerance_seconds):
+            return False
+        key = Ed25519PublicKey.from_public_bytes(base64.b64decode(public_key))
+        key.verify(
+            base64.b64decode(signature),
+            str(timestamp).strip().encode("ascii") + b"|" + raw_body,
+        )
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def webhook_authorized(
+    shared_secret: Optional[str],
+    signature: str = "",
+    timestamp: str = "",
+    raw_body: bytes = b"",
+) -> bool:
+    """Aceita assinatura Ed25519 quando configurada; senão, segredo partilhado."""
+    if str(getattr(settings, "TELNYX_PUBLIC_KEY", "") or "").strip():
+        if verify_signature(signature, timestamp, raw_body):
+            return True
+        # Tool calls e testes internos continuam a usar o segredo partilhado.
+        return verify_secret(shared_secret)
+    return verify_secret(shared_secret)
+
+
 def _call_action(call_control_id: str, action: str, payload: dict) -> dict:
     if not configured() or not call_control_id:
         return {"ok": False, "reason": "not_configured"}
@@ -232,16 +281,77 @@ def _call_action(call_control_id: str, action: str, payload: dict) -> dict:
     return {"ok": True}
 
 
-def start_ai_assistant(call_control_id: str, assistant_id: str) -> dict:
+def start_ai_assistant(
+    call_control_id: str,
+    assistant_id: str,
+    *,
+    instructions: str = "",
+    greeting: str = "",
+    voice: str = "",
+    dynamic_variables: Optional[dict] = None,
+) -> dict:
+    """Arranca o assistant com o script já renderizado para esta chamada."""
     if not assistant_id:
         return {"ok": False, "reason": "missing_assistant_id"}
+    assistant: dict[str, Any] = {"id": assistant_id}
+    if instructions:
+        assistant["instructions"] = instructions[:12000]
+    if greeting:
+        assistant["greeting"] = greeting[:3000]
+    if voice:
+        assistant["voice_settings"] = {"voice": voice}
+    if dynamic_variables:
+        assistant["dynamic_variables"] = dynamic_variables
     return _call_action(
-        call_control_id, "ai_assistant_start", {"assistant": {"id": assistant_id}}
+        call_control_id, "ai_assistant_start", {"assistant": assistant}
     )
 
 
 def hangup_call(call_control_id: str) -> dict:
     return _call_action(call_control_id, "hangup", {})
+
+
+def _render_for_call(current: dict, client_state: dict) -> dict:
+    """Renderiza o script aprovado para esta chamada (override incluído)."""
+    from . import voice_scripts
+
+    trade = (
+        current.get("trade_code")
+        or client_state.get("trade_code")
+        or ""
+    )
+    if not trade:
+        return {}
+    company_id = current.get("company_id") or client_state.get("company_id")
+    company = b2b_voice.get_company(company_id) if company_id else {}
+    company = company or {}
+    company_name = (
+        company.get("company_name")
+        or client_state.get("company_name")
+        or ""
+    )
+    city = current.get("city") or client_state.get("city") or company.get("city") or ""
+    state = company.get("state") or client_state.get("state") or ""
+    permit_count = int(
+        company.get("permit_count") or client_state.get("permit_count") or 0
+    )
+    try:
+        return voice_scripts.render(
+            trade,
+            company=company_name,
+            city=city,
+            permit_count=permit_count,
+            state=state,
+        )
+    except ValueError:
+        return {}
+
+
+def _valid_email(value: Any) -> str:
+    email = str(value or "").strip().lower()
+    if re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        return email
+    return ""
 
 
 def handle_webhook(payload: dict) -> dict:
@@ -268,16 +378,14 @@ def handle_webhook(payload: dict) -> dict:
     if "dtmf" in event_type:
         digit = str(body.get("dtmf_digit") or body.get("digit") or "").strip()
         if digit == "1":
-            b2b_voice.update_voice_call(
-                voice_call_id, intent="showcase", status="in_call"
-            )
-            sent = send_showcase_for_call(voice_call_id)
+            # O assistant recebe o DTMF como texto e pergunta o email; o envio
+            # acontece na tool capture_email para não duplicar emails.
+            b2b_voice.update_voice_call(voice_call_id, intent="showcase")
             return {
                 "ok": True,
-                "action": "showcase",
+                "action": "dtmf_yes",
                 "voice_call_id": voice_call_id,
                 "digit": digit,
-                "showcase": sent,
             }
         return {
             "ok": True,
@@ -300,8 +408,13 @@ def handle_webhook(payload: dict) -> dict:
         assistant_result = None
         if configured() and call_control_id:
             if assistant_id:
+                rendered = _render_for_call(current, state)
                 assistant_result = start_ai_assistant(
-                    call_control_id, assistant_id
+                    call_control_id,
+                    assistant_id,
+                    instructions=str(rendered.get("instructions") or ""),
+                    greeting=str(rendered.get("greeting") or ""),
+                    voice=str(rendered.get("voice_id") or ""),
                 )
                 if not assistant_result.get("ok"):
                     b2b_voice.update_voice_call(
@@ -364,14 +477,18 @@ def send_showcase_for_call(
     voice_call_id: int,
     city: Optional[str] = None,
     trade_code: Optional[str] = None,
+    email: Optional[str] = None,
 ) -> dict:
     """Cria o link da vitrine e envia o email para a empresa da chamada."""
     call = b2b_voice.get_voice_call(voice_call_id)
     if not call:
         return {"ok": False, "reason": "call_not_found"}
-    company = b2b_voice.get_company(call["company_id"])
-    if not company:
-        return {"ok": False, "reason": "company_not_found"}
+    company = (
+        b2b_voice.get_company(call["company_id"])
+        if call.get("company_id")
+        else None
+    )
+    company = company or {}
 
     resolved_city = city or call.get("city") or company.get("city")
     resolved_trade = showcase.normalize_trade(
@@ -384,10 +501,17 @@ def send_showcase_for_call(
     if not page:
         return {"ok": False, "reason": "no_inventory"}
 
-    email = (company.get("email") or "").strip()
+    to_email = _valid_email(email) or _valid_email(company.get("email"))
+    if not to_email:
+        return {
+            "ok": False,
+            "reason": "email_required",
+            "message": "Ask the caller for the best email address.",
+        }
+
     link = showcase.create_link(
-        company_id=int(company["id"]),
-        email=email,
+        company_id=int(call.get("company_id") or 0),
+        email=to_email,
         city=resolved_city,
         trade_code=resolved_trade,
         company_name=company.get("company_name") or "",
@@ -404,7 +528,7 @@ def send_showcase_for_call(
         else showcase.trade_label(page_trade)
     )
     email_result = showcase.send_showcase_email(
-        to_email=email,
+        to_email=to_email,
         company_name=company.get("company_name") or "",
         city=email_city,
         trade_code=page_trade,
@@ -415,9 +539,87 @@ def send_showcase_for_call(
     b2b_voice.update_voice_call(
         voice_call_id, showcase_link_id=link["link_id"], status="showcase_sent"
     )
+    campaign_id = str(call.get("campaign_id") or "")
+    if campaign_id.isdigit():
+        # Mantem a metrica da campanha mesmo com o envio pos-consentimento.
+        b2b_voice.bump_campaign(int(campaign_id), 0, 1, 0)
     return {
         "ok": True,
         "link": link,
         "email": email_result,
         "page": page["page"],
     }
+
+
+def handle_tool_call(
+    tool_name: str, payload: dict, call_control_id: str
+) -> dict:
+    """Executa os webhook tools do assistant, correlacionados pelo call id."""
+    call = b2b_voice.get_voice_call_by_provider_id(call_control_id)
+    if not call:
+        return {
+            "ok": False,
+            "error": "call_not_found",
+            "message": "This call is not registered.",
+        }
+    voice_call_id = int(call["id"])
+    company_id = int(call.get("company_id") or 0)
+    name = str(tool_name or "").strip()
+
+    if name == "send_showcase_link":
+        result = send_showcase_for_call(voice_call_id)
+        if result.get("ok"):
+            return {
+                "ok": True,
+                "message": "The showcase link was sent to the email on file.",
+            }
+        if result.get("reason") == "email_required":
+            return {
+                "ok": False,
+                "reason": "email_required",
+                "message": "Ask the caller for the best email address.",
+            }
+        return {
+            "ok": False,
+            "reason": str(result.get("reason") or "send_failed"),
+            "message": "I could not send the link automatically.",
+        }
+
+    if name == "capture_email":
+        email = _valid_email(payload.get("email") or payload.get("address"))
+        if not email:
+            return {
+                "ok": False,
+                "reason": "invalid_email",
+                "message": (
+                    "That email did not sound valid. Ask the caller to repeat "
+                    "it slowly."
+                ),
+            }
+        if company_id:
+            b2b_voice.set_company_email(company_id, email)
+        result = send_showcase_for_call(voice_call_id, email=email)
+        return {
+            "ok": bool(result.get("ok")),
+            "email": email,
+            "message": (
+                "The showcase link is on its way to that email."
+                if result.get("ok")
+                else "The email was saved, but the link could not be sent."
+            ),
+        }
+
+    if name == "remove_from_list":
+        b2b_voice.update_voice_call(voice_call_id, intent="opt_out")
+        if company_id:
+            phone = str((b2b_voice.get_company(company_id) or {}).get("phone") or "")
+            if phone:
+                b2b_voice.suppress(phone, reason="caller_opt_out")
+            b2b_voice.mark_company_do_not_call(company_id)
+        return {
+            "ok": True,
+            "message": "The number was removed from the calling list.",
+        }
+
+    return {"ok": False, "error": "unknown_tool", "message": "Unknown tool."}
+
