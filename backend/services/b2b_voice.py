@@ -918,13 +918,18 @@ def _state_tz(state: str) -> ZoneInfo:
 
 
 def _eligibility(
-    company: dict, conn: sqlite3.Connection, now: datetime
+    company: dict,
+    conn: sqlite3.Connection,
+    now: datetime,
+    allow_international: bool = False,
 ) -> dict:
     reasons: list[str] = []
     checks: dict[str, bool] = {}
 
     phone = str(company.get("phone") or "")
-    checks["phone_valid"] = bool(re.match(r"^\+1\d{10}$", phone))
+    checks["phone_valid"] = bool(re.match(r"^\+1\d{10}$", phone)) or (
+        allow_international and bool(re.match(r"^\+\d{8,15}$", phone))
+    )
     if not checks["phone_valid"]:
         reasons.append("invalid_phone")
 
@@ -1009,13 +1014,17 @@ def _eligibility(
     }
 
 
-def can_call(company: dict, now: Optional[datetime] = None) -> dict:
+def can_call(
+    company: dict, now: Optional[datetime] = None, allow_international: bool = False
+) -> dict:
     """Fail-closed. Recebe a empresa (dict) e devolve allowed + reasons."""
     init()
     reference = now or _utc_now()
     conn = get_conn()
     try:
-        return _eligibility(company, conn, reference)
+        return _eligibility(
+            company, conn, reference, allow_international=allow_international
+        )
     finally:
         conn.close()
 

@@ -166,6 +166,21 @@ def test_can_call_libera_estados_do_piloto(state, phone):
     assert result["checks"]["state_enabled"] is True
 
 
+def test_can_call_teste_permite_numero_internacional():
+    phone = "+351912345678"
+    voice.check_dnc(phone, listed=False, source="pytest")
+    company = {
+        "phone": phone,
+        "entity_type": "business",
+        "state": "MA",
+        "status": "ready",
+    }
+    blocked = voice.can_call(company)
+    assert "invalid_phone" in blocked["reasons"]
+    allowed = voice.can_call(company, allow_international=True)
+    assert allowed["allowed"] is True, allowed
+
+
 def test_horario_usa_timezone_do_estado():
     voice.import_licenses_csv(_csv(phone="+12145550197", state="TX"))
     voice.check_dnc("+12145550197", listed=False, source="pytest")

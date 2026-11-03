@@ -1768,7 +1768,7 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Admin**: gauges **Voice Accept** e **Assinatura**, funil com passo
   **Aceite (1/Yes)**, tres tabelas por estado/cidade/nicho e colunas de aceite
   na matriz cidade x nicho.
-- **Testes**: **1.318 pytest**; cobertura **70,0%**.
+- **Testes**: **1.319 pytest**; cobertura **70,0%**.
 
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.

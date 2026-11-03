@@ -229,7 +229,11 @@ Definicoes:
 
 1. Configurar `TELNYX_API_KEY`, `TELNYX_CONNECTION_ID`, `TELNYX_FROM_NUMBER`,
    `TELNYX_WEBHOOK_SECRET`, `TELNYX_PUBLIC_KEY` e `PUBLIC_API_URL`.
-2. `VOICE_TEST_NUMBERS=+1...` com o telemovel de teste.
+2. `VOICE_TEST_NUMBERS=+1...` ou `+351...` com o telemovel de teste. O gate
+   normal so aceita `+1`, mas a chamada de teste permite E.164 internacional
+   **apenas** para numeros na allowlist (`allow_international` em
+   `create_call`). A conta Telnyx tem de permitir chamadas internacionais e ter
+   saldo; caso contrario a operadora devolve erro.
 3. **Aprovar Todos** e **Sync Telnyx** para preencher os 15 `assistant_id`.
 4. `VOICE_STAGING_MODE=false`.
 5. `POST /api/admin/voice/test-call` com `{"confirm": true, "phone": "+1..."}`.

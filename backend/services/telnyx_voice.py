@@ -75,7 +75,9 @@ def create_call(
     dry_run: bool = False,
 ) -> dict:
     """Cria uma chamada Telnyx para uma empresa já validada pelo gate."""
-    eligibility = b2b_voice.can_call(company)
+    eligibility = b2b_voice.can_call(
+        company, allow_international=(campaign_id == "test_call")
+    )
     if not eligibility["allowed"]:
         return {
             "ok": False,
