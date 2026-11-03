@@ -77,6 +77,9 @@ class Settings(BaseSettings):
     VOICE_CALL_START_HOUR: int = 9
     VOICE_CALL_END_HOUR: int = 20
     VOICE_AUTOSCHED_DELAY_SECONDS: int = 30
+    # Cadencia do loop que retoma campanhas pausadas (orcamento diario,
+    # lote do dia ou fora da janela).
+    VOICE_CAMPAIGN_RESUME_INTERVAL_SECONDS: int = 300
     VOICE_SOURCE_ALLOWED_HOSTS: str = ""
     VOICE_SYNC_INTERVAL_HOURS: int = 6
     VOICE_STAGING_MODE: bool = False

@@ -1912,6 +1912,20 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Gravacao**: `recording_settings.enabled=false` no assistant.
 - **Testes**: **1.337 pytest**; cobertura **70,0%**.
 
+### Fase 2N - Retoma automatica de campanhas pausadas (2026-11-03)
+
+- **Loop**: `_voice_campaign_resume_loop` (a cada `VOICE_CAMPAIGN_RESUME_INTERVAL_SECONDS`,
+  300s) le `paused_campaigns_due()` e volta a lancar a campanha quando
+  `next_batch_at` venceu. Sem isto a pausa diaria ficava eterna depois de um deploy.
+- **Fecho na retoma**: se o total ou os dias ja esgotaram, a campanha passa a
+  `completed` em vez de arrancar outra vez.
+- **Pausa diaria**: `next_batch_at` passa a ser a proxima meia-noite **NY**
+  (`next_day_start_utc`), nao "agora + 24h" — evita perder a manha seguinte.
+- **Fora da janela**: `create_call` devolve `outside_hours` (transitorio) e o
+  auto-dialer **pausa 1h sem marcar o contacto como saltado**. Antes, arrancar
+  fora de horas queimava a fila inteira como `blocked`.
+- **Testes**: **1.340 pytest**; cobertura **70,0%**.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

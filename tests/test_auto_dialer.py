@@ -305,6 +305,74 @@ def test_auto_dialer_termina_no_orcamento_total(monkeypatch):
     assert final["finished_at"]
 
 
+def test_auto_dialer_pausa_fora_da_janela_sem_saltar(monkeypatch):
+    _import_company("+16175550135", "Boston", "MA")
+    campaign = voice.create_campaign(
+        "ForaJanela", "Boston", "Roofing", 3, 0, 3, 3, True, False
+    )
+    monkeypatch.setattr(
+        auto_dialer.telnyx_voice,
+        "create_call",
+        lambda *a, **k: {"ok": False, "reason": "outside_hours"},
+    )
+    asyncio.run(auto_dialer.run_campaign(campaign["id"]))
+    final = voice.get_campaign(campaign["id"])
+    assert final["status"] == "paused"
+    assert final["error"] == "outside_hours"
+    assert final["next_batch_at"]
+    assert final["skipped"] == 0
+
+
+def test_retoma_campanha_pausada_vencida(monkeypatch):
+    import backend.main as main_module
+
+    campaign = voice.create_campaign(
+        "Retoma", "Boston", "Roofing", 3, 0, 3, 3, True, False
+    )
+    past = (NOW - timedelta(minutes=5)).isoformat()
+    voice.update_campaign(
+        campaign["id"], status="paused", next_batch_at=past,
+        error="daily_budget_reached",
+    )
+    launched: list[int] = []
+    monkeypatch.setattr(
+        main_module, "_launch_voice_campaign", lambda cid: launched.append(cid)
+    )
+    resumed = asyncio.run(main_module._resume_due_voice_campaigns())
+    assert campaign["id"] in resumed
+    assert campaign["id"] in launched
+    final = voice.get_campaign(campaign["id"])
+    assert final["status"] == "running"
+    assert final["next_batch_at"] is None
+    assert final["error"] is None
+
+
+def test_retoma_termina_campanha_no_orcamento_total(monkeypatch):
+    import backend.main as main_module
+
+    company = _company_for_budget("+16175550136")
+    campaign = voice.create_campaign(
+        "RetomaTotal", "Boston", "Roofing", 3, 0, 3, 3, True, False, 0.10, 5.0, 30
+    )
+    call = voice.create_voice_call(
+        company, provider="telnyx", campaign_id=str(campaign["id"])
+    )
+    voice.update_voice_call(call["id"], status="ended", cost_cents=6)
+    past = (NOW - timedelta(minutes=5)).isoformat()
+    voice.update_campaign(
+        campaign["id"], status="paused", next_batch_at=past,
+        error="daily_budget_reached",
+    )
+    monkeypatch.setattr(
+        main_module, "_launch_voice_campaign", lambda cid: None
+    )
+    resumed = asyncio.run(main_module._resume_due_voice_campaigns())
+    assert resumed == []
+    final = voice.get_campaign(campaign["id"])
+    assert final["status"] == "completed"
+    assert final["error"] == "total_budget_reached"
+
+
 def test_metrics_calcula_funil(monkeypatch):
     _import_company("+16175550114", "Boston", "MA")
     conn = voice.get_conn()

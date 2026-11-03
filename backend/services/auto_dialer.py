@@ -13,6 +13,7 @@ import anyio
 from ..config import settings
 from ..utils.logger import logger
 from . import b2b_voice, telnyx_voice
+from .timeutil import next_day_start_utc
 
 MAX_GUARD_MULTIPLIER = 10
 
@@ -92,13 +93,31 @@ async def run_campaign(campaign_id: int) -> None:
                             reason,
                         )
                         return
+                    if reason == "outside_hours":
+                        # Fora da janela local do estado: nao queimar o
+                        # contacto. Pausa e o loop de retoma tenta daqui a
+                        # uma hora (o candidato continua na fila).
+                        next_batch = (
+                            datetime.now(timezone.utc) + timedelta(hours=1)
+                        ).isoformat()
+                        await _run_sync(
+                            lambda: b2b_voice.update_campaign(
+                                campaign_id,
+                                status="paused",
+                                next_batch_at=next_batch,
+                                error="outside_hours",
+                            )
+                        )
+                        logger.info(
+                            "[AUTO-DIALER] campanha %s pausada: fora da janela",
+                            campaign_id,
+                        )
+                        return
                     if reason in (
                         "daily_budget_reached",
                         "daily_calls_reached",
                     ):
-                        next_batch = (
-                            datetime.now(timezone.utc) + timedelta(days=1)
-                        ).isoformat()
+                        next_batch = next_day_start_utc()
                         await _run_sync(
                             lambda: b2b_voice.update_campaign(
                                 campaign_id,
@@ -149,9 +168,7 @@ async def run_campaign(campaign_id: int) -> None:
                     )
                 )
             else:
-                next_batch = (
-                    datetime.now(timezone.utc) + timedelta(days=1)
-                ).isoformat()
+                next_batch = next_day_start_utc()
                 await _run_sync(
                     lambda: b2b_voice.update_campaign(
                         campaign_id,

@@ -140,6 +140,7 @@ Variaveis de ambiente:
 | `VOICE_CAMPAIGN_TOTAL_BUDGET_USD` | sim | default de campanha (100) |
 | `VOICE_CAMPAIGN_DAILY_BUDGET_USD` | sim | default diario de campanha (5) |
 | `VOICE_CAMPAIGN_MAX_DAYS` | sim | default de dias (30) |
+| `VOICE_CAMPAIGN_RESUME_INTERVAL_SECONDS` | sim | cadencia do loop de retoma (300) |
 | `VOICE_FALLBACK_AUDIO_URL` | nao | vazio deriva de `PUBLIC_API_URL/api/voice/fallback.mp3` |
 | `VOICE_STAGING_MODE` | sim | `false` so durante o teste real |
 | `EMAIL_API_KEY` | sim | Resend para o email da vitrine |
@@ -303,6 +304,14 @@ O backend reserva 25c por chamada ativa e substitui pelo custo real no fim.
 `campaign_budget_status` corre antes de cada chamada; o auto-scheduler pausa
 ou completa a campanha automaticamente. Ha ainda uma rede de seguranca global:
 `VOICE_MAX_DAILY_BUDGET_USD=5` e `VOICE_MAX_CALLS_PER_DAY=100`.
+
+### Retoma automatica
+
+`_voice_campaign_resume_loop` corre a cada 5 min e retoma campanhas `paused`
+quando `next_batch_at` venceu. A pausa diaria aponta para a proxima
+meia-noite de Nova Iorque; se o total ou os dias ja esgotaram, a campanha e
+fechada como `completed` na retoma. Fora da janela local do estado a chamada
+devolve `outside_hours` e a campanha pausa 1h **sem** saltar o contacto.
 
 ## Chamada de teste controlada
 

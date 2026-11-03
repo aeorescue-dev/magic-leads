@@ -124,9 +124,17 @@ def create_call(
         company, allow_international=(campaign_id == "test_call")
     )
     if not eligibility["allowed"]:
+        reasons = list(eligibility.get("reasons") or [])
+        # Fora da janela local e' transitorio: pausa a campanha em vez de
+        # marcar a empresa como saltada para sempre.
+        reason = (
+            "outside_hours"
+            if reasons and all(item == "outside_hours" for item in reasons)
+            else "blocked"
+        )
         return {
             "ok": False,
-            "reason": "blocked",
+            "reason": reason,
             "reasons": eligibility["reasons"],
             "reason_labels": eligibility["reason_labels"],
         }

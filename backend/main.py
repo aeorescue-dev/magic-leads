@@ -1632,6 +1632,93 @@ def _launch_voice_campaign(campaign_id: int) -> None:
     )
 
 
+async def _resume_due_voice_campaigns() -> list[int]:
+    """Retoma campanhas pausadas cujo `next_batch_at` já passou.
+
+    Uma pausa por orçamento diário, lote do dia ou janela de chamadas grava
+    `status='paused'` + `next_batch_at`. Sem este passo a campanha ficava
+    parada para sempre depois do deploy. Campanhas que entretanto esgotaram o
+    total ou os dias são fechadas aqui em vez de voltarem a arrancar.
+    """
+    due = await anyio.to_thread.run_sync(b2b_voice.paused_campaigns_due)
+    resumed: list[int] = []
+    for campaign_id in due:
+        campaign_id = int(campaign_id)
+        if campaign_id in _voice_campaign_tasks:
+            continue
+        campaign = await anyio.to_thread.run_sync(
+            b2b_voice.get_campaign, campaign_id
+        )
+        if not campaign or campaign.get("status") != "paused":
+            continue
+        budget = await anyio.to_thread.run_sync(
+            b2b_voice.campaign_budget_status, campaign_id
+        )
+        reason = str(budget.get("blocked_reason") or "")
+        if reason in ("total_budget_reached", "days_limit_reached"):
+            await anyio.to_thread.run_sync(
+                lambda cid=campaign_id, why=reason: b2b_voice.update_campaign(
+                    cid,
+                    status="completed",
+                    finished_at=datetime.now(timezone.utc).isoformat(),
+                    next_batch_at=None,
+                    error=why[:300],
+                )
+            )
+            logger.info(
+                "[VOICE] campanha %s concluída na retoma: %s",
+                campaign_id,
+                reason,
+            )
+            continue
+        quota = int(campaign.get("quota_total") or campaign.get("max_calls") or 0)
+        calls = int(campaign.get("calls_started") or 0)
+        if quota > 0 and calls >= quota:
+            await anyio.to_thread.run_sync(
+                lambda cid=campaign_id: b2b_voice.update_campaign(
+                    cid,
+                    status="completed",
+                    finished_at=datetime.now(timezone.utc).isoformat(),
+                    next_batch_at=None,
+                )
+            )
+            continue
+        await anyio.to_thread.run_sync(
+            lambda cid=campaign_id: b2b_voice.update_campaign(
+                cid, status="running", next_batch_at=None, error=None
+            )
+        )
+        _launch_voice_campaign(campaign_id)
+        resumed.append(campaign_id)
+    return resumed
+
+
+async def _voice_campaign_resume_loop() -> None:
+    """Verifica periodicamente campanhas pausadas prontas a retomar."""
+    interval = max(
+        30,
+        int(
+            getattr(
+                settings, "VOICE_CAMPAIGN_RESUME_INTERVAL_SECONDS", 300
+            )
+            or 300
+        ),
+    )
+    logger.info(
+        "Retoma de campanhas de voz ativa (a cada %ss)", interval
+    )
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            resumed = await _resume_due_voice_campaigns()
+            if resumed:
+                logger.info(
+                    "[VOICE] campanhas retomadas: %s", resumed
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Falha a retomar campanhas de voz: %s", e)
+
+
 def _remember_scrape_run(state: dict) -> None:
     """Guarda o run em memória com poda (o processo pode viver semanas)."""
     run_id = state.get("run_id")
@@ -5461,6 +5548,7 @@ async def _lifespan(app):
     _owner_backfill_task = None
     _outbound_task = None
     _freshness_task = None
+    _voice_resume_task = None
 
     # Fase 2: o writer de telemetria arranca com o processo. Sem isto o
     # buffer acumula em memoria ate limite e perde eventos sem nunca
@@ -5520,6 +5608,10 @@ async def _lifespan(app):
             )
     except Exception as e:
         logger.warning("Falha ao fechar campanhas de voz interrompidas: %s", e)
+
+    # Pausas por orcamento diario/lote/janela nunca podem ficar eternas.
+    # O loop so' arranca campanhas com `next_batch_at` vencido.
+    _voice_resume_task = asyncio.create_task(_voice_campaign_resume_loop())
 
     # B1: higiene de dispositivos push (limite de 5). Corrige o estado legado
     # (utilizadores com 9 browsers) sem esperar por um novo subscribe.
@@ -5671,6 +5763,7 @@ async def _lifespan(app):
         ("owner_backfill", _owner_backfill_task),
         ("outbound", _outbound_task),
         ("freshness", _freshness_task),
+        ("voice_resume", _voice_resume_task),
     ):
         if task:
             task.cancel()
