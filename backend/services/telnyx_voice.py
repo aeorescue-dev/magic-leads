@@ -14,6 +14,7 @@ import hmac
 import json
 import math
 import re
+import threading
 import time
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -412,6 +413,59 @@ def _truthy(value: Any) -> bool:
     return str(value or "").strip().lower() in ("1", "true", "yes", "y")
 
 
+def _start_assistant_for_call(
+    voice_call_id: int, call_control_id: str, client_state: dict
+) -> dict:
+    """Arranca o assistant apenas depois do AMD confirmar humano."""
+    if not configured() or not call_control_id:
+        return {"ok": False, "reason": "not_configured"}
+    current = b2b_voice.get_voice_call(voice_call_id) or {}
+    assistant_id = str(current.get("assistant_id") or "")
+    if not assistant_id:
+        b2b_voice.update_voice_call(
+            voice_call_id, status="ended", hangup_cause="missing_assistant"
+        )
+        hangup_call(call_control_id)
+        return {"ok": False, "reason": "missing_assistant"}
+    if not b2b_voice.claim_assistant_start(voice_call_id):
+        return {"ok": False, "reason": "already_started"}
+    rendered = _render_for_call(current, client_state)
+    result = start_ai_assistant(
+        call_control_id,
+        assistant_id,
+        instructions=str(rendered.get("instructions") or ""),
+        greeting=str(rendered.get("greeting") or ""),
+        voice=str(rendered.get("voice_id") or ""),
+    )
+    if result.get("ok"):
+        b2b_voice.update_voice_call(voice_call_id, status="in_call")
+    else:
+        b2b_voice.update_voice_call(
+            voice_call_id, status="ended", hangup_cause="assistant_start_failed"
+        )
+        hangup_call(call_control_id)
+    return result
+
+
+def _schedule_assistant_fallback(
+    voice_call_id: int,
+    call_control_id: str,
+    client_state: dict,
+    delay_seconds: int = 8,
+) -> None:
+    """Se o AMD nao chegar, arranca o assistant ao fim de 8s (fail-open)."""
+
+    def _run() -> None:
+        time.sleep(delay_seconds)
+        current = b2b_voice.get_voice_call(voice_call_id) or {}
+        if current.get("status") == "assistant_pending":
+            _start_assistant_for_call(
+                voice_call_id, call_control_id, client_state
+            )
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
 def handle_webhook(payload: dict) -> dict:
     """Normaliza eventos Telnyx e executa a ação de showcase no DTMF 1."""
     data = payload.get("data") if isinstance(payload, dict) else {}
@@ -458,6 +512,10 @@ def handle_webhook(payload: dict) -> dict:
                 "result": result,
                 "event_type": event_type,
             }
+        if voice_call_id:
+            _start_assistant_for_call(
+                voice_call_id, call_control_id, state
+            )
         return {
             "ok": True,
             "action": "amd_human",
@@ -534,46 +592,41 @@ def handle_webhook(payload: dict) -> dict:
         current = b2b_voice.get_voice_call(voice_call_id) or {}
         b2b_voice.update_voice_call(
             voice_call_id,
-            status="in_call",
+            status="assistant_pending",
             answered_at=datetime.now(timezone.utc).isoformat(),
         )
         call_control_id = str(
             body.get("call_control_id") or current.get("provider_call_id") or ""
         )
         assistant_id = str(current.get("assistant_id") or "")
-        assistant_result = None
+        if configured() and call_control_id and not assistant_id:
+            # Seguranca: nunca deixar uma chamada real em silencio.
+            b2b_voice.update_voice_call(
+                voice_call_id,
+                status="ended",
+                hangup_cause="missing_assistant",
+            )
+            hangup_call(call_control_id)
+            return {
+                "ok": True,
+                "action": "answered",
+                "voice_call_id": voice_call_id,
+                "assistant_started": False,
+                "waiting_for_amd": False,
+                "reason": "missing_assistant",
+            }
         if configured() and call_control_id:
-            if assistant_id:
-                rendered = _render_for_call(current, state)
-                assistant_result = start_ai_assistant(
-                    call_control_id,
-                    assistant_id,
-                    instructions=str(rendered.get("instructions") or ""),
-                    greeting=str(rendered.get("greeting") or ""),
-                    voice=str(rendered.get("voice_id") or ""),
-                )
-                if not assistant_result.get("ok"):
-                    b2b_voice.update_voice_call(
-                        voice_call_id,
-                        status="ended",
-                        hangup_cause="assistant_start_failed",
-                    )
-                    hangup_call(call_control_id)
-            else:
-                # Segurança: nunca deixar uma chamada real em silêncio.
-                b2b_voice.update_voice_call(
-                    voice_call_id,
-                    status="ended",
-                    hangup_cause="missing_assistant",
-                )
-                hangup_call(call_control_id)
+            # Nao fala antes do AMD. O evento AMD humano arranca o assistant;
+            # se o AMD nao chegar em 8s, o timer arranca (fail-open).
+            _schedule_assistant_fallback(
+                voice_call_id, call_control_id, state
+            )
         return {
             "ok": True,
             "action": "answered",
             "voice_call_id": voice_call_id,
-            "assistant_started": bool(
-                assistant_result and assistant_result.get("ok")
-            ),
+            "assistant_started": False,
+            "waiting_for_amd": bool(configured() and call_control_id),
         }
     elif "hangup" in event_type or "call.ended" in event_type or "ended" in event_type:
         current = b2b_voice.get_voice_call(voice_call_id) or {}

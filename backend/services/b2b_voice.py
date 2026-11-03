@@ -2209,6 +2209,22 @@ def create_voice_call(
         conn.close()
 
 
+def claim_assistant_start(voice_call_id: int) -> bool:
+    """Reclama o arranque do assistant uma unica vez (AMD vs timer)."""
+    init()
+    conn = get_conn()
+    try:
+        cur = conn.execute(
+            "UPDATE voice_calls SET status='assistant_starting' "
+            "WHERE id=? AND status='assistant_pending'",
+            (int(voice_call_id),),
+        )
+        conn.commit()
+        return cur.rowcount == 1
+    finally:
+        conn.close()
+
+
 def update_voice_call(voice_call_id: int, **fields: Any) -> Optional[dict]:
     init()
     allowed = {

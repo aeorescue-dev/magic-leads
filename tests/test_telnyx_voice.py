@@ -646,7 +646,23 @@ def test_answered_envia_script_renderizado_ao_assistant(monkeypatch):
             }
         }
     )
-    assert result["assistant_started"] is True
+    assert result["assistant_started"] is False
+    assert result["waiting_for_amd"] is True
+    assert captured == {}
+    assert voice.get_voice_call(call_id)["status"] == "assistant_pending"
+
+    telnyx_voice.handle_webhook(
+        {
+            "data": {
+                "event_type": "call.machine.premium.detection.ended",
+                "payload": {
+                    "client_state": state,
+                    "call_control_id": "v3:answered",
+                    "result": "human_business",
+                },
+            }
+        }
+    )
     sent = captured["json"]["assistant"]
     assert sent["id"] == "assistant-123"
     assert "Telnyx Roofing" in sent["instructions"]

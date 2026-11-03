@@ -132,7 +132,6 @@ Variaveis de ambiente:
 | `TELNYX_SHARED_ASSISTANT_ID` | recomendada | assistant unico para os 15 roteiros (limite Telnyx) |
 | `TELNYX_ASSISTANT_TRANSCRIPTION_MODEL` | nao | `deepgram/nova-3` por defeito |
 | `TELNYX_ASSISTANT_NOISE_SUPPRESSION` | nao | `krisp` por defeito |
-| `TELNYX_ASSISTANT_GREETING_DELAY_MS` | nao | `5000` (espera pelo AMD antes do greeting) |
 | `TELNYX_ASSISTANT_EXPRESSIVE_MODE` | nao | `true` para Ultra expressive |
 | `VOICE_TEST_NUMBERS` | teste | allowlist E.164 separada por virgulas |
 | `VOICE_FALLBACK_AUDIO_URL` | nao | vazio deriva de `PUBLIC_API_URL/api/voice/fallback.mp3` |
@@ -168,8 +167,10 @@ por trade.
 
 - Todas as chamadas sao criadas com `answering_machine_detection="premium"`
   (`total_analysis_time_millis=5000`).
-- O assistant tem `greeting_delay_ms=5000` e
+- O assistant tem
   `voicemail_detection.on_voicemail_detected.action="stop_assistant"`.
+- `call.answered` marca `assistant_pending` e **nao** arranca o assistant. O
+  AMD humano arranca-o; se o AMD nao chegar em 8s, um timer fail-open arranca.
 - No webhook AMD, `machine/silence/fax_detected/beep` marcam
   `intent=voicemail`, `hangup_cause=voicemail_detected` e desligam a chamada.
   `human/human_residence/human_business/not_sure` seguem para o fluxo normal.

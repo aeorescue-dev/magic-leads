@@ -1866,15 +1866,18 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Dial**: `answering_machine_detection="premium"` com
   `total_analysis_time_millis=5000` em todas as chamadas.
 - **Assistant**: `voicemail_detection.on_voicemail_detected.action =
-  stop_assistant` e `greeting_delay_ms=5000`; o greeting espera pelo AMD antes
-  de falar.
+  stop_assistant`.
+- **Arranque adiado**: `call.answered` marca `assistant_pending` e **nao**
+  arranca o assistant. O AMD humano arranca-o; o AMD maquina desliga. Se o AMD
+  nao chegar em 8s, um timer fail-open arranca o assistant.
 - **Webhook AMD**: `call.machine.premium.detection.ended` /
   `call.machine.detection.ended`; `machine/silence/fax_detected/beep` ->
   `intent=voicemail`, `hangup_cause=voicemail_detected` e hangup imediato.
   `human/human_residence/human_business/not_sure` seguem normalmente.
   Correlaciona pelo `call_control_id` quando falta `client_state`.
 - **Resultado**: o assistant nao conversa com voicemail nem envia links nesse
-  caso; chamadas humanas mantem o fluxo 1/2.
+  caso; chamadas humanas mantem o fluxo 1/2. O `greeting_delay_ms` nao e aceite
+  pela API atual; o adiamento e feito no backend.
 - **Testes**: **1.328 pytest**; cobertura **70,0%**.
 
 ### P1 (a seguir)

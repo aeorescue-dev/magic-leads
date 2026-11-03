@@ -56,9 +56,6 @@ class Settings(BaseSettings):
     TELNYX_ASSISTANT_KEYTERMS: str = (
         "gmail.com,outlook.com,yahoo.com,hotmail.com,icloud.com,protonmail.com"
     )
-    # Espera antes do greeting para dar tempo ao AMD premium. Se for maquina,
-    # o assistant e parado e a chamada e desligada pelo webhook AMD.
-    TELNYX_ASSISTANT_GREETING_DELAY_MS: int = 5000
     # Plano Telnyx limita TeXML Applications (10). Quando definido, todos os
     # roteiros usam este assistant unico; as instructions sao renderizadas por
     # chamada no ai_assistant_start.

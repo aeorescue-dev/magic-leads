@@ -780,13 +780,6 @@ def sync_to_telnyx(trade_code: str) -> dict:
             },
         },
     }
-    greeting_delay = int(
-        getattr(settings, "TELNYX_ASSISTANT_GREETING_DELAY_MS", 5000) or 0
-    )
-    if greeting_delay > 0:
-        body["telephony_settings"]["greeting_delay_ms"] = min(
-            10000, greeting_delay
-        )
     transcription_model = str(
         getattr(settings, "TELNYX_ASSISTANT_TRANSCRIPTION_MODEL", "") or ""
     ).strip()

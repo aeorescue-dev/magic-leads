@@ -267,7 +267,6 @@ def test_sync_inclui_voz_nativa_tools_e_dtmf(monkeypatch):
         ]["action"]
         == "stop_assistant"
     )
-    assert body["telephony_settings"]["greeting_delay_ms"] == 5000
     assert "model" not in body
     assert "send_showcase_link" in body["instructions"]
     names = {tool["webhook"]["name"] for tool in body["tools"]}
