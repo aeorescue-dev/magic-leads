@@ -1770,6 +1770,25 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   na matriz cidade x nicho.
 - **Testes**: **1.319 pytest**; cobertura **70,0%**.
 
+### Fase 2F - Credenciais reais e shared assistant (2026-11-03)
+
+- **Variaveis Telnyx**: as chaves foram corrigidas no Railway; quatro nomes
+  tinham `:` no fim (`TELNYX_API_KEY:`), por isso o pydantic nao as lia. Ficaram
+  `TELNYX_API_KEY`, `TELNYX_CONNECTION_ID`, `TELNYX_FROM_NUMBER`,
+  `TELNYX_PUBLIC_KEY` e `VOICE_TEST_NUMBERS`. Validacao real: API 200,
+  connection 200, numero existe, chave publica 32 bytes.
+- **Voice ID real**: a API rejeitava `Telnyx.Ultra.Callie`; o ID da Callie e
+  `Telnyx.Ultra.00a77add-48d5-4ef6-8157-71e5437b282d` (en-US, female).
+- **Limite Telnyx**: a conta so permite **10 TeXML Applications**. Foram criados
+  10 assistants e o 11.o devolveu `10039`. Solucao: um **shared assistant**
+  (`assistant-f688c3cb-...`) para os 15 roteiros, com instructions renderizadas
+  por chamada. `TELNYX_SHARED_ASSISTANT_ID` ativa o modo.
+- **Bug de sync**: a resposta da API e flat (`{"id": ...}`); o codigo so lia
+  `data.id` e nao guardava o ID. Corrigido para aceitar flat e nested.
+- **Resultado**: `sync_all` devolve `synced=15`, `shared=true`; os 15 roteiros
+  apontam para o assistant unico com voz Callie, DTMF ativo e as 4 tools.
+- **Testes**: **1.320 pytest**; cobertura **70,0%**.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

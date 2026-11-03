@@ -129,6 +129,7 @@ Variaveis de ambiente:
 | `PUBLIC_API_URL` | sim | base dos webhooks/tools |
 | `TELNYX_ASSISTANT_VOICE` | nao | Callie (`Telnyx.Ultra.00a77add-...`) por defeito |
 | `TELNYX_ASSISTANT_MODEL` | nao | vazio usa o default Telnyx |
+| `TELNYX_SHARED_ASSISTANT_ID` | recomendada | assistant unico para os 15 roteiros (limite Telnyx) |
 | `TELNYX_ASSISTANT_EXPRESSIVE_MODE` | nao | `true` para Ultra expressive |
 | `VOICE_TEST_NUMBERS` | teste | allowlist E.164 separada por virgulas |
 | `VOICE_STAGING_MODE` | sim | `false` so durante o teste real |
@@ -141,6 +142,23 @@ Variaveis de ambiente:
 - `voice_settings.voice` nativo;
 - `telephony_settings.disable_dtmf=false` (DTMF ativo por defeito);
 - tools webhook `send_showcase_link`, `capture_email` e `remove_from_list`.
+
+## Limite de assistants e modo shared
+
+A conta Telnyx atual permite **10 TeXML Applications** (erro `10039`). Como os 15
+roteiros precisam de assistant, usamos **um assistant unico**:
+
+- `TELNYX_SHARED_ASSISTANT_ID=assistant-...`
+- `sync_all` atualiza esse assistant uma vez e grava o mesmo `assistant_id` nos
+  15 roteiros.
+- O `ai_assistant_start` envia `instructions`, `greeting` e `voice_settings`
+  renderizados por chamada, por isso o assistant fala o roteiro do trade certo.
+- As tools (`mark_acceptance`, `send_showcase_link`, `capture_email`,
+  `remove_from_list`) sao as mesmas para todos os trades.
+
+Se a conta for upgraded para mais de 15 TeXML apps, basta remover
+`TELNYX_SHARED_ASSISTANT_ID` e correr **Sync Telnyx** para criar um assistant
+por trade.
 
 ## DTMF e tools
 
