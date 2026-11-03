@@ -260,6 +260,18 @@ def _registered_call(company: dict, provider_id: str = "v3:tool-call") -> dict:
     return voice.get_voice_call(created["voice_call_id"]) or {}
 
 
+def test_tool_mark_acceptance_regista_intent():
+    company = _seed_company()
+    _registered_call(company)
+    result = telnyx_voice.handle_tool_call(
+        "mark_acceptance", {}, "v3:tool-call"
+    )
+    assert result["ok"] is True
+    call = voice.get_voice_call_by_provider_id("v3:tool-call")
+    assert call is not None
+    assert call["intent"] == "showcase"
+
+
 def test_tool_capture_email_guarda_e_envia(monkeypatch):
     company = _seed_company()
     _seed_showcase()

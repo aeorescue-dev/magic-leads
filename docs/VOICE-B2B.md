@@ -218,7 +218,8 @@ cidade x nicho tambem ganhou as colunas Aceite e Assinatura.
 
 Definicoes:
 
-- **Aceite** = `intent='showcase'` na chamada (DTMF 1 ou yes falado).
+- **Aceite** = `intent='showcase'` na chamada. E marcado pela tool
+  `mark_acceptance` (yes falado) e pelo DTMF 1; o envio tambem garante a marca.
 - **Assinatura** = `checkout_session_id` preenchido no webhook Stripe
   `checkout.session.completed` com `source=voice_showcase`.
 - **Conversao** = assinaturas / aceites (nao sobre cliques), para medir a

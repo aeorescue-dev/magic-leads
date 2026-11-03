@@ -574,6 +574,10 @@ def handle_tool_call(
     company_id = int(call.get("company_id") or 0)
     name = str(tool_name or "").strip()
 
+    if name == "mark_acceptance":
+        b2b_voice.update_voice_call(voice_call_id, intent="showcase")
+        return {"ok": True, "message": "Acceptance recorded."}
+
     if name == "send_showcase_link":
         company = b2b_voice.get_company(company_id) if company_id else {}
         on_file = _valid_email((company or {}).get("email"))

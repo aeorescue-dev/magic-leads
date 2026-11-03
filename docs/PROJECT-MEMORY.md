@@ -1763,12 +1763,12 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Remetente**: `Magic Leads Team <support@magicleads.app>`.
 - **Analytics**: `summary.accepts`, `accept_rate`, `subscription_rate`,
   `revenue_per_accept_usd`; `by_state`, `by_city`, `by_trade` e
-  `by_city_trade`. Aceite = `intent='showcase'`; assinatura =
-  `checkout_session_id` preenchido no Stripe.
+  `by_city_trade`. Aceite = `intent='showcase'` (tool `mark_acceptance` ou
+  DTMF 1); assinatura = `checkout_session_id` preenchido no Stripe.
 - **Admin**: gauges **Voice Accept** e **Assinatura**, funil com passo
   **Aceite (1/Yes)**, tres tabelas por estado/cidade/nicho e colunas de aceite
   na matriz cidade x nicho.
-- **Testes**: **1.317 pytest**; cobertura **70,0%**.
+- **Testes**: **1.318 pytest**; cobertura **70,0%**.
 
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
