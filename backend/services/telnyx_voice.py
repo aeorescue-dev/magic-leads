@@ -456,6 +456,25 @@ def handle_webhook(payload: dict) -> dict:
                     duration = int(round(float(millis) / 1000.0))
                 except (TypeError, ValueError):
                     duration = 0
+        if not duration and current.get("answered_at"):
+            # O call.hangup da Telnyx nem sempre traz a duracao; sem este
+            # fallback a chamada ficava com 0s e custo 0.
+            try:
+                answered_dt = datetime.fromisoformat(
+                    str(current["answered_at"])
+                )
+                if answered_dt.tzinfo is None:
+                    answered_dt = answered_dt.replace(tzinfo=timezone.utc)
+                duration = max(
+                    0,
+                    int(
+                        (
+                            datetime.now(timezone.utc) - answered_dt
+                        ).total_seconds()
+                    ),
+                )
+            except (TypeError, ValueError):
+                duration = 0
         answered = bool(current.get("answered_at"))
         cost_cents = 0
         if duration > 0:

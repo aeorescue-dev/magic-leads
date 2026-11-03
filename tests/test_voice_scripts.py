@@ -258,6 +258,9 @@ def test_sync_inclui_voz_nativa_tools_e_dtmf(monkeypatch):
     body = captured["body"]
     assert body["voice_settings"]["voice"] == "Telnyx.Ultra.Asher"
     assert body["telephony_settings"]["disable_dtmf"] is False
+    assert body["transcription"]["model"] == "deepgram/nova-3"
+    assert "gmail.com" in body["transcription"]["settings"]["keyterm"]
+    assert body["telephony_settings"]["noise_suppression"] == "krisp"
     assert "model" not in body
     assert "send_showcase_link" in body["instructions"]
     names = {tool["webhook"]["name"] for tool in body["tools"]}

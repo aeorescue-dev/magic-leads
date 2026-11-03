@@ -49,6 +49,13 @@ class Settings(BaseSettings):
         "Telnyx.Ultra.00a77add-48d5-4ef6-8157-71e5437b282d"
     )
     TELNYX_ASSISTANT_EXPRESSIVE_MODE: bool = False
+    # Transcricao para dictado de emails: nova-3 e mais robusto que flux para
+    # enderecos soletrados; noise suppression ajuda em telemovel.
+    TELNYX_ASSISTANT_TRANSCRIPTION_MODEL: str = "deepgram/nova-3"
+    TELNYX_ASSISTANT_NOISE_SUPPRESSION: str = "krisp"
+    TELNYX_ASSISTANT_KEYTERMS: str = (
+        "gmail.com,outlook.com,yahoo.com,hotmail.com,icloud.com,protonmail.com"
+    )
     # Plano Telnyx limita TeXML Applications (10). Quando definido, todos os
     # roteiros usam este assistant unico; as instructions sao renderizadas por
     # chamada no ai_assistant_start.

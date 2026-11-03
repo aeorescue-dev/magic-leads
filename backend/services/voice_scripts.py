@@ -67,11 +67,14 @@ TOOL_GUIDANCE = (
     "  2. After the caller confirms the email on file, call "
     "send_showcase_link. Do not ask them to dictate the address again.\n"
     "  3. If there is no email on file, or the caller wants a different "
-    "address, ask them to say it slowly. Repeat it back and ask "
-    "\"Is that correct?\". Only after they confirm, call capture_email with "
-    "the exact address.\n"
+    "address, say: \"Please say the part before the @ first, then say 'at', "
+    "then the domain.\" Repeat the full address back. If any part is unclear, "
+    "ask the caller to spell that part letter by letter (for example, "
+    "F-A-B-I-O). Only after the caller confirms the full address, call "
+    "capture_email with confirmed=true.\n"
     "  4. Never invent, guess, or silently correct an email. If capture_email "
-    "returns invalid_email, apologize and ask the caller to repeat it.\n"
+    "returns invalid_email, apologize and ask the caller to repeat it. After "
+    "two failed attempts, stop guessing and offer to try again later.\n"
     "- If the caller says no, stop, or asks to be removed, call "
     "remove_from_list and end politely.\n"
     "- Pressing 1 is equivalent to saying yes. DTMF input arrives as text.\n"
@@ -777,6 +780,22 @@ def sync_to_telnyx(trade_code: str) -> dict:
         "tools": _assistant_tools(),
         "telephony_settings": {"disable_dtmf": False},
     }
+    transcription_model = str(
+        getattr(settings, "TELNYX_ASSISTANT_TRANSCRIPTION_MODEL", "") or ""
+    ).strip()
+    if transcription_model:
+        transcription: dict = {"model": transcription_model, "language": "en"}
+        keyterms = str(
+            getattr(settings, "TELNYX_ASSISTANT_KEYTERMS", "") or ""
+        ).strip()
+        if keyterms:
+            transcription["settings"] = {"keyterm": keyterms}
+        body["transcription"] = transcription
+    noise_suppression = str(
+        getattr(settings, "TELNYX_ASSISTANT_NOISE_SUPPRESSION", "") or ""
+    ).strip()
+    if noise_suppression:
+        body["telephony_settings"]["noise_suppression"] = noise_suppression
     voice_settings = _voice_settings(script)
     if voice_settings:
         body["voice_settings"] = voice_settings

@@ -130,6 +130,8 @@ Variaveis de ambiente:
 | `TELNYX_ASSISTANT_VOICE` | nao | Callie (`Telnyx.Ultra.00a77add-...`) por defeito |
 | `TELNYX_ASSISTANT_MODEL` | nao | vazio usa o default Telnyx |
 | `TELNYX_SHARED_ASSISTANT_ID` | recomendada | assistant unico para os 15 roteiros (limite Telnyx) |
+| `TELNYX_ASSISTANT_TRANSCRIPTION_MODEL` | nao | `deepgram/nova-3` por defeito |
+| `TELNYX_ASSISTANT_NOISE_SUPPRESSION` | nao | `krisp` por defeito |
 | `TELNYX_ASSISTANT_EXPRESSIVE_MODE` | nao | `true` para Ultra expressive |
 | `VOICE_TEST_NUMBERS` | teste | allowlist E.164 separada por virgulas |
 | `VOICE_STAGING_MODE` | sim | `false` so durante o teste real |
@@ -209,13 +211,14 @@ Fluxo:
 2. Se existe email na ficha, o assistant pergunta:
    "Great! Can I send it to info@apexroofing.com?"
 3. Se o cliente confirma, chama `send_showcase_link` com esse endereco.
-4. Se nao existe email, ou o cliente quer outro, o assistant pede o endereco,
-   le de volta ("Is that correct?") e chama `capture_email` com
-   `confirmed=true`.
+4. Se nao existe email, ou o cliente quer outro, o assistant pede a parte antes
+   do `@`, depois o dominio, le o endereco completo de volta e chama
+   `capture_email` com `confirmed=true`. Se uma parte falhar, pede para
+   soletrar (ex.: F-A-B-I-O). Apos duas falhas, oferece tentar mais tarde.
 
-O ditado fica assim reservado aos casos sem email ou a pedido explicito, o que
-reduz drasticamente erros de ASR. O backend nunca inventa nem corrige um email
-em silencio.
+O ditado fica assim reservado aos casos sem email ou a pedido explicito. A
+transcricao usa `deepgram/nova-3` e noise suppression `krisp`; o backend nunca
+inventa nem corrige um email em silencio.
 
 ## Analytics de aceite e conversao
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import base64
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -192,6 +192,29 @@ def test_webhook_instrumenta_answered_e_hangup():
     assert call["listen_seconds"] == 65
     assert call["hangup_cause"] == "normal_clearing"
     assert call["cost_cents"] == 4
+
+
+def test_hangup_sem_duracao_usa_answered_at():
+    company = _seed_company()
+    created = telnyx_voice.create_call(company)
+    call_id = created["voice_call_id"]
+    answered = (datetime.now(timezone.utc) - timedelta(seconds=45)).isoformat()
+    voice.update_voice_call(call_id, status="in_call", answered_at=answered)
+    state = base64.b64encode(
+        json.dumps({"voice_call_id": call_id, "company_id": company["id"]}).encode()
+    ).decode()
+    telnyx_voice.handle_webhook(
+        {
+            "data": {
+                "event_type": "call.hangup",
+                "payload": {"client_state": state},
+            }
+        }
+    )
+    call = voice.get_voice_call(call_id)
+    assert 40 <= call["duration_seconds"] <= 60
+    assert call["listen_seconds"] >= 40
+    assert call["cost_cents"] > 0
 
 
 def test_email_fallback_cidade_usa_escopo_neutro(monkeypatch):

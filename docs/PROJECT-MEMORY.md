@@ -1805,6 +1805,23 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   das 07:01 ET foram anteriores a esta mudanca.
 - **Testes**: **1.321 pytest**; cobertura **70,0%**.
 
+### Fase 2H - Dictado de email e duracao (2026-11-03)
+
+- **Diagnostico real**: nas calls 9/10 o assistant pediu o email, mas a
+  transcricao ouviu "Familyvera dot com", "Fabio. Liveira." e nunca formou um
+  endereco valido; `capture_email` nao foi chamada. Nao era a tool, era ASR.
+- **Transcricao**: `deepgram/flux` -> `deepgram/nova-3`, `language=en`,
+  keyterms para dominios comuns; `noise_suppression=krisp`.
+- **Prompt**: pedir primeiro a parte antes do `@`, depois o dominio; soletrar
+  se necessario; repetir o endereco completo; nunca adivinhar. Apos duas
+  falhas, oferecer tentar mais tarde.
+- **Flow**: removida a tool `mark_acceptance` (causava um turno extra e, na
+  call 9, o assistant ficou sem resposta). `intent=showcase` passa a ser
+  marcado pelo DTMF 1 e pelas tools de email.
+- **Duracao**: fallback `answered_at -> hangup` quando a Telnyx nao envia
+  `duration_seconds`/`duration_millis`; custo deixa de ficar 0.
+- **Testes**: **1.322 pytest**; cobertura **70,0%**.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
