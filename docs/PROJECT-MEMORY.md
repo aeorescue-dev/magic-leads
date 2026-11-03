@@ -1789,6 +1789,18 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   apontam para o assistant unico com voz Callie, DTMF ativo e as 4 tools.
 - **Testes**: **1.320 pytest**; cobertura **70,0%**.
 
+### Fase 2G - Cap outbound e digest (2026-11-03)
+
+- **Over-cap real**: a 2026-11-03 12:01 UTC, Pedro enviou **4** com cap **3**.
+  Dois ticks sobrepostos tinham snapshots de capacidade independentes. O
+  `process_queue` ganhou um `asyncio.Lock` (tick sobreposto devolve
+  `tick_in_progress`) e uma re-checagem do cap na BD antes de enviar.
+- **Digest**: `hoje` passa a contar `outbound_messages.status='sent'` desde a
+  meia-noite de Nova Iorque, em vez do contador legado. O digest ganhou a linha
+  **FILA** com o motivo da retencao (quiet hours/cap) para explicar filas
+  antigas sem as pintar de vermelho.
+- **Testes**: **1.321 pytest**; cobertura **70,0%**.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

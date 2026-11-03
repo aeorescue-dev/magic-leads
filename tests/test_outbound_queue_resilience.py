@@ -269,6 +269,15 @@ async def test_reaper_runs_even_when_send_is_disabled(clean_engine, monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_tick_sobreposto_nao_corre_em_paralelo(clean_engine):
+    """Dois ticks em paralelo podiam ter snapshots de cap independentes."""
+    async with clean_engine._tick_lock:
+        result = await clean_engine.process_queue(now=NOW)
+    assert result["status"] == "tick_in_progress"
+    assert result["sent"] == 0
+
+
+@pytest.mark.asyncio
 async def test_cap_por_caixa_e_respeitado_no_mesmo_tick(clean_engine, monkeypatch):
     """Regressão 995007d: o snapshot não podia ser copiado.
 

@@ -31,6 +31,7 @@ import httpx
 
 from ..utils.logger import logger
 from .db import DB_PATH, get_connection
+from .timeutil import day_start_utc
 
 VPS_URL = (os.getenv("VPS_WORKER_URL") or "").strip().rstrip("/")
 VPS_SECRET = (os.getenv("VPS_WORKER_SECRET") or "").strip()
@@ -877,11 +878,14 @@ def build_digest() -> str:
                 "SELECT key, value FROM outbound_config WHERE city=''"
             )
         }
-        today_sent = 0
-        for r in conn.execute(
-            "SELECT sent FROM outbound_daily_counters WHERE day=?", (day,)
-        ):
-            today_sent += int(r["sent"] or 0)
+        today_sent = int(
+            conn.execute(
+                "SELECT COUNT(1) FROM outbound_messages WHERE status='sent' "
+                "AND sent_at >= ?",
+                (day_start_utc(day),),
+            ).fetchone()[0]
+            or 0
+        )
     finally:
         conn.close()
 
@@ -902,6 +906,11 @@ def build_digest() -> str:
         + f" · enviados 24h {sent_24h} · hoje {today_sent}"
         + f" · send_enabled={config.get('send_enabled')}",
     ]
+    queue_check = next(
+        (c for c in checks if c.get("check_name") == "queue_age"), None
+    )
+    if queued and queue_check:
+        lines.append(f"FILA       {queue_check['detail']}")
     cap = _queue_capacity(config, now)
     for mb in cap["mailboxes"]:
         lines.append(

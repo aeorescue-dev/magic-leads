@@ -10,6 +10,7 @@ fail-closed: `send_enabled=0` (default) desliga todo o processamento.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from datetime import datetime, timedelta, timezone
@@ -306,6 +307,11 @@ class OutboundEngine:
 
     # Alias para testes/monkeypatch.
     ENRICH_CONCURRENCY = 4
+
+    def __init__(self) -> None:
+        # Um tick de cada vez: dois ticks sobrepostos tinham snapshots de cap
+        # independentes e podiam estourar o limite da caixa (ex.: 4/3).
+        self._tick_lock = asyncio.Lock()
 
     async def aclose(self) -> None:
         """Fecha os clients HTTP partilhados (Gmail/EmailListVerify) no shutdown."""
@@ -726,6 +732,20 @@ class OutboundEngine:
     async def process_queue(
         self, limit: Optional[int] = None, now: Optional[datetime] = None
     ) -> dict:
+        """Wrapper que serializa ticks; um tick sobreposto e' ignorado."""
+        if self._tick_lock.locked():
+            return {
+                "status": "tick_in_progress",
+                "sent": 0,
+                "blocked_reason": "tick_in_progress",
+                "blocked_detail": "Outro tick de envio esta em curso.",
+            }
+        async with self._tick_lock:
+            return await self._process_queue_locked(limit=limit, now=now)
+
+    async def _process_queue_locked(
+        self, limit: Optional[int] = None, now: Optional[datetime] = None
+    ) -> dict:
         """Um tick do worker: envia ate' ao limite do chunk respeitando travas.
 
         Regras de bloqueio (nenhuma delas pode parar o tick inteiro):
@@ -895,6 +915,19 @@ class OutboundEngine:
                     stop_reason, stop_detail, len(messages) - sent - skipped - failed,
                 )
                 break
+
+            # Re-checa o cap na BD antes de enviar: o snapshot pode ter sido
+            # construido por um tick que ainda nao via o envio do outro.
+            cap_now = _int(mailbox.get("_cap"), 0)
+            if cap_now:
+                sent_now = await db_service.count_mailbox_sent_today(
+                    mailbox["id"], day
+                )
+                if sent_now >= cap_now:
+                    mailbox["sent_today"] = sent_now
+                    mailbox["remaining_today"] = 0
+                    deferred += 1
+                    continue
 
             if mailbox.get("_spillover"):
                 logger.info(
