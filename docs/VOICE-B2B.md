@@ -158,7 +158,8 @@ Todas exigem sessão **admin** (`_require_admin_user`).
 
 ## Roteiros de voz
 
-- 15 roteiros default em **inglês US**, status `draft`, versão 1.
+- 15 roteiros default com o template oficial aprovado, status `draft`.
+- O template inclui Opening & Pitch, “If Yes / Press 1” e “If No / Stop”.
 - Variáveis: `{{company}}`, `{{city}}`, `{{trade}}`, `{{permit_count}}`,
   `{{showcase_line}}`, `{{price_weekly}}`, `{{price_monthly}}`.
 - Aba **Roteiros** no `/admin/voice`: editar, pré-visualizar por cidade/empresa,

@@ -15,150 +15,73 @@ from ..config import settings
 from ..utils.logger import logger
 from . import b2b_voice, showcase
 
-DISCLOSURE = (
-    "Hi, this is an automated assistant from Magic Leads. This call may be "
-    "recorded for quality. You can say stop at any time and we will not call "
-    "you again."
+DISCLOSURE = "Hi {{company}}, this is an automated assistant from Magic Leads."
+
+TEMPLATE_VERSION = "2026-11-02.1"
+
+DEFAULT_TEMPLATE = (
+    "Opening & Pitch: Hi {{company}}, this is an automated assistant from "
+    "Magic Leads. On our website right now, we have {{showcase_line}}. We're "
+    "reaching out so you don't miss these exclusive opportunities. We deliver "
+    "the client's name, address, and the specific job to perform before any "
+    "competitor finds out. Can I send you our website link so you can check "
+    "these opportunities?\n\n"
+    "If Yes / Press 1: Great! What's the best email address to send the link "
+    "right now?\n\n"
+    "If No / Stop: No problem at all. I'll remove your number from our list. "
+    "Have a great day!"
 )
 
-_RULES = (
-    "RULES: Speak US English only. Keep the call under 60 seconds. Never "
-    "promise jobs, revenue or a specific close rate. Use only the facts in "
-    "{{showcase_line}} and {{permit_count}}. If asked whether you are an AI, "
-    "say yes. If the person says stop, not interested, or do not call, confirm "
-    "once and end the call. Do not mention homeowner names or exact addresses."
+TRADES = (
+    "remodeling",
+    "roofing",
+    "electrical",
+    "painting",
+    "hvac",
+    "plumbing",
+    "landscaping",
+    "windows",
+    "general_contractor",
+    "remediation",
+    "cleaning",
+    "pest_control",
+    "debris_removal",
+    "elevator",
+    "signage",
 )
 
-
-def _script(trade: str, value_line: str, objection_line: str) -> str:
-    return (
-        "ROLE: You are a courteous, executive US English B2B voice assistant "
-        "for Magic Leads. You call contractors, not homeowners.\n\n"
-        f"DISCLOSURE: \"{DISCLOSURE}\"\n\n"
-        "OPENING: \"Hi, I'm calling {{company}} because you're an active "
-        "{{trade}} contractor in {{city}}. Do you have thirty seconds?\"\n\n"
-        f"VALUE: \"{value_line} {objection_line}\"\n\n"
-        "QUALIFY: \"{{showcase_line}} Would it help if I sent you the masked "
-        "list by email so you can see the projects?\"\n\n"
-        "PRICE: \"Access is a seven-day pass for {{price_weekly}}, which is "
-        "{{price_monthly}} per month normalized. No annual contract and no "
-        "per-lead fee.\"\n\n"
-        "OBJECTIONS:\n"
-        "- Too expensive: \"It is a weekly pass, not a per-lead charge. You "
-        "can test one week and cancel.\"\n"
-        "- I already buy leads: \"Most shared-lead programs send the same "
-        "request to several contractors. We keep one business per address.\"\n"
-        "- Send information: \"I can send the masked city list and the "
-        "checkout link right now.\"\n"
-        "- Not interested: \"No problem. I will mark you as do-not-call and "
-        "we will not call again.\"\n\n"
-        "CLOSE: \"If you want the list, say yes or press one. If not, say "
-        "stop.\"\n\n" + _RULES
-    )
+DEFAULT_SCRIPTS: dict[str, str] = {trade: DEFAULT_TEMPLATE for trade in TRADES}
 
 
-DEFAULT_SCRIPTS: dict[str, str] = {
-    "remodeling": _script(
-        "remodeling",
-        "We track active remodeling and structure opportunities from public "
-        "records in {{city}}, including permit and property signals.",
-        "Unlike shared-lead marketplaces, we do not resell the same address "
-        "to a group of contractors.",
-    ),
-    "roofing": _script(
-        "roofing",
-        "We track active roofing and exterior opportunities from public "
-        "records in {{city}}.",
-        "One contractor per address means you are not bidding against four "
-        "other roofers for the same homeowner.",
-    ),
-    "electrical": _script(
-        "electrical",
-        "We track electrical and building-service opportunities from public "
-        "records in {{city}}.",
-        "You get a focused weekly list instead of paying separately for every "
-        "shared lead.",
-    ),
-    "painting": _script(
-        "painting",
-        "We track painting and property-condition opportunities from public "
-        "records in {{city}}.",
-        "The weekly pass is designed for contractors who want a predictable "
-        "local pipeline.",
-    ),
-    "hvac": _script(
-        "hvac",
-        "We track heating, cooling and building-service opportunities from "
-        "public records in {{city}}.",
-        "You see the opportunity before it is resold across a large "
-        "marketplace.",
-    ),
-    "plumbing": _script(
-        "plumbing",
-        "We track plumbing and water-related opportunities from public "
-        "records in {{city}}.",
-        "The pass gives you a local list without a per-lead auction.",
-    ),
-    "landscaping": _script(
-        "landscaping",
-        "We track landscaping, vegetation and exterior opportunities from "
-        "public records in {{city}}.",
-        "You can focus on the addresses that match your crew and service area.",
-    ),
-    "windows": _script(
-        "windows",
-        "We track window, door and exterior-envelope opportunities from "
-        "public records in {{city}}.",
-        "One business per address keeps your estimate pipeline cleaner.",
-    ),
-    "general_contractor": _script(
-        "general_contractor",
-        "We track construction, remodeling and property opportunities from "
-        "public records in {{city}}.",
-        "The weekly pass is built for contractors who want local projects "
-        "without a shared-lead race.",
-    ),
-    "remediation": _script(
-        "remediation",
-        "We track remediation, restoration and property-condition "
-        "opportunities from public records in {{city}}.",
-        "You get a focused list and a clear weekly price.",
-    ),
-    "cleaning": _script(
-        "cleaning",
-        "We track cleaning and property-condition opportunities from public "
-        "records in {{city}}.",
-        "The pass is weekly, so you can test your market without a long "
-        "contract.",
-    ),
-    "pest_control": _script(
-        "pest_control",
-        "We track pest-control and property-condition opportunities from "
-        "public records in {{city}}.",
-        "You see local signals without paying a separate fee for every shared "
-        "lead.",
-    ),
-    "debris_removal": _script(
-        "debris_removal",
-        "We track debris, cleanup and property-maintenance opportunities from "
-        "public records in {{city}}.",
-        "The weekly pass keeps the cost predictable while you test the route.",
-    ),
-    "elevator": _script(
-        "elevator",
-        "We track elevator and building-service opportunities from public "
-        "records in {{city}}.",
-        "The pass is designed for specialist contractors with a focused "
-        "service area.",
-    ),
-    "signage": _script(
-        "signage",
-        "We track signage, permit and business-location opportunities from "
-        "public records in {{city}}.",
-        "You get a local list without a shared-lead marketplace taking a cut "
-        "of every job.",
-    ),
-}
+def _apply_template(conn) -> None:
+    """Atualiza os 15 seeds para o template oficial e volta a draft."""
+    now = datetime.now(timezone.utc).isoformat()
+    for trade, body in DEFAULT_SCRIPTS.items():
+        existing = conn.execute(
+            "SELECT version FROM voice_scripts WHERE trade_code=?", (trade,)
+        ).fetchone()
+        version = int(existing["version"] or 0) + 1 if existing else 1
+        conn.execute(
+            """
+            INSERT INTO voice_scripts
+              (trade_code, version, status, body, disclosure, updated_at)
+            VALUES (?, ?, 'draft', ?, ?, ?)
+            ON CONFLICT(trade_code) DO UPDATE SET
+              version=excluded.version,
+              status='draft',
+              body=excluded.body,
+              disclosure=excluded.disclosure,
+              updated_at=excluded.updated_at
+            """,
+            (trade, version, body, DISCLOSURE, now),
+        )
+        conn.execute(
+            "INSERT INTO voice_script_versions "
+            "(trade_code, version, status, body, disclosure, created_at, created_by) "
+            "VALUES (?, ?, 'draft', ?, ?, ?, 0)",
+            (trade, version, body, DISCLOSURE, now),
+        )
+
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS voice_scripts (
@@ -199,22 +122,18 @@ def init() -> None:
     conn = b2b_voice.get_conn()
     try:
         conn.executescript(_SCHEMA)
-        count = int(conn.execute("SELECT COUNT(*) FROM voice_scripts").fetchone()[0] or 0)
-        if count == 0:
-            now = datetime.now(timezone.utc).isoformat()
-            for trade, body in DEFAULT_SCRIPTS.items():
-                conn.execute(
-                    "INSERT INTO voice_scripts "
-                    "(trade_code, version, status, body, disclosure, "
-                    "updated_at) VALUES (?, 1, 'draft', ?, ?, ?)",
-                    (trade, body, DISCLOSURE, now),
-                )
-                conn.execute(
-                    "INSERT INTO voice_script_versions "
-                    "(trade_code, version, status, body, disclosure, "
-                    "created_at) VALUES (?, 1, 'draft', ?, ?, ?)",
-                    (trade, body, DISCLOSURE, now),
-                )
+        row = conn.execute(
+            "SELECT value FROM voice_meta WHERE key='scripts_template_version'"
+        ).fetchone()
+        current = str(row["value"]) if row else ""
+        if current != TEMPLATE_VERSION:
+            _apply_template(conn)
+            conn.execute(
+                "INSERT INTO voice_meta (key, value) "
+                "VALUES ('scripts_template_version', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (TEMPLATE_VERSION,),
+            )
         conn.commit()
     finally:
         conn.close()

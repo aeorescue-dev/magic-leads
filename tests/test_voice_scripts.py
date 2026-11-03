@@ -22,6 +22,9 @@ def _clean():
             conn.execute(f"DELETE FROM {table}")
         conn.execute("DELETE FROM voice_script_versions")
         conn.execute("DELETE FROM voice_scripts")
+        conn.execute(
+            "DELETE FROM voice_meta WHERE key='scripts_template_version'"
+        )
         conn.commit()
     finally:
         conn.close()
@@ -30,17 +33,19 @@ def _clean():
     yield
 
 
-def test_seed_cria_roteiros_em_ingles_com_draft():
+def test_seed_cria_roteiros_com_template_oficial():
     scripts = voice_scripts.list_scripts()
-    assert len(scripts) >= 8
+    assert len(scripts) == 15
     codes = {item["trade_code"] for item in scripts}
     assert {"remodeling", "roofing", "electrical", "painting", "hvac"} <= codes
     for item in scripts:
         assert item["status"] == "draft"
         assert item["version"] == 1
-        assert "DISCLOSURE" in item["body"]
+        assert "Opening & Pitch" in item["body"]
         assert "automated assistant" in item["body"].lower()
-        assert "US English" in item["body"]
+        assert "before any competitor finds out" in item["body"]
+        assert "If Yes / Press 1" in item["body"]
+        assert "If No / Stop" in item["body"]
 
 
 def test_save_draft_incrementa_versao_e_approve():
@@ -77,7 +82,6 @@ def test_render_variaveis_e_showcase_line(monkeypatch):
     assert "Acme Roofing" in result["body"]
     assert "New York" in result["body"]
     assert "7 active roofing opportunities" in result["body"]
-    assert "$120" in result["body"]
     assert "{{company}}" not in result["body"]
 
 

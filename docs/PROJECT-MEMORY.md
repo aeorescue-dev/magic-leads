@@ -1684,10 +1684,11 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 
 ### Fase 2B — Roteiros e Telnyx AI (2026-11-02)
 
-- **15 roteiros default em inglês** (remodeling, roofing, electrical, painting,
-  HVAC, plumbing, landscaping, windows, general contractor, remediation,
-  cleaning, pest control, debris, elevator, signage). Status inicial `draft`,
-  versão 1, disclosure de IA e opt-out.
+- **15 roteiros default em inglês** com o template oficial aprovado:
+  “Hi {{company}}, this is an automated assistant from Magic Leads. On our
+  website right now, we have {{showcase_line}}…”. Todos em `draft`, versão
+  atualizada para 2 em produção, com labels Opening/Pitch, Yes/Press 1 e
+  No/Stop. O `assistant_id` é preservado em reedições.
 - **Variáveis**: `{{company}}`, `{{city}}`, `{{trade}}`, `{{permit_count}}`,
   `{{showcase_line}}`, `{{price_weekly}}`, `{{price_monthly}}`. A
   `showcase_line` é calculada por cidade/nicho e nunca promete o nicho quando
