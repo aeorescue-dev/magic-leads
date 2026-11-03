@@ -76,6 +76,50 @@ def create_call(
     dry_run: bool = False,
 ) -> dict:
     """Cria uma chamada Telnyx para uma empresa já validada pelo gate."""
+    if (
+        configured()
+        and not dry_run
+        and str(campaign_id or "") != "test_call"
+    ):
+        campaign_key = str(campaign_id or "")
+        if campaign_key.isdigit():
+            campaign_status = b2b_voice.campaign_budget_status(
+                int(campaign_key)
+            )
+            if (
+                campaign_status.get("ok")
+                and campaign_status.get("blocked_reason")
+            ):
+                return {
+                    "ok": False,
+                    "reason": campaign_status["blocked_reason"],
+                    "message": campaign_status.get("blocked_detail") or "",
+                    "campaign_budget": campaign_status,
+                }
+        usage = b2b_voice.voice_daily_usage()
+        estimate = max(
+            0, int(getattr(settings, "VOICE_ESTIMATED_CALL_COST_CENTS", 25) or 0)
+        )
+        budget_cents = int(usage.get("budget_cents") or 0)
+        if (
+            budget_cents > 0
+            and int(usage.get("estimated_total_cents") or 0) + estimate
+            > budget_cents
+        ):
+            return {
+                "ok": False,
+                "reason": "daily_budget_reached",
+                "message": "Limite diário de orçamento de voz atingido.",
+                "usage": usage,
+            }
+        max_calls = int(usage.get("max_calls_per_day") or 0)
+        if max_calls > 0 and int(usage.get("calls") or 0) >= max_calls:
+            return {
+                "ok": False,
+                "reason": "daily_calls_reached",
+                "message": "Limite diário de chamadas de voz atingido.",
+                "usage": usage,
+            }
     eligibility = b2b_voice.can_call(
         company, allow_international=(campaign_id == "test_call")
     )

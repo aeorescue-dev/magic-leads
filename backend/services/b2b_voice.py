@@ -213,6 +213,9 @@ CREATE TABLE IF NOT EXISTS voice_campaigns (
   calls_started INTEGER NOT NULL DEFAULT 0,
   showcases_sent INTEGER NOT NULL DEFAULT 0,
   skipped INTEGER NOT NULL DEFAULT 0,
+  budget_total_usd REAL NOT NULL DEFAULT 0,
+  budget_daily_usd REAL NOT NULL DEFAULT 0,
+  max_days INTEGER NOT NULL DEFAULT 0,
   error TEXT,
   next_batch_at TEXT,
   created_by INTEGER,
@@ -323,6 +326,9 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         ("include_fallback", "INTEGER NOT NULL DEFAULT 1"),
         ("dry_run", "INTEGER NOT NULL DEFAULT 0"),
         ("next_batch_at", "TEXT"),
+        ("budget_total_usd", "REAL NOT NULL DEFAULT 0"),
+        ("budget_daily_usd", "REAL NOT NULL DEFAULT 0"),
+        ("max_days", "INTEGER NOT NULL DEFAULT 0"),
     ):
         if name not in campaign_cols:
             conn.execute(f"ALTER TABLE voice_campaigns ADD COLUMN {name} {ddl}")
@@ -1158,6 +1164,7 @@ def stats() -> dict:
                 "GROUP BY campaign_id ORDER BY calls DESC LIMIT 20"
             ).fetchall()
         ]
+        usage = voice_daily_usage()
         return {
             "total": total,
             "callable": callable_count,
@@ -1171,6 +1178,21 @@ def stats() -> dict:
             "pilot_state": ", ".join(PILOT_STATES),
             "pilot_states": list(PILOT_STATES),
             "staging_mode": staging_mode(),
+            "daily_budget_usd": (
+                round(usage["budget_cents"] / 100.0, 2)
+                if usage["budget_cents"]
+                else 0.0
+            ),
+            "daily_spent_usd": round(
+                usage["estimated_total_cents"] / 100.0, 2
+            ),
+            "daily_calls": usage["calls"],
+            "max_calls_per_day": usage["max_calls_per_day"],
+            "daily_budget_remaining_usd": (
+                round(usage["budget_remaining_cents"] / 100.0, 2)
+                if usage["budget_remaining_cents"] is not None
+                else None
+            ),
             "calling_window": (
                 f"{_call_window()[0]:02d}:00–{_call_window()[1]:02d}:00 "
                 "local (ET/CT)"
@@ -1259,18 +1281,46 @@ def create_campaign(
     batch_size: Optional[int] = None,
     include_fallback: bool = True,
     dry_run: bool = False,
+    budget_total_usd: Optional[float] = None,
+    budget_daily_usd: Optional[float] = None,
+    max_days: Optional[int] = None,
 ) -> dict:
     init()
     now = _iso()
     quota = max(1, min(10000, int(quota_total if quota_total is not None else max_calls)))
     batch = max(1, min(quota, int(batch_size or quota)))
+    total_budget = max(
+        0.0,
+        float(
+            budget_total_usd
+            if budget_total_usd is not None
+            else getattr(settings, "VOICE_CAMPAIGN_TOTAL_BUDGET_USD", 100.0)
+        ),
+    )
+    daily_budget = max(
+        0.0,
+        float(
+            budget_daily_usd
+            if budget_daily_usd is not None
+            else getattr(settings, "VOICE_CAMPAIGN_DAILY_BUDGET_USD", 5.0)
+        ),
+    )
+    days = max(
+        0,
+        int(
+            max_days
+            if max_days is not None
+            else getattr(settings, "VOICE_CAMPAIGN_MAX_DAYS", 30)
+        ),
+    )
     conn = get_conn()
     try:
         cur = conn.execute(
             "INSERT INTO voice_campaigns "
             "(name, city, trade, status, max_calls, quota_total, batch_size, "
-            "include_fallback, dry_run, created_by, created_at, started_at) "
-            "VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?)",
+            "include_fallback, dry_run, budget_total_usd, budget_daily_usd, "
+            "max_days, created_by, created_at, started_at) "
+            "VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
                 city,
@@ -1280,6 +1330,9 @@ def create_campaign(
                 batch,
                 1 if include_fallback else 0,
                 1 if dry_run else 0,
+                round(total_budget, 2),
+                round(daily_budget, 2),
+                days,
                 int(created_by or 0),
                 now,
                 now,
@@ -1336,6 +1389,9 @@ def update_campaign(campaign_id: int, **fields: Any) -> Optional[dict]:
         "name",
         "city",
         "trade",
+        "budget_total_usd",
+        "budget_daily_usd",
+        "max_days",
     }
     updates = {key: value for key, value in fields.items() if key in allowed}
     if not updates:
@@ -2245,6 +2301,174 @@ def claim_fallback_playback(voice_call_id: int) -> bool:
         return cur.rowcount == 1
     finally:
         conn.close()
+
+
+def voice_daily_usage() -> dict:
+    """Uso de voz do dia (America/New_York), sem test_call/dry_run."""
+    from ..config import settings
+    from .timeutil import day_key, day_start_utc
+
+    day = day_key(_utc_now())
+    since = day_start_utc(day)
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT status, cost_cents FROM voice_calls "
+            "WHERE datetime(created_at) >= datetime(?) "
+            "AND COALESCE(provider,'')='telnyx' "
+            "AND COALESCE(campaign_id,'') <> 'test_call' "
+            "AND status <> 'dry_run'",
+            (since,),
+        ).fetchall()
+    finally:
+        conn.close()
+    calls = len(rows)
+    spent_cents = sum(int(row["cost_cents"] or 0) for row in rows)
+    active = sum(
+        1
+        for row in rows
+        if str(row["status"] or "") not in ("ended", "failed")
+    )
+    estimate = max(
+        0, int(getattr(settings, "VOICE_ESTIMATED_CALL_COST_CENTS", 25) or 0)
+    )
+    reserved_cents = active * estimate
+    estimated_total = spent_cents + reserved_cents
+    budget_cents = max(
+        0, int(round(float(getattr(settings, "VOICE_MAX_DAILY_BUDGET_USD", 5.0) or 0) * 100))
+    )
+    max_calls = max(
+        0, int(getattr(settings, "VOICE_MAX_CALLS_PER_DAY", 100) or 0)
+    )
+    return {
+        "day": day,
+        "calls": calls,
+        "spent_cents": spent_cents,
+        "active_calls": active,
+        "reserved_cents": reserved_cents,
+        "estimated_total_cents": estimated_total,
+        "budget_cents": budget_cents,
+        "budget_remaining_cents": (
+            max(0, budget_cents - estimated_total) if budget_cents > 0 else None
+        ),
+        "max_calls_per_day": max_calls,
+        "calls_remaining": (
+            max(0, max_calls - calls) if max_calls > 0 else None
+        ),
+    }
+
+
+def campaign_budget_status(campaign_id: int) -> dict:
+    """Tetos de campanha: total, diario e dias. Inclui reserva de ativas."""
+    from ..config import settings
+    from .timeutil import day_key, day_start_utc
+
+    campaign = get_campaign(int(campaign_id))
+    if not campaign:
+        return {"ok": False, "reason": "campaign_not_found"}
+    now = _utc_now()
+    started = parse_dt(
+        campaign.get("started_at") or campaign.get("created_at")
+    ) or now
+    days_elapsed = max(1, (now - started).days + 1)
+    max_days = max(0, int(campaign.get("max_days") or 0))
+    day = day_key(now)
+    since = day_start_utc(day)
+    estimate = max(
+        0, int(getattr(settings, "VOICE_ESTIMATED_CALL_COST_CENTS", 25) or 0)
+    )
+    conn = get_conn()
+    try:
+        all_rows = conn.execute(
+            "SELECT status, cost_cents FROM voice_calls "
+            "WHERE campaign_id=? AND COALESCE(provider,'')='telnyx' "
+            "AND status <> 'dry_run'",
+            (str(int(campaign_id)),),
+        ).fetchall()
+        today_rows = conn.execute(
+            "SELECT status, cost_cents FROM voice_calls "
+            "WHERE campaign_id=? AND COALESCE(provider,'')='telnyx' "
+            "AND status <> 'dry_run' AND datetime(created_at) >= datetime(?)",
+            (str(int(campaign_id)), since),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    def _totals(rows) -> tuple[int, int, int, int]:
+        spent = sum(int(row["cost_cents"] or 0) for row in rows)
+        active = sum(
+            1
+            for row in rows
+            if str(row["status"] or "") not in ("ended", "failed")
+        )
+        reserved = active * estimate
+        return spent, active, reserved, spent + reserved
+
+    total_spent, total_active, total_reserved, total_estimated = _totals(all_rows)
+    daily_spent, daily_active, daily_reserved, daily_estimated = _totals(today_rows)
+    total_budget_cents = max(
+        0, int(round(float(campaign.get("budget_total_usd") or 0) * 100))
+    )
+    daily_budget_cents = max(
+        0, int(round(float(campaign.get("budget_daily_usd") or 0) * 100))
+    )
+
+    blocked_reason = ""
+    blocked_detail = ""
+    if max_days > 0 and days_elapsed > max_days:
+        blocked_reason = "days_limit_reached"
+        blocked_detail = f"Campanha no dia {days_elapsed}; limite {max_days}."
+    elif (
+        total_budget_cents > 0
+        and total_estimated + estimate > total_budget_cents
+    ):
+        blocked_reason = "total_budget_reached"
+        blocked_detail = (
+            f"Orçamento total: ${total_estimated / 100:.2f} usados/reservados "
+            f"de ${total_budget_cents / 100:.2f}."
+        )
+    elif (
+        daily_budget_cents > 0
+        and daily_estimated + estimate > daily_budget_cents
+    ):
+        blocked_reason = "daily_budget_reached"
+        blocked_detail = (
+            f"Orçamento diário: ${daily_estimated / 100:.2f} usados/reservados "
+            f"de ${daily_budget_cents / 100:.2f}."
+        )
+
+    return {
+        "ok": True,
+        "campaign_id": int(campaign_id),
+        "day": day,
+        "days_elapsed": days_elapsed,
+        "max_days": max_days,
+        "days_remaining": (
+            max(0, max_days - days_elapsed + 1) if max_days > 0 else None
+        ),
+        "total_budget_cents": total_budget_cents,
+        "total_spent_cents": total_spent,
+        "total_active_calls": total_active,
+        "total_reserved_cents": total_reserved,
+        "total_estimated_cents": total_estimated,
+        "total_remaining_cents": (
+            max(0, total_budget_cents - total_estimated)
+            if total_budget_cents > 0
+            else None
+        ),
+        "daily_budget_cents": daily_budget_cents,
+        "daily_spent_cents": daily_spent,
+        "daily_active_calls": daily_active,
+        "daily_reserved_cents": daily_reserved,
+        "daily_estimated_cents": daily_estimated,
+        "daily_remaining_cents": (
+            max(0, daily_budget_cents - daily_estimated)
+            if daily_budget_cents > 0
+            else None
+        ),
+        "blocked_reason": blocked_reason,
+        "blocked_detail": blocked_detail,
+    }
 
 
 def update_voice_call(voice_call_id: int, **fields: Any) -> Optional[dict]:

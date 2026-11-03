@@ -781,6 +781,7 @@ def sync_to_telnyx(trade_code: str) -> dict:
             "voicemail_detection": {
                 "on_voicemail_detected": {"action": "stop_assistant"}
             },
+            "recording_settings": {"enabled": False},
         },
     }
     transcription_model = str(

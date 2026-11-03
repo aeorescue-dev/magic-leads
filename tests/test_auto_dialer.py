@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from backend.services import auto_dialer, showcase
+from backend.services import auto_dialer, showcase, telnyx_voice
 from backend.services import b2b_voice as voice
 from backend.services.db import get_connection
 
@@ -187,6 +187,122 @@ def test_cota_total_com_lote_diario_pausa_e_retoma():
     final = voice.get_campaign(campaign["id"])
     assert final["status"] == "completed"
     assert final["calls_started"] == 3
+
+
+def test_auto_dialer_pausa_no_limite_diario(monkeypatch):
+    for idx in range(3):
+        _seed_lead("Boston", "MA", "Roof", "02118", idx)
+    showcase.build_pages()
+    _import_company("+16175550121", "Boston", "MA")
+    campaign = voice.create_campaign("Budget", "Boston", "Roofing", 3)
+    monkeypatch.setattr(
+        auto_dialer.telnyx_voice,
+        "create_call",
+        lambda *a, **k: {
+            "ok": False,
+            "reason": "daily_budget_reached",
+            "message": "limite",
+        },
+    )
+    asyncio.run(auto_dialer.run_campaign(campaign["id"]))
+    final = voice.get_campaign(campaign["id"])
+    assert final["status"] == "paused"
+    assert final["calls_started"] == 0
+    assert final["error"] == "daily_budget_reached"
+    assert final["next_batch_at"]
+
+
+def _company_for_budget(phone: str) -> dict:
+    _import_company(phone, "Boston", "MA")
+    conn = voice.get_conn()
+    try:
+        row = conn.execute(
+            "SELECT * FROM prospect_companies WHERE phone=?", (phone,)
+        ).fetchone()
+        return dict(row)
+    finally:
+        conn.close()
+
+
+def test_campaign_budget_daily_e_total():
+    company = _company_for_budget("+16175550131")
+    daily = voice.create_campaign(
+        "Daily", "Boston", "Roofing", 10, 0, 10, 10, True, False, 100.0, 0.05, 2
+    )
+    call = voice.create_voice_call(
+        company, provider="telnyx", campaign_id=str(daily["id"])
+    )
+    voice.update_voice_call(call["id"], status="ended", cost_cents=6)
+    status = voice.campaign_budget_status(daily["id"])
+    assert status["blocked_reason"] == "daily_budget_reached"
+
+    total = voice.create_campaign(
+        "Total", "Boston", "Roofing", 10, 0, 10, 10, True, False, 0.10, 100.0, 2
+    )
+    call = voice.create_voice_call(
+        company, provider="telnyx", campaign_id=str(total["id"])
+    )
+    voice.update_voice_call(call["id"], status="ended", cost_cents=6)
+    status = voice.campaign_budget_status(total["id"])
+    assert status["blocked_reason"] == "total_budget_reached"
+
+
+def test_campaign_budget_dias_termina():
+    _company_for_budget("+16175550132")
+    campaign = voice.create_campaign(
+        "Dias", "Boston", "Roofing", 10, 0, 10, 10, True, False, 100.0, 100.0, 1
+    )
+    conn = voice.get_conn()
+    try:
+        conn.execute(
+            "UPDATE voice_campaigns SET started_at=? WHERE id=?",
+            ((NOW - timedelta(days=3)).isoformat(), campaign["id"]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    status = voice.campaign_budget_status(campaign["id"])
+    assert status["blocked_reason"] == "days_limit_reached"
+
+
+def test_create_call_respeita_total_budget_campanha(monkeypatch):
+    monkeypatch.setattr(telnyx_voice.settings, "VOICE_STAGING_MODE", False)
+    monkeypatch.setattr(telnyx_voice.settings, "TELNYX_API_KEY", "key")
+    monkeypatch.setattr(telnyx_voice.settings, "TELNYX_CONNECTION_ID", "conn")
+    monkeypatch.setattr(telnyx_voice.settings, "TELNYX_FROM_NUMBER", "+16175550000")
+    company = _company_for_budget("+16175550133")
+    campaign = voice.create_campaign(
+        "TotalCall", "Boston", "Roofing", 10, 0, 10, 10, True, False, 0.10, 100.0, 2
+    )
+    call = voice.create_voice_call(
+        company, provider="telnyx", campaign_id=str(campaign["id"])
+    )
+    voice.update_voice_call(call["id"], status="ended", cost_cents=6)
+    result = telnyx_voice.create_call(
+        company, campaign_id=str(campaign["id"]), dry_run=False
+    )
+    assert result["ok"] is False
+    assert result["reason"] == "total_budget_reached"
+
+
+def test_auto_dialer_termina_no_orcamento_total(monkeypatch):
+    for idx in range(3):
+        _seed_lead("Boston", "MA", "Roof", "02118", idx)
+    showcase.build_pages()
+    _import_company("+16175550134", "Boston", "MA")
+    campaign = voice.create_campaign(
+        "TotalEnd", "Boston", "Roofing", 3, 0, 3, 3, True, False, 0.10, 5.0, 30
+    )
+    monkeypatch.setattr(
+        auto_dialer.telnyx_voice,
+        "create_call",
+        lambda *a, **k: {"ok": False, "reason": "total_budget_reached"},
+    )
+    asyncio.run(auto_dialer.run_campaign(campaign["id"]))
+    final = voice.get_campaign(campaign["id"])
+    assert final["status"] == "completed"
+    assert final["error"] == "total_budget_reached"
+    assert final["finished_at"]
 
 
 def test_metrics_calcula_funil(monkeypatch):

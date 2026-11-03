@@ -134,6 +134,12 @@ Variaveis de ambiente:
 | `TELNYX_ASSISTANT_NOISE_SUPPRESSION` | nao | `krisp` por defeito |
 | `TELNYX_ASSISTANT_EXPRESSIVE_MODE` | nao | `true` para Ultra expressive |
 | `VOICE_TEST_NUMBERS` | teste | allowlist E.164 separada por virgulas |
+| `VOICE_MAX_DAILY_BUDGET_USD` | sim | teto global diario de voz (default 5) |
+| `VOICE_MAX_CALLS_PER_DAY` | sim | teto global de chamadas/dia (default 100) |
+| `VOICE_ESTIMATED_CALL_COST_CENTS` | sim | reserva por chamada ativa (default 25c) |
+| `VOICE_CAMPAIGN_TOTAL_BUDGET_USD` | sim | default de campanha (100) |
+| `VOICE_CAMPAIGN_DAILY_BUDGET_USD` | sim | default diario de campanha (5) |
+| `VOICE_CAMPAIGN_MAX_DAYS` | sim | default de dias (30) |
 | `VOICE_FALLBACK_AUDIO_URL` | nao | vazio deriva de `PUBLIC_API_URL/api/voice/fallback.mp3` |
 | `VOICE_STAGING_MODE` | sim | `false` so durante o teste real |
 | `EMAIL_API_KEY` | sim | Resend para o email da vitrine |
@@ -282,6 +288,21 @@ Definicoes:
   `checkout.session.completed` com `source=voice_showcase`.
 - **Conversao** = assinaturas / aceites (nao sobre cliques), para medir a
   qualidade do lead de voz.
+
+## Orcamento de campanha
+
+Cada campanha tem tres tetos:
+
+| Parametro | Efeito |
+|---|---|
+| `budget_total_usd` | ao esgotar, a campanha fica **completed** |
+| `budget_daily_usd` | ao esgotar, a campanha fica **paused** ate ao dia seguinte |
+| `max_days` | ao passar o numero de dias, a campanha fica **completed** |
+
+O backend reserva 25c por chamada ativa e substitui pelo custo real no fim.
+`campaign_budget_status` corre antes de cada chamada; o auto-scheduler pausa
+ou completa a campanha automaticamente. Ha ainda uma rede de seguranca global:
+`VOICE_MAX_DAILY_BUDGET_USD=5` e `VOICE_MAX_CALLS_PER_DAY=100`.
 
 ## Chamada de teste controlada
 

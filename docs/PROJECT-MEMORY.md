@@ -1897,6 +1897,21 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   deterministico da Callie toca limpo e a chamada fecha no fim.
 - **Testes**: **1.329 pytest**; cobertura **70,0%**.
 
+### Fase 2M - Orcamento total/diario/dias por campanha (2026-11-03)
+
+- **Campanha**: `budget_total_usd`, `budget_daily_usd` e `max_days` (defaults
+  $100, $5/dia, 30 dias). O Admin envia os tres valores ao iniciar a campanha.
+- **Reserva**: cada chamada ativa reserva `VOICE_ESTIMATED_CALL_COST_CENTS`
+  (25c) no orcamento; ao terminar, entra o custo real. Isto evita estourar o
+  teto por causa de chamadas em curso.
+- **Regra**: `campaign_budget_status` verifica dias, total e diario antes de
+  cada chamada. `total_budget_reached`/`days_limit_reached` **completam** a
+  campanha; `daily_budget_reached` **pausa** ate ao dia seguinte.
+- **Limite global**: `VOICE_MAX_DAILY_BUDGET_USD=5` e
+  `VOICE_MAX_CALLS_PER_DAY=100` continuam como rede de seguranca.
+- **Gravacao**: `recording_settings.enabled=false` no assistant.
+- **Testes**: **1.337 pytest**; cobertura **70,0%**.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

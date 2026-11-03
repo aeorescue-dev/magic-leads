@@ -61,6 +61,15 @@ class Settings(BaseSettings):
     # chamada no ai_assistant_start.
     TELNYX_SHARED_ASSISTANT_ID: str = ""
     VOICE_TEST_NUMBERS: str = ""
+    # Limites de seguranca da operacao real (por dia, America/New_York).
+    VOICE_MAX_DAILY_BUDGET_USD: float = 5.0
+    VOICE_MAX_CALLS_PER_DAY: int = 100
+    # Reserva conservadora por chamada ativa para o orcamento diario.
+    VOICE_ESTIMATED_CALL_COST_CENTS: int = 25
+    # Defaults de campanha quando o Admin nao envia valores.
+    VOICE_CAMPAIGN_TOTAL_BUDGET_USD: float = 100.0
+    VOICE_CAMPAIGN_DAILY_BUDGET_USD: float = 5.0
+    VOICE_CAMPAIGN_MAX_DAYS: int = 30
     # URL publica do MP3 deterministico do fallback (tecla 2). Vazio deriva
     # de PUBLIC_API_URL + /api/voice/fallback.mp3.
     VOICE_FALLBACK_AUDIO_URL: str = ""

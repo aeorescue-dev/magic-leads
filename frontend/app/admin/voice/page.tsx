@@ -623,6 +623,9 @@ export default function VoiceB2BPage() {
   const [quotaTotal, setQuotaTotal] = useState(100);
   const [batchSize, setBatchSize] = useState(25);
   const [includeFallback, setIncludeFallback] = useState(true);
+  const [budgetTotal, setBudgetTotal] = useState(100);
+  const [budgetDaily, setBudgetDaily] = useState(5);
+  const [maxDays, setMaxDays] = useState(30);
   const [metricsDays, setMetricsDays] = useState(30);
   const [tab, setTab] = useState<VoiceTab>("overview");
   const [sourceName, setSourceName] = useState("");
@@ -796,6 +799,9 @@ export default function VoiceB2BPage() {
         quota_total: quotaTotal,
         batch_size: batchSize,
         include_fallback: segment ? true : includeFallback,
+        budget_total_usd: budgetTotal,
+        budget_daily_usd: budgetDaily,
+        max_days: maxDays,
       });
       await Promise.all([
         mutateCampaigns(),
@@ -1800,6 +1806,39 @@ export default function VoiceB2BPage() {
               className="mt-1 block w-24 rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-[11px] text-slate-200"
             />
           </label>
+          <label className="text-[10px] text-slate-500">
+            Orçamento total ($)
+            <input
+              type="number"
+              min={0}
+              step={1}
+              value={budgetTotal}
+              onChange={(event) => setBudgetTotal(Number(event.target.value))}
+              className="mt-1 block w-24 rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-[11px] text-slate-200"
+            />
+          </label>
+          <label className="text-[10px] text-slate-500">
+            Orçamento / dia ($)
+            <input
+              type="number"
+              min={0}
+              step={0.5}
+              value={budgetDaily}
+              onChange={(event) => setBudgetDaily(Number(event.target.value))}
+              className="mt-1 block w-24 rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-[11px] text-slate-200"
+            />
+          </label>
+          <label className="text-[10px] text-slate-500">
+            Máx. dias
+            <input
+              type="number"
+              min={0}
+              step={1}
+              value={maxDays}
+              onChange={(event) => setMaxDays(Number(event.target.value))}
+              className="mt-1 block w-20 rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-[11px] text-slate-200"
+            />
+          </label>
           <label className="flex items-center gap-2 pb-2 text-[10px] font-semibold text-slate-400">
             <input
               type="checkbox"
@@ -1857,6 +1896,13 @@ export default function VoiceB2BPage() {
                   {campaign.batch_size ?? campaign.max_calls} ·{" "}
                   {campaign.showcases_sent} vitrines · {campaign.skipped} saltos
                 </span>
+                {campaign.budget_total_usd ? (
+                  <span className="text-slate-600">
+                    ${campaign.budget_total_usd.toFixed(0)} total · $
+                    {(campaign.budget_daily_usd ?? 0).toFixed(2)}/dia ·{" "}
+                    {campaign.max_days || "∞"} dias
+                  </span>
+                ) : null}
                 <span className="text-slate-600">
                   {campaign.city || "todas"} / {campaign.trade || "todos"}
                 </span>

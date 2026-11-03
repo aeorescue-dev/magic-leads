@@ -3370,6 +3370,9 @@ async def admin_voice_campaign_start(
     batch_size = int(payload.get("batch_size") or quota_total)
     include_fallback = bool(payload.get("include_fallback", True))
     dry_run = bool(payload.get("dry_run", not telnyx_voice.configured()))
+    budget_total_usd = payload.get("budget_total_usd")
+    budget_daily_usd = payload.get("budget_daily_usd")
+    max_days = payload.get("max_days")
     name = str(payload.get("name") or "").strip() or (
         f"Auto {city or 'todas'} {trade or 'todos'}"
     )
@@ -3384,6 +3387,9 @@ async def admin_voice_campaign_start(
         batch_size,
         include_fallback,
         dry_run,
+        budget_total_usd,
+        budget_daily_usd,
+        max_days,
     )
     _launch_voice_campaign(int(campaign["id"]))
     return {"ok": True, "campaign": campaign}

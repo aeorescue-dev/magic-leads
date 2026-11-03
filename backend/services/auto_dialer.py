@@ -70,6 +70,49 @@ async def run_campaign(campaign_id: int) -> None:
                     bool(campaign.get("dry_run")),
                 )
                 if not result.get("ok"):
+                    reason = str(result.get("reason") or "blocked")
+                    if reason in (
+                        "total_budget_reached",
+                        "days_limit_reached",
+                    ):
+                        await _run_sync(
+                            lambda: b2b_voice.update_campaign(
+                                campaign_id,
+                                status="completed",
+                                finished_at=datetime.now(
+                                    timezone.utc
+                                ).isoformat(),
+                                next_batch_at=None,
+                                error=reason[:300],
+                            )
+                        )
+                        logger.info(
+                            "[AUTO-DIALER] campanha %s terminada: %s",
+                            campaign_id,
+                            reason,
+                        )
+                        return
+                    if reason in (
+                        "daily_budget_reached",
+                        "daily_calls_reached",
+                    ):
+                        next_batch = (
+                            datetime.now(timezone.utc) + timedelta(days=1)
+                        ).isoformat()
+                        await _run_sync(
+                            lambda: b2b_voice.update_campaign(
+                                campaign_id,
+                                status="paused",
+                                next_batch_at=next_batch,
+                                error=str(result.get("reason"))[:300],
+                            )
+                        )
+                        logger.info(
+                            "[AUTO-DIALER] campanha %s pausada: %s",
+                            campaign_id,
+                            result.get("reason"),
+                        )
+                        return
                     await _run_sync(
                         b2b_voice.skip_campaign_company,
                         campaign_id,

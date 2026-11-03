@@ -459,6 +459,49 @@ def test_fallback_audio_existe_e_url_publica():
     assert telnyx_voice.fallback_audio_url().endswith("/api/voice/fallback.mp3")
 
 
+def test_voice_daily_usage_exclui_test_e_dry_run():
+    company = _seed_company()
+    normal = voice.create_voice_call(company, provider="telnyx", campaign_id="pilot")
+    voice.update_voice_call(normal["id"], cost_cents=10)
+    test = voice.create_voice_call(company, provider="telnyx", campaign_id="test_call")
+    voice.update_voice_call(test["id"], cost_cents=100)
+    dry = voice.create_voice_call(company, provider="telnyx", campaign_id="pilot")
+    voice.update_voice_call(dry["id"], status="dry_run", cost_cents=50)
+    usage = voice.voice_daily_usage()
+    assert usage["calls"] == 1
+    assert usage["spent_cents"] == 10
+    assert usage["active_calls"] == 1
+
+
+def test_create_call_bloqueia_limite_diario_de_chamadas(monkeypatch):
+    monkeypatch.setattr(telnyx_voice.settings, "VOICE_STAGING_MODE", False)
+    monkeypatch.setattr(telnyx_voice.settings, "TELNYX_API_KEY", "key")
+    monkeypatch.setattr(telnyx_voice.settings, "TELNYX_CONNECTION_ID", "conn")
+    monkeypatch.setattr(telnyx_voice.settings, "TELNYX_FROM_NUMBER", "+16175550000")
+    monkeypatch.setattr(telnyx_voice.settings, "VOICE_MAX_CALLS_PER_DAY", 1)
+    monkeypatch.setattr(telnyx_voice.settings, "VOICE_MAX_DAILY_BUDGET_USD", 0.0)
+    company = _seed_company()
+    voice.create_voice_call(company, provider="telnyx", campaign_id="pilot")
+    result = telnyx_voice.create_call(company, campaign_id="pilot", dry_run=False)
+    assert result["ok"] is False
+    assert result["reason"] == "daily_calls_reached"
+
+
+def test_create_call_bloqueia_limite_diario_de_orcamento(monkeypatch):
+    monkeypatch.setattr(telnyx_voice.settings, "VOICE_STAGING_MODE", False)
+    monkeypatch.setattr(telnyx_voice.settings, "TELNYX_API_KEY", "key")
+    monkeypatch.setattr(telnyx_voice.settings, "TELNYX_CONNECTION_ID", "conn")
+    monkeypatch.setattr(telnyx_voice.settings, "TELNYX_FROM_NUMBER", "+16175550000")
+    monkeypatch.setattr(telnyx_voice.settings, "VOICE_MAX_CALLS_PER_DAY", 0)
+    monkeypatch.setattr(telnyx_voice.settings, "VOICE_MAX_DAILY_BUDGET_USD", 0.05)
+    monkeypatch.setattr(telnyx_voice.settings, "VOICE_ESTIMATED_CALL_COST_CENTS", 25)
+    company = _seed_company()
+    voice.create_voice_call(company, provider="telnyx", campaign_id="pilot")
+    result = telnyx_voice.create_call(company, campaign_id="pilot", dry_run=False)
+    assert result["ok"] is False
+    assert result["reason"] == "daily_budget_reached"
+
+
 def test_email_fallback_cidade_usa_escopo_neutro(monkeypatch):
     """Dallas roofing sem página exata: email não pode dizer 'Roofing 3864'."""
     conn = get_connection()
