@@ -261,12 +261,7 @@ def test_sync_inclui_voz_nativa_tools_e_dtmf(monkeypatch):
     assert "model" not in body
     assert "send_showcase_link" in body["instructions"]
     names = {tool["webhook"]["name"] for tool in body["tools"]}
-    assert names == {
-        "mark_acceptance",
-        "send_showcase_link",
-        "capture_email",
-        "remove_from_list",
-    }
+    assert names == {"send_showcase_link", "capture_email", "remove_from_list"}
     for tool in body["tools"]:
         assert tool["webhook"]["url"].endswith(
             "/api/voice/telnyx/tools/" + tool["webhook"]["name"]

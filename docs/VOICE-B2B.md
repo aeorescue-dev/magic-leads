@@ -153,7 +153,7 @@ roteiros precisam de assistant, usamos **um assistant unico**:
   15 roteiros.
 - O `ai_assistant_start` envia `instructions`, `greeting` e `voice_settings`
   renderizados por chamada, por isso o assistant fala o roteiro do trade certo.
-- As tools (`mark_acceptance`, `send_showcase_link`, `capture_email`,
+- As tools (`send_showcase_link`, `capture_email`,
   `remove_from_list`) sao as mesmas para todos os trades.
 
 Se a conta for upgraded para mais de 15 TeXML apps, basta remover
@@ -237,8 +237,9 @@ cidade x nicho tambem ganhou as colunas Aceite e Assinatura.
 
 Definicoes:
 
-- **Aceite** = `intent='showcase'` na chamada. E marcado pela tool
-  `mark_acceptance` (yes falado) e pelo DTMF 1; o envio tambem garante a marca.
+- **Aceite** = `intent='showcase'` na chamada. E marcado pelo DTMF 1 e pelas
+  tools de email (`send_showcase_link`/`capture_email`); o envio tambem garante
+  a marca.
 - **Assinatura** = `checkout_session_id` preenchido no webhook Stripe
   `checkout.session.completed` com `source=voice_showcase`.
 - **Conversao** = assinaturas / aceites (nao sobre cliques), para medir a

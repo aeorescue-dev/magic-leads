@@ -1763,8 +1763,8 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Remetente**: `Magic Leads Team <support@magicleads.app>`.
 - **Analytics**: `summary.accepts`, `accept_rate`, `subscription_rate`,
   `revenue_per_accept_usd`; `by_state`, `by_city`, `by_trade` e
-  `by_city_trade`. Aceite = `intent='showcase'` (tool `mark_acceptance` ou
-  DTMF 1); assinatura = `checkout_session_id` preenchido no Stripe.
+  `by_city_trade`. Aceite = `intent='showcase'` (DTMF 1 ou tool de email);
+  assinatura = `checkout_session_id` preenchido no Stripe.
 - **Admin**: gauges **Voice Accept** e **Assinatura**, funil com passo
   **Aceite (1/Yes)**, tres tabelas por estado/cidade/nicho e colunas de aceite
   na matriz cidade x nicho.
@@ -1786,7 +1786,7 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Bug de sync**: a resposta da API e flat (`{"id": ...}`); o codigo so lia
   `data.id` e nao guardava o ID. Corrigido para aceitar flat e nested.
 - **Resultado**: `sync_all` devolve `synced=15`, `shared=true`; os 15 roteiros
-  apontam para o assistant unico com voz Callie, DTMF ativo e as 4 tools.
+  apontam para o assistant unico com voz Callie, DTMF ativo e as 3 tools.
 - **Testes**: **1.320 pytest**; cobertura **70,0%**.
 
 ### Fase 2G - Cap outbound e digest (2026-11-03)

@@ -58,8 +58,6 @@ TOOL_GUIDANCE = (
     "## Operational rules\n"
     "You are on a live outbound phone call. Follow the approved script above "
     "exactly; do not add claims, prices, or promises that are not in it.\n"
-    "- Acceptance: as soon as the caller says yes or presses 1, call "
-    "mark_acceptance before anything else.\n"
     "- Email handling, in this order (this overrides the generic \"If Yes / "
     "Press 1\" line when an email is on file):\n"
     "  1. If the call context below includes an email on file, confirm it out "
@@ -692,16 +690,6 @@ def _assistant_tools() -> list[dict]:
         }
 
     return [
-        tool(
-            "mark_acceptance",
-            (
-                "Record that the caller accepted the offer (said yes or pressed "
-                "1). Call it immediately when they accept, before email "
-                "confirmation."
-            ),
-            {},
-            [],
-        ),
         tool(
             "send_showcase_link",
             (
