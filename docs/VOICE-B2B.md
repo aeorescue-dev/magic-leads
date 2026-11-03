@@ -134,6 +134,7 @@ Variaveis de ambiente:
 | `TELNYX_ASSISTANT_NOISE_SUPPRESSION` | nao | `krisp` por defeito |
 | `TELNYX_ASSISTANT_EXPRESSIVE_MODE` | nao | `true` para Ultra expressive |
 | `VOICE_TEST_NUMBERS` | teste | allowlist E.164 separada por virgulas |
+| `VOICE_FALLBACK_AUDIO_URL` | nao | vazio deriva de `PUBLIC_API_URL/api/voice/fallback.mp3` |
 | `VOICE_STAGING_MODE` | sim | `false` so durante o teste real |
 | `EMAIL_API_KEY` | sim | Resend para o email da vitrine |
 | `EMAIL_FROM` | sim | ex. `Magic Leads <support@magicleads.app>` |
@@ -169,8 +170,11 @@ por trade.
   like a different email.".
 - Tecla **1**: se houver email na ficha, o backend envia o link imediatamente
   (`send_showcase_for_call`), sem depender de LLM/ASR.
-- Tecla **2**: marca `intent=website_redirect` e injeta o fallback exato no
-  assistant ativo via `ai_assistant_add_messages`; o cliente nunca fica preso.
+- Tecla **2**: marca `intent=website_redirect`, para o assistant
+  (`ai_assistant_stop`) e toca o MP3 deterministico da Callie
+  (`/api/voice/fallback.mp3`). No `call.playback.ended`, desliga a chamada. O
+  texto e sempre o mesmo, sem variacao do LLM. Se o playback falhar, usa
+  `speak` com o mesmo texto como fallback.
 - Se o cliente recusa o email da ficha, quer outro endereco, ou nao ha email na
   ficha, o assistant **nao pede email nenhum**: diz o script de fallback exato
   e termina. Nao existe ditado de email nem `capture_email`.

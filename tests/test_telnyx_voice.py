@@ -219,19 +219,17 @@ def test_hangup_sem_duracao_usa_answered_at():
     assert call["cost_cents"] > 0
 
 
-def test_webhook_dtmf_2_injeta_fallback_do_site():
+def test_webhook_dtmf_2_toca_mp3_e_nao_envia_email():
     company = _seed_company()
     created = telnyx_voice.create_call(company)
     call_id = created["voice_call_id"]
     state = base64.b64encode(
         json.dumps({"voice_call_id": call_id, "company_id": company["id"]}).encode()
     ).decode()
-    captured: dict = {}
+    actions: list[tuple[str, dict]] = []
 
     def fake_action(call_control_id, action, payload):
-        captured["call_control_id"] = call_control_id
-        captured["action"] = action
-        captured["payload"] = payload
+        actions.append((action, payload))
         return {"ok": True}
 
     original = telnyx_voice._call_action
@@ -252,12 +250,86 @@ def test_webhook_dtmf_2_injeta_fallback_do_site():
     finally:
         telnyx_voice._call_action = original
     assert result["action"] == "website_redirect"
-    assert captured["action"] == "ai_assistant_add_messages"
-    assert captured["call_control_id"] == "v3:test-dtmf2"
-    content = captured["payload"]["messages"][0]["content"]
-    assert "No problem at all! Just visit MagicLeads.app" in content
+    assert [action for action, _ in actions] == [
+        "ai_assistant_stop",
+        "playback_start",
+    ]
+    assert actions[1][1]["audio_url"].endswith("/api/voice/fallback.mp3")
+    assert actions[1][1]["audio_type"] == "mp3"
     call = voice.get_voice_call(call_id)
     assert call["intent"] == "website_redirect"
+    assert call["showcase_link_id"] is None
+
+
+def test_webhook_playback_ended_desliga_chamada():
+    company = _seed_company()
+    created = telnyx_voice.create_call(company)
+    call_id = created["voice_call_id"]
+    state = base64.b64encode(
+        json.dumps({"voice_call_id": call_id, "company_id": company["id"]}).encode()
+    ).decode()
+    calls: list[tuple[str, dict]] = []
+
+    def fake_action(call_control_id, action, payload):
+        calls.append((action, payload))
+        return {"ok": True}
+
+    original = telnyx_voice._call_action
+    telnyx_voice._call_action = fake_action
+    try:
+        result = telnyx_voice.handle_webhook(
+            {
+                "data": {
+                    "event_type": "call.playback.ended",
+                    "payload": {
+                        "client_state": state,
+                        "call_control_id": "v3:test-playback",
+                    },
+                }
+            }
+        )
+    finally:
+        telnyx_voice._call_action = original
+    assert result["action"] == "media_ended_hangup"
+    assert calls and calls[0][0] == "hangup"
+
+
+def test_webhook_playback_ended_sem_client_state_desliga():
+    company = _seed_company()
+    created = telnyx_voice.create_call(company)
+    call_id = created["voice_call_id"]
+    voice.update_voice_call(call_id, provider_call_id="v3:media-only")
+    calls: list[str] = []
+
+    def fake_action(call_control_id, action, payload):
+        calls.append(action)
+        return {"ok": True}
+
+    original = telnyx_voice._call_action
+    telnyx_voice._call_action = fake_action
+    try:
+        result = telnyx_voice.handle_webhook(
+            {
+                "data": {
+                    "event_type": "call.playback.ended",
+                    "payload": {"call_control_id": "v3:media-only"},
+                }
+            }
+        )
+    finally:
+        telnyx_voice._call_action = original
+    assert result["ok"] is True
+    assert result["action"] == "media_ended_hangup"
+    assert calls == ["hangup"]
+
+
+def test_fallback_audio_existe_e_url_publica():
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "backend" / "static" / "voice_fallback.mp3"
+    assert path.exists()
+    assert path.stat().st_size > 1000
+    assert telnyx_voice.fallback_audio_url().endswith("/api/voice/fallback.mp3")
 
 
 def test_email_fallback_cidade_usa_escopo_neutro(monkeypatch):

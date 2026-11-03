@@ -8,6 +8,7 @@ import sqlite3
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -24,7 +25,7 @@ from fastapi import (
     Request,
     Response,
 )
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, EmailStr
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -3199,6 +3200,19 @@ async def telnyx_webhook(request: Request, secret: str = ""):
     except Exception:  # noqa: BLE001
         raise HTTPException(status_code=400, detail="json inválido")
     return await anyio.to_thread.run_sync(telnyx_voice.handle_webhook, payload)
+
+
+@app.get("/api/voice/fallback.mp3")
+async def voice_fallback_mp3():
+    """Audio deterministico do fallback (tecla 2), voz Callie."""
+    path = Path(__file__).resolve().parent / "static" / "voice_fallback.mp3"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="fallback audio missing")
+    return FileResponse(
+        path,
+        media_type="audio/mpeg",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
 
 
 @app.post("/api/voice/telnyx/tools/{tool_name}")

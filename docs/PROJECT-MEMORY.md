@@ -1846,7 +1846,20 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Empresa de teste**: `prospect_companies.id=9959` (Boston/MA, remodeling,
   email `support@magicleads.app`). O endpoint `test-call` passou a aceitar
   `company_id`, para a Callie ler o email da ficha.
-- **Testes**: **1.322 pytest**; cobertura **70,0%**.
+- **Testes**: **1.323 pytest**; cobertura **70,0%**.
+
+### Fase 2J - Fallback deterministico em MP3 (2026-11-03)
+
+- **Problema**: a tecla 2 injetava o fallback como instrucao para o LLM; o
+  audio variava e podia acrescentar "Have a great day, goodbye!".
+- **Solucao**: MP3 pre-gerado com a voz Callie
+  (`Telnyx.Ultra.00a77add-...`) e o texto exato; servido em
+  `/api/voice/fallback.mp3` (audio/mpeg, cache imutavel).
+- **Tecla 2**: `ai_assistant_stop` -> `playback_start` com o MP3; ao receber
+  `call.playback.ended`, o backend desliga a chamada. Se o playback falhar,
+  usa `speak` com o mesmo texto como fallback. O evento de media e
+  correlacionado pelo `call_control_id` mesmo sem `client_state`.
+- **Testes**: **1.326 pytest**; cobertura **70,0%**.
 
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.

@@ -313,23 +313,51 @@ def hangup_call(call_control_id: str) -> dict:
     return _call_action(call_control_id, "hangup", {})
 
 
-def send_fallback_script(call_control_id: str) -> dict:
-    """Injeta o script de fallback no assistant ativo (tecla 2)."""
+def fallback_audio_url() -> str:
+    """URL publica do MP3 deterministico do fallback (voz Callie)."""
+    configured = str(
+        getattr(settings, "VOICE_FALLBACK_AUDIO_URL", "") or ""
+    ).strip()
+    if configured:
+        return configured
+    base = str(getattr(settings, "PUBLIC_API_URL", "") or "").rstrip("/")
+    return f"{base}/api/voice/fallback.mp3"
+
+
+def play_fallback_audio(call_control_id: str) -> dict:
+    """Para o assistant e toca o MP3 exato; fallback para speak se falhar."""
     from .voice_scripts import FALLBACK_SCRIPT
 
     if not call_control_id:
         return {"ok": False, "reason": "missing_call_control_id"}
-    content = (
-        "[SYSTEM: The caller pressed 2 because the email on file is not "
-        "correct. Say exactly, word for word: \""
-        + FALLBACK_SCRIPT
-        + "\" Then end the call politely. Do not call any tool.]"
-    )
-    return _call_action(
+    stop = _call_action(call_control_id, "ai_assistant_stop", {})
+    play = _call_action(
         call_control_id,
-        "ai_assistant_add_messages",
-        {"messages": [{"role": "user", "content": content}]},
+        "playback_start",
+        {
+            "audio_url": fallback_audio_url(),
+            "audio_type": "mp3",
+            "cache_audio": True,
+        },
     )
+    if play.get("ok"):
+        return {"ok": True, "mode": "playback", "stop": stop, "play": play}
+    speak = _call_action(
+        call_control_id,
+        "speak",
+        {
+            "payload": FALLBACK_SCRIPT,
+            "voice": "female",
+            "language": "en-US",
+        },
+    )
+    return {
+        "ok": bool(speak.get("ok")),
+        "mode": "speak",
+        "stop": stop,
+        "play": play,
+        "speak": speak,
+    }
 
 
 def _render_for_call(current: dict, client_state: dict) -> dict:
@@ -393,6 +421,24 @@ def handle_webhook(payload: dict) -> dict:
         body.get("client_state") or data.get("client_state") or payload.get("client_state")
     )
     voice_call_id = state.get("voice_call_id")
+    if "playback.ended" in event_type or "speak.ended" in event_type:
+        # Alguns eventos de media não trazem client_state; correlaciona pelo
+        # call_control_id antes de exigir voice_call_id.
+        call_control_id = str(
+            body.get("call_control_id") or data.get("call_control_id") or ""
+        )
+        if not voice_call_id and call_control_id:
+            found = b2b_voice.get_voice_call_by_provider_id(call_control_id)
+            if found:
+                voice_call_id = found["id"]
+        if call_control_id:
+            hangup_call(call_control_id)
+        return {
+            "ok": True,
+            "action": "media_ended_hangup",
+            "voice_call_id": voice_call_id,
+            "event_type": event_type,
+        }
     if not voice_call_id:
         return {"ok": False, "reason": "missing_voice_call_id", "event_type": event_type}
 
@@ -412,13 +458,13 @@ def handle_webhook(payload: dict) -> dict:
                 or current.get("provider_call_id")
                 or ""
             )
-            fallback = send_fallback_script(call_control_id)
+            fallback = play_fallback_audio(call_control_id)
             return {
                 "ok": True,
                 "action": "website_redirect",
                 "voice_call_id": voice_call_id,
                 "digit": digit,
-                "fallback": fallback,
+                "playback": fallback,
             }
         if digit == "1":
             # Tecla 1 e confirmacao explicita: se ha email na ficha, envia ja

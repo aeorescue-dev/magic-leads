@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     # chamada no ai_assistant_start.
     TELNYX_SHARED_ASSISTANT_ID: str = ""
     VOICE_TEST_NUMBERS: str = ""
+    # URL publica do MP3 deterministico do fallback (tecla 2). Vazio deriva
+    # de PUBLIC_API_URL + /api/voice/fallback.mp3.
+    VOICE_FALLBACK_AUDIO_URL: str = ""
     # Janela de chamada no fuso local do estado (TCPA-friendly). Fim exclusivo.
     VOICE_CALL_START_HOUR: int = 9
     VOICE_CALL_END_HOUR: int = 20
