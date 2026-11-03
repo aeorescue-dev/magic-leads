@@ -1696,12 +1696,18 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Registry**: `voice_scripts` + `voice_script_versions`; guardar incrementa
   versão e volta a `draft`; aprovar marca `approved` com autor/data.
 - **Admin**: tab **Roteiros** com lista por trade, editor, disclosure,
-  assistant_id, preview por empresa/cidade, Guardar draft, Aprovar e Sync
-  Telnyx.
-- **Telnyx**: `create_call` resolve o roteiro aprovado, guarda `assistant_id` e
-  bloqueia chamada real sem roteiro aprovado/assistant. No webhook
-  `call.answered`, inicia `ai_assistant_start`; se falhar, desliga a chamada
-  para não ficar em silêncio.
+  assistant_id, preview por empresa/cidade, Guardar draft, Aprovar, Aprovar
+  Todos e Sync Telnyx.
+- **Overrides**: `voice_script_overrides` por `state` ou `city`; resolução
+  runtime **cidade > estado > global**. Só overrides `approved` entram em
+  produção; drafts ignoram-se e o global continua.
+- **Bulk approve**: `approve_all` aprova os 15 e `sync_all` tenta sincronizar
+  todos os assistants; sem chaves Telnyx devolve `telnyx_not_configured` sem
+  bloquear a aprovação.
+- **Telnyx**: `create_call` resolve o roteiro efetivo (com override), guarda
+  `assistant_id` e bloqueia chamada real sem roteiro aprovado/assistant. No
+  webhook `call.answered`, inicia `ai_assistant_start`; se falhar, desliga a
+  chamada para não ficar em silêncio.
 - **Teste real controlado**: `POST /api/admin/voice/test-call` exige
   `VOICE_STAGING_MODE=false`, Telnyx configurado, `confirm=true` e telefone em
   `VOICE_TEST_NUMBERS`.

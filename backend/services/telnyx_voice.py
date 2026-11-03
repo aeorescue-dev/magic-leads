@@ -85,19 +85,31 @@ def create_call(
     trade = showcase.normalize_trade(trade_code or company.get("trade"))
     from . import voice_scripts
 
-    script = voice_scripts.approved_for_trade(trade) if trade else None
+    script = (
+        voice_scripts.approved_for_trade(
+            trade, city or company.get("city") or "", company.get("state") or ""
+        )
+        if trade
+        else None
+    )
     assistant_id = (script or {}).get("assistant_id") or ""
     staging = bool(getattr(settings, "VOICE_STAGING_MODE", False))
-    if configured() and not dry_run and (not script or not assistant_id):
-        return {
-            "ok": False,
-            "reason": "script_not_approved",
-            "script_status": (script or {}).get("status"),
-            "message": (
-                "Roteiro aprovado com assistant_id Telnyx é obrigatório para "
-                "chamadas reais."
-            ),
-        }
+    if configured() and not dry_run:
+        if not script:
+            return {
+                "ok": False,
+                "reason": "script_not_approved",
+                "message": "Roteiro aprovado é obrigatório para chamadas reais.",
+            }
+        if not assistant_id:
+            return {
+                "ok": False,
+                "reason": "assistant_missing",
+                "message": (
+                    "Roteiro aprovado sem assistant_id Telnyx; sincroniza o "
+                    "assistant antes de ligar."
+                ),
+            }
     call = b2b_voice.create_voice_call(
         company,
         provider="telnyx",

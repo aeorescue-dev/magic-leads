@@ -116,6 +116,8 @@ Com `VOICE_STAGING_MODE=true`:
 | POST | `/api/admin/voice/scripts/{trade}/approve` | aprovar roteiro |
 | POST | `/api/admin/voice/scripts/{trade}/preview` | renderizar variáveis |
 | POST | `/api/admin/voice/scripts/{trade}/sync-telnyx` | criar/atualizar assistant |
+| POST | `/api/admin/voice/scripts/approve-all` | aprovar todos + sync |
+| POST | `/api/admin/voice/scripts/sync-all` | sincronizar todos |
 | POST | `/api/admin/voice/test-call` | 1 chamada real controlada |
 | POST | `/api/admin/voice/dnc/check` | check manual (limpo/listado) |
 | POST | `/api/admin/voice/contacts/{id}/call` | registar tentativa |
@@ -163,8 +165,11 @@ Todas exigem sessão **admin** (`_require_admin_user`).
 - Variáveis: `{{company}}`, `{{city}}`, `{{trade}}`, `{{permit_count}}`,
   `{{showcase_line}}`, `{{price_weekly}}`, `{{price_monthly}}`.
 - Aba **Roteiros** no `/admin/voice`: editar, pré-visualizar por cidade/empresa,
-  guardar draft, aprovar e sincronizar com a Telnyx.
+  guardar draft, aprovar, **Aprovar Todos** e sincronizar com a Telnyx.
 - Só roteiro `approved` com `assistant_id` pode ser usado em chamada real.
+- **Overrides futuros**: `voice_script_overrides` por estado/cidade. Resolução
+  runtime **cidade > estado > global**; só overrides `approved` entram em
+  produção. O global por trade continua a ser o default.
 - No `call.answered`, o backend inicia o assistant; se falhar, desliga a
   chamada para não ficar em silêncio.
 - Teste real: `POST /voice/test-call` com `confirm=true`, telefone em

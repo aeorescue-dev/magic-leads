@@ -3447,6 +3447,32 @@ async def admin_voice_source_sync(
     return await anyio.to_thread.run_sync(b2b_voice.sync_source, source_id)
 
 
+@app.post("/api/admin/voice/scripts/approve-all")
+async def admin_voice_scripts_approve_all(
+    request: Request, _admin: dict = Depends(_require_admin_user)
+):
+    """Aprova todos os roteiros e tenta sincronizar com a Telnyx."""
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001
+        payload = {}
+    payload = payload or {}
+    result = await anyio.to_thread.run_sync(
+        voice_scripts.approve_all, int(_admin["id"])
+    )
+    sync_result = None
+    if bool(payload.get("sync", True)):
+        sync_result = await anyio.to_thread.run_sync(voice_scripts.sync_all)
+    return {"ok": True, **result, "sync": sync_result}
+
+
+@app.post("/api/admin/voice/scripts/sync-all")
+async def admin_voice_scripts_sync_all(
+    _admin: dict = Depends(_require_admin_user),
+):
+    return await anyio.to_thread.run_sync(voice_scripts.sync_all)
+
+
 @app.get("/api/admin/voice/scripts")
 async def admin_voice_scripts(_admin: dict = Depends(_require_admin_user)):
     return {"scripts": await anyio.to_thread.run_sync(voice_scripts.list_scripts)}

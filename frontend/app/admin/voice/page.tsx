@@ -38,6 +38,7 @@ import useSWR from "swr";
 
 import {
   AdminApiError,
+  approveAllVoiceScripts,
   approveVoiceScript,
   buildShowcasePages,
   checkVoiceDnc,
@@ -802,6 +803,18 @@ export default function VoiceB2BPage() {
       return `Roteiro ${scriptTrade} aprovado para uso em chamadas.`;
     });
 
+  const approveAllScripts = () =>
+    run("scripts-approve-all", async () => {
+      const result = await approveAllVoiceScripts(true);
+      await mutateScripts();
+      const sync = result.sync;
+      const syncNote =
+        sync?.status === "telnyx_not_configured"
+          ? " · sync Telnyx pendente (chaves ausentes)"
+          : ` · ${sync?.synced ?? 0} sincronizados`;
+      return `Roteiros: ${result.approved} aprovados de ${result.total}${syncNote}.`;
+    });
+
   const previewScript = () =>
     run("script-preview", async () => {
       if (!currentScript) throw new Error("Seleciona um roteiro.");
@@ -1299,9 +1312,24 @@ export default function VoiceB2BPage() {
         icon={<FileText className="h-4 w-4 text-indigo-400" />}
         hint="Inglês US, versionado. Só um roteiro Approved pode ser usado em chamadas reais."
         action={
-          <Badge tone="emerald">
-            {scripts.filter((item) => item.status === "approved").length} aprovados
-          </Badge>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge tone="emerald">
+              {scripts.filter((item) => item.status === "approved").length} aprovados
+            </Badge>
+            <button
+              type="button"
+              onClick={() => void approveAllScripts()}
+              disabled={working === "scripts-approve-all"}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-1.5 text-[10px] font-bold text-[#062017] hover:bg-emerald-400 disabled:opacity-50"
+            >
+              {working === "scripts-approve-all" ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <CheckCircle2 className="h-3.5 w-3.5" />
+              )}
+              Aprovar Todos
+            </button>
+          </div>
         }
         className={tab === "scripts" ? "" : "hidden"}
       >

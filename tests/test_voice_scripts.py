@@ -21,6 +21,7 @@ def _clean():
         ):
             conn.execute(f"DELETE FROM {table}")
         conn.execute("DELETE FROM voice_script_versions")
+        conn.execute("DELETE FROM voice_script_overrides")
         conn.execute("DELETE FROM voice_scripts")
         conn.execute(
             "DELETE FROM voice_meta WHERE key='scripts_template_version'"
@@ -46,6 +47,42 @@ def test_seed_cria_roteiros_com_template_oficial():
         assert "before any competitor finds out" in item["body"]
         assert "If Yes / Press 1" in item["body"]
         assert "If No / Stop" in item["body"]
+
+
+def test_approve_all_aprova_os_15():
+    result = voice_scripts.approve_all(user_id=7)
+    assert result["approved"] == 15
+    scripts = voice_scripts.list_scripts()
+    assert all(item["status"] == "approved" for item in scripts)
+    assert voice_scripts.approved_for_trade("roofing") is not None
+
+
+def test_override_cidade_tem_prioridade_sobre_global(monkeypatch):
+    voice_scripts.approve_all(user_id=7)
+    override = voice_scripts.save_override(
+        "roofing",
+        "city",
+        "New York",
+        "CITY OVERRIDE for {{company}}",
+        disclosure="City disclosure.",
+        assistant_id="assistant-city",
+        user_id=7,
+    )
+    # Draft override não entra em produção; global continua.
+    global_script = voice_scripts.get_effective_script(
+        "roofing", city="New York", state="NY"
+    )
+    assert global_script["scope"] == "global"
+    voice_scripts.approve_override(override["id"], user_id=7)
+    city_script = voice_scripts.get_effective_script(
+        "roofing", city="New York", state="NY"
+    )
+    assert city_script["scope"] == "city"
+    assert city_script["body"] == "CITY OVERRIDE for {{company}}"
+    other_city = voice_scripts.get_effective_script(
+        "roofing", city="Boston", state="MA"
+    )
+    assert other_city["scope"] == "global"
 
 
 def test_save_draft_incrementa_versao_e_approve():

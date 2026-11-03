@@ -2044,6 +2044,36 @@ export function approveVoiceScript(
   );
 }
 
+export function approveAllVoiceScripts(sync = true): Promise<{
+  ok: boolean;
+  approved: number;
+  total: number;
+  trades: string[];
+  sync: {
+    ok: boolean;
+    status: string;
+    synced: number;
+    total?: number;
+    errors: Array<{ trade_code: string; error: string }>;
+  } | null;
+}> {
+  return adminFetch("/voice/scripts/approve-all", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sync }),
+  });
+}
+
+export function syncAllVoiceScripts(): Promise<{
+  ok: boolean;
+  status: string;
+  synced: number;
+  total?: number;
+  errors: Array<{ trade_code: string; error: string }>;
+}> {
+  return adminFetch("/voice/scripts/sync-all", { method: "POST" });
+}
+
 export function previewVoiceScript(
   tradeCode: string,
   payload: { company?: string; city?: string; permit_count?: number }

@@ -109,6 +109,26 @@ CREATE TABLE IF NOT EXISTS voice_script_versions (
 );
 CREATE INDEX IF NOT EXISTS idx_script_versions_trade
   ON voice_script_versions (trade_code, version DESC);
+
+CREATE TABLE IF NOT EXISTS voice_script_overrides (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  trade_code TEXT NOT NULL,
+  scope_type TEXT NOT NULL DEFAULT 'state',
+  scope_value TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL DEFAULT 'draft',
+  body TEXT NOT NULL,
+  disclosure TEXT,
+  voice_id TEXT,
+  assistant_id TEXT,
+  approved_by INTEGER,
+  approved_at TEXT,
+  updated_by INTEGER,
+  updated_at TEXT NOT NULL,
+  UNIQUE(trade_code, scope_type, scope_value)
+);
+CREATE INDEX IF NOT EXISTS idx_script_overrides_scope
+  ON voice_script_overrides (trade_code, scope_type, scope_value, status);
 """
 
 _INIT: dict[str, Optional[str]] = {"path": None}
@@ -167,6 +187,41 @@ def get_script(trade_code: str) -> Optional[dict]:
         return dict(row) if row else None
     finally:
         conn.close()
+
+
+def get_effective_script(
+    trade_code: str, city: str = "", state: str = ""
+) -> Optional[dict]:
+    """Resolve override aprovado (cidade > estado) ou o default global."""
+    global_script = get_script(trade_code)
+    if not global_script:
+        return None
+    code = global_script["trade_code"]
+    candidates: list[tuple[str, str]] = []
+    if city.strip():
+        candidates.append(("city", city.strip()))
+    if state.strip():
+        candidates.append(("state", state.strip().upper()))
+    conn = b2b_voice.get_conn()
+    try:
+        for scope_type, scope_value in candidates:
+            row = conn.execute(
+                "SELECT * FROM voice_script_overrides "
+                "WHERE trade_code=? AND scope_type=? "
+                "AND UPPER(scope_value)=UPPER(?) AND status='approved'",
+                (code, scope_type, scope_value),
+            ).fetchone()
+            if row:
+                result = dict(row)
+                result["scope"] = scope_type
+                result["scope_value"] = scope_value
+                return result
+    finally:
+        conn.close()
+    result = dict(global_script)
+    result["scope"] = "global"
+    result["scope_value"] = ""
+    return result
 
 
 def save_draft(
@@ -268,13 +323,170 @@ def approve(trade_code: str, user_id: int = 0) -> dict:
         conn.close()
 
 
+def approve_all(user_id: int = 0) -> dict:
+    """Aprova todos os roteiros globais que ainda estão em draft."""
+    init()
+    now = datetime.now(timezone.utc).isoformat()
+    conn = b2b_voice.get_conn()
+    approved = 0
+    trades: list[str] = []
+    try:
+        rows = conn.execute(
+            "SELECT * FROM voice_scripts ORDER BY trade_code"
+        ).fetchall()
+        for row in rows:
+            if row["status"] == "approved":
+                continue
+            conn.execute(
+                "UPDATE voice_scripts SET status='approved', approved_by=?, "
+                "approved_at=? WHERE trade_code=?",
+                (int(user_id or 0), now, row["trade_code"]),
+            )
+            conn.execute(
+                "INSERT INTO voice_script_versions "
+                "(trade_code, version, status, body, disclosure, created_at, created_by) "
+                "VALUES (?, ?, 'approved', ?, ?, ?, ?)",
+                (
+                    row["trade_code"],
+                    int(row["version"]),
+                    row["body"],
+                    row["disclosure"],
+                    now,
+                    int(user_id or 0),
+                ),
+            )
+            approved += 1
+            trades.append(row["trade_code"])
+        conn.commit()
+    finally:
+        conn.close()
+    return {
+        "ok": True,
+        "approved": approved,
+        "total": len(rows),
+        "trades": trades,
+    }
+
+
+def sync_all() -> dict:
+    """Sincroniza todos os roteiros aprovados com a Telnyx, se configurada."""
+    init()
+    if not getattr(settings, "TELNYX_API_KEY", ""):
+        return {
+            "ok": False,
+            "status": "telnyx_not_configured",
+            "synced": 0,
+            "errors": [],
+        }
+    scripts = [item for item in list_scripts() if item["status"] == "approved"]
+    synced = 0
+    errors: list[dict] = []
+    for script in scripts:
+        try:
+            result = sync_to_telnyx(script["trade_code"])
+            if result.get("ok"):
+                synced += 1
+        except ValueError as exc:
+            errors.append(
+                {"trade_code": script["trade_code"], "error": str(exc)[:200]}
+            )
+    return {
+        "ok": not errors,
+        "status": "ok" if not errors else "partial",
+        "synced": synced,
+        "total": len(scripts),
+        "errors": errors,
+    }
+
+
+def save_override(
+    trade_code: str,
+    scope_type: str,
+    scope_value: str,
+    body: str,
+    disclosure: str = "",
+    assistant_id: str = "",
+    voice_id: str = "",
+    user_id: int = 0,
+) -> dict:
+    """Cria/atualiza override por estado ou cidade; começa em draft."""
+    init()
+    code = showcase.normalize_trade(trade_code) or str(trade_code or "").strip()
+    if scope_type not in ("state", "city"):
+        raise ValueError("scope_type deve ser state ou city")
+    if not code or not scope_value.strip() or not body.strip():
+        raise ValueError("trade, scope_value e body são obrigatórios")
+    now = datetime.now(timezone.utc).isoformat()
+    conn = b2b_voice.get_conn()
+    try:
+        conn.execute(
+            """
+            INSERT INTO voice_script_overrides
+              (trade_code, scope_type, scope_value, version, status, body,
+               disclosure, voice_id, assistant_id, updated_by, updated_at)
+            VALUES (?, ?, ?, 1, 'draft', ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(trade_code, scope_type, scope_value) DO UPDATE SET
+              version=voice_script_overrides.version + 1,
+              status='draft',
+              body=excluded.body,
+              disclosure=excluded.disclosure,
+              voice_id=COALESCE(NULLIF(excluded.voice_id,''), voice_script_overrides.voice_id),
+              assistant_id=COALESCE(NULLIF(excluded.assistant_id,''), voice_script_overrides.assistant_id),
+              updated_by=excluded.updated_by,
+              updated_at=excluded.updated_at
+            """,
+            (
+                code,
+                scope_type,
+                scope_value.strip(),
+                body,
+                disclosure or DISCLOSURE,
+                voice_id or "",
+                assistant_id or "",
+                int(user_id or 0),
+                now,
+            ),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT * FROM voice_script_overrides WHERE trade_code=? "
+            "AND scope_type=? AND scope_value=?",
+            (code, scope_type, scope_value.strip()),
+        ).fetchone()
+        return dict(row)
+    finally:
+        conn.close()
+
+
+def approve_override(override_id: int, user_id: int = 0) -> dict:
+    init()
+    now = datetime.now(timezone.utc).isoformat()
+    conn = b2b_voice.get_conn()
+    try:
+        conn.execute(
+            "UPDATE voice_script_overrides SET status='approved', "
+            "approved_by=?, approved_at=? WHERE id=?",
+            (int(user_id or 0), now, int(override_id)),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT * FROM voice_script_overrides WHERE id=?", (int(override_id),)
+        ).fetchone()
+        if not row:
+            raise ValueError("override não encontrado")
+        return dict(row)
+    finally:
+        conn.close()
+
+
 def render(
     trade_code: str,
     company: str = "",
     city: str = "",
     permit_count: int = 0,
+    state: str = "",
 ) -> dict:
-    script = get_script(trade_code)
+    script = get_effective_script(trade_code, city, state)
     if not script:
         raise ValueError("roteiro não encontrado")
     code = showcase.normalize_trade(trade_code) or trade_code
@@ -321,8 +533,10 @@ def render(
     }
 
 
-def approved_for_trade(trade_code: str) -> Optional[dict]:
-    script = get_script(trade_code)
+def approved_for_trade(
+    trade_code: str, city: str = "", state: str = ""
+) -> Optional[dict]:
+    script = get_effective_script(trade_code, city, state)
     if script and script.get("status") == "approved":
         return script
     return None
