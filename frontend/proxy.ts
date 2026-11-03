@@ -36,6 +36,16 @@ if (pathname === "/admin" || pathname.startsWith("/admin/")) {
     return NextResponse.next();
 }
 
+// Links publicos branded: /r/<token> e /unsubscribe sao rewrites para o
+// backend (next.config.js). Nao podem levar prefixo de locale.
+if (
+  pathname === "/unsubscribe" ||
+  pathname === "/r" ||
+  pathname.startsWith("/r/")
+) {
+  return NextResponse.next();
+}
+
   // Check if pathname already has locale prefix
   const pathnameHasLocale = LOCALES.some(
     (locale) => pathname.startsWith(`/${locale}/`) || pathname === `/${locale}`
