@@ -450,7 +450,9 @@ def test_answered_envia_script_renderizado_ao_assistant(monkeypatch):
         "instructions"
     ]
     assert sent["greeting"].startswith("Hi Telnyx Roofing")
-    assert sent["voice_settings"]["voice"] == "Telnyx.Ultra.Callie"
+    assert sent["voice_settings"]["voice"] == (
+        "Telnyx.Ultra.00a77add-48d5-4ef6-8157-71e5437b282d"
+    )
     assert "Email on file for this business: jane@example.com" in sent[
         "instructions"
     ]

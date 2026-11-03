@@ -106,13 +106,14 @@ Deepgram Aura nem outro TTS externo.
 
 | Definicao | Valor |
 |---|---|
-| Voz default masculina | `Telnyx.Ultra.Asher` (en, male) |
-| Voz default feminina | `Telnyx.Ultra.Callie` (en, female) |
-| Alternativa feminina en-US | `Telnyx.Ultra.Clara` (en-US, female) |
+| Voz default masculina | `Telnyx.Ultra.00967b2f-88a6-4a31-8153-110a92134b9f` (Asher, en-US, male) |
+| Voz default feminina | `Telnyx.Ultra.00a77add-48d5-4ef6-8157-71e5437b282d` (Callie, en-US, female) |
+| Alternativa feminina en-US | `Telnyx.Ultra.01eaafa9-308a-4276-a017-6ab0cf061b1f` (Clara, en-US, female) |
 | Modelo | default da conta Telnyx (`TELNYX_ASSISTANT_MODEL` vazio) |
 | Formato | `Telnyx.Ultra.<voice_id>` |
 
-O default do codigo e `Telnyx.Ultra.Callie` (`TELNYX_ASSISTANT_VOICE`). Cada
+O default do codigo e **Callie**
+(`Telnyx.Ultra.00a77add-48d5-4ef6-8157-71e5437b282d`). Cada
 roteiro pode fixar a sua voz em `voice_id`. A voz tambem e enviada no
 `ai_assistant_start`, com o script ja renderizado para a chamada.
 
@@ -126,7 +127,7 @@ Variaveis de ambiente:
 | `TELNYX_WEBHOOK_SECRET` | sim | assinatura dos tool calls |
 | `TELNYX_PUBLIC_KEY` | recomendada | verificacao Ed25519 do webhook |
 | `PUBLIC_API_URL` | sim | base dos webhooks/tools |
-| `TELNYX_ASSISTANT_VOICE` | nao | `Telnyx.Ultra.Callie` por defeito |
+| `TELNYX_ASSISTANT_VOICE` | nao | Callie (`Telnyx.Ultra.00a77add-...`) por defeito |
 | `TELNYX_ASSISTANT_MODEL` | nao | vazio usa o default Telnyx |
 | `TELNYX_ASSISTANT_EXPRESSIVE_MODE` | nao | `true` para Ultra expressive |
 | `VOICE_TEST_NUMBERS` | teste | allowlist E.164 separada por virgulas |

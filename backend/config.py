@@ -45,7 +45,9 @@ class Settings(BaseSettings):
     # Modelo nativo Telnyx. Vazio deixa a Telnyx aplicar o default da conta.
     TELNYX_ASSISTANT_MODEL: str = ""
     # Voz nativa Telnyx (sem ElevenLabs/Deepgram externos).
-    TELNYX_ASSISTANT_VOICE: str = "Telnyx.Ultra.Callie"
+    TELNYX_ASSISTANT_VOICE: str = (
+        "Telnyx.Ultra.00a77add-48d5-4ef6-8157-71e5437b282d"
+    )
     TELNYX_ASSISTANT_EXPRESSIVE_MODE: bool = False
     VOICE_TEST_NUMBERS: str = ""
     # Janela de chamada no fuso local do estado (TCPA-friendly). Fim exclusivo.

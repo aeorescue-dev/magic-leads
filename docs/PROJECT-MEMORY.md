@@ -1716,8 +1716,8 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 ### Fase 2C — Voz nativa Telnyx e tools (2026-11-02)
 
 - **Voz nativa apenas**: `TELNYX_ASSISTANT_VOICE` default
-  `Telnyx.Ultra.Callie`; alternativas documentadas `Telnyx.Ultra.Asher`,
-  `Telnyx.Ultra.Callie` e `Telnyx.Ultra.Clara`. Sem ElevenLabs/Deepgram
+  `Telnyx.Ultra.00a77add-...` (Callie); alternativas documentadas Asher e
+  Clara. Sem ElevenLabs/Deepgram
   externos. `TELNYX_ASSISTANT_EXPRESSIVE_MODE` liga expressive mode em Ultra.
 - **Script por chamada**: no `call.answered`, o backend renderiza o roteiro
   efetivo (override incluído) e envia `instructions`, `greeting` e
