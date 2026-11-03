@@ -3263,6 +3263,8 @@ async def admin_voice_send_showcase(
         call["id"],
         payload.get("city"),
         payload.get("trade"),
+        None,
+        True,
     )
     return result
 

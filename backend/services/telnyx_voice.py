@@ -385,14 +385,17 @@ def handle_webhook(payload: dict) -> dict:
     if "dtmf" in event_type:
         digit = str(body.get("dtmf_digit") or body.get("digit") or "").strip()
         if digit == "1":
-            # O assistant recebe o DTMF como texto e pergunta o email; o envio
-            # acontece na tool capture_email para não duplicar emails.
+            # Tecla 1 e confirmacao explicita: se ha email na ficha, envia ja
+            # o link sem depender do LLM/ASR. A tool send_showcase_link fica
+            # idempotente para o caso de o assistant tambem a chamar.
             b2b_voice.update_voice_call(voice_call_id, intent="showcase")
+            sent = send_showcase_for_call(voice_call_id)
             return {
                 "ok": True,
-                "action": "dtmf_yes",
+                "action": "showcase" if sent.get("ok") else "dtmf_yes",
                 "voice_call_id": voice_call_id,
                 "digit": digit,
+                "showcase": sent,
             }
         return {
             "ok": True,
@@ -504,11 +507,19 @@ def send_showcase_for_call(
     city: Optional[str] = None,
     trade_code: Optional[str] = None,
     email: Optional[str] = None,
+    force: bool = False,
 ) -> dict:
     """Cria o link da vitrine e envia o email para a empresa da chamada."""
     call = b2b_voice.get_voice_call(voice_call_id)
     if not call:
         return {"ok": False, "reason": "call_not_found"}
+    if call.get("showcase_link_id") and not force:
+        return {
+            "ok": True,
+            "duplicate": True,
+            "link_id": call.get("showcase_link_id"),
+            "message": "showcase already sent for this call",
+        }
     company = (
         b2b_voice.get_company(call["company_id"])
         if call.get("company_id")

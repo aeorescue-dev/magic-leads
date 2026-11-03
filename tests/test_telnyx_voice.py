@@ -118,7 +118,7 @@ def test_create_call_dry_run_sem_chaves():
     assert call["provider"] == "telnyx"
 
 
-def test_webhook_dtmf_1_marca_intent_sem_duplicar_email():
+def test_webhook_dtmf_1_envia_link_da_ficha_e_e_idempotente():
     company = _seed_company()
     _seed_showcase()
     created = telnyx_voice.create_call(company, campaign_id="pilot")
@@ -137,13 +137,15 @@ def test_webhook_dtmf_1_marca_intent_sem_duplicar_email():
     }
     result = telnyx_voice.handle_webhook(payload)
     assert result["ok"] is True
-    assert result["action"] == "dtmf_yes"
-    assert result["digit"] == "1"
-
+    assert result["action"] == "showcase"
+    assert result["showcase"]["ok"] is True
     call = voice.get_voice_call(call_id)
     assert call["intent"] == "showcase"
-    # O envio fica a cargo da tool capture_email (o assistant pergunta o email).
-    assert call["showcase_link_id"] is None
+    assert call["showcase_link_id"]
+
+    again = telnyx_voice.handle_webhook(payload)
+    assert again["showcase"].get("duplicate") is True
+    assert again["showcase"]["link_id"] == call["showcase_link_id"]
 
 
 def test_webhook_secret_fail_closed_e_valida():

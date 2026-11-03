@@ -1832,6 +1832,12 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   depende de ASR. O backend mantem o handler por compatibilidade, mas nao o
   expoe ao modelo.
 - **Tools**: `send_showcase_link` e `remove_from_list`.
+- **Greeting deterministico**: o arranque inclui o script aprovado + "I have
+  your email on file as <email>. Is that the best address to send the link?".
+  O modelo nao precisa de gerar a pergunta de confirmacao.
+- **DTMF 1**: se ha email na ficha, o backend envia o link imediatamente
+  (`send_showcase_for_call`), sem depender de LLM/ASR. `send_showcase_link` e
+  idempotente por `voice_call_id` (nao duplica emails).
 - **Empresa de teste**: `prospect_companies.id=9959` (Boston/MA, remodeling,
   email `support@magicleads.app`). O endpoint `test-call` passou a aceitar
   `company_id`, para a Callie ler o email da ficha.

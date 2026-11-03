@@ -164,13 +164,16 @@ por trade.
 
 ## DTMF e tools
 
-- O assistant recebe DTMF como texto. A tecla **1** conta como "sim" e marca
-  `intent=showcase`; nao envia email nesse momento.
-- Se existe email na ficha, o assistant confirma-o e so depois chama
-  `send_showcase_link`.
+- O assistant recebe DTMF como texto. A tecla **1** conta como "sim" e, se
+  houver email na ficha, o backend envia o link imediatamente
+  (`send_showcase_for_call`), sem depender de LLM/ASR.
+- Se existe email na ficha, o arranque da chamada ja pergunta "I have your email
+  on file as <email>. Is that the best address to send the link?".
 - Se o cliente recusa o email da ficha, quer outro endereco, ou nao ha email na
   ficha, o assistant **nao pede email nenhum**: diz o script de fallback exato
   e termina. Nao existe ditado de email nem `capture_email`.
+- `send_showcase_link` e idempotente por `voice_call_id`; a tecla 1 e a tool nao
+  duplicam o email.
 - `remove_from_list` cria supressao e marca a empresa `do_not_call`.
 - O auto-scheduler **nao** envia a vitrine ao discar; o email so sai depois de
   o contacto atender e autorizar, para nao enviar links sem consentimento.
@@ -205,10 +208,12 @@ Email on file for this business: info@apexroofing.com
 
 Fluxo:
 
-1. Cliente diz "yes" ou prime 1.
-2. Se existe email na ficha, o assistant pergunta:
-   "Great! Can I send it to info@apexroofing.com?"
-3. Se o cliente confirma, chama `send_showcase_link` com esse endereco.
+1. O arranque da chamada inclui o script aprovado e, se houver email na ficha:
+   "I have your email on file as info@apexroofing.com. Is that the best address
+   to send the link?".
+2. Cliente diz "yes" ou prime 1.
+3. Se disser "yes", o assistant chama `send_showcase_link` com esse endereco.
+   Se premir 1, o backend envia imediatamente, sem depender de LLM/ASR.
 4. Se o cliente recusa o email da ficha, quer outro endereco, ou nao ha email
    na ficha, o assistant **nao pede email** e diz exatamente:
 

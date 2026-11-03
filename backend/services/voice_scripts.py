@@ -67,19 +67,16 @@ TOOL_GUIDANCE = (
     "exactly; do not add claims, prices, or promises that are not in it.\n"
     "- Email handling (strict; this overrides the generic \"If Yes / Press 1\" "
     "line):\n"
-    "  1. If the call context below includes an email on file, confirm it out "
-    "loud exactly once: \"Great! Can I send it to [say the email on file]?\". "
-    "Wait for an explicit yes. Do not ask \"What is the best email address?\" "
-    "and do not ask the caller to dictate or spell an email.\n"
-    "  2. After the caller confirms the email on file, call "
-    "send_showcase_link with confirmed_email equal to that exact address. Do "
-    "not ask them to dictate the address again.\n"
-    "  3. If the caller says no to the email on file, wants a different "
+    "  1. If the call context below includes an email on file, the greeting "
+    "has already asked the caller to confirm it. If the caller says yes or "
+    "presses 1, call send_showcase_link with confirmed_email equal to that "
+    "exact address. Do not ask the confirmation question again.\n"
+    "  2. If the caller says no to the email on file, wants a different "
     "address, or there is no email on file, do NOT ask for an email, do NOT "
     "spell, and do NOT call capture_email. Say exactly this script:\n"
     f"\"{FALLBACK_SCRIPT}\"\n"
     "Then end the call politely.\n"
-    "  4. Never ask the caller to dictate or spell an email. The only email "
+    "  3. Never ask the caller to dictate or spell an email. The only email "
     "path is confirming the address already on file.\n"
     "- If the caller says no to the offer/link or asks to be removed, call "
     "remove_from_list and end politely.\n"
@@ -637,6 +634,12 @@ def render(
     disclosure = (script.get("disclosure") or DISCLOSURE)
     for key, value in replacements.items():
         disclosure = disclosure.replace(key, value)
+    greeting = opening_for_greeting(body)
+    if email:
+        greeting = (
+            f"{greeting} I have your email on file as {email}. "
+            "Is that the best address to send the link?"
+        )
     return {
         "trade_code": code,
         "version": script["version"],
@@ -645,7 +648,7 @@ def render(
         "voice_id": _assistant_voice(script),
         "body": body,
         "instructions": build_instructions(body, email_on_file=email),
-        "greeting": opening_for_greeting(body),
+        "greeting": greeting,
         "disclosure": disclosure,
         "variables": replacements,
     }
