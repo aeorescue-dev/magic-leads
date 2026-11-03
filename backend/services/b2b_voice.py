@@ -1759,7 +1759,10 @@ def metrics(days: int = 30, city: str = "", trade: str = "") -> dict:
     since = (_utc_now() - timedelta(days=days)).isoformat()
     city_filter = city.strip()
     trade_code = showcase.normalize_trade(trade) if trade.strip() else ""
-    where = ["datetime(COALESCE(v.created_at, v.started_at)) >= datetime(?)"]
+    where = [
+        "datetime(COALESCE(v.created_at, v.started_at)) >= datetime(?)",
+        "COALESCE(v.campaign_id, '') <> 'test_call'",
+    ]
     params: list[Any] = [since]
     if city_filter:
         where.append("UPPER(TRIM(COALESCE(v.city, c.city)))=UPPER(?)")

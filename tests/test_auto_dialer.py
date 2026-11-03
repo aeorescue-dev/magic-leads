@@ -217,6 +217,12 @@ def test_metrics_calcula_funil(monkeypatch):
     voice.update_voice_call(
         missed["id"], status="ended", hangup_cause="no_answer", cost_cents=200
     )
+    test_call = voice.create_voice_call(
+        company, provider="pytest", campaign_id="test_call"
+    )
+    voice.update_voice_call(
+        test_call["id"], status="ended", answered_at=NOW.isoformat()
+    )
     result = voice.metrics(days=30)
     summary = result["summary"]
     assert summary["dialed"] == 2
