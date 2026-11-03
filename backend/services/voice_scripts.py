@@ -54,28 +54,34 @@ TRADES = (
 
 DEFAULT_SCRIPTS: dict[str, str] = {trade: DEFAULT_TEMPLATE for trade in TRADES}
 
+FALLBACK_SCRIPT = (
+    "No problem at all! Just visit MagicLeads.app to check out the best active "
+    "opportunities available for you right now. There's no competition, and "
+    "best of all, you get access up to 7 days before any other contractor even "
+    "knows about them. The first to call gets the job!"
+)
+
 TOOL_GUIDANCE = (
     "## Operational rules\n"
     "You are on a live outbound phone call. Follow the approved script above "
     "exactly; do not add claims, prices, or promises that are not in it.\n"
-    "- Email handling, in this order (this overrides the generic \"If Yes / "
-    "Press 1\" line when an email is on file):\n"
+    "- Email handling (strict; this overrides the generic \"If Yes / Press 1\" "
+    "line):\n"
     "  1. If the call context below includes an email on file, confirm it out "
     "loud exactly once: \"Great! Can I send it to [say the email on file]?\". "
     "Wait for an explicit yes. Do not ask \"What is the best email address?\" "
-    "in this case.\n"
+    "and do not ask the caller to dictate or spell an email.\n"
     "  2. After the caller confirms the email on file, call "
-    "send_showcase_link. Do not ask them to dictate the address again.\n"
-    "  3. If there is no email on file, or the caller wants a different "
-    "address, say: \"Please say the part before the @ first, then say 'at', "
-    "then the domain.\" Repeat the full address back. If any part is unclear, "
-    "ask the caller to spell that part letter by letter (for example, "
-    "F-A-B-I-O). Only after the caller confirms the full address, call "
-    "capture_email with confirmed=true.\n"
-    "  4. Never invent, guess, or silently correct an email. If capture_email "
-    "returns invalid_email, apologize and ask the caller to repeat it. After "
-    "two failed attempts, stop guessing and offer to try again later.\n"
-    "- If the caller says no, stop, or asks to be removed, call "
+    "send_showcase_link with confirmed_email equal to that exact address. Do "
+    "not ask them to dictate the address again.\n"
+    "  3. If the caller says no to the email on file, wants a different "
+    "address, or there is no email on file, do NOT ask for an email, do NOT "
+    "spell, and do NOT call capture_email. Say exactly this script:\n"
+    f"\"{FALLBACK_SCRIPT}\"\n"
+    "Then end the call politely.\n"
+    "  4. Never ask the caller to dictate or spell an email. The only email "
+    "path is confirming the address already on file.\n"
+    "- If the caller says no to the offer/link or asks to be removed, call "
     "remove_from_list and end politely.\n"
     "- Pressing 1 is equivalent to saying yes. DTMF input arrives as text.\n"
 )
@@ -88,14 +94,15 @@ def build_instructions(body: str, email_on_file: str = "") -> str:
         context = (
             "## Call context\n"
             f"Email on file for this business: {email}\n"
-            "Start by confirming this address; only use dictation if the caller "
-            "declines it or asks for another address.\n"
+            "Confirm this address. If the caller declines it or wants another "
+            "address, say the fallback script exactly and do not ask for an "
+            "email.\n"
         )
     else:
         context = (
             "## Call context\n"
             "Email on file for this business: none.\n"
-            "Ask the caller for the best email address and read it back.\n"
+            "Do not ask for an email. Say the fallback script exactly.\n"
         )
     return f"{str(body or '').strip()}\n\n{TOOL_GUIDANCE}\n{context}"
 
@@ -669,7 +676,7 @@ def _tools_base_url() -> str:
 
 
 def _assistant_tools() -> list[dict]:
-    """Tools webhook que ligam a conversa ao backend (link, email, opt-out)."""
+    """Tools webhook que ligam a conversa ao backend (link e opt-out)."""
     base = _tools_base_url()
     secret = str(getattr(settings, "TELNYX_WEBHOOK_SECRET", "") or "")
 
@@ -698,8 +705,9 @@ def _assistant_tools() -> list[dict]:
             (
                 "Send the Magic Leads showcase link to the email already on "
                 "file for this business. Use it only after the caller confirms "
-                "the address on file out loud. Do not use it when there is no "
-                "email on file."
+                "the address on file out loud. If there is no email on file or "
+                "the caller declines it, do NOT call this tool; say the "
+                "fallback script instead."
             ),
             {
                 "confirmed_email": {
@@ -710,29 +718,6 @@ def _assistant_tools() -> list[dict]:
                 }
             },
             ["confirmed_email"],
-        ),
-        tool(
-            "capture_email",
-            (
-                "Save a new email dictated by the caller and send the showcase "
-                "link to it. Use only when there is no email on file or the "
-                "caller explicitly wants a different address. Never invent, "
-                "guess, or auto-correct an email."
-            ),
-            {
-                "email": {
-                    "type": "string",
-                    "description": "Email address dictated and confirmed by the caller.",
-                },
-                "confirmed": {
-                    "type": "boolean",
-                    "description": (
-                        "True only after the assistant read the address back "
-                        "and the caller confirmed it."
-                    ),
-                },
-            },
-            ["email", "confirmed"],
         ),
         tool(
             "remove_from_list",

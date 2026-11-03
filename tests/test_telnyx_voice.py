@@ -480,5 +480,6 @@ def test_answered_envia_script_renderizado_ao_assistant(monkeypatch):
     assert "Email on file for this business: jane@example.com" in sent[
         "instructions"
     ]
+    assert "No problem at all! Just visit MagicLeads.app" in sent["instructions"]
     assert "send_showcase_link" in sent["instructions"]
 

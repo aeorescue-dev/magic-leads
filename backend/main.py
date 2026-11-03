@@ -3597,30 +3597,53 @@ async def admin_voice_test_call(
         )
     if not telnyx_voice.configured():
         raise HTTPException(status_code=503, detail="Telnyx não configurado")
-    phone = b2b_voice.normalize_phone(payload.get("phone"))
     allowed = {
         b2b_voice.normalize_phone(item.strip())
         for item in str(getattr(settings, "VOICE_TEST_NUMBERS", "")).split(",")
         if item.strip()
     }
-    if not phone or phone not in allowed:
-        raise HTTPException(
-            status_code=403,
-            detail="número fora de VOICE_TEST_NUMBERS",
+    company_id = int(payload.get("company_id") or 0)
+    if company_id:
+        company = await anyio.to_thread.run_sync(b2b_voice.get_company, company_id)
+        if not company:
+            raise HTTPException(status_code=404, detail="empresa de teste não encontrada")
+        phone = b2b_voice.normalize_phone(company.get("phone"))
+        if not phone or phone not in allowed:
+            raise HTTPException(
+                status_code=403,
+                detail="telefone da empresa fora de VOICE_TEST_NUMBERS",
+            )
+        trade = (
+            showcase.normalize_trade(payload.get("trade") or company.get("trade"))
+            or "remodeling"
         )
-    trade = showcase.normalize_trade(payload.get("trade")) or "remodeling"
+        company = {
+            **company,
+            "phone": phone,
+            "city": str(payload.get("city") or company.get("city") or "Boston"),
+            "state": str(payload.get("state") or company.get("state") or "MA").upper(),
+            "trade": trade,
+        }
+    else:
+        phone = b2b_voice.normalize_phone(payload.get("phone"))
+        if not phone or phone not in allowed:
+            raise HTTPException(
+                status_code=403,
+                detail="número fora de VOICE_TEST_NUMBERS",
+            )
+        trade = showcase.normalize_trade(payload.get("trade")) or "remodeling"
+        company = {
+            "id": 0,
+            "company_name": "Magic Leads Test Call",
+            "phone": phone,
+            "city": str(payload.get("city") or "Boston"),
+            "state": str(payload.get("state") or "MA").upper(),
+            "trade": trade,
+            "entity_type": "business",
+            "status": "ready",
+            "email": "",
+        }
     b2b_voice.check_dnc(phone, listed=False, source="test_call")
-    company = {
-        "id": 0,
-        "company_name": "Magic Leads Test Call",
-        "phone": phone,
-        "city": str(payload.get("city") or "Boston"),
-        "state": str(payload.get("state") or "MA").upper(),
-        "trade": trade,
-        "entity_type": "business",
-        "status": "ready",
-        "email": "",
-    }
     result = await anyio.to_thread.run_sync(
         telnyx_voice.create_call,
         company,

@@ -143,7 +143,7 @@ Variaveis de ambiente:
 - `instructions` = script aprovado + regras operacionais;
 - `voice_settings.voice` nativo;
 - `telephony_settings.disable_dtmf=false` (DTMF ativo por defeito);
-- tools webhook `send_showcase_link`, `capture_email` e `remove_from_list`.
+- tools webhook `send_showcase_link` e `remove_from_list`.
 
 ## Limite de assistants e modo shared
 
@@ -155,8 +155,8 @@ roteiros precisam de assistant, usamos **um assistant unico**:
   15 roteiros.
 - O `ai_assistant_start` envia `instructions`, `greeting` e `voice_settings`
   renderizados por chamada, por isso o assistant fala o roteiro do trade certo.
-- As tools (`send_showcase_link`, `capture_email`,
-  `remove_from_list`) sao as mesmas para todos os trades.
+- As tools (`send_showcase_link`, `remove_from_list`) sao as mesmas para todos
+  os trades.
 
 Se a conta for upgraded para mais de 15 TeXML apps, basta remover
 `TELNYX_SHARED_ASSISTANT_ID` e correr **Sync Telnyx** para criar um assistant
@@ -164,12 +164,13 @@ por trade.
 
 ## DTMF e tools
 
-- O assistant recebe DTMF como texto. A tecla **1** conta como "sim"; o
-  backend apenas marca `intent=showcase` e **nao** envia email nesse momento.
-- O assistant pergunta o email e chama `capture_email`; so essa tool envia o
-  link, evitando emails duplicados.
-- `send_showcase_link` envia para o email ja existente; sem email devolve
-  `email_required` e o assistant pede o endereco.
+- O assistant recebe DTMF como texto. A tecla **1** conta como "sim" e marca
+  `intent=showcase`; nao envia email nesse momento.
+- Se existe email na ficha, o assistant confirma-o e so depois chama
+  `send_showcase_link`.
+- Se o cliente recusa o email da ficha, quer outro endereco, ou nao ha email na
+  ficha, o assistant **nao pede email nenhum**: diz o script de fallback exato
+  e termina. Nao existe ditado de email nem `capture_email`.
 - `remove_from_list` cria supressao e marca a empresa `do_not_call`.
 - O auto-scheduler **nao** envia a vitrine ao discar; o email so sai depois de
   o contacto atender e autorizar, para nao enviar links sem consentimento.
@@ -189,15 +190,12 @@ OPPORTUNITIES`, link `https://www.magicleads.app/r/<token>`, assinatura
 `Magic Leads Team`, morada `100 Main St, Suite 500, Boston, MA 02110` e link
 de unsubscribe. O assunto e o corpo usam plural correto (`1 ... opportunity`).
 
-O email e disparado por:
+O email e disparado apenas por `send_showcase_link`, que so envia para o email
+**que ja esta na ficha** e exige `confirmed_email` igual ao endereco em ficha.
+Se nao bater, devolve `email_confirmation_mismatch` e o assistant confirma de
+novo.
 
-- `send_showcase_link` — so envia para o email **que ja esta na ficha** e exige
-  `confirmed_email` igual ao endereco em ficha. Se nao bater, devolve
-  `email_confirmation_mismatch` e o assistant confirma de novo.
-- `capture_email` — so aceita um endereco ditado com `confirmed=true`, depois
-  de o assistant o ler de volta. Sem isso devolve `email_not_confirmed`.
-
-### Confirmacao primeiro (anti-erro de transcricao)
+### Confirmacao primeiro (fluxo definitivo)
 
 No arranque da chamada, o backend injeta no instructions o email da ficha:
 
@@ -211,14 +209,19 @@ Fluxo:
 2. Se existe email na ficha, o assistant pergunta:
    "Great! Can I send it to info@apexroofing.com?"
 3. Se o cliente confirma, chama `send_showcase_link` com esse endereco.
-4. Se nao existe email, ou o cliente quer outro, o assistant pede a parte antes
-   do `@`, depois o dominio, le o endereco completo de volta e chama
-   `capture_email` com `confirmed=true`. Se uma parte falhar, pede para
-   soletrar (ex.: F-A-B-I-O). Apos duas falhas, oferece tentar mais tarde.
+4. Se o cliente recusa o email da ficha, quer outro endereco, ou nao ha email
+   na ficha, o assistant **nao pede email** e diz exatamente:
 
-O ditado fica assim reservado aos casos sem email ou a pedido explicito. A
-transcricao usa `deepgram/nova-3` e noise suppression `krisp`; o backend nunca
-inventa nem corrige um email em silencio.
+```text
+No problem at all! Just visit MagicLeads.app to check out the best active
+opportunities available for you right now. There's no competition, and best of
+all, you get access up to 7 days before any other contractor even knows about
+them. The first to call gets the job!
+```
+
+Depois termina a chamada. Nao ha ditado, soletragem nem `capture_email`. A
+transcricao continua em `deepgram/nova-3` com noise suppression `krisp` para a
+conversa geral, mas o email nunca depende de ASR.
 
 ## Analytics de aceite e conversao
 
@@ -241,7 +244,7 @@ cidade x nicho tambem ganhou as colunas Aceite e Assinatura.
 Definicoes:
 
 - **Aceite** = `intent='showcase'` na chamada. E marcado pelo DTMF 1 e pelas
-  tools de email (`send_showcase_link`/`capture_email`); o envio tambem garante
+  tools de email (`send_showcase_link`); o envio tambem garante
   a marca.
 - **Assinatura** = `checkout_session_id` preenchido no webhook Stripe
   `checkout.session.completed` com `source=voice_showcase`.

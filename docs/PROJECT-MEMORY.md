@@ -1822,6 +1822,21 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   `duration_seconds`/`duration_millis`; custo deixa de ficar 0.
 - **Testes**: **1.322 pytest**; cobertura **70,0%**.
 
+### Fase 2I - Fluxo definitivo de email (2026-11-03)
+
+- **Confirmacao apenas**: se existe email na ficha, a Callie confirma-o e chama
+  `send_showcase_link`. Se o cliente recusa, quer outro endereco, ou nao ha
+  email, **nao pede email nenhum**: diz o fallback exato ("No problem at all!
+  Just visit MagicLeads.app... The first to call gets the job!") e termina.
+- **Sem dictado**: removida a tool `capture_email` do assistant; o email nunca
+  depende de ASR. O backend mantem o handler por compatibilidade, mas nao o
+  expoe ao modelo.
+- **Tools**: `send_showcase_link` e `remove_from_list`.
+- **Empresa de teste**: `prospect_companies.id=9959` (Boston/MA, remodeling,
+  email `support@magicleads.app`). O endpoint `test-call` passou a aceitar
+  `company_id`, para a Callie ler o email da ficha.
+- **Testes**: **1.322 pytest**; cobertura **70,0%**.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
