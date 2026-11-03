@@ -1926,6 +1926,20 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   fora de horas queimava a fila inteira como `blocked`.
 - **Testes**: **1.340 pytest**; cobertura **70,0%**.
 
+### Fase 2O - Primeira campanha real (2026-11-03)
+
+- **Campanha #3**: `Pilot NY Remodeling 2026-11-03`, New York / remodeling,
+  cota 40, lote 8/dia, **$10 total / $2 por dia / 7 dias**. Vitrine dedicada.
+- **Arranque**: criada como `paused` com `next_batch_at` vencido e retomada
+  pelo loop em produção (`[VOICE] campanhas retomadas: [3]`), validando o
+  caminho de retoma de ponta a ponta.
+- **1.o lote**: 8 chamadas, 0 saltos. 4 voicemail (AMD `machine`, sem
+  assistant nem link), 2 `user_busy`, 1 `not_sure` tratado como humano
+  (128 s, sem tool), 1 `normal_clearing` 13 s. Custo real **16c** (~2c/chamada).
+- **Pausa**: lote concluído → `paused`, `next_batch_at=2026-11-04 05:00:00`
+  (meia-noite NY). O loop tenta de hora a hora e dispara às 09:00 ET.
+- **Saldo Telnyx no arranque**: **$11,30**.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
