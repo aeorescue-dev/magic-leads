@@ -216,6 +216,7 @@ CREATE TABLE IF NOT EXISTS voice_campaigns (
   budget_total_usd REAL NOT NULL DEFAULT 0,
   budget_daily_usd REAL NOT NULL DEFAULT 0,
   max_days INTEGER NOT NULL DEFAULT 0,
+  start_hour_et INTEGER NOT NULL DEFAULT 9,
   error TEXT,
   next_batch_at TEXT,
   created_by INTEGER,
@@ -329,6 +330,7 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         ("budget_total_usd", "REAL NOT NULL DEFAULT 0"),
         ("budget_daily_usd", "REAL NOT NULL DEFAULT 0"),
         ("max_days", "INTEGER NOT NULL DEFAULT 0"),
+        ("start_hour_et", "INTEGER NOT NULL DEFAULT 9"),
     ):
         if name not in campaign_cols:
             conn.execute(f"ALTER TABLE voice_campaigns ADD COLUMN {name} {ddl}")
@@ -1284,6 +1286,7 @@ def create_campaign(
     budget_total_usd: Optional[float] = None,
     budget_daily_usd: Optional[float] = None,
     max_days: Optional[int] = None,
+    start_hour_et: Optional[int] = None,
 ) -> dict:
     init()
     now = _iso()
@@ -1313,14 +1316,25 @@ def create_campaign(
             else getattr(settings, "VOICE_CAMPAIGN_MAX_DAYS", 30)
         ),
     )
+    start_hour = max(
+        0,
+        min(
+            23,
+            int(
+                start_hour_et
+                if start_hour_et is not None
+                else getattr(settings, "VOICE_CALL_START_HOUR", 9)
+            ),
+        ),
+    )
     conn = get_conn()
     try:
         cur = conn.execute(
             "INSERT INTO voice_campaigns "
             "(name, city, trade, status, max_calls, quota_total, batch_size, "
             "include_fallback, dry_run, budget_total_usd, budget_daily_usd, "
-            "max_days, created_by, created_at, started_at) "
-            "VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "max_days, start_hour_et, created_by, created_at, started_at) "
+            "VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
                 city,
@@ -1333,6 +1347,7 @@ def create_campaign(
                 round(total_budget, 2),
                 round(daily_budget, 2),
                 days,
+                start_hour,
                 int(created_by or 0),
                 now,
                 now,
@@ -1392,6 +1407,7 @@ def update_campaign(campaign_id: int, **fields: Any) -> Optional[dict]:
         "budget_total_usd",
         "budget_daily_usd",
         "max_days",
+        "start_hour_et",
     }
     updates = {key: value for key, value in fields.items() if key in allowed}
     if not updates:
@@ -1495,6 +1511,18 @@ def campaign_candidates(
         "id NOT IN (SELECT company_id FROM voice_campaign_skips WHERE campaign_id=?)"
     )
     params.append(int(campaign_id))
+    # Exclusao global: nenhuma campanha repete um contacto chamado nos
+    # ultimos 7 dias. A exclusao por campanha acima nao chega quando duas
+    # campanhas correm em paralelo no mesmo segmento.
+    since = (_utc_now() - timedelta(days=7)).isoformat()
+    where.append(
+        "id NOT IN (SELECT company_id FROM voice_calls "
+        "WHERE COALESCE(provider,'')='telnyx' "
+        "AND COALESCE(campaign_id,'') <> 'test_call' "
+        "AND status <> 'dry_run' "
+        "AND datetime(COALESCE(created_at, started_at)) >= datetime(?))"
+    )
+    params.append(since)
     conn = get_conn()
     try:
         rows = [
@@ -2519,6 +2547,28 @@ def get_voice_call(voice_call_id: int) -> Optional[dict]:
             "SELECT * FROM voice_calls WHERE id=?", (int(voice_call_id),)
         ).fetchone()
         return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def delete_voice_call(voice_call_id: int) -> bool:
+    """Remove uma chamada que falhou antes de sair para a Telnyx.
+
+    Erros http_402/403/429/5xx/network_error nao chegaram a ser discados;
+    se ficassem em `voice_calls`, a empresa era excluida dos candidatos e a
+    tentativa contava para o teto diario.
+    """
+    init()
+    conn = get_conn()
+    try:
+        cur = conn.execute(
+            "DELETE FROM voice_calls WHERE id=? "
+            "AND COALESCE(provider_call_id,'')='' "
+            "AND status IN ('failed','queued')",
+            (int(voice_call_id),),
+        )
+        conn.commit()
+        return cur.rowcount > 0
     finally:
         conn.close()
 

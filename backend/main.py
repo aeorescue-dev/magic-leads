@@ -3460,6 +3460,7 @@ async def admin_voice_campaign_start(
     budget_total_usd = payload.get("budget_total_usd")
     budget_daily_usd = payload.get("budget_daily_usd")
     max_days = payload.get("max_days")
+    start_hour_et = payload.get("start_hour_et")
     name = str(payload.get("name") or "").strip() or (
         f"Auto {city or 'todas'} {trade or 'todos'}"
     )
@@ -3477,6 +3478,7 @@ async def admin_voice_campaign_start(
         budget_total_usd,
         budget_daily_usd,
         max_days,
+        start_hour_et,
     )
     _launch_voice_campaign(int(campaign["id"]))
     return {"ok": True, "campaign": campaign}

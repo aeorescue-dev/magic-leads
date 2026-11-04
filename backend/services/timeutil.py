@@ -42,3 +42,29 @@ def next_day_start_utc(now: Optional[datetime] = None) -> str:
         hour=0, minute=0, second=0, microsecond=0
     )
     return nxt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def next_day_hour_utc(hour: int, now: Optional[datetime] = None) -> str:
+    """Proximo dia a `hour` local NY, em UTC (inicio do lote diario)."""
+    local = _now(now).astimezone(NY_TZ)
+    nxt = (local + timedelta(days=1)).replace(
+        hour=max(0, min(23, int(hour))),
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    return nxt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def next_or_today_hour_utc(hour: int, now: Optional[datetime] = None) -> str:
+    """Proxima ocorrencia de `hour` local NY (hoje se ainda nao passou)."""
+    local = _now(now).astimezone(NY_TZ)
+    target = local.replace(
+        hour=max(0, min(23, int(hour))),
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    if target <= local:
+        target += timedelta(days=1)
+    return target.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")

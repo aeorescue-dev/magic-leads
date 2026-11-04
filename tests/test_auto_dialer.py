@@ -9,6 +9,7 @@ import pytest
 from backend.services import auto_dialer, showcase, telnyx_voice
 from backend.services import b2b_voice as voice
 from backend.services.db import get_connection
+from backend.services.timeutil import NY_TZ
 
 NOW = datetime(2026, 11, 2, 16, 0, tzinfo=timezone.utc)
 
@@ -371,6 +372,102 @@ def test_retoma_termina_campanha_no_orcamento_total(monkeypatch):
     final = voice.get_campaign(campaign["id"])
     assert final["status"] == "completed"
     assert final["error"] == "total_budget_reached"
+
+
+def test_campanha_nao_repete_contacto_global_7_dias():
+    company = _company_for_budget("+16175550140")
+    first = voice.create_campaign(
+        "Global A", "Boston", "Roofing", 1, 0, 1, 1, True, False
+    )
+    second = voice.create_campaign(
+        "Global B", "Boston", "Roofing", 1, 0, 1, 1, True, False
+    )
+    call = voice.create_voice_call(
+        company, provider="telnyx", campaign_id=str(first["id"])
+    )
+    voice.update_voice_call(call["id"], status="ended")
+    ids = [
+        row["id"]
+        for row in voice.campaign_candidates(
+            second["id"], "Boston", "Roofing", 50, True
+        )
+    ]
+    assert company["id"] not in ids
+
+    old = (NOW - timedelta(days=8)).isoformat()
+    conn = voice.get_conn()
+    try:
+        conn.execute(
+            "UPDATE voice_calls SET created_at=?, started_at=? WHERE id=?",
+            (old, old, call["id"]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    ids = [
+        row["id"]
+        for row in voice.campaign_candidates(
+            second["id"], "Boston", "Roofing", 50, True
+        )
+    ]
+    assert company["id"] in ids
+
+
+def test_auto_dialer_pausa_em_erro_http_transitorio(monkeypatch):
+    _import_company("+16175550141", "TransientCity", "MA")
+    conn = voice.get_conn()
+    try:
+        company = dict(
+            conn.execute(
+                "SELECT * FROM prospect_companies WHERE phone=?",
+                ("+16175550141",),
+            ).fetchone()
+        )
+    finally:
+        conn.close()
+    campaign = voice.create_campaign(
+        "Transient", "TransientCity", "Roofing", 3, 0, 3, 3, True, False
+    )
+    # provider pytest: nao entra na exclusao global de contactos reais.
+    failed = voice.create_voice_call(
+        company, provider="pytest", campaign_id="other"
+    )
+    monkeypatch.setattr(
+        auto_dialer.telnyx_voice,
+        "create_call",
+        lambda *a, **k: {
+            "ok": False,
+            "reason": "http_402",
+            "voice_call_id": failed["id"],
+        },
+    )
+    asyncio.run(auto_dialer.run_campaign(campaign["id"]))
+    final = voice.get_campaign(campaign["id"])
+    assert final["status"] == "paused"
+    assert final["error"] == "http_402"
+    assert final["skipped"] == 0
+    assert voice.get_voice_call(failed["id"]) is None
+
+
+def test_auto_dialer_usa_hora_de_inicio_da_campanha(monkeypatch):
+    _import_company("+16175550142", "HourCity", "MA")
+    campaign = voice.create_campaign(
+        "Hour10", "HourCity", "Roofing", 2, 0, 2, 1, True, False,
+        10.0, 2.0, 7, 10,
+    )
+    assert campaign["start_hour_et"] == 10
+    monkeypatch.setattr(
+        auto_dialer.telnyx_voice,
+        "create_call",
+        lambda *a, **k: {"ok": True, "dry_run": True, "voice_call_id": 0},
+    )
+    asyncio.run(auto_dialer.run_campaign(campaign["id"]))
+    final = voice.get_campaign(campaign["id"])
+    assert final["status"] == "paused"
+    next_at = datetime.fromisoformat(final["next_batch_at"]).replace(
+        tzinfo=timezone.utc
+    )
+    assert next_at.astimezone(NY_TZ).hour == 10
 
 
 def test_metrics_calcula_funil(monkeypatch):

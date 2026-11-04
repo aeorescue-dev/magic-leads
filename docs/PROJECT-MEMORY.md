@@ -1958,6 +1958,21 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   2026-02-17. Sem codigo SMS escrito.
 - **Saldo Telnyx**: ~**$9,02** (numero + teste + custos da campanha).
 
+### Fase 2Q - Horario por campanha e travas de paralelismo (2026-11-03)
+
+- **`start_hour_et` por campanha** (default 9): o lote diario arranca a essa
+  hora ET e a pausa diaria aponta para a proxima ocorrencia dessa hora, nao
+  para a meia-noite. O Admin expoe o campo "Inicio (ET)".
+- **Distribuicao**: o lote nao e espalhado pelo dia; as chamadas sao iniciadas
+  com 30s entre si e depois a campanha pausa ate ao dia seguinte. Um lote de 8
+  leva ~4 min; conversas longas podem sobrepor 2-4 chamadas.
+- **Exclusao global 7 dias**: `campaign_candidates` ignora contactos com
+  `voice_calls` Telnyx nos ultimos 7 dias, mesmo de outra campanha. Evita
+  duplicados em campanhas paralelas no mesmo segmento.
+- **Erros transitorios**: 401/402/403/429/5xx/rede pausam a campanha (1h) e
+  apagam a linha failed; o contacto nao e marcado como saltado.
+- **Testes**: **1.343 pytest**; cobertura **70,0%**.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

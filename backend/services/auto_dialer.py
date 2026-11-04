@@ -13,9 +13,24 @@ import anyio
 from ..config import settings
 from ..utils.logger import logger
 from . import b2b_voice, telnyx_voice
-from .timeutil import next_day_start_utc
+from .timeutil import NY_TZ, next_day_hour_utc, next_or_today_hour_utc
 
 MAX_GUARD_MULTIPLIER = 10
+# Erros que nao sao do contacto: pausam a campanha em vez de o saltar.
+TRANSIENT_API_REASONS = {
+    "http_401",
+    "http_402",
+    "http_403",
+    "http_429",
+    "network_error",
+}
+
+
+def _campaign_start_hour(campaign: dict) -> int:
+    try:
+        return max(0, min(23, int(campaign.get("start_hour_et") or 9)))
+    except (TypeError, ValueError):
+        return 9
 
 
 async def _run_sync(fn, *args):
@@ -25,6 +40,25 @@ async def _run_sync(fn, *args):
 async def run_campaign(campaign_id: int) -> None:
     campaign = await _run_sync(b2b_voice.get_campaign, campaign_id)
     if not campaign or campaign.get("status") != "running":
+        return
+
+    start_hour = _campaign_start_hour(campaign)
+    now = b2b_voice._utc_now()
+    if now.astimezone(NY_TZ).hour < start_hour:
+        next_batch = next_or_today_hour_utc(start_hour, now=now)
+        await _run_sync(
+            lambda: b2b_voice.update_campaign(
+                campaign_id,
+                status="paused",
+                next_batch_at=next_batch,
+                error="before_start_hour",
+            )
+        )
+        logger.info(
+            "[AUTO-DIALER] campanha %s aguarda a hora de inicio (%02d:00 ET)",
+            campaign_id,
+            start_hour,
+        )
         return
 
     max_calls = max(1, int(campaign.get("quota_total") or campaign.get("max_calls") or 25))
@@ -98,7 +132,7 @@ async def run_campaign(campaign_id: int) -> None:
                         # contacto. Pausa e o loop de retoma tenta daqui a
                         # uma hora (o candidato continua na fila).
                         next_batch = (
-                            datetime.now(timezone.utc) + timedelta(hours=1)
+                            b2b_voice._utc_now() + timedelta(hours=1)
                         ).isoformat()
                         await _run_sync(
                             lambda: b2b_voice.update_campaign(
@@ -117,7 +151,9 @@ async def run_campaign(campaign_id: int) -> None:
                         "daily_budget_reached",
                         "daily_calls_reached",
                     ):
-                        next_batch = next_day_start_utc()
+                        next_batch = next_day_hour_utc(
+                            start_hour, now=b2b_voice._utc_now()
+                        )
                         await _run_sync(
                             lambda: b2b_voice.update_campaign(
                                 campaign_id,
@@ -130,6 +166,35 @@ async def run_campaign(campaign_id: int) -> None:
                             "[AUTO-DIALER] campanha %s pausada: %s",
                             campaign_id,
                             result.get("reason"),
+                        )
+                        return
+                    if reason in TRANSIENT_API_REASONS or reason.startswith(
+                        "http_5"
+                    ):
+                        # Erro de conta/rede: a chamada nunca saiu. Remove a
+                        # linha failed para o contacto voltar a ser candidato
+                        # e pausa; nao marca a empresa como saltada.
+                        voice_call_id = result.get("voice_call_id")
+                        if voice_call_id:
+                            await _run_sync(
+                                b2b_voice.delete_voice_call,
+                                int(voice_call_id),
+                            )
+                        next_batch = (
+                            b2b_voice._utc_now() + timedelta(hours=1)
+                        ).isoformat()
+                        await _run_sync(
+                            lambda: b2b_voice.update_campaign(
+                                campaign_id,
+                                status="paused",
+                                next_batch_at=next_batch,
+                                error=reason[:300],
+                            )
+                        )
+                        logger.warning(
+                            "[AUTO-DIALER] campanha %s pausada (transitorio): %s",
+                            campaign_id,
+                            reason,
                         )
                         return
                     await _run_sync(
@@ -168,7 +233,10 @@ async def run_campaign(campaign_id: int) -> None:
                     )
                 )
             else:
-                next_batch = next_day_start_utc()
+                next_batch = next_day_hour_utc(
+                    _campaign_start_hour(final or campaign),
+                    now=b2b_voice._utc_now(),
+                )
                 await _run_sync(
                     lambda: b2b_voice.update_campaign(
                         campaign_id,

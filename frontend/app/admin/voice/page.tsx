@@ -626,6 +626,7 @@ export default function VoiceB2BPage() {
   const [budgetTotal, setBudgetTotal] = useState(100);
   const [budgetDaily, setBudgetDaily] = useState(5);
   const [maxDays, setMaxDays] = useState(30);
+  const [startHour, setStartHour] = useState(9);
   const [metricsDays, setMetricsDays] = useState(30);
   const [tab, setTab] = useState<VoiceTab>("overview");
   const [sourceName, setSourceName] = useState("");
@@ -802,6 +803,7 @@ export default function VoiceB2BPage() {
         budget_total_usd: budgetTotal,
         budget_daily_usd: budgetDaily,
         max_days: maxDays,
+        start_hour_et: startHour,
       });
       await Promise.all([
         mutateCampaigns(),
@@ -1839,6 +1841,18 @@ export default function VoiceB2BPage() {
               className="mt-1 block w-20 rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-[11px] text-slate-200"
             />
           </label>
+          <label className="text-[10px] text-slate-500">
+            Início (ET)
+            <input
+              type="number"
+              min={0}
+              max={23}
+              step={1}
+              value={startHour}
+              onChange={(event) => setStartHour(Number(event.target.value))}
+              className="mt-1 block w-20 rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-[11px] text-slate-200"
+            />
+          </label>
           <label className="flex items-center gap-2 pb-2 text-[10px] font-semibold text-slate-400">
             <input
               type="checkbox"
@@ -1900,7 +1914,8 @@ export default function VoiceB2BPage() {
                   <span className="text-slate-600">
                     ${campaign.budget_total_usd.toFixed(0)} total · $
                     {(campaign.budget_daily_usd ?? 0).toFixed(2)}/dia ·{" "}
-                    {campaign.max_days || "∞"} dias
+                    {campaign.max_days || "∞"} dias · início{" "}
+                    {campaign.start_hour_et ?? 9}:00 ET
                   </span>
                 ) : null}
                 <span className="text-slate-600">

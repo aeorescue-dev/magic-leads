@@ -294,28 +294,44 @@ Definicoes:
 - **Conversao** = assinaturas / aceites (nao sobre cliques), para medir a
   qualidade do lead de voz.
 
-## Orcamento de campanha
+## Orcamento e horario de campanha
 
-Cada campanha tem tres tetos:
+Cada campanha tem estes parametros:
 
 | Parametro | Efeito |
 |---|---|
 | `budget_total_usd` | ao esgotar, a campanha fica **completed** |
 | `budget_daily_usd` | ao esgotar, a campanha fica **paused** ate ao dia seguinte |
 | `max_days` | ao passar o numero de dias, a campanha fica **completed** |
+| `start_hour_et` | hora local (ET) em que o lote diario arranca (default 9) |
 
 O backend reserva 25c por chamada ativa e substitui pelo custo real no fim.
 `campaign_budget_status` corre antes de cada chamada; o auto-scheduler pausa
 ou completa a campanha automaticamente. Ha ainda uma rede de seguranca global:
 `VOICE_MAX_DAILY_BUDGET_USD=5` e `VOICE_MAX_CALLS_PER_DAY=100`.
 
+**Distribuicao diaria:** o lote nao e espalhado pelo dia. Quando a hora de
+inicio chega, o auto-dialer inicia as chamadas do lote sequencialmente com
+`VOICE_AUTOSCHED_DELAY_SECONDS` (30s) entre cada uma e depois pausa ate ao dia
+seguinte. Um lote de 8 chamadas leva ~4 min. O auto-dialer nao espera que a
+chamada anterior termine: com conversas longas pode haver 2-4 chamadas ativas
+em simultaneo.
+
+**Exclusao global:** `campaign_candidates` nao repete um contacto que tenha
+`voice_calls` Telnyx nos ultimos 7 dias, mesmo que seja de outra campanha. Isto
+evita chamadas duplicadas quando duas campanhas correm em paralelo.
+
+**Erros transitorios:** `http_401`, `http_402`, `http_403`, `http_429`,
+`http_5xx` e `network_error` **pausam** a campanha em vez de saltar o contacto;
+a linha `voice_calls` failed e apagada para o contacto voltar a ser candidato.
+
 ### Retoma automatica
 
 `_voice_campaign_resume_loop` corre a cada 5 min e retoma campanhas `paused`
-quando `next_batch_at` venceu. A pausa diaria aponta para a proxima
-meia-noite de Nova Iorque; se o total ou os dias ja esgotaram, a campanha e
-fechada como `completed` na retoma. Fora da janela local do estado a chamada
-devolve `outside_hours` e a campanha pausa 1h **sem** saltar o contacto.
+quando `next_batch_at` venceu. A pausa diaria aponta para a proxima ocorrencia
+de `start_hour_et` em Nova Iorque; se o total ou os dias ja esgotaram, a
+campanha e fechada como `completed` na retoma. Fora da janela local do estado a
+chamada devolve `outside_hours` e a campanha pausa 1h **sem** saltar o contacto.
 
 ## Chamada de teste controlada
 

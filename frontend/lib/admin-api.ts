@@ -1787,6 +1787,7 @@ export interface VoiceCampaign {
   budget_total_usd?: number;
   budget_daily_usd?: number;
   max_days?: number;
+  start_hour_et?: number;
   calls_started: number;
   showcases_sent: number;
   skipped: number;
@@ -1924,6 +1925,7 @@ export function startVoiceCampaign(payload: {
   budget_total_usd?: number;
   budget_daily_usd?: number;
   max_days?: number;
+  start_hour_et?: number;
 }): Promise<{ ok: boolean; campaign: VoiceCampaign }> {
   return adminFetch<{ ok: boolean; campaign: VoiceCampaign }>(
     "/voice/campaigns/start",
