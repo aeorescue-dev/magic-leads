@@ -21,6 +21,11 @@ def _clean(monkeypatch):
     monkeypatch.setattr(showcase.settings, "SHOWCASE_WINDOW_DAYS", 30)
     monkeypatch.setattr(showcase.settings, "EMAIL_API_KEY", "")
     monkeypatch.setattr(showcase.settings, "EMAIL_FROM", "")
+
+    async def _no_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(auto_dialer.asyncio, "sleep", _no_sleep)
     voice.init()
     conn = voice.get_conn()
     try:
@@ -90,12 +95,14 @@ def _seed_lead(city: str, state: str, category: str, zip_code: str, idx: int) ->
         conn.close()
 
 
-def _import_company(phone: str, city: str, state: str) -> None:
+def _import_company(
+    phone: str, city: str, state: str, trade: str = "Roofing"
+) -> None:
     csv_text = (
         "company_name,contact_name,phone,email,city,state,license_status,trade,"
         "permit_count\n"
         f"Auto {city} Co,Test,{phone},{phone[1:]}@example.com,{city},{state},"
-        "active,Roofing,7\n"
+        f"active,{trade},7\n"
     )
     voice.import_licenses_csv(csv_text, source_name="pytest-auto")
     voice.check_dnc(phone, listed=False, source="pytest")
@@ -490,6 +497,46 @@ def test_campaign_batch_size_respeita_plano():
     assert auto_dialer._campaign_batch_size({"batch_size": 7}) == 7
 
 
+def test_campaign_trade_plan_distribui_por_trade(monkeypatch):
+    for phone in ("+16175550151", "+16175550152"):
+        _import_company(phone, "Multi", "MA", trade="Roofing")
+    for phone in ("+16175550153", "+16175550154"):
+        _import_company(phone, "Multi", "MA", trade="Painting")
+    campaign = voice.create_campaign(
+        name="Multi plan",
+        city="Multi",
+        trade="",
+        max_calls=4,
+        quota_total=4,
+        batch_size=4,
+        include_fallback=True,
+        dry_run=False,
+        budget_total_usd=10.0,
+        budget_daily_usd=2.0,
+        max_days=1,
+        start_hour_et=0,
+        call_interval_seconds=0,
+        trade_plan=[
+            {"trade": "Roofing", "quota": 2},
+            {"trade": "Painting", "quota": 2},
+        ],
+    )
+    assert campaign["trade_plan"]
+    selected: list[str] = []
+
+    def fake_call(company, campaign_id, script_id, city, trade, dry_run, from_number=None):
+        selected.append(trade)
+        return {"ok": True, "dry_run": False, "voice_call_id": 0}
+
+    monkeypatch.setattr(auto_dialer.telnyx_voice, "create_call", fake_call)
+    asyncio.run(auto_dialer.run_campaign(campaign["id"]))
+    final = voice.get_campaign(campaign["id"])
+    assert final["status"] == "completed"
+    assert final["calls_started"] == 4
+    assert selected.count("roofing") == 2
+    assert selected.count("painting") == 2
+
+
 def test_auto_dialer_usa_intervalo_e_avanca_plano(monkeypatch):
     for idx, phone in enumerate(
         ("+16175550143", "+16175550144", "+16175550145")
@@ -521,7 +568,9 @@ def test_auto_dialer_usa_intervalo_e_avanca_plano(monkeypatch):
     final = voice.get_campaign(campaign["id"])
     assert final["status"] == "completed"
     assert final["calls_started"] == 3
-    assert delays == [600]
+    assert len(delays) == 1
+    assert 480 <= delays[0] <= 720
+    assert 600 not in delays
 
 
 def test_metrics_calcula_funil(monkeypatch):

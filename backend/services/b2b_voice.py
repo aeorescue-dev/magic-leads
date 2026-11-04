@@ -221,6 +221,7 @@ CREATE TABLE IF NOT EXISTS voice_campaigns (
   start_hour_et INTEGER NOT NULL DEFAULT 9,
   call_interval_seconds INTEGER NOT NULL DEFAULT 30,
   batch_plan TEXT,
+  trade_plan TEXT,
   plan_index INTEGER NOT NULL DEFAULT 0,
   error TEXT,
   next_batch_at TEXT,
@@ -338,6 +339,7 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         ("start_hour_et", "INTEGER NOT NULL DEFAULT 9"),
         ("call_interval_seconds", "INTEGER NOT NULL DEFAULT 30"),
         ("batch_plan", "TEXT"),
+        ("trade_plan", "TEXT"),
         ("plan_index", "INTEGER NOT NULL DEFAULT 0"),
     ):
         if name not in campaign_cols:
@@ -1322,6 +1324,7 @@ def create_campaign(
     start_hour_et: Optional[int] = None,
     call_interval_seconds: Optional[int] = None,
     batch_plan: Optional[list[int]] = None,
+    trade_plan: Optional[list[dict]] = None,
 ) -> dict:
     init()
     now = _iso()
@@ -1382,6 +1385,26 @@ def create_campaign(
                 plan_json = json.dumps(values)
         except (TypeError, ValueError):
             plan_json = ""
+    trade_plan_json = ""
+    if trade_plan:
+        from . import showcase
+
+        rows: list[dict] = []
+        for item in trade_plan:
+            code = showcase.normalize_trade((item or {}).get("trade"))
+            try:
+                amount = int((item or {}).get("quota") or 0)
+            except (TypeError, ValueError):
+                amount = 0
+            if code and amount > 0:
+                rows.append({"trade": code, "quota": amount})
+        if rows:
+            total_plan = sum(row["quota"] for row in rows)
+            if total_plan != quota:
+                raise ValueError(
+                    f"trade_plan soma {total_plan}, quota_total é {quota}"
+                )
+            trade_plan_json = json.dumps(rows)
     conn = get_conn()
     try:
         cur = conn.execute(
@@ -1389,8 +1412,8 @@ def create_campaign(
             "(name, city, trade, status, max_calls, quota_total, batch_size, "
             "include_fallback, dry_run, budget_total_usd, budget_daily_usd, "
             "max_days, start_hour_et, call_interval_seconds, batch_plan, "
-            "plan_index, created_by, created_at, started_at) "
-            "VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
+            "trade_plan, plan_index, created_by, created_at, started_at) "
+            "VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
             (
                 name,
                 city,
@@ -1406,6 +1429,7 @@ def create_campaign(
                 start_hour,
                 interval,
                 plan_json,
+                trade_plan_json,
                 int(created_by or 0),
                 now,
                 now,
@@ -1468,6 +1492,7 @@ def update_campaign(campaign_id: int, **fields: Any) -> Optional[dict]:
         "start_hour_et",
         "call_interval_seconds",
         "batch_plan",
+        "trade_plan",
         "plan_index",
     }
     updates = {key: value for key, value in fields.items() if key in allowed}
@@ -1544,6 +1569,22 @@ def skip_campaign_company(campaign_id: int, company_id: int, reason: str = "") -
             (int(campaign_id), int(company_id), reason[:300], _iso()),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def campaign_trade_counts(campaign_id: int) -> dict[str, int]:
+    """Chamadas já criadas por trade nesta campanha (para o trade_plan)."""
+    init()
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT LOWER(TRIM(COALESCE(trade_code,''))) AS trade, "
+            "COUNT(*) AS n FROM voice_calls WHERE campaign_id=? "
+            "AND status <> 'dry_run' GROUP BY 1",
+            (str(int(campaign_id)),),
+        ).fetchall()
+        return {str(r["trade"] or ""): int(r["n"] or 0) for r in rows}
     finally:
         conn.close()
 

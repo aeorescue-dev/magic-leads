@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 from datetime import datetime, timedelta, timezone
 
 import anyio
@@ -99,6 +100,67 @@ async def run_campaign(campaign_id: int) -> None:
             or getattr(settings, "VOICE_AUTOSCHED_DELAY_SECONDS", 30)
         ),
     )
+    jitter = max(
+        0.0, float(getattr(settings, "VOICE_CALL_INTERVAL_JITTER", 0.2) or 0)
+    )
+    pause_every = max(
+        0, int(getattr(settings, "VOICE_PAUSE_EVERY_CALLS", 25) or 0)
+    )
+    pause_seconds = max(
+        0, int(getattr(settings, "VOICE_PAUSE_SECONDS", 600) or 0)
+    )
+    did_cap = max(1, int(getattr(settings, "VOICE_DID_DAILY_CAP", 50) or 50))
+    secondary_from = str(
+        getattr(settings, "TELNYX_FROM_NUMBER_SECONDARY", "") or ""
+    ).strip()
+    trade_plan: list[dict] = []
+    raw_plan = campaign.get("trade_plan")
+    if raw_plan:
+        try:
+            parsed = json.loads(raw_plan) if isinstance(raw_plan, str) else raw_plan
+            if isinstance(parsed, list):
+                trade_plan = [
+                    {
+                        "trade": str(item.get("trade") or "").strip(),
+                        "quota": max(0, int(item.get("quota") or 0)),
+                    }
+                    for item in parsed
+                    if isinstance(item, dict)
+                ]
+        except (TypeError, ValueError, json.JSONDecodeError):
+            trade_plan = []
+    if not trade_plan:
+        trade_plan = [
+            {
+                "trade": str(campaign.get("trade") or "").strip(),
+                "quota": max_calls,
+            }
+        ]
+    used_by_trade = await _run_sync(
+        b2b_voice.campaign_trade_counts, campaign_id
+    )
+
+    async def next_trade_batch(limit: int) -> tuple[str, list[dict]]:
+        for item in trade_plan:
+            trade_code = str(item.get("trade") or "").strip()
+            target = int(item.get("quota") or 0)
+            used = int(used_by_trade.get(trade_code, 0))
+            if target <= 0 or used >= target:
+                continue
+            rows = await _run_sync(
+                b2b_voice.campaign_candidates,
+                campaign_id,
+                campaign.get("city") or "",
+                trade_code,
+                limit,
+                include_fallback,
+            )
+            if rows:
+                return trade_code, rows
+            # Sem contactos para este trade: não voltar a tentar neste run.
+            used_by_trade[trade_code] = target
+        return "", []
+
     guard = 0
     max_guard = max(1, batch_end - calls) * MAX_GUARD_MULTIPLIER + 100
 
@@ -108,15 +170,7 @@ async def run_campaign(campaign_id: int) -> None:
             if not current or current.get("status") != "running":
                 return
             city = current.get("city") or ""
-            trade = current.get("trade") or ""
-            batch = await _run_sync(
-                b2b_voice.campaign_candidates,
-                campaign_id,
-                city,
-                trade,
-                min(25, batch_end - calls),
-                include_fallback,
-            )
+            trade, batch = await next_trade_batch(min(25, batch_end - calls))
             if not batch:
                 break
             progressed = False
@@ -126,6 +180,9 @@ async def run_campaign(campaign_id: int) -> None:
                     return
                 if calls >= batch_end:
                     break
+                from_number = (
+                    secondary_from if secondary_from and calls >= did_cap else ""
+                )
                 result = await _run_sync(
                     telnyx_voice.create_call,
                     company,
@@ -134,6 +191,7 @@ async def run_campaign(campaign_id: int) -> None:
                     city,
                     trade,
                     bool(campaign.get("dry_run")),
+                    from_number,
                 )
                 if not result.get("ok"):
                     reason = str(result.get("reason") or "blocked")
@@ -242,13 +300,23 @@ async def run_campaign(campaign_id: int) -> None:
                     continue
 
                 calls += 1
+                used_by_trade[trade] = int(used_by_trade.get(trade, 0)) + 1
                 progressed = True
                 await _run_sync(b2b_voice.bump_campaign, campaign_id, 1, 0, 0)
                 # A vitrine so e enviada depois de o contacto atender e dar
                 # consentimento (tool capture_email), nunca no dial.
 
                 if not result.get("dry_run") and delay and calls < batch_end:
-                    await asyncio.sleep(delay)
+                    low = max(0.0, delay * (1.0 - jitter))
+                    high = max(low, delay * (1.0 + jitter))
+                    await asyncio.sleep(random.uniform(low, high))
+                    if (
+                        pause_every
+                        and pause_seconds
+                        and calls % pause_every == 0
+                        and calls < batch_end
+                    ):
+                        await asyncio.sleep(pause_seconds)
 
             guard += 1
             if not progressed:

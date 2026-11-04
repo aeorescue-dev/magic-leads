@@ -51,6 +51,13 @@ class Settings(BaseSettings):
     # "premium" ($0.0065/chamada), "standard" ($0.002/chamada) ou "disabled".
     TELNYX_AMD_MODE: str = "standard"
     TELNYX_STATIC_GATHER_TIMEOUT_MS: int = 10000
+    # Segundo DID para dividir o volume e respeitar 50/dia por número.
+    TELNYX_FROM_NUMBER_SECONDARY: str = ""
+    VOICE_DID_DAILY_CAP: int = 50
+    # Pacing: 75s base +/-20% = 60-90s; pausa de 10 min a cada 25 chamadas.
+    VOICE_CALL_INTERVAL_JITTER: float = 0.2
+    VOICE_PAUSE_EVERY_CALLS: int = 25
+    VOICE_PAUSE_SECONDS: int = 600
     # Modelo nativo Telnyx. Vazio deixa a Telnyx aplicar o default da conta.
     TELNYX_ASSISTANT_MODEL: str = ""
     # Voz nativa Telnyx (sem ElevenLabs/Deepgram externos).

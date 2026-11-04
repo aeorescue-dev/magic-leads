@@ -84,6 +84,7 @@ def create_call(
     city: Optional[str] = None,
     trade_code: Optional[str] = None,
     dry_run: bool = False,
+    from_number: Optional[str] = None,
 ) -> dict:
     """Cria uma chamada Telnyx para uma empresa já validada pelo gate."""
     if (
@@ -242,7 +243,7 @@ def create_call(
     payload = {
         "connection_id": settings.TELNYX_CONNECTION_ID,
         "to": company["phone"],
-        "from": settings.TELNYX_FROM_NUMBER,
+        "from": str(from_number or settings.TELNYX_FROM_NUMBER),
         "webhook_url": _webhook_url(),
         "client_state": state,
         "timeout_secs": 30,
