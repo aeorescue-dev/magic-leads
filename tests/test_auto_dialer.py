@@ -523,9 +523,17 @@ def test_campaign_trade_plan_distribui_por_trade(monkeypatch):
     )
     assert campaign["trade_plan"]
     selected: list[str] = []
+    from_numbers: list[str | None] = []
+    monkeypatch.setattr(auto_dialer.settings, "VOICE_DID_DAILY_CAP", 2)
+    monkeypatch.setattr(
+        auto_dialer.settings,
+        "TELNYX_FROM_NUMBER_SECONDARY",
+        "+15189429910",
+    )
 
     def fake_call(company, campaign_id, script_id, city, trade, dry_run, from_number=None):
         selected.append(trade)
+        from_numbers.append(from_number)
         return {"ok": True, "dry_run": False, "voice_call_id": 0}
 
     monkeypatch.setattr(auto_dialer.telnyx_voice, "create_call", fake_call)
@@ -535,6 +543,8 @@ def test_campaign_trade_plan_distribui_por_trade(monkeypatch):
     assert final["calls_started"] == 4
     assert selected.count("roofing") == 2
     assert selected.count("painting") == 2
+    assert from_numbers[:2] == ["", ""]
+    assert from_numbers[2:] == ["+15189429910", "+15189429910"]
 
 
 def test_auto_dialer_usa_intervalo_e_avanca_plano(monkeypatch):
