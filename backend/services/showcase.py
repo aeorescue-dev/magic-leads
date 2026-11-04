@@ -19,7 +19,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 from html import escape
 from typing import Any, Optional
-from urllib.parse import quote, urlencode
+from urllib.parse import urlencode
 
 import httpx
 
