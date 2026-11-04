@@ -228,6 +228,33 @@ def test_hangup_sem_duracao_usa_answered_at():
     assert call["cost_cents"] > 0
 
 
+def test_opt_out_de_test_call_usa_phone_do_voice_call():
+    phone = "+16175550988"
+    voice.check_dnc(phone, listed=False, source="pytest")
+    created = telnyx_voice.create_call(
+        {
+            "id": 0,
+            "company_name": "",
+            "phone": phone,
+            "city": "Boston",
+            "state": "MA",
+            "trade": "roofing",
+        },
+        campaign_id="test_call",
+        dry_run=True,
+    )
+    telnyx_voice.opt_out_voice_call(created["voice_call_id"])
+    conn = voice.get_conn()
+    try:
+        suppressed = conn.execute(
+            "SELECT COUNT(*) FROM voice_suppressions WHERE value=?",
+            (phone,),
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert suppressed == 1
+
+
 def test_webhook_dtmf_2_faz_opt_out_real_e_confirma():
     company = _seed_company()
     created = telnyx_voice.create_call(company)

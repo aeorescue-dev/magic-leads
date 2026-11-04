@@ -3757,9 +3757,12 @@ async def admin_voice_test_call(
                 detail="número fora de VOICE_TEST_NUMBERS",
             )
         trade = showcase.normalize_trade(payload.get("trade")) or "remodeling"
+        test_name = payload.get("company_name")
+        if test_name is None:
+            test_name = "Magic Leads Test Call"
         company = {
             "id": 0,
-            "company_name": "Magic Leads Test Call",
+            "company_name": str(test_name),
             "phone": phone,
             "city": str(payload.get("city") or "Boston"),
             "state": str(payload.get("state") or "MA").upper(),

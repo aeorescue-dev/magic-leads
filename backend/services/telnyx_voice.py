@@ -938,7 +938,7 @@ def opt_out_voice_call(voice_call_id: int) -> dict:
     call = b2b_voice.get_voice_call(int(voice_call_id)) or {}
     company_id = int(call.get("company_id") or 0)
     company = b2b_voice.get_company(company_id) if company_id else {}
-    phone = str((company or {}).get("phone") or "").strip()
+    phone = str((company or {}).get("phone") or call.get("phone") or "").strip()
     if phone:
         b2b_voice.suppress(phone, reason="caller_opt_out")
     if company_id:

@@ -178,6 +178,7 @@ CREATE TABLE IF NOT EXISTS voice_calls (
   company_id INTEGER REFERENCES prospect_companies(id) ON DELETE CASCADE,
   campaign_id TEXT,
   script_id TEXT,
+  phone TEXT,
   city TEXT,
   trade_code TEXT,
   status TEXT NOT NULL DEFAULT 'queued',
@@ -353,6 +354,7 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         ("showcase_clicked_at", "TEXT"),
         ("revenue_cents", "INTEGER DEFAULT 0"),
         ("assistant_id", "TEXT"),
+        ("phone", "TEXT"),
         ("fallback_audio_started_at", "TEXT"),
         ("amd_result", "TEXT"),
     ):
@@ -2312,15 +2314,16 @@ def create_voice_call(
         cur = conn.execute(
             """
             INSERT INTO voice_calls
-              (provider, company_id, campaign_id, script_id, city, trade_code,
-               assistant_id, status, started_at, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
+              (provider, company_id, campaign_id, script_id, phone, city,
+               trade_code, assistant_id, status, started_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
             """,
             (
                 provider,
                 int(company["id"]) if company.get("id") else None,
                 campaign_id,
                 script_id,
+                normalize_phone(company.get("phone")),
                 city or company.get("city"),
                 trade_code or company.get("trade"),
                 assistant_id or "",
