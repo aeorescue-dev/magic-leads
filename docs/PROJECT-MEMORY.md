@@ -2020,6 +2020,29 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   Push **100** (0 entregas, sem alertas elegiveis), Saude Geral **100/100**.
 - **Testes**: **1.349 pytest**; cobertura **70,0%**.
 
+### Fase 2U - Diagnostico do Web Analytics e atribuicao de voz (2026-11-04)
+
+- **Score 78/100 (7d)**: volume **100**, engagement **25**, conversao **100**.
+  40%*100 + 30%*25 + 30%*100 = 77,5 -> 78. O unico motivo e "engagement baixo".
+- **Dados**: 19 visitas/10 unicos; 16 direct, 2 email, 1 social; tempo medio
+  **18,3s**; scroll medio **16,5%**; 3/19 chegam a 50%; bounce **84,2%** =
+  1 - 3/19. O bounce do painel e "sem scroll>=50 nem CTA/form", nao o bounce
+  classico.
+- **Engagement**: formula 60% tempo (cap 60s) + 40% scroll. 18,3s + 16,5% ->
+  18,3 + 6,6 = 25. A conversao satura o teto (CTA 5/19>5%, form 1/19>2%).
+- **Integridade**: o funil conta 5 sessoes CTA, mas 3 eventos tem `session_id`
+  orfao (1/8/9) e nao entram no bounce; os CTAs validos na janela sao 2 (10,5%).
+  Contar so `showcase_checkout`/checkout, nao `language_pt`/`faq_cta`.
+- **Fixes**: links de voz passam a levar
+  `utm_source=voice&utm_medium=call&utm_campaign=voice_campaign_<id>&utm_content=showcase`;
+  o CTA da vitrine ganhou `data-track=showcase_checkout`. Assim o trafego #3/#4
+  fica isolado e o clique de checkout e contado.
+- **Recomendacoes**: CTA acima da dobra/sticky no mobile (hoje fica na sidebar,
+  depois da lista em mobile); amostra minima >=100 visitas antes de otimizar;
+  engagement score alinhado com interacao (nao penalizar clique rapido) e
+  conversao separada de CTA generico.
+- **Testes**: **1.351 pytest**; cobertura **70,0%**.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

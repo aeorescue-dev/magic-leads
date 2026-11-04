@@ -46,6 +46,14 @@ referrer, locale, device/browser/OS, pageviews, engagement_ms, scroll_pct.
 3. Links do outreach: `sequence_url()` adiciona
    `utm_source=magicleads&utm_medium=outreach&utm_campaign=<cidade>_<nicho>&utm_content=stepN`.
    Sem UTM, o Gmail remove o Referer e o e-mail apareceria como “direct”.
+4. Links de voz (`/r/<token>`): o redirect adiciona
+   `utm_source=voice&utm_medium=call&utm_campaign=voice_campaign_<id>&utm_content=showcase`
+   quando o link tem `voice_call_id`/`campaign_id`; o token `vt` mantém-se. Isto
+   isola o tráfego das campanhas #3/#4 do tráfego direto e do e-mail frio.
+5. O CTA de checkout da vitrine (`ShowcaseCta`) envia `cta_click` com label
+   `showcase_checkout`; os restantes CTAs têm labels próprios (`hero_cta`,
+   `calc_cta`, `faq_cta`, `language_pt`, ...). Para conversão real, contar
+   `showcase_checkout`/checkout, não qualquer CTA.
 
 ## Tabelas e retenção
 
@@ -60,8 +68,17 @@ referrer, locale, device/browser/OS, pageviews, engagement_ms, scroll_pct.
 
 ## Admin
 
-- **Saúde do tráfego**: score 0–100 = 40% volume (vs período anterior), 30%
-  engagement (tempo + scroll), 30% conversão (CTA + formulário).
+- **Saúde do tráfego**: score 0–100 = **40% volume + 30% engagement + 30% conversão**.
+  - `volume = clamp(50 + 50*(visits-prev_visits)/prev_visits, 0, 100)`; sem
+    período anterior (`prev=0`) devolve 100. É relativo, não volume absoluto.
+  - `engagement = clamp((min(avg_engagement_s,60)/60)*60 + (avg_scroll_pct/100)*40, 0, 100)`.
+  - `conversion = clamp((min(cta_rate,5%)/5%)*60 + (min(form_rate,2%)/2%)*40, 0, 100)`.
+  - `bounce = 1 - engaged/visits`, com `engaged = scroll>=50% OR cta_click OR
+    form_submit`. **Não é o bounce clássico de analytics** (sessão de uma página):
+    é a fração de sessões sem scroll a 50% nem clique/submissão. Bounce não entra
+    diretamente na fórmula; é um sintoma do engagement.
+  - Amostra pequena (<100 visitas) torna o score ruidoso; 1 CTA em 19 visitas
+    satura o teto de 5% e 1 form em 19 satura o teto de 2%.
 - Cards: visitas, únicos, pageviews, cliques CTA, formulários, tempo médio,
   bounce — com sparkline e delta.
 - Gráficos: tráfego (hora/dia), origens + **campanhas/UTM (campaign/content)**,
@@ -73,6 +90,8 @@ referrer, locale, device/browser/OS, pageviews, engagement_ms, scroll_pct.
   filtrado, séries, origens, campanhas, geo, funil, atribuição e eventos.
 - `email_attribution` isola as sessões `source='email'` e cruza-as com
   `form_submit`; `campaigns` agrupa por `source/medium/campaign/content`.
+  O tráfego de voz **não** entra em `email_attribution`: aparece em `sources` e
+  `campaigns` como `voice/call` + `voice_campaign_<id>`.
 
 ## Operação
 

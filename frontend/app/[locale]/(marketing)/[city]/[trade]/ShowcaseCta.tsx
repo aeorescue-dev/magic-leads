@@ -58,6 +58,7 @@ export function ShowcaseCta({
         type="button"
         onClick={() => void start()}
         disabled={busy}
+        data-track="showcase_checkout"
         className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-5 py-3 text-sm font-black text-[#052018] transition-colors hover:bg-emerald-400 disabled:opacity-60"
       >
         {busy ? (

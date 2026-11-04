@@ -204,6 +204,37 @@ def test_token_cria_regista_visita_e_redireciona():
     )
 
 
+def test_redirect_url_voice_leva_utm_de_atribuicao():
+    url = showcase.redirect_url(
+        {
+            "city_slug": "boston",
+            "trade_slug": "roofing",
+            "voice_call_id": 99,
+            "campaign_id": "3",
+        },
+        "tok",
+    )
+    assert "utm_source=voice" in url
+    assert "utm_medium=call" in url
+    assert "utm_campaign=voice_campaign_3" in url
+    assert "utm_content=showcase" in url
+    assert "vt=tok" in url
+
+
+def test_redirect_url_manual_sem_utm():
+    url = showcase.redirect_url(
+        {
+            "city_slug": "boston",
+            "trade_slug": "roofing",
+            "voice_call_id": None,
+            "campaign_id": "",
+        },
+        "tok",
+    )
+    assert "utm_source" not in url
+    assert "vt=tok" in url
+
+
 def test_token_expirado_e_rejeitado():
     for idx in range(3):
         _seed_lead("Boston", "MA", "Roof", "02118", idx)

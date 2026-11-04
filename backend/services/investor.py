@@ -24,7 +24,7 @@ from ..utils.logger import logger
 from . import analytics
 from .db import get_connection
 
-VERSION = "2026-11-02.36"
+VERSION = "2026-11-02.37"
 NDA_VERSION = "investor-nda-2026-11-02"
 PRICE_WEEKLY = 120.0
 WEEKS_PER_YEAR = 52.0
@@ -340,7 +340,7 @@ DEFAULT_ASSUMPTIONS: dict[str, Any] = {
     "code_inventory": {
         "python_lines": 60968,
         "typescript_lines": 21445,
-        "pytest_tests": 1349,
+        "pytest_tests": 1351,
         "vitest_tests": 109,
         "test_files": 121,
         "docs": 19,

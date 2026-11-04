@@ -19,7 +19,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 from html import escape
 from typing import Any, Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 import httpx
 
@@ -828,10 +828,27 @@ def record_visit(
 
 
 def redirect_url(link: dict, token: str) -> str:
-    return (
+    base = (
         f"{_frontend_base()}/en/{link['city_slug']}/{link['trade_slug']}"
-        f"?vt={quote(token)}"
     )
+    params = {"vt": token}
+    campaign_id = str(link.get("campaign_id") or "").strip()
+    if link.get("voice_call_id") or campaign_id:
+        # Atribuicao first-party do trafego de voz: sem UTM o redirect
+        # aparecia como "direct" e misturava-se com o resto do site.
+        params.update(
+            {
+                "utm_source": "voice",
+                "utm_medium": "call",
+                "utm_campaign": (
+                    f"voice_campaign_{campaign_id}"
+                    if campaign_id
+                    else "voice_call"
+                ),
+                "utm_content": "showcase",
+            }
+        )
+    return f"{base}?{urlencode(params)}"
 
 
 def record_checkout(
