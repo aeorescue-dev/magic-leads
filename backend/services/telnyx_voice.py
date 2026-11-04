@@ -240,6 +240,8 @@ def create_call(
     )
     if amd_mode not in {"premium", "standard", "disabled"}:
         amd_mode = "standard"
+    # Telnyx chama ao modo standard "detect"; "standard" e' invalido (422).
+    amd_wire = "detect" if amd_mode == "standard" else amd_mode
     payload = {
         "connection_id": settings.TELNYX_CONNECTION_ID,
         "to": company["phone"],
@@ -249,7 +251,7 @@ def create_call(
         "timeout_secs": 30,
     }
     if amd_mode != "disabled":
-        payload["answering_machine_detection"] = amd_mode
+        payload["answering_machine_detection"] = amd_wire
         if amd_mode == "premium":
             payload["answering_machine_detection_config"] = {
                 "total_analysis_time_millis": 5000
