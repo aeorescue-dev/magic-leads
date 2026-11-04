@@ -2043,6 +2043,17 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   conversao separada de CTA generico.
 - **Testes**: **1.351 pytest**; cobertura **70,0%**.
 
+### Fase 2V - CTA mobile na vitrine (2026-11-04)
+
+- **Hero**: CTA de checkout movido para logo abaixo do titulo/subtitulo,
+  antes da lista e dos blocos longos; padding/titulo reduzidos no telemovel.
+- **Sticky bar**: barra fixa no fundo (`lg:hidden`) com contagem, preco e CTA
+  compacto (`Unlock - $120/week`); `pb-24` na pagina para nao tapar conteudo.
+- **Tracking**: hero, sidebar e sticky usam `data-track=showcase_checkout`;
+  o UTM de voz (`voice/call/voice_campaign_<id>`) ja estava ativo.
+- **Build**: `tsc` e `next build` verdes; backend sem alteracoes (1.351
+  pytest, cobertura 70,0%).
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

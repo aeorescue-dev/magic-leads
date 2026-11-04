@@ -13,11 +13,13 @@ export function ShowcaseCta({
   city,
   trade,
   priceUsd,
+  compact = false,
 }: {
   token: string;
   city: string;
   trade: string;
   priceUsd: number;
+  compact?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -67,14 +69,18 @@ export function ShowcaseCta({
           <LockKeyhole className="h-4 w-4" />
         )}
         {token
-          ? `Unlock the full list — $${priceUsd}/week`
+          ? compact
+            ? `Unlock — $${priceUsd}/week`
+            : `Unlock the full list — $${priceUsd}/week`
           : "Join Magic Leads"}
       </button>
-      <p className="mt-2 text-center text-[10px] text-slate-500">
-        Secure Stripe checkout · 7-day pass · cancel anytime
-      </p>
+      {!compact ? (
+        <p className="mt-2 text-center text-[10px] text-slate-500">
+          Secure Stripe checkout · 7-day pass · cancel anytime
+        </p>
+      ) : null}
       {error ? (
-        <p className="mt-2 rounded-lg border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
+        <p className="mt-1 rounded-lg border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-[10px] text-amber-200">
           {error}
         </p>
       ) : null}

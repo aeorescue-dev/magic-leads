@@ -68,6 +68,22 @@ Chamada Telnyx
 O link de email passa pelo backend (`/r/<token>`), não diretamente pela
 página, para capturar o clique antes de qualquer JS.
 
+O redirect de links de voz acrescenta UTM
+`source=voice&medium=call&campaign=voice_campaign_<id>&content=showcase` e
+mantém `vt=<token>`. O CTA de checkout (`ShowcaseCta`) envia
+`cta_click` com label `showcase_checkout`.
+
+## UX mobile (2026-11-04)
+
+- **CTA acima da dobra:** botão de checkout logo abaixo do título/subtítulo,
+  antes da lista e dos blocos longos.
+- **Sticky bar mobile:** barra fixa no fundo (`lg:hidden`) com contagem,
+  preço e CTA compacto; `pb-24` na página para não tapar conteúdo.
+- **Hero curto:** padding e título reduzidos no telemóvel; o título já destaca
+  `N <trade> opportunities in <city>`.
+- Os três CTAs (hero, sidebar, sticky) usam o mesmo label de tracking
+  `showcase_checkout`.
+
 ## Endpoints
 
 | Método | Rota | Função |
