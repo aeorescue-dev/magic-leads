@@ -1973,6 +1973,18 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   apagam a linha failed; o contacto nao e marcado como saltado.
 - **Testes**: **1.343 pytest**; cobertura **70,0%**.
 
+### Fase 2R - Campanha #4 NY HVAC em paralelo (2026-11-03)
+
+- **Campanha #4**: `Pilot NY HVAC 2026-11-04`, New York / hvac, cota 35,
+  lote 5/dia, **$5 total / $1,50 por dia / 7 dias**, `start_hour_et=10`.
+- **Estado**: `paused`, `next_batch_at=2026-11-04 15:00:00` (10:00 ET);
+  `started_at` tambem 10:00 ET para os 7 dias contarem a partir do 1.o lote.
+- **Paralelo**: #3 (8/dia, $2/dia, 09:00 ET) + #4 (5/dia, $1,50/dia,
+  10:00 ET) = **13 chamadas/dia, $3,50/dia**, dentro do teto global de $5 e
+  100 chamadas. Caller ID 929 em ambas.
+- **Exclusao global**: a #4 nao repete contactos chamados pela #3 nos ultimos
+  7 dias; como o nicho e diferente, a sobreposicao e minima.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
