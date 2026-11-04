@@ -12,6 +12,7 @@ const PROTECTED_PATHS = ["/dashboard", "/onboarding"];
 // página, porque um IP não transporta o ofício do caller.
 const GEO_CITY_SLUGS: Record<string, string> = {
   "new york": "new-york",
+  "new-york": "new-york",
   nyc: "new-york",
   brooklyn: "new-york",
   manhattan: "new-york",
@@ -23,18 +24,26 @@ const GEO_CITY_SLUGS: Record<string, string> = {
   boston: "boston",
 };
 
-function geoCitySlug(request: NextRequest): string {
-  const raw =
-    request.headers.get("x-vercel-ip-city") ||
-    request.headers.get("cf-ipcity") ||
-    "";
+function citySlugFrom(raw: string): string {
   let city = raw.trim().toLowerCase();
   try {
     city = decodeURIComponent(city);
   } catch {
-    // Header já vem plano; mantém o valor original.
+    // Valor já vem plano; mantém o original.
   }
   return GEO_CITY_SLUGS[city] || "";
+}
+
+function geoCitySlug(request: NextRequest): string {
+  // `?city=` é um override explícito (testes/operadores). O header do edge é
+  // a via normal; o IP nunca transporta o nicho.
+  const explicit = citySlugFrom(request.nextUrl.searchParams.get("city") || "");
+  if (explicit) return explicit;
+  return citySlugFrom(
+    request.headers.get("x-vercel-ip-city") ||
+      request.headers.get("cf-ipcity") ||
+      ""
+  );
 }
 
 export function proxy(request: NextRequest) {
