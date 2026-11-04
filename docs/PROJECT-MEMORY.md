@@ -1999,6 +1999,23 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   baixo-moderada para um numero novo; nao se avanca para 76/dia/228.
 - **Testes**: **1.346 pytest**; cobertura **70,0%**.
 
+### Fase 2T - Diagnostico de ingestao e limpeza de alertas (2026-11-04)
+
+- **Diagnostico**: as rotinas de Chicago/Boston **nao estavam a falhar**. O run
+  326 (manual, 23:17-23:46) cobriu 4/4 cidades, inseriu 33 e o `city_health`
+  ficou `success`. O que estava velho era a **fonte**: Chicago 311 tinha o
+  ultimo `created_date` ~Nov 3 01:23 e Boston CKAN ~Nov 2 22:17 (lag de
+  24-27h). O limiar de 24h transformava esse lag diario em falso positivo.
+- **Correcao**: `SCRAPER_STALE_HOURS=36` (config + system health). 36-54h
+  passa a `-25`; >54h ou sem data `-50`. O watchdog deixa de criar alertas
+  diarios falsos; uma atualizacao diaria falhada continua a ser apanhada.
+- **Alertas**: 20 abertos (14 `SCRAPER_INTERRUPTED` de deploys + 6
+  `SCRAPER_CITY_STALE`). Todos reconhecidos apos a validacao; as linhas ficam
+  na BD com `acknowledged=1` para auditoria.
+- **Resultado**: Ingestao **100** (4/4 frescas), Alertas **100** (0 abertos),
+  Saude Geral **100/100**.
+- **Testes**: **1.348 pytest**; cobertura **70,0%**.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

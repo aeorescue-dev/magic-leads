@@ -67,6 +67,23 @@ def test_ingest_city_25h_is_warn():
     assert layer["status"] == "warn"
 
 
+def test_ingest_city_25h_is_fresh_com_limite_36h():
+    layer = sh.score_ingest(
+        [_city("NYC", 25)], [_run()], NOW, stale_hours=36
+    )
+    assert layer["score"] == 100
+    assert layer["status"] == "ok"
+    assert layer["metrics"][0]["threshold"] == "36h"
+
+
+def test_ingest_city_40h_is_warn_com_limite_36h():
+    layer = sh.score_ingest(
+        [_city("NYC", 40)], [_run()], NOW, stale_hours=36
+    )
+    assert layer["score"] == 75
+    assert layer["status"] == "warn"
+
+
 def test_ingest_city_40h_is_fail():
     layer = sh.score_ingest([_city("BOSTON", 40)], [_run()], NOW)
     assert layer["score"] == 50

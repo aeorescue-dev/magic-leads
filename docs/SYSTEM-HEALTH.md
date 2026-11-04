@@ -29,7 +29,7 @@ persistidas, nunca de contadores em memória (que reiniciam no deploy).
 
 ### Regras de penalização (resumo)
 
-**Ingestão** — por cidade: 24–36h `-25`, >36h ou sem data `-50`; 2 runs
+**Ingestão** — por cidade: 36–54h `-25`, >54h ou sem data `-50`; 2 runs
 seguidos com `inserted=0` `-30`; sem runs `-50`; run vencido (`intervalo×1,75`)
 `-30`; último run em erro `-20`.
 

@@ -23,6 +23,7 @@ from typing import Any, Optional
 
 import anyio
 
+from ..config import settings
 from ..utils.logger import logger
 from ..utils.time import utcnow_aware
 from . import control_tower
@@ -219,7 +220,7 @@ def score_ingest(
             fresh,
             f"/{len(cities)}",
             "ok" if fresh == len(cities) else ("warn" if fresh else "fail"),
-            "24h",
+            f"{stale_hours:.0f}h",
         ),
         _metric(
             "oldest_city_h",
@@ -227,7 +228,7 @@ def score_ingest(
             oldest,
             "h",
             "ok" if oldest <= stale_hours else ("warn" if oldest <= stale_hours * 1.5 else "fail"),
-            "24h",
+            f"{stale_hours:.0f}h",
         ),
         _metric("inserted_24h", "Inseridos 24h", inserted_24h, "", "ok"),
         _metric(
@@ -1054,7 +1055,15 @@ async def build_snapshot(
 
     layers = {
         "ingest": score_ingest(
-            raw["cities"], raw["runs"], now,
+            raw["cities"],
+            raw["runs"],
+            now,
+            interval_hours=float(
+                getattr(settings, "SCRAPER_INTERVAL_HOURS", 6) or 6
+            ),
+            stale_hours=float(
+                getattr(settings, "SCRAPER_STALE_HOURS", 36.0) or 36.0
+            ),
             inserted_24h=int(raw["runs_24h"].get("inserted") or 0),
         ),
         "enrichment": score_enrichment(

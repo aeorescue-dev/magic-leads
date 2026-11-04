@@ -35,10 +35,14 @@ Critérios (todos viram `system_alerts`):
 
 | Código | Condição | Limiar |
 |---|---|---|
-| `SCRAPER_CITY_STALE:<CIDADE>` | `MAX(date_reported)` da cidade | > 24h (`SCRAPER_STALE_HOURS`) |
+| `SCRAPER_CITY_STALE:<CIDADE>` | `MAX(date_reported)` da cidade | > 36h (`SCRAPER_STALE_HOURS`) |
 | `SCRAPER_ZERO_INSERTS` | runs concluídos consecutivos com `inserted=0` | ≥ 2 |
 | `SCRAPER_CITY_ZERO_INSERTS:<CIDADE>` | anomalia por cidade (inseridos, não raw) | ≥ 2 runs |
 | `SCRAPER_OVERDUE` | nenhum run iniciado | intervalo × 1,75 (~10,5h) |
+
+> **Porque 36h:** Chicago 311 e Boston CKAN publicam com um lag de ~24-27h.
+> Um limiar de 24h gerava um falso positivo diário mesmo com o scraper saudável.
+> 36h dá 12h de margem e ainda apanha uma atualização diária falhada.
 
 - Alertas deduplicados por código/cidade durante 6h.
 - Se houver problema e nenhum run ativo, força uma recolha, no máximo a cada 3h
@@ -112,7 +116,7 @@ hora e queimavam as 2 tentativas de 24k entidades.
 SCRAPER_RETRY_MINUTES=30
 SCRAPER_WATCHDOG_ENABLED=1
 SCRAPER_WATCHDOG_INTERVAL_MIN=30
-SCRAPER_STALE_HOURS=24
+SCRAPER_STALE_HOURS=36
 SCRAPER_WATCHDOG_FORCE_MIN_HOURS=3
 SCRAPER_ALERT_DEDUPE_HOURS=6
 OWNER_BACKFILL_ENABLED=1

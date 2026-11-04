@@ -177,7 +177,7 @@ class Settings(BaseSettings):
     # Watchdog de frescura (auditoria 01/11/2026).
     SCRAPER_WATCHDOG_ENABLED: bool = True
     SCRAPER_WATCHDOG_INTERVAL_MIN: int = 30
-    SCRAPER_STALE_HOURS: float = 24.0
+    SCRAPER_STALE_HOURS: float = 36.0
     SCRAPER_WATCHDOG_FORCE_MIN_HOURS: float = 3.0
     SCRAPER_ALERT_DEDUPE_HOURS: int = 6
     # Backfill de owners em lote (leads com owner_name NULL).
