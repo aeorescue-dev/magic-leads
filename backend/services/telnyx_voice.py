@@ -699,6 +699,8 @@ def handle_webhook(payload: dict) -> dict:
                     "language": "en-US",
                 },
             )
+            if not speak.get("ok"):
+                hangup_call(call_control_id)
             return {
                 "ok": True,
                 "action": "opt_out",
@@ -731,6 +733,8 @@ def handle_webhook(payload: dict) -> dict:
                     "language": "en-US",
                 },
             )
+            if not speak.get("ok"):
+                hangup_call(call_control_id)
             return {
                 "ok": True,
                 "action": "website_reminder",
