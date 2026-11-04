@@ -2012,9 +2012,13 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Alertas**: 20 abertos (14 `SCRAPER_INTERRUPTED` de deploys + 6
   `SCRAPER_CITY_STALE`). Todos reconhecidos apos a validacao; as linhas ficam
   na BD com `acknowledged=1` para auditoria.
+- **Push**: o painel ainda acusava "sem entregas 24h" com 12 subs ativas, mas
+  nao havia **notificacoes elegiveis** no periodo (ultima em 2026-11-03
+  01:32). O score passa a exigir `notifications_24h > 0` para penalizar zero
+  entregas; sem alertas, o pipeline esta saudavel.
 - **Resultado**: Ingestao **100** (4/4 frescas), Alertas **100** (0 abertos),
-  Saude Geral **100/100**.
-- **Testes**: **1.348 pytest**; cobertura **70,0%**.
+  Push **100** (0 entregas, sem alertas elegiveis), Saude Geral **100/100**.
+- **Testes**: **1.349 pytest**; cobertura **70,0%**.
 
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.

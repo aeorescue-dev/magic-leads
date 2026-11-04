@@ -269,6 +269,7 @@ def _push(**extra):
         "not_configured": 0,
         "clicks": 2,
         "active_subs": 10,
+        "notifications_24h": 5,
     }
     base.update(extra)
     return base
@@ -292,6 +293,14 @@ def test_push_dead_subscriptions_penalise():
 def test_push_no_deliveries_with_subs_penalises():
     layer = sh.score_push(_push(deliveries=0, accepted=0))
     assert layer["score"] == 75
+
+
+def test_push_no_deliveries_without_eligible_notifications_is_ok():
+    layer = sh.score_push(
+        _push(deliveries=0, accepted=0, notifications_24h=0)
+    )
+    assert layer["score"] == 100
+    assert "sem alertas elegíveis" in layer["headline"]
 
 
 # ------------------------------------------------------------------ quotas

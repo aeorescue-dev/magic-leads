@@ -44,8 +44,9 @@ caixa** (a mesma amostra do disjuntor); abaixo disso a taxa fica visível como
 aviso de amostra (`amostra X/20`), sem derrubar a camada. `mailbox_cap` e
 `quiet_hours` são esperados: não penalizam, mas o blocker fica visível.
 
-**Push** — `not_configured` `-60`; zero entregas com subs ativas `-25`;
->20% mortas (≥10 entregas) `-30`; zero subs `-15`.
+**Push** - `not_configured` `-60`; zero entregas com subs ativas **e
+notificações elegíveis** `-25`; >20% mortas (≥10 entregas) `-30`; zero subs
+`-15`.
 
 **Cotas** — Brave bloqueado `-40`, ≥90% `-20`; Searchbug >50% de
 `transport_error` em 15 min `-40`; custo/hora 3× a média `-15`; >30% pagas

@@ -482,11 +482,12 @@ def score_push(push: dict) -> dict:
     expired = int(push.get("expired") or 0)
     dead = int(push.get("rejected_dead") or 0)
     active_subs = int(push.get("active_subs") or 0)
+    notifications = int(push.get("notifications_24h") or 0)
 
     if not_configured:
         penalties.append(60)
         reasons.append(f"{not_configured} entregas sem VAPID")
-    if deliveries == 0 and active_subs > 0:
+    if deliveries == 0 and active_subs > 0 and notifications > 0:
         penalties.append(25)
         reasons.append("Sem entregas em 24h com subscrições ativas")
     if deliveries >= 10 and (expired + dead) / deliveries > 0.2:
@@ -498,6 +499,8 @@ def score_push(push: dict) -> dict:
 
     dead_pct = round((expired + dead) * 100 / deliveries, 1) if deliveries else 0.0
     headline = f"{deliveries} entregas 24h · {active_subs} dispositivos ativos"
+    if deliveries == 0 and active_subs > 0 and notifications == 0:
+        headline += " · sem alertas elegíveis"
     metrics = [
         _metric("deliveries", "Entregas 24h", deliveries, "", "ok"),
         _metric(
@@ -979,6 +982,13 @@ def _gather_sync() -> dict:
             "SELECT MAX(sent_at) FROM push_deliveries WHERE outcome='accepted'"
         ).fetchone()[0]
         push["last_accepted"] = last_accepted
+        push["notifications_24h"] = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM notifications "
+                "WHERE created_at >= datetime('now','-24 hours')"
+            ).fetchone()[0]
+            or 0
+        )
         alerts = [dict(r) for r in conn.execute(
             "SELECT id, level, code, message, created_at FROM system_alerts "
             "WHERE acknowledged=0 ORDER BY id DESC LIMIT 20"
