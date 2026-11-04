@@ -70,6 +70,67 @@ def test_backup_antigo_e_fail(monkeypatch):
     assert checks["backup"]["status"] == "fail"
 
 
+# ----------------------------------------------------------------- push
+def test_push_health_zero_entregas_sem_notificacoes_e_ok():
+    r = ct._push_health_status(
+        deliveries=0,
+        accepted=0,
+        expired=0,
+        dead=0,
+        not_configured=0,
+        active_subs=7,
+        total_subs=16,
+        notifications_24h=0,
+    )
+    assert r["status"] == "ok"
+    assert "sem notificações elegíveis" in r["detail"]
+
+
+def test_push_health_zero_entregas_com_notificacoes_e_warn():
+    r = ct._push_health_status(
+        deliveries=0,
+        accepted=0,
+        expired=0,
+        dead=0,
+        not_configured=0,
+        active_subs=7,
+        total_subs=16,
+        notifications_24h=3,
+    )
+    assert r["status"] == "warn"
+    assert "notificações elegíveis" in r["detail"]
+
+
+def test_push_health_ignora_linhas_desativadas():
+    r = ct._push_health_status(
+        deliveries=2,
+        accepted=2,
+        expired=0,
+        dead=0,
+        not_configured=0,
+        active_subs=7,
+        total_subs=16,
+        notifications_24h=0,
+    )
+    assert r["status"] == "ok"
+    assert "7 ativas/16 total" in r["detail"]
+
+
+def test_push_health_sem_subscricoes_ativas_e_warn():
+    r = ct._push_health_status(
+        deliveries=0,
+        accepted=0,
+        expired=0,
+        dead=0,
+        not_configured=0,
+        active_subs=0,
+        total_subs=0,
+        notifications_24h=0,
+    )
+    assert r["status"] == "warn"
+    assert "0 subscrição" in r["detail"]
+
+
 # ------------------------------------------------------------------ digest
 
 def test_digest_tem_os_blocos_esperados(monkeypatch):

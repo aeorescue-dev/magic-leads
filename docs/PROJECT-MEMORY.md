@@ -2054,6 +2054,31 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Build**: `tsc` e `next build` verdes; backend sem alteracoes (1.351
   pytest, cobertura 70,0%).
 
+### Fase 2W - Push health ativo e limpeza de subs (2026-11-04)
+
+- **`push_health`**: passa a contar **subscrições ativas** (`disabled_at IS NULL`)
+  e só alerta zero entregas quando existem **notificações elegíveis** nas 24h.
+  Detalhe mostra `ativas/total` e "sem notificações elegíveis" quando aplicável.
+- **Limpeza**: 5 subs stale do `demo@magicleads.app` desativadas (último
+  `last_seen` em setembro, `last_success_at=null`); 4 antigas da Pamela já
+  estavam desativadas e ficam para auditoria. Ativas passam de 12 para 7
+  (Fabio 3 + Pamela 4).
+- **Não mexe** no motor de email, voz, campanhas, outreach ou analytics.
+
+### Fase 2X - Categorias canónicas 16x4 (2026-11-04)
+
+- **Novo módulo** `alert_categories.py` (puro, isolado): 16 categorias
+  canónicas + aliases dos rótulos B2B (`Roofing`, `Heating & HVAC`,
+  `General Contractors`, `Remodeling & Renovation`, `Restoration & Cleanup`,
+  `Landscaping & Grounds`).
+- **Integração mínima**: `plan_and_dispatch` normaliza a categoria antes de
+  agrupar; categoria desconhecida gera warning e não é silenciada.
+- **Testes**: 16×4 (16 categorias × 4 cidades) cria 64 alertas in-app e um push
+  coalescido para um utilizador com os 16 interesses; aliases testados.
+- **Resultado**: nenhum nicho canónico fica fora por causa do rótulo da fonte;
+  o motor continua a respeitar interesses e filtro de cidade do utilizador.
+- **Testes**: **1.388 pytest**; cobertura **70,0%**.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).

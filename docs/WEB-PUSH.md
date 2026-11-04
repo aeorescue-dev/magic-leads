@@ -72,3 +72,12 @@ Sem segredo, o clique continua a abrir o lead mas não é medido (fail-closed).
 | iPhone (PWA no ecrã inicial, iOS 16.4+) | sem botões; corpo termina com “Toque para abrir o lead.”; CTA abre o dashboard no lead. |
 | iPhone Safari (aba normal) | push indisponível até instalar como PWA. |
 | Desktop Chrome/Edge | ícone PNG, ações visíveis no cartão de notificação. |
+
+## Saúde e cobertura (2026-11-04)
+
+- `push_health` conta apenas subscrições ativas (`disabled_at IS NULL`) e só
+  alerta zero entregas quando existem notificações elegíveis nas 24h.
+- Categorias são normalizadas para as 16 canónicas antes do Alert Planner;
+  aliases como `Roofing`/`Roof`, `Heating & HVAC`/`Heating` e
+  `General Contractors`/`Structure` não ficam silenciosos.
+- Subs stale/demo são desativadas; as linhas ficam para auditoria.

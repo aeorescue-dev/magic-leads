@@ -362,3 +362,40 @@ def test_enforce_device_limit_sweeps_legacy_state():
 
     assert db_service._service.enforce_push_device_limit() == 2
     assert len(db_service._service.get_user_push_subscriptions(uid)) == 5
+
+
+def test_categoria_alias_roofing_dispara_interesse_roof(monkeypatch):
+    _reset()
+    _user(("Roof",))
+    calls = []
+    monkeypatch.setattr(push_service, "send_to_user", _fake_push(calls))
+
+    report = _run(plan_and_dispatch([_lead("Roofing")]))
+
+    assert report.created == 1
+    assert report.pushed == 1
+    assert len(calls) == 1
+
+
+def test_cobertura_16_categorias_x_4_cidades(monkeypatch):
+    from backend.config import settings
+    from backend.services.alert_categories import CANONICAL_CATEGORIES
+
+    _reset()
+    _user(tuple(CANONICAL_CATEGORIES))
+    monkeypatch.setattr(settings, "PUSH_DAILY_LIMIT", 100, raising=False)
+    calls = []
+    monkeypatch.setattr(push_service, "send_to_user", _fake_push(calls))
+
+    cities = ("NYC", "CHICAGO", "DALLAS", "BOSTON")
+    leads = [
+        _lead(category, city=city)
+        for category in CANONICAL_CATEGORIES
+        for city in cities
+    ]
+    report = _run(plan_and_dispatch(leads))
+
+    assert report.created == 16 * 4
+    assert report.audience == 1
+    assert report.pushed == 1
+    assert len(calls) == 1

@@ -633,12 +633,70 @@ async def maybe_send_red_alert(checks: list[dict]) -> Optional[dict]:
     return await send_alert(checks)
 
 
+def _push_health_status(
+    *,
+    deliveries: int,
+    accepted: int,
+    expired: int,
+    dead: int,
+    not_configured: int,
+    active_subs: int,
+    total_subs: int,
+    notifications_24h: int,
+) -> dict:
+    """Decide o estado do push sem tocar na BD (testavel isoladamente)."""
+    if not_configured:
+        return {
+            "name": "push_health",
+            "status": "fail",
+            "detail": f"{not_configured} entrega(s) com VAPID em falta",
+        }
+    if active_subs <= 0:
+        return {
+            "name": "push_health",
+            "status": "warn",
+            "detail": "0 subscrição(ões) ativa(s)",
+        }
+    if deliveries == 0:
+        if notifications_24h > 0:
+            return {
+                "name": "push_health",
+                "status": "warn",
+                "detail": (
+                    f"{active_subs} subscrição(ões) ativa(s) sem entregas "
+                    "em 24h com notificações elegíveis"
+                ),
+            }
+        return {
+            "name": "push_health",
+            "status": "ok",
+            "detail": (
+                f"0 entregas 24h · {active_subs} ativas/{total_subs} total "
+                "· sem notificações elegíveis"
+            ),
+        }
+    bad = expired + dead
+    if deliveries >= 10 and bad / deliveries > 0.2:
+        return {
+            "name": "push_health",
+            "status": "warn",
+            "detail": f"{bad}/{deliveries} subscriptions mortas em 24h",
+        }
+    return {
+        "name": "push_health",
+        "status": "ok",
+        "detail": (
+            f"{accepted}/{deliveries} aceites · "
+            f"{active_subs} ativas/{total_subs} total"
+        ),
+    }
+
+
 def _check_push_health() -> dict:
     """Saude das entregas de push nas ultimas 24h.
 
-    `accepted` nao prova entrega; o que importa aqui e' a ausencia de entregas
-    com subscricoes ativas, VAPID em falta e uma explosao de subscriptions
-    mortas (404/410/401/403) que indica aparelhos a receber para o vazio.
+    So alerta zero entregas quando ha' notificacoes elegiveis nas 24h. A
+    contagem usa subscricoes ativas, nao todas as linhas historicas.
     """
     try:
         conn = get_connection()
@@ -653,38 +711,33 @@ def _check_push_health() -> dict:
                    FROM push_deliveries
                    WHERE sent_at >= datetime('now', '-24 hours')"""
             ).fetchone()
-            subs = conn.execute("SELECT COUNT(*) FROM push_subscriptions").fetchone()[0]
+            subs = conn.execute(
+                "SELECT COUNT(*) AS total, "
+                "COALESCE(SUM(CASE WHEN disabled_at IS NULL THEN 1 ELSE 0 END), 0) "
+                "AS active FROM push_subscriptions"
+            ).fetchone()
+            notifications_24h = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM notifications "
+                    "WHERE created_at >= datetime('now', '-24 hours')"
+                ).fetchone()[0]
+                or 0
+            )
         finally:
             conn.close()
     except sqlite3.OperationalError as exc:
         return {"name": "push_health", "status": "warn", "detail": f"indisponivel: {exc}"}
 
-    deliveries = int(row["deliveries"] or 0)
-    accepted = int(row["accepted"] or 0)
-    expired = int(row["expired"] or 0)
-    dead = int(row["dead"] or 0)
-    not_configured = int(row["not_configured"] or 0)
-
-    if not_configured:
-        return {
-            "name": "push_health", "status": "fail",
-            "detail": f"{not_configured} entrega(s) com VAPID em falta",
-        }
-    if subs > 0 and deliveries == 0:
-        return {
-            "name": "push_health", "status": "warn",
-            "detail": f"{subs} subscription(s) sem entregas em 24h",
-        }
-    bad = expired + dead
-    if deliveries >= 10 and bad / deliveries > 0.2:
-        return {
-            "name": "push_health", "status": "warn",
-            "detail": f"{bad}/{deliveries} subscriptions mortas em 24h",
-        }
-    return {
-        "name": "push_health", "status": "ok",
-        "detail": f"{accepted}/{deliveries} aceites · {subs} subscription(s)",
-    }
+    return _push_health_status(
+        deliveries=int(row["deliveries"] or 0),
+        accepted=int(row["accepted"] or 0),
+        expired=int(row["expired"] or 0),
+        dead=int(row["dead"] or 0),
+        not_configured=int(row["not_configured"] or 0),
+        active_subs=int(subs["active"] or 0),
+        total_subs=int(subs["total"] or 0),
+        notifications_24h=notifications_24h,
+    )
 
 
 async def run_health_checks() -> list[dict]:

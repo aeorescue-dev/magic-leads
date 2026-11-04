@@ -29,6 +29,7 @@ from zoneinfo import ZoneInfo
 
 from ..config import settings
 from ..utils.logger import logger
+from . import alert_categories
 from .access import is_access_active
 from .db import db_service
 from .lead_rules import (
@@ -866,8 +867,14 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
         ok, _signal, _status = _is_alertable(ld, now)
         if not ok:
             continue
-        cat = (ld.get("issue_category") or "").strip()
+        raw_cat = (ld.get("issue_category") or "").strip()
+        cat = alert_categories.canonical_category(raw_cat)
         if not cat:
+            logger.warning(
+                "[ALERT] categoria sem mapeamento: %r lead=%s",
+                raw_cat or "(vazia)",
+                ld.get("id"),
+            )
             continue
         by_cat.setdefault(cat, []).append(ld)
 
