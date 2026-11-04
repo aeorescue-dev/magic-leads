@@ -686,49 +686,37 @@ def showcase_guard(trade_code: str, city: str = "") -> dict:
     )
     exact = int(info.get("exact_count") or 0)
     city_total = int(info.get("city_total") or 0)
-    ready = info.get("ready")
-    if ready is None:
-        # Compatibilidade com chamadas antigas/test doubles que ainda não
-        # devolvem `ready`.
-        ready = max(exact, city_total) >= threshold
-    if not ready:
-        reasons: list[str] = []
-        if info.get("fresh") is False:
-            reasons.append("stale_inventory")
-        if max(exact, city_total) < threshold:
-            reasons.append("insufficient_inventory")
+    # Voz é estrita: o número tem de ser do nicho exato. Um total city-wide
+    # ("863 property opportunities") não serve para um HVAC/roofing e seria
+    # exatamente o tipo de número estranho que queremos evitar.
+    problems: list[str] = []
+    if info.get("fresh") is False:
+        problems.append("stale_inventory")
+    if exact < threshold:
+        problems.append("insufficient_trade_inventory")
+    if problems:
         return {
             "ready": False,
-            "reason": ",".join(reasons) or "showcase_unavailable",
+            "reason": ",".join(problems),
             "line": "",
             "scope": "none",
-            "count": max(exact, city_total),
+            "count": exact,
             "exact_count": exact,
             "city_total": city_total,
             "threshold": threshold,
             "built_at": info.get("built_at"),
             "age_hours": info.get("age_hours"),
         }
-    if info.get("available"):
-        count = exact
-        scope = "trade"
-        line = (
-            f"{_spoken_count(count)} active {showcase.trade_label(code).lower()} "
-            f"opportunities in {city_label} this week"
-        )
-    else:
-        count = city_total
-        scope = "city"
-        line = (
-            f"{_spoken_count(count)} active property opportunities "
-            f"in {city_label} this week"
-        )
+    line = (
+        f"{_spoken_count(exact)} active {showcase.trade_label(code).lower()} "
+        f"opportunities in {city_label} this week"
+    )
     return {
         "ready": True,
         "reason": "",
         "line": line,
-        "scope": scope,
-        "count": count,
+        "scope": "trade",
+        "count": exact,
         "exact_count": exact,
         "city_total": city_total,
         "threshold": threshold,

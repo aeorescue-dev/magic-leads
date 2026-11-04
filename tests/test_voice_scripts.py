@@ -148,15 +148,15 @@ def test_render_company_fallback_usa_contractor(monkeypatch):
     assert "Hi ," not in result["greeting"]
 
 
-def test_render_fallback_cidade_nao_promete_nicho(monkeypatch):
+def test_render_usa_contagem_exata_do_nicho(monkeypatch):
     monkeypatch.setattr(
         showcase,
         "available",
         lambda city, trade, **kwargs: {
-            "available": False,
-            "exact_count": 0,
-            "city_total": 42,
-            "min_items": 3,
+            "available": True,
+            "exact_count": 42,
+            "city_total": 100,
+            "min_items": 5,
             "page_path": "/en/dallas/roofing",
             "fresh": True,
             "ready": True,
@@ -165,8 +165,27 @@ def test_render_fallback_cidade_nao_promete_nicho(monkeypatch):
         },
     )
     result = voice_scripts.render("roofing", city="Dallas")
-    assert "42 active property opportunities" in result["body"]
-    assert "42 active roofing" not in result["body"]
+    assert "42 active roofing opportunities" in result["body"]
+
+
+def test_render_bloqueia_nicho_sem_inventario_exato(monkeypatch):
+    monkeypatch.setattr(
+        showcase,
+        "available",
+        lambda city, trade, **kwargs: {
+            "available": False,
+            "exact_count": 0,
+            "city_total": 42,
+            "min_items": 5,
+            "page_path": "/en/dallas/roofing",
+            "fresh": True,
+            "ready": True,
+            "built_at": "2026-11-04T12:00:00+00:00",
+            "age_hours": 1.0,
+        },
+    )
+    with pytest.raises(ValueError, match="showcase_unavailable"):
+        voice_scripts.render("roofing", city="Dallas")
 
 
 def test_render_bloqueia_contagem_fraca(monkeypatch):

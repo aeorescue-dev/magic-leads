@@ -228,10 +228,12 @@ ASR.
   `SHOWCASE_WINDOW_DAYS`, sinais `SHOWCASE_SIGNAL_TYPES`).
 - A V3 exige `VOICE_MIN_SHOWCASE_ITEMS` (default **5**) e inventário com menos
   de `VOICE_SHOWCASE_MAX_AGE_HOURS` (default **72 h**).
-- Se a contagem exata e a city-wide estiverem abaixo do mínimo, ou o inventário
-  estiver velho, `showcase_guard()` devolve `ready=False` e
-  `telnyx_voice.create_call()` aborta com `showcase_unavailable` — a chamada
-  nao sai.
+- A voz é **estrita ao nicho**: se a contagem exata de `city+trade` estiver
+  abaixo do mínimo, a chamada não sai. O total city-wide é mostrado no admin,
+  mas não é usado como substituto na fala.
+- Se o inventário estiver velho ou o nicho exato estiver abaixo do mínimo,
+  `showcase_guard()` devolve `ready=False` e `telnyx_voice.create_call()`
+  aborta com `showcase_unavailable` — a chamada nao sai.
 - Nunca e falado “0”: contagens >= 1.000 sao arredondadas para “over N,XXX”
   para o TTS nao arrastar o numero.
 
