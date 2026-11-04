@@ -6,7 +6,10 @@ real (VPS), nao aqui.
 """
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
+
+import anyio
 
 from backend.services import control_tower as ct
 
@@ -166,6 +169,47 @@ def test_digest_marca_estado_vermelho_quando_ha_fail(monkeypatch):
     out = ct.build_digest()
     assert "estado geral: VERMELHO" in out
     assert "gmail_tokens: HTTP 400" in out
+
+
+def test_check_tokens_usa_credenciais_do_auth_ref(monkeypatch):
+    class Cursor:
+        def fetchall(self):
+            return [
+                {
+                    "email": "pamela@magicleads.app",
+                    "auth_ref": json.dumps(
+                        {
+                            "client_id": "db-cid",
+                            "client_secret": "db-secret",
+                            "refresh_token": "db-refresh",
+                        }
+                    ),
+                }
+            ]
+
+    class Conn:
+        def execute(self, *_args, **_kwargs):
+            return Cursor()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(ct, "get_connection", lambda: Conn())
+    captured: dict = {}
+
+    class Response:
+        status_code = 200
+
+    async def fake_post(_self, _url, data):
+        captured.update(data)
+        return Response()
+
+    monkeypatch.setattr(ct.httpx.AsyncClient, "post", fake_post)
+    result = anyio.run(ct._check_tokens)
+    assert result["status"] == "ok"
+    assert captured["client_id"] == "db-cid"
+    assert captured["client_secret"] == "db-secret"
+    assert captured["refresh_token"] == "db-refresh"
 
 
 def test_parse_aceita_formatos_do_sqlite_e_iso():

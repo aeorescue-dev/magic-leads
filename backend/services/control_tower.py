@@ -19,7 +19,6 @@ Nada aqui envia e-mail a prospects: o digest vai para o endereco interno.
 from __future__ import annotations
 
 import gzip
-import json
 import os
 import shutil
 import sqlite3
@@ -561,20 +560,21 @@ async def _check_tokens() -> dict:
         return {"name": "gmail_tokens", "status": "warn", "detail": "sem caixas ativas"}
 
     failures = []
+    # `auth_ref` pode estar encriptado no disco; json.loads direto falhava e
+    # misturava o client_id/secret do ambiente com o refresh token da caixa,
+    # produzindo um falso HTTP 400. Usar a mesma resolução do sender real.
+    from .gmail import GmailSender
+
+    sender = GmailSender()
     for mb in mailboxes:
-        raw = mb["auth_ref"]
-        rt = cid = csec = None
-        if raw:
-            try:
-                d = json.loads(raw)
-                cid, csec, rt = d.get("client_id"), d.get("client_secret"), d.get("refresh_token")
-            except Exception:  # noqa: BLE001
-                pass
+        creds = sender._credentials(dict(mb))
+        cid, csec, rt = (
+            creds.get("client_id"),
+            creds.get("client_secret"),
+            creds.get("refresh_token"),
+        )
         cid = cid or client_id
         csec = csec or client_secret
-        if not rt:
-            local = str(mb["email"]).split("@")[0].upper()
-            rt = (os.getenv(f"GMAIL_REFRESH_TOKEN_{local}") or "").strip()
         if not (cid and csec and rt):
             failures.append(f"{mb['email']}: sem credenciais")
             continue
