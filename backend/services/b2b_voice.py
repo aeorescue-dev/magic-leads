@@ -1258,10 +1258,16 @@ def segments(city: str = "", trade: str = "", state: str = "") -> list[dict]:
     finally:
         conn.close()
 
+    voice_min = max(
+        1,
+        int(getattr(settings, "VOICE_MIN_SHOWCASE_ITEMS", 5) or 5),
+    )
     for group in groups.values():
         trade_code = showcase.normalize_trade(group["trade"])
         available = showcase.available(
-            group["city"], trade_code or group["trade"]
+            group["city"],
+            trade_code or group["trade"],
+            min_items=voice_min,
         )
         if available["available"]:
             mode = "dedicated"

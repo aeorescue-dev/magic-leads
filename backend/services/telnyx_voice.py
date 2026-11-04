@@ -167,6 +167,21 @@ def create_call(
                     "assistant antes de ligar."
                 ),
             }
+        # Guardrail duro: nunca discar para um segmento sem vitrine fresca e
+        # com contagem suficiente. Evita dizer "0 opportunities" ou prometer
+        # dados velhos. Test calls ficam isentos.
+        if str(campaign_id or "") != "test_call":
+            guard = voice_scripts.showcase_guard(
+                trade or company.get("trade") or "",
+                city or company.get("city") or "",
+            )
+            if not guard["ready"]:
+                return {
+                    "ok": False,
+                    "reason": "showcase_unavailable",
+                    "message": guard.get("reason") or "showcase_unavailable",
+                    "showcase": guard,
+                }
     call = b2b_voice.create_voice_call(
         company,
         provider="telnyx",
@@ -665,42 +680,64 @@ def handle_webhook(payload: dict) -> dict:
     if "dtmf" in event_type:
         digit = str(body.get("dtmf_digit") or body.get("digit") or "").strip()
         if digit == "2":
-            # Bifurcacao deterministica: email errado -> parar assistant e,
-            # so depois, tocar o MP3. Evita sobreposicao de vozes.
-            b2b_voice.update_voice_call(
-                voice_call_id,
-                intent="website_redirect",
-                status="fallback_pending",
-            )
+            # Opt-out deterministico: suppression + DNC antes de qualquer
+            # audio. O assistant e parado para nao sobrepor a confirmacao.
             current = b2b_voice.get_voice_call(voice_call_id) or {}
             call_control_id = str(
                 body.get("call_control_id")
                 or current.get("provider_call_id")
                 or ""
             )
+            opted_out = opt_out_voice_call(voice_call_id)
             stop = stop_assistant_for_fallback(call_control_id)
-            schedule_fallback_playback(
-                voice_call_id, call_control_id, delay_seconds=2
+            speak = _call_action(
+                call_control_id,
+                "speak",
+                {
+                    "payload": "You've been removed from our list. Goodbye.",
+                    "voice": "female",
+                    "language": "en-US",
+                },
             )
             return {
                 "ok": True,
-                "action": "website_redirect",
+                "action": "opt_out",
+                "voice_call_id": voice_call_id,
+                "digit": digit,
+                "opt_out": opted_out,
+                "stop": stop,
+                "confirmation": speak,
+            }
+        if digit == "1":
+            # A V3 nao oferece tecla 1. Se o caller pressionar por habito,
+            # repetimos o unico caminho de conversao (website) sem email.
+            current = b2b_voice.get_voice_call(voice_call_id) or {}
+            call_control_id = str(
+                body.get("call_control_id")
+                or current.get("provider_call_id")
+                or ""
+            )
+            b2b_voice.update_voice_call(voice_call_id, intent="website_reminder")
+            stop = stop_assistant_for_fallback(call_control_id)
+            speak = _call_action(
+                call_control_id,
+                "speak",
+                {
+                    "payload": (
+                        "Visit MagicLeads dot app to see this week's active "
+                        "opportunities."
+                    ),
+                    "voice": "female",
+                    "language": "en-US",
+                },
+            )
+            return {
+                "ok": True,
+                "action": "website_reminder",
                 "voice_call_id": voice_call_id,
                 "digit": digit,
                 "stop": stop,
-            }
-        if digit == "1":
-            # Tecla 1 e confirmacao explicita: se ha email na ficha, envia ja
-            # o link sem depender do LLM/ASR. A tool send_showcase_link fica
-            # idempotente para o caso de o assistant tambem a chamar.
-            b2b_voice.update_voice_call(voice_call_id, intent="showcase")
-            sent = send_showcase_for_call(voice_call_id)
-            return {
-                "ok": True,
-                "action": "showcase" if sent.get("ok") else "dtmf_yes",
-                "voice_call_id": voice_call_id,
-                "digit": digit,
-                "showcase": sent,
+                "confirmation": speak,
             }
         return {
             "ok": True,
@@ -892,6 +929,29 @@ def send_showcase_for_call(
     }
 
 
+def opt_out_voice_call(voice_call_id: int) -> dict:
+    """Suprime o número e marca DNC para um opt-out determinístico."""
+    call = b2b_voice.get_voice_call(int(voice_call_id)) or {}
+    company_id = int(call.get("company_id") or 0)
+    company = b2b_voice.get_company(company_id) if company_id else {}
+    phone = str((company or {}).get("phone") or "").strip()
+    if phone:
+        b2b_voice.suppress(phone, reason="caller_opt_out")
+    if company_id:
+        b2b_voice.mark_company_do_not_call(company_id)
+    b2b_voice.update_voice_call(
+        int(voice_call_id),
+        intent="opt_out",
+        status="opt_out",
+    )
+    return {
+        "ok": True,
+        "company_id": company_id,
+        "phone": phone,
+        "suppressed": bool(phone),
+    }
+
+
 def handle_tool_call(
     tool_name: str, payload: dict, call_control_id: str
 ) -> dict:
@@ -985,12 +1045,7 @@ def handle_tool_call(
         }
 
     if name == "remove_from_list":
-        b2b_voice.update_voice_call(voice_call_id, intent="opt_out")
-        if company_id:
-            phone = str((b2b_voice.get_company(company_id) or {}).get("phone") or "")
-            if phone:
-                b2b_voice.suppress(phone, reason="caller_opt_out")
-            b2b_voice.mark_company_do_not_call(company_id)
+        opt_out_voice_call(voice_call_id)
         return {
             "ok": True,
             "message": "The number was removed from the calling list.",

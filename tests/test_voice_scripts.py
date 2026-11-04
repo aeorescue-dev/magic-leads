@@ -41,18 +41,18 @@ def test_seed_cria_roteiros_com_template_oficial():
     codes = {item["trade_code"] for item in scripts}
     assert {"remodeling", "roofing", "electrical", "painting", "hvac"} <= codes
     for item in scripts:
-        assert item["status"] == "draft"
+        assert item["status"] == "approved"
         assert item["version"] == 1
-        assert "Opening & Pitch" in item["body"]
-        assert "automated assistant" in item["body"].lower()
-        assert "before any competitor finds out" in item["body"]
-        assert "If Yes / Press 1" in item["body"]
-        assert "If No / Stop" in item["body"]
+        assert "{{company | Contractor}}" in item["body"]
+        assert "MagicLeads.app" in item["body"]
+        assert "press 2" in item["body"].lower()
+        assert "5 to 8" in item["body"]
+        assert "If Yes / Press 1" not in item["body"]
 
 
-def test_approve_all_aprova_os_15():
+def test_approve_all_is_idempotent_when_v3_is_already_approved():
     result = voice_scripts.approve_all(user_id=7)
-    assert result["approved"] == 15
+    assert result["approved"] == 0
     scripts = voice_scripts.list_scripts()
     assert all(item["status"] == "approved" for item in scripts)
     assert voice_scripts.approved_for_trade("roofing") is not None
@@ -106,12 +106,16 @@ def test_render_variaveis_e_showcase_line(monkeypatch):
     monkeypatch.setattr(
         showcase,
         "available",
-        lambda city, trade: {
+        lambda city, trade, **kwargs: {
             "available": True,
             "exact_count": 7,
             "city_total": 10,
             "min_items": 3,
             "page_path": "/en/new-york/roofing",
+            "fresh": True,
+            "ready": True,
+            "built_at": "2026-11-04T12:00:00+00:00",
+            "age_hours": 1.0,
         },
     )
     result = voice_scripts.render(
@@ -123,21 +127,66 @@ def test_render_variaveis_e_showcase_line(monkeypatch):
     assert "{{company}}" not in result["body"]
 
 
+def test_render_company_fallback_usa_contractor(monkeypatch):
+    monkeypatch.setattr(
+        showcase,
+        "available",
+        lambda city, trade, **kwargs: {
+            "available": True,
+            "exact_count": 7,
+            "city_total": 10,
+            "min_items": 3,
+            "page_path": "/en/new-york/roofing",
+            "fresh": True,
+            "ready": True,
+            "built_at": "2026-11-04T12:00:00+00:00",
+            "age_hours": 1.0,
+        },
+    )
+    result = voice_scripts.render("roofing", company="", city="New York")
+    assert result["greeting"].startswith("Hi Contractor,")
+    assert "Hi ," not in result["greeting"]
+
+
 def test_render_fallback_cidade_nao_promete_nicho(monkeypatch):
     monkeypatch.setattr(
         showcase,
         "available",
-        lambda city, trade: {
+        lambda city, trade, **kwargs: {
             "available": False,
             "exact_count": 0,
             "city_total": 42,
             "min_items": 3,
             "page_path": "/en/dallas/roofing",
+            "fresh": True,
+            "ready": True,
+            "built_at": "2026-11-04T12:00:00+00:00",
+            "age_hours": 1.0,
         },
     )
     result = voice_scripts.render("roofing", city="Dallas")
     assert "42 active property opportunities" in result["body"]
     assert "42 active roofing" not in result["body"]
+
+
+def test_render_bloqueia_contagem_fraca(monkeypatch):
+    monkeypatch.setattr(
+        showcase,
+        "available",
+        lambda city, trade, **kwargs: {
+            "available": False,
+            "exact_count": 0,
+            "city_total": 3,
+            "min_items": 5,
+            "page_path": "/en/dallas/roofing",
+            "fresh": True,
+            "ready": False,
+            "built_at": "2026-11-04T12:00:00+00:00",
+            "age_hours": 1.0,
+        },
+    )
+    with pytest.raises(ValueError, match="showcase_unavailable"):
+        voice_scripts.render("roofing", city="Dallas")
 
 
 def test_start_ai_assistant_chama_telnyx(monkeypatch):
@@ -176,6 +225,10 @@ def test_chamada_real_exige_roteiro_aprovado(monkeypatch):
     b2b_voice.check_dnc(phone, listed=False, source="pytest")
     conn = b2b_voice.get_conn()
     try:
+        conn.execute(
+            "UPDATE voice_scripts SET status='draft' WHERE trade_code='roofing'"
+        )
+        conn.commit()
         company = dict(
             conn.execute(
                 "SELECT * FROM prospect_companies WHERE phone=?", (phone,)
@@ -269,10 +322,12 @@ def test_sync_inclui_voz_nativa_tools_e_dtmf(monkeypatch):
         == "stop_assistant"
     )
     assert "model" not in body
-    assert "send_showcase_link" in body["instructions"]
+    assert "remove_from_list" in body["instructions"]
+    assert "Do not ask for an email" in body["instructions"]
+    assert "send_showcase_link" not in body["instructions"]
     names = {tool["webhook"]["name"] for tool in body["tools"]}
-    assert names == {"send_showcase_link", "remove_from_list"}
-    assert "No problem at all! Just visit MagicLeads.app" in body["instructions"]
+    assert names == {"remove_from_list"}
+    assert "MagicLeads dot app" in body["instructions"]
     for tool in body["tools"]:
         assert tool["webhook"]["url"].endswith(
             "/api/voice/telnyx/tools/" + tool["webhook"]["name"]

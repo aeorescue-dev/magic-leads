@@ -16,6 +16,7 @@ import re
 import secrets
 import sqlite3
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from html import escape
 from typing import Any, Optional
@@ -174,6 +175,8 @@ CREATE INDEX IF NOT EXISTS idx_showcase_checkouts_link
 """
 
 _LOCK = threading.Lock()
+_REFRESH_LOCK = threading.Lock()
+_LAST_REFRESH = 0.0
 _INIT: dict[str, Optional[str]] = {"path": None}
 _CACHE: dict[str, tuple[float, Any]] = {}
 
@@ -633,6 +636,59 @@ def _fallback_page(city_slug: str, trade_slug: str) -> Optional[dict]:
     return None
 
 
+def _age_hours(value: Any) -> Optional[float]:
+    """Idade em horas de um timestamp ISO; None se não for parseável."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return max(
+        0.0,
+        (datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds()
+        / 3600.0,
+    )
+
+
+def ensure_fresh(max_age_hours: float = 0) -> None:
+    """Reconstrói o inventário se estiver mais velho do que o limite.
+
+    O build é caro (lê o leads.db e agrega todos os nichos). Por isso é
+    limitado a uma execução a cada 5 minutos, mesmo que várias chamadas
+    concorrentes peçam refresh. `max_age_hours <= 0` desliga a verificação.
+    """
+    if max_age_hours <= 0:
+        return
+    init()
+    conn = get_conn()
+    try:
+        newest = conn.execute(
+            "SELECT MAX(built_at) FROM market_inventory"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    age = _age_hours(newest)
+    if age is not None and age <= max_age_hours:
+        return
+    global _LAST_REFRESH
+    now = time.monotonic()
+    if now - _LAST_REFRESH < 300:
+        return
+    with _REFRESH_LOCK:
+        now = time.monotonic()
+        if now - _LAST_REFRESH < 300:
+            return
+        try:
+            build_pages()
+        finally:
+            # Mesmo em erro, evita martelar o build em cada chamada.
+            _LAST_REFRESH = time.monotonic()
+
+
 def ensure_built() -> None:
     """Constrói páginas na primeira utilização se ainda não existirem."""
     init()
@@ -662,20 +718,35 @@ def get_page(city_slug: str, trade_slug: str) -> Optional[dict]:
     return _fallback_page(city_slug, trade_slug)
 
 
-def available(city_slug: str, trade_slug: str) -> dict:
-    """Consulta rápida para o guião de voz antes de prometer uma vitrine."""
+def available(
+    city_slug: str,
+    trade_slug: str,
+    *,
+    min_items: Optional[int] = None,
+    max_age_hours: float = 0,
+) -> dict:
+    """Consulta rápida para o guião de voz antes de prometer uma vitrine.
+
+    `min_items` permite exigir um mínimo mais alto do que o build (o voice
+    guard usa isto). `max_age_hours > 0` obriga a que o inventário tenha sido
+    reconstruído recentemente; caso contrário `ready=False`.
+    """
     init()
     ensure_built()
+    if max_age_hours > 0:
+        ensure_fresh(max_age_hours)
     city_slug = normalize_city_slug(city_slug)
     trade_slug = slugify(trade_slug)
+    threshold = max(_min_items(), int(min_items or 0))
     conn = get_conn()
     try:
         row = conn.execute(
-            "SELECT item_count, city, state FROM market_inventory "
+            "SELECT item_count, city, state, built_at FROM market_inventory "
             "WHERE city_slug=? AND trade_slug=?",
             (city_slug, trade_slug),
         ).fetchone()
         exact = int(row["item_count"]) if row else 0
+        built_at = row["built_at"] if row else None
         city_total = int(
             conn.execute(
                 "SELECT COALESCE(SUM(item_count),0) FROM market_inventory "
@@ -684,15 +755,64 @@ def available(city_slug: str, trade_slug: str) -> dict:
             ).fetchone()[0]
             or 0
         )
+        age = _age_hours(built_at)
+        fresh = (
+            True
+            if max_age_hours <= 0
+            else age is not None and age <= max_age_hours
+        )
         return {
-            "available": exact >= _min_items(),
+            "available": exact >= threshold,
             "exact_count": exact,
             "city_total": city_total,
-            "min_items": _min_items(),
+            "min_items": threshold,
             "page_path": f"/en/{city_slug}/{trade_slug}",
+            "built_at": built_at,
+            "age_hours": round(age, 2) if age is not None else None,
+            "fresh": fresh,
+            "ready": fresh and max(exact, city_total) >= threshold,
         }
     finally:
         conn.close()
+
+
+def city_trades(city_slug: str) -> Optional[dict]:
+    """Nicho + contagem por cidade, para a landing de entrada do voice."""
+    init()
+    ensure_built()
+    city_slug = normalize_city_slug(city_slug)
+    conn = get_conn()
+    try:
+        rows = [
+            dict(row)
+            for row in conn.execute(
+                "SELECT city, state, city_slug, trade_slug, trade_code, "
+                "item_count, built_at FROM market_inventory "
+                "WHERE city_slug=? AND item_count >= ? "
+                "ORDER BY item_count DESC",
+                (city_slug, _min_items()),
+            ).fetchall()
+        ]
+    finally:
+        conn.close()
+    if not rows:
+        return None
+    return {
+        "city": rows[0]["city"],
+        "state": rows[0]["state"],
+        "city_slug": city_slug,
+        "built_at": max(str(row.get("built_at") or "") for row in rows),
+        "trades": [
+            {
+                "trade_code": row["trade_code"],
+                "trade_slug": row["trade_slug"],
+                "trade_label": _trade_label(row["trade_code"]),
+                "item_count": int(row["item_count"]),
+                "page_path": f"/en/{city_slug}/{row['trade_slug']}",
+            }
+            for row in rows
+        ],
+    }
 
 
 def _hash_token(token: str) -> str:

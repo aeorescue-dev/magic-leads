@@ -3136,6 +3136,16 @@ async def admin_voice_template(_admin: dict = Depends(_require_admin_user)):
     )
 
 
+@app.get("/api/showcase/{city}")
+@limiter.limit("120/minute")
+async def public_showcase_city(request: Request, city: str):
+    """Landing de cidade: lista os nichos com inventário fresco."""
+    data = await anyio.to_thread.run_sync(showcase.city_trades, city)
+    if not data:
+        raise HTTPException(status_code=404, detail="showcase_city_not_found")
+    return data
+
+
 @app.get("/api/showcase/{city}/{trade}")
 @limiter.limit("120/minute")
 async def public_showcase_page(

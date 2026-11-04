@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     SHOWCASE_BASE_URL: str = ""  # default: PUBLIC_API_URL
     SHOWCASE_MIN_ITEMS: int = 3
     SHOWCASE_WINDOW_DAYS: int = 30
+    # Voice guardrails: nunca prometer contagens fracas nem inventário antigo.
+    VOICE_MIN_SHOWCASE_ITEMS: int = 5
+    VOICE_SHOWCASE_MAX_AGE_HOURS: int = 72
     SHOWCASE_SIGNAL_TYPES: str = "open_request,authorized_work"
     PUBLIC_API_URL: str = "https://magic-leads-production.up.railway.app"
 

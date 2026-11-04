@@ -189,82 +189,51 @@ por trade.
   para o fluxo normal; `silence` nao e maquina.
 - Assim o assistant nao fala com voicemail nem envia links sem um humano.
 
-## DTMF e tools
+## DTMF e tools (V3 — website-only)
 
 - O backend recebe os DTMF via Call Control (`call.dtmf.received`); o assistant
-  nao os recebe (`disable_dtmf=true`). O arranque da chamada diz: "I have your
-  email on file as <email>. Press 1 if that's correct, or press 2 if you'd
-  like a different email.".
-- Tecla **1**: se houver email na ficha, o backend envia o link imediatamente
-  (`send_showcase_for_call`), sem depender de LLM/ASR.
-- Tecla **2**: marca `intent=website_redirect` e para o assistant
-  (`ai_assistant_stop`). O MP3 deterministico da Callie
-  (`/api/voice/fallback.mp3`) so arranca no `call.conversation.ended` (ou num
-  timer de 2s), evitando sobreposicao de vozes. No `call.playback.ended`,
-  desliga a chamada. Se o playback falhar, usa `speak` com o mesmo texto.
-- Se o cliente recusa o email da ficha, quer outro endereco, ou nao ha email na
-  ficha, o assistant **nao pede email nenhum**: diz o script de fallback exato
-  e termina. Nao existe ditado de email nem `capture_email`.
-- `send_showcase_link` e idempotente por `voice_call_id`; a tecla 1 e a tool nao
-  duplicam o email.
-- `remove_from_list` cria supressao e marca a empresa `do_not_call`, mas um
-  "no" ao email da ficha **nao** e opt-out; so "remove me/stop calling/do not
-  call" o aciona.
-- O auto-scheduler **nao** envia a vitrine ao discar; o email so sai depois de
-  o contacto atender e autorizar, para nao enviar links sem consentimento.
+  nao os recebe (`disable_dtmf=true`).
+- A V3 **nao oferece Tecla 1**. O unico caminho de conversao e o website
+  `MagicLeads.app`; a Tecla 2 e opt-out.
+- Tecla **2**: chama `opt_out_voice_call()` antes de qualquer audio — cria
+  `voice_suppressions`, marca a empresa `do_not_call`, atualiza
+  `voice_calls.intent=opt_out` e para o assistant. Depois fala
+  “You've been removed from our list. Goodbye.” e desliga no `speak.ended`.
+- Tecla **1** (habito): repete “Visit MagicLeads dot app…” e desliga. Nao envia
+  email nem SMS.
+- O assistant **nunca pede email** nem promete entrega por email/SMS. As tools
+  expostas sao apenas `remove_from_list` para opt-out verbal.
+- `send_showcase_link`/`capture_email` ja nao fazem parte do assistant de voz;
+  o envio de email da vitrine fica apenas em fluxos manuais/admin.
+- `remove_from_list` e idempotente: cria supressao e marca `do_not_call`.
+- O auto-scheduler **nao** envia vitrine ao discar; a V3 nao envia nada.
 - Os tool calls chegam com `x-telnyx-call-control-id`, correlacionado com
   `voice_calls.provider_call_id`.
 
-## Email da vitrine (HTML aprovado)
+## Email da vitrine (legado / manual)
 
-Assunto:
+O email da vitrine e o template `/r/<token>` continuam a existir para fluxos
+manuais e admin, mas **nao fazem parte da V3 de voz**. A V3 nao pede email, nao
+envia email e nao expõe `send_showcase_link` ao assistant.
 
-```text
-Here is your link: {count} active {trade} opportunities in {city}
-```
+O envio manual continua a usar o link `/r/<token>` e o email aprovado; qualquer
+envio exige o endereco que ja esta na ficha. A transcricao usa
+`deepgram/nova-3` com noise suppression `krisp`, mas o email nunca depende de
+ASR.
 
-Corpo (HTML + fallback texto), com botao `ACCESS YOUR EXCLUSIVE
-OPPORTUNITIES`, link `https://www.magicleads.app/r/<token>`, assinatura
-`Magic Leads Team`, morada `100 Main St, Suite 500, Boston, MA 02110` e link
-de unsubscribe. O assunto e o corpo usam plural correto (`1 ... opportunity`).
+## Guardrails do `showcase_line` (voz)
 
-O email e disparado apenas por `send_showcase_link`, que so envia para o email
-**que ja esta na ficha** e exige `confirmed_email` igual ao endereco em ficha.
-Se nao bater, devolve `email_confirmation_mismatch` e o assistant confirma de
-novo.
-
-### Confirmacao primeiro (fluxo definitivo)
-
-No arranque da chamada, o backend injeta no instructions o email da ficha:
-
-```text
-Email on file for this business: info@apexroofing.com
-```
-
-Fluxo:
-
-1. O arranque da chamada inclui o script aprovado e, se houver email na ficha:
-   "I have your email on file as info@apexroofing.com. Press 1 if that's
-   correct, or press 2 if you'd like a different email.".
-2. **Tecla 1 / "yes"**: se disser "yes", o assistant chama
-   `send_showcase_link` com esse endereco. Se premir 1, o backend envia
-   imediatamente, sem depender de LLM/ASR.
-3. **Tecla 2**: o backend marca `intent=website_redirect` e injeta o fallback
-   exato no assistant ativo; a Callie diz o script e termina. O cliente nunca
-   fica bloqueado se o email estiver errado.
-4. Se o cliente recusa o email da ficha por voz, quer outro endereco, ou nao ha
-   email na ficha, o assistant **nao pede email** e diz exatamente:
-
-```text
-No problem at all! Just visit MagicLeads.app to check out the best active
-opportunities available for you right now. There's no competition, and best of
-all, you get access up to 7 days before any other contractor even knows about
-them. The first to call gets the job!
-```
-
-Depois termina a chamada. Nao ha ditado, soletragem nem `capture_email`. A
-transcricao continua em `deepgram/nova-3` com noise suppression `krisp` para a
-conversa geral, mas o email nunca depende de ASR.
+- O numero vem de `showcase.available(city, trade)`, que lê
+  `market_inventory` (build a partir de `leads.db`, janela
+  `SHOWCASE_WINDOW_DAYS`, sinais `SHOWCASE_SIGNAL_TYPES`).
+- A V3 exige `VOICE_MIN_SHOWCASE_ITEMS` (default **5**) e inventário com menos
+  de `VOICE_SHOWCASE_MAX_AGE_HOURS` (default **72 h**).
+- Se a contagem exata e a city-wide estiverem abaixo do mínimo, ou o inventário
+  estiver velho, `showcase_guard()` devolve `ready=False` e
+  `telnyx_voice.create_call()` aborta com `showcase_unavailable` — a chamada
+  nao sai.
+- Nunca e falado “0”: contagens >= 1.000 sao arredondadas para “over N,XXX”
+  para o TTS nao arrastar o numero.
 
 ## Analytics de aceite e conversao
 
@@ -420,18 +389,22 @@ Todas exigem sessão **admin** (`_require_admin_user`).
 4. **Dry-run**: sem chaves Telnyx, as chamadas ficam registadas em `voice_calls`
    e os emails ficam em dry-run; nenhum contacto real é feito.
 
-## Roteiros de voz
+## Roteiros de voz (V3)
 
-- 15 roteiros default com o template oficial aprovado, status `draft`.
-- O template inclui Opening & Pitch, “If Yes / Press 1” e “If No / Stop”.
-- Variáveis: `{{company}}`, `{{city}}`, `{{trade}}`, `{{permit_count}}`,
-  `{{showcase_line}}`, `{{price_weekly}}`, `{{price_monthly}}`.
+- 15 roteiros default com o template V3 aprovado; `TEMPLATE_VERSION` bump
+  aplica-o e deixa todos `approved` (a V3 foi aprovada pelo operador).
+- O template V3 e website-only: `{{company | Contractor}}`,
+  `{{showcase_line}}`, URL `MagicLeads.app`, Tecla 2 = opt-out. Nao tem
+  “If Yes / Press 1” nem CTA de email.
+- Variáveis: `{{company}}` (fallback `Contractor`), `{{city}}`, `{{trade}}`,
+  `{{permit_count}}`, `{{showcase_line}}`, `{{price_weekly}}`,
+  `{{price_monthly}}`.
+- O parser suporta `{{var | fallback}}`; nunca deixa braces no áudio.
 - Aba **Roteiros** no `/admin/voice`: editar, pré-visualizar por cidade/empresa,
   guardar draft, aprovar, **Aprovar Todos** e sincronizar com a Telnyx.
 - Só roteiro `approved` com `assistant_id` pode ser usado em chamada real.
-- **Overrides futuros**: `voice_script_overrides` por estado/cidade. Resolução
-  runtime **cidade > estado > global**; só overrides `approved` entram em
-  produção. O global por trade continua a ser o default.
+- **Overrides**: `voice_script_overrides` por estado/cidade. Resolução runtime
+  **cidade > estado > global**; só overrides `approved` entram em produção.
 - No `call.answered`, o backend inicia o assistant; se falhar, desliga a
   chamada para não ficar em silêncio.
 - Teste real: `POST /voice/test-call` com `confirm=true`, telefone em

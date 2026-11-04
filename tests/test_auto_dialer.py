@@ -131,9 +131,9 @@ def test_auto_dialer_dry_run_dispara_chamadas_sem_vitrine_precoce():
 
 
 def test_segments_classificam_dedicada_e_fallback():
-    for idx in range(3):
+    for idx in range(5):
         _seed_lead("Boston", "MA", "Roof", "02118", idx)
-    for idx in range(3):
+    for idx in range(5):
         _seed_lead("Dallas", "TX", "Structure", "75201", idx)
     showcase.build_pages()
     _import_company("+16175550104", "Boston", "MA")
@@ -147,10 +147,10 @@ def test_segments_classificam_dedicada_e_fallback():
         s for s in segments if s["city"] == "Dallas" and s["trade"] == "Roofing"
     )
     assert boston["showcase_mode"] == "dedicated"
-    assert boston["showcase_exact"] >= 3
+    assert boston["showcase_exact"] >= 5
     assert dallas["showcase_mode"] == "city_fallback"
     assert dallas["showcase_exact"] == 0
-    assert dallas["showcase_city_total"] >= 3
+    assert dallas["showcase_city_total"] >= 5
 
 
 def test_campanha_interrompida_e_fechada_no_arranque():
@@ -648,7 +648,7 @@ def test_bridge_contractor_entities_preenche_voice_db():
 
 
 def test_source_http_csv_importa_e_rebuilda_segmentos(monkeypatch):
-    for idx in range(3):
+    for idx in range(5):
         _seed_lead("Chicago", "IL", "Paint", "60601", idx)
     csv_text = (
         "company_name,contact_name,phone,email,city,state,license_status,trade,"

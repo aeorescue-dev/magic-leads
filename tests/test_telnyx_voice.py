@@ -85,7 +85,7 @@ def _seed_company() -> dict:
 def _seed_showcase() -> None:
     conn = get_connection()
     try:
-        for idx in range(3):
+        for idx in range(5):
             conn.execute(
                 """
                 INSERT INTO leads
@@ -118,7 +118,7 @@ def test_create_call_dry_run_sem_chaves():
     assert call["provider"] == "telnyx"
 
 
-def test_webhook_dtmf_1_envia_link_da_ficha_e_e_idempotente():
+def test_webhook_dtmf_1_regete_website_sem_email():
     company = _seed_company()
     _seed_showcase()
     created = telnyx_voice.create_call(company, campaign_id="pilot")
@@ -126,26 +126,35 @@ def test_webhook_dtmf_1_envia_link_da_ficha_e_e_idempotente():
     state = base64.b64encode(
         json.dumps({"voice_call_id": call_id, "company_id": company["id"]}).encode()
     ).decode()
-    payload = {
-        "data": {
-            "event_type": "call.dtmf.received",
-            "payload": {
-                "client_state": state,
-                "dtmf_digit": "1",
-            },
-        }
-    }
-    result = telnyx_voice.handle_webhook(payload)
-    assert result["ok"] is True
-    assert result["action"] == "showcase"
-    assert result["showcase"]["ok"] is True
-    call = voice.get_voice_call(call_id)
-    assert call["intent"] == "showcase"
-    assert call["showcase_link_id"]
+    actions: list[tuple[str, dict]] = []
 
-    again = telnyx_voice.handle_webhook(payload)
-    assert again["showcase"].get("duplicate") is True
-    assert again["showcase"]["link_id"] == call["showcase_link_id"]
+    def fake_action(call_control_id, action, payload):
+        actions.append((action, payload))
+        return {"ok": True}
+
+    original = telnyx_voice._call_action
+    telnyx_voice._call_action = fake_action
+    try:
+        result = telnyx_voice.handle_webhook(
+            {
+                "data": {
+                    "event_type": "call.dtmf.received",
+                    "payload": {
+                        "client_state": state,
+                        "dtmf_digit": "1",
+                        "call_control_id": "v3:test-dtmf1",
+                    },
+                }
+            }
+        )
+    finally:
+        telnyx_voice._call_action = original
+    assert result["ok"] is True
+    assert result["action"] == "website_reminder"
+    assert [action for action, _ in actions] == ["ai_assistant_stop", "speak"]
+    call = voice.get_voice_call(call_id)
+    assert call["intent"] == "website_reminder"
+    assert call["showcase_link_id"] is None
 
 
 def test_webhook_secret_fail_closed_e_valida():
@@ -219,7 +228,7 @@ def test_hangup_sem_duracao_usa_answered_at():
     assert call["cost_cents"] > 0
 
 
-def test_webhook_dtmf_2_para_assistant_e_toca_mp3_no_ended():
+def test_webhook_dtmf_2_faz_opt_out_real_e_confirma():
     company = _seed_company()
     created = telnyx_voice.create_call(company)
     call_id = created["voice_call_id"]
@@ -247,32 +256,29 @@ def test_webhook_dtmf_2_para_assistant_e_toca_mp3_no_ended():
                 }
             }
         )
-        assert result["action"] == "website_redirect"
-        assert [action for action, _ in actions] == ["ai_assistant_stop"]
-        ended = telnyx_voice.handle_webhook(
-            {
-                "data": {
-                    "event_type": "call.conversation.ended",
-                    "payload": {
-                        "client_state": state,
-                        "call_control_id": "v3:test-dtmf2",
-                    },
-                }
-            }
-        )
-        assert ended["action"] == "conversation_ended"
     finally:
         telnyx_voice._call_action = original
-    assert [action for action, _ in actions] == [
-        "ai_assistant_stop",
-        "playback_start",
-    ]
-    assert actions[1][1]["audio_url"].endswith("/api/voice/fallback.mp3")
-    assert actions[1][1]["audio_type"] == "mp3"
+    assert result["action"] == "opt_out"
+    assert result["opt_out"]["suppressed"] is True
+    assert [action for action, _ in actions] == ["ai_assistant_stop", "speak"]
+    assert "removed from our list" in actions[1][1]["payload"]
     call = voice.get_voice_call(call_id)
-    assert call["intent"] == "website_redirect"
-    assert call["fallback_audio_started_at"]
+    assert call["intent"] == "opt_out"
     assert call["showcase_link_id"] is None
+    conn = voice.get_conn()
+    try:
+        row = conn.execute(
+            "SELECT status FROM prospect_companies WHERE id=?",
+            (company["id"],),
+        ).fetchone()
+        suppressed = conn.execute(
+            "SELECT COUNT(*) FROM voice_suppressions WHERE value=?",
+            (company["phone"],),
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert row["status"] == "do_not_call"
+    assert suppressed == 1
 
 
 def test_webhook_playback_ended_desliga_chamada():
@@ -775,13 +781,11 @@ def test_answered_envia_script_renderizado_ao_assistant(monkeypatch):
         "instructions"
     ]
     assert sent["greeting"].startswith("Hi Telnyx Roofing")
-    assert "Press 1 if that's correct, or press 2" in sent["greeting"]
+    assert "press 2" in sent["greeting"].lower()
+    assert "Press 1 if that's correct" not in sent["greeting"]
     assert sent["voice_settings"]["voice"] == (
         "Telnyx.Ultra.00a77add-48d5-4ef6-8157-71e5437b282d"
     )
-    assert "Email on file for this business: jane@example.com" in sent[
-        "instructions"
-    ]
-    assert "No problem at all! Just visit MagicLeads.app" in sent["instructions"]
-    assert "send_showcase_link" in sent["instructions"]
+    assert "Do not ask for an email" in sent["instructions"]
+    assert "send_showcase_link" not in sent["instructions"]
 

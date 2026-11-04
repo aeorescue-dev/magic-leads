@@ -7,6 +7,7 @@ iniciado na chamada quando o contacto atende.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import quote
@@ -17,21 +18,24 @@ from ..config import settings
 from ..utils.logger import logger
 from . import b2b_voice, showcase
 
-DISCLOSURE = "Hi {{company}}, this is an automated assistant from Magic Leads."
+DISCLOSURE = "Hi {{company | Contractor}}, this is an automated assistant from Magic Leads."
 
-TEMPLATE_VERSION = "2026-11-02.1"
+TEMPLATE_VERSION = "2026-11-04.3"
+
+# Guardrails do voice: nunca prometer uma vitrine com contagem fraca/zero
+# nem usar inventário antigo. O valor pode ser afinado por ambiente.
+VOICE_MIN_SHOWCASE_ITEMS = 5
+VOICE_SHOWCASE_MAX_AGE_HOURS = 72.0
 
 DEFAULT_TEMPLATE = (
-    "Opening & Pitch: Hi {{company}}, this is an automated assistant from "
-    "Magic Leads. On our website right now, we have {{showcase_line}}. We're "
-    "reaching out so you don't miss these exclusive opportunities. We deliver "
-    "the client's name, address, and the specific job to perform before any "
-    "competitor finds out. Can I send you our website link so you can check "
-    "these opportunities?\n\n"
-    "If Yes / Press 1: Great! What's the best email address to send the link "
-    "right now?\n\n"
-    "If No / Stop: No problem at all. I'll remove your number from our list. "
-    "Have a great day!"
+    "Hi {{company | Contractor}}, this is an automated assistant from Magic "
+    "Leads. We have {{showcase_line}} on MagicLeads.app right now. Stop wasting "
+    "money competing with 5 to 8 other contractors on traditional platforms "
+    "that only bleed your pocket. With us, you get exclusive opportunities up "
+    "to 7 days before anyone else, with the client's name, address, and job "
+    "details. Go to MagicLeads.app on your phone's browser to close your first "
+    "deal today. To remove your number from our list, press 2 now. Have a "
+    "great day!"
 )
 
 TRADES = (
@@ -55,59 +59,32 @@ TRADES = (
 DEFAULT_SCRIPTS: dict[str, str] = {trade: DEFAULT_TEMPLATE for trade in TRADES}
 
 FALLBACK_SCRIPT = (
-    "No problem at all! Just visit MagicLeads.app to check out the best active "
-    "opportunities available for you right now. There's no competition, and "
-    "best of all, you get access up to 7 days before any other contractor even "
-    "knows about them. The first to call gets the job!"
+    "You can visit MagicLeads.app to see this week's active opportunities. "
+    "Have a great day!"
 )
 
 TOOL_GUIDANCE = (
     "## Operational rules\n"
     "You are on a live outbound phone call. Follow the approved script above "
     "exactly; do not add claims, prices, or promises that are not in it.\n"
-    "- Email handling (strict; this overrides the generic \"If Yes / Press 1\" "
-    "line):\n"
-    "  1. The greeting already gives the caller two options: press 1 if the "
-    "email on file is correct, or press 2 for a different email. If they press "
-    "1 or say yes, call send_showcase_link with confirmed_email equal to that "
-    "exact address. Do not ask the confirmation question again.\n"
-    "  2. If they press 2, the backend injects the fallback script; do not call "
-    "any tool.\n"
-    "  3. If they say no to the email on file (without asking to be removed), "
-    "say exactly this script:\n"
-    f"\"{FALLBACK_SCRIPT}\"\n"
-    "Then end the call politely. Do NOT call remove_from_list for this case.\n"
-    "  4. Call remove_from_list only when the caller explicitly asks to be "
-    "removed or to stop calling (for example: \"remove me\", \"stop calling\", "
-    "\"do not call\", \"take me off your list\"). A plain \"no\" to the email "
-    "on file is not an opt-out.\n"
-    "  5. Never ask the caller to dictate or spell an email. The only email "
-    "path is confirming the address already on file.\n"
-    "- If the caller says no to the offer/link or asks to be removed, call "
-    "remove_from_list and end politely.\n"
-    "- Pressing 1 is equivalent to saying yes. DTMF input arrives as text.\n"
+    "- The script asks the caller to visit MagicLeads.app and to press 2 to be "
+    "removed from the list.\n"
+    "- Pressing 2 is an opt-out. The backend handles the suppression and the "
+    "confirmation; do not call any tool for DTMF input.\n"
+    "- Call remove_from_list only when the caller verbally asks to be removed "
+    "or to stop calling (for example: \"remove me\", \"stop calling\", \"do "
+    "not call\", \"take me off your list\").\n"
+    "- Do not ask for an email address. Do not promise email or SMS delivery. "
+    "The only conversion path is the website.\n"
+    "- If the caller asks for the website, repeat \"MagicLeads dot app\".\n"
+    "- If the caller says no or is not interested, end the call politely. Do "
+    "not pressure them.\n"
 )
 
 
-def build_instructions(body: str, email_on_file: str = "") -> str:
-    """Script aprovado + regras operacionais + contexto de email da chamada."""
-    email = str(email_on_file or "").strip()
-    if email:
-        context = (
-            "## Call context\n"
-            f"Email on file for this business: {email}\n"
-            "The greeting already asks the caller to press 1 (correct) or 2 "
-            "(different email). If the caller declines it or wants another "
-            "address, say the fallback script exactly and do not ask for an "
-            "email.\n"
-        )
-    else:
-        context = (
-            "## Call context\n"
-            "Email on file for this business: none.\n"
-            "Do not ask for an email. Say the fallback script exactly.\n"
-        )
-    return f"{str(body or '').strip()}\n\n{TOOL_GUIDANCE}\n{context}"
+def build_instructions(body: str) -> str:
+    """Script aprovado + regras operacionais (website-only, sem email/SMS)."""
+    return f"{str(body or '').strip()}\n\n{TOOL_GUIDANCE}"
 
 
 def opening_for_greeting(body: str) -> str:
@@ -120,7 +97,12 @@ def opening_for_greeting(body: str) -> str:
 
 
 def _apply_template(conn) -> None:
-    """Atualiza os 15 seeds para o template oficial e volta a draft."""
+    """Aplica o template global aprovado (V3) aos 15 seeds.
+
+    A versão é bumpada e o script fica `approved` porque a V3 foi aprovada
+    explicitamente pelo operador antes do deploy. Overrides por cidade/estado
+    continuam a ter precedência e não são tocados.
+    """
     now = datetime.now(timezone.utc).isoformat()
     for trade, body in DEFAULT_SCRIPTS.items():
         existing = conn.execute(
@@ -130,21 +112,24 @@ def _apply_template(conn) -> None:
         conn.execute(
             """
             INSERT INTO voice_scripts
-              (trade_code, version, status, body, disclosure, updated_at)
-            VALUES (?, ?, 'draft', ?, ?, ?)
+              (trade_code, version, status, body, disclosure, approved_by,
+               approved_at, updated_at)
+            VALUES (?, ?, 'approved', ?, ?, 0, ?, ?)
             ON CONFLICT(trade_code) DO UPDATE SET
               version=excluded.version,
-              status='draft',
+              status='approved',
               body=excluded.body,
               disclosure=excluded.disclosure,
+              approved_by=0,
+              approved_at=excluded.approved_at,
               updated_at=excluded.updated_at
             """,
-            (trade, version, body, DISCLOSURE, now),
+            (trade, version, body, DISCLOSURE, now, now),
         )
         conn.execute(
             "INSERT INTO voice_script_versions "
             "(trade_code, version, status, body, disclosure, created_at, created_by) "
-            "VALUES (?, ?, 'draft', ?, ?, ?, 0)",
+            "VALUES (?, ?, 'approved', ?, ?, ?, 0)",
             (trade, version, body, DISCLOSURE, now),
         )
 
@@ -596,6 +581,162 @@ def approve_override(override_id: int, user_id: int = 0) -> dict:
         conn.close()
 
 
+_VAR_RE = re.compile(
+    r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:\|\s*([^}]*?))?\s*\}\}"
+)
+
+_BAD_COMPANY = {
+    "UNAVAILABLE OWNER",
+    "UNKNOWN",
+    "OWNER",
+    "N A",
+    "NA",
+    "NONE",
+    "TAXPAYER OF",
+    "SAME AS OWNER",
+    "SELF",
+    "PRIVATE",
+}
+
+
+def _clean_company(value: object) -> str:
+    """Nome apresentável para o TTS; vazio se for placeholder ou lixo."""
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if not text:
+        return ""
+    normalized = re.sub(r"[^A-Z0-9 ]+", " ", text.upper())
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    if len(normalized) < 3 or normalized in _BAD_COMPANY:
+        return ""
+    return text
+
+
+def _render_template(text: str, values: dict[str, str]) -> str:
+    """Substitui {{var}} e {{var | fallback}} sem deixar braces no áudio."""
+
+    def repl(match: re.Match[str]) -> str:
+        key = match.group(1)
+        fallback = (match.group(2) or "").strip()
+        value = values.get(key)
+        if value is None or not str(value).strip():
+            return fallback
+        return str(value)
+
+    return _VAR_RE.sub(repl, str(text or ""))
+
+
+def _spoken_count(value: object) -> str:
+    """Números grandes arredondados para não arrastar o TTS."""
+    try:
+        count = max(0, int(value))
+    except (TypeError, ValueError):
+        return "0"
+    if count >= 1000:
+        rounded = (count // 100) * 100
+        return f"over {rounded:,}"
+    return str(count)
+
+
+def _voice_min_items() -> int:
+    return max(
+        1,
+        int(
+            getattr(
+                settings,
+                "VOICE_MIN_SHOWCASE_ITEMS",
+                VOICE_MIN_SHOWCASE_ITEMS,
+            )
+            or VOICE_MIN_SHOWCASE_ITEMS
+        ),
+    )
+
+
+def _voice_max_age_hours() -> float:
+    try:
+        return max(
+            0.0,
+            float(
+                getattr(
+                    settings,
+                    "VOICE_SHOWCASE_MAX_AGE_HOURS",
+                    VOICE_SHOWCASE_MAX_AGE_HOURS,
+                )
+                or VOICE_SHOWCASE_MAX_AGE_HOURS
+            ),
+        )
+    except (TypeError, ValueError):
+        return VOICE_SHOWCASE_MAX_AGE_HOURS
+
+
+def showcase_guard(trade_code: str, city: str = "") -> dict:
+    """Fonte única da linha falada e do gate de disparo.
+
+    Nunca devolve uma linha com 0. Se a contagem exata ou city-wide estiver
+    abaixo do mínimo, ou se o inventário estiver velho, `ready=False` e a
+    chamada real é bloqueada por `telnyx_voice.create_call`.
+    """
+    code = showcase.normalize_trade(trade_code) or str(trade_code or "").strip()
+    city_label = str(city or "").strip() or "your city"
+    threshold = _voice_min_items()
+    info = showcase.available(
+        city_label,
+        code,
+        min_items=threshold,
+        max_age_hours=_voice_max_age_hours(),
+    )
+    exact = int(info.get("exact_count") or 0)
+    city_total = int(info.get("city_total") or 0)
+    ready = info.get("ready")
+    if ready is None:
+        # Compatibilidade com chamadas antigas/test doubles que ainda não
+        # devolvem `ready`.
+        ready = max(exact, city_total) >= threshold
+    if not ready:
+        reasons: list[str] = []
+        if info.get("fresh") is False:
+            reasons.append("stale_inventory")
+        if max(exact, city_total) < threshold:
+            reasons.append("insufficient_inventory")
+        return {
+            "ready": False,
+            "reason": ",".join(reasons) or "showcase_unavailable",
+            "line": "",
+            "scope": "none",
+            "count": max(exact, city_total),
+            "exact_count": exact,
+            "city_total": city_total,
+            "threshold": threshold,
+            "built_at": info.get("built_at"),
+            "age_hours": info.get("age_hours"),
+        }
+    if info.get("available"):
+        count = exact
+        scope = "trade"
+        line = (
+            f"{_spoken_count(count)} active {showcase.trade_label(code).lower()} "
+            f"opportunities in {city_label} this week"
+        )
+    else:
+        count = city_total
+        scope = "city"
+        line = (
+            f"{_spoken_count(count)} active property opportunities "
+            f"in {city_label} this week"
+        )
+    return {
+        "ready": True,
+        "reason": "",
+        "line": line,
+        "scope": scope,
+        "count": count,
+        "exact_count": exact,
+        "city_total": city_total,
+        "threshold": threshold,
+        "built_at": info.get("built_at"),
+        "age_hours": info.get("age_hours"),
+    }
+
+
 def render(
     trade_code: str,
     company: str = "",
@@ -609,44 +750,21 @@ def render(
         raise ValueError("roteiro não encontrado")
     code = showcase.normalize_trade(trade_code) or trade_code
     city_label = city.strip() or "your city"
-    trade_label = showcase.trade_label(code)
-    available = showcase.available(city_label, code)
-    if available["available"]:
-        showcase_line = (
-            f"{available['exact_count']} active {trade_label.lower()} "
-            f"opportunities in {city_label} this week"
-        )
-    elif available["city_total"]:
-        showcase_line = (
-            f"{available['city_total']} active property opportunities "
-            f"in {city_label} this week"
-        )
-    else:
-        showcase_line = (
-            f"new property opportunities in {city_label} this week"
-        )
-    replacements = {
-        "{{company}}": company or "your company",
-        "{{city}}": city_label,
-        "{{trade}}": trade_label,
-        "{{permit_count}}": str(int(permit_count or 0)),
-        "{{showcase_line}}": showcase_line,
-        "{{price_weekly}}": "$120",
-        "{{price_monthly}}": "$520",
+    guard = showcase_guard(code, city_label)
+    if not guard["ready"]:
+        raise ValueError(f"showcase_unavailable: {guard['reason']}")
+    values = {
+        "company": _clean_company(company) or "Contractor",
+        "city": city_label,
+        "trade": showcase.trade_label(code),
+        "permit_count": str(int(permit_count or 0)),
+        "showcase_line": guard["line"],
+        "price_weekly": "$120",
+        "price_monthly": "$520",
     }
-    body = script["body"]
-    for key, value in replacements.items():
-        body = body.replace(key, value)
-    disclosure = (script.get("disclosure") or DISCLOSURE)
-    for key, value in replacements.items():
-        disclosure = disclosure.replace(key, value)
+    body = _render_template(script["body"], values)
+    disclosure = _render_template(script.get("disclosure") or DISCLOSURE, values)
     greeting = opening_for_greeting(body)
-    if email:
-        greeting = (
-            f"{greeting} I have your email on file as {email}. "
-            "Press 1 if that's correct, or press 2 if you'd like a different "
-            "email."
-        )
     return {
         "trade_code": code,
         "version": script["version"],
@@ -654,10 +772,11 @@ def render(
         "assistant_id": script.get("assistant_id") or "",
         "voice_id": _assistant_voice(script),
         "body": body,
-        "instructions": build_instructions(body, email_on_file=email),
+        "instructions": build_instructions(body),
         "greeting": greeting,
         "disclosure": disclosure,
-        "variables": replacements,
+        "showcase": guard,
+        "variables": {f"{{{{{key}}}}}": value for key, value in values.items()},
     }
 
 
@@ -711,29 +830,11 @@ def _assistant_tools() -> list[dict]:
 
     return [
         tool(
-            "send_showcase_link",
-            (
-                "Send the Magic Leads showcase link to the email already on "
-                "file for this business. Use it only after the caller confirms "
-                "the address on file out loud. If there is no email on file or "
-                "the caller declines it, do NOT call this tool; say the "
-                "fallback script instead."
-            ),
-            {
-                "confirmed_email": {
-                    "type": "string",
-                    "description": (
-                        "The email on file that the caller just confirmed."
-                    ),
-                }
-            },
-            ["confirmed_email"],
-        ),
-        tool(
             "remove_from_list",
             (
-                "Register that the caller asked to stop. Call it when the "
-                "caller says no, stop, or asks to be removed."
+                "Register that the caller asked to stop. Use it only when the "
+                "caller verbally asks to be removed or to stop calling. DTMF 2 "
+                "is handled by the backend."
             ),
             {},
             [],

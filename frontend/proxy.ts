@@ -7,6 +7,36 @@ const LOCALES = ["pt", "en", "es"] as const;
 const DEFAULT_LOCALE = "en";
 const PROTECTED_PATHS = ["/dashboard", "/onboarding"];
 
+// Cidades atendidas pela operação de voz. O header geográfico do edge
+// (Vercel/Cloudflare) resolve a cidade; o nicho continua a ser escolhido na
+// página, porque um IP não transporta o ofício do caller.
+const GEO_CITY_SLUGS: Record<string, string> = {
+  "new york": "new-york",
+  nyc: "new-york",
+  brooklyn: "new-york",
+  manhattan: "new-york",
+  queens: "new-york",
+  bronx: "new-york",
+  "staten island": "new-york",
+  chicago: "chicago",
+  dallas: "dallas",
+  boston: "boston",
+};
+
+function geoCitySlug(request: NextRequest): string {
+  const raw =
+    request.headers.get("x-vercel-ip-city") ||
+    request.headers.get("cf-ipcity") ||
+    "";
+  let city = raw.trim().toLowerCase();
+  try {
+    city = decodeURIComponent(city);
+  } catch {
+    // Header já vem plano; mantém o valor original.
+  }
+  return GEO_CITY_SLUGS[city] || "";
+}
+
 export function proxy(request: NextRequest) {
   let { pathname } = request.nextUrl;
   pathname = pathname.replace(/\/+$/, "") || "/";
@@ -59,8 +89,22 @@ if (
         ? (cookieLocale as string)
         : DEFAULT_LOCALE;
 
-    // Root "/": ALWAYS rewrite to DEFAULT_LOCALE (en) invisibly, ignoring any cookie
+    // Root "/": encaminha para a cidade detetada pelo edge; sem geolocalização
+    // (ou fora das 4 cidades) mantém a landing genérica em /en.
     if (pathname === "/") {
+      const citySlug = geoCitySlug(request);
+      if (citySlug) {
+        const cityUrl = new URL(`/${DEFAULT_LOCALE}/${citySlug}`, request.url);
+        const response = NextResponse.redirect(cityUrl);
+        response.headers.set("x-middleware-locale", DEFAULT_LOCALE);
+        response.cookies.set("NEXT_LOCALE", DEFAULT_LOCALE, {
+          path: "/",
+          maxAge: 60 * 60 * 24 * 365,
+          sameSite: "lax",
+          secure: true,
+        });
+        return response;
+      }
       const rewriteUrl = new URL(`/${DEFAULT_LOCALE}`, request.url);
       const response = NextResponse.rewrite(rewriteUrl);
       response.headers.set("x-middleware-locale", DEFAULT_LOCALE);

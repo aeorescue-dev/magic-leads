@@ -1431,6 +1431,7 @@ def test_admin_voice_ingest_builds_segments(admin_client, monkeypatch):
     client, headers, _ = admin_client
     monkeypatch.setattr(showcase.settings, "SHOWCASE_MIN_ITEMS", 3)
     monkeypatch.setattr(showcase.settings, "SHOWCASE_WINDOW_DAYS", 30)
+    monkeypatch.setattr(b2b_voice.settings, "VOICE_MIN_SHOWCASE_ITEMS", 3)
     phone = "+16175550666"
     conn = get_connection()
     try:
