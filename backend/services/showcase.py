@@ -755,6 +755,12 @@ def available(
             ).fetchone()[0]
             or 0
         )
+        if built_at is None:
+            # Trade sem linha própria: a frescura é a da cidade, não `None`.
+            built_at = conn.execute(
+                "SELECT MAX(built_at) FROM market_inventory WHERE city_slug=?",
+                (city_slug,),
+            ).fetchone()[0]
         age = _age_hours(built_at)
         fresh = (
             True

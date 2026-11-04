@@ -132,6 +132,21 @@ def test_available_para_guiao_de_voz():
     assert ok["exact_count"] == 3
     missing = showcase.available("boston", "hvac")
     assert missing["available"] is False
+    assert missing["built_at"] is not None
+
+
+def test_available_city_fallback_usa_built_at_da_cidade():
+    for idx in range(5):
+        _seed_lead("Boston", "MA", "Roof", "02118", idx)
+    showcase.build_pages()
+    city_fallback = showcase.available(
+        "boston", "hvac", min_items=5, max_age_hours=72
+    )
+    assert city_fallback["available"] is False
+    assert city_fallback["city_total"] == 5
+    assert city_fallback["built_at"] is not None
+    assert city_fallback["fresh"] is True
+    assert city_fallback["ready"] is True
 
 
 def test_trade_slug_com_hifen_encontra_pagina_exata():
