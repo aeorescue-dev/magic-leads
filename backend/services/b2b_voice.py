@@ -12,6 +12,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import json
 import os
 import re
 import sqlite3
@@ -217,6 +218,9 @@ CREATE TABLE IF NOT EXISTS voice_campaigns (
   budget_daily_usd REAL NOT NULL DEFAULT 0,
   max_days INTEGER NOT NULL DEFAULT 0,
   start_hour_et INTEGER NOT NULL DEFAULT 9,
+  call_interval_seconds INTEGER NOT NULL DEFAULT 30,
+  batch_plan TEXT,
+  plan_index INTEGER NOT NULL DEFAULT 0,
   error TEXT,
   next_batch_at TEXT,
   created_by INTEGER,
@@ -331,6 +335,9 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         ("budget_daily_usd", "REAL NOT NULL DEFAULT 0"),
         ("max_days", "INTEGER NOT NULL DEFAULT 0"),
         ("start_hour_et", "INTEGER NOT NULL DEFAULT 9"),
+        ("call_interval_seconds", "INTEGER NOT NULL DEFAULT 30"),
+        ("batch_plan", "TEXT"),
+        ("plan_index", "INTEGER NOT NULL DEFAULT 0"),
     ):
         if name not in campaign_cols:
             conn.execute(f"ALTER TABLE voice_campaigns ADD COLUMN {name} {ddl}")
@@ -1287,6 +1294,8 @@ def create_campaign(
     budget_daily_usd: Optional[float] = None,
     max_days: Optional[int] = None,
     start_hour_et: Optional[int] = None,
+    call_interval_seconds: Optional[int] = None,
+    batch_plan: Optional[list[int]] = None,
 ) -> dict:
     init()
     now = _iso()
@@ -1327,14 +1336,35 @@ def create_campaign(
             ),
         ),
     )
+    interval = max(
+        0,
+        int(
+            call_interval_seconds
+            if call_interval_seconds is not None
+            else getattr(settings, "VOICE_AUTOSCHED_DELAY_SECONDS", 30)
+        ),
+    )
+    plan_json = ""
+    if batch_plan:
+        try:
+            values = [
+                max(1, min(quota, int(value)))
+                for value in batch_plan
+                if int(value) > 0
+            ]
+            if values:
+                plan_json = json.dumps(values)
+        except (TypeError, ValueError):
+            plan_json = ""
     conn = get_conn()
     try:
         cur = conn.execute(
             "INSERT INTO voice_campaigns "
             "(name, city, trade, status, max_calls, quota_total, batch_size, "
             "include_fallback, dry_run, budget_total_usd, budget_daily_usd, "
-            "max_days, start_hour_et, created_by, created_at, started_at) "
-            "VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "max_days, start_hour_et, call_interval_seconds, batch_plan, "
+            "plan_index, created_by, created_at, started_at) "
+            "VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
             (
                 name,
                 city,
@@ -1348,6 +1378,8 @@ def create_campaign(
                 round(daily_budget, 2),
                 days,
                 start_hour,
+                interval,
+                plan_json,
                 int(created_by or 0),
                 now,
                 now,
@@ -1408,6 +1440,9 @@ def update_campaign(campaign_id: int, **fields: Any) -> Optional[dict]:
         "budget_daily_usd",
         "max_days",
         "start_hour_et",
+        "call_interval_seconds",
+        "batch_plan",
+        "plan_index",
     }
     updates = {key: value for key, value in fields.items() if key in allowed}
     if not updates:

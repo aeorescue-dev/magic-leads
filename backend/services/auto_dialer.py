@@ -6,6 +6,7 @@ vitrine sem clique individual. Sem chaves Telnyx corre em dry-run.
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime, timedelta, timezone
 
 import anyio
@@ -31,6 +32,30 @@ def _campaign_start_hour(campaign: dict) -> int:
         return max(0, min(23, int(campaign.get("start_hour_et") or 9)))
     except (TypeError, ValueError):
         return 9
+
+
+def _campaign_batch_size(campaign: dict) -> int:
+    """Escolhe o lote do dia a partir de `batch_plan` (ramp) ou `batch_size`."""
+    raw = campaign.get("batch_plan")
+    if raw:
+        try:
+            plan = json.loads(raw) if isinstance(raw, str) else raw
+            if isinstance(plan, list) and plan:
+                index = max(0, int(campaign.get("plan_index") or 0))
+                return max(1, int(plan[min(index, len(plan) - 1)]))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+    try:
+        return max(
+            1,
+            int(
+                campaign.get("batch_size")
+                or campaign.get("max_calls")
+                or 25
+            ),
+        )
+    except (TypeError, ValueError):
+        return 25
 
 
 async def _run_sync(fn, *args):
@@ -62,12 +87,18 @@ async def run_campaign(campaign_id: int) -> None:
         return
 
     max_calls = max(1, int(campaign.get("quota_total") or campaign.get("max_calls") or 25))
-    batch_size = max(1, int(campaign.get("batch_size") or max_calls))
+    batch_size = _campaign_batch_size(campaign)
     calls = int(campaign.get("calls_started") or 0)
     initial_calls = calls
     batch_end = min(max_calls, calls + batch_size)
     include_fallback = bool(int(campaign.get("include_fallback", 1)))
-    delay = max(0, int(getattr(settings, "VOICE_AUTOSCHED_DELAY_SECONDS", 30)))
+    delay = max(
+        0,
+        int(
+            campaign.get("call_interval_seconds")
+            or getattr(settings, "VOICE_AUTOSCHED_DELAY_SECONDS", 30)
+        ),
+    )
     guard = 0
     max_guard = max(1, batch_end - calls) * MAX_GUARD_MULTIPLIER + 100
 
@@ -160,6 +191,8 @@ async def run_campaign(campaign_id: int) -> None:
                                 status="paused",
                                 next_batch_at=next_batch,
                                 error=str(result.get("reason"))[:300],
+                                plan_index=int(current.get("plan_index") or 0)
+                                + 1,
                             )
                         )
                         logger.info(
@@ -214,7 +247,7 @@ async def run_campaign(campaign_id: int) -> None:
                 # A vitrine so e enviada depois de o contacto atender e dar
                 # consentimento (tool capture_email), nunca no dial.
 
-                if not result.get("dry_run") and delay:
+                if not result.get("dry_run") and delay and calls < batch_end:
                     await asyncio.sleep(delay)
 
             guard += 1
@@ -242,6 +275,7 @@ async def run_campaign(campaign_id: int) -> None:
                         campaign_id,
                         status="paused",
                         next_batch_at=next_batch,
+                        plan_index=int(final.get("plan_index") or 0) + 1,
                     )
                 )
     except Exception as exc:  # noqa: BLE001

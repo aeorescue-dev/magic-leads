@@ -304,6 +304,8 @@ Cada campanha tem estes parametros:
 | `budget_daily_usd` | ao esgotar, a campanha fica **paused** ate ao dia seguinte |
 | `max_days` | ao passar o numero de dias, a campanha fica **completed** |
 | `start_hour_et` | hora local (ET) em que o lote diario arranca (default 9) |
+| `call_interval_seconds` | intervalo entre chamadas do lote (default 30) |
+| `batch_plan` | lista JSON de lotes por dia (ramp); `plan_index` avanca apos cada lote |
 
 O backend reserva 25c por chamada ativa e substitui pelo custo real no fim.
 `campaign_budget_status` corre antes de cada chamada; o auto-scheduler pausa
@@ -311,11 +313,12 @@ ou completa a campanha automaticamente. Ha ainda uma rede de seguranca global:
 `VOICE_MAX_DAILY_BUDGET_USD=5` e `VOICE_MAX_CALLS_PER_DAY=100`.
 
 **Distribuicao diaria:** o lote nao e espalhado pelo dia. Quando a hora de
-inicio chega, o auto-dialer inicia as chamadas do lote sequencialmente com
-`VOICE_AUTOSCHED_DELAY_SECONDS` (30s) entre cada uma e depois pausa ate ao dia
-seguinte. Um lote de 8 chamadas leva ~4 min. O auto-dialer nao espera que a
-chamada anterior termine: com conversas longas pode haver 2-4 chamadas ativas
-em simultaneo.
+inicio chega, o auto-dialer inicia as chamadas do lote com
+`call_interval_seconds` entre cada uma e depois pausa ate ao dia seguinte.
+Sem `batch_plan`, usa `batch_size`; com `batch_plan` (ex.: `[15,20,25]`), usa
+o lote do dia e avanca o `plan_index` no fim. O auto-dialer nao espera que a
+chamada anterior termine: com conversas longas pode haver chamadas ativas em
+simultaneo.
 
 **Exclusao global:** `campaign_candidates` nao repete um contacto que tenha
 `voice_calls` Telnyx nos ultimos 7 dias, mesmo que seja de outra campanha. Isto

@@ -470,6 +470,60 @@ def test_auto_dialer_usa_hora_de_inicio_da_campanha(monkeypatch):
     assert next_at.astimezone(NY_TZ).hour == 10
 
 
+def test_campaign_guarda_intervalo_e_plano():
+    campaign = voice.create_campaign(
+        "Plan", "PlanCity", "Roofing", 5, 0, 5, 1, True, False,
+        10.0, 2.0, 7, 10, 600, [1, 2, 3],
+    )
+    assert campaign["call_interval_seconds"] == 600
+    assert campaign["batch_plan"] == "[1, 2, 3]"
+    assert campaign["plan_index"] == 0
+
+
+def test_campaign_batch_size_respeita_plano():
+    campaign = {"batch_plan": "[2, 3]", "plan_index": 0, "batch_size": 9}
+    assert auto_dialer._campaign_batch_size(campaign) == 2
+    campaign["plan_index"] = 1
+    assert auto_dialer._campaign_batch_size(campaign) == 3
+    campaign["plan_index"] = 9
+    assert auto_dialer._campaign_batch_size(campaign) == 3
+    assert auto_dialer._campaign_batch_size({"batch_size": 7}) == 7
+
+
+def test_auto_dialer_usa_intervalo_e_avanca_plano(monkeypatch):
+    for idx, phone in enumerate(
+        ("+16175550143", "+16175550144", "+16175550145")
+    ):
+        _import_company(phone, "PlanCity", "MA")
+    campaign = voice.create_campaign(
+        "Ramp", "PlanCity", "Roofing", 3, 0, 3, 1, True, False,
+        10.0, 2.0, 7, 9, 600, [1, 2],
+    )
+    delays = []
+
+    async def fake_sleep(seconds):
+        delays.append(seconds)
+
+    monkeypatch.setattr(auto_dialer.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(
+        auto_dialer.telnyx_voice,
+        "create_call",
+        lambda *a, **k: {"ok": True, "dry_run": False, "voice_call_id": 0},
+    )
+    asyncio.run(auto_dialer.run_campaign(campaign["id"]))
+    first = voice.get_campaign(campaign["id"])
+    assert first["status"] == "paused"
+    assert first["calls_started"] == 1
+    assert first["plan_index"] == 1
+
+    voice.update_campaign(campaign["id"], status="running", next_batch_at=None)
+    asyncio.run(auto_dialer.run_campaign(campaign["id"]))
+    final = voice.get_campaign(campaign["id"])
+    assert final["status"] == "completed"
+    assert final["calls_started"] == 3
+    assert delays == [600]
+
+
 def test_metrics_calcula_funil(monkeypatch):
     _import_company("+16175550114", "Boston", "MA")
     conn = voice.get_conn()

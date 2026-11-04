@@ -1985,6 +1985,20 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Exclusao global**: a #4 nao repete contactos chamados pela #3 nos ultimos
   7 dias; como o nicho e diferente, a sobreposicao e minima.
 
+### Fase 2S - Plano A de ramp controlado (2026-11-04 a 06)
+
+- **Intervalo**: `call_interval_seconds` por campanha (default 30; Plano A
+  **600s = 10 min**). O lote deixa de ser um burst de 30s e espalha-se pelo
+  dia.
+- **Ramp**: `batch_plan` + `plan_index` por campanha. #3 `[15,20,25]` e #4
+  `[10,15,20]`; o plano avanca no fim de cada lote diario.
+- **Cronograma**: Qua **25** (15+10), Qui **35** (20+15), Sex **45** (25+20)
+  = 105 chamadas; custo real estimado ~$4,14; buffer ~$4,88.
+- **Quotas**: #3 passa a 68 (8 ja feitas + 60 do plano); #4 passa a 45.
+- **Risco**: 25-45/dia total no 929, espalhado, dentro da zona
+  baixo-moderada para um numero novo; nao se avanca para 76/dia/228.
+- **Testes**: **1.346 pytest**; cobertura **70,0%**.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
