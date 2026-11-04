@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     # URL base dos tool calls do assistant. Vazio deriva de PUBLIC_API_URL.
     TELNYX_TOOLS_URL: str = ""
     TELNYX_COST_PER_MINUTE_CENTS: int = 2
+    # "assistant" = Callie AI (conversacional, $0.05/min + Krisp).
+    # "static" = gather_using_speak (TTS por caractere), sem AI/Krisp.
+    VOICE_SCRIPT_MODE: str = "assistant"
+    # "premium" ($0.0065/chamada), "standard" ($0.002/chamada) ou "disabled".
+    TELNYX_AMD_MODE: str = "standard"
+    TELNYX_STATIC_GATHER_TIMEOUT_MS: int = 10000
     # Modelo nativo Telnyx. Vazio deixa a Telnyx aplicar o default da conta.
     TELNYX_ASSISTANT_MODEL: str = ""
     # Voz nativa Telnyx (sem ElevenLabs/Deepgram externos).
@@ -55,7 +61,8 @@ class Settings(BaseSettings):
     # Transcricao para dictado de emails: nova-3 e mais robusto que flux para
     # enderecos soletrados; noise suppression ajuda em telemovel.
     TELNYX_ASSISTANT_TRANSCRIPTION_MODEL: str = "deepgram/nova-3"
-    TELNYX_ASSISTANT_NOISE_SUPPRESSION: str = "krisp"
+    # Krisp custa $0.005/leg/min; para outbound B2B nao e necessario.
+    TELNYX_ASSISTANT_NOISE_SUPPRESSION: str = ""
     TELNYX_ASSISTANT_KEYTERMS: str = (
         "gmail.com,outlook.com,yahoo.com,hotmail.com,icloud.com,protonmail.com"
     )

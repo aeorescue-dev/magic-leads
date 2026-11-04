@@ -228,6 +228,75 @@ def test_hangup_sem_duracao_usa_answered_at():
     assert call["cost_cents"] > 0
 
 
+def test_static_mode_usa_gather_using_speak_sem_ai(monkeypatch):
+    company = _seed_company()
+    _seed_showcase()
+    created = telnyx_voice.create_call(company, campaign_id="test_call", dry_run=True)
+    call_id = created["voice_call_id"]
+    voice.update_voice_call(call_id, status="assistant_pending")
+    monkeypatch.setattr(telnyx_voice.settings, "VOICE_SCRIPT_MODE", "static")
+    monkeypatch.setattr(telnyx_voice, "configured", lambda: True)
+    actions: list[tuple[str, dict]] = []
+
+    def fake_action(call_control_id, action, payload):
+        actions.append((action, payload))
+        return {"ok": True}
+
+    monkeypatch.setattr(telnyx_voice, "_call_action", fake_action)
+    result = telnyx_voice._start_static_script_for_call(
+        call_id,
+        "v3:static",
+        {"voice_call_id": call_id, "company_id": company["id"]},
+    )
+    assert result["ok"] is True
+    assert [action for action, _ in actions] == ["gather_using_speak"]
+    payload = actions[0][1]
+    assert "MagicLeads.app" in payload["payload"]
+    assert payload["valid_digits"] == "2"
+    assert payload["maximum_tries"] == 1
+    assert voice.get_voice_call(call_id)["status"] == "in_call"
+
+
+def test_gather_ended_2_faz_opt_out_real(monkeypatch):
+    company = _seed_company()
+    created = telnyx_voice.create_call(company, campaign_id="test_call", dry_run=True)
+    call_id = created["voice_call_id"]
+    state = base64.b64encode(
+        json.dumps({"voice_call_id": call_id, "company_id": company["id"]}).encode()
+    ).decode()
+    actions: list[tuple[str, dict]] = []
+
+    def fake_action(call_control_id, action, payload):
+        actions.append((action, payload))
+        return {"ok": True}
+
+    monkeypatch.setattr(telnyx_voice, "_call_action", fake_action)
+    result = telnyx_voice.handle_webhook(
+        {
+            "data": {
+                "event_type": "call.gather.ended",
+                "payload": {
+                    "client_state": state,
+                    "digits": "2",
+                    "call_control_id": "v3:gather-2",
+                },
+            }
+        }
+    )
+    assert result["action"] == "gather_opt_out"
+    assert actions and actions[0][0] == "speak"
+    assert "removed from our list" in actions[0][1]["payload"]
+    conn = voice.get_conn()
+    try:
+        suppressed = conn.execute(
+            "SELECT COUNT(*) FROM voice_suppressions WHERE value=?",
+            (company["phone"],),
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert suppressed == 1
+
+
 def test_opt_out_de_test_call_usa_phone_do_voice_call():
     phone = "+16175550988"
     voice.check_dnc(phone, listed=False, source="pytest")

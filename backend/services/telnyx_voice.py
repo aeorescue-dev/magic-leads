@@ -39,6 +39,16 @@ def configured() -> bool:
     )
 
 
+def static_script_mode() -> bool:
+    """True = gather_using_speak + DTMF; False = AI Assistant/Callie."""
+    return (
+        str(getattr(settings, "VOICE_SCRIPT_MODE", "assistant") or "")
+        .strip()
+        .lower()
+        == "static"
+    )
+
+
 def _webhook_url() -> str:
     base = (
         getattr(settings, "TELNYX_WEBHOOK_URL", "")
@@ -158,7 +168,7 @@ def create_call(
                 "reason": "script_not_approved",
                 "message": "Roteiro aprovado é obrigatório para chamadas reais.",
             }
-        if not assistant_id:
+        if not assistant_id and not static_script_mode():
             return {
                 "ok": False,
                 "reason": "assistant_missing",
@@ -222,6 +232,13 @@ def create_call(
             "assistant_id": assistant_id,
         }
     )
+    amd_mode = (
+        str(getattr(settings, "TELNYX_AMD_MODE", "standard") or "standard")
+        .strip()
+        .lower()
+    )
+    if amd_mode not in {"premium", "standard", "disabled"}:
+        amd_mode = "standard"
     payload = {
         "connection_id": settings.TELNYX_CONNECTION_ID,
         "to": company["phone"],
@@ -229,11 +246,13 @@ def create_call(
         "webhook_url": _webhook_url(),
         "client_state": state,
         "timeout_secs": 30,
-        "answering_machine_detection": "premium",
-        "answering_machine_detection_config": {
-            "total_analysis_time_millis": 5000
-        },
     }
+    if amd_mode != "disabled":
+        payload["answering_machine_detection"] = amd_mode
+        if amd_mode == "premium":
+            payload["answering_machine_detection_config"] = {
+                "total_analysis_time_millis": 5000
+            }
     try:
         resp = httpx.post(
             f"{API_BASE}/calls",
@@ -510,10 +529,64 @@ def _truthy(value: Any) -> bool:
     return str(value or "").strip().lower() in ("1", "true", "yes", "y")
 
 
+def _start_static_script_for_call(
+    voice_call_id: int, call_control_id: str, client_state: dict
+) -> dict:
+    """V3 low-cost: TTS + gather DTMF 2, sem AI Assistant/Krisp."""
+    if not configured() or not call_control_id:
+        return {"ok": False, "reason": "not_configured"}
+    current = b2b_voice.get_voice_call(voice_call_id) or {}
+    if not b2b_voice.claim_assistant_start(voice_call_id):
+        return {"ok": False, "reason": "already_started"}
+    try:
+        rendered = _render_for_call(current, client_state)
+    except ValueError as exc:
+        b2b_voice.update_voice_call(
+            voice_call_id,
+            status="ended",
+            hangup_cause=f"render_failed:{str(exc)[:80]}",
+        )
+        hangup_call(call_control_id)
+        return {"ok": False, "reason": "render_failed", "detail": str(exc)[:200]}
+    greeting = str(rendered.get("greeting") or "").strip()
+    voice = str(rendered.get("voice_id") or "").strip() or "female"
+    timeout_ms = max(
+        1000,
+        int(getattr(settings, "TELNYX_STATIC_GATHER_TIMEOUT_MS", 10000) or 10000),
+    )
+    result = _call_action(
+        call_control_id,
+        "gather_using_speak",
+        {
+            "payload": greeting[:3000],
+            "voice": voice,
+            "language": "en-US",
+            "minimum_digits": 1,
+            "maximum_digits": 1,
+            "maximum_tries": 1,
+            "timeout_millis": timeout_ms,
+            "valid_digits": "2",
+            "client_state": _encode_state(client_state),
+        },
+    )
+    if result.get("ok"):
+        b2b_voice.update_voice_call(voice_call_id, status="in_call")
+    else:
+        b2b_voice.update_voice_call(
+            voice_call_id, status="ended", hangup_cause="static_tts_failed"
+        )
+        hangup_call(call_control_id)
+    return result
+
+
 def _start_assistant_for_call(
     voice_call_id: int, call_control_id: str, client_state: dict
 ) -> dict:
     """Arranca o assistant apenas depois do AMD confirmar humano."""
+    if static_script_mode():
+        return _start_static_script_for_call(
+            voice_call_id, call_control_id, client_state
+        )
     if not configured() or not call_control_id:
         return {"ok": False, "reason": "not_configured"}
     current = b2b_voice.get_voice_call(voice_call_id) or {}
@@ -629,6 +702,45 @@ def handle_webhook(payload: dict) -> dict:
             "result": result,
             "event_type": event_type,
         }
+    if "gather.ended" in event_type:
+        digits = str(
+            body.get("digits") or body.get("dtmf_digits") or ""
+        ).strip()
+        call_control_id = str(
+            body.get("call_control_id") or data.get("call_control_id") or ""
+        )
+        if not voice_call_id and call_control_id:
+            found = b2b_voice.get_voice_call_by_provider_id(call_control_id)
+            if found:
+                voice_call_id = found["id"]
+        if voice_call_id and digits == "2":
+            opt_out_voice_call(voice_call_id)
+            speak = _call_action(
+                call_control_id,
+                "speak",
+                {
+                    "payload": "You've been removed from our list. Goodbye.",
+                    "voice": "female",
+                    "language": "en-US",
+                },
+            )
+            if not speak.get("ok"):
+                hangup_call(call_control_id)
+            return {
+                "ok": True,
+                "action": "gather_opt_out",
+                "voice_call_id": voice_call_id,
+                "digits": digits,
+            }
+        if call_control_id:
+            hangup_call(call_control_id)
+        return {
+            "ok": True,
+            "action": "gather_ended",
+            "voice_call_id": voice_call_id,
+            "digits": digits,
+        }
+
     if "conversation.ended" in event_type:
         # O assistant parou; se foi a tecla 2, toca o MP3 agora (sem overlap).
         call_control_id = str(

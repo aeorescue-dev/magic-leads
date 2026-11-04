@@ -210,6 +210,20 @@ por trade.
 - Os tool calls chegam com `x-telnyx-call-control-id`, correlacionado com
   `voice_calls.provider_call_id`.
 
+## Modo low-cost (V3 estático)
+
+`VOICE_SCRIPT_MODE=static` remove o AI Assistant/Callie do caminho de voz:
+
+- `gather_using_speak` toca o guião renderizado e recolhe o DTMF 2.
+- Não há AI Assistant ($0,05/min) nem Krisp ($0,005/leg/min).
+- `TELNYX_AMD_MODE=standard` troca o AMD premium ($0,0065) pelo standard ($0,002).
+- Custo por chamada conectada de 1 min: **TTS (~$0,0016) + Call Control
+  ($0,002) + SIP ($0,005) + AMD standard ($0,002) ≈ $0,0106**.
+- Sem AMD: ~$0,0086. Com áudio pré-gerado (sem TTS por chamada): ~$0,009
+  com AMD standard.
+- O piso da Telnyx para PSTN é SIP ($0,005/min) + Call Control ($0,002/min)
+  = **$0,007/min (0,7¢/min)**; não existe um caminho legítimo a $0,00001/min.
+
 ## Email da vitrine (legado / manual)
 
 O email da vitrine e o template `/r/<token>` continuam a existir para fluxos

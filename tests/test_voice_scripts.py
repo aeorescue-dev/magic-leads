@@ -333,7 +333,7 @@ def test_sync_inclui_voz_nativa_tools_e_dtmf(monkeypatch):
     assert body["telephony_settings"]["recording_settings"]["enabled"] is False
     assert body["transcription"]["model"] == "deepgram/nova-3"
     assert "gmail.com" in body["transcription"]["settings"]["keyterm"]
-    assert body["telephony_settings"]["noise_suppression"] == "krisp"
+    assert "noise_suppression" not in body["telephony_settings"]
     assert (
         body["telephony_settings"]["voicemail_detection"][
             "on_voicemail_detected"
