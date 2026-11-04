@@ -2015,6 +2015,28 @@ export function stopVoiceCampaign(
   );
 }
 
+export interface VoiceTestCallResult {
+  ok: boolean;
+  voice_call_id: number;
+  provider_call_id?: string;
+  status?: string;
+  suppression_cleared?: number;
+}
+
+export function startVoiceTestCall(payload: {
+  phone: string;
+  city?: string;
+  state?: string;
+  trade?: string;
+  company_name?: string;
+}): Promise<VoiceTestCallResult> {
+  return adminFetch<VoiceTestCallResult>("/voice/test-call", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ confirm: true, ...payload }),
+  });
+}
+
 export interface VoiceScript {
   trade_code: string;
   version: number;

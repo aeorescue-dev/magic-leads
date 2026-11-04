@@ -928,6 +928,24 @@ def suppress(phone: str, reason: str = "manual") -> dict:
     return {"ok": True, "phone": normalized, "reason": reason}
 
 
+def clear_suppression(value: str, channel: str = "phone") -> int:
+    """Remove uma supressão (usado pelo test-call antes de cada ensaio)."""
+    init()
+    normalized = normalize_phone(value) or str(value or "").strip()
+    if not normalized:
+        return 0
+    conn = get_conn()
+    try:
+        cur = conn.execute(
+            "DELETE FROM voice_suppressions WHERE value=? AND channel=?",
+            (normalized, channel),
+        )
+        conn.commit()
+        return int(cur.rowcount or 0)
+    finally:
+        conn.close()
+
+
 def _company_dict(row: sqlite3.Row) -> dict:
     return dict(row)
 

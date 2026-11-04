@@ -3771,6 +3771,11 @@ async def admin_voice_test_call(
             "status": "ready",
             "email": "",
         }
+    # Um ensaio anterior com Tecla 2 pode ter suprimido este número. O
+    # test-call limpa a supressão antes de cada disparo, para permitir repetir.
+    cleared = await anyio.to_thread.run_sync(
+        b2b_voice.clear_suppression, phone
+    )
     b2b_voice.check_dnc(phone, listed=False, source="test_call")
     result = await anyio.to_thread.run_sync(
         telnyx_voice.create_call,
@@ -3783,7 +3788,7 @@ async def admin_voice_test_call(
     )
     if not result.get("ok"):
         raise HTTPException(status_code=409, detail=result)
-    return result
+    return {**result, "suppression_cleared": cleared}
 
 
 @app.get("/api/admin/analytics")

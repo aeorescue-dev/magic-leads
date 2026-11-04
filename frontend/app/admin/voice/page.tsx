@@ -62,6 +62,7 @@ import {
   scrubDnc,
   sendVoiceShowcase,
   startVoiceCampaign,
+  startVoiceTestCall,
   stagingClearDnc,
   stopVoiceCampaign,
   suppressVoicePhone,
@@ -652,6 +653,11 @@ export default function VoiceB2BPage() {
   const [outcome, setOutcome] = useState("connected");
   const [notes, setNotes] = useState("");
   const [callbackAt, setCallbackAt] = useState("");
+  const [testPhone, setTestPhone] = useState("");
+  const [testCity, setTestCity] = useState("New York");
+  const [testState, setTestState] = useState("NY");
+  const [testTrade, setTestTrade] = useState("remodeling");
+  const [testCompanyName, setTestCompanyName] = useState("");
 
   const queueKey = `voice-queue-${includeBlocked}-${cityFilter}-${tradeFilter}-${page}`;
   const {
@@ -816,6 +822,25 @@ export default function VoiceB2BPage() {
       return `Campanha #${result.campaign.id} iniciada: cota ${result.campaign.quota_total ?? result.campaign.max_calls}, lote ${result.campaign.batch_size ?? result.campaign.max_calls} · ${
         city || "todas as cidades"
       } / ${trade || "todos os nichos"}.`;
+    });
+
+  const fireTestCall = () =>
+    run("test-call", async () => {
+      const phone = testPhone.trim();
+      if (!phone) {
+        throw new Error("Indica o número E.164 que está em VOICE_TEST_NUMBERS.");
+      }
+      if (!window.confirm(`Ligar agora para ${phone}?`)) {
+        throw new Error("Chamada cancelada.");
+      }
+      const result = await startVoiceTestCall({
+        phone,
+        city: testCity.trim() || "New York",
+        state: testState.trim().toUpperCase() || "NY",
+        trade: testTrade,
+        company_name: testCompanyName,
+      });
+      return `Chamada de teste #${result.voice_call_id} (${result.status ?? "dialing"}) — atende e prime 2 para validar o opt-out. Supressão limpa: ${result.suppression_cleared ?? 0}.`;
     });
 
   const stopCampaign = (campaignId: number) =>
@@ -1138,6 +1163,73 @@ export default function VoiceB2BPage() {
           </button>
         ))}
       </nav>
+
+      <Card
+        title="Test Call"
+        icon={<PhoneOutgoing className="h-4 w-4 text-emerald-400" />}
+        hint="Chamada real para um número em VOICE_TEST_NUMBERS. A Tecla 2 suprime o número; o próximo test-call limpa a supressão automaticamente."
+        className={tab === "overview" ? "mb-5" : "hidden"}
+        action={
+          <button
+            type="button"
+            onClick={() => void fireTestCall()}
+            disabled={working === "test-call"}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-1.5 text-[11px] font-bold text-[#052018] hover:bg-emerald-400 disabled:opacity-50"
+          >
+            {working === "test-call" ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <PhoneCall className="h-3.5 w-3.5" />
+            )}
+            Disparar Test Call
+          </button>
+        }
+      >
+        <div className="grid gap-2 md:grid-cols-5">
+          <input
+            value={testPhone}
+            onChange={(event) => setTestPhone(event.target.value)}
+            placeholder="+1XXXXXXXXXX"
+            inputMode="tel"
+            className="rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-[11px] text-slate-200 placeholder:text-slate-600"
+          />
+          <input
+            value={testCity}
+            onChange={(event) => setTestCity(event.target.value)}
+            placeholder="Cidade"
+            className="rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-[11px] text-slate-200 placeholder:text-slate-600"
+          />
+          <input
+            value={testState}
+            onChange={(event) => setTestState(event.target.value)}
+            placeholder="Estado"
+            maxLength={2}
+            className="rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-[11px] uppercase text-slate-200 placeholder:text-slate-600"
+          />
+          <SelectMenu
+            value={testTrade}
+            onChange={setTestTrade}
+            placeholder="Trade"
+            className="min-w-[130px]"
+            options={(scripts.length
+              ? scripts.map((item) => ({
+                  value: item.trade_code,
+                  label: item.trade_code.replace(/_/g, " "),
+                }))
+              : [{ value: "remodeling", label: "remodeling" }])}
+          />
+          <input
+            value={testCompanyName}
+            onChange={(event) => setTestCompanyName(event.target.value)}
+            placeholder="Nome (vazio = Contractor)"
+            className="rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-[11px] text-slate-200 placeholder:text-slate-600"
+          />
+        </div>
+        <p className="mt-2 text-[10px] text-slate-600">
+          O número tem de estar na allowlist `VOICE_TEST_NUMBERS`. Deixa o nome
+          vazio para ouvir o fallback “Hi Contractor”.
+        </p>
+      </Card>
 
       <Card
         title="Command Center"
