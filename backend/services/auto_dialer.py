@@ -147,12 +147,15 @@ async def run_campaign(campaign_id: int) -> None:
             used = int(used_by_trade.get(trade_code, 0))
             if target <= 0 or used >= target:
                 continue
+            # Nunca buscar mais candidatos do que a quota restante deste trade.
+            # Sem este limite, o primeiro trade consumia o lote inteiro.
+            remaining = max(1, target - used)
             rows = await _run_sync(
                 b2b_voice.campaign_candidates,
                 campaign_id,
                 campaign.get("city") or "",
                 trade_code,
-                limit,
+                min(limit, remaining),
                 include_fallback,
             )
             if rows:

@@ -498,7 +498,12 @@ def test_campaign_batch_size_respeita_plano():
 
 
 def test_campaign_trade_plan_distribui_por_trade(monkeypatch):
-    for phone in ("+16175550151", "+16175550152"):
+    for phone in (
+        "+16175550151",
+        "+16175550152",
+        "+16175550155",
+        "+16175550156",
+    ):
         _import_company(phone, "Multi", "MA", trade="Roofing")
     for phone in ("+16175550153", "+16175550154"):
         _import_company(phone, "Multi", "MA", trade="Painting")
