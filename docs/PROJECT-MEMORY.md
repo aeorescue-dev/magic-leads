@@ -2079,6 +2079,19 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
   o motor continua a respeitar interesses e filtro de cidade do utilizador.
 - **Testes**: **1.388 pytest**; cobertura **70,0%**.
 
+### Auditoria NYC — 16 nichos (2026-11-05)
+
+- **Documento completo:** `docs/NYC-MARKET-AUDIT.md`.
+- **Snapshot:** 17:00 UTC. NYC tem **8.534 empresas**, **100% com telefone E.164 válido**, mas só **3.437 (40,3%) elegíveis** sob a guardrail de showcase exato.
+- **Bloqueio estrutural:** **4.850 general contractors + 246 signage** não têm showcase exato e são bloqueados pelo `showcase_guard`; não é falta de telefone.
+- **Oportunidades:** 53.919 no total, **13.774 em 30 d** e **1.721 em 72 h**. A afirmação anterior de “0 leads <72 h” estava errada.
+- **Nichos sem empresas:** Elevators (349 oportunidades/30 d), Rodents (1.109), Debris (1.052) e Construction & Permits (760 leads, 0 mapeados).
+- **Nichos subaproveitados:** Plumbing (3.366 oportunidades para 9 empresas), Unsanitary (1.811/34), Heating (2.867/117), Electrical (392/33).
+- **Excesso sem uso:** Mold/remediation tem 205 empresas para 17 oportunidades; Structure tem 2.630 remodeling elegíveis para 95 oportunidades.
+- **Risco:** `market_inventory` construído em 2026-11-02T21:29Z; expira às 21:29 UTC / 16:29 ET de 05/11. Preflight da #6 tem de confirmar `showcase_guard()` fresco.
+- **Enriquecimento:** fontes públicas identificadas — NYC DOB `t8hj-ruu2` (1.129 master plumbers, 950 electrical firms, 7 elevators, 104 oil burner, 42 sign hangers), DSNY/BIC `867j-5pgi` (89 debris haulers ativos em NYC), NYS DEC `h8u2-6ejg` (442 pest businesses, sem telefone). Esforço 5–7 dias + 2–3 para pest.
+- **Decisão:** não alterar #6–#11; a #6 cabe nos 3.354 elegíveis imediatos. Não importar GC em massa.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
