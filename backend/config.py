@@ -29,6 +29,13 @@ class Settings(BaseSettings):
     # Voice guardrails: nunca prometer contagens fracas nem inventário antigo.
     VOICE_MIN_SHOWCASE_ITEMS: int = 5
     VOICE_SHOWCASE_MAX_AGE_HOURS: int = 72
+    # Âmbitos do guard: "exact" (default), "exact,bundle", "exact,bundle,city".
+    # `city` só é aceite para general_contractor e nunca acima de
+    # VOICE_CITY_SCOPE_MAX_PCT do lote (o limite é validado em create_campaign).
+    VOICE_GUARD_SCOPES: str = "exact"
+    VOICE_BUNDLE_MIN_TOTAL: int = 25
+    VOICE_CITY_MIN_TOTAL: int = 5000
+    VOICE_CITY_SCOPE_MAX_PCT: int = 10
     SHOWCASE_SIGNAL_TYPES: str = "open_request,authorized_work"
     PUBLIC_API_URL: str = "https://magic-leads-production.up.railway.app"
 

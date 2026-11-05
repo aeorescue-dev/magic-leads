@@ -134,6 +134,21 @@ CREATE INDEX IF NOT EXISTS idx_prospect_status ON prospect_companies (status, st
 CREATE INDEX IF NOT EXISTS idx_prospect_city ON prospect_companies (city);
 CREATE INDEX IF NOT EXISTS idx_prospect_license ON prospect_companies (license_number);
 
+-- Classificação multi-label: a mesma empresa pode servir vários trades sem
+-- duplicar o contacto (o telefone continua único em prospect_companies).
+CREATE TABLE IF NOT EXISTS company_trades (
+  company_id INTEGER NOT NULL REFERENCES prospect_companies(id) ON DELETE CASCADE,
+  trade_code TEXT NOT NULL,
+  confidence REAL NOT NULL DEFAULT 0,
+  source TEXT NOT NULL DEFAULT '',
+  is_primary INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (company_id, trade_code)
+);
+
+CREATE INDEX IF NOT EXISTS idx_company_trades_trade
+  ON company_trades (trade_code, confidence DESC);
+
 CREATE TABLE IF NOT EXISTS dnc_checks (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   phone TEXT NOT NULL UNIQUE,
@@ -181,6 +196,8 @@ CREATE TABLE IF NOT EXISTS voice_calls (
   phone TEXT,
   city TEXT,
   trade_code TEXT,
+  category_code TEXT,
+  script_scope TEXT,
   status TEXT NOT NULL DEFAULT 'queued',
   intent TEXT,
   showcase_link_id INTEGER,
@@ -359,6 +376,8 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         ("phone", "TEXT"),
         ("fallback_audio_started_at", "TEXT"),
         ("amd_result", "TEXT"),
+        ("category_code", "TEXT"),
+        ("script_scope", "TEXT"),
     ):
         if name not in call_cols:
             conn.execute(f"ALTER TABLE voice_calls ADD COLUMN {name} {ddl}")
@@ -1386,24 +1405,74 @@ def create_campaign(
         except (TypeError, ValueError):
             plan_json = ""
     trade_plan_json = ""
+    if isinstance(trade_plan, dict):
+        trade_plan = [trade_plan]
     if trade_plan:
-        from . import showcase
+        from . import showcase, voice_taxonomy
 
         rows: list[dict] = []
         for item in trade_plan:
-            code = showcase.normalize_trade((item or {}).get("trade"))
+            item = item or {}
+            category = str(item.get("category") or "").strip()
+            code = showcase.normalize_trade(item.get("trade"))
+            if not code and category:
+                code = voice_taxonomy.category_trade(category)
             try:
-                amount = int((item or {}).get("quota") or 0)
+                amount = int(item.get("quota") or 0)
             except (TypeError, ValueError):
                 amount = 0
             if code and amount > 0:
-                rows.append({"trade": code, "quota": amount})
+                row = {"trade": code, "quota": amount}
+                if category:
+                    row["category"] = category
+                rows.append(row)
         if rows:
             total_plan = sum(row["quota"] for row in rows)
             if total_plan != quota:
                 raise ValueError(
                     f"trade_plan soma {total_plan}, quota_total é {quota}"
                 )
+            # Limite duro do GC quando os scopes não-exact estão ligados. O
+            # bundle/city só existem para o GC; nunca podem ser a maioria da
+            # campanha. 10% por defeito.
+            scopes = {
+                part.strip().lower()
+                for part in str(
+                    getattr(settings, "VOICE_GUARD_SCOPES", "exact") or "exact"
+                ).split(",")
+                if part.strip()
+            }
+            if scopes - {"exact"}:
+                gc_quota = sum(
+                    row["quota"]
+                    for row in rows
+                    if row["trade"] == "general_contractor"
+                )
+                if gc_quota:
+                    try:
+                        pct = max(
+                            1,
+                            min(
+                                100,
+                                int(
+                                    getattr(
+                                        settings,
+                                        "VOICE_CITY_SCOPE_MAX_PCT",
+                                        10,
+                                    )
+                                    or 10
+                                ),
+                            ),
+                        )
+                    except (TypeError, ValueError):
+                        pct = 10
+                    cap = max(1, (quota * pct + 99) // 100)
+                    if gc_quota > cap:
+                        raise ValueError(
+                            "trade_plan: general_contractor "
+                            f"{gc_quota} excede o limite de {pct}% "
+                            f"({cap} de {quota})"
+                        )
             trade_plan_json = json.dumps(rows)
     conn = get_conn()
     try:
@@ -1603,8 +1672,16 @@ def campaign_candidates(
         where.append("UPPER(TRIM(city))=UPPER(?)")
         params.append(city.strip())
     if trade.strip():
-        where.append("LOWER(TRIM(COALESCE(trade,'')))=LOWER(?)")
-        params.append(trade.strip())
+        # Multi-label: o campo primário continua a valer, mas uma empresa
+        # reclassificada (ex.: GC que também é plumbing) entra pelo sinal com
+        # confiança >=0.80. O EXISTS evita duplicar a empresa no lote.
+        where.append(
+            "(LOWER(TRIM(COALESCE(trade,'')))=LOWER(?) OR EXISTS ("
+            "SELECT 1 FROM company_trades ct WHERE ct.company_id="
+            "prospect_companies.id AND LOWER(ct.trade_code)=LOWER(?) "
+            "AND ct.confidence>=0.80))"
+        )
+        params.extend([trade.strip(), trade.strip()])
     where.append(
         "id NOT IN (SELECT company_id FROM voice_calls WHERE campaign_id=?)"
     )
@@ -1648,8 +1725,13 @@ def campaign_candidates(
             filtered = []
             for row in rows:
                 city_slug = showcase.normalize_city_slug(row.get("city"))
-                trade_code = showcase.normalize_trade(row.get("trade")) or row.get(
-                    "trade"
+                # A empresa pode ter sido chamada por um trade secundário
+                # (multi-label). O segmento tem de ser o trade da campanha,
+                # não o campo primário antigo.
+                trade_code = (
+                    showcase.normalize_trade(trade)
+                    or showcase.normalize_trade(row.get("trade"))
+                    or row.get("trade")
                 )
                 trade_slug = showcase.slugify(trade_code)
                 if (city_slug, trade_slug) in dedicated:
@@ -1876,6 +1958,7 @@ def sync_source(source_id: int) -> dict:
             raise ValueError(f"kind não suportado: {kind}")
         built = showcase.build_pages()
         rebuilt = rebuild_segments()
+        classified = sync_company_trades()
         finished = _iso()
         conn = get_conn()
         try:
@@ -1907,6 +1990,7 @@ def sync_source(source_id: int) -> dict:
             "import": imported,
             "showcase": built,
             "segments": rebuilt,
+            "company_trades": classified,
         }
     except Exception as exc:  # noqa: BLE001
         message = str(exc)[:300]
@@ -2268,6 +2352,152 @@ def _infer_trade(name: str, niche_key: str = "") -> str:
     return "general_contractor"
 
 
+def sync_company_trades(limit: int = 0, min_confidence: float = 0.0) -> dict:
+    """Materializa a classificação multi-label em `company_trades`.
+
+    Idempotente: substitui apenas as linhas da empresa. Nunca apaga a empresa
+    nem o telefone. Empresas `general_contractor` sem sinal forte ficam com
+    confiança baixa (0.40) e não entram em campanha; é o report honesto do
+    que ainda não sabemos classificar.
+    """
+    from . import showcase, voice_taxonomy
+
+    init()
+    capped = max(0, int(limit or 0))
+    sql = (
+        "SELECT id, company_name, trade FROM prospect_companies "
+        "ORDER BY id ASC"
+    )
+    params: tuple = ()
+    if capped:
+        sql += " LIMIT ?"
+        params = (capped,)
+    conn = get_conn()
+    try:
+        rows = conn.execute(sql, params).fetchall()
+        inserted = 0
+        multi = 0
+        unclassified = 0
+        for row in rows:
+            company_id = int(row["id"])
+            primary_raw = str(row["trade"] or "").strip()
+            primary = showcase.normalize_trade(primary_raw) or primary_raw
+            signals = voice_taxonomy.classify_company(
+                row["company_name"],
+                primary_trade=primary,
+            )
+            by_trade = voice_taxonomy.merge_signals(signals)
+
+            if primary and primary in voice_taxonomy.TRADE_TO_CATEGORIES:
+                if primary in ("general_contractor", "remodeling"):
+                    if primary == "remodeling":
+                        by_trade.setdefault(
+                            primary,
+                            voice_taxonomy.TradeSignal(
+                                primary, 0.85, "primary_trade", primary
+                            ),
+                        )
+                    elif primary not in by_trade:
+                        by_trade[primary] = voice_taxonomy.TradeSignal(
+                            primary, 0.40, "primary_unconfirmed", primary
+                        )
+                else:
+                    current = by_trade.get(primary)
+                    if current is None or current.confidence < 0.90:
+                        by_trade[primary] = voice_taxonomy.TradeSignal(
+                            primary, 0.90, "primary_trade", primary
+                        )
+            elif primary:
+                by_trade.setdefault(
+                    primary,
+                    voice_taxonomy.TradeSignal(
+                        primary, 0.90, "primary_trade", primary
+                    ),
+                )
+
+            if not by_trade:
+                unclassified += 1
+                continue
+            if len([s for s in by_trade.values() if s.confidence >= 0.80]) > 1:
+                multi += 1
+
+            conn.execute(
+                "DELETE FROM company_trades WHERE company_id=?",
+                (company_id,),
+            )
+            for trade, signal in by_trade.items():
+                if signal.confidence < float(min_confidence or 0):
+                    continue
+                conn.execute(
+                    "INSERT OR REPLACE INTO company_trades "
+                    "(company_id, trade_code, confidence, source, is_primary, "
+                    "updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        company_id,
+                        trade,
+                        round(float(signal.confidence), 3),
+                        signal.source,
+                        1 if trade == primary else 0,
+                        _iso(),
+                    ),
+                )
+                inserted += 1
+        conn.commit()
+        return {
+            "companies": len(rows),
+            "signals": inserted,
+            "multi_trade": multi,
+            "unclassified": unclassified,
+        }
+    finally:
+        conn.close()
+
+
+def company_trades_for(company_id: int, min_confidence: float = 0.0) -> list[dict]:
+    init()
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT trade_code, confidence, source, is_primary, updated_at "
+            "FROM company_trades WHERE company_id=? AND confidence>=? "
+            "ORDER BY confidence DESC, trade_code ASC",
+            (int(company_id), float(min_confidence or 0)),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def company_trade_stats(
+    city: str = "",
+    state: str = "",
+    min_confidence: float = 0.80,
+) -> list[dict]:
+    """Contagem distinta de empresas por trade classificada (para o planeador)."""
+    init()
+    where = ["ct.confidence>=?"]
+    params: list[Any] = [float(min_confidence or 0)]
+    if city.strip():
+        where.append("UPPER(TRIM(c.city))=UPPER(?)")
+        params.append(city.strip())
+    if state.strip():
+        where.append("UPPER(TRIM(c.state))=UPPER(?)")
+        params.append(state.strip())
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT ct.trade_code AS trade, COUNT(DISTINCT ct.company_id) AS n "
+            "FROM company_trades ct "
+            "JOIN prospect_companies c ON c.id=ct.company_id "
+            f"WHERE {' AND '.join(where)} "
+            "GROUP BY ct.trade_code ORDER BY n DESC",
+            tuple(params),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
 def bridge_contractor_entities(limit: int = 20000) -> dict:
     """Converte contractor_entities (licenças já ingeridas) em prospect_companies."""
     import csv as _csv
@@ -2365,6 +2595,8 @@ def create_voice_call(
     city: Optional[str] = None,
     trade_code: Optional[str] = None,
     assistant_id: Optional[str] = None,
+    category_code: Optional[str] = None,
+    script_scope: Optional[str] = None,
 ) -> dict:
     init()
     now = _iso()
@@ -2374,8 +2606,9 @@ def create_voice_call(
             """
             INSERT INTO voice_calls
               (provider, company_id, campaign_id, script_id, phone, city,
-               trade_code, assistant_id, status, started_at, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
+               trade_code, category_code, script_scope, assistant_id, status,
+               started_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
             """,
             (
                 provider,
@@ -2385,6 +2618,8 @@ def create_voice_call(
                 normalize_phone(company.get("phone")),
                 city or company.get("city"),
                 trade_code or company.get("trade"),
+                category_code or "",
+                script_scope or "",
                 assistant_id or "",
                 now,
                 now,

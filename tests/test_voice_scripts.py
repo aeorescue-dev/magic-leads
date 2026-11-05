@@ -353,3 +353,79 @@ def test_sync_inclui_voz_nativa_tools_e_dtmf(monkeypatch):
             + "?secret=tool-secret"
         )
 
+
+
+def _guard_info(exact=0, city_total=12806, fresh=True):
+    return {
+        "available": exact > 0,
+        "exact_count": exact,
+        "city_total": city_total,
+        "min_items": 5,
+        "page_path": "/en/new-york",
+        "fresh": fresh,
+        "ready": exact > 0,
+        "built_at": "2026-11-05T12:00:00+00:00",
+        "age_hours": 1.0,
+    }
+
+
+def test_guard_default_exact_blocks_gc_even_with_city_total(monkeypatch):
+    monkeypatch.setattr(voice_scripts.settings, "VOICE_GUARD_SCOPES", "exact")
+    monkeypatch.setattr(
+        showcase,
+        "available",
+        lambda city, trade, **kwargs: _guard_info(0, 12806),
+    )
+    guard = voice_scripts.showcase_guard("general_contractor", "New York")
+    assert guard["ready"] is False
+    assert guard["scope"] == "none"
+
+
+def test_guard_bundle_allows_gc_when_two_trades_have_inventory(monkeypatch):
+    monkeypatch.setattr(
+        voice_scripts.settings, "VOICE_GUARD_SCOPES", "exact,bundle"
+    )
+    counts = {"plumbing": 10, "hvac": 20}
+
+    def fake_available(city, trade, **kwargs):
+        return _guard_info(counts.get(trade, 0), 12806)
+
+    monkeypatch.setattr(showcase, "available", fake_available)
+    guard = voice_scripts.showcase_guard("general_contractor", "New York")
+    assert guard["ready"] is True
+    assert guard["scope"] == "bundle"
+    assert guard["bundle_code"] == "home_services"
+    assert guard["count"] == 30
+    assert "home-service opportunities" in guard["line"]
+
+
+def test_guard_bundle_requires_two_trades(monkeypatch):
+    monkeypatch.setattr(
+        voice_scripts.settings, "VOICE_GUARD_SCOPES", "exact,bundle"
+    )
+    counts = {"plumbing": 30}
+
+    def fake_available(city, trade, **kwargs):
+        return _guard_info(counts.get(trade, 0), 12806)
+
+    monkeypatch.setattr(showcase, "available", fake_available)
+    guard = voice_scripts.showcase_guard("general_contractor", "New York")
+    assert guard["ready"] is False
+
+
+def test_guard_city_allows_gc_only(monkeypatch):
+    monkeypatch.setattr(
+        voice_scripts.settings, "VOICE_GUARD_SCOPES", "exact,bundle,city"
+    )
+    monkeypatch.setattr(
+        showcase,
+        "available",
+        lambda city, trade, **kwargs: _guard_info(0, 12806),
+    )
+    gc = voice_scripts.showcase_guard("general_contractor", "New York")
+    assert gc["ready"] is True
+    assert gc["scope"] == "city"
+    assert "property opportunities" in gc["line"]
+
+    roofing = voice_scripts.showcase_guard("roofing", "New York")
+    assert roofing["ready"] is False

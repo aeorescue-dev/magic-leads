@@ -4143,6 +4143,7 @@ class DatabaseService:
         external_id: Optional[str] = None,
         domain: Optional[str] = None,
         phone: Optional[str] = None,
+        niche_key: Optional[str] = None,
     ) -> Optional[dict]:
         """Deduplica por licença (quando existe) ou nome normalizado+estado."""
         from .contractor_entities import (
@@ -4185,16 +4186,18 @@ class DatabaseService:
                     "license=COALESCE(license, ?), role=COALESCE(role, ?), "
                     "phone=COALESCE(phone, ?), "
                     "domain=COALESCE(domain, ?), "
+                    "niche_key=COALESCE(niche_key, ?), "
                     "status=CASE WHEN COALESCE(domain,'')<>'' AND status='new' "
                     "            THEN 'domain' ELSE status END, "
                     "updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                    (legal_name, city, lic, role, tel, domain, eid),
+                    (legal_name, city, lic, role, tel, domain, niche_key, eid),
                 )
             else:
                 cur = conn.execute(
                     "INSERT INTO contractor_entities "
                     "(entity_key, legal_name, normalized_name, license, city, state, "
-                    " role, phone, domain, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " role, phone, domain, niche_key, status) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         key,
                         legal_name,
@@ -4205,6 +4208,7 @@ class DatabaseService:
                         role,
                         tel,
                         domain,
+                        niche_key,
                         "domain" if domain else "new",
                     ),
                 )
