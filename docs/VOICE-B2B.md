@@ -225,6 +225,24 @@ por trade.
 - O piso da Telnyx para PSTN é SIP ($0,005/min) + Call Control ($0,002/min)
   = **$0,007/min (0,7¢/min)**; não existe um caminho legítimo a $0,00001/min.
 
+## Medição de menções no áudio (obrigatório)
+
+O guião V3 menciona `MagicLeads.app` **duas vezes**:
+
+1. no início, na frase de contexto (“… on MagicLeads.app right now”);
+2. no fim, na CTA imperativa (“Go to MagicLeads.app …”).
+
+Antes de qualquer relatório de retenção/CTA:
+
+- extrair o áudio efetivamente reproduzido (TTS ou gravação);
+- transcrever com timestamps por palavra;
+- confirmar as duas menções e as respetivas posições;
+- comparar com os percentis de `listen_seconds` reais;
+- nunca inferir posições a partir da contagem de palavras ou de estimativas.
+
+Os valores absolutos variam com a renderização/voz; o que não pode variar é a
+validação ponta a ponta do áudio antes da conclusão.
+
 ## Email da vitrine (legado / manual)
 
 O email da vitrine e o template `/r/<token>` continuam a existir para fluxos
