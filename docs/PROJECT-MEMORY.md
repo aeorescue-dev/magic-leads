@@ -2132,6 +2132,18 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Liquidez:** PI lawyers ($100–$1.000/lead) > body shops ($20–$75) > towing ($13–$40); PI é o mais regulado.
 - **Próximo gate:** parecer jurídico US ($5k–$15k) antes de código; MVP agregado 3–4 semanas.
 
+### Estudo v2 — Collision Innovation (2026-11-06)
+
+- **Documento completo:** `docs/PREDICTIVE-COLLISION-INNOVATION.md`.
+- **Tese:** o espaço é **infraestrutura do momento zero** + **demanda out-of-pocket**, não mais um marketplace de leads.
+- **Correções técnicas:** Waze for Cities é governo-only; Google não expõe feed de colisões; Web Push/geofence não acorda em iOS; Apple SafetyKit exige autorização e só crashes severos; Android não tem API pública equivalente.
+- **Aposta A (0–6 m):** Provider Demand Intelligence — SaaS H3/hora para body shops/reboques, open data, sem PII; lift-alvo 1,8–2,5× no top decil.
+- **Aposta B (6–18 m):** Moment-Zero SDK embebido em frotas/dashcams/estacionamento; ajuda pré-aprovada + matchmaking zero-PII.
+- **Aposta C (12–24 m):** Driver-Owned Crash Record + Near-Miss Network; dossiê assinado e dados agregados.
+- **Vectores adicionais:** damage triage API, fleet FNOL, towing orchestration, municipal twin, parametric micro-cover (depois), V2X (não agora).
+- **Prior art:** CMT/Sfara, Samsara/Geotab/Motive, Nexar, Waze/Google, CCC/Mitchell/Solera, RepairPal; a combinação é nova, os componentes não.
+- **Gate 90 dias:** lift ≥1,5×; 3 LOIs; bid coverage ≥30%; 1 parceiro com LOI. Sem código antes do parecer jurídico e LOIs.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
