@@ -684,9 +684,14 @@ def _bundle_min_total() -> int:
 
 def _city_min_total() -> int:
     try:
-        return max(1, int(getattr(settings, "VOICE_CITY_MIN_TOTAL", 5000) or 5000))
+        return max(1, int(getattr(settings, "VOICE_CITY_MIN_TOTAL", 3000) or 3000))
     except (TypeError, ValueError):
-        return 5000
+        return 3000
+
+
+def _city_scope_cities() -> set[str]:
+    raw = str(getattr(settings, "VOICE_CITY_SCOPE_CITIES", "Dallas") or "")
+    return {part.strip().lower() for part in raw.split(",") if part.strip()}
 
 
 def _bundle_guard(city_label: str, threshold: int) -> dict:
@@ -820,7 +825,11 @@ def showcase_guard(trade_code: str, city: str = "") -> dict:
 
     # City: apenas general_contractor, porque é o único trade sem página
     # exata. Nunca para roofing/hvac/etc. — esses teriam de ter exact.
-    if "city" in scopes and code == "general_contractor" and fresh:
+    city_scope_allowed = (
+        code == "general_contractor"
+        or city_label.strip().lower() in _city_scope_cities()
+    )
+    if "city" in scopes and city_scope_allowed and fresh:
         minimum = _city_min_total()
         if city_total >= minimum:
             line = (

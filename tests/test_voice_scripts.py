@@ -469,3 +469,25 @@ def test_render_bloqueia_count_fora_do_scope_exact(monkeypatch):
     )
     with pytest.raises(ValueError, match="count_requires_exact_scope"):
         voice_scripts.render("plumbing", company="Acme", city="New York")
+
+
+def test_guard_city_dallas_permite_trades_sem_exact(monkeypatch):
+    monkeypatch.setattr(
+        voice_scripts.settings, "VOICE_GUARD_SCOPES", "exact,bundle,city"
+    )
+    monkeypatch.setattr(
+        voice_scripts.settings, "VOICE_CITY_SCOPE_CITIES", "Dallas"
+    )
+    monkeypatch.setattr(voice_scripts.settings, "VOICE_CITY_MIN_TOTAL", 3000)
+    monkeypatch.setattr(
+        showcase,
+        "available",
+        lambda city, trade, **kwargs: _guard_info(0, 3857),
+    )
+    dallas = voice_scripts.showcase_guard("electrical", "Dallas")
+    assert dallas["ready"] is True
+    assert dallas["scope"] == "city"
+    assert "property opportunities" in dallas["line"]
+
+    new_york = voice_scripts.showcase_guard("electrical", "New York")
+    assert new_york["ready"] is False
