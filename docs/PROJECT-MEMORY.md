@@ -2092,6 +2092,16 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Enriquecimento:** fontes públicas identificadas — NYC DOB `t8hj-ruu2` (1.129 master plumbers, 950 electrical firms, 7 elevators, 104 oil burner, 42 sign hangers), DSNY/BIC `867j-5pgi` (89 debris haulers ativos em NYC), NYS DEC `h8u2-6ejg` (442 pest businesses, sem telefone). Esforço 5–7 dias + 2–3 para pest.
 - **Decisão:** não alterar #6–#11; a #6 cabe nos 3.354 elegíveis imediatos. Não importar GC em massa.
 
+### Roadmap — Chat multilíngue da landing + Inbox Admin (2026-11-06)
+
+- **Documento completo:** `docs/CHAT-INBOX-ROADMAP.md`.
+- **Objetivo:** chat público com captura única de telefone, texto/áudio, tradução bidirecional e inbox admin em PT-BR com rascunho IA.
+- **Custo:** sem SaaS novo; transcrição local (`faster-whisper`) e LLM low-cost com cache/orçamento.
+- **Arquitetura:** `landing_contacts`, `chat_conversations`, `chat_messages`, `chat_ai_drafts`, `chat_events`; SSE + polling; áudio em `/data/chat_audio` com retenção.
+- **Segurança:** admin-only no piloto, `CHAT_INBOX_ENABLED=0`, validação E.164, consentimento, rate limit, XSS e limites de áudio.
+- **Roadmap:** seg spec/schema; ter APIs/telefone; qua widget/áudio; qui inbox/tradução/rascunho; sex testes/piloto/deploy após 20:00.
+- **Gate:** público só após 48 h de piloto admin limpo.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
