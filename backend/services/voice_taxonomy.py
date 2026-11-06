@@ -373,12 +373,42 @@ def name_signals(company_name: object) -> list[TradeSignal]:
     return out
 
 
+def site_signals(site_text: object) -> list[TradeSignal]:
+    """Sinais de ofício a partir do texto público do site da empresa.
+
+    É um sinal mais fraco do que o nome/licença: o site pode falar de vários
+    serviços. Só entra com confiança suficiente para desempatar, nunca para
+    substituir um `license_type` forte.
+    """
+    raw = normalize_text(site_text)
+    if not raw or _has_negative(raw):
+        return []
+    out: list[TradeSignal] = []
+    for trade, rules in NAME_RULES.items():
+        matches = [(token, weight) for token, weight in rules if token in raw]
+        if not matches:
+            continue
+        best = min(0.84, max(weight for _, weight in matches) - 0.06)
+        if len(matches) > 1:
+            best = min(0.86, best + 0.02)
+        out.append(
+            TradeSignal(
+                trade,
+                round(best, 3),
+                "site_text",
+                ",".join(token for token, _ in matches),
+            )
+        )
+    return out
+
+
 def classify_company(
     company_name: object = "",
     *,
     license_type: object = "",
     niche_key: object = "",
     primary_trade: object = "",
+    site_text: object = "",
 ) -> list[TradeSignal]:
     """Devolve sinais de trade ordenados por confiança (maior primeiro).
 
@@ -401,6 +431,9 @@ def classify_company(
             add(TradeSignal(code, 0.92, "niche_key", niche))
 
     for signal in name_signals(company_name):
+        add(signal)
+
+    for signal in site_signals(site_text):
         add(signal)
 
     primary = normalize_text(primary_trade)
@@ -479,6 +512,7 @@ def signals_for_company(
     license_type: object = "",
     niche_key: object = "",
     primary_trade: object = "",
+    site_text: object = "",
     min_confidence: float = 0.0,
 ) -> list[TradeSignal]:
     signals = classify_company(
@@ -486,6 +520,7 @@ def signals_for_company(
         license_type=license_type,
         niche_key=niche_key,
         primary_trade=primary_trade,
+        site_text=site_text,
     )
     return [s for s in signals if s.confidence >= min_confidence]
 

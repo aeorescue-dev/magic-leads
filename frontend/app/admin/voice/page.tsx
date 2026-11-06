@@ -47,6 +47,8 @@ import {
   downloadVoiceTemplate,
   fetchShowcaseStats,
   fetchVoiceCampaigns,
+  fetchVoiceLiquidity,
+  fetchVoiceLive,
   fetchVoiceMetrics,
   fetchVoiceQueue,
   fetchVoiceScripts,
@@ -71,6 +73,8 @@ import {
   syncVoiceSource,
   type VoiceCampaign,
   type VoiceCompany,
+  type VoiceLiquidity,
+  type VoiceLive,
   type VoiceMetrics,
   type VoiceMetricsGroup,
   type VoiceRetentionBucket,
@@ -703,7 +707,17 @@ export default function VoiceB2BPage() {
   const { data: metrics, mutate: mutateMetrics } = useSWR(
     `voice-metrics-${metricsDays}`,
     () => fetchVoiceMetrics(metricsDays),
-    { refreshInterval: 60_000 }
+    { refreshInterval: 30_000, revalidateOnFocus: true }
+  );
+  const { data: liveData } = useSWR<VoiceLive>(
+    "voice-live",
+    () => fetchVoiceLive(),
+    { refreshInterval: 30_000, revalidateOnFocus: true }
+  );
+  const { data: liquidityData } = useSWR<VoiceLiquidity>(
+    "voice-liquidity",
+    () => fetchVoiceLiquidity(),
+    { refreshInterval: 30_000, revalidateOnFocus: true }
   );
   const { data: sourcesData, mutate: mutateSources } = useSWR(
     "voice-sources",
@@ -1229,6 +1243,116 @@ export default function VoiceB2BPage() {
           O número tem de estar na allowlist `VOICE_TEST_NUMBERS`. Deixa o nome
           vazio para ouvir o fallback “Hi Contractor”.
         </p>
+      </Card>
+
+      <Card
+        title="Live calls — atualiza a cada 30 s"
+        icon={<PhoneCall className="h-4 w-4 text-emerald-400" />}
+        hint="Campanha ativa, chamadas em curso, resposta e stock por cidade/nicho"
+        className={tab === "overview" ? "" : "hidden"}
+      >
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-7">
+          <Stat
+            label="Campanha"
+            value={liveData?.campaign?.status ?? "—"}
+            sub={`#${liveData?.campaign?.id ?? "—"} · ${liveData?.campaign?.calls_started ?? 0}/${liveData?.campaign?.quota_total ?? 0}`}
+          />
+          <Stat
+            label="Em curso"
+            value={String(liveData?.active_calls.length ?? 0)}
+            sub="chamadas ativas"
+          />
+          <Stat
+            label="Atendidas"
+            value={String(liveData?.summary.answered ?? 0)}
+            sub={`${liveData?.summary.answer_rate ?? 0}% de ${liveData?.summary.dialed ?? 0}`}
+          />
+          <Stat
+            label="Humanos"
+            value={String(liveData?.summary.human ?? 0)}
+            sub={`${liveData?.summary.human_rate ?? 0}%`}
+          />
+          <Stat
+            label="Voicemail"
+            value={String(liveData?.summary.voicemail ?? 0)}
+            sub={`${liveData?.summary.voicemail_rate ?? 0}%`}
+          />
+          <Stat
+            label="Opt-outs"
+            value={String(liveData?.summary.optouts ?? 0)}
+            sub={`${liveData?.summary.optout_rate ?? 0}%`}
+          />
+          <Stat
+            label="Listen médio"
+            value={`${liveData?.summary.avg_listen_seconds ?? 0}s`}
+            sub="atendidas"
+          />
+        </div>
+
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full min-w-[680px] text-left text-[10px]">
+            <thead className="text-slate-500">
+              <tr>
+                <th className="pb-1">Empresa</th>
+                <th className="pb-1">Nicho</th>
+                <th className="pb-1">Estado</th>
+                <th className="pb-1 text-right">Em curso</th>
+                <th className="pb-1 text-right">Escuta</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(liveData?.active_calls ?? []).map((call) => (
+                <tr key={call.id} className="border-t border-white/5">
+                  <td className="py-1.5 text-slate-200">{call.company || "—"}</td>
+                  <td className="py-1.5 text-slate-400">{call.trade || "—"}</td>
+                  <td className="py-1.5 text-slate-400">{call.status}</td>
+                  <td className="py-1.5 text-right tabular-nums text-cyan-300">
+                    {call.elapsed_seconds}s
+                  </td>
+                  <td className="py-1.5 text-right tabular-nums text-emerald-300">
+                    {call.listen_seconds}s
+                  </td>
+                </tr>
+              ))}
+              {!liveData?.active_calls?.length ? (
+                <tr>
+                  <td colSpan={5} className="py-2 text-slate-600">
+                    Sem chamadas ativas neste instante.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="mt-4 border-t border-white/5 pt-3">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+            Liquidez por cidade e nicho
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {(liquidityData?.rows ?? [])
+              .filter((row) => row.exact)
+              .slice(0, 12)
+              .map((row) => (
+                <div
+                  key={`${row.city}-${row.trade}`}
+                  className="rounded-lg border border-white/5 bg-white/[0.02] px-2.5 py-1.5 text-[10px]"
+                >
+                  <span className="font-semibold text-slate-200">{row.city}</span>
+                  <span className="ml-1 text-slate-500">{row.trade}</span>
+                  <div className="mt-0.5 flex justify-between text-slate-400">
+                    <span>{row.available} disponíveis</span>
+                    <span>{row.used_7d} usados/7d</span>
+                  </div>
+                </div>
+              ))}
+            {!liquidityData?.rows?.some((row) => row.exact) ? (
+              <p className="text-[10px] text-slate-600">
+                Sem stock exacto materializado. Reconstrói os segmentos.
+              </p>
+            ) : null}
+          </div>
+        </div>
       </Card>
 
       <Card

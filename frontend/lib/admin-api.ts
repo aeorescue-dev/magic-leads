@@ -1870,6 +1870,74 @@ export interface VoiceMetrics {
   by_city_trade: VoiceMetricsGroup[];
 }
 
+export interface VoiceLiveCall {
+  id: number;
+  company_id: number | null;
+  company: string;
+  phone: string;
+  city: string;
+  trade: string;
+  status: string;
+  amd_result: string;
+  elapsed_seconds: number;
+  listen_seconds: number;
+  started_at?: string | null;
+  answered_at?: string | null;
+}
+
+export interface VoiceLive {
+  generated_at: string;
+  campaign: {
+    id: number;
+    name: string;
+    status: string;
+    quota_total: number;
+    calls_started: number;
+    next_batch_at: string | null;
+    error: string | null;
+    include_fallback: number;
+  } | null;
+  summary: {
+    dialed: number;
+    answered: number;
+    unanswered: number;
+    human: number;
+    voicemail: number;
+    not_sure: number;
+    optouts: number;
+    avg_listen_seconds: number;
+    answer_rate: number;
+    human_rate: number;
+    voicemail_rate: number;
+    optout_rate: number;
+    cost_usd: number;
+  };
+  active_calls: VoiceLiveCall[];
+  recent_calls: Array<Record<string, any>>;
+}
+
+export interface VoiceLiquidityRow {
+  city: string;
+  state: string;
+  trade: string;
+  total: number;
+  callable: number;
+  used_7d: number;
+  available: number;
+  exact: boolean;
+  scope: "exact" | "city_fallback";
+  showcase_items: number;
+  built_at: string | null;
+  age_hours: number | null;
+}
+
+export interface VoiceLiquidity {
+  generated_at: string;
+  cities: string[];
+  exact_available: number;
+  rows: VoiceLiquidityRow[];
+}
+
 export interface VoiceSource {
   id: number;
   name: string;
@@ -1960,6 +2028,26 @@ export function fetchVoiceMetrics(
   if (city) params.set("city", city);
   if (trade) params.set("trade", trade);
   return adminFetch<VoiceMetrics>(`/voice/metrics?${params.toString()}`);
+}
+
+export function fetchVoiceLive(
+  campaignId?: number
+): Promise<VoiceLive> {
+  const params = new URLSearchParams();
+  if (campaignId) params.set("campaign_id", String(campaignId));
+  const qs = params.toString();
+  return adminFetch<VoiceLive>(`/voice/live${qs ? `?${qs}` : ""}`);
+}
+
+export function fetchVoiceLiquidity(
+  city = "",
+  trade = ""
+): Promise<VoiceLiquidity> {
+  const params = new URLSearchParams();
+  if (city) params.set("city", city);
+  if (trade) params.set("trade", trade);
+  const qs = params.toString();
+  return adminFetch<VoiceLiquidity>(`/voice/liquidity${qs ? `?${qs}` : ""}`);
 }
 
 export function fetchVoiceSources(): Promise<{ sources: VoiceSource[] }> {

@@ -70,3 +70,13 @@ def test_category_for_trade():
     assert tax.category_for_trade("plumbing") == "Plumbing"
     assert tax.category_for_trade("hvac") == "Heating"
     assert tax.category_for_trade("unknown") == ""
+
+
+def test_site_text_classifica_oficio_sem_nome():
+    signals = tax.classify_company(
+        "ABC Corp",
+        site_text="We provide plumbing, drain cleaning and sewer repair.",
+    )
+    trades = _trades(signals)
+    assert trades["plumbing"] >= 0.80
+    assert signals[0].source in ("site_text", "name")

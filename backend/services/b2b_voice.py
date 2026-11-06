@@ -2285,6 +2285,220 @@ def metrics(days: int = 30, city: str = "", trade: str = "") -> dict:
         conn.close()
 
 
+def _parse_dt(value: Any) -> Optional[datetime]:
+    try:
+        dt = datetime.fromisoformat(str(value))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except (TypeError, ValueError):
+        return None
+
+
+def live_dashboard(
+    campaign_id: Optional[int] = None, recent_limit: int = 15
+) -> dict:
+    """Snapshot vivo de uma campanha para o Admin (polling de 30 s)."""
+    init()
+    now = datetime.now(timezone.utc)
+    limit = max(1, min(50, int(recent_limit or 15)))
+    conn = get_conn()
+    try:
+        if campaign_id is None:
+            row = conn.execute(
+                "SELECT id FROM voice_campaigns "
+                "ORDER BY CASE status WHEN 'running' THEN 0 ELSE 1 END, id DESC "
+                "LIMIT 1"
+            ).fetchone()
+            campaign_id = int(row["id"]) if row else None
+        campaign = get_campaign(int(campaign_id)) if campaign_id else None
+        if not campaign:
+            return {
+                "generated_at": _iso(now),
+                "campaign": None,
+                "summary": {},
+                "active_calls": [],
+                "recent_calls": [],
+            }
+        cid = str(int(campaign_id))
+        active_rows = conn.execute(
+            "SELECT v.id, v.company_id, c.company_name, c.phone, v.city, "
+            "v.trade_code, v.status, v.started_at, v.answered_at, v.amd_result "
+            "FROM voice_calls v LEFT JOIN prospect_companies c ON c.id=v.company_id "
+            "WHERE v.campaign_id=? AND v.status IN "
+            "('queued','dialing','assistant_pending','assistant_starting','in_call') "
+            "ORDER BY v.id ASC",
+            (cid,),
+        ).fetchall()
+        active = []
+        for row in active_rows:
+            started = _parse_dt(row["started_at"])
+            answered = _parse_dt(row["answered_at"])
+            active.append(
+                {
+                    "id": int(row["id"]),
+                    "company_id": row["company_id"],
+                    "company": row["company_name"] or "",
+                    "phone": row["phone"] or "",
+                    "city": row["city"] or "",
+                    "trade": row["trade_code"] or "",
+                    "status": row["status"],
+                    "amd_result": row["amd_result"] or "",
+                    "elapsed_seconds": (
+                        max(0, int((now - started).total_seconds())) if started else 0
+                    ),
+                    "listen_seconds": (
+                        max(0, int((now - answered).total_seconds()))
+                        if answered
+                        else 0
+                    ),
+                    "started_at": row["started_at"],
+                    "answered_at": row["answered_at"],
+                }
+            )
+
+        summary_row = conn.execute(
+            "SELECT COUNT(*) dialed, "
+            "SUM(CASE WHEN answered_at IS NOT NULL THEN 1 ELSE 0 END) answered, "
+            "SUM(CASE WHEN answered_at IS NULL THEN 1 ELSE 0 END) unanswered, "
+            "SUM(CASE WHEN amd_result='human' THEN 1 ELSE 0 END) human, "
+            "SUM(CASE WHEN amd_result='machine' THEN 1 ELSE 0 END) voicemail, "
+            "SUM(CASE WHEN amd_result='not_sure' THEN 1 ELSE 0 END) not_sure, "
+            "SUM(CASE WHEN intent='opt_out' THEN 1 ELSE 0 END) optouts, "
+            "AVG(CASE WHEN answered_at IS NOT NULL THEN listen_seconds END) avg_listen, "
+            "COALESCE(SUM(cost_cents),0) cost_cents "
+            "FROM voice_calls WHERE campaign_id=? AND status<>'dry_run'",
+            (cid,),
+        ).fetchone()
+        summary = dict(summary_row) if summary_row else {}
+        for key in ("dialed", "answered", "unanswered", "human", "voicemail", "not_sure", "optouts"):
+            summary[key] = int(summary.get(key) or 0)
+        summary["avg_listen_seconds"] = round(float(summary.get("avg_listen") or 0), 1)
+        summary["answer_rate"] = _rate(summary["answered"], summary["dialed"])
+        summary["human_rate"] = _rate(summary["human"], summary["dialed"])
+        summary["voicemail_rate"] = _rate(summary["voicemail"], summary["dialed"])
+        summary["optout_rate"] = _rate(summary["optouts"], summary["dialed"])
+        summary["cost_usd"] = round(int(summary.get("cost_cents") or 0) / 100.0, 2)
+
+        recent_rows = conn.execute(
+            "SELECT v.id, v.company_id, c.company_name, v.city, v.trade_code, "
+            "v.status, v.intent, v.amd_result, v.duration_seconds, "
+            "v.listen_seconds, v.hangup_cause, v.created_at, v.answered_at "
+            "FROM voice_calls v LEFT JOIN prospect_companies c ON c.id=v.company_id "
+            "WHERE v.campaign_id=? AND v.status<>'dry_run' "
+            "ORDER BY v.id DESC LIMIT ?",
+            (cid, limit),
+        ).fetchall()
+        recent = [dict(row) for row in recent_rows]
+        return {
+            "generated_at": _iso(now),
+            "campaign": {
+                "id": int(campaign["id"]),
+                "name": campaign.get("name"),
+                "status": campaign.get("status"),
+                "quota_total": campaign.get("quota_total"),
+                "calls_started": campaign.get("calls_started"),
+                "next_batch_at": campaign.get("next_batch_at"),
+                "error": campaign.get("error"),
+                "include_fallback": campaign.get("include_fallback"),
+            },
+            "summary": summary,
+            "active_calls": active,
+            "recent_calls": recent,
+        }
+    finally:
+        conn.close()
+
+
+def voice_liquidity(city: str = "", trade: str = "") -> dict:
+    """Stock chamável por cidade/trade, com separação exact vs fallback.
+
+    Usa `voice_segments` como stock materializado e desconta as empresas
+    chamadas nos últimos 7 dias. `built_at` é exposto para o Admin mostrar a
+    idade do stock.
+    """
+    init()
+    from . import showcase
+
+    city_filter = str(city or "").strip()
+    trade_filter = showcase.normalize_trade(trade) if trade.strip() else ""
+    selected = ("New York", "Dallas", "Chicago", "Boston")
+    conn = get_conn()
+    try:
+        where = ["city IN (?, ?, ?, ?)"]
+        params: list[Any] = list(selected)
+        if city_filter:
+            where.append("UPPER(TRIM(city))=UPPER(?)")
+            params.append(city_filter)
+        if trade_filter:
+            where.append("LOWER(trade_code)=LOWER(?)")
+            params.append(trade_filter)
+        rows = conn.execute(
+            "SELECT city,state,city_slug,trade_code,total,callable,"
+            "showcase_mode,showcase_exact,built_at FROM voice_segments "
+            f"WHERE {' AND '.join(where)} ORDER BY city, trade_code",
+            tuple(params),
+        ).fetchall()
+        used_rows = conn.execute(
+            "SELECT COALESCE(city,'') city, COALESCE(trade_code,'') trade, "
+            "COUNT(DISTINCT company_id) used "
+            "FROM voice_calls WHERE COALESCE(campaign_id,'')<>'test_call' "
+            "AND status<>'dry_run' "
+            "AND datetime(COALESCE(created_at,started_at))>=datetime('now','-7 days') "
+            "GROUP BY 1,2"
+        ).fetchall()
+        used = {
+            (str(r["city"]).strip().lower(), str(r["trade"]).strip().lower()): int(
+                r["used"] or 0
+            )
+            for r in used_rows
+        }
+        now = datetime.now(timezone.utc)
+        out = []
+        for row in rows:
+            exact = (
+                str(row["showcase_mode"]) == "dedicated"
+                and int(row["showcase_exact"] or 0) >= 5
+            )
+            callable_n = int(row["callable"] or 0)
+            used_n = used.get(
+                (str(row["city"]).strip().lower(), str(row["trade_code"]).lower()),
+                0,
+            )
+            available = max(0, callable_n - used_n)
+            built = _parse_dt(row["built_at"])
+            out.append(
+                {
+                    "city": row["city"],
+                    "state": row["state"],
+                    "trade": row["trade_code"],
+                    "total": int(row["total"] or 0),
+                    "callable": callable_n,
+                    "used_7d": used_n,
+                    "available": available,
+                    "exact": exact,
+                    "scope": "exact" if exact else "city_fallback",
+                    "showcase_items": int(row["showcase_exact"] or 0),
+                    "built_at": row["built_at"],
+                    "age_hours": (
+                        round((now - built).total_seconds() / 3600.0, 1)
+                        if built
+                        else None
+                    ),
+                }
+            )
+        return {
+            "generated_at": _iso(now),
+            "cities": list(selected),
+            "rows": out,
+            "exact_available": sum(
+                r["available"] for r in out if r["exact"]
+            ),
+        }
+    finally:
+        conn.close()
+
+
 def paused_campaigns_due(now: Optional[datetime] = None) -> list[int]:
     init()
     reference = (now or _utc_now()).isoformat()
@@ -2502,6 +2716,7 @@ def bridge_contractor_entities(limit: int = 20000) -> dict:
     """Converte contractor_entities (licenças já ingeridas) em prospect_companies."""
     import csv as _csv
 
+    from . import voice_taxonomy
     from .db import get_connection as get_leads_connection
     from .showcase import CITY_CANON
 
@@ -2509,7 +2724,7 @@ def bridge_contractor_entities(limit: int = 20000) -> dict:
     try:
         rows = leads.execute(
             "SELECT legal_name, city, state, phone, email, license, niche_key, "
-            "status, quarantine_reason FROM contractor_entities "
+            "site_snippet, status, quarantine_reason FROM contractor_entities "
             "WHERE COALESCE(TRIM(phone),'')<>'' AND state IN ('MA','NY','TX','IL') "
             "AND COALESCE(quarantine_reason,'')='' "
             "ORDER BY id DESC LIMIT ?",
@@ -2541,7 +2756,18 @@ def bridge_contractor_entities(limit: int = 20000) -> dict:
         if not phone or not name or not city_raw:
             continue
         city = CITY_CANON.get(city_raw.upper(), city_raw.title())
-        trade = _infer_trade(name, str(row["niche_key"] or ""))
+        signals = voice_taxonomy.classify_company(
+            name,
+            niche_key=str(row["niche_key"] or ""),
+            site_text=str(row["site_snippet"] or ""),
+        )
+        strong = [s for s in signals if s.confidence >= 0.80]
+        if strong:
+            trade = strong[0].trade
+            note = f"contractor_entities:classified:{strong[0].source}"
+        else:
+            trade = _infer_trade(name, str(row["niche_key"] or ""))
+            note = "contractor_entities:unclassified"
         writer.writerow(
             [
                 name,
@@ -2552,7 +2778,7 @@ def bridge_contractor_entities(limit: int = 20000) -> dict:
                 str(row["license"] or "").strip(),
                 "active",
                 trade,
-                "contractor_entities",
+                note,
             ]
         )
         used += 1
