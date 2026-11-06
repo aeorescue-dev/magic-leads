@@ -251,7 +251,7 @@ def test_static_mode_usa_gather_using_speak_sem_ai(monkeypatch):
     assert result["ok"] is True
     assert [action for action, _ in actions] == ["gather_using_speak"]
     payload = actions[0][1]
-    assert "MagicLeads.app" in payload["payload"]
+    assert "magicleads.app" in payload["payload"]
     assert payload["valid_digits"] == "2"
     assert payload["maximum_tries"] == 1
     assert voice.get_voice_call(call_id)["status"] == "in_call"
@@ -873,7 +873,7 @@ def test_answered_envia_script_renderizado_ao_assistant(monkeypatch):
     sent = captured["json"]["assistant"]
     assert sent["id"] == "assistant-123"
     assert "Telnyx Roofing" in sent["instructions"]
-    assert "active roofing opportunities in Boston this week" in sent[
+    assert "active opportunities in your trade right now" in sent[
         "instructions"
     ]
     assert sent["greeting"].startswith("Hi Telnyx Roofing")

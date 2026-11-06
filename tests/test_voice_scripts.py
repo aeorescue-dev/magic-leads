@@ -44,9 +44,13 @@ def test_seed_cria_roteiros_com_template_oficial():
         assert item["status"] == "approved"
         assert item["version"] == 1
         assert "{{company | Contractor}}" in item["body"]
-        assert "MagicLeads.app" in item["body"]
+        assert "magicleads.app" in item["body"]
+        assert "{{count}}" in item["body"]
+        assert "automated message" in item["body"]
+        assert "verified address" in item["body"]
+        assert "send a letter" in item["body"]
         assert "press 2" in item["body"].lower()
-        assert "5 to 8" in item["body"]
+        assert "five local contractors" in item["body"]
         assert "If Yes / Press 1" not in item["body"]
 
 
@@ -123,7 +127,7 @@ def test_render_variaveis_e_showcase_line(monkeypatch):
     )
     assert "Acme Roofing" in result["body"]
     assert "New York" in result["body"]
-    assert "7 active roofing opportunities" in result["body"]
+    assert "7 active opportunities" in result["body"]
     assert "{{company}}" not in result["body"]
 
 
@@ -144,7 +148,7 @@ def test_render_company_fallback_usa_contractor(monkeypatch):
         },
     )
     result = voice_scripts.render("roofing", company="", city="New York")
-    assert result["greeting"].startswith("Hi Contractor,")
+    assert result["greeting"].startswith("Hi Contractor.")
     assert "Hi ," not in result["greeting"]
 
 
@@ -165,7 +169,7 @@ def test_render_usa_contagem_exata_do_nicho(monkeypatch):
         },
     )
     result = voice_scripts.render("roofing", city="Dallas")
-    assert "42 active roofing opportunities" in result["body"]
+    assert "42 active opportunities" in result["body"]
 
 
 def test_render_bloqueia_nicho_sem_inventario_exato(monkeypatch):
@@ -429,3 +433,39 @@ def test_guard_city_allows_gc_only(monkeypatch):
 
     roofing = voice_scripts.showcase_guard("roofing", "New York")
     assert roofing["ready"] is False
+
+
+def test_template_version_propaga_para_scripts_existentes():
+    conn = b2b_voice.get_conn()
+    try:
+        conn.execute("UPDATE voice_scripts SET version=3, body='OLD BODY'")
+        conn.execute(
+            "UPDATE voice_meta SET value='2026-11-04.3' "
+            "WHERE key='scripts_template_version'"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    voice_scripts._INIT["path"] = None
+    voice_scripts.init()
+    scripts = voice_scripts.list_scripts()
+    assert len(scripts) == 15
+    assert all(item["version"] == 4 for item in scripts)
+    assert all(item["body"] == voice_scripts.DEFAULT_TEMPLATE for item in scripts)
+    assert all(item["status"] == "approved" for item in scripts)
+
+
+def test_render_bloqueia_count_fora_do_scope_exact(monkeypatch):
+    monkeypatch.setattr(
+        voice_scripts,
+        "showcase_guard",
+        lambda *args, **kwargs: {
+            "ready": True,
+            "line": "over 5,000 active home-service opportunities",
+            "count": 5000,
+            "scope": "bundle",
+        },
+    )
+    with pytest.raises(ValueError, match="count_requires_exact_scope"):
+        voice_scripts.render("plumbing", company="Acme", city="New York")

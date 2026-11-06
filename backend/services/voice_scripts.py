@@ -20,7 +20,7 @@ from . import b2b_voice, showcase
 
 DISCLOSURE = "Hi {{company | Contractor}}, this is an automated assistant from Magic Leads."
 
-TEMPLATE_VERSION = "2026-11-04.3"
+TEMPLATE_VERSION = "2026-11-06.1"
 
 # Guardrails do voice: nunca prometer uma vitrine com contagem fraca/zero
 # nem usar inventário antigo. O valor pode ser afinado por ambiente.
@@ -28,14 +28,14 @@ VOICE_MIN_SHOWCASE_ITEMS = 5
 VOICE_SHOWCASE_MAX_AGE_HOURS = 72.0
 
 DEFAULT_TEMPLATE = (
-    "Hi {{company | Contractor}}, this is an automated assistant from Magic "
-    "Leads. We have {{showcase_line}} on MagicLeads.app right now. Stop wasting "
-    "money competing with 5 to 8 other contractors on traditional platforms "
-    "that only bleed your pocket. With us, you get exclusive opportunities up "
-    "to 7 days before anyone else, with the client's name, address, and job "
-    "details. Go to MagicLeads.app on your phone's browser to close your first "
-    "deal today. To remove your number from our list, press 2 now. Have a "
-    "great day!"
+    "Hi {{company | Contractor}}. This is an automated message from Magic "
+    "Leads in New York. We just unlocked {{count}} active opportunities in "
+    "your trade right now on magicleads.app. While shared lead apps sell the "
+    "same contact to five local contractors and eat into your margins, we "
+    "give you the owner's direct name, verified address, and job details 5 "
+    "to 7 days before anyone else in your area. You just call, visit, or "
+    "send a letter, and close the deal before your competitors do. Go to "
+    "magicleads.app right now. To opt out, press 2."
 )
 
 TRADES = (
@@ -870,11 +870,20 @@ def render(
     guard = showcase_guard(code, city_label)
     if not guard["ready"]:
         raise ValueError(f"showcase_unavailable: {guard['reason']}")
+    # `{{count}}` só pode ser falado com uma contagem do trade exato. Os
+    # scopes `bundle`/`city` devolvem totais agregados e tornariam a frase
+    # "in your trade" falsa.
+    if "{{count}}" in str(script.get("body") or "") and guard.get("scope") not in (
+        "trade",
+        "exact",
+    ):
+        raise ValueError("count_requires_exact_scope")
     values = {
         "company": _clean_company(company) or "Contractor",
         "city": city_label,
         "trade": showcase.trade_label(code),
         "permit_count": str(int(permit_count or 0)),
+        "count": f"{int(guard.get('count') or 0):,}",
         "showcase_line": guard["line"],
         "price_weekly": "$120",
         "price_monthly": "$520",
