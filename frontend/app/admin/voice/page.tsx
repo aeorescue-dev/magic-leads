@@ -1384,24 +1384,40 @@ export default function VoiceB2BPage() {
           </p>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {(liquidityData?.rows ?? [])
-              .filter((row) => row.exact)
+              .slice()
+              .sort(
+                (a, b) =>
+                  Number(b.exact) - Number(a.exact) ||
+                  b.available - a.available
+              )
               .slice(0, 12)
               .map((row) => (
                 <div
                   key={`${row.city}-${row.trade}`}
                   className="rounded-lg border border-white/5 bg-white/[0.02] px-2.5 py-1.5 text-[10px]"
                 >
-                  <span className="font-semibold text-slate-200">{row.city}</span>
-                  <span className="ml-1 text-slate-500">{row.trade}</span>
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-slate-200">
+                      {row.city}
+                    </span>
+                    <span
+                      className={
+                        row.exact ? "text-emerald-300" : "text-amber-300"
+                      }
+                    >
+                      {row.scope}
+                    </span>
+                  </div>
+                  <span className="text-slate-500">{row.trade}</span>
                   <div className="mt-0.5 flex justify-between text-slate-400">
                     <span>{row.available} disponíveis</span>
                     <span>{row.used_7d} usados/7d</span>
                   </div>
                 </div>
               ))}
-            {!liquidityData?.rows?.some((row) => row.exact) ? (
+            {!liquidityData?.rows?.length ? (
               <p className="text-[10px] text-slate-600">
-                Sem stock exacto materializado. Reconstrói os segmentos.
+                Sem stock materializado. Reconstrói os segmentos.
               </p>
             ) : null}
           </div>
