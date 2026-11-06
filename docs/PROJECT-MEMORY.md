@@ -2120,6 +2120,18 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Recomendação:** SMS só como fallback transacional 1:1 para opt-in do chat, 1 número 10DLC SP, cap $2/dia e 100/dia; push e voz continuam primários; **nunca** SMS para a base B2B raspada.
 - **Sem código nem deploy:** parecer docs-only; deploy das 20:00 ET inalterado.
 
+### Parecer — Collision & Accident Leads (2026-11-06)
+
+- **Documento completo:** `docs/COLLISION-LEADS-FEASIBILITY.md`.
+- **Veredicto:** **NO-GO** ao modelo de raspar relatórios com PII e vender contactos a body shops/reboques/PI lawyers.
+- **Bloqueio:** DPPA (18 USC §2721; $2.500/pessoa), FL 316.066 (sworn statement + felony), TX 550.065 (relatório completo só a "proper interest"; redigido remove PII), IL 11-412 (confidencial), NY MV-198C (permissible use), MA RMV ($20, permitted use).
+- **Dados:** open data agregado sem PII existe em NYC (`h9gi-nx95`), Chicago (`85ca-t3if`), Boston, Dallas, Austin; é a base viável.
+- **Viés:** limiares de reporte ($1.000) excluem "fender benders"; o inventário disponível pende para lesão/PI, não para reparação pequena.
+- **Reutilização:** ingestão, geocoding, segmentos, admin e outbound B2B reaproveitam-se; voz/DNC e enriquecimento de telefone **não** servem para consumidores.
+- **Pivot recomendado:** (A) Crash Intelligence agregada por ZIP/corredor, sem PII, assinatura $99–$499/mês; (B) marketplace inbound com consentimento e routing. Original rejeitado.
+- **Liquidez:** PI lawyers ($100–$1.000/lead) > body shops ($20–$75) > towing ($13–$40); PI é o mais regulado.
+- **Próximo gate:** parecer jurídico US ($5k–$15k) antes de código; MVP agregado 3–4 semanas.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
