@@ -2096,10 +2096,15 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 
 - **Documento completo:** `docs/CHAT-INBOX-ROADMAP.md`.
 - **Objetivo:** chat público com captura única de telefone, texto/áudio, tradução bidirecional e inbox admin em PT-BR com rascunho IA.
-- **Custo:** sem SaaS novo; transcrição local (`faster-whisper`) e LLM low-cost com cache/orçamento.
-- **Arquitetura:** `landing_contacts`, `chat_conversations`, `chat_messages`, `chat_ai_drafts`, `chat_events`; SSE + polling; áudio em `/data/chat_audio` com retenção.
+- **Idioma:** EN de fábrica; seletor top 20 idiomas dos EUA + busca; fallback LLM para outros.
+- **Out-of-hours:** cliente envia sempre; auto-resposta no idioma dele; Admin configura timezone, horários por dia e mensagem.
+- **Consentimento:** “By submitting your phone number, you agree to receive calls/messages regarding our services.”
+- **Qualificação:** Contractor/Homeowner/Other antes de migrar para voz; só Contractor entra em campanhas.
+- **Custo:** sem SaaS novo; Whisper local; LLM com cap **$5/dia**; áudio 30 dias no VPS.
+- **Admin:** notificação visual + som de nova mensagem no `/admin/inbox`.
+- **Arquitetura:** `landing_contacts`, `chat_conversations`, `chat_messages`, `chat_ai_drafts`, `chat_events`, `chat_settings`; SSE + polling.
 - **Segurança:** admin-only no piloto, `CHAT_INBOX_ENABLED=0`, validação E.164, consentimento, rate limit, XSS e limites de áudio.
-- **Roadmap:** seg spec/schema; ter APIs/telefone; qua widget/áudio; qui inbox/tradução/rascunho; sex testes/piloto/deploy após 20:00.
+- **Roadmap:** seg spec/schema; ter APIs/telefone; qua widget/EN/qualificação/áudio; qui inbox/tradução/rascunho/out-of-hours; sex testes/piloto/deploy após 20:00.
 - **Gate:** público só após 48 h de piloto admin limpo.
 
 ### P1 (a seguir)

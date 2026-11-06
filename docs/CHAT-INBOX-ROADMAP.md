@@ -16,17 +16,34 @@ Permitir que um visitante da landing page inicie uma conversa em qualquer idioma
 
 ### Entrada
 - Widget flutuante, lazy-loaded, sem bloquear o LCP.
+- **Idioma de fábrica: EN (EUA)**. A landing page e toda a UI nativa do chat nascem em inglês; o seletor é apenas uma opção do visitante.
 - Abre com:
-  - saudação em inglês (default);
+  - saudação em inglês;
   - seletor de idioma no topo;
   - campo de telefone;
   - caixa de texto;
   - botão de áudio.
 - Só o telefone é obrigatório. Sem nome, e-mail ou empresa.
-- Microcopy de consentimento numa linha: contacto futuro por telefone/WhatsApp; guardar `consent_text` + timestamp + IP hash.
+- Microcopy de consentimento numa linha, em inglês:
+  > “By submitting your phone number, you agree to receive calls/messages regarding our services.”
+- Guardar `consent_text` + timestamp + IP hash.
+
+### Out-of-hours
+- O chat **nunca** mostra “fechado” antes do envio. O visitante pode escrever, gravar áudio e deixar o telefone a qualquer hora.
+- Fora do horário, o sistema responde automaticamente no idioma selecionado:
+  - confirma a receção;
+  - informa que a resposta chega no próximo dia útil;
+  - mantém a conversa aberta para o operador.
+- A mensagem automática é editável no Admin.
+- Configuração no `/admin/inbox`:
+  - timezone;
+  - horário de abertura/fecho por dia da semana;
+  - mensagem personalizada de fora de horário (com tradução automática para o idioma do cliente).
 
 ### Seletor de idioma
-- Lista priorizada: EN, PT-BR, ES, ZH, RU, HT, FR, AR, BN, UR, PL, IT, DE, KO, VI, TL, HE, HI, JA, TR.
+- Default de fábrica: **EN**.
+- Lista inicial: **top 20 idiomas mais falados nos EUA** — EN, ES, ZH, VI, FR, AR, KO, RU, HT, TL, PT, HI, BN, UR, PL, IT, DE, HE, JA, TR — com busca rápida.
+- Fallback via LLM para qualquer outro idioma suportado pelo modelo.
 - Busca por nome nativo; bandeiras não são obrigatórias (evitar poluição).
 - `dir="auto"` para RTL.
 - Guardar escolha em `localStorage` por conversa; default EN.
@@ -38,6 +55,15 @@ Permitir que um visitante da landing page inicie uma conversa em qualquer idioma
 - Rejeitar números inválidos/curtos; rate limit por IP/telefone.
 - Guardar em `landing_contacts` com `source='landing_chat'`, `consent_at`, `page_url`, UTM, idioma.
 - Não inserir automaticamente em `prospect_companies`/campanhas de voz; qualificação posterior.
+
+### Qualificação do visitante
+- Antes de migrar a lead para a base de voz, o chat pergunta o perfil:
+  - **Contractor**
+  - **Homeowner**
+  - **Other**
+- A resposta é guardada em `landing_contacts.profile_type` e `qualification_json`.
+- Só `Contractor` (ou qualificação manual equivalente) pode ser promovido a `prospect_companies`/campanha de voz.
+- Homeowner/Other ficam no CRM de landing, sem chamadas de voz automáticas.
 
 ### Texto e áudio
 - Texto com limite de 2.000 caracteres.
@@ -62,6 +88,8 @@ Rota: `/admin/inbox` (alias `/admin/chat`).
 - Filtros: idioma, cidade/UTM, telefone, operador, data.
 - Badge de não lidas e idade da última mensagem.
 - Auto-refresh 10 s + SSE.
+- **Notificação visual + alerta sonoro** quando entra nova mensagem (som só com o painel aberto e aba visível; sem autoplay bloqueado).
+- Configuração de horário: timezone, abertura/fecho por dia, mensagem fora de horário.
 
 ### Thread
 - Mensagens originais + tradução PT-BR lado a lado ou toggle.
@@ -91,7 +119,13 @@ Rota: `/admin/inbox` (alias `/admin/chat`).
 ```sql
 landing_contacts (
   id, phone_e164 UNIQUE, language, source, page_url, utm_json,
-  consent_text, consent_at, ip_hash, created_at, last_seen_at
+  profile_type, qualification_json, consent_text, consent_at, ip_hash,
+  created_at, last_seen_at
+)
+
+chat_settings (
+  id, timezone, hours_json, out_of_hours_message, auto_reply_enabled,
+  updated_by, updated_at
 )
 
 chat_conversations (
@@ -172,6 +206,13 @@ GET  /api/admin/inbox/stream    # SSE
 
 O maior custo é o LLM; usar cache, limites e modelo barato. Sem Google Places/Searchbug/novo SaaS.
 
+**Cap inicial aprovado:** **$5/dia** para tradução + rascunhos. O sistema deve:
+- bloquear novas chamadas ao LLM quando o cap diário for atingido;
+- mostrar aviso no Admin;
+- usar cache e fallback sem tradução quando possível.
+
+**Retenção de áudio:** **30 dias no VPS** durante o piloto; S3/R2 fica para avaliação futura.
+
 ---
 
 ## 6. Roadmap da semana
@@ -179,10 +220,10 @@ O maior custo é o LLM; usar cache, limites e modelo barato. Sem Google Places/S
 | Dia | Entrega |
 |---|---|
 | **Seg** | Spec freeze, wireframes, schema, consentimento, lista de idiomas |
-| **Ter** | `landing_contacts`, `chat_*`, APIs de sessão/mensagem, validação de telefone, rate limit |
-| **Qua** | Widget público (texto + áudio), SSE/polling, transcrição local |
-| **Qui** | Inbox Admin, tradução PT-BR, rascunho IA, envio traduzido |
-| **Sex** | Segurança, testes de carga, retenção, monitorização, piloto admin-only; deploy após 20:00 |
+| **Ter** | `landing_contacts`, `chat_*`, `chat_settings`, APIs de sessão/mensagem, validação de telefone, rate limit |
+| **Qua** | Widget público (texto + áudio), EN default, seletor top 20, qualificação, SSE/polling, transcrição local |
+| **Qui** | Inbox Admin, tradução PT-BR, rascunho IA, envio traduzido, horário/out-of-hours, notificação visual + som |
+| **Sex** | Segurança, testes de carga, retenção 30 d, cap $5/dia, monitorização, piloto admin-only; deploy após 20:00 |
 
 **Gate:** `CHAT_INBOX_ENABLED=0` por defeito; ativar primeiro para admin; público só depois de 48 h de piloto limpo.
 
@@ -190,24 +231,36 @@ O maior custo é o LLM; usar cache, limites e modelo barato. Sem Google Places/S
 
 ## 7. Critérios de aceitação
 
+- UI inicial em **EN**; seletor muda o idioma apenas por ação do visitante.
 - Telefone inválido não cria conversa.
-- Telefone válido cria `landing_contacts` e conversa.
+- Telefone válido cria `landing_contacts` e conversa com o microcopy de consentimento exato.
 - Mensagem de texto e áudio aparecem no Admin em PT-BR.
 - Rascunho PT-BR é editável e enviado no idioma do cliente.
-- Áudio ≤60 s é transcrito e traduzido.
+- Áudio ≤60 s é transcrito e traduzido; retenção 30 dias.
+- Fora de horário: mensagem é aceite, auto-resposta no idioma do cliente, conversa aberta.
+- Admin configura timezone, horários por dia e mensagem out-of-hours.
+- Nova mensagem gera badge + som no Admin (com aba visível).
+- Qualificação Contractor/Homeowner/Other; só Contractor pode ir para voz.
 - Nenhuma mensagem é enviada sem tradução confirmada ou fallback explícito.
 - SSE entrega em <2 s; polling fallback.
 - Rate limit e consentimento registados.
 - Admin-only; público bloqueado por flag.
-- Testes de XSS, upload inválido, número inválido, tradução falhada, conversa fechada.
+- Cap IA $5/dia com bloqueio e aviso.
+- Testes de XSS, upload inválido, número inválido, tradução falhada, conversa fechada, out-of-hours, qualificação.
 
 ---
 
-## 8. Decisões em aberto
+## 8. Decisões fechadas
 
-1. Consentimento: texto exato para contacto futuro (voz/WhatsApp) e base legal.
-2. Lista inicial de idiomas (20 prioritários vs todos os ISO via LLM).
-3. Modelo de tradução/rascunho e orçamento diário.
-4. Retenção de áudio (30 dias?) e necessidade de R2/S3.
-5. Quem recebe/atribui conversas e notificação (in-app/email).
-6. Se o chat deve qualificar o visitante (contractor vs homeowner) antes de criar lead de voz.
+1. **Consentimento:** “By submitting your phone number, you agree to receive calls/messages regarding our services.”
+2. **Idioma:** EN de fábrica; seletor com top 20 idiomas dos EUA + busca; fallback LLM para outros.
+3. **Orçamento IA:** cap **$5/dia** para tradução + rascunhos, com bloqueio e aviso.
+4. **Áudio:** retenção **30 dias no VPS**; S3/R2 apenas no futuro.
+5. **Notificação:** badge visual + alerta sonoro no `/admin/inbox` quando entra mensagem.
+6. **Qualificação:** Contractor / Homeowner / Other antes de migrar para a base de voz; só Contractor entra em campanhas de voz.
+
+### Ainda por decidir na implementação
+- Modelo LLM exato (DeepSeek/GLM) e fallback.
+- Quem recebe/atribui conversas e se há notificação por email.
+- Limite de conversas por telefone/IP por dia.
+- Política de apagação de PII a pedido.
