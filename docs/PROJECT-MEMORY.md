@@ -2103,6 +2103,7 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Custo:** sem SaaS novo; Whisper local; LLM com cap **$5/dia**; áudio 30 dias no VPS.
 - **Admin:** notificação visual + som de nova mensagem no `/admin/inbox`.
 - **Push Web:** opt-in pós-telefone, VAPID + Service Worker, opt-out imediato, Broadcast segmentado por cidade/nicho/idioma/perfil; tradução automática; custo $0.
+- **iOS:** landing PWA-ready, Smart Prompt Share → Add to Home Screen, `push_eligible` + fallback SMS/voz para non-push iOS; fallback tem custo Telnyx e exige consentimento.
 - **Arquitetura:** `landing_contacts`, `chat_conversations`, `chat_messages`, `chat_ai_drafts`, `chat_events`, `chat_settings`, `landing_push_subscriptions`, `landing_push_campaigns`, `landing_push_deliveries`; SSE + polling.
 - **Segurança:** admin-only no piloto, `CHAT_INBOX_ENABLED=0`, validação E.164, consentimento, rate limit, XSS e limites de áudio.
 - **Roadmap:** seg spec/schema; ter APIs/telefone; qua widget/EN/qualificação/áudio; qui inbox/tradução/rascunho/out-of-hours; sex testes/piloto/deploy após 20:00.

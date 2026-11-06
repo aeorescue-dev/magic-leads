@@ -103,6 +103,29 @@ Rota: `/admin/inbox` (alias `/admin/chat`).
 - O visitante pode desativar no widget ou no rodapé da notificação; a subscrição é desativada imediatamente.
 - iOS: push só em PWA instalada (iOS 16.4+); o widget explica isso sem bloquear o chat.
 
+### iOS / PWA — requisitos obrigatórios
+
+- **PWA-Ready Landing Page:**
+  - `manifest.json` completo: `name`, `short_name`, `start_url`, `scope`, `display: standalone`, `background_color`, `theme_color`.
+  - Ícones 192, 512 e maskable; `apple-touch-icon`.
+  - Meta tags: `apple-mobile-web-app-capable=yes`, `apple-mobile-web-app-status-bar-style`, `apple-mobile-web-app-title`.
+  - Service Worker registado; HTTPS; VAPID.
+- **Smart Prompt iOS:**
+  - Detetar iPhone/iPad + Safari + `display-mode` não-standalone.
+  - Depois do telefone e do opt-in, mostrar um guia visual curto:
+    1. Share;
+    2. Add to Home Screen;
+    3. abrir pela Home Screen;
+    4. Allow Notifications.
+  - **Não é possível instalar a PWA com um único clique programático no iOS** — o Safari não expõe `beforeinstallprompt`. O “1 clique” é um CTA que abre o guia certo; a instalação continua a ser Share → Add to Home Screen.
+  - Depois de aberta em standalone, pedir a permissão de notificações num gesto do utilizador.
+- **Fallback cross-channel:**
+  - Se não instalar, não autorizar ou o browser não suportar push, `landing_contacts.push_eligible=false`.
+  - Guardar `push_platform='ios'`, `push_state` (`unsupported`, `not_installed`, `denied`, `subscribed`) e `fallback_channel` (`sms`/`voice`).
+  - Contactos `push_eligible=false` entram no segmento Admin **“non-push iOS”** para broadcast via SMS ou voz.
+  - O envio SMS/voz usa a Telnyx existente, com consentimento e orçamento; **não é $0 por mensagem**. A elegibilidade é registada a custo zero; o disparo real tem custo Telnyx.
+  - Sem consentimento para SMS/voz, o contacto fica apenas no CRM e no chat, sem broadcast ativo.
+
 ### Broadcast no Admin
 - Secção “Broadcast Push” no `/admin/inbox`.
 - Operador escreve título/corpo em PT-BR (ou EN), escolhe segmento:
@@ -110,8 +133,10 @@ Rota: `/admin/inbox` (alias `/admin/chat`).
   - nicho/trade;
   - idioma;
   - perfil Contractor/Homeowner/Other;
-  - apenas opt-in ativo.
+  - apenas opt-in ativo;
+  - **non-push iOS** (`push_eligible=false`), com fallback SMS/voz.
 - Preview da contagem antes do envio; teste para o próprio admin.
+- Mostrar separadamente: subscrições push ativas, iOS sem PWA, iOS sem permissão e contactos sem push.
 - Tradução automática para o `locale` de cada subscrição antes do envio.
 - Envio por Web Push API nativa (VAPID + Service Worker), sem OneSignal/SaaS.
 - Guardar `landing_push_campaigns` + `landing_push_deliveries` (status, HTTP, erro, clique).
@@ -147,7 +172,8 @@ Rota: `/admin/inbox` (alias `/admin/chat`).
 landing_contacts (
   id, phone_e164 UNIQUE, language, source, page_url, utm_json,
   profile_type, qualification_json, consent_text, consent_at, ip_hash,
-  created_at, last_seen_at
+  push_eligible, push_platform, push_state, fallback_channel,
+  fallback_consent, created_at, last_seen_at
 )
 
 chat_settings (
@@ -250,6 +276,7 @@ GET  /api/admin/inbox/push/deliveries
 | Tradução/rascunho LLM | ~$0,0002–$0,002 por mensagem |
 | SSE/polling | $0 |
 | Web Push VAPID/Service Worker | $0 |
+| Fallback SMS/voz (non-push iOS) | custo Telnyx por envio |
 | SaaS novo | $0 |
 
 O maior custo é o LLM; usar cache, limites e modelo barato. Sem Google Places/Searchbug/novo SaaS.
@@ -269,9 +296,9 @@ O maior custo é o LLM; usar cache, limites e modelo barato. Sem Google Places/S
 |---|---|
 | **Seg** | Spec freeze, wireframes, schema, consentimento, lista de idiomas |
 | **Ter** | `landing_contacts`, `chat_*`, `chat_settings`, APIs de sessão/mensagem, validação de telefone, rate limit |
-| **Qua** | Widget público (texto + áudio), EN default, seletor top 20, qualificação, SSE/polling, transcrição local, opt-in push pós-telefone |
-| **Qui** | Inbox Admin, tradução PT-BR, rascunho IA, envio traduzido, horário/out-of-hours, notificação visual + som, Broadcast Push + segmentos |
-| **Sex** | Segurança, testes de carga, retenção 30 d, cap $5/dia, VAPID/service worker, opt-out push, piloto admin-only; deploy após 20:00 |
+| **Qua** | Widget público (texto + áudio), EN default, seletor top 20, qualificação, SSE/polling, transcrição local, opt-in push pós-telefone, deteção iOS/PWA e guia Add to Home Screen |
+| **Qui** | Inbox Admin, tradução PT-BR, rascunho IA, envio traduzido, horário/out-of-hours, notificação visual + som, Broadcast Push + segmentos, `push_eligible`/fallback |
+| **Sex** | Segurança, testes de carga, retenção 30 d, cap $5/dia, VAPID/service worker, opt-out push, fallback SMS/voz, piloto admin-only; deploy após 20:00 |
 
 **Gate:** `CHAT_INBOX_ENABLED=0` por defeito; ativar primeiro para admin; público só depois de 48 h de piloto limpo.
 
@@ -290,6 +317,10 @@ O maior custo é o LLM; usar cache, limites e modelo barato. Sem Google Places/S
 - Nova mensagem gera badge + som no Admin (com aba visível).
 - Push opt-in só depois do telefone e num gesto do utilizador; `consent_at`/`ip_hash` guardados.
 - Opt-out push desativa imediatamente a subscrição.
+- iOS: landing PWA-ready; manifest/meta/ícones/service worker válidos.
+- iOS Safari não-standalone vê o guia Share → Add to Home Screen; não há promessa de instalação programática.
+- iOS sem PWA/permissão fica `push_eligible=false` e `fallback_channel` preenchido.
+- Segmento “non-push iOS” visível no Broadcast; SMS/voz respeita consentimento e orçamento.
 - Broadcast segmentado por cidade/nicho/idioma/perfil; preview e contagem corretos.
 - Push traduzido para o locale de cada subscrição; falha bloqueia aquele envio.
 - Nenhum telefone/PII no payload push.
@@ -312,7 +343,8 @@ O maior custo é o LLM; usar cache, limites e modelo barato. Sem Google Places/S
 5. **Notificação:** badge visual + alerta sonoro no `/admin/inbox` quando entra mensagem.
 6. **Qualificação:** Contractor / Homeowner / Other antes de migrar para a base de voz; só Contractor entra em campanhas de voz.
 7. **Push Web:** opt-in após o telefone, VAPID + Service Worker, custo $0; opt-out imediato; Broadcast segmentado no Admin.
-8. **Notificação de nova mensagem:** badge visual + som no `/admin/inbox`.
+8. **iOS:** PWA-ready, Smart Prompt para Add to Home Screen, `push_eligible` e fallback SMS/voz para non-push iOS.
+9. **Notificação de nova mensagem:** badge visual + som no `/admin/inbox`.
 
 ### Ainda por decidir na implementação
 - Modelo LLM exato (DeepSeek/GLM) e fallback.
