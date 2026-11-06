@@ -90,6 +90,33 @@ Rota: `/admin/inbox` (alias `/admin/chat`).
 - Auto-refresh 10 s + SSE.
 - **Notificação visual + alerta sonoro** quando entra nova mensagem (som só com o painel aberto e aba visível; sem autoplay bloqueado).
 - Configuração de horário: timezone, abertura/fecho por dia, mensagem fora de horário.
+- **Broadcast Push Notifications**: compositor manual, segmentação por cidade/nicho/idioma/perfil, preview e disparo.
+
+### Push Web (opt-in do visitante)
+- Após a captura do telefone, o widget pede permissão:
+  > “Stay updated on new project opportunities in your area.”
+- O pedido é feito **num gesto do utilizador**; nunca no carregamento da página.
+- Guardar em `landing_push_subscriptions`:
+  - `landing_contact_id`, `endpoint`, `p256dh`, `auth`;
+  - `locale`, `user_agent`, `consent_at`, `ip_hash`;
+  - `disabled_at` para opt-out.
+- O visitante pode desativar no widget ou no rodapé da notificação; a subscrição é desativada imediatamente.
+- iOS: push só em PWA instalada (iOS 16.4+); o widget explica isso sem bloquear o chat.
+
+### Broadcast no Admin
+- Secção “Broadcast Push” no `/admin/inbox`.
+- Operador escreve título/corpo em PT-BR (ou EN), escolhe segmento:
+  - cidade;
+  - nicho/trade;
+  - idioma;
+  - perfil Contractor/Homeowner/Other;
+  - apenas opt-in ativo.
+- Preview da contagem antes do envio; teste para o próprio admin.
+- Tradução automática para o `locale` de cada subscrição antes do envio.
+- Envio por Web Push API nativa (VAPID + Service Worker), sem OneSignal/SaaS.
+- Guardar `landing_push_campaigns` + `landing_push_deliveries` (status, HTTP, erro, clique).
+- Payload sem PII: título, corpo traduzido, URL e `tag`; o telefone nunca vai no payload.
+- Cap de tradução dentro dos $5/dia; se falhar, o envio desse idioma é bloqueado e registado — nunca sai texto no idioma errado.
 
 ### Thread
 - Mensagens originais + tradução PT-BR lado a lado ou toggle.
@@ -126,6 +153,21 @@ landing_contacts (
 chat_settings (
   id, timezone, hours_json, out_of_hours_message, auto_reply_enabled,
   updated_by, updated_at
+)
+
+landing_push_subscriptions (
+  id, landing_contact_id, endpoint UNIQUE, p256dh, auth, locale,
+  user_agent, consent_at, ip_hash, disabled_at, last_success_at, created_at
+)
+
+landing_push_campaigns (
+  id, title_source, body_source, source_lang, segment_json, status,
+  created_by, created_at, sent_at, sent_count, failed_count
+)
+
+landing_push_deliveries (
+  id, campaign_id, subscription_id, status, http_status, error,
+  clicked_at, created_at
 )
 
 chat_conversations (
@@ -170,6 +212,11 @@ POST /api/admin/inbox/{id}/reply
 POST /api/admin/inbox/{id}/draft
 POST /api/admin/inbox/{id}/status
 GET  /api/admin/inbox/stream    # SSE
+POST /api/chat/push/subscribe   # opt-in, subscription nativa
+POST /api/chat/push/unsubscribe # opt-out imediato
+POST /api/admin/inbox/push/broadcast
+GET  /api/admin/inbox/push/segments
+GET  /api/admin/inbox/push/deliveries
 ```
 
 ### Tradução
@@ -202,6 +249,7 @@ GET  /api/admin/inbox/stream    # SSE
 | Transcrição local Whisper | $0 (CPU VPS) |
 | Tradução/rascunho LLM | ~$0,0002–$0,002 por mensagem |
 | SSE/polling | $0 |
+| Web Push VAPID/Service Worker | $0 |
 | SaaS novo | $0 |
 
 O maior custo é o LLM; usar cache, limites e modelo barato. Sem Google Places/Searchbug/novo SaaS.
@@ -221,9 +269,9 @@ O maior custo é o LLM; usar cache, limites e modelo barato. Sem Google Places/S
 |---|---|
 | **Seg** | Spec freeze, wireframes, schema, consentimento, lista de idiomas |
 | **Ter** | `landing_contacts`, `chat_*`, `chat_settings`, APIs de sessão/mensagem, validação de telefone, rate limit |
-| **Qua** | Widget público (texto + áudio), EN default, seletor top 20, qualificação, SSE/polling, transcrição local |
-| **Qui** | Inbox Admin, tradução PT-BR, rascunho IA, envio traduzido, horário/out-of-hours, notificação visual + som |
-| **Sex** | Segurança, testes de carga, retenção 30 d, cap $5/dia, monitorização, piloto admin-only; deploy após 20:00 |
+| **Qua** | Widget público (texto + áudio), EN default, seletor top 20, qualificação, SSE/polling, transcrição local, opt-in push pós-telefone |
+| **Qui** | Inbox Admin, tradução PT-BR, rascunho IA, envio traduzido, horário/out-of-hours, notificação visual + som, Broadcast Push + segmentos |
+| **Sex** | Segurança, testes de carga, retenção 30 d, cap $5/dia, VAPID/service worker, opt-out push, piloto admin-only; deploy após 20:00 |
 
 **Gate:** `CHAT_INBOX_ENABLED=0` por defeito; ativar primeiro para admin; público só depois de 48 h de piloto limpo.
 
@@ -240,6 +288,11 @@ O maior custo é o LLM; usar cache, limites e modelo barato. Sem Google Places/S
 - Fora de horário: mensagem é aceite, auto-resposta no idioma do cliente, conversa aberta.
 - Admin configura timezone, horários por dia e mensagem out-of-hours.
 - Nova mensagem gera badge + som no Admin (com aba visível).
+- Push opt-in só depois do telefone e num gesto do utilizador; `consent_at`/`ip_hash` guardados.
+- Opt-out push desativa imediatamente a subscrição.
+- Broadcast segmentado por cidade/nicho/idioma/perfil; preview e contagem corretos.
+- Push traduzido para o locale de cada subscrição; falha bloqueia aquele envio.
+- Nenhum telefone/PII no payload push.
 - Qualificação Contractor/Homeowner/Other; só Contractor pode ir para voz.
 - Nenhuma mensagem é enviada sem tradução confirmada ou fallback explícito.
 - SSE entrega em <2 s; polling fallback.
@@ -258,6 +311,8 @@ O maior custo é o LLM; usar cache, limites e modelo barato. Sem Google Places/S
 4. **Áudio:** retenção **30 dias no VPS**; S3/R2 apenas no futuro.
 5. **Notificação:** badge visual + alerta sonoro no `/admin/inbox` quando entra mensagem.
 6. **Qualificação:** Contractor / Homeowner / Other antes de migrar para a base de voz; só Contractor entra em campanhas de voz.
+7. **Push Web:** opt-in após o telefone, VAPID + Service Worker, custo $0; opt-out imediato; Broadcast segmentado no Admin.
+8. **Notificação de nova mensagem:** badge visual + som no `/admin/inbox`.
 
 ### Ainda por decidir na implementação
 - Modelo LLM exato (DeepSeek/GLM) e fallback.
