@@ -2109,6 +2109,17 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Roadmap:** seg spec/schema; ter APIs/telefone; qua widget/EN/qualificação/áudio; qui inbox/tradução/rascunho/out-of-hours; sex testes/piloto/deploy após 20:00.
 - **Gate:** público só após 48 h de piloto admin limpo.
 
+### Parecer — SMS Telnyx sem LLC (2026-11-06)
+
+- **Documento completo:** `docs/SMS-TELNYX-FEASIBILITY.md`.
+- **Veredicto:** conta **VERIFIED** não substitui Toll-Free Verification nem 10DLC brand/campaign; **não há SMS de produção hoje**.
+- **Sem LLC:** TFV aceita `businessRegistrationType=SSN` + `entityType=SOLE_PROPRIETOR` (1–2 semanas); 10DLC Sole Proprietor usa últimos 4 do SSN + OTP (dias), mas fica limitado a **1 campanha/1 número** e throughput baixo.
+- **Pré-requisitos:** SSN, morada US e mobile US/CA. Sem isto, só com EIN/LLC. EIN gratuito ao IRS (sem LLC) é o caminho para standard brand.
+- **Custos:** 10DLC $0,004/parte + carrier $0,0035–$0,005; TF $0,0055/parte + carrier; 10DLC SP $4,50 brand + $15 vetting + $2/mês; número ~$1/mês. UCS-2 corta para 70 caracteres/parte.
+- **Backend:** não existe código/tabelas SMS; `voice_suppressions` serve de lista central; `telnyx_voice.webhook_authorized()` é reutilizável; DLR em `message.sent`/`message.finalized`; inbound `message.received` para STOP/HELP.
+- **Recomendação:** SMS só como fallback transacional 1:1 para opt-in do chat, 1 número 10DLC SP, cap $2/dia e 100/dia; push e voz continuam primários; **nunca** SMS para a base B2B raspada.
+- **Sem código nem deploy:** parecer docs-only; deploy das 20:00 ET inalterado.
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
