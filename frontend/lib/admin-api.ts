@@ -1891,11 +1891,14 @@ export interface VoiceLive {
     id: number;
     name: string;
     status: string;
+    city: string;
     quota_total: number;
     calls_started: number;
     next_batch_at: string | null;
     error: string | null;
     include_fallback: number;
+    start_hour_et: number;
+    call_interval_seconds: number;
   } | null;
   summary: {
     dialed: number;
@@ -1905,12 +1908,41 @@ export interface VoiceLive {
     voicemail: number;
     not_sure: number;
     optouts: number;
+    disconnected: number;
+    failed: number;
+    real_attended: number;
     avg_listen_seconds: number;
     answer_rate: number;
     human_rate: number;
     voicemail_rate: number;
     optout_rate: number;
     cost_usd: number;
+  };
+  thermometer: {
+    red: number;
+    yellow: number;
+    green: number;
+    total: number;
+    red_pct: number;
+    yellow_pct: number;
+    green_pct: number;
+    basis: string;
+    thresholds: { red: number; green: number };
+  };
+  day_cycle: {
+    city: string;
+    planned_calls: number;
+    calls_done: number;
+    calls_remaining: number;
+    start_hour_et: number;
+    started_at: string | null;
+    finished_at: string | null;
+    call_interval_seconds: number;
+    pause_every: number;
+    pause_seconds: number;
+    estimated_finish_at: string;
+    estimated_finish_earliest: string;
+    estimated_finish_latest: string;
   };
   active_calls: VoiceLiveCall[];
   recent_calls: Array<Record<string, any>>;

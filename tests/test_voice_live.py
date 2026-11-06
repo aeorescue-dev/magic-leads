@@ -103,3 +103,56 @@ def test_voice_liquidity_separa_exact_e_desconta_7d():
     assert row["available"] == 9
     assert data["exact_available"] == 9
 
+
+
+def test_live_thermometer_e_ciclo_do_dia():
+    company = _company("+12125550200", "Beta Heating")
+    campaign = voice.create_campaign(
+        name="thermo-test",
+        city="New York",
+        trade="hvac",
+        max_calls=60,
+        quota_total=60,
+        trade_plan=[{"trade": "hvac", "quota": 60}],
+    )
+    conn = voice.get_conn()
+    try:
+        conn.execute(
+            "UPDATE voice_campaigns SET calls_started=50 WHERE id=?",
+            (int(campaign["id"]),),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    for idx, (seconds, amd) in enumerate(((10, "human"), (27, "human"), (50, "not_sure"))):
+        call = voice.create_voice_call(
+            company, campaign_id=str(campaign["id"]), trade_code="hvac"
+        )
+        voice.update_voice_call(
+            call["id"],
+            status="ended",
+            answered_at=(NOW - timedelta(seconds=seconds)).isoformat(),
+            duration_seconds=seconds,
+            listen_seconds=seconds,
+            amd_result=amd,
+        )
+    voicemail = voice.create_voice_call(
+        company, campaign_id=str(campaign["id"]), trade_code="hvac"
+    )
+    voice.update_voice_call(
+        voicemail["id"],
+        status="ended",
+        answered_at=NOW.isoformat(),
+        duration_seconds=3,
+        listen_seconds=3,
+        amd_result="machine",
+    )
+    live = voice.live_dashboard(int(campaign["id"]))
+    assert live["thermometer"]["red"] == 1
+    assert live["thermometer"]["yellow"] == 1
+    assert live["thermometer"]["green"] == 1
+    assert live["thermometer"]["total"] == 3
+    assert live["day_cycle"]["planned_calls"] == 60
+    assert live["day_cycle"]["calls_done"] == 50
+    assert live["day_cycle"]["calls_remaining"] == 10
+    assert live["summary"]["optouts"] == 0

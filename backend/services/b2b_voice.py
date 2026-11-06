@@ -17,7 +17,7 @@ import os
 import re
 import sqlite3
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from typing import Any, Optional
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
@@ -2317,6 +2317,18 @@ def live_dashboard(
                 "generated_at": _iso(now),
                 "campaign": None,
                 "summary": {},
+                "thermometer": {
+                    "red": 0,
+                    "yellow": 0,
+                    "green": 0,
+                    "total": 0,
+                    "red_pct": 0,
+                    "yellow_pct": 0,
+                    "green_pct": 0,
+                    "basis": "answered_non_voicemail",
+                    "thresholds": {"red": 15, "green": 40},
+                },
+                "day_cycle": {},
                 "active_calls": [],
                 "recent_calls": [],
             }
@@ -2365,20 +2377,110 @@ def live_dashboard(
             "SUM(CASE WHEN amd_result='machine' THEN 1 ELSE 0 END) voicemail, "
             "SUM(CASE WHEN amd_result='not_sure' THEN 1 ELSE 0 END) not_sure, "
             "SUM(CASE WHEN intent='opt_out' THEN 1 ELSE 0 END) optouts, "
+            "SUM(CASE WHEN answered_at IS NULL OR amd_result='machine' THEN 1 ELSE 0 END) disconnected, "
+            "SUM(CASE WHEN hangup_cause IN ('static_tts_failed','render_failed',"
+            "'assistant_start_failed','missing_assistant') THEN 1 ELSE 0 END) failed, "
             "AVG(CASE WHEN answered_at IS NOT NULL THEN listen_seconds END) avg_listen, "
             "COALESCE(SUM(cost_cents),0) cost_cents "
             "FROM voice_calls WHERE campaign_id=? AND status<>'dry_run'",
             (cid,),
         ).fetchone()
         summary = dict(summary_row) if summary_row else {}
-        for key in ("dialed", "answered", "unanswered", "human", "voicemail", "not_sure", "optouts"):
+        for key in (
+            "dialed",
+            "answered",
+            "unanswered",
+            "human",
+            "voicemail",
+            "not_sure",
+            "optouts",
+            "disconnected",
+            "failed",
+        ):
             summary[key] = int(summary.get(key) or 0)
+        summary["real_attended"] = summary["human"] + summary["not_sure"]
         summary["avg_listen_seconds"] = round(float(summary.get("avg_listen") or 0), 1)
         summary["answer_rate"] = _rate(summary["answered"], summary["dialed"])
         summary["human_rate"] = _rate(summary["human"], summary["dialed"])
         summary["voicemail_rate"] = _rate(summary["voicemail"], summary["dialed"])
         summary["optout_rate"] = _rate(summary["optouts"], summary["dialed"])
         summary["cost_usd"] = round(int(summary.get("cost_cents") or 0) / 100.0, 2)
+
+        thermo_rows = conn.execute(
+            "SELECT listen_seconds FROM voice_calls WHERE campaign_id=? "
+            "AND status<>'dry_run' AND answered_at IS NOT NULL "
+            "AND COALESCE(amd_result,'')<>'machine'",
+            (cid,),
+        ).fetchall()
+        red = yellow = green = 0
+        for row in thermo_rows:
+            seconds = int(row["listen_seconds"] or 0)
+            if seconds < 15:
+                red += 1
+            elif seconds < 40:
+                yellow += 1
+            else:
+                green += 1
+        thermo_total = red + yellow + green
+        thermometer = {
+            "red": red,
+            "yellow": yellow,
+            "green": green,
+            "total": thermo_total,
+            "red_pct": _rate(red, thermo_total),
+            "yellow_pct": _rate(yellow, thermo_total),
+            "green_pct": _rate(green, thermo_total),
+            "basis": "answered_non_voicemail",
+            "thresholds": {"red": 15, "green": 40},
+        }
+
+        start_hour = int(campaign.get("start_hour_et") or 9)
+        interval = max(1, int(campaign.get("call_interval_seconds") or 75))
+        pause_every = max(0, int(getattr(settings, "VOICE_PAUSE_EVERY_CALLS", 25) or 0))
+        pause_seconds = max(0, int(getattr(settings, "VOICE_PAUSE_SECONDS", 600) or 0))
+        quota = int(campaign.get("quota_total") or 0)
+        done = int(campaign.get("calls_started") or 0)
+        remaining = max(0, quota - done)
+        et_tz = ZoneInfo("America/New_York")
+        finished = _parse_dt(campaign.get("finished_at"))
+        today = now.astimezone(et_tz).date()
+        scheduled_start = datetime.combine(
+            today, time(hour=start_hour), tzinfo=et_tz
+        )
+
+        def simulate(base: datetime, first_done: int, count: int, step: int) -> datetime:
+            cursor = base
+            call_no = first_done
+            for idx in range(count):
+                cursor += timedelta(seconds=step)
+                call_no += 1
+                if pause_every and call_no % pause_every == 0 and idx < count - 1:
+                    cursor += timedelta(seconds=pause_seconds)
+            return cursor
+
+        if campaign.get("status") == "completed" and finished:
+            finish_at = finished
+            earliest = latest = finished
+        else:
+            base = now if campaign.get("status") == "running" else scheduled_start
+            finish_at = simulate(base, done, remaining, interval)
+            earliest = simulate(base, done, remaining, max(1, int(interval * 0.8)))
+            latest = simulate(base, done, remaining, max(1, int(interval * 1.2)))
+        day_cycle = {
+            "city": campaign.get("city") or "",
+            "planned_calls": quota,
+            "calls_done": done,
+            "calls_remaining": remaining,
+            "start_hour_et": start_hour,
+            "started_at": campaign.get("started_at"),
+            "finished_at": campaign.get("finished_at"),
+            "call_interval_seconds": interval,
+            "pause_every": pause_every,
+            "pause_seconds": pause_seconds,
+            "estimated_finish_at": _iso(finish_at),
+            "estimated_finish_earliest": _iso(earliest),
+            "estimated_finish_latest": _iso(latest),
+        }
 
         recent_rows = conn.execute(
             "SELECT v.id, v.company_id, c.company_name, v.city, v.trade_code, "
@@ -2396,13 +2498,18 @@ def live_dashboard(
                 "id": int(campaign["id"]),
                 "name": campaign.get("name"),
                 "status": campaign.get("status"),
+                "city": campaign.get("city"),
                 "quota_total": campaign.get("quota_total"),
                 "calls_started": campaign.get("calls_started"),
                 "next_batch_at": campaign.get("next_batch_at"),
                 "error": campaign.get("error"),
                 "include_fallback": campaign.get("include_fallback"),
+                "start_hour_et": start_hour,
+                "call_interval_seconds": interval,
             },
             "summary": summary,
+            "thermometer": thermometer,
+            "day_cycle": day_cycle,
             "active_calls": active,
             "recent_calls": recent,
         }
