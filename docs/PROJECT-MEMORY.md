@@ -2178,3 +2178,13 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - VPS: `184.174.36.43` / `https://184.174.36.43.sslip.io` (TLS Caddy, uvicorn 127.0.0.1:8443).
 - Testes: `pytest tests/ -v` (CI), ruff `--select=E,F,W,I --ignore=E501`, `tsc --noEmit`.
 - Control Tower: backup diário verificado, health 15 min, digest diário.
+
+---
+
+## 7. Roadmap voz — contagem verificada por nicho em Dallas (prioridade)
+
+- **Problema:** o texto V7.4 usa `{{count}}` e só é honesto em trades com showcase exacto. Em Dallas, apenas plumbing e remodeling têm contagem exacta; os restantes usam o body city-wide sem `{{count}}`.
+- **Objectivo:** criar uma contagem verificada de oportunidades por trade/nicho em Dallas, com frescura e fonte, permitindo aplicar o texto original completo a 100% dos trades.
+- **Regras:** não usar o total city-wide (3.534) como se fosse o nicho; não relaxar o guard `count_requires_exact_scope` sem contagem verificada.
+- **Entrega:** função de contagem, cache/frescura, regra de render `count_city_verified`, testes e backtest.
+- **Prioridade:** próxima janela de produto, depois da campanha #12.
