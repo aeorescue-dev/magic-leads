@@ -751,7 +751,7 @@ def _bundle_guard(city_label: str, threshold: int) -> dict:
             "bundle": per_trade,
         }
     line = (
-        f"over {_spoken_count(total)} active home-service opportunities "
+        f"{_spoken_count(total)} active home-service opportunities "
         f"in {city_label} this week"
     )
     return {
@@ -833,7 +833,7 @@ def showcase_guard(trade_code: str, city: str = "") -> dict:
         minimum = _city_min_total()
         if city_total >= minimum:
             line = (
-                f"over {_spoken_count(city_total)} active property "
+                f"{_spoken_count(city_total)} active property "
                 f"opportunities in {city_label} this week"
             )
             return {

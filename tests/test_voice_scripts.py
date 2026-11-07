@@ -443,6 +443,8 @@ def test_guard_city_only_in_authorized_cities(monkeypatch):
     assert gc_dallas["ready"] is True
     assert gc_dallas["scope"] == "city"
     assert "property opportunities" in gc_dallas["line"]
+    assert "over over" not in gc_dallas["line"]
+    assert gc_dallas["line"].startswith("over 12,800")
     roofing_dallas = voice_scripts.showcase_guard("roofing", "Dallas")
     assert roofing_dallas["ready"] is True
     assert roofing_dallas["scope"] == "city"
