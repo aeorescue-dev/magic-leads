@@ -1658,6 +1658,87 @@ def campaign_trade_counts(campaign_id: int) -> dict[str, int]:
         conn.close()
 
 
+def _verified_trade_clause() -> str:
+    """Cláusula única de verificação de nicho.
+
+    Só aceita `company_trades` com confiança >=0.80, nunca
+    `primary_unconfirmed`, e exige licença/registo OU fonte forte
+    (`license`/`niche_key`/`site_text`). O `trade` primário de
+    `prospect_companies` deixou de ser suficiente.
+    """
+    return (
+        "EXISTS (SELECT 1 FROM company_trades ct "
+        "WHERE ct.company_id=prospect_companies.id "
+        "AND LOWER(ct.trade_code)=LOWER(?) "
+        "AND ct.confidence>=0.80 "
+        "AND COALESCE(ct.source,'')<>'primary_unconfirmed' "
+        "AND (COALESCE(TRIM(prospect_companies.license_number),'')<>'' "
+        "     OR ct.source IN ('license','niche_key','site_text')))"
+    )
+
+
+def verified_candidate_count(city: str, trade: str) -> int:
+    """Contactos 100% validados para cidade+trade (sem depender da hora)."""
+    init()
+    from . import showcase
+
+    code = showcase.normalize_trade(trade) or str(trade or "").strip()
+    if not code:
+        return 0
+    where = [
+        "status NOT IN ('do_not_call', 'invalid', 'meeting')",
+        "LENGTH(phone)=12 AND phone LIKE '+1%'",
+        "UPPER(TRIM(city))=UPPER(?)",
+        _verified_trade_clause(),
+    ]
+    conn = get_conn()
+    try:
+        return int(
+            conn.execute(
+                "SELECT COUNT(1) FROM prospect_companies WHERE "
+                + " AND ".join(where),
+                (str(city or "").strip(), code),
+            ).fetchone()[0]
+            or 0
+        )
+    finally:
+        conn.close()
+
+
+def validate_campaign_niche(campaign_id: int) -> dict:
+    """Gate duro: cada quota do trade_plan tem de ter contactos verificados."""
+    campaign = get_campaign(int(campaign_id))
+    if not campaign:
+        raise ValueError(f"campaign_not_found: {campaign_id}")
+    city = str(campaign.get("city") or "").strip()
+    raw = campaign.get("trade_plan")
+    try:
+        plan = json.loads(raw) if raw else []
+    except (TypeError, ValueError, json.JSONDecodeError):
+        plan = []
+    if not plan:
+        plan = [
+            {
+                "trade": str(campaign.get("trade") or "").strip(),
+                "quota": int(campaign.get("quota_total") or 0),
+            }
+        ]
+    deficits: list[str] = []
+    checked: list[dict] = []
+    for item in plan:
+        trade = str(item.get("trade") or "").strip()
+        quota = max(0, int(item.get("quota") or 0))
+        if not trade or quota <= 0:
+            continue
+        available = verified_candidate_count(city, trade)
+        checked.append({"trade": trade, "quota": quota, "verified": available})
+        if available < quota:
+            deficits.append(f"{trade}: quota {quota} > verificados {available}")
+    if deficits:
+        raise ValueError("niche_gate: " + "; ".join(deficits))
+    return {"ok": True, "campaign_id": int(campaign_id), "city": city, "trades": checked}
+
+
 def campaign_candidates(
     campaign_id: int,
     city: str = "",
@@ -1666,7 +1747,10 @@ def campaign_candidates(
     include_fallback: bool = True,
 ) -> list[dict]:
     init()
-    where = ["status NOT IN ('do_not_call', 'invalid', 'meeting')"]
+    where = [
+        "status NOT IN ('do_not_call', 'invalid', 'meeting')",
+        "LENGTH(phone)=12 AND phone LIKE '+1%'",
+    ]
     params: list[Any] = []
     if city.strip():
         where.append("UPPER(TRIM(city))=UPPER(?)")
@@ -1675,13 +1759,8 @@ def campaign_candidates(
         # Multi-label: o campo primário continua a valer, mas uma empresa
         # reclassificada (ex.: GC que também é plumbing) entra pelo sinal com
         # confiança >=0.80. O EXISTS evita duplicar a empresa no lote.
-        where.append(
-            "(LOWER(TRIM(COALESCE(trade,'')))=LOWER(?) OR EXISTS ("
-            "SELECT 1 FROM company_trades ct WHERE ct.company_id="
-            "prospect_companies.id AND LOWER(ct.trade_code)=LOWER(?) "
-            "AND ct.confidence>=0.80))"
-        )
-        params.extend([trade.strip(), trade.strip()])
+        where.append(_verified_trade_clause())
+        params.append(trade.strip())
     where.append(
         "id NOT IN (SELECT company_id FROM voice_calls WHERE campaign_id=?)"
     )
@@ -2653,6 +2732,8 @@ def _infer_trade(name: str, niche_key: str = "") -> str:
             return code
     lowered = (name or "").lower()
     keywords = (
+        ("general contractor", "general_contractor"),
+        ("general contractors", "general_contractor"),
         ("elevator", "elevator"),
         ("sign", "signage"),
         ("electric", "electrical"),
@@ -2678,7 +2759,10 @@ def _infer_trade(name: str, niche_key: str = "") -> str:
     for token, code in keywords:
         if token in lowered:
             return code
-    return "general_contractor"
+    # Sem sinal explícito, NÃO inventar general_contractor. A empresa fica
+    # unclassified e só entra em campanha se `company_trades` a promover com
+    # confiança >=0.80 e licença/fonte verificada.
+    return ""
 
 
 def sync_company_trades(limit: int = 0, min_confidence: float = 0.0) -> dict:

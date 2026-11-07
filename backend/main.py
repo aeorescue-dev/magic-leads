@@ -1683,6 +1683,26 @@ async def _resume_due_voice_campaigns() -> list[int]:
                 )
             )
             continue
+        try:
+            await anyio.to_thread.run_sync(
+                b2b_voice.validate_campaign_niche, campaign_id
+            )
+        except ValueError as exc:
+            await anyio.to_thread.run_sync(
+                lambda cid=campaign_id, why=str(exc): b2b_voice.update_campaign(
+                    cid,
+                    status="stopped",
+                    next_batch_at=None,
+                    finished_at=datetime.now(timezone.utc).isoformat(),
+                    error=why[:300],
+                )
+            )
+            logger.warning(
+                "[VOICE] campanha %s bloqueada pelo niche gate: %s",
+                campaign_id,
+                exc,
+            )
+            continue
         await anyio.to_thread.run_sync(
             lambda cid=campaign_id: b2b_voice.update_campaign(
                 cid, status="running", next_batch_at=None, error=None
@@ -3544,6 +3564,21 @@ async def admin_voice_campaign_start(
         batch_plan,
         trade_plan,
     )
+    try:
+        await anyio.to_thread.run_sync(
+            b2b_voice.validate_campaign_niche, int(campaign["id"])
+        )
+    except ValueError as exc:
+        await anyio.to_thread.run_sync(
+            lambda cid=int(campaign["id"]), why=str(exc): b2b_voice.update_campaign(
+                cid,
+                status="stopped",
+                next_batch_at=None,
+                finished_at=datetime.now(timezone.utc).isoformat(),
+                error=why[:300],
+            )
+        )
+        raise HTTPException(status_code=409, detail=str(exc))
     _launch_voice_campaign(int(campaign["id"]))
     return {"ok": True, "campaign": campaign}
 

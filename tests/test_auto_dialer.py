@@ -100,12 +100,13 @@ def _import_company(
 ) -> None:
     csv_text = (
         "company_name,contact_name,phone,email,city,state,license_status,trade,"
-        "permit_count\n"
+        "license_number,permit_count\n"
         f"Auto {city} Co,Test,{phone},{phone[1:]}@example.com,{city},{state},"
-        f"active,{trade},7\n"
+        f"active,{trade},LIC-{phone[1:]},7\n"
     )
     voice.import_licenses_csv(csv_text, source_name="pytest-auto")
     voice.check_dnc(phone, listed=False, source="pytest")
+    voice.sync_company_trades()
 
 
 def test_auto_dialer_dry_run_dispara_chamadas_sem_vitrine_precoce():
@@ -334,6 +335,9 @@ def test_auto_dialer_pausa_fora_da_janela_sem_saltar(monkeypatch):
 def test_retoma_campanha_pausada_vencida(monkeypatch):
     import backend.main as main_module
 
+    _import_company("+16175550135", "Boston", "MA", "Roofing")
+    _import_company("+16175550136", "Boston", "MA", "Roofing")
+    _import_company("+16175550137", "Boston", "MA", "Roofing")
     campaign = voice.create_campaign(
         "Retoma", "Boston", "Roofing", 3, 0, 3, 3, True, False
     )
