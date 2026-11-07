@@ -15,11 +15,15 @@ import re
 from datetime import datetime, timezone
 from typing import Iterable, Optional
 
-import httpx
-
 from ..utils.logger import logger
+from . import self_healing
 from .contractor_entities import is_usable_company_name
 from .contractor_ingest import record_entities
+from .resilient_fetch import ResilientFetcher
+
+# Ultimo estado de fetch por fonte: usado para gravar `ingestion_runs` com
+# success/partial/failed em vez de mascarar dados parciais como sucesso.
+_FETCH_STATUS: dict[str, str] = {}
 
 NYC_DCWP_URL = "https://data.cityofnewyork.us/resource/w7w3-xahh.json"
 NYC_LICENSE_SOURCE = "nyc_dcwp"
@@ -157,6 +161,31 @@ def extract_nyc_licenses(rows: Iterable[dict]) -> list[dict]:
     return out
 
 
+def _mark_fetch(source: str, status: str) -> None:
+    previous = _FETCH_STATUS.get(source)
+    if previous == "failed":
+        return
+    if previous == "partial" and status != "failed":
+        return
+    _FETCH_STATUS[source] = status
+
+
+def _record_ingest(
+    source: str, rows: int, records: int, result: dict, started: str
+) -> None:
+    status = _FETCH_STATUS.get(source, "success")
+    self_healing.record_ingestion_run(
+        source,
+        status,
+        rows_fetched=rows,
+        rows_parsed=records,
+        rows_upserted=int(result.get("saved") or 0),
+        error_code=None if status == "success" else "partial_fetch",
+        error_detail=None if status == "success" else f"fetch status={status}",
+        started_at=started,
+    )
+
+
 async def fetch_nyc_licenses(limit: int = 5000) -> list[dict]:
     """Licencas ativas (paginado) direto do Socrata, sem chave.
 
@@ -167,29 +196,33 @@ async def fetch_nyc_licenses(limit: int = 5000) -> list[dict]:
     page = 5000
     out: list[dict] = []
     offset = 0
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            while len(out) < limit:
-                params = {
-                    "$select": NYC_SELECT,
-                    "$where": NYC_WHERE,
-                    "$order": "license_creation_date DESC",
-                    "$limit": str(min(page, limit - len(out))),
-                    "$offset": str(offset),
-                }
-                resp = await client.get(NYC_DCWP_URL, params=params)
-                if resp.status_code != 200:
-                    logger.warning("[LICENSES] NYC HTTP %s", resp.status_code)
-                    break
-                data = resp.json()
-                if not isinstance(data, list) or not data:
-                    break
-                out.extend(data)
-                if len(data) < page:
-                    break
-                offset += len(data)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("[LICENSES] NYC fetch falhou: %s", exc)
+    fetcher = ResilientFetcher(NYC_LICENSE_SOURCE)
+    _FETCH_STATUS.pop(NYC_LICENSE_SOURCE, None)
+    while len(out) < limit:
+        params = {
+            "$select": NYC_SELECT,
+            "$where": NYC_WHERE,
+            "$order": "license_creation_date DESC",
+            "$limit": str(min(page, limit - len(out))),
+            "$offset": str(offset),
+        }
+        result = await fetcher.get_json(NYC_DCWP_URL, params=params)
+        if not result.ok:
+            logger.warning(
+                "[LICENSES] NYC HTTP %s (%s)",
+                result.http_status,
+                result.error_class,
+            )
+            _mark_fetch(NYC_LICENSE_SOURCE, "partial" if out else "failed")
+            break
+        data = result.data
+        if not isinstance(data, list) or not data:
+            break
+        out.extend(data)
+        if len(data) < page:
+            break
+        offset += len(data)
+    _mark_fetch(NYC_LICENSE_SOURCE, "success")
     return out
 
 
@@ -243,40 +276,45 @@ async def fetch_nyc_dob_licenses(limit: int = 5000) -> list[dict]:
     page = 5000
     out: list[dict] = []
     offset = 0
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            while len(out) < limit:
-                params = {
-                    "$select": NYC_DOB_SELECT,
-                    "$where": NYC_DOB_WHERE,
-                    "$order": "license_number DESC",
-                    "$limit": str(min(page, limit - len(out))),
-                    "$offset": str(offset),
-                }
-                resp = await client.get(NYC_DOB_URL, params=params)
-                if resp.status_code != 200:
-                    logger.warning(
-                        "[LICENSES] DOB HTTP %s", resp.status_code
-                    )
-                    break
-                data = resp.json()
-                if not isinstance(data, list) or not data:
-                    break
-                out.extend(data)
-                if len(data) < page:
-                    break
-                offset += len(data)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("[LICENSES] DOB fetch falhou: %s", exc)
+    source = "nyc_dob_licenses"
+    fetcher = ResilientFetcher(source)
+    _FETCH_STATUS.pop(source, None)
+    while len(out) < limit:
+        params = {
+            "$select": NYC_DOB_SELECT,
+            "$where": NYC_DOB_WHERE,
+            "$order": "license_number DESC",
+            "$limit": str(min(page, limit - len(out))),
+            "$offset": str(offset),
+        }
+        result = await fetcher.get_json(NYC_DOB_URL, params=params)
+        if not result.ok:
+            logger.warning(
+                "[LICENSES] DOB HTTP %s (%s)",
+                result.http_status,
+                result.error_class,
+            )
+            _mark_fetch(source, "partial" if out else "failed")
+            break
+        data = result.data
+        if not isinstance(data, list) or not data:
+            break
+        out.extend(data)
+        if len(data) < page:
+            break
+        offset += len(data)
+    _mark_fetch(source, "success")
     return out
 
 
 async def ingest_nyc_dob_licenses(limit: int = 5000) -> dict:
+    started = datetime.now(timezone.utc).isoformat()
     rows = await fetch_nyc_dob_licenses(limit)
     records = extract_nyc_dob_licenses(rows)
     result = await record_entities(records, max_records=max(limit, len(records)))
     result["fetched"] = len(rows)
     result["extracted"] = len(records)
+    _record_ingest("nyc_dob_licenses", len(rows), len(records), result, started)
     logger.info(
         "[LICENSES] DOB: fetched=%s extraidas=%s guardadas=%s",
         len(rows),
@@ -333,40 +371,47 @@ async def fetch_dsny_trade_waste(limit: int = 5000) -> list[dict]:
         + ",".join(f"'{name}'" for name in NYC_BOROUGHS)
         + ")"
     )
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            while len(out) < limit:
-                params = {
-                    "$select": DSNY_TRADE_WASTE_SELECT,
-                    "$where": where,
-                    "$order": "account_name ASC",
-                    "$limit": str(min(page, limit - len(out))),
-                    "$offset": str(offset),
-                }
-                resp = await client.get(DSNY_TRADE_WASTE_URL, params=params)
-                if resp.status_code != 200:
-                    logger.warning(
-                        "[LICENSES] DSNY HTTP %s", resp.status_code
-                    )
-                    break
-                data = resp.json()
-                if not isinstance(data, list) or not data:
-                    break
-                out.extend(data)
-                if len(data) < page:
-                    break
-                offset += len(data)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("[LICENSES] DSNY fetch falhou: %s", exc)
+    source = DSNY_TRADE_WASTE_SOURCE
+    fetcher = ResilientFetcher(source)
+    _FETCH_STATUS.pop(source, None)
+    while len(out) < limit:
+        params = {
+            "$select": DSNY_TRADE_WASTE_SELECT,
+            "$where": where,
+            "$order": "account_name ASC",
+            "$limit": str(min(page, limit - len(out))),
+            "$offset": str(offset),
+        }
+        result = await fetcher.get_json(DSNY_TRADE_WASTE_URL, params=params)
+        if not result.ok:
+            logger.warning(
+                "[LICENSES] DSNY HTTP %s (%s)",
+                result.http_status,
+                result.error_class,
+            )
+            _mark_fetch(source, "partial" if out else "failed")
+            break
+        data = result.data
+        if not isinstance(data, list) or not data:
+            break
+        out.extend(data)
+        if len(data) < page:
+            break
+        offset += len(data)
+    _mark_fetch(source, "success")
     return out
 
 
 async def ingest_dsny_trade_waste(limit: int = 5000) -> dict:
+    started = datetime.now(timezone.utc).isoformat()
     rows = await fetch_dsny_trade_waste(limit)
     records = extract_dsny_trade_waste(rows)
     result = await record_entities(records, max_records=max(limit, len(records)))
     result["fetched"] = len(rows)
     result["extracted"] = len(records)
+    _record_ingest(
+        DSNY_TRADE_WASTE_SOURCE, len(rows), len(records), result, started
+    )
     logger.info(
         "[LICENSES] DSNY: fetched=%s extraidas=%s guardadas=%s",
         len(rows),
@@ -433,25 +478,33 @@ async def fetch_tdlr_file(filename: str) -> list[dict]:
     import csv
     import io
 
-    try:
-        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
-            resp = await client.get(TDLR_BASE + filename)
-        if resp.status_code != 200:
-            logger.warning("[LICENSES] TDLR %s HTTP %s", filename, resp.status_code)
-            return []
-        text = resp.content.decode("utf-8-sig", errors="replace")
-        return list(csv.DictReader(io.StringIO(text)))
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("[LICENSES] TDLR %s falhou: %s", filename, exc)
+    result = await ResilientFetcher(
+        "tdlr_tx", retries=4, timeout=120.0
+    ).get_text(TDLR_BASE + filename)
+    if not result.ok:
+        logger.warning(
+            "[LICENSES] TDLR %s HTTP %s (%s)",
+            filename,
+            result.http_status,
+            result.error_class,
+        )
         return []
+    text = str(result.data or "").lstrip("\ufeff")
+    return list(csv.DictReader(io.StringIO(text)))
 
 
 async def ingest_tdlr(limit: int = 12000) -> dict:
     """Ingere os ficheiros de contractor do TDLR e filtra o metro de Dallas."""
+    started = datetime.now(timezone.utc).isoformat()
     records: list[dict] = []
     per_file: dict[str, int] = {}
+    total_rows = 0
+    failed_files = 0
     for label, filename in TDLR_FILES.items():
         rows = await fetch_tdlr_file(filename)
+        total_rows += len(rows)
+        if not rows:
+            failed_files += 1
         extracted = extract_tdlr_licenses(
             rows,
             niche_key=TDLR_TRADE.get(label, ""),
@@ -488,6 +541,13 @@ async def ingest_tdlr(limit: int = 12000) -> dict:
         conn.close()
     result["extracted"] = len(records)
     result["per_file"] = per_file
+    if failed_files == 0:
+        _FETCH_STATUS["tdlr_tx"] = "success"
+    elif total_rows:
+        _FETCH_STATUS["tdlr_tx"] = "partial"
+    else:
+        _FETCH_STATUS["tdlr_tx"] = "failed"
+    _record_ingest("tdlr_tx", total_rows, len(records), result, started)
     logger.info(
         "[LICENSES] TDLR: extraidas=%s guardadas=%s", len(records), result.get("saved")
     )
@@ -524,25 +584,34 @@ def extract_il_roofing(rows: Iterable[dict]) -> list[dict]:
 
 
 async def ingest_il_roofing(limit: int = 5000) -> dict:
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.get(IL_LICENSE_URL, params={
-                "$select": "business_name,businessdba,first_name,last_name,"
-                           "license_number,zip,city",
-                "$where": IL_ROOFING_WHERE,
-                "$limit": str(max(1, min(limit, 50000))),
-            })
-        if resp.status_code != 200:
-            logger.warning("[LICENSES] IL IDFPR HTTP %s", resp.status_code)
-            return {"status": "http_error", "code": resp.status_code}
-        rows = resp.json()
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("[LICENSES] IL IDFPR falhou: %s", exc)
-        return {"status": "error"}
+    source = "il_idfpr"
+    started = datetime.now(timezone.utc).isoformat()
+    _FETCH_STATUS.pop(source, None)
+    fetched = await ResilientFetcher(source).get_json(
+        IL_LICENSE_URL,
+        params={
+            "$select": "business_name,businessdba,first_name,last_name,"
+            "license_number,zip,city",
+            "$where": IL_ROOFING_WHERE,
+            "$limit": str(max(1, min(limit, 50000))),
+        },
+    )
+    if not fetched.ok:
+        logger.warning(
+            "[LICENSES] IL IDFPR HTTP %s (%s)",
+            fetched.http_status,
+            fetched.error_class,
+        )
+        _mark_fetch(source, "failed")
+        result = {"status": "http_error", "code": fetched.http_status, "saved": 0}
+        _record_ingest(source, 0, 0, result, started)
+        return result
+    rows = fetched.data
     records = extract_il_roofing(rows if isinstance(rows, list) else [])
     result = await record_entities(records, max_records=max(limit, len(records)))
     result["fetched"] = len(rows) if isinstance(rows, list) else 0
     result["extracted"] = len(records)
+    _record_ingest(source, result["fetched"], len(records), result, started)
     logger.info(
         "[LICENSES] IL roofing: fetched=%s extraidas=%s guardadas=%s",
         result["fetched"], len(records), result.get("saved"),
@@ -578,24 +647,33 @@ def extract_chicago_licenses(rows: Iterable[dict]) -> list[dict]:
 
 
 async def ingest_chicago_licenses(limit: int = 2000) -> dict:
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.get(CHI_LICENSE_URL, params={
-                "$select": "legal_name,doing_business_as_name,license_number",
-                "$where": CHI_WHERE,
-                "$limit": str(max(1, min(limit, 20000))),
-            })
-        if resp.status_code != 200:
-            logger.warning("[LICENSES] Chicago HTTP %s", resp.status_code)
-            return {"status": "http_error", "code": resp.status_code}
-        rows = resp.json()
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("[LICENSES] Chicago falhou: %s", exc)
-        return {"status": "error"}
+    source = "chi_business_license"
+    started = datetime.now(timezone.utc).isoformat()
+    _FETCH_STATUS.pop(source, None)
+    fetched = await ResilientFetcher(source).get_json(
+        CHI_LICENSE_URL,
+        params={
+            "$select": "legal_name,doing_business_as_name,license_number",
+            "$where": CHI_WHERE,
+            "$limit": str(max(1, min(limit, 20000))),
+        },
+    )
+    if not fetched.ok:
+        logger.warning(
+            "[LICENSES] Chicago HTTP %s (%s)",
+            fetched.http_status,
+            fetched.error_class,
+        )
+        _mark_fetch(source, "failed")
+        result = {"status": "http_error", "code": fetched.http_status, "saved": 0}
+        _record_ingest(source, 0, 0, result, started)
+        return result
+    rows = fetched.data
     records = extract_chicago_licenses(rows if isinstance(rows, list) else [])
     result = await record_entities(records, max_records=max(limit, len(records)))
     result["fetched"] = len(rows) if isinstance(rows, list) else 0
     result["extracted"] = len(records)
+    _record_ingest(source, result["fetched"], len(records), result, started)
     logger.info(
         "[LICENSES] Chicago: fetched=%s extraidas=%s guardadas=%s",
         result["fetched"], len(records), result.get("saved"),
@@ -605,11 +683,13 @@ async def ingest_chicago_licenses(limit: int = 2000) -> dict:
 
 async def ingest_nyc_licenses(limit: int = 2000) -> dict:
     """Busca + grava. Idempotente; devolve {fetched, extracted, saved, ...}."""
+    started = datetime.now(timezone.utc).isoformat()
     rows = await fetch_nyc_licenses(limit=limit)
     records = extract_nyc_licenses(rows)
     result = await record_entities(records, max_records=max(limit, len(records)))
     result["fetched"] = len(rows)
     result["extracted"] = len(records)
+    _record_ingest("nyc_dcwp", len(rows), len(records), result, started)
     logger.info(
         "[LICENSES] NYC: fetched=%s extracted=%s saved=%s",
         result["fetched"], result["extracted"], result.get("saved"),

@@ -21,6 +21,7 @@ from . import (
     licensing_sources,
     osm_extract,
     owner_email,
+    scoring_v2,
     self_healing,
     timeutil,
 )
@@ -41,6 +42,8 @@ _last_overpass_at = 0.0
 _run_lock = asyncio.Lock()
 _source_lock = asyncio.Lock()
 _ticks = [0]
+_last_self_heal = [0.0]
+SELF_HEAL_INTERVAL = 900  # 15 min
 _discovery = CompanyDiscovery()
 SOURCE_INTERVAL_DAYS = 7
 LICENSES_PER_RUN = 2000
@@ -385,6 +388,20 @@ async def scheduler_loop() -> None:
             await asyncio.sleep(TICK_SECONDS)
             await run_once()
             asyncio.create_task(_ingest_sources(datetime.now(timezone.utc)))
+            if time.monotonic() - _last_self_heal[0] >= SELF_HEAL_INTERVAL:
+                _last_self_heal[0] = time.monotonic()
+                try:
+                    heal = await self_healing.run_incremental()
+                    score = await asyncio.to_thread(
+                        scoring_v2.recompute_if_changed
+                    )
+                    logger.info(
+                        "[SELF-HEAL] tick=%s score=%s",
+                        heal,
+                        score,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("[SELF-HEAL] tick falhou: %s", exc)
             _ticks[0] += 1
             if _ticks[0] % 30 == 0:
                 await db_service.checkpoint()
