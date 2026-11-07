@@ -2144,6 +2144,17 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Prior art:** CMT/Sfara, Samsara/Geotab/Motive, Nexar, Waze/Google, CCC/Mitchell/Solera, RepairPal; a combinação é nova, os componentes não.
 - **Gate 90 dias:** lift ≥1,5×; 3 LOIs; bid coverage ≥30%; 1 parceiro com LOI. Sem código antes do parecer jurídico e LOIs.
 
+### Estudo v3 — Inovação disruptiva automóvel (2026-11-06)
+
+- **Documento completo:** `docs/DISRUPTIVE-AUTOMOTIVE-INNOVATION.md`.
+- **Tese:** o maior boom B2B de 60 dias é recuperar receita que as body shops já ganharam mas não documentam — não detetar acidentes.
+- **#1 Claim Completeness AI:** auditoria de estimativas vs. procedimentos OEM, geração de supplement e tracking; **$1.023/estimativa** omitida; 63% dos reparos exigem supplement; fee 15–20% do recuperado.
+- **#2 Calibration & Sublet Exchange:** rede B2B de calibração ADAS e sublet especializado; 68% dos veículos ADAS exigem recalibração após para-brisas; take rate 15–20%.
+- **#3 Collision Repair Data Cooperative:** benchmark anónimo de labor rates, ciclo, negação e underpayment por seguradora/ZIP; k≥10; venda a distribuidores/PE/associações.
+- **Vantagem:** B2B, sem PII de consumidor, sem DPPA/TCPA, sem dependência de CCC/Mitchell/Seguradoras/DMS/telemática.
+- **60 dias:** #1 com 2 engenheiros + expert de colisão + sales/ops; 10 design partners, 50 ROs, MVP, 20 shops pagantes.
+- **Sequência:** #1 (0–60 d) → #2 (60–120 d) → #3 (6–12 m).
+
 ### P1 (a seguir)
 - Acumular ≥30 amostras por segmento para a percentagem começar a aparecer.
 - Ampliar a amostra com as consultas reais (hoje ~65 chamadas no histórico).
