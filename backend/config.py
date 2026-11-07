@@ -62,6 +62,8 @@ class Settings(BaseSettings):
     # "premium" ($0.0065/chamada), "standard" ($0.002/chamada) ou "disabled".
     TELNYX_AMD_MODE: str = "standard"
     TELNYX_STATIC_GATHER_TIMEOUT_MS: int = 10000
+    # Test call: nao desligar enquanto o utilizador ouve a copy e testa a tecla 2.
+    TELNYX_TEST_GATHER_TIMEOUT_MS: int = 120000
     # Segundo DID para dividir o volume e respeitar 50/dia por número.
     TELNYX_FROM_NUMBER_SECONDARY: str = ""
     # Mapa JSON cidade->DID, ex.: {"dallas":"+14699607326"}.

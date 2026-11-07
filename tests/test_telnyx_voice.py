@@ -885,3 +885,172 @@ def test_answered_envia_script_renderizado_ao_assistant(monkeypatch):
     assert "Do not ask for an email" in sent["instructions"]
     assert "send_showcase_link" not in sent["instructions"]
 
+
+def test_test_call_amd_machine_nao_desliga():
+    company = _seed_company()
+    created = voice.create_voice_call(
+        company,
+        provider="pytest",
+        campaign_id="test_call",
+        trade_code="roofing",
+    )
+    call_id = created["id"]
+    voice.update_voice_call(
+        call_id, provider_call_id="v3:test-amd", status="assistant_pending"
+    )
+    state = base64.b64encode(
+        json.dumps({"voice_call_id": call_id, "company_id": company["id"]}).encode()
+    ).decode()
+    actions: list[str] = []
+
+    def fake_action(call_control_id, action, payload):
+        actions.append(action)
+        return {"ok": True}
+
+    original = telnyx_voice._call_action
+    telnyx_voice._call_action = fake_action
+    try:
+        result = telnyx_voice.handle_webhook(
+            {
+                "data": {
+                    "event_type": "call.machine.premium.detection.ended",
+                    "payload": {
+                        "client_state": state,
+                        "call_control_id": "v3:test-amd",
+                        "result": "machine",
+                    },
+                }
+            }
+        )
+    finally:
+        telnyx_voice._call_action = original
+    assert result["action"] == "amd_test_call_ignored"
+    assert actions == []
+    current = voice.get_voice_call(call_id)
+    assert current["intent"] != "voicemail"
+    assert current["hangup_cause"] is None
+
+
+def test_test_call_answered_arranca_gather_imediatamente(monkeypatch):
+    monkeypatch.setattr(telnyx_voice.settings, "VOICE_STAGING_MODE", False)
+    monkeypatch.setattr(telnyx_voice.settings, "TELNYX_API_KEY", "key")
+    monkeypatch.setattr(telnyx_voice.settings, "TELNYX_CONNECTION_ID", "conn")
+    monkeypatch.setattr(telnyx_voice.settings, "TELNYX_FROM_NUMBER", "+16175550000")
+    monkeypatch.setattr(telnyx_voice.settings, "VOICE_SCRIPT_MODE", "static")
+    company = _seed_company()
+    created = voice.create_voice_call(
+        company,
+        provider="pytest",
+        campaign_id="test_call",
+        trade_code="roofing",
+    )
+    call_id = created["id"]
+    voice.update_voice_call(call_id, provider_call_id="v3:test-answered")
+    state = base64.b64encode(
+        json.dumps({"voice_call_id": call_id, "company_id": company["id"]}).encode()
+    ).decode()
+    actions: list[str] = []
+
+    def fake_action(call_control_id, action, payload):
+        actions.append(action)
+        return {"ok": True}
+
+    original = telnyx_voice._call_action
+    telnyx_voice._call_action = fake_action
+    try:
+        result = telnyx_voice.handle_webhook(
+            {
+                "data": {
+                    "event_type": "call.answered",
+                    "payload": {
+                        "client_state": state,
+                        "call_control_id": "v3:test-answered",
+                    },
+                }
+            }
+        )
+    finally:
+        telnyx_voice._call_action = original
+    assert result["action"] == "answered_test_call"
+    assert result["waiting_for_amd"] is False
+    assert "gather_using_speak" in actions
+    assert voice.get_voice_call(call_id)["status"] == "in_call"
+
+
+def test_test_call_gather_sem_digitos_nao_desliga():
+    company = _seed_company()
+    created = voice.create_voice_call(
+        company,
+        provider="pytest",
+        campaign_id="test_call",
+        trade_code="roofing",
+    )
+    call_id = created["id"]
+    voice.update_voice_call(
+        call_id, provider_call_id="v3:test-gather", status="in_call"
+    )
+    state = base64.b64encode(
+        json.dumps({"voice_call_id": call_id, "company_id": company["id"]}).encode()
+    ).decode()
+    actions: list[str] = []
+
+    def fake_action(call_control_id, action, payload):
+        actions.append(action)
+        return {"ok": True}
+
+    original = telnyx_voice._call_action
+    telnyx_voice._call_action = fake_action
+    try:
+        result = telnyx_voice.handle_webhook(
+            {
+                "data": {
+                    "event_type": "call.gather.ended",
+                    "payload": {
+                        "client_state": state,
+                        "call_control_id": "v3:test-gather",
+                        "digits": "",
+                    },
+                }
+            }
+        )
+    finally:
+        telnyx_voice._call_action = original
+    assert result["action"] == "gather_ended_test_keepalive"
+    assert "hangup" not in actions
+
+
+def test_test_call_speak_ended_nao_desliga():
+    company = _seed_company()
+    created = voice.create_voice_call(
+        company,
+        provider="pytest",
+        campaign_id="test_call",
+        trade_code="roofing",
+    )
+    call_id = created["id"]
+    voice.update_voice_call(
+        call_id, provider_call_id="v3:test-speak", status="in_call"
+    )
+    actions: list[str] = []
+
+    def fake_action(call_control_id, action, payload):
+        actions.append(action)
+        return {"ok": True}
+
+    original = telnyx_voice._call_action
+    telnyx_voice._call_action = fake_action
+    try:
+        result = telnyx_voice.handle_webhook(
+            {
+                "data": {
+                    "event_type": "call.speak.ended",
+                    "payload": {
+                        "call_control_id": "v3:test-speak",
+                    },
+                }
+            }
+        )
+    finally:
+        telnyx_voice._call_action = original
+    assert result["action"] == "media_ended_test_keepalive"
+    assert "hangup" not in actions

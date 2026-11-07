@@ -255,7 +255,11 @@ def create_call(
         "client_state": state,
         "timeout_secs": 30,
     }
-    if amd_mode != "disabled":
+    # O Test Call e' uma chamada de escuta: nao usar AMD. Um telemovel com
+    # voicemail e' classificado como "machine" e o webhook desligava a chamada
+    # 2 s depois de atender. O teste arranca o script no call.answered.
+    is_test_call = str(campaign_id or "") == "test_call"
+    if amd_mode != "disabled" and not is_test_call:
         payload["answering_machine_detection"] = amd_wire
         if amd_mode == "premium":
             payload["answering_machine_detection_config"] = {
@@ -412,6 +416,18 @@ def hangup_call(call_control_id: str) -> dict:
     return _call_action(call_control_id, "hangup", {})
 
 
+def _schedule_hangup(call_control_id: str, delay_seconds: float = 5) -> None:
+    """Encerra depois de dar tempo ao ultimo TTS (test call / tecla 2)."""
+    if not call_control_id:
+        return
+
+    def _run() -> None:
+        time.sleep(delay_seconds)
+        hangup_call(call_control_id)
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
 def fallback_audio_url() -> str:
     """URL publica do MP3 deterministico do fallback (voz Callie)."""
     configured = str(
@@ -558,10 +574,14 @@ def _start_static_script_for_call(
         return {"ok": False, "reason": "render_failed", "detail": str(exc)[:200]}
     greeting = str(rendered.get("greeting") or "").strip()
     voice = str(rendered.get("voice_id") or "").strip() or "female"
-    timeout_ms = max(
-        1000,
-        int(getattr(settings, "TELNYX_STATIC_GATHER_TIMEOUT_MS", 10000) or 10000),
+    timeout_default = getattr(
+        settings, "TELNYX_STATIC_GATHER_TIMEOUT_MS", 10000
     )
+    if str(current.get("campaign_id") or "") == "test_call":
+        timeout_default = getattr(
+            settings, "TELNYX_TEST_GATHER_TIMEOUT_MS", 120000
+        )
+    timeout_ms = max(1000, int(timeout_default or 10000))
     result = _call_action(
         call_control_id,
         "gather_using_speak",
@@ -676,6 +696,21 @@ def handle_webhook(payload: dict) -> dict:
             found = b2b_voice.get_voice_call_by_provider_id(call_control_id)
             if found:
                 voice_call_id = found["id"]
+        current = (
+            b2b_voice.get_voice_call(voice_call_id) if voice_call_id else {}
+        ) or {}
+        if str(current.get("campaign_id") or "") == "test_call":
+            # Teste de escuta: AMD pode marcar um telemovel como maquina.
+            # Nunca desligar o teste por causa disso.
+            if voice_call_id:
+                b2b_voice.update_voice_call(voice_call_id, amd_result=result)
+            return {
+                "ok": True,
+                "action": "amd_test_call_ignored",
+                "voice_call_id": voice_call_id,
+                "result": result,
+                "event_type": event_type,
+            }
         is_machine = (
             result in {"machine", "fax_detected"}
             or "beep" in result
@@ -734,12 +769,31 @@ def handle_webhook(payload: dict) -> dict:
             )
             if not speak.get("ok"):
                 hangup_call(call_control_id)
+            else:
+                current_call = b2b_voice.get_voice_call(voice_call_id) or {}
+                if (
+                    str(current_call.get("campaign_id") or "") == "test_call"
+                    and str(current_call.get("status") or "") != "dry_run"
+                ):
+                    # Tecla 2 termina o teste depois do "Goodbye".
+                    _schedule_hangup(call_control_id, 5)
             return {
                 "ok": True,
                 "action": "gather_opt_out",
                 "voice_call_id": voice_call_id,
                 "digits": digits,
             }
+        if voice_call_id:
+            current_call = b2b_voice.get_voice_call(voice_call_id) or {}
+            if str(current_call.get("campaign_id") or "") == "test_call":
+                # Test call: o gather pode terminar sem digitos. Nao desligar
+                # a linha; o utilizador ainda pode ouvir/terminar o teste.
+                return {
+                    "ok": True,
+                    "action": "gather_ended_test_keepalive",
+                    "voice_call_id": voice_call_id,
+                    "digits": digits,
+                }
         if call_control_id:
             hangup_call(call_control_id)
         return {
@@ -781,6 +835,17 @@ def handle_webhook(payload: dict) -> dict:
             found = b2b_voice.get_voice_call_by_provider_id(call_control_id)
             if found:
                 voice_call_id = found["id"]
+        if voice_call_id:
+            current_call = b2b_voice.get_voice_call(voice_call_id) or {}
+            if str(current_call.get("campaign_id") or "") == "test_call":
+                # gather_using_speak pode emitir speak.ended antes do DTMF.
+                # No test call isso nao deve encerrar a linha.
+                return {
+                    "ok": True,
+                    "action": "media_ended_test_keepalive",
+                    "voice_call_id": voice_call_id,
+                    "event_type": event_type,
+                }
         if call_control_id:
             hangup_call(call_control_id)
         return {
@@ -881,6 +946,24 @@ def handle_webhook(payload: dict) -> dict:
             body.get("call_control_id") or current.get("provider_call_id") or ""
         )
         assistant_id = str(current.get("assistant_id") or "")
+        if (
+            str(current.get("campaign_id") or "") == "test_call"
+            and configured()
+            and call_control_id
+        ):
+            # Teste de escuta: nao esperar por AMD. Arranca a copy/fallback
+            # imediatamente e mantem a linha aberta para a tecla 2.
+            started = _start_assistant_for_call(
+                voice_call_id, call_control_id, state
+            )
+            return {
+                "ok": True,
+                "action": "answered_test_call",
+                "voice_call_id": voice_call_id,
+                "assistant_started": bool(started.get("ok")),
+                "waiting_for_amd": False,
+                "detail": started.get("reason") or "",
+            }
         if configured() and call_control_id and not assistant_id:
             # Seguranca: nunca deixar uma chamada real em silencio.
             b2b_voice.update_voice_call(
