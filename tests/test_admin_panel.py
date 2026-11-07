@@ -1690,6 +1690,10 @@ def test_admin_alerts_dedupe_and_critical_first(admin_client):
     conn = get_connection()
     try:
         conn.execute("DELETE FROM system_alerts WHERE code LIKE 'PYTEST_DEDUP%'")
+        conn.execute(
+            "INSERT INTO system_alerts (level, code, message, acknowledged) "
+            "VALUES ('warning', 'PYTEST_DEDUP_OTHER', 'aviso separado', 0)"
+        )
         for level, message in (
             ("warning", "duplicado antigo"),
             ("warning", "duplicado novo"),

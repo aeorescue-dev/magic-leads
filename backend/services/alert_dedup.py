@@ -102,7 +102,7 @@ def dedupe_alerts(rows: Iterable[Any], limit: int = 100) -> list[dict]:
     ordered = sorted(
         groups.values(),
         key=lambda item: (
-            int(item.get("_rank") or 1),
+            1 if item.get("_rank") is None else int(item["_rank"]),
             -int(item.get("latest_id") or 0),
         ),
     )
