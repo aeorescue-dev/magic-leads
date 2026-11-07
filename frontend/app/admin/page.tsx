@@ -161,18 +161,6 @@ function Kpi({ label, value, sub }: { label: string; value: React.ReactNode; sub
   );
 }
 
-function StateBadge({ ok, bad }: { ok: boolean; bad: string }) {
-  return ok ? (
-    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-400">
-      <CheckCircle2 className="h-3 w-3" /> Saudável
-    </span>
-  ) : (
-    <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-400">
-      <AlertTriangle className="h-3 w-3" /> {bad}
-    </span>
-  );
-}
-
 function fmtDt(value?: string | null) {
   if (!value) return "—";
   // Timestamps da BD são UTC naive. Sem sufixo, o browser interpretava como
@@ -2723,10 +2711,19 @@ export default function AdminPage() {
           hint={sources?.freshness ? `frescura ${sources.freshness.state}` : "city health"}
         >
           <div className="mb-4 flex flex-wrap items-center gap-2.5">
-            <StateBadge
-              ok={unhealthy.length === 0}
-              bad={`${unhealthy.length} cidade(s) a rever`}
-            />
+            <StatusPill
+              state={
+                unhealthy.length === 0
+                  ? "ok"
+                  : cities.some(([, v]) => v.state === "fail")
+                    ? "fail"
+                    : "warn"
+              }
+            >
+              {unhealthy.length === 0
+                ? "Saud?vel"
+                : `${unhealthy.length} cidade(s) a rever`}
+            </StatusPill>
             <span className="text-[10px] text-slate-500">
               último run: <span className="text-slate-300">{fmtDt(lastRun?.finished_at)}</span>
               {lastRun?.inserted != null ? ` · ${lastRun.inserted} leads inseridos` : ""}
