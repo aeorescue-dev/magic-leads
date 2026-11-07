@@ -2462,7 +2462,15 @@ def live_dashboard(
             finish_at = finished
             earliest = latest = finished
         else:
-            base = now if campaign.get("status") == "running" else scheduled_start
+            next_batch = _parse_dt(campaign.get("next_batch_at"))
+            if campaign.get("status") == "running":
+                base = now
+            elif next_batch and next_batch > now:
+                # Campanha agendada: o ciclo do dia começa no next_batch,
+                # não nas 09:00 de hoje (que já passaram).
+                base = next_batch.astimezone(et_tz)
+            else:
+                base = scheduled_start
             finish_at = simulate(base, done, remaining, interval)
             earliest = simulate(base, done, remaining, max(1, int(interval * 0.8)))
             latest = simulate(base, done, remaining, max(1, int(interval * 1.2)))

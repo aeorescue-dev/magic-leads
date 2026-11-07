@@ -105,6 +105,29 @@ def test_voice_liquidity_separa_exact_e_desconta_7d():
 
 
 
+def test_live_paused_agendada_usa_next_batch_no_ciclo():
+    campaign = voice.create_campaign(
+        name="scheduled-test",
+        city="Dallas",
+        max_calls=1,
+        quota_total=1,
+        start_hour_et=9,
+        trade_plan=[{"trade": "cleaning", "quota": 1}],
+    )
+    future = datetime(2030, 1, 2, 14, 0, tzinfo=timezone.utc)  # 09:00 ET
+    voice.update_campaign(
+        int(campaign["id"]),
+        status="paused",
+        next_batch_at=future.isoformat(),
+        error="scheduled_9am_et",
+    )
+    live = voice.live_dashboard(int(campaign["id"]))
+    finish = live["day_cycle"]["estimated_finish_at"]
+    assert finish.startswith("2030-01-02T09:00"), finish
+    assert live["day_cycle"]["planned_calls"] == 1
+    assert live["day_cycle"]["calls_remaining"] == 1
+
+
 def test_live_thermometer_e_ciclo_do_dia():
     company = _company("+12125550200", "Beta Heating")
     campaign = voice.create_campaign(
