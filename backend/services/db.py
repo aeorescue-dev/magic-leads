@@ -10116,6 +10116,20 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def resolve_system_alerts_by_code(self, code: str) -> int:
+        """Reconhece todas as linhas abertas de um código (auto-resolução)."""
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE system_alerts SET acknowledged = 1 "
+                "WHERE code = ? AND acknowledged = 0",
+                (str(code or ""),),
+            )
+            conn.commit()
+            return int(cur.rowcount or 0)
+        finally:
+            conn.close()
+
     def get_open_system_alerts(
         self, limit: int = 50, dedup: bool = True
     ) -> List[dict]:
@@ -13027,6 +13041,11 @@ class AsyncDatabaseService:
     ) -> List[dict]:
         return await anyio.to_thread.run_sync(
             self._service.get_open_system_alerts, limit, dedup
+        )
+
+    async def resolve_system_alerts_by_code(self, code: str) -> int:
+        return await anyio.to_thread.run_sync(
+            self._service.resolve_system_alerts_by_code, code
         )
 
     async def get_city_fact_stats(self) -> dict[str, dict]:

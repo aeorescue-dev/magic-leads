@@ -4733,6 +4733,471 @@ async def _send_scraper_webhook(run_id: str, city_results: dict, dlq_reprocessed
         return False
 
 
+
+# ---------------------------------------------------------------- Boston CKAN
+# O 311 de Boston mudou de sistema. O recurso "2026" ficou congelado em
+# 2026-11-05; o recurso "NEW SYSTEM" e' o feed ativo. O conector resolve o
+# recurso dinamicamente, faz dual-read do legado na primeira migracao e
+# mantem um watermark por recurso.
+BOSTON_CKAN_PACKAGE = "8048697b-ad64-4bfc-b090-ee00169f2323"
+BOSTON_CKAN_NEW_RESOURCE = "254adca6-64ab-4c5c-9fc0-a6da622be185"
+BOSTON_CKAN_LEGACY_RESOURCE = "1a0b420d-99f1-4887-9851-990b2a5a6e17"
+BOSTON_CKAN_PERMITS_RESOURCE = "6ddcd912-32a0-43df-9908-63574f8c7e77"
+BOSTON_SOURCE_STALE_HOURS = float(
+    os.getenv("BOSTON_SOURCE_STALE_HOURS", "36") or 36
+)
+BOSTON_RESOURCE_LAG_ALERT_HOURS = float(
+    os.getenv("BOSTON_RESOURCE_LAG_ALERT_HOURS", "24") or 24
+)
+BOSTON_CONNECTOR_STALE_HOURS = float(
+    os.getenv("BOSTON_CONNECTOR_STALE_HOURS", "48") or 48
+)
+
+
+def _parse_ckan_dt(value) -> Optional[datetime]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        try:
+            parsed = datetime.strptime(text[:19], "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+async def _ckan_get(client: httpx.AsyncClient, action: str, params: dict) -> dict:
+    response = await client.get(
+        f"https://data.boston.gov/api/3/action/{action}", params=params
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not payload.get("success"):
+        raise RuntimeError(
+            f"Boston CKAN {action}: {str(payload.get('error'))[:300]}"
+        )
+    return payload.get("result") or {}
+
+
+async def _discover_boston_resources(
+    client: httpx.AsyncClient,
+) -> tuple[dict, dict, bool]:
+    """Resolve o feed 311 ativo; devolve (novo, legado, id_mudou)."""
+    resources: list[dict] = []
+    try:
+        package = await _ckan_get(
+            client, "package_show", {"id": BOSTON_CKAN_PACKAGE}
+        )
+        resources = list(package.get("resources") or [])
+    except Exception as exc:  # noqa: BLE001 - fallback para IDs conhecidos
+        logger.warning("[BOSTON] package_show falhou: %s", exc)
+
+    candidates = [
+        row
+        for row in resources
+        if row.get("datastore_active")
+        and "311" in str(row.get("name") or "").upper()
+    ]
+    preferred = next(
+        (
+            row
+            for row in candidates
+            if "NEW SYSTEM" in str(row.get("name") or "").upper()
+        ),
+        None,
+    )
+    if preferred is None:
+        preferred = next(
+            (
+                row
+                for row in candidates
+                if str(row.get("id")) == BOSTON_CKAN_NEW_RESOURCE
+            ),
+            None,
+        )
+    if preferred is None and candidates:
+        candidates.sort(
+            key=lambda row: str(row.get("last_modified") or ""), reverse=True
+        )
+        preferred = candidates[0]
+    if preferred is None:
+        preferred = {
+            "id": BOSTON_CKAN_NEW_RESOURCE,
+            "name": "311 Service Requests - NEW SYSTEM (fallback)",
+            "last_modified": None,
+        }
+    legacy = next(
+        (
+            row
+            for row in resources
+            if str(row.get("id")) == BOSTON_CKAN_LEGACY_RESOURCE
+        ),
+        {
+            "id": BOSTON_CKAN_LEGACY_RESOURCE,
+            "name": "311 Service Requests - 2026 (legacy)",
+            "last_modified": None,
+        },
+    )
+    chosen_id = str(preferred.get("id") or "")
+    return preferred, legacy, bool(chosen_id and chosen_id != BOSTON_CKAN_NEW_RESOURCE)
+
+
+async def _fetch_boston_ckan_records(
+    client: httpx.AsyncClient,
+    resource_id: str,
+    date_field: str,
+    since: datetime,
+    *,
+    page_size: int = 5000,
+    max_pages: int = 5,
+) -> tuple[list[dict], bool, Optional[datetime]]:
+    """Pagina o CKAN por data DESC; devolve (records, truncated, source_max)."""
+    records: list[dict] = []
+    source_max: Optional[datetime] = None
+    truncated = False
+    for page in range(max(1, max_pages)):
+        result = await _ckan_get(
+            client,
+            "datastore_search",
+            {
+                "resource_id": resource_id,
+                "limit": page_size,
+                "offset": page * page_size,
+                "sort": f"{date_field} DESC",
+            },
+        )
+        chunk = list(result.get("records") or [])
+        if not chunk:
+            break
+        records.extend(chunk)
+        for rec in chunk:
+            parsed = _parse_ckan_dt(rec.get(date_field))
+            if parsed and (source_max is None or parsed > source_max):
+                source_max = parsed
+        if len(chunk) < page_size:
+            break
+        oldest = _parse_ckan_dt(chunk[-1].get(date_field))
+        if oldest and oldest < since:
+            break
+    else:
+        truncated = True
+    return records, truncated, source_max
+
+
+def _boston_lead_from_record(record: dict):
+    import backend.models.schemas as _sch
+    from backend.scrapers.socrata_311 import socrata_scraper as _s
+
+    opened = _parse_ckan_dt(record.get("open_date") or record.get("open_dt"))
+    if opened is None:
+        return None
+    external_id = str(
+        record.get("case_id")
+        or record.get("case_enquiry_id")
+        or record.get("_id")
+        or ""
+    ).strip()
+    if not external_id:
+        return None
+
+    description = str(
+        record.get("case_topic")
+        or record.get("service_name")
+        or record.get("case_title")
+        or record.get("reason")
+        or record.get("type")
+        or "311 service request"
+    ).strip()
+    raw_location = str(
+        record.get("full_address")
+        or record.get("location")
+        or record.get("location_street_name")
+        or ""
+    ).strip()
+    raw_zip = str(
+        record.get("zip_code")
+        or record.get("location_zipcode")
+        or ""
+    ).strip()
+    if raw_zip.isdigit() and len(raw_zip) == 4:
+        raw_zip = raw_zip.zfill(5)
+    address, clean_zip = clean_boston_location(raw_location, raw_zip)
+    if not address:
+        address = "Boston"
+
+    def _float(value):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    return _sch.RawLead311(
+        external_id=external_id,
+        address=address,
+        city="Boston",
+        state="MA",
+        zip_code=clean_zip or (raw_zip or None),
+        issue_description=description or "311 service request",
+        created_at=opened,
+        lat=_float(record.get("latitude")),
+        lng=_float(record.get("longitude")),
+        issue_category=_s._infer_category(description),
+        case_title=record.get("case_topic") or record.get("case_title"),
+        subject=record.get("service_name") or record.get("subject"),
+        reason=record.get("service_name") or record.get("reason"),
+        type=record.get("service_name") or record.get("type"),
+        queue=record.get("assigned_team") or record.get("queue"),
+        department=record.get("assigned_department") or record.get("department"),
+        closure_reason=record.get("closure_reason"),
+        case_status=record.get("case_status"),
+        on_time=record.get("on_time"),
+        sla_target_dt=record.get("target_close_date") or record.get("sla_target_dt"),
+        closed_dt=record.get("close_date") or record.get("closed_dt"),
+        source=record.get("report_source") or record.get("source"),
+        neighborhood=record.get("neighborhood"),
+        ward=str(record.get("ward")) if record.get("ward") is not None else None,
+        precinct=(
+            str(record.get("precinct"))
+            if record.get("precinct") is not None
+            else None
+        ),
+        resolution_description=(
+            record.get("closure_comments")
+            or record.get("resolution_description")
+            or record.get("closure_reason")
+        ),
+    )
+
+
+async def _boston_source_alert(
+    resource: dict,
+    source_max: Optional[datetime],
+    now: datetime,
+    *,
+    resource_changed: bool = False,
+) -> None:
+    """Alerta cedo quando o recurso/portal congela sem erro HTTP."""
+    resource_name = str(resource.get("name") or resource.get("id") or "?")
+    resource_id = str(resource.get("id") or "")
+    modified = _parse_ckan_dt(resource.get("last_modified"))
+
+    async def emit(level: str, code: str, message: str, context: dict) -> None:
+        try:
+            if await db_service.has_recent_system_alert(code, hours=6):
+                return
+            await db_service.record_system_alert(
+                level=level, code=code, message=message, context=context
+            )
+        except Exception as exc:  # noqa: BLE001 - alerta nunca derruba o run
+            logger.warning("[BOSTON] alerta %s falhou: %s", code, exc)
+
+    base_ctx = {
+        "resource_id": resource_id,
+        "resource_name": resource_name,
+        "resource_modified": resource.get("last_modified"),
+        "source_max": source_max.isoformat() if source_max else None,
+    }
+    if source_max is None:
+        await emit(
+            "critical",
+            "SCRAPER_SOURCE_SCHEMA:BOSTON",
+            f"BOSTON: {resource_name} sem data de abertura reconhecida",
+            base_ctx,
+        )
+        return
+
+    age_h = (now - source_max).total_seconds() / 3600
+    if modified and resource_changed:
+        await emit(
+            "warning",
+            "SCRAPER_SOURCE_CHANGED:BOSTON",
+            f"BOSTON: recurso ativo mudou para {resource_name}",
+            base_ctx,
+        )
+    if modified and modified > source_max:
+        lag_h = (modified - source_max).total_seconds() / 3600
+        if lag_h > BOSTON_RESOURCE_LAG_ALERT_HOURS:
+            await emit(
+                "warning",
+                "SCRAPER_SOURCE_STALE:BOSTON",
+                (
+                    f"BOSTON: CKAN atualizado ha {lag_h:.1f}h a frente do "
+                    f"ultimo facto ({age_h:.1f}h)"
+                ),
+                {**base_ctx, "resource_lag_hours": round(lag_h, 1)},
+            )
+    if age_h > BOSTON_SOURCE_STALE_HOURS:
+        await emit(
+            "warning",
+            "SCRAPER_CITY_STALE:BOSTON",
+            f"BOSTON: {age_h:.1f}h sem factos na fonte {resource_name}",
+            {**base_ctx, "age_hours": round(age_h, 1)},
+        )
+    if modified and (now - modified).total_seconds() / 3600 > BOSTON_CONNECTOR_STALE_HOURS:
+        await emit(
+            "warning",
+            "SCRAPER_CONNECTOR_STALE:BOSTON",
+            f"BOSTON: metadados do CKAN sem atualizacao ha mais de {BOSTON_CONNECTOR_STALE_HOURS:.0f}h",
+            base_ctx,
+        )
+
+
+async def _fetch_boston_311(entry: dict) -> dict:
+    """Le o feed ativo, faz dual-read inicial do legado e devolve leads + watermarks."""
+    hours = max(24, int(entry.get("hours") or 72))
+    now = datetime.now(timezone.utc)
+    async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
+        new_res, legacy_res, resource_changed = await _discover_boston_resources(client)
+        new_id = str(new_res.get("id") or BOSTON_CKAN_NEW_RESOURCE)
+        legacy_id = str(legacy_res.get("id") or BOSTON_CKAN_LEGACY_RESOURCE)
+        new_key = f"data.boston.gov/{new_id}"
+        legacy_key = f"data.boston.gov/{legacy_id}"
+
+        new_wm = await db_service.get_scraper_watermark(new_key)
+        legacy_wm = await db_service.get_scraper_watermark(legacy_key)
+        first_migration = not new_wm
+        if new_wm:
+            try:
+                since = datetime.fromisoformat(str(new_wm)[:10]).replace(
+                    tzinfo=timezone.utc
+                ) - timedelta(hours=6)
+            except (TypeError, ValueError):
+                since = now - timedelta(hours=hours)
+        else:
+            since = now - timedelta(days=7)
+
+        new_records, new_truncated, new_max = await _fetch_boston_ckan_records(
+            client, new_id, "open_date", since, max_pages=5
+        )
+        legacy_records: list[dict] = []
+        legacy_truncated = False
+        legacy_max: Optional[datetime] = None
+        # Dual-read so' na primeira migracao. Depois disso o legado esta
+        # congelado; usa-lo de novo poderia regredir `date_reported`.
+        if first_migration:
+            if legacy_wm:
+                try:
+                    legacy_since = datetime.fromisoformat(
+                        str(legacy_wm)[:10]
+                    ).replace(tzinfo=timezone.utc) - timedelta(hours=6)
+                except (TypeError, ValueError):
+                    legacy_since = since
+            else:
+                legacy_since = since
+            legacy_records, legacy_truncated, legacy_max = (
+                await _fetch_boston_ckan_records(
+                    client,
+                    legacy_id,
+                    "open_dt",
+                    legacy_since,
+                    max_pages=3 if first_migration else 1,
+                )
+            )
+
+        if new_records and new_max is None:
+            await _boston_source_alert(
+                new_res, None, now, resource_changed=resource_changed
+            )
+            raise RuntimeError(
+                f"Boston CKAN: schema sem open_date em {new_res.get('name')}"
+            )
+        if not new_records and not legacy_records:
+            raise RuntimeError("Boston CKAN: nenhum registo devolvido")
+
+        # Dedupe por id e ordena ASC: o registo mais recente entra por ultimo,
+        # para que o upsert por (address, city) fique com a data mais nova.
+        by_id: dict[str, dict] = {}
+        for rec in legacy_records + new_records:
+            eid = str(
+                rec.get("case_id")
+                or rec.get("case_enquiry_id")
+                or rec.get("_id")
+                or ""
+            ).strip()
+            if eid:
+                by_id[eid] = rec
+        ordered = sorted(
+            by_id.values(),
+            key=lambda rec: _parse_ckan_dt(
+                rec.get("open_date") or rec.get("open_dt")
+            )
+            or datetime.min.replace(tzinfo=timezone.utc),
+        )
+        leads = []
+        for rec in ordered:
+            opened = _parse_ckan_dt(rec.get("open_date") or rec.get("open_dt"))
+            if opened is None or opened < since:
+                continue
+            lead = _boston_lead_from_record(rec)
+            if lead is not None:
+                leads.append(lead)
+
+        await _boston_source_alert(
+            new_res, new_max, now, resource_changed=resource_changed
+        )
+
+        # Se a fonte voltou a estar fresca, fecha automaticamente os alertas
+        # antigos de Boston (o histórico fica com acknowledged=1).
+        if new_max and (now - new_max).total_seconds() / 3600 <= BOSTON_SOURCE_STALE_HOURS:
+            for stale_code in (
+                "SCRAPER_CITY_STALE:BOSTON",
+                "SCRAPER_SOURCE_STALE:BOSTON",
+                "SCRAPER_CONNECTOR_STALE:BOSTON",
+            ):
+                try:
+                    await db_service.resolve_system_alerts_by_code(stale_code)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("[BOSTON] auto-ack %s falhou: %s", stale_code, exc)
+
+        watermarks: dict[str, str] = {}
+        if new_max and not new_truncated:
+            watermarks[new_key] = new_max.date().isoformat()
+        if legacy_max and not legacy_truncated and first_migration:
+            watermarks[legacy_key] = legacy_max.date().isoformat()
+
+        # Permits: nao bloqueia o 311; serve o grafo de contractors.
+        try:
+            permit_result = await _ckan_get(
+                client,
+                "datastore_search",
+                {
+                    "resource_id": BOSTON_CKAN_PERMITS_RESOURCE,
+                    "limit": 5000,
+                    "sort": "issued_date DESC",
+                },
+            )
+            await _record_contractor_entities(
+                contractor_ingest.extract_boston_permits(
+                    permit_result.get("records") or []
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[ENTITIES] Boston extracao falhou: %s", exc)
+
+        logger.info(
+            "[P0-A] Boston: %s leads, recurso=%s (%s), novos=%s legado=%s, "
+            "truncated=%s/%s, watermark=%s",
+            len(leads),
+            new_res.get("name"),
+            new_id,
+            len(new_records),
+            len(legacy_records),
+            new_truncated,
+            legacy_truncated,
+            watermarks,
+        )
+        return {
+            "leads": leads,
+            "watermarks": watermarks,
+            "resource": new_res,
+            "source_max": new_max,
+        }
+
+
 async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int = None):
     """Executa o scrape nacional (worker em background) com Circuit Breaker, DLQ e City Health."""
     state = _scrape_runs[run_id]
@@ -5133,164 +5598,16 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                                 "[ENTITIES] Dallas extração falhou: %s", e
                             )
 
-                # Boston (CKAN) - caso especial
+                # Boston (CKAN) - recurso ativo NEW SYSTEM + dual-read legado
                 if city == "Boston":
-                    from backend.scrapers.socrata_311 import socrata_scraper as _s
-                    try:
-                        import httpx as _h
-
-                        resource_id = "1a0b420d-99f1-4887-9851-990b2a5a6e17"
-                        wm_key = f"data.boston.gov/{resource_id}"
-                        wm = await db_service.get_scraper_watermark(wm_key)
-                        if wm:
-                            try:
-                                since = datetime.fromisoformat(str(wm)[:10]) - timedelta(hours=6)
-                            except (ValueError, TypeError):
-                                since = datetime.now() - timedelta(hours=entry["hours"])
-                        else:
-                            since = datetime.now() - timedelta(hours=entry["hours"])
-
-                        def _parse_open(value):
-                            parsed = datetime.fromisoformat(
-                                str(value).replace("Z", "+00:00").replace("T", " ")
-                            )
-                            return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
-
-                        page_size = 5000
-                        max_pages = 5
-                        records = []
-                        truncated = False
-                        async with _h.AsyncClient(timeout=60) as client:
-                            for page in range(max_pages):
-                                resp = await client.get(
-                                    "https://data.boston.gov/api/3/action/datastore_search",
-                                    params={
-                                        "resource_id": resource_id,
-                                        "limit": page_size,
-                                        "offset": page * page_size,
-                                        "sort": "open_dt DESC",
-                                    },
-                                )
-                                logger.info(
-                                    "Boston CKAN: page %s HTTP %s, bytes=%s",
-                                    page + 1, resp.status_code, len(resp.text),
-                                )
-                                data = resp.json()
-                                if not data.get("success"):
-                                    logger.warning(
-                                        f"Boston CKAN: success=FALSE -> {str(data.get('error'))[:300]}"
-                                    )
-                                    records = []
-                                    break
-                                chunk = data["result"]["records"]
-                                records.extend(chunk)
-                                if len(chunk) < page_size:
-                                    break
-                                # Ordenado DESC: se a pagina ja' passou do `since`,
-                                # nao vale a pena pedir mais.
-                                try:
-                                    oldest = _parse_open(chunk[-1].get("open_dt"))
-                                    if oldest < since:
-                                        break
-                                except Exception:
-                                    pass
-                            else:
-                                truncated = True
-
-                        out = []
-                        max_open = None
-                        for rec in records:
-                            od = rec.get("open_dt")
-                            if not od:
-                                continue
-                            try:
-                                odo = _parse_open(od)
-                            except Exception:
-                                continue
-                            if odo < since:
-                                continue
-                            eid = str(rec.get("case_enquiry_id") or rec.get("_id") or "")
-                            if not eid:
-                                continue
-
-                            raw_location = rec.get("location") or rec.get("location_street_name") or ""
-                            raw_zip = str(rec.get("location_zipcode") or "").strip()
-                            address, clean_zip = clean_boston_location(raw_location, raw_zip)
-                            if not address:
-                                address = "Boston"
-                            desc = rec.get("case_title") or rec.get("reason") or rec.get("type") or ""
-                            if raw_zip.isdigit() and len(raw_zip) == 4:
-                                raw_zip = raw_zip.zfill(5)
-                            import backend.models.schemas as _sch
-                            out.append(_sch.RawLead311(
-                                external_id=eid,
-                                address=address,
-                                city="Boston",
-                                state="MA",
-                                zip_code=clean_zip or (raw_zip or None),
-                                issue_description=desc,
-                                created_at=odo,
-                                lat=rec.get("latitude"),
-                                lng=rec.get("longitude"),
-                                issue_category=_s._infer_category(desc),
-                                case_title=rec.get("case_title") or None,
-                                subject=rec.get("subject") or None,
-                                reason=rec.get("reason") or None,
-                                type=rec.get("type") or None,
-                                queue=rec.get("queue") or None,
-                                department=rec.get("department") or None,
-                                closure_reason=rec.get("closure_reason") or None,
-                                case_status=rec.get("case_status") or None,
-                                on_time=rec.get("on_time") or None,
-                                sla_target_dt=rec.get("sla_target_dt") or None,
-                                closed_dt=rec.get("closed_dt") or None,
-                                source=rec.get("source") or None,
-                                neighborhood=rec.get("neighborhood") or None,
-                                ward=rec.get("ward") or None,
-                                precinct=rec.get("precinct") or None,
-                                resolution_description=rec.get("closure_reason") or None,
-                            ))
-                            if max_open is None or odo > max_open:
-                                max_open = odo
-                        leads = out
-                        # Fase 2: o 311 não traz empreiteiro; lemos o dataset
-                        # de Approved Building Permits (applicant) só para o
-                        # grafo. Sem empresa no nome -> não cria entidade.
-                        try:
-                            async with _h.AsyncClient(timeout=60) as client:
-                                pr = await client.get(
-                                    "https://data.boston.gov/api/3/action/datastore_search",
-                                    params={
-                                        "resource_id": "6ddcd912-32a0-43df-9908-63574f8c7e77",
-                                        "limit": 5000,
-                                        "sort": "issued_date DESC",
-                                    },
-                                )
-                                pdata = pr.json()
-                            permits = (
-                                (pdata.get("result") or {}).get("records") or []
-                                if pdata.get("success")
-                                else []
-                            )
-                            await _record_contractor_entities(
-                                contractor_ingest.extract_boston_permits(permits)
-                            )
-                        except Exception as e:  # noqa: BLE001
-                            logger.warning(
-                                "[ENTITIES] Boston extração falhou: %s", e
-                            )
-                        logger.info(
-                            "[P0-A] Boston: %s registos, %s aceites, truncado=%s",
-                            len(records), len(out), truncated,
-                        )
-                        if not truncated and max_open is not None:
-                            pending_watermarks[wm_key] = max_open.date().isoformat()
-                    except Exception as e:
-                        logger.warning(f"Boston CKAN fetch error: {e}")
-                        # Propagar: antes Boston ficava verde no city_health
-                        # mesmo com a fonte CKAN em baixo.
-                        raise
-
+                    boston_result = await _fetch_boston_311(entry)
+                    leads = boston_result["leads"]
+                    pending_watermarks.update(boston_result["watermarks"])
+                    logger.info(
+                        "[P0-A] Boston: %s leads prontos (recurso=%s)",
+                        len(leads),
+                        boston_result.get("resource", {}).get("id"),
+                    )
                 # Sucesso desta fonte. A saúde da cidade e' decidida no fim do
                 # loop: uma cidade tem varias entradas (NYC tem 4) e o erro de
                 # uma nao pode apagar o resultado das outras nem marcar a cidade
