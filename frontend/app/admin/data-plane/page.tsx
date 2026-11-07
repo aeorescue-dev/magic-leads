@@ -74,6 +74,10 @@ export default function DataPlanePage() {
   const freshness = data?.freshness;
   const score = data?.score;
 
+  const ingestsTotal = (ingestion?.by_status ?? []).reduce(
+    (sum, row) => sum + row.n,
+    0
+  );
   const ingestsOk =
     ingestion?.by_status.find((row) => row.status === "success")?.n ?? 0;
   const ingestsBad = (ingestion?.by_status ?? [])
@@ -147,7 +151,7 @@ export default function DataPlanePage() {
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           label="Ingestões registadas"
-          value={ingestion?.runs.length ?? "—"}
+          value={data ? ingestsTotal : "—"}
           sub={
             ingestsBad
               ? `${ingestsBad} falha(s) · ${ingestsOk} sucesso(s)`
@@ -198,7 +202,9 @@ export default function DataPlanePage() {
               <StatusPill state={lastFreshness?.status === "ok" ? "ok" : "warn"}>
                 {lastFreshness?.status ?? "sem dados"}
               </StatusPill>
-              <span>{freshness?.runs.length ?? 0} runs no histórico</span>
+              <span>
+                {(freshness?.by_status ?? []).reduce((sum, row) => sum + row.n, 0)} runs no histórico
+              </span>
             </div>
           }
         />

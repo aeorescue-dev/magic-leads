@@ -34,7 +34,10 @@ export default function DataPlaneStrip() {
     );
   }
 
-  const ingestions = data?.ingestion.runs.length ?? 0;
+  const ingestions = (data?.ingestion.by_status ?? []).reduce(
+    (sum, row) => sum + row.n,
+    0
+  );
   const failures = (data?.ingestion.by_status ?? [])
     .filter((row) => row.status !== "success")
     .reduce((sum, row) => sum + row.n, 0);
