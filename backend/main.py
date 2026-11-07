@@ -88,6 +88,7 @@ from .models.schemas import (
 from .scrapers.socrata_311 import socrata_scraper
 from .scrapers.socrata_discovery import socrata_discovery
 from .services import (
+    admin_data_plane,
     alert_planner,
     analytics,
     auto_batch,
@@ -2036,14 +2037,136 @@ async def admin_access_audit(
 
 @app.get("/api/admin/sources")
 async def admin_sources(_admin: dict = Depends(_require_admin_user)):
-    """Saúde das fontes de dados: circuit breaker por cidade + último run.
+    """Saúde das fontes: HTTP (`city_health`) + frescura real dos factos.
 
-    Lê `city_health`/`scraper_runs` (persistidos) em vez do dict em memória
-    `_scrape_runs`, que se perde a cada restart da Railway.
+    `city_health` sozinho dava "falso verde": a cidade respondia ao fetch mas
+    podia estar 55h sem factos novos (Boston). Cruzamos os dois sinais e
+    devolvemos um estado único (`ok`/`warn`/`fail`) para o overview.
     """
     city_health = await db_service.get_city_health_for_scraper_status()
+    facts = await db_service.get_city_fact_stats()
     last_run = await db_service.get_last_scrape_run()
-    return {"city_health": city_health, "last_run": last_run}
+    last_freshness = await db_service.get_last_freshness_run()
+
+    def age_hours(value: object) -> float | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            try:
+                parsed = datetime.strptime(text[:19], "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return round(
+            (datetime.now(timezone.utc) - parsed).total_seconds() / 3600, 1
+        )
+
+    counts = {"ok": 0, "warn": 0, "fail": 0, "unknown": 0}
+    for city, health in city_health.items():
+        fact = facts.get(str(city).strip().upper(), {})
+        age = age_hours(fact.get("last_fact"))
+        failures = int(health.get("failure_count") or 0)
+        circuit = health.get("circuit_open_until")
+        if circuit or failures >= 3 or (age is not None and age > 36):
+            state = "fail"
+            reason = (
+                "circuito aberto"
+                if circuit
+                else f"{failures} falhas de fetch"
+                if failures >= 3
+                else f"{age:.1f}h sem factos"
+            )
+        elif failures > 0 or (age is not None and age > 24):
+            state = "warn"
+            reason = (
+                f"{failures} falha(s) de fetch"
+                if failures > 0
+                else f"{age:.1f}h sem factos"
+            )
+        elif age is None:
+            state = "unknown"
+            reason = "sem data de facto"
+        else:
+            state = "ok"
+            reason = f"factos há {age:.1f}h"
+        counts[state] += 1
+        health.update(
+            {
+                "last_fact_at": fact.get("last_fact"),
+                "last_created_at": fact.get("last_created"),
+                "facts_24h": int(fact.get("facts_24h") or 0),
+                "created_24h": int(fact.get("created_24h") or 0),
+                "lead_total": int(fact.get("total") or 0),
+                "age_hours": age,
+                "state": state,
+                "state_reason": reason,
+            }
+        )
+
+    return {
+        "city_health": city_health,
+        "last_run": last_run,
+        "freshness": {
+            "last_run": last_freshness,
+            "age_hours": age_hours((last_freshness or {}).get("finished_at")),
+            "counts": counts,
+            "state": (
+                "fail"
+                if counts["fail"]
+                else "warn"
+                if counts["warn"] or counts["unknown"]
+                else "ok"
+            ),
+        },
+    }
+
+
+@app.get("/api/admin/data-plane")
+async def admin_data_plane_summary(_admin: dict = Depends(_require_admin_user)):
+    """Resumo read-only do plano de dados para o overview e a página dedicada."""
+    return await anyio.to_thread.run_sync(admin_data_plane.summary)
+
+
+@app.get("/api/admin/data-plane/ingestion")
+async def admin_data_plane_ingestion(
+    limit: int = 50, _admin: dict = Depends(_require_admin_user)
+):
+    return await anyio.to_thread.run_sync(admin_data_plane.ingestion, limit)
+
+
+@app.get("/api/admin/data-plane/quarantine")
+async def admin_data_plane_quarantine(
+    limit: int = 200, _admin: dict = Depends(_require_admin_user)
+):
+    return await anyio.to_thread.run_sync(admin_data_plane.quarantine, limit)
+
+
+@app.get("/api/admin/data-plane/freshness")
+async def admin_data_plane_freshness(
+    limit: int = 50, _admin: dict = Depends(_require_admin_user)
+):
+    return await anyio.to_thread.run_sync(admin_data_plane.freshness, limit)
+
+
+@app.get("/api/admin/voice/score-distribution")
+async def admin_voice_score_distribution(_admin: dict = Depends(_require_admin_user)):
+    return await anyio.to_thread.run_sync(admin_data_plane.score_summary)
+
+
+@app.get("/api/admin/voice/companies/{company_id}/score")
+async def admin_voice_company_score(
+    company_id: int, _admin: dict = Depends(_require_admin_user)
+):
+    result = await anyio.to_thread.run_sync(
+        admin_data_plane.score_detail, int(company_id)
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
+    return result
 
 
 @app.get("/api/admin/scraper/runs")
@@ -2968,9 +3091,14 @@ async def admin_voice_queue(
     trade: str = "",
     state: str = "",
     offset: int = 0,
+    score_min: int | None = None,
+    score_max: int | None = None,
+    status: str = "",
+    date_from: str = "",
+    date_to: str = "",
     _admin: dict = Depends(_require_admin_user),
 ):
-    """Fila B2B: empresas com gate can_call() aplicado e filtros multi-cidade."""
+    """Fila B2B: gate can_call() + filtros de leitura (cidade, score, estado)."""
     return await anyio.to_thread.run_sync(
         b2b_voice.queue,
         limit,
@@ -2979,6 +3107,11 @@ async def admin_voice_queue(
         trade,
         state,
         offset,
+        score_min,
+        score_max,
+        status,
+        date_from,
+        date_to,
     )
 
 
@@ -4346,10 +4479,27 @@ def admin_purge_city(
 
 
 @app.get("/api/admin/alerts")
-async def admin_alerts(limit: int = 50, _admin: dict = Depends(_require_admin_user)):
-    """Alertas de auditoria (Dead Man's Switch), incluindo reconhecidos."""
-    alerts = await db_service.get_recent_system_alerts(limit)
-    return {"alerts": alerts, "count": len(alerts)}
+async def admin_alerts(
+    limit: int = 50,
+    dedup: bool = True,
+    include_acknowledged: bool = False,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Alertas operacionais para o painel.
+
+    Por defeito devolve apenas os abertos (`acknowledged=0`), agrupados por
+    `code` (um item por problema, com `occurrences`). Um crítico antigo nunca
+    fica escondido atrás de muitos avisos recentes.
+    """
+    if include_acknowledged:
+        alerts = await db_service.get_recent_system_alerts(limit)
+    else:
+        alerts = await db_service.get_open_system_alerts(limit, dedup)
+    return {
+        "alerts": alerts,
+        "count": len(alerts),
+        "dedup": bool(dedup) and not include_acknowledged,
+    }
 
 
 @app.post("/api/admin/alerts/{alert_id}/ack")

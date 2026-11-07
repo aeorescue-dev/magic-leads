@@ -1,19 +1,19 @@
-"""Admin panel: gate de role + endpoints de leitura.
+﻿"""Admin panel: gate de role + endpoints de leitura.
 
 Invariantes fixados aqui:
 
-  1. `/api/admin/*` NÃO abre com o secret global (`X-Admin-Secret`): exige
-     sessão real de utilizador. Um `ADMIN_SECRET` conhecido não dá acesso ao
-     painel, porque o painel é login+password por utilizador.
-  2. Fail-closed: sem token -> 401; token inválido -> 401; utilizador
+  1. `/api/admin/*` NÃƒO abre com o secret global (`X-Admin-Secret`): exige
+     sessÃ£o real de utilizador. Um `ADMIN_SECRET` conhecido nÃ£o dÃ¡ acesso ao
+     painel, porque o painel Ã© login+password por utilizador.
+  2. Fail-closed: sem token -> 401; token invÃ¡lido -> 401; utilizador
      autenticado mas sem `is_admin` -> 403. Nunca 200.
-  3. `users.is_admin` é fail-closed na migração: linhas existentes ficam a 0,
-     ninguém se torna admin por efeito de uma migration.
-  4. O histórico do scraper vem da tabela `scraper_runs` (sobrevive a restart),
-     não do dict em memória `_scrape_runs`.
+  3. `users.is_admin` Ã© fail-closed na migraÃ§Ã£o: linhas existentes ficam a 0,
+     ninguÃ©m se torna admin por efeito de uma migration.
+  4. O histÃ³rico do scraper vem da tabela `scraper_runs` (sobrevive a restart),
+     nÃ£o do dict em memÃ³ria `_scrape_runs`.
   5. A fila de recovers (`returned_only`) devolve exatamente os reveals que
-     voltaram ao pool e ainda não foram estornados — a fila de trabalho do
-     incidente "dados pagos ficaram invisíveis".
+     voltaram ao pool e ainda nÃ£o foram estornados â€” a fila de trabalho do
+     incidente "dados pagos ficaram invisÃ­veis".
 """
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ def admin_client():
 def nonadmin_client():
     token = "pytest-nonadmin-token"
     _ensure_user(NONADMIN_EMAIL, token)
-    # Garante que NÃO é admin, mesmo que outro teste tenha mexido.
+    # Garante que NÃƒO Ã© admin, mesmo que outro teste tenha mexido.
     db_service._service.set_user_admin(NONADMIN_EMAIL, False)
     return TestClient(app), {"Authorization": f"Bearer {token}"}
 
@@ -72,7 +72,7 @@ def nonadmin_client():
 
 
 def test_admin_routes_reject_global_secret_only(admin_client):
-    """O X-Admin-Secret (usado por cron/scripts) NÃO abre o painel."""
+    """O X-Admin-Secret (usado por cron/scripts) NÃƒO abre o painel."""
     client, _, _ = admin_client
     headers = {"X-Admin-Secret": main_module.settings.ADMIN_SECRET or "anything"}
     r = client.get("/api/admin/overview", headers=headers)
@@ -91,7 +91,7 @@ def test_admin_routes_reject_global_secret_only(admin_client):
     ],
 )
 def test_admin_routes_require_session(admin_client, path):
-    """Sem sessão: 401 em todos os endpoints do painel."""
+    """Sem sessÃ£o: 401 em todos os endpoints do painel."""
     client, _, _ = admin_client
     assert client.get(path).status_code == 401
 
@@ -126,7 +126,7 @@ def test_admin_routes_reject_invalid_token(admin_client, path):
     ],
 )
 def test_admin_routes_reject_non_admin_user(nonadmin_client, path):
-    """Utilizador autenticado mas sem is_admin: 403 (não 401, não 200)."""
+    """Utilizador autenticado mas sem is_admin: 403 (nÃ£o 401, nÃ£o 200)."""
     client, headers = nonadmin_client
     assert client.get(path, headers=headers).status_code == 403
 
@@ -236,7 +236,7 @@ def test_admin_can_read_overview(admin_client):
 
 
 def test_admin_sources_reads_persisted_health(admin_client):
-    """Saúde das fontes vem de city_health persistido, não de memória."""
+    """SaÃºde das fontes vem de city_health persistido, nÃ£o de memÃ³ria."""
     client, headers, _ = admin_client
     r = client.get("/api/admin/sources", headers=headers)
     assert r.status_code == 200, r.text
@@ -244,7 +244,7 @@ def test_admin_sources_reads_persisted_health(admin_client):
 
 
 def test_admin_scraper_runs_come_from_table(admin_client):
-    """O histórico sobrevive a restart: é lido de scraper_runs."""
+    """O histÃ³rico sobrevive a restart: Ã© lido de scraper_runs."""
     client, headers, _ = admin_client
     r = client.get("/api/admin/scraper/runs?limit=5", headers=headers)
     assert r.status_code == 200, r.text
@@ -254,7 +254,7 @@ def test_admin_scraper_runs_come_from_table(admin_client):
 
 
 def test_admin_reveals_returned_only_filters_correctly(admin_client):
-    """returned_only traz os voltados ao pool e não estornados."""
+    """returned_only traz os voltados ao pool e nÃ£o estornados."""
     client, headers, _ = admin_client
     svc = db_service._service
     payload = EnrichedLead(
@@ -301,7 +301,7 @@ def test_admin_reveals_returned_only_filters_correctly(admin_client):
     assert mine, "reveal de teste nao apareceu na fila returned_only"
     assert mine[0]["returned_to_pool"] == 1
     assert mine[0]["refunded"] == 0
-    # O dado pago continua na base (o admin vê que a recuperação é possível).
+    # O dado pago continua na base (o admin vÃª que a recuperaÃ§Ã£o Ã© possÃ­vel).
     assert mine[0]["has_phone"] == 1
     assert mine[0]["address"] == "1 ADMIN PANEL STREET"
 
@@ -311,7 +311,7 @@ def _admin_user_id(admin_client) -> int:
 
 
 def test_is_admin_migration_defaults_to_zero(admin_client):
-    """Linhas existentes nunca são promovidas a admin por efeito da migration."""
+    """Linhas existentes nunca sÃ£o promovidas a admin por efeito da migration."""
     client, headers, user_id = admin_client
     user = db_service._service.get_user_by_id(user_id)
     assert user is not None
@@ -512,8 +512,8 @@ def test_admin_push_counts_outcomes(admin_client):
 
 
 def test_admin_push_counts_no_subscriptions(admin_client):
-    """Utilizador ativo sem dispositivo subscrito tem de ser distinguível de
-    "o push nunca foi tentado" — é a causa nº 2 de "não recebo notificações"."""
+    """Utilizador ativo sem dispositivo subscrito tem de ser distinguÃ­vel de
+    "o push nunca foi tentado" â€” Ã© a causa nÂº 2 de "nÃ£o recebo notificaÃ§Ãµes"."""
     client, headers, _ = admin_client
     _seed_push([
         ("accepted", 1, 1, 150, "lead_alert"),
@@ -596,7 +596,7 @@ def test_admin_planner_metrics(admin_client):
     assert cats["pothole"] >= 2
 
 
-# ------------------------------------------------- Fase 4: sessões admin
+# ------------------------------------------------- Fase 4: sessÃµes admin
 
 def _session_count(user_id: int) -> int:
     conn = get_connection()
@@ -612,7 +612,7 @@ def test_admin_sessions_exempt_from_fifo_eviction(admin_client):
     """Um login do admin noutro dispositivo NAO pode expulsar a sessao do painel.
 
     O teto de 2 sessoes (FIFO) fazia /admin devolver 401 ("sessao expirada")
-    mesmo com a conta de admin autenticada — bastava um terceiro login.
+    mesmo com a conta de admin autenticada â€” bastava um terceiro login.
     """
     _, _, admin_id = admin_client
     svc = db_service._service
@@ -621,7 +621,7 @@ def test_admin_sessions_exempt_from_fifo_eviction(admin_client):
     for i in range(3):
         svc.create_user_session(admin_id, _hash_token(f"pytest-admin-extra-{i}"), "Pytest Extra", None)
 
-    # 1 (fixture) + 3 (novas) — nenhuma foi evicted.
+    # 1 (fixture) + 3 (novas) â€” nenhuma foi evicted.
     assert _session_count(admin_id) >= 4
 
 
@@ -675,11 +675,11 @@ def test_admin_push_test_authorized_for_admin(admin_client):
 # ------------------------------------------------- Outbound frio (dry-run)
 #
 # Invariantes fixados aqui:
-#   1. O simulador é dry-run: NUNCA enfileira em `outbound_messages`.
-#   2. A config é isolada por cidade (defaults < global < override da cidade).
-#   3. A trava de envio é fail-closed: `send_enabled=0` -> 409; mesmo ligado,
-#      o motor não existe -> 503. Nunca 200 a enviar.
-#   4. O gate de role vale também para estas rotas.
+#   1. O simulador Ã© dry-run: NUNCA enfileira em `outbound_messages`.
+#   2. A config Ã© isolada por cidade (defaults < global < override da cidade).
+#   3. A trava de envio Ã© fail-closed: `send_enabled=0` -> 409; mesmo ligado,
+#      o motor nÃ£o existe -> 503. Nunca 200 a enviar.
+#   4. O gate de role vale tambÃ©m para estas rotas.
 
 
 def _count(table: str) -> int:
@@ -697,7 +697,7 @@ def _seed_outbound_lead(
     owner_name: str = "VITORIO CONTRACTING LLC",
     issue_category: IssueCategory = IssueCategory.ROOF,
 ) -> int:
-    """Semeia um lead que passa `_qualified_where` (endereço + categoria + gatilho)."""
+    """Semeia um lead que passa `_qualified_where` (endereÃ§o + categoria + gatilho)."""
     payload = EnrichedLead(
         external_id=external_id,
         source_type=SourceType.SERVICE_311,
@@ -748,7 +748,7 @@ def test_outbound_config_lists_served_cities_with_send_disabled(admin_client):
 
 
 def test_outbound_config_city_override_is_isolated(admin_client):
-    """O override de uma cidade não deve contaminar as outras; o global propaga."""
+    """O override de uma cidade nÃ£o deve contaminar as outras; o global propaga."""
     client, headers, _ = admin_client
     svc = db_service._service
     svc.set_outbound_config("batch_size", "111", city="")
@@ -909,12 +909,12 @@ def test_outbound_simulate_dry_run_never_queues_messages(admin_client):
     assert body["batch_size"] == min(50, body["qualified_available"])
     assert set(body["template"]) == {"subject", "body"}
 
-    # Custo: scrape grátis + fallback Snov pago.
+    # Custo: scrape grÃ¡tis + fallback Snov pago.
     assert body["cost_estimate"]["scrape_cost_usd"] == 0
     assert body["cost_estimate"]["snov_cost_usd"] >= 0
     assert body["cost_estimate"]["total_usd"] == body["cost_estimate"]["snov_cost_usd"]
 
-    # Nada foi enfileirado: a simulação não escreve em outbound_messages.
+    # Nada foi enfileirado: a simulaÃ§Ã£o nÃ£o escreve em outbound_messages.
     assert _count("outbound_messages") == before
 
     # O lote fica apenas como rascunho previewed.
@@ -924,7 +924,7 @@ def test_outbound_simulate_dry_run_never_queues_messages(admin_client):
 
 
 def test_outbound_simulate_caps_batch_at_inventory(admin_client):
-    """Pedir mais do que existe não inventa leads: o lote fica limitado ao inventário."""
+    """Pedir mais do que existe nÃ£o inventa leads: o lote fica limitado ao inventÃ¡rio."""
     client, headers, _ = admin_client
     r = client.post(
         "/api/admin/outbound/simulate", headers=headers, json={"city": "BOSTON", "batch_size": 100000}
@@ -936,26 +936,26 @@ def test_outbound_simulate_caps_batch_at_inventory(admin_client):
 
 
 # --------------------------------------------------------------------------
-# Templates dinâmicos por nicho + idioma obrigatório (en-US).
+# Templates dinÃ¢micos por nicho + idioma obrigatÃ³rio (en-US).
 #
-#   1. A prévia é gerada dinamicamente e preenchida com dados REAIS (endereço,
-#      empresa/contacto) — nunca placeholders por resolver.
-#   2. Todo o copy outbound é inglês comercial americano; o guard de import
+#   1. A prÃ©via Ã© gerada dinamicamente e preenchida com dados REAIS (endereÃ§o,
+#      empresa/contacto) â€” nunca placeholders por resolver.
+#   2. Todo o copy outbound Ã© inglÃªs comercial americano; o guard de import
 #      recusa qualquer template fora de en-US.
-#   3. O nicho filtra o inventário (telhados não contam canalização).
+#   3. O nicho filtra o inventÃ¡rio (telhados nÃ£o contam canalizaÃ§Ã£o).
 # --------------------------------------------------------------------------
 
 
 def test_outbound_templates_are_english_only():
-    """Nenhum template pode conter acentos/termos PT — o guard recusa no import."""
+    """Nenhum template pode conter acentos/termos PT â€” o guard recusa no import."""
     for niche, tpl in outbound_templates.TEMPLATES.items():
         outbound_templates.assert_english_only(tpl["subject"])
         outbound_templates.assert_english_only(tpl["body"])
-    # O guard é real: uma string PT dispara excepção.
+    # O guard Ã© real: uma string PT dispara excepÃ§Ã£o.
     with pytest.raises(ValueError):
         outbound_templates.assert_english_only("Ola empreiteiro, obrigado pela preferencia")
     with pytest.raises(ValueError):
-        outbound_templates.assert_english_only("Hello - rotação")
+        outbound_templates.assert_english_only("Hello - rotaÃ§Ã£o")
 
 
 def test_outbound_templates_hide_data_sources():
@@ -1151,7 +1151,7 @@ def test_outbound_preview_rejects_unserved_city_and_bad_niche(admin_client):
 
 
 def test_outbound_preview_renders_real_data_in_english(admin_client):
-    """A prévia preenche os placeholders com dados reais, toda em en-US."""
+    """A prÃ©via preenche os placeholders com dados reais, toda em en-US."""
     client, headers, _ = admin_client
     _seed_outbound_lead(
         "CHICAGO",
@@ -1174,16 +1174,16 @@ def test_outbound_preview_renders_real_data_in_english(admin_client):
     # Sem placeholders por resolver.
     assert "{" not in subject and "}" not in subject
     assert "{" not in rendered and "}" not in rendered
-    # Dados reais: o endereço aparece na clausula condicional.
+    # Dados reais: o endereÃ§o aparece na clausula condicional.
     assert "500 N MICHIGAN AVENUE" not in rendered
     assert "active roofing project is open in Chicago this week" in rendered
-    # A prévia e' estritamente en-US (mesmo guard dos templates).
+    # A prÃ©via e' estritamente en-US (mesmo guard dos templates).
     outbound_templates.assert_english_only(subject)
     outbound_templates.assert_english_only(rendered)
 
 
 def test_outbound_preview_falls_back_to_lead_owner_without_enrichment(admin_client):
-    """Sem contacto enriquecido, a prévia usa owner_name (stand-in) e sinaliza-o."""
+    """Sem contacto enriquecido, a prÃ©via usa owner_name (stand-in) e sinaliza-o."""
     client, headers, _ = admin_client
     _seed_outbound_lead(
         "DALLAS",
@@ -1204,7 +1204,7 @@ def test_outbound_preview_falls_back_to_lead_owner_without_enrichment(admin_clie
 
 
 def test_outbound_preview_uses_enriched_contact_when_available(admin_client):
-    """Com contacto enriquecido, empresa/contacto reais entram na prévia."""
+    """Com contacto enriquecido, empresa/contacto reais entram na prÃ©via."""
     client, headers, _ = admin_client
     lead_id = _seed_outbound_lead(
         "BOSTON",
@@ -1299,7 +1299,7 @@ def test_admin_billing_funnel_exposes_funnel_and_recovery(admin_client):
 
 
 def test_admin_billing_funnel_requires_admin(admin_client, nonadmin_client):
-    """O funil de billing é sensível: exige admin real."""
+    """O funil de billing Ã© sensÃ­vel: exige admin real."""
     client, _, _ = admin_client
     _, nonadmin_headers = nonadmin_client
     assert client.get("/api/admin/billing/funnel").status_code == 401
@@ -1334,7 +1334,7 @@ def test_admin_can_mark_outbound_contact_replied(admin_client):
 
 
 def test_admin_outbound_status_exposes_sequence_config(admin_client):
-    """O estado do motor expõe a configuração da sequência."""
+    """O estado do motor expÃµe a configuraÃ§Ã£o da sequÃªncia."""
     client, headers, _ = admin_client
     r = client.get("/api/admin/outbound/status", headers=headers)
     assert r.status_code == 200, r.text
@@ -1346,7 +1346,7 @@ def test_admin_outbound_status_exposes_sequence_config(admin_client):
 
 
 def test_admin_voice_import_dnc_queue_and_call(admin_client, monkeypatch):
-    """Fluxo Fase 1: importar licença -> DNC -> fila -> registar chamada."""
+    """Fluxo Fase 1: importar licenÃ§a -> DNC -> fila -> registar chamada."""
     monkeypatch.setenv("VOICE_NOW_ISO", "2026-11-02T16:00:00+00:00")
     from backend.services import b2b_voice
 
@@ -1531,7 +1531,7 @@ def test_admin_voice_requires_admin(admin_client, nonadmin_client):
 
 
 def test_admin_showcase_build_public_page_and_token_redirect(admin_client, monkeypatch):
-    """Fluxo Fase 2A: build -> página pública mascarada -> token -> redirect."""
+    """Fluxo Fase 2A: build -> pÃ¡gina pÃºblica mascarada -> token -> redirect."""
     from datetime import datetime, timezone
 
     from backend.services import b2b_voice, showcase
@@ -1661,4 +1661,71 @@ def test_admin_showcase_build_public_page_and_token_redirect(admin_client, monke
         conn.close()
     showcase._CACHE.clear()
 
+
+
+
+# ---------------------------------------------------- data plane / alertas
+
+
+def test_admin_data_plane_endpoints(admin_client):
+    client, headers, _ = admin_client
+    for path in (
+        "/api/admin/data-plane",
+        "/api/admin/data-plane/ingestion",
+        "/api/admin/data-plane/quarantine",
+        "/api/admin/data-plane/freshness",
+        "/api/admin/voice/score-distribution",
+    ):
+        r = client.get(path, headers=headers)
+        assert r.status_code == 200, (path, r.text)
+    body = client.get("/api/admin/data-plane", headers=headers).json()
+    for key in ("ingestion", "quarantine", "freshness", "score"):
+        assert key in body
+    assert "active_count" in body["quarantine"]
+    assert "buckets" in body["score"]
+
+
+def test_admin_alerts_dedupe_and_critical_first(admin_client):
+    client, headers, _ = admin_client
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM system_alerts WHERE code LIKE 'PYTEST_DEDUP%'")
+        for level, message in (
+            ("warning", "duplicado antigo"),
+            ("warning", "duplicado novo"),
+            ("critical", "critico unico"),
+        ):
+            conn.execute(
+                "INSERT INTO system_alerts (level, code, message, acknowledged) "
+                "VALUES (?, ?, ?, 0)",
+                (level, "PYTEST_DEDUP", message),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    r = client.get("/api/admin/alerts?limit=20", headers=headers)
+    assert r.status_code == 200, r.text
+    items = r.json()["alerts"]
+    dedup = [item for item in items if item["code"] == "PYTEST_DEDUP"]
+    assert len(dedup) == 1
+    assert dedup[0]["occurrences"] == 3
+    assert items[0]["code"] == "PYTEST_DEDUP"
+    assert items[0]["level"] == "critical"
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM system_alerts WHERE code LIKE 'PYTEST_DEDUP%'")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_admin_sources_include_freshness_state(admin_client):
+    client, headers, _ = admin_client
+    r = client.get("/api/admin/sources", headers=headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "freshness" in body
+    for city, health in body["city_health"].items():
+        assert "state" in health, city
+        assert health["state"] in ("ok", "warn", "fail", "unknown")
 

@@ -27,6 +27,7 @@ from ..config import settings
 from ..utils.logger import logger
 from ..utils.time import utcnow_aware
 from . import control_tower
+from .alert_dedup import dedupe_alerts
 from .db import SERVED_CITIES, db_service, get_connection
 from .scrape_guard import parse_dt, zero_insert_streak
 
@@ -745,9 +746,12 @@ def score_alerts(alerts: list[dict], now: datetime) -> dict:
         penalties.append(10)
         reasons.append(f"Alerta aberto há {max(live_ages):.0f}h")
 
+    occurrences = sum(max(1, int(a.get("occurrences") or 1)) for a in alerts)
     headline = f"{len(alerts)} aberto(s)"
     if informational:
         headline += f" ({len(informational)} informativo(s))"
+    if occurrences > len(alerts):
+        headline += f" · {occurrences} ocorrência(s)"
     metrics = [
         _metric(
             "open",
@@ -770,6 +774,14 @@ def score_alerts(alerts: list[dict], now: datetime) -> dict:
             critical_old,
             "",
             "ok" if not critical_old else "warn",
+        ),
+        _metric(
+            "occurrences",
+            "Ocorrências",
+            occurrences,
+            "",
+            "ok" if occurrences <= len(alerts) else "warn",
+            "histórico do mesmo código",
         ),
         _metric(
             "informational",
@@ -797,7 +809,7 @@ def score_alerts(alerts: list[dict], now: datetime) -> dict:
         {
             "items": [
                 {**alert, "informational": not _is_operational_alert(alert)}
-                for alert in alerts[:10]
+                for alert in alerts
             ]
         },
     )
@@ -989,10 +1001,13 @@ def _gather_sync() -> dict:
             ).fetchone()[0]
             or 0
         )
-        alerts = [dict(r) for r in conn.execute(
+        alert_rows = [dict(r) for r in conn.execute(
             "SELECT id, level, code, message, created_at FROM system_alerts "
-            "WHERE acknowledged=0 ORDER BY id DESC LIMIT 20"
+            "WHERE acknowledged=0 ORDER BY id DESC LIMIT 200"
         ).fetchall()]
+        # Um código repetido (ex.: BOSTON stale de 6 em 6 horas) é um só
+        # problema operacional. O painel mostra ocorrências, não 9 cartões.
+        alerts = dedupe_alerts(alert_rows, limit=50)
         return {
             "cities": cities,
             "city_health": city_health,

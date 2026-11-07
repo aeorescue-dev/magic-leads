@@ -1112,6 +1112,11 @@ def queue(
     trade: str = "",
     state: str = "",
     offset: int = 0,
+    score_min: Optional[int] = None,
+    score_max: Optional[int] = None,
+    status: str = "",
+    date_from: str = "",
+    date_to: str = "",
 ) -> dict:
     init()
     now = _utc_now()
@@ -1127,6 +1132,21 @@ def queue(
     if trade.strip():
         where.append("LOWER(TRIM(COALESCE(trade,''))) = LOWER(?)")
         params.append(trade.strip())
+    if score_min is not None:
+        where.append("score >= ?")
+        params.append(int(score_min))
+    if score_max is not None:
+        where.append("score <= ?")
+        params.append(int(score_max))
+    if status.strip():
+        where.append("status = ?")
+        params.append(status.strip())
+    if date_from.strip():
+        where.append("date(created_at) >= date(?)")
+        params.append(date_from.strip())
+    if date_to.strip():
+        where.append("date(created_at) <= date(?)")
+        params.append(date_to.strip())
     clause = (" WHERE " + " AND ".join(where)) if where else ""
     conn = get_conn()
     try:
@@ -1162,6 +1182,11 @@ def queue(
                 "city": city,
                 "trade": trade,
                 "state": state,
+                "score_min": score_min,
+                "score_max": score_max,
+                "status": status,
+                "date_from": date_from,
+                "date_to": date_to,
             },
         }
     finally:

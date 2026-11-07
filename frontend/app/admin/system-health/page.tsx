@@ -806,7 +806,7 @@ export default function SystemHealthPage() {
         <Section
           title="Alertas abertos"
           icon={<AlertTriangle className="h-4 w-4 text-amber-400" />}
-          hint="Reconhecer diretamente aqui; o resto continua read-only"
+          hint={`${alertItems.length} código(s) aberto(s) · reconhecer aqui`}
         >
           {ackError ? (
             <p className="mb-2 rounded-lg border border-rose-500/20 bg-rose-500/10 p-2 text-[11px] text-rose-200">
@@ -832,6 +832,11 @@ export default function SystemHealthPage() {
                   >
                     {alert.informational ? "auditoria" : alert.level}
                   </span>
+                  {Number(alert.occurrences || 1) > 1 ? (
+                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[9px] font-bold text-slate-400">
+                      {alert.occurrences}×
+                    </span>
+                  ) : null}
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] text-slate-500">
                       {fmtWhen(alert.created_at)}
@@ -853,6 +858,11 @@ export default function SystemHealthPage() {
                 </div>
                 <p className="mt-1 font-mono text-[10px] text-slate-400">{alert.code}</p>
                 <p className="text-[11px] text-slate-300">{alert.message}</p>
+                {Number(alert.occurrences || 1) > 1 && alert.first_seen ? (
+                  <p className="mt-1 text-[9px] text-slate-600">
+                    primeira ocorrência {fmtWhen(alert.first_seen)}
+                  </p>
+                ) : null}
                 {alert.informational ? (
                   <p className="mt-1 text-[10px] text-slate-500">
                     Registo de auditoria — não afeta o score operacional.

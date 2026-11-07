@@ -10116,6 +10116,63 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def get_open_system_alerts(
+        self, limit: int = 50, dedup: bool = True
+    ) -> List[dict]:
+        """Alertas abertos (acknowledged=0), opcionalmente agrupados por código.
+
+        O painel precisa do estado atual, não do histórico repetido: o mesmo
+        `SCRAPER_CITY_STALE:BOSTON` gera uma linha por ciclo. Com `dedup=True`
+        devolvemos um item por código, com `occurrences`, `first_seen` e
+        `last_seen`, ordenado por severidade e recência.
+        """
+        from .alert_dedup import dedupe_alerts
+
+        limit = max(1, min(int(limit), 500))
+        conn = get_connection()
+        try:
+            # Busca uma janela maior para que a deduplicação não esconda um
+            # crítico antigo atrás de muitos avisos recentes.
+            window = max(limit * 20, 200)
+            rows = conn.execute(
+                "SELECT id, level, code, message, context, acknowledged, created_at "
+                "FROM system_alerts WHERE acknowledged=0 ORDER BY id DESC LIMIT ?",
+                (window,),
+            ).fetchall()
+        finally:
+            conn.close()
+        if not dedup:
+            return [dict(r) for r in rows[:limit]]
+        return dedupe_alerts(rows, limit=limit)
+
+    def get_city_fact_stats(self) -> dict[str, dict]:
+        """Frescura real por cidade, a partir dos factos em `leads`.
+
+        `city_health` mede o sucesso HTTP do fetch; esta leitura mede se
+        entraram factos novos. O painel cruza as duas para não pintar de verde
+        uma cidade que responde mas está seca.
+        """
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                """
+                SELECT UPPER(TRIM(city)) AS city,
+                       COUNT(*) AS total,
+                       SUM(CASE WHEN date_reported >= datetime('now','-24 hours')
+                                THEN 1 ELSE 0 END) AS facts_24h,
+                       SUM(CASE WHEN created_at >= datetime('now','-24 hours')
+                                THEN 1 ELSE 0 END) AS created_24h,
+                       MAX(date_reported) AS last_fact,
+                       MAX(created_at) AS last_created
+                FROM leads
+                WHERE COALESCE(TRIM(city),'') <> ''
+                GROUP BY 1
+                """
+            ).fetchall()
+            return {str(r["city"]): dict(r) for r in rows}
+        finally:
+            conn.close()
+
     def acknowledge_system_alert(self, alert_id: int) -> Optional[dict]:
         """Marca um alerta de auditoria como reconhecido. Retorna o alerta ou None."""
         conn = get_connection()
@@ -12927,6 +12984,16 @@ class AsyncDatabaseService:
         return await anyio.to_thread.run_sync(
             self._service.get_recent_system_alerts, limit
         )
+
+    async def get_open_system_alerts(
+        self, limit: int = 50, dedup: bool = True
+    ) -> List[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.get_open_system_alerts, limit, dedup
+        )
+
+    async def get_city_fact_stats(self) -> dict[str, dict]:
+        return await anyio.to_thread.run_sync(self._service.get_city_fact_stats)
 
     async def acknowledge_system_alert(self, alert_id: int) -> Optional[dict]:
         return await anyio.to_thread.run_sync(

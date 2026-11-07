@@ -26,6 +26,12 @@ import {
   Wallet,
 } from "lucide-react";
 
+import DataPlaneStrip from "@/components/admin/DataPlaneStrip";
+import {
+  MetricCard,
+  StatusPill,
+  cn,
+} from "@/components/admin/ui";
 import {
   AdminAlert,
   AdminApiError,
@@ -49,6 +55,7 @@ import {
     AdminCreditLedgerEvent,
     AdminCreditLedgerResponse,
     AdminCreditReconcileResponse,
+  ackAdminAlert,
   fetchAdminAlerts,
   fetchAdminEnrichmentStatus,
   fetchAdminOutboundBatches,
@@ -125,23 +132,31 @@ function Card({
   hint?: string;
 }) {
   return (
-    <section className="rounded-2xl border border-white/10 bg-[#10131a]">
-      <header className="flex items-center gap-2 border-b border-white/10 px-4 py-3">
-        <span className="text-indigo-400">{icon}</span>
-        <h2 className="text-sm font-bold text-slate-200">{title}</h2>
-        {hint ? <span className="ml-auto text-[11px] text-slate-500">{hint}</span> : null}
+    <section className="group relative overflow-hidden rounded-2xl border border-white/[0.07] bg-[#0e1118]/90 shadow-[0_24px_80px_-48px_rgba(0,0,0,0.95)] backdrop-blur-xl">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-emerald-400/25 to-transparent" />
+      <header className="flex items-center gap-2.5 border-b border-white/[0.06] px-5 py-3.5">
+        <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-emerald-400/15 bg-emerald-500/[0.07] text-emerald-300">
+          {icon}
+        </span>
+        <h2 className="text-[13px] font-bold tracking-tight text-slate-100">{title}</h2>
+        {hint ? (
+          <span className="ml-auto rounded-full border border-white/[0.06] bg-white/[0.03] px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+            {hint}
+          </span>
+        ) : null}
       </header>
-      <div className="p-4">{children}</div>
+      <div className="p-5">{children}</div>
     </section>
   );
 }
 
 function Kpi({ label, value, sub }: { label: string; value: React.ReactNode; sub?: string }) {
   return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2">
-      <div className="text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
-      <div className="text-xl font-bold text-slate-100">{value}</div>
-      {sub ? <div className="text-[11px] text-slate-500">{sub}</div> : null}
+    <div className="relative overflow-hidden rounded-xl border border-white/[0.06] bg-white/[0.02] px-3.5 py-3">
+      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-emerald-400/40 via-sky-400/20 to-transparent" />
+      <div className="text-[9px] font-bold uppercase tracking-[0.16em] text-slate-600">{label}</div>
+      <div className="mt-1 text-xl font-black tracking-tight text-slate-50">{value}</div>
+      {sub ? <div className="mt-0.5 text-[10px] text-slate-500">{sub}</div> : null}
     </div>
   );
 }
@@ -2467,6 +2482,8 @@ export default function AdminPage() {
   const [sessions, setSessions] = useState<AdminSession[]>([]);
   const [revoking, setRevoking] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  const [acking, setAcking] = useState<number | null>(null);
+  const [ackError, setAckError] = useState<string | null>(null);
   const [pushTest, setPushTest] = useState<{ state: "idle" | "sending" | "ok" | "error"; message?: string }>(
     { state: "idle" }
   );
@@ -2527,6 +2544,24 @@ export default function AdminPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const ackAlert = useCallback(async (alert: AdminAlert) => {
+    const target = Number(alert.latest_id ?? alert.id);
+    setAcking(target);
+    setAckError(null);
+    try {
+      await ackAdminAlert(target);
+      setAlerts((current) =>
+        current.filter((item) => Number(item.latest_id ?? item.id) !== target)
+      );
+    } catch (error) {
+      setAckError(
+        error instanceof Error ? error.message : "Não foi possível reconhecer o alerta."
+      );
+    } finally {
+      setAcking(null);
+    }
+  }, []);
 
   const hasToken =
     typeof window !== "undefined" && !!window.localStorage.getItem(AUTH_TOKEN_KEY);
@@ -2591,71 +2626,90 @@ export default function AdminPage() {
 
   const health = sources?.city_health ?? {};
   const cities = Object.entries(health);
-  const unhealthy = cities.filter(([, v]) => (v.failure_count ?? 0) > 0 || v.circuit_open_until);
+  const unhealthy = cities.filter(
+    ([, v]) => v.state === "fail" || v.state === "warn" || (v.failure_count ?? 0) > 0 || v.circuit_open_until
+  );
   const lastRun = overview?.last_scraper_run ?? null;
+  const criticalAlerts = alerts.filter((alert) =>
+    ["critical", "error", "fail"].includes(String(alert.level).toLowerCase())
+  );
+  const overallState: "ok" | "warn" | "fail" =
+    criticalAlerts.length > 0 ||
+    sources?.freshness?.state === "fail" ||
+    cities.some(([, v]) => v.state === "fail")
+      ? "fail"
+      : unhealthy.length > 0 || sources?.freshness?.state === "warn"
+        ? "warn"
+        : "ok";
+  const overallLabel =
+    overallState === "fail"
+      ? "Operação crítica"
+      : overallState === "warn"
+        ? "Atenção operacional"
+        : "Operação saudável";
 
   return (
-    <div className="mx-auto max-w-7xl space-y-5 p-5">
-      <header className="flex flex-wrap items-center gap-3">
+    <div className="mx-auto max-w-[1600px] space-y-5 px-4 py-6">
+      <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-xl font-bold text-slate-100">Torre de Controlo · Magic Leads</h1>
-          <p className="text-xs text-slate-500">
-            Painel interno. Gerado em {fmtDt(overview?.generated_at)} (UTC).
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <StatusPill state={overallState} pulse>
+              {overallLabel}
+            </StatusPill>
+            <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-600">
+              Control Tower
+            </span>
+          </div>
+          <h1 className="text-3xl font-black tracking-tight text-white">
+            Overview operacional
+          </h1>
+          <p className="mt-1 text-xs text-slate-500">
+            Gerado em {fmtDt(overview?.generated_at)} UTC · atualização manual
+            ou ao focar a janela.
           </p>
         </div>
-        <a
-          href="/admin/system-health"
-          className="ml-auto inline-flex items-center gap-2 rounded-lg border border-indigo-400/30 bg-indigo-500/10 px-3 py-2 text-xs font-semibold text-indigo-200 hover:bg-indigo-500/20"
-        >
-          <Activity className="h-4 w-4" />
-          System Health
-        </a>
-        <a
-          href="/admin/analytics"
-          className="inline-flex items-center gap-2 rounded-lg border border-indigo-400/30 bg-indigo-500/10 px-3 py-2 text-xs font-semibold text-indigo-200 hover:bg-indigo-500/20"
-        >
-          <BarChart3 className="h-4 w-4" />
-          Analytics
-        </a>
-        <a
-          href="/admin/investor-room"
-          className="inline-flex items-center gap-2 rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-200 hover:bg-amber-500/20"
-        >
-          <Wallet className="h-4 w-4" />
-          Investor Room
-        </a>
-        <a
-          href="/admin/voice"
-          className="inline-flex items-center gap-2 rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/20"
-        >
-          <Phone className="h-4 w-4" />
-          Voice B2B
-        </a>
         <button
           onClick={() => void load()}
           disabled={busy}
-          className="inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/5 disabled:opacity-50"
+          className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-[11px] font-bold text-slate-300 transition hover:border-emerald-400/30 hover:text-emerald-200 disabled:opacity-50"
         >
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
           Atualizar
         </button>
       </header>
 
-      {/* ---------------------------------------------------------- topo */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Kpi label="Leads (total)" value={overview?.leads.total ?? "—"} sub={`${overview?.leads.today ?? 0} hoje`} />
-        <Kpi label="Utilizadores" value={overview?.users.total ?? "—"} sub={`${overview?.users.today ?? 0} hoje`} />
-        <Kpi
-          label="Revelos hoje"
-          value={overview?.reveals.today ?? "—"}
-          sub={`${overview?.reveals.active ?? 0} ainda ativos`}
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard
+          label="Leads"
+          value={overview?.leads.total ?? "—"}
+          sub={`${overview?.leads.today ?? 0} hoje · ${overview?.leads.last_24h ?? 0} em 24h`}
+          icon={<Database className="h-4 w-4" />}
+          tone="sky"
         />
-        <Kpi
+        <MetricCard
+          label="Utilizadores"
+          value={overview?.users.total ?? "—"}
+          sub={`${overview?.users.today ?? 0} novos hoje`}
+          icon={<Users className="h-4 w-4" />}
+          tone="violet"
+        />
+        <MetricCard
+          label="Revelações hoje"
+          value={overview?.reveals.today ?? "—"}
+          sub={`${overview?.reveals.active ?? 0} ainda ativas · ${overview?.reveals.returned_to_pool ?? 0} devolvidas`}
+          icon={<Mail className="h-4 w-4" />}
+          tone="emerald"
+        />
+        <MetricCard
           label="Créditos usados"
           value={overview?.credits.used_today ?? "—"}
-          sub={`${overview?.credits.refunded_today ?? 0} estornados`}
+          sub={`${overview?.credits.refunded_today ?? 0} estornados hoje`}
+          icon={<Wallet className="h-4 w-4" />}
+          tone="amber"
         />
       </div>
+
+      <DataPlaneStrip />
 
       {/* ------------------------------------------------------ outbound */}
       <OutboundPanel />
@@ -2663,44 +2717,92 @@ export default function AdminPage() {
 
       <div className="grid gap-5 lg:grid-cols-2">
         {/* -------------------------------------------------- fontes */}
-        <Card title="Saúde das fontes de dados" icon={<Database className="h-4 w-4" />}>
-          <div className="mb-3 flex flex-wrap items-center gap-3 text-xs">
-            <StateBadge ok={unhealthy.length === 0} bad={`${unhealthy.length} cidade(s) com falha`} />
-            <span className="text-slate-500">
-              Último run: <span className="text-slate-300">{fmtDt(lastRun?.finished_at)}</span>
+        <Card
+          title="Saúde das cidades"
+          icon={<Database className="h-4 w-4" />}
+          hint={sources?.freshness ? `frescura ${sources.freshness.state}` : "city health"}
+        >
+          <div className="mb-4 flex flex-wrap items-center gap-2.5">
+            <StateBadge
+              ok={unhealthy.length === 0}
+              bad={`${unhealthy.length} cidade(s) a rever`}
+            />
+            <span className="text-[10px] text-slate-500">
+              último run: <span className="text-slate-300">{fmtDt(lastRun?.finished_at)}</span>
               {lastRun?.inserted != null ? ` · ${lastRun.inserted} leads inseridos` : ""}
             </span>
+            {sources?.freshness?.last_run ? (
+              <span className="ml-auto text-[10px] text-slate-500">
+                frescura: {sources.freshness.last_run.status} ·{" "}
+                {sources.freshness.last_run.hpd_checked.toLocaleString("pt-PT")} HPD /{" "}
+                {sources.freshness.last_run.dob_checked.toLocaleString("pt-PT")} DOB
+              </span>
+            ) : null}
           </div>
           {cities.length === 0 ? (
             <p className="text-xs text-slate-500">Sem registos em city_health ainda.</p>
           ) : (
-            <table className="w-full text-left text-xs">
-              <thead className="text-[10px] uppercase tracking-wider text-slate-500">
-                <tr>
-                  <th className="py-1">Cidade</th>
-                  <th className="py-1">Falhas</th>
-                  <th className="py-1">Circuit</th>
-                  <th className="py-1">Último sucesso</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/5">
-                {cities.map(([city, v]) => {
-                  const broken = (v.failure_count ?? 0) > 0 || !!v.circuit_open_until;
-                  return (
-                    <tr key={city}>
-                      <td className="py-1.5 font-medium text-slate-300">{city}</td>
-                      <td className={broken ? "py-1.5 text-amber-400" : "py-1.5 text-slate-400"}>
-                        {v.failure_count ?? 0}
-                      </td>
-                      <td className="py-1.5 text-slate-400">
-                        {v.circuit_open_until ? `aberto até ${fmtDt(v.circuit_open_until)}` : "fechado"}
-                      </td>
-                      <td className="py-1.5 text-slate-400">{fmtDt(v.last_success_at)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {cities.map(([city, v]) => {
+                const state = v.state ?? "unknown";
+                const age = v.age_hours ?? null;
+                const barWidth = Math.min(100, Math.max(2, ((age ?? 0) / 48) * 100));
+                const barClass =
+                  state === "fail"
+                    ? "from-rose-500 to-orange-400"
+                    : state === "warn"
+                      ? "from-amber-400 to-yellow-300"
+                      : "from-emerald-400 to-teal-300";
+                return (
+                  <div
+                    key={city}
+                    className={cn(
+                      "rounded-xl border p-3 transition",
+                      state === "fail"
+                        ? "border-rose-400/20 bg-rose-500/[0.05]"
+                        : state === "warn"
+                          ? "border-amber-400/20 bg-amber-500/[0.05]"
+                          : "border-white/[0.07] bg-white/[0.02]"
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-bold text-white">{city}</p>
+                        <p className="mt-0.5 text-[10px] text-slate-500">{v.state_reason ?? "sem diagnóstico"}</p>
+                      </div>
+                      <StatusPill state={state === "ok" ? "ok" : state === "warn" ? "warn" : state === "fail" ? "fail" : "neutral"}>
+                        {state}
+                      </StatusPill>
+                    </div>
+                    <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
+                      <div
+                        className={cn("h-full rounded-full bg-gradient-to-r", barClass)}
+                        style={{ width: `${barWidth}%` }}
+                      />
+                    </div>
+                    <div className="mt-2 grid grid-cols-3 gap-1 text-[9px] text-slate-500">
+                      <span>
+                        <b className="block text-[11px] text-slate-300">{(v.facts_24h ?? 0).toLocaleString("pt-PT")}</b>
+                        factos 24h
+                      </span>
+                      <span>
+                        <b className="block text-[11px] text-slate-300">
+                          {age === null ? "—" : age < 48 ? `${age.toFixed(1)}h` : `${Math.round(age / 24)}d`}
+                        </b>
+                        idade
+                      </span>
+                      <span>
+                        <b className="block text-[11px] text-slate-300">{v.failure_count ?? 0}</b>
+                        falhas
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[9px] text-slate-600">
+                      fetch ok: {fmtDt(v.last_success_at)}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </Card>
 
@@ -3478,33 +3580,89 @@ export default function AdminPage() {
 
         {/* -------------------------------------------------- alertas */}
         <Card
-          title="Alertas de auditoria"
+          title="Alertas abertos"
           icon={<AlertTriangle className="h-4 w-4" />}
-          hint={`${overview?.alerts.unacknowledged ?? 0} por reconhecer`}
+          hint={`${alerts.length} código(s)`}
         >
+          {ackError ? (
+            <p className="mb-2 rounded-lg border border-rose-400/20 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-200">
+              {ackError}
+            </p>
+          ) : null}
           {alerts.length === 0 ? (
-            <p className="text-xs text-slate-500">Sem alertas registados.</p>
+            <div className="flex items-center gap-2 rounded-xl border border-emerald-400/15 bg-emerald-500/[0.04] px-3 py-4 text-xs text-emerald-200">
+              <CheckCircle2 className="h-4 w-4" /> Sem alertas abertos. Operação limpa.
+            </div>
           ) : (
             <ul className="space-y-2">
-              {alerts.map((a) => (
-                <li key={a.id} className="rounded-lg border border-white/10 p-2.5">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`text-[10px] font-bold uppercase ${
-                        a.level === "critical" ? "text-rose-400" : "text-amber-400"
-                      }`}
-                    >
-                      {a.level}
-                    </span>
-                    <span className="font-mono text-[11px] text-slate-400">{a.code}</span>
-                    <span className="ml-auto text-[11px] text-slate-500">{fmtDt(a.created_at)}</span>
-                  </div>
-                  <p className="mt-1 text-xs text-slate-300">{a.message}</p>
-                  {a.acknowledged ? (
-                    <span className="mt-1 inline-block text-[10px] text-slate-500">reconhecido</span>
-                  ) : null}
-                </li>
-              ))}
+              {alerts.map((a) => {
+                const critical = ["critical", "error", "fail"].includes(
+                  String(a.level).toLowerCase()
+                );
+                const occurrences = a.occurrences ?? 1;
+                const target = Number(a.latest_id ?? a.id);
+                return (
+                  <li
+                    key={a.id}
+                    className={cn(
+                      "rounded-xl border p-3",
+                      critical
+                        ? "border-rose-400/20 bg-rose-500/[0.05]"
+                        : "border-amber-400/15 bg-amber-500/[0.035]"
+                    )}
+                  >
+                    <div className="flex items-start gap-2.5">
+                      <span
+                        className={cn(
+                          "mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border",
+                          critical
+                            ? "border-rose-400/25 bg-rose-500/10 text-rose-300"
+                            : "border-amber-400/20 bg-amber-500/10 text-amber-300"
+                        )}
+                      >
+                        <AlertTriangle className="h-3.5 w-3.5" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <StatusPill state={critical ? "fail" : "warn"}>
+                            {a.level}
+                          </StatusPill>
+                          <span className="font-mono text-[10px] text-slate-400">{a.code}</span>
+                          {occurrences > 1 ? (
+                            <span className="rounded-full border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[9px] font-bold text-slate-400">
+                              {occurrences}×
+                            </span>
+                          ) : null}
+                          <span className="ml-auto text-[10px] text-slate-500">
+                            {fmtDt(a.last_seen ?? a.created_at)}
+                          </span>
+                        </div>
+                        <p className="mt-1.5 text-[11px] leading-relaxed text-slate-300">
+                          {a.message}
+                        </p>
+                        {occurrences > 1 && a.first_seen ? (
+                          <p className="mt-1 text-[9px] text-slate-600">
+                            primeira ocorrência {fmtDt(a.first_seen)}
+                          </p>
+                        ) : null}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void ackAlert(a)}
+                        disabled={acking === target}
+                        className="shrink-0 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-[10px] font-bold text-slate-300 transition hover:border-emerald-400/30 hover:text-emerald-200 disabled:opacity-50"
+                      >
+                        {acking === target ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <CheckCircle2 className="h-3 w-3" />
+                        )}
+                        <span className="ml-1">Reconhecer</span>
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </Card>

@@ -78,12 +78,37 @@ export interface AdminCityHealth {
     circuit_open_until?: string | null;
     last_success_at?: string | null;
     anomaly_counter?: number;
+    last_fact_at?: string | null;
+    last_created_at?: string | null;
+    facts_24h?: number;
+    created_24h?: number;
+    lead_total?: number;
+    age_hours?: number | null;
+    state?: "ok" | "warn" | "fail" | "unknown";
+    state_reason?: string;
   };
 }
 
 export interface AdminSources {
   city_health: AdminCityHealth;
   last_run: AdminOverview["last_scraper_run"];
+  freshness?: {
+    last_run: {
+      id: number;
+      started_at: string;
+      finished_at: string | null;
+      hpd_checked: number;
+      hpd_closed: number;
+      dob_checked: number;
+      dob_closed: number;
+      history_refreshed: number;
+      status: string;
+      errors: string | null;
+    } | null;
+    age_hours: number | null;
+    counts: { ok: number; warn: number; fail: number; unknown: number };
+    state: "ok" | "warn" | "fail";
+  };
 }
 
 export interface AdminScraperRun {
@@ -124,6 +149,10 @@ export interface AdminAlert {
   context: string | null;
   acknowledged: number;
   created_at: string;
+  occurrences?: number;
+  first_seen?: string | null;
+  last_seen?: string | null;
+  latest_id?: number | null;
 }
 
 // Fase 2 — custo das consultas pagas a Searchbug.
@@ -350,6 +379,239 @@ export function ackAdminAlert(
     `/alerts/${alertId}/ack`,
     { method: "POST" }
   );
+}
+
+// ------------------------------------------------------ Data Plane (Fase 1)
+
+export interface AdminIngestionRun {
+  id: number;
+  run_id: string;
+  source: string;
+  status: string;
+  attempt: number;
+  http_status: number | null;
+  rows_fetched: number;
+  rows_parsed: number;
+  rows_upserted: number;
+  watermark_before: string | null;
+  watermark_after: string | null;
+  error_code: string | null;
+  error_detail: string | null;
+  started_at: string;
+  finished_at: string | null;
+}
+
+export interface AdminIngestionFailure {
+  id: number;
+  run_id: string;
+  source: string;
+  url: string | null;
+  http_status: number | null;
+  error_class: string | null;
+  retryable: number;
+  next_retry_at: string | null;
+  created_at: string;
+}
+
+export interface AdminIngestion {
+  runs: AdminIngestionRun[];
+  failures: AdminIngestionFailure[];
+  by_status: Array<{ status: string; n: number }>;
+  by_source: Array<{
+    source: string;
+    status: string;
+    n: number;
+    last_at: string | null;
+  }>;
+  scraper_runs: AdminScraperRun[];
+  scraper_status: Array<{ status: string; n: number; inserted: number }>;
+  last_success: { started_at: string; finished_at: string; source: string } | null;
+  last_failure: {
+    started_at: string;
+    source: string;
+    error_code: string | null;
+  } | null;
+  coverage_note: string;
+}
+
+export interface AdminQuarantineEntity {
+  id: number;
+  entity_id: number;
+  reason: string;
+  rule_id: string;
+  status: string;
+  evidence_json: string | null;
+  evidence: Record<string, unknown> | null;
+  created_at: string;
+  legal_name: string | null;
+  license: string | null;
+  state: string | null;
+  city: string | null;
+  phone: string | null;
+  entity_status: string | null;
+}
+
+export interface AdminQualityFinding {
+  id: number;
+  run_id: string;
+  entity_id: number | null;
+  company_id: number | null;
+  rule_id: string;
+  severity: string;
+  status: string;
+  evidence_json: string | null;
+  evidence: Record<string, unknown> | null;
+  created_at: string;
+  resolved_at: string | null;
+}
+
+export interface AdminQuarantine {
+  active: AdminQuarantineEntity[];
+  active_count: number;
+  reason_counts: Array<{ value: string; n: number }>;
+  findings: AdminQualityFinding[];
+  findings_by_rule: Array<{
+    rule_id: string;
+    severity: string;
+    status: string;
+    n: number;
+  }>;
+  findings_total: number;
+  entity_status: Array<{ status: string; n: number }>;
+  entity_quarantined_total: number;
+  other_quarantined: number;
+  note: string;
+}
+
+export interface AdminFreshnessRun {
+  id: number;
+  started_at: string;
+  finished_at: string | null;
+  hpd_checked: number;
+  hpd_closed: number;
+  dob_checked: number;
+  dob_closed: number;
+  history_refreshed: number;
+  status: string;
+  errors: string | null;
+}
+
+export interface AdminFreshness {
+  runs: AdminFreshnessRun[];
+  last_run: AdminFreshnessRun | null;
+  last_age_hours: number | null;
+  by_status: Array<{ status: string; n: number }>;
+  geocode: Array<{ status: string; n: number }>;
+  geocode_total: number;
+  health_remediations: Array<Record<string, unknown>>;
+  health_remediations_count: number;
+  health_remediations_implemented: boolean;
+  sanitizer_runs: Array<{
+    id: number;
+    run_id: string;
+    mode: string;
+    findings_count: number;
+    quarantined_count: number;
+    started_at: string;
+    finished_at: string | null;
+  }>;
+}
+
+export interface AdminScoreBucket {
+  bucket: number;
+  label: string;
+  n: number;
+}
+
+export interface AdminScoreSummary {
+  total: number;
+  min: number;
+  max: number;
+  avg: number;
+  distinct_scores: number;
+  updated_at: string | null;
+  buckets: AdminScoreBucket[];
+  snapshots: number;
+  snapshots_without_components: number;
+  last_run: {
+    id: number;
+    version: string;
+    status: string;
+    processed: number;
+    errors: number;
+    source_watermark: string | null;
+    started_at: string;
+    finished_at: string | null;
+    summary_json: string | null;
+  } | null;
+}
+
+export interface AdminDataPlane {
+  generated_at: string;
+  ingestion: AdminIngestion;
+  quarantine: AdminQuarantine;
+  freshness: AdminFreshness;
+  score: AdminScoreSummary;
+}
+
+export interface AdminScoreDetail {
+  id: number;
+  company_name: string;
+  score: number;
+  trade: string | null;
+  city: string | null;
+  state: string | null;
+  phone: string | null;
+  email: string | null;
+  website: string | null;
+  license_number: string | null;
+  permit_count: number | null;
+  permit_value_usd: number | null;
+  years_active: number | null;
+  employee_estimate: number | null;
+  status: string | null;
+  updated_at: string | null;
+  snapshot: {
+    company_id: number;
+    score: number;
+    version: string;
+    components: Record<string, number> | null;
+    quality_penalty: number;
+    computed_at: string;
+    source_event_id: string | null;
+  } | null;
+}
+
+export function fetchAdminDataPlane(): Promise<AdminDataPlane> {
+  return adminFetch<AdminDataPlane>("/data-plane");
+}
+
+export function fetchAdminDataPlaneIngestion(
+  limit = 50
+): Promise<AdminIngestion> {
+  return adminFetch<AdminIngestion>(`/data-plane/ingestion?limit=${limit}`);
+}
+
+export function fetchAdminDataPlaneQuarantine(
+  limit = 200
+): Promise<AdminQuarantine> {
+  return adminFetch<AdminQuarantine>(`/data-plane/quarantine?limit=${limit}`);
+}
+
+export function fetchAdminDataPlaneFreshness(
+  limit = 50
+): Promise<AdminFreshness> {
+  return adminFetch<AdminFreshness>(`/data-plane/freshness?limit=${limit}`);
+}
+
+export function fetchVoiceScoreDistribution(): Promise<AdminScoreSummary> {
+  return adminFetch<AdminScoreSummary>("/voice/score-distribution");
+}
+
+export function fetchVoiceCompanyScore(
+  companyId: number
+): Promise<AdminScoreDetail> {
+  return adminFetch<AdminScoreDetail>(`/voice/companies/${companyId}/score`);
 }
 
 export function fetchAdminSearchbug(days = 7, recentLimit = 50): Promise<AdminSearchbugMetrics> {
@@ -1517,7 +1779,16 @@ export interface VoiceQueue {
   total: number;
   callable: number;
   include_blocked: boolean;
-  filters?: { city: string; trade: string; state: string };
+  filters?: {
+    city: string;
+    trade: string;
+    state: string;
+    score_min?: number | null;
+    score_max?: number | null;
+    status?: string;
+    date_from?: string;
+    date_to?: string;
+  };
 }
 
 export interface VoiceGroup {
@@ -1568,20 +1839,45 @@ export interface VoiceImportResult {
   errors?: Array<{ row: number; reason: string }>;
 }
 
+export interface VoiceQueueFilters {
+  city?: string;
+  trade?: string;
+  state?: string;
+  scoreMin?: number | null;
+  scoreMax?: number | null;
+  status?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}
+
 export function fetchVoiceQueue(
   includeBlocked = false,
   limit = 100,
-  city = "",
+  cityOrFilters: string | VoiceQueueFilters = "",
   trade = "",
   offset = 0
 ): Promise<VoiceQueue> {
+  const filters: VoiceQueueFilters =
+    typeof cityOrFilters === "string"
+      ? { city: cityOrFilters, trade }
+      : cityOrFilters;
   const params = new URLSearchParams({
     include_blocked: includeBlocked ? "1" : "0",
     limit: String(limit),
     offset: String(offset),
   });
-  if (city) params.set("city", city);
-  if (trade) params.set("trade", trade);
+  if (filters.city) params.set("city", filters.city);
+  if (filters.trade) params.set("trade", filters.trade);
+  if (filters.state) params.set("state", filters.state);
+  if (filters.scoreMin !== null && filters.scoreMin !== undefined) {
+    params.set("score_min", String(filters.scoreMin));
+  }
+  if (filters.scoreMax !== null && filters.scoreMax !== undefined) {
+    params.set("score_max", String(filters.scoreMax));
+  }
+  if (filters.status) params.set("status", filters.status);
+  if (filters.dateFrom) params.set("date_from", filters.dateFrom);
+  if (filters.dateTo) params.set("date_to", filters.dateTo);
   return adminFetch<VoiceQueue>(`/voice/queue?${params.toString()}`);
 }
 

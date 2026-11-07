@@ -82,7 +82,18 @@ import {
   type VoiceScriptPreview,
   type VoiceSegment,
   type VoiceSource,
+  fetchVoiceCompanyScore,
+  fetchVoiceScoreDistribution,
+  type AdminScoreDetail,
 } from "@/lib/admin-api";
+import {
+  DateField,
+  FilterChip,
+  ScoreBar,
+  ScoreHistogram,
+  StatusPill,
+} from "@/components/admin/ui";
+import { SCORE_RANGES, formatScore, scoreBand, SCORE_BAND_META } from "@/lib/score";
 import { fmtWhen } from "@/lib/system-health";
 
 type VoiceTab = "overview" | "campaigns" | "segments" | "scripts" | "sources";
@@ -120,6 +131,16 @@ const money2 = (value: number) =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value);
+
+const SCORE_COMPONENTS: Record<string, { label: string; max: number; tone: string }> = {
+  demand: { label: "Demanda", max: 1, tone: "from-sky-400 to-cyan-300" },
+  trade_confidence: { label: "Confiança do trade", max: 1, tone: "from-violet-400 to-fuchsia-300" },
+  license: { label: "Licença", max: 8, tone: "from-emerald-400 to-teal-300" },
+  contact: { label: "Contacto", max: 10, tone: "from-amber-400 to-yellow-300" },
+  company_strength: { label: "Força da empresa", max: 1, tone: "from-orange-400 to-amber-300" },
+  freshness: { label: "Frescura", max: 5, tone: "from-teal-400 to-emerald-300" },
+  quality_penalty: { label: "Penalidade", max: 50, tone: "from-rose-500 to-orange-400" },
+};
 
 function cn(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
@@ -696,6 +717,12 @@ export default function VoiceB2BPage() {
   const [includeBlocked, setIncludeBlocked] = useState(false);
   const [cityFilter, setCityFilter] = useState("");
   const [tradeFilter, setTradeFilter] = useState("");
+  const [scoreRange, setScoreRange] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [scoreDetail, setScoreDetail] = useState<AdminScoreDetail | null>(null);
+  const [scoreLoading, setScoreLoading] = useState(false);
   const [page, setPage] = useState(1);
   const pageSize = 20;
   const [quotaTotal, setQuotaTotal] = useState(100);
@@ -718,6 +745,27 @@ export default function VoiceB2BPage() {
   const [previewCity, setPreviewCity] = useState("New York");
   const [previewCompany, setPreviewCompany] = useState("Example Contracting");
   const [selected, setSelected] = useState<VoiceCompany | null>(null);
+  useEffect(() => {
+    if (!selected) {
+      setScoreDetail(null);
+      return;
+    }
+    let alive = true;
+    setScoreLoading(true);
+    fetchVoiceCompanyScore(selected.id)
+      .then((detail) => {
+        if (alive) setScoreDetail(detail);
+      })
+      .catch(() => {
+        if (alive) setScoreDetail(null);
+      })
+      .finally(() => {
+        if (alive) setScoreLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [selected?.id]);
   const [licenseCsv, setLicenseCsv] = useState("");
   const [licenseName, setLicenseName] = useState("MA HIC / licenças");
   const [licenseUrl, setLicenseUrl] = useState("");
@@ -738,7 +786,18 @@ export default function VoiceB2BPage() {
   const [testTrade, setTestTrade] = useState("remodeling");
   const [testCompanyName, setTestCompanyName] = useState("");
 
-  const queueKey = `voice-queue-${includeBlocked}-${cityFilter}-${tradeFilter}-${page}`;
+  const selectedRange =
+    SCORE_RANGES.find((range) => range.id === scoreRange) ?? SCORE_RANGES[0];
+  const queueFilters = {
+    city: cityFilter,
+    trade: tradeFilter,
+    scoreMin: selectedRange.min,
+    scoreMax: selectedRange.max,
+    status: statusFilter,
+    dateFrom,
+    dateTo,
+  };
+  const queueKey = `voice-queue-${includeBlocked}-${JSON.stringify(queueFilters)}-${page}`;
   const {
     data: queue,
     error,
@@ -750,8 +809,8 @@ export default function VoiceB2BPage() {
       fetchVoiceQueue(
         includeBlocked,
         pageSize,
-        cityFilter,
-        tradeFilter,
+        queueFilters,
+        "",
         (page - 1) * pageSize
       ),
     {
@@ -762,6 +821,11 @@ export default function VoiceB2BPage() {
   const { data: stats, mutate: mutateStats } = useSWR(
     "voice-stats",
     fetchVoiceStats,
+    { refreshInterval: 60_000 }
+  );
+  const { data: scoreDist, mutate: mutateScoreDist } = useSWR(
+    "voice-score-distribution",
+    fetchVoiceScoreDistribution,
     { refreshInterval: 60_000 }
   );
   const { data: showcaseStats, mutate: mutateShowcase } = useSWR(
@@ -825,6 +889,7 @@ export default function VoiceB2BPage() {
       await Promise.allSettled([
         mutateQueue(),
         mutateStats(),
+        mutateScoreDist(),
         mutateShowcase(),
         mutateSegments(),
         mutateCampaigns(),
@@ -858,7 +923,7 @@ export default function VoiceB2BPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [includeBlocked, cityFilter, tradeFilter]);
+  }, [includeBlocked, cityFilter, tradeFilter, scoreRange, statusFilter, dateFrom, dateTo]);
 
   const totalItems = queue?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
@@ -2708,6 +2773,12 @@ export default function VoiceB2BPage() {
         icon={<Users className="h-4 w-4 text-indigo-400" />}
         hint="Ordenada por score ICP e volume de obras; compliance sempre visível."
         action={
+          <StatusPill state="info">
+            {(queue?.total ?? 0).toLocaleString("pt-PT")} empresas
+          </StatusPill>
+        }
+      >
+        <div className="mb-4 space-y-3">
           <div className="flex flex-wrap items-center gap-2">
             <SelectMenu
               value={cityFilter}
@@ -2735,18 +2806,88 @@ export default function VoiceB2BPage() {
                 })),
               ]}
             />
-            <label className="inline-flex cursor-pointer items-center gap-2 text-[10px] font-semibold text-slate-400">
+            <SelectMenu
+              value={statusFilter}
+              onChange={setStatusFilter}
+              placeholder="Todos os estados"
+              className="min-w-[140px]"
+              options={[
+                { value: "", label: "Todos os estados" },
+                { value: "ready", label: "Prontas" },
+                { value: "do_not_call", label: "Não contactar" },
+                { value: "meeting", label: "Reunião" },
+                { value: "invalid", label: "Inválidas" },
+              ]}
+            />
+            <DateField label="de" value={dateFrom} onChange={setDateFrom} />
+            <DateField label="até" value={dateTo} onChange={setDateTo} />
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[10px] font-semibold text-slate-400">
               <input
                 type="checkbox"
                 checked={includeBlocked}
                 onChange={(event) => setIncludeBlocked(event.target.checked)}
-                className="accent-indigo-400"
+                className="accent-emerald-400"
               />
               Mostrar bloqueadas
             </label>
           </div>
-        }
-      >
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="mr-1 text-[9px] font-bold uppercase tracking-[0.16em] text-slate-600">
+              Score
+            </span>
+            {SCORE_RANGES.map((range) => (
+              <FilterChip
+                key={range.id}
+                active={scoreRange === range.id}
+                onClick={() => setScoreRange(range.id)}
+              >
+                {range.label}
+              </FilterChip>
+            ))}
+            {scoreRange !== "all" || statusFilter || dateFrom || dateTo ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setScoreRange("all");
+                  setStatusFilter("");
+                  setDateFrom("");
+                  setDateTo("");
+                }}
+                className="ml-1 rounded-full border border-white/10 px-2.5 py-1.5 text-[10px] font-semibold text-slate-500 hover:text-slate-200"
+              >
+                limpar
+              </button>
+            ) : null}
+          </div>
+          {scoreDist ? (
+            <div className="grid gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3 lg:grid-cols-[1fr_260px]">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-[10px] text-slate-500">
+                  <span>distribuição do score V2</span>
+                  <span className="tabular-nums">
+                    média {formatScore(scoreDist.avg)} · {scoreDist.min}–{scoreDist.max}
+                  </span>
+                </div>
+                <ScoreHistogram buckets={scoreDist.buckets} total={scoreDist.total} />
+              </div>
+              <div className="flex flex-wrap content-start gap-1.5">
+                {(["elite", "strong", "developing", "low"] as const).map((band) => (
+                  <span
+                    key={band}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[9px] font-bold ${SCORE_BAND_META[band].chip}`}
+                  >
+                    <span className={`h-1.5 w-1.5 rounded-full ${SCORE_BAND_META[band].dot}`} />
+                    {SCORE_BAND_META[band].label}
+                  </span>
+                ))}
+                <p className="mt-2 w-full text-[10px] leading-relaxed text-slate-500">
+                  {scoreDist.snapshots.toLocaleString("pt-PT")} snapshots explicáveis ·{" "}
+                  {scoreDist.distinct_scores} valores distintos
+                </p>
+              </div>
+            </div>
+          ) : null}
+        </div>
         {isLoading && !queue ? (
           <div className="flex items-center gap-2 py-8 text-xs text-slate-400">
             <Loader2 className="h-4 w-4 animate-spin" /> A carregar fila…
@@ -2813,24 +2954,7 @@ export default function VoiceB2BPage() {
                         ) : null}
                       </td>
                       <td className="py-2.5 pr-2">
-                        <div className="flex items-center gap-1.5">
-                          <div className="h-1.5 w-12 overflow-hidden rounded-full bg-white/10">
-                            <div
-                              className={cn(
-                                "h-full rounded-full",
-                                company.score >= 70
-                                  ? "bg-emerald-400"
-                                  : company.score >= 45
-                                    ? "bg-amber-400"
-                                    : "bg-slate-500"
-                              )}
-                              style={{ width: `${Math.min(100, company.score)}%` }}
-                            />
-                          </div>
-                          <span className="text-[10px] tabular-nums text-slate-400">
-                            {company.score}
-                          </span>
-                        </div>
+                        <ScoreBar score={company.score} />
                       </td>
                       <td className="py-2.5 pr-2">
                         {allowed ? (
@@ -2910,8 +3034,19 @@ export default function VoiceB2BPage() {
           >
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                  Empresa {selected.id} · score {selected.score}
+                <p className="flex flex-wrap items-center gap-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  <span>Empresa {selected.id}</span>
+                  <span
+                    className={`rounded-full border px-2 py-0.5 text-[9px] font-bold ${SCORE_BAND_META[scoreBand(selected.score)].chip}`}
+                  >
+                    {SCORE_BAND_META[scoreBand(selected.score)].label} ·{" "}
+                    {formatScore(selected.score)}/63
+                  </span>
+                  {scoreDetail?.snapshot ? (
+                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[9px] text-slate-400">
+                      {scoreDetail.snapshot.version}
+                    </span>
+                  ) : null}
                 </p>
                 <h2 className="text-lg font-black text-white">{selected.company_name}</h2>
                 <p className="text-[11px] text-slate-400">
@@ -2972,6 +3107,69 @@ export default function VoiceB2BPage() {
               </div>
             </div>
 
+            <div className="mb-4 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                  <Gauge className="h-3 w-3" /> Score V2 · componentes
+                </p>
+                <span className="text-[10px] text-slate-500">
+                  {scoreDetail?.snapshot?.computed_at
+                    ? fmtWhen(scoreDetail.snapshot.computed_at)
+                    : "sem snapshot"}
+                </span>
+              </div>
+              <ScoreBar score={scoreDetail?.score ?? selected.score} />
+              {scoreLoading ? (
+                <div className="mt-3 flex items-center gap-2 text-[10px] text-slate-500">
+                  <Loader2 className="h-3 w-3 animate-spin" /> a carregar snapshot…
+                </div>
+              ) : scoreDetail?.snapshot?.components ? (
+                <>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    {Object.entries(scoreDetail.snapshot.components).map(([key, value]) => {
+                      const meta = SCORE_COMPONENTS[key] ?? {
+                        label: key.replaceAll("_", " "),
+                        max: 1,
+                        tone: "from-slate-400 to-slate-300",
+                      };
+                      const width =
+                        key === "quality_penalty"
+                          ? Math.min(100, (Number(value) / meta.max) * 100)
+                          : Math.max(2, Math.min(100, (Number(value) / meta.max) * 100));
+                      return (
+                        <div key={key} className="rounded-lg border border-white/[0.05] bg-white/[0.02] p-2">
+                          <div className="flex items-center justify-between text-[9px]">
+                            <span className="text-slate-500">{meta.label}</span>
+                            <span className="font-semibold tabular-nums text-slate-300">
+                              {Number(value).toFixed(2)}
+                            </span>
+                          </div>
+                          <div className="mt-1 h-1 overflow-hidden rounded-full bg-white/[0.06]">
+                            <div
+                              className={`h-full rounded-full bg-gradient-to-r ${meta.tone}`}
+                              style={{ width: `${width}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-2 flex items-center justify-between text-[9px] text-slate-600">
+                    <span>
+                      penalidade de qualidade{" "}
+                      <b className={scoreDetail.snapshot.quality_penalty ? "text-rose-300" : "text-emerald-300"}>
+                        {scoreDetail.snapshot.quality_penalty.toFixed(1)}
+                      </b>
+                    </span>
+                    <span>snapshot {scoreDetail.snapshot.company_id}</span>
+                  </div>
+                </>
+              ) : (
+                <p className="mt-2 text-[10px] text-slate-500">
+                  Sem snapshot explicável para esta empresa.
+                </p>
+              )}
+            </div>
             <div className="mb-4 rounded-xl border border-white/5 bg-white/[0.02] p-3">
               <p className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
                 <ShieldCheck className="h-3 w-3" /> Gate de compliance
