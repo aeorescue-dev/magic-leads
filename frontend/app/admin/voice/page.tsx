@@ -948,7 +948,7 @@ export default function VoiceB2BPage() {
     run("test-call", async () => {
       const phone = testPhone.trim();
       if (!phone) {
-        throw new Error("Indica o número E.164 que está em VOICE_TEST_NUMBERS.");
+        throw new Error("Indica um número US válido no formato +1XXXXXXXXXX.");
       }
       if (!window.confirm(`Ligar agora para ${phone}?`)) {
         throw new Error("Chamada cancelada.");
@@ -1315,7 +1315,7 @@ export default function VoiceB2BPage() {
           <div className="space-y-3">
             <Field
               label="Número de teste"
-              hint="Tem de estar na allowlist VOICE_TEST_NUMBERS."
+              hint="Qualquer número US válido no formato +1XXXXXXXXXX."
             >
               <input
                 value={testPhone}

@@ -460,6 +460,12 @@ def normalize_phone(raw: Any) -> Optional[str]:
     return None
 
 
+def is_valid_us_phone(raw: Any) -> bool:
+    """Valida NANP/E.164 dos EUA: +1, area 2-9, exchange 2-9."""
+    phone = normalize_phone(raw)
+    return bool(phone and re.fullmatch(r"\+1[2-9]\d{2}[2-9]\d{6}", phone))
+
+
 def _norm_header(value: Any) -> str:
     return re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower()).strip("_")
 

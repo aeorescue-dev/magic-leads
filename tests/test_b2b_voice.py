@@ -370,3 +370,18 @@ def test_scrub_dnc_aplica_lista_a_toda_a_base():
     blocked = voice.can_call(_company("+16175550182"), now=NOW)
     assert blocked["allowed"] is False
     assert "dnc_listed" in blocked["reasons"]
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("+16094449285", True),
+        ("(609) 444-9285", True),
+        ("+1 212 555 0123", True),
+        ("+442079460958", False),
+        ("+15551234567", False),
+        ("12345", False),
+        ("", False),
+    ],
+)
+def test_is_valid_us_phone(raw, expected):
+    assert voice.is_valid_us_phone(raw) is expected

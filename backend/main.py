@@ -3833,7 +3833,11 @@ async def admin_voice_script_sync(
 async def admin_voice_test_call(
     request: Request, _admin: dict = Depends(_require_admin_user)
 ):
-    """Uma chamada real controlada; exige staging off + allowlist + confirmação."""
+    """Chamada real de teste; exige staging off + confirmação + número US válido.
+
+    Qualquer número NANP/E.164 dos EUA (+1XXXXXXXXXX) é aceite. O DNC de
+    teste, a limpeza de supressão e a tecla 2 continuam ativos.
+    """
     try:
         payload = await request.json()
     except Exception:  # noqa: BLE001
@@ -3848,21 +3852,16 @@ async def admin_voice_test_call(
         )
     if not telnyx_voice.configured():
         raise HTTPException(status_code=503, detail="Telnyx não configurado")
-    allowed = {
-        b2b_voice.normalize_phone(item.strip())
-        for item in str(getattr(settings, "VOICE_TEST_NUMBERS", "")).split(",")
-        if item.strip()
-    }
     company_id = int(payload.get("company_id") or 0)
     if company_id:
         company = await anyio.to_thread.run_sync(b2b_voice.get_company, company_id)
         if not company:
             raise HTTPException(status_code=404, detail="empresa de teste não encontrada")
         phone = b2b_voice.normalize_phone(company.get("phone"))
-        if not phone or phone not in allowed:
+        if not b2b_voice.is_valid_us_phone(phone):
             raise HTTPException(
-                status_code=403,
-                detail="telefone da empresa fora de VOICE_TEST_NUMBERS",
+                status_code=400,
+                detail="telefone da empresa inválido; usa um número US +1",
             )
         trade = (
             showcase.normalize_trade(payload.get("trade") or company.get("trade"))
@@ -3877,10 +3876,10 @@ async def admin_voice_test_call(
         }
     else:
         phone = b2b_voice.normalize_phone(payload.get("phone"))
-        if not phone or phone not in allowed:
+        if not b2b_voice.is_valid_us_phone(phone):
             raise HTTPException(
-                status_code=403,
-                detail="número fora de VOICE_TEST_NUMBERS",
+                status_code=400,
+                detail="número US inválido; usa o formato +1XXXXXXXXXX",
             )
         trade = showcase.normalize_trade(payload.get("trade")) or "remodeling"
         test_name = payload.get("company_name")
