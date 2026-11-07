@@ -152,6 +152,40 @@ def test_admin_can_ack_system_alert(admin_client):
     assert r.json()["alert"]["acknowledged"] == 1
 
 
+def test_admin_ack_closes_whole_deduplicated_group(admin_client):
+    client, headers, _ = admin_client
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM system_alerts WHERE code='PYTEST_GROUP_ACK'")
+        ids = []
+        for level in ("warning", "warning", "critical"):
+            cur = conn.execute(
+                "INSERT INTO system_alerts (level, code, message) "
+                "VALUES (?, 'PYTEST_GROUP_ACK', 'grupo')",
+                (level,),
+            )
+            ids.append(int(cur.lastrowid))
+        conn.commit()
+    finally:
+        conn.close()
+    r = client.post(f"/api/admin/alerts/{ids[-1]}/ack", headers=headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["acknowledged"] == 3
+    assert body["alert"]["acknowledged"] == 1
+    conn = get_connection()
+    try:
+        open_rows = conn.execute(
+            "SELECT COUNT(1) FROM system_alerts "
+            "WHERE code='PYTEST_GROUP_ACK' AND acknowledged=0"
+        ).fetchone()[0]
+        conn.execute("DELETE FROM system_alerts WHERE code='PYTEST_GROUP_ACK'")
+        conn.commit()
+    finally:
+        conn.close()
+    assert open_rows == 0
+
+
 def test_admin_ack_unknown_alert_returns_404(admin_client):
     client, headers, _ = admin_client
     r = client.post("/api/admin/alerts/99999999/ack", headers=headers)

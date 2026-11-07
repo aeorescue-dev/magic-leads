@@ -2630,12 +2630,12 @@ class DatabaseService:
         try:
             sent = conn.execute(
                 "SELECT COUNT(*) c FROM outbound_messages WHERE mailbox_id=? "
-                "AND status='sent' AND sent_at >= datetime('now', ?)",
+                "AND status='sent' AND datetime(sent_at) >= datetime('now', ?)",
                 (int(mailbox_id), window),
             ).fetchone()["c"]
             events = conn.execute(
                 "SELECT kind, COUNT(*) c FROM mailbox_bounce_events "
-                "WHERE mailbox_id=? AND created_at >= datetime('now', ?) GROUP BY kind",
+                "WHERE mailbox_id=? AND datetime(created_at) >= datetime('now', ?) GROUP BY kind",
                 (int(mailbox_id), window),
             ).fetchall()
             counts = {r["kind"]: int(r["c"]) for r in events}
@@ -3076,23 +3076,23 @@ class DatabaseService:
             for mb in self.list_sending_mailboxes(enabled_only=False):
                 sent = conn.execute(
                     "SELECT COUNT(*) c FROM outbound_messages "
-                    "WHERE mailbox_id=? AND status='sent' AND sent_at >= datetime('now', ?)",
+                    "WHERE mailbox_id=? AND status='sent' AND datetime(sent_at) >= datetime('now', ?)",
                     (mb["id"], win),
                 ).fetchone()["c"]
                 failed = conn.execute(
                     "SELECT COUNT(*) c FROM outbound_messages "
                     "WHERE mailbox_id=? AND status='failed' "
-                    "AND COALESCE(sent_at, created_at) >= datetime('now', ?)",
+                    "AND datetime(COALESCE(sent_at, created_at)) >= datetime('now', ?)",
                     (mb["id"], win),
                 ).fetchone()["c"]
                 bounced = conn.execute(
                     "SELECT COUNT(*) c FROM mailbox_bounce_events "
-                    "WHERE mailbox_id=? AND kind='bounce' AND created_at >= datetime('now', ?)",
+                    "WHERE mailbox_id=? AND kind='bounce' AND datetime(created_at) >= datetime('now', ?)",
                     (mb["id"], win),
                 ).fetchone()["c"]
                 complaints = conn.execute(
                     "SELECT COUNT(*) c FROM mailbox_bounce_events "
-                    "WHERE mailbox_id=? AND kind='complaint' AND created_at >= datetime('now', ?)",
+                    "WHERE mailbox_id=? AND kind='complaint' AND datetime(created_at) >= datetime('now', ?)",
                     (mb["id"], win),
                 ).fetchone()["c"]
                 replies = conn.execute(
@@ -3100,7 +3100,7 @@ class DatabaseService:
                     "JOIN outbound_messages m ON m.contact_id = c.id "
                     "WHERE m.mailbox_id=? AND m.status='sent' "
                     "AND c.replied_at IS NOT NULL "
-                    "AND c.replied_at >= datetime('now', ?)",
+                    "AND datetime(c.replied_at) >= datetime('now', ?)",
                     (mb["id"], win),
                 ).fetchone()["c"]
                 positive = conn.execute(
@@ -3108,7 +3108,7 @@ class DatabaseService:
                     "JOIN outbound_messages m ON m.contact_id = c.id "
                     "WHERE m.mailbox_id=? AND m.status='sent' "
                     "AND c.reply_sentiment='positive' "
-                    "AND c.replied_at >= datetime('now', ?)",
+                    "AND datetime(c.replied_at) >= datetime('now', ?)",
                     (mb["id"], win),
                 ).fetchone()["c"]
                 rows.append({
@@ -3133,12 +3133,12 @@ class DatabaseService:
             total_complaints = sum(r["complaints"] for r in rows)
             total_replies = conn.execute(
                 "SELECT COUNT(*) c FROM outbound_contacts "
-                "WHERE replied_at IS NOT NULL AND replied_at >= datetime('now', ?)",
+                "WHERE replied_at IS NOT NULL AND datetime(replied_at) >= datetime('now', ?)",
                 (win,),
             ).fetchone()["c"]
             total_positive = conn.execute(
                 "SELECT COUNT(*) c FROM outbound_contacts "
-                "WHERE reply_sentiment='positive' AND replied_at >= datetime('now', ?)",
+                "WHERE reply_sentiment='positive' AND datetime(replied_at) >= datetime('now', ?)",
                 (win,),
             ).fetchone()["c"]
             by_source = [
@@ -3149,7 +3149,7 @@ class DatabaseService:
                     "COUNT(DISTINCT CASE WHEN c.reply_sentiment='positive' THEN c.id END) AS positive "
                     "FROM outbound_contacts c "
                     "JOIN outbound_messages m ON m.contact_id = c.id "
-                    "WHERE m.status='sent' AND m.sent_at >= datetime('now', ?) "
+                    "WHERE m.status='sent' AND datetime(m.sent_at) >= datetime('now', ?) "
                     "GROUP BY source ORDER BY contacts DESC",
                     (win,),
                 ).fetchall()
@@ -3172,7 +3172,7 @@ class DatabaseService:
                     "FROM outbound_messages m "
                     "LEFT JOIN outbound_contacts c ON c.id = m.contact_id "
                     "WHERE m.status='sent' AND m.sequence_step=1 "
-                    "AND m.sent_at >= datetime('now', ?) "
+                    "AND datetime(m.sent_at) >= datetime('now', ?) "
                     "GROUP BY variant ORDER BY sent DESC",
                     (win,),
                 ).fetchall()
@@ -3972,7 +3972,7 @@ class DatabaseService:
                     "SELECT COALESCE(NULLIF(c.email_source,''),'import') AS email_source, "
                     "COUNT(*) AS c FROM outbound_messages m "
                     "JOIN outbound_contacts c ON c.id = m.contact_id "
-                    "WHERE m.status='sent' AND m.sent_at >= datetime('now','-1 day') "
+                    "WHERE m.status='sent' AND datetime(m.sent_at) >= datetime('now','-1 day') "
                     "GROUP BY 1"
                 ).fetchall()
             }
@@ -4133,7 +4133,7 @@ class DatabaseService:
                   FROM sending_mailboxes m
                   LEFT JOIN outbound_messages o
                     ON o.mailbox_id = m.id
-                   AND COALESCE(o.sent_at, o.created_at) >= datetime('now', ?)
+                   AND datetime(COALESCE(o.sent_at, o.created_at)) >= datetime('now', ?)
                  GROUP BY m.id
                  ORDER BY m.id
                 """,
@@ -4581,13 +4581,13 @@ class DatabaseService:
                     "SELECT COUNT(*) c FROM contractor_entities "
                     "WHERE UPPER(TRIM(city))=? AND COALESCE(email,'')<>'' "
                     "AND bridged_at IS NOT NULL "
-                    "AND bridged_at >= datetime('now', ?)",
+                    "AND datetime(bridged_at) >= datetime('now', ?)",
                     (city, f"-{window} days"),
                 ).fetchone()["c"]
                 sent = conn.execute(
                     "SELECT COUNT(*) c FROM outbound_messages "
                     "WHERE status='sent' AND UPPER(TRIM(COALESCE(city,'')))=? "
-                    "AND sent_at >= datetime('now', ?)",
+                    "AND datetime(sent_at) >= datetime('now', ?)",
                     (city, f"-{window} days"),
                 ).fetchone()["c"]
                 total_ready += int(readiness.get("ready") or 0)
@@ -5219,7 +5219,7 @@ class DatabaseService:
                 where.append("l.urgency_level IN (%s)" % ",".join("?" * len(urg)))
                 params.extend(urg)
         if days:
-            where.append("l.date_reported >= datetime('now', ?)")
+            where.append("datetime(l.date_reported) >= datetime('now', ?)")
             params.append(f"-{int(days)} days")
         if not include_closed:
             where.append("COALESCE(l.signal_status, 'unknown') != 'closed'")
@@ -5602,7 +5602,7 @@ class DatabaseService:
         conn = get_connection()
         try:
             rows = conn.execute(
-                "SELECT COUNT(*) AS c FROM leads WHERE created_at >= datetime('now', '-1 day')"
+                "SELECT COUNT(*) AS c FROM leads WHERE datetime(created_at) >= datetime('now', '-1 day')"
             ).fetchone()
             return rows["c"] if rows else 0
         finally:
@@ -5718,7 +5718,7 @@ class DatabaseService:
                 rows = conn.execute(
                     """
                     SELECT * FROM notifications
-                    WHERE created_at >= datetime('now', '-7 days')
+                    WHERE datetime(created_at) >= datetime('now', '-7 days')
                     ORDER BY created_at DESC
                     LIMIT ?
                     """,
@@ -6485,11 +6485,11 @@ class DatabaseService:
                     stale = False
                     if sub["last_success_at"]:
                         stale = conn.execute(
-                            "SELECT ? < datetime('now', ?)", (sub["last_success_at"], cutoff)
+                            "SELECT datetime(?) < datetime('now', ?)", (sub["last_success_at"], cutoff)
                         ).fetchone()[0] == 1
                     else:
                         stale = conn.execute(
-                            "SELECT ? < datetime('now', ?)", (sub["created_at"], old_cutoff)
+                            "SELECT datetime(?) < datetime('now', ?)", (sub["created_at"], old_cutoff)
                         ).fetchone()[0] == 1
                     if stale:
                         conn.execute(
@@ -6888,7 +6888,7 @@ class DatabaseService:
                   AND u.push_enabled = 1
                   AND n.type IN ('reveal_followup', 'reveal_urgent',
                                  'stage_warning', 'stage_urgent')
-                  AND n.created_at >= datetime('now', '-45 minutes')
+                  AND datetime(n.created_at) >= datetime('now', '-45 minutes')
                   AND EXISTS (
                     SELECT 1 FROM push_subscriptions s
                     WHERE s.user_id = n.user_id AND s.disabled_at IS NULL
@@ -7318,7 +7318,7 @@ class DatabaseService:
             )
             leads_24h = scalar(
                 """SELECT COUNT(*) FROM leads
-                   WHERE created_at >= datetime('now', '-1 day')"""
+                   WHERE datetime(created_at) >= datetime('now', '-1 day')"""
             )
             total_users = scalar("SELECT COUNT(*) FROM users")
             users_today = scalar(
@@ -7564,7 +7564,7 @@ class DatabaseService:
         conn = get_connection()
         try:
             where = [
-                "called_at >= datetime('now', ?)",
+                "datetime(called_at) >= datetime('now', ?)",
                 "outcome IN ('success', 'no_results', 'name_mismatch')",
             ]
             params: list = [f"-{int(days)} days"]
@@ -7603,7 +7603,7 @@ class DatabaseService:
         try:
             cutoff = f"-{int(days)} days"
             base_where = (
-                "called_at >= datetime('now', ?) "
+                "datetime(called_at) >= datetime('now', ?) "
                 "AND outcome IN ('success', 'no_results', 'name_mismatch')"
             )
             segments = conn.execute(
@@ -8447,7 +8447,7 @@ class DatabaseService:
                 rows = conn.execute(
                     """
                     SELECT * FROM notifications
-                    WHERE (user_id = ? OR user_id IS NULL) AND created_at >= datetime('now', '-7 days')
+                    WHERE (user_id = ? OR user_id IS NULL) AND datetime(created_at) >= datetime('now', '-7 days')
                     ORDER BY created_at DESC LIMIT ?
                     """,
                     (user_id, limit),
@@ -8770,11 +8770,11 @@ class DatabaseService:
             """
             UPDATE leads SET lead_status = 'available', reserved_by = NULL, reserved_until = NULL
             WHERE lead_status = 'reserved' AND reserved_until IS NOT NULL
-              AND reserved_until < datetime('now')
+              AND datetime(reserved_until) < datetime('now')
             """
         )
         conn.execute(
-            "UPDATE lead_holds SET status = 'expired' WHERE status = 'active' AND expires_at < datetime('now')"
+            "UPDATE lead_holds SET status = 'expired' WHERE status = 'active' AND datetime(expires_at) < datetime('now')"
         )
 
     def _event(self, conn: sqlite3.Connection, lead_id: int, user_id: Optional[int], event_type: str, detail: Optional[str] = None) -> None:
@@ -9124,7 +9124,7 @@ class DatabaseService:
                       (lead_id, repeat_365, open_cases, oldest_open_days, last_case_at, updated_at)
                     SELECT l.id,
                       COALESCE(SUM(CASE
-                        WHEN h.opened_at >= datetime('now', '-365 days')
+                        WHEN datetime(h.opened_at) >= datetime('now', '-365 days')
                          AND h.issue_category = l.issue_category
                         THEN 1 ELSE 0 END), 0),
                       COALESCE(SUM(CASE
@@ -9313,7 +9313,7 @@ class DatabaseService:
                 """
                 SELECT h.lead_id, h.user_id FROM lead_holds h
                 JOIN leads l ON l.id = h.lead_id
-                WHERE h.status = 'active' AND h.expires_at < datetime('now')
+                WHERE h.status = 'active' AND datetime(h.expires_at) < datetime('now')
                   AND l.lead_status = 'reserved' AND l.reserved_by = h.user_id
                 """
             ).fetchall()
@@ -9464,7 +9464,7 @@ class DatabaseService:
         conn = get_connection()
         try:
             conn.execute(
-                "UPDATE contractor_penalties SET is_active = 0 WHERE is_active = 1 AND penalty_expires_at < datetime('now')"
+                "UPDATE contractor_penalties SET is_active = 0 WHERE is_active = 1 AND datetime(penalty_expires_at) < datetime('now')"
             )
             conn.commit()
             rows = conn.execute(
@@ -9608,7 +9608,7 @@ class DatabaseService:
             # base, por `created_at` — que NÃO é reescrito por re-scrape;
             # `updated_at` seria poluído por cada varredura).
             captured_24h = conn.execute(
-                "SELECT COUNT(*) AS c FROM leads WHERE created_at >= datetime('now', '-24 hours')"
+                "SELECT COUNT(*) AS c FROM leads WHERE datetime(created_at) >= datetime('now', '-24 hours')"
             ).fetchone()["c"]
         finally:
             conn.close()
@@ -9668,7 +9668,7 @@ class DatabaseService:
             # Fase 22: qualificação materializada em vez do WHERE com 20 LIKEs.
             base_where = """
                 WHERE date_reported IS NOT NULL
-                  AND date_reported >= datetime('now', '-7 days')
+                  AND datetime(date_reported) >= datetime('now', '-7 days')
                   AND is_qualified = 1
             """
             params: list = []
@@ -9978,7 +9978,7 @@ class DatabaseService:
             rows = conn.execute(
                 "SELECT captured_at, overall_status, overall_score, payload "
                 "FROM system_health_snapshots "
-                "WHERE captured_at >= datetime('now', ?) "
+                "WHERE datetime(captured_at) >= datetime('now', ?) "
                 "ORDER BY captured_at ASC LIMIT ?",
                 (
                     f"-{max(1, int(hours))} hours",
@@ -10158,9 +10158,9 @@ class DatabaseService:
                 """
                 SELECT UPPER(TRIM(city)) AS city,
                        COUNT(*) AS total,
-                       SUM(CASE WHEN date_reported >= datetime('now','-24 hours')
+                       SUM(CASE WHEN datetime(date_reported) >= datetime('now','-24 hours')
                                 THEN 1 ELSE 0 END) AS facts_24h,
-                       SUM(CASE WHEN created_at >= datetime('now','-24 hours')
+                       SUM(CASE WHEN datetime(created_at) >= datetime('now','-24 hours')
                                 THEN 1 ELSE 0 END) AS created_24h,
                        MAX(date_reported) AS last_fact,
                        MAX(created_at) AS last_created
@@ -10187,6 +10187,43 @@ class DatabaseService:
             return dict(row) if row else None
         except Exception as e:
             logger.error(f"Erro ao reconhecer system_alert {alert_id}: {e}")
+            return None
+        finally:
+            conn.close()
+
+    def acknowledge_system_alert_group(self, alert_id: int) -> Optional[dict]:
+        """Reconhece todas as linhas abertas do mesmo `code`.
+
+        O painel mostra um item por código (deduplicado). Reconhecer apenas a
+        linha mais recente deixava as anteriores abertas e o grupo voltava no
+        refresh. Este método resolve o grupo inteiro de forma atómica.
+        """
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                "SELECT * FROM system_alerts WHERE id = ?", (int(alert_id),)
+            ).fetchone()
+            if row is None:
+                return None
+            code = str(row["code"] or "")
+            cur = conn.execute(
+                "UPDATE system_alerts SET acknowledged = 1 "
+                "WHERE code = ? AND acknowledged = 0",
+                (code,),
+            )
+            conn.commit()
+            latest = conn.execute(
+                "SELECT * FROM system_alerts WHERE id = ?", (int(alert_id),)
+            ).fetchone()
+            return {
+                "code": code,
+                "acknowledged": int(cur.rowcount or 0),
+                "alert": dict(latest) if latest else dict(row),
+            }
+        except Exception as e:
+            logger.error(
+                f"Erro ao reconhecer grupo de system_alerts {alert_id}: {e}"
+            )
             return None
         finally:
             conn.close()
@@ -10739,7 +10776,7 @@ class DatabaseService:
 
             minute = conn.execute(
                 """SELECT COUNT(*) AS c FROM phone_attempts
-                   WHERE user_id = ? AND attempted_at >= datetime('now', '-60 seconds')""",
+                   WHERE user_id = ? AND datetime(attempted_at) >= datetime('now', '-60 seconds')""",
                 (user_id,),
             ).fetchone()["c"]
             if minute >= minute_limit:
@@ -10748,7 +10785,7 @@ class DatabaseService:
 
             conn.execute("INSERT INTO phone_attempts (user_id) VALUES (?)", (user_id,))
             # Limpeza barata: a tabela nunca cresce mais de 2 dias.
-            conn.execute("DELETE FROM phone_attempts WHERE attempted_at < datetime('now', '-2 days')")
+            conn.execute("DELETE FROM phone_attempts WHERE datetime(attempted_at) < datetime('now', '-2 days')")
             conn.commit()
             return {"ok": True, "used": daily + 1, "limit": daily_limit}
         finally:
@@ -11124,7 +11161,7 @@ class DatabaseService:
                    LEFT JOIN lead_reveals r ON r.lead_id = l.id AND r.returned_to_pool = 0
                    WHERE l.lead_status IN ('contacted', 'in_negotiation')
                      AND l.stage_expires_at IS NOT NULL
-                     AND l.stage_expires_at < datetime('now')"""
+                     AND datetime(l.stage_expires_at) < datetime('now')"""
             ).fetchall()
             for row in stagnant:
                 owner_id = row["reserved_by"] or 0
@@ -11169,8 +11206,8 @@ class DatabaseService:
                      AND r.returned_to_pool = 0 AND r.user_id = l.reserved_by
                    WHERE l.lead_status IN ('contacted', 'in_negotiation')
                      AND l.stage_expires_at IS NOT NULL
-                     AND l.stage_expires_at >= datetime('now')
-                     AND l.stage_expires_at <= datetime('now', '+24 hours')"""
+                     AND datetime(l.stage_expires_at) >= datetime('now')
+                     AND datetime(l.stage_expires_at) <= datetime('now', '+24 hours')"""
             ).fetchall()
             for row in pending:
                 expires_dt = self._parse_dt(row["stage_expires_at"]) or (now + timedelta(hours=24))
@@ -12998,6 +13035,11 @@ class AsyncDatabaseService:
     async def acknowledge_system_alert(self, alert_id: int) -> Optional[dict]:
         return await anyio.to_thread.run_sync(
             self._service.acknowledge_system_alert, alert_id
+        )
+
+    async def acknowledge_system_alert_group(self, alert_id: int) -> Optional[dict]:
+        return await anyio.to_thread.run_sync(
+            self._service.acknowledge_system_alert_group, alert_id
         )
 
     async def add_notification_for_user(self, user_id: int, type: str, title: str, message: str, lead_id: Optional[int] = None,

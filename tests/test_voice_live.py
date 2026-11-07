@@ -80,7 +80,8 @@ def test_voice_liquidity_separa_exact_e_desconta_7d():
             "showcase_city_total, page_path, built_at) "
             "VALUES ('new-york','plumbing','New York','NY','plumbing','Plumbing',"
             "10,10,0,'dedicated',50,100,'/en/new-york/plumbing',?)",
-            (NOW.isoformat(),),
+            # O stock tem TTL: o teste tem de simular um segmento fresco.
+            (datetime.now(timezone.utc).isoformat(),),
         )
         conn.commit()
     finally:

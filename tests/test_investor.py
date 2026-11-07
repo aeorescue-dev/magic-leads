@@ -1,6 +1,9 @@
 """Investor Room (Fase 30): preço semanal, valuation, proof, NDA e watermark."""
 from __future__ import annotations
 
+import json
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from backend.services import investor
@@ -162,3 +165,41 @@ def test_refresh_if_due_e_get_snapshot():
     assert snap["price_bridge"]["mrr_per_pass"] == pytest.approx(520)
     again = investor.refresh_if_due()
     assert again["status"] in ("ok", "skipped")
+
+
+def test_get_snapshot_recalcula_quando_antigo(monkeypatch):
+    investor.init()
+    investor._CACHE.clear()
+    current = investor.build_snapshot()
+    old = dict(current)
+    old["generated_at"] = (
+        datetime.now(timezone.utc) - timedelta(minutes=31)
+    ).isoformat()
+    conn = investor.get_conn()
+    try:
+        conn.execute(
+            "INSERT INTO snapshots (captured_at, version, checksum, payload_json) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                old["generated_at"],
+                old.get("version") or investor.VERSION,
+                old.get("checksum") or "pytest",
+                json.dumps(old, ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    investor._CACHE.clear()
+    calls = []
+    real = investor.build_snapshot
+
+    def wrapped():
+        calls.append(1)
+        return real()
+
+    monkeypatch.setattr(investor, "build_snapshot", wrapped)
+    fresh = investor.get_snapshot()
+    assert calls
+    assert fresh["generated_at"] != old["generated_at"]
+    investor._CACHE.clear()

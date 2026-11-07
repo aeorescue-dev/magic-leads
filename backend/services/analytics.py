@@ -919,11 +919,11 @@ def maintenance(days_events: int = 90, days_sessions: int = 180) -> dict:
     conn = get_connection()
     try:
         ev = conn.execute(
-            "DELETE FROM events WHERE ts < datetime('now', ?)",
+            "DELETE FROM events WHERE datetime(ts) < datetime('now', ?)",
             (f"-{max(1, int(days_events))} days",),
         ).rowcount
         sess = conn.execute(
-            "DELETE FROM sessions WHERE last_seen_at < datetime('now', ?)",
+            "DELETE FROM sessions WHERE datetime(last_seen_at) < datetime('now', ?)",
             (f"-{max(1, int(days_sessions))} days",),
         ).rowcount
         salts = conn.execute(

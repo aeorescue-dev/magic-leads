@@ -62,6 +62,13 @@ def _call_window() -> tuple[int, int]:
 DNC_MAX_AGE_DAYS = 31
 MAX_ATTEMPTS_7D = 3
 
+# Cache materializado de segmentos. O stock de elegibilidade muda com a hora
+# local, DNC, scoring e self-healing; 5 min é o compromisso entre frescura e
+# custo (rebuild percorre os ~15,5k prospects).
+VOICE_SEGMENTS_TTL_SECONDS = max(
+    60, int(os.getenv("VOICE_SEGMENTS_TTL_SECONDS", "300") or 300)
+)
+
 OUTCOMES = {
     "connected",
     "voicemail",
@@ -1221,9 +1228,14 @@ def stats() -> dict:
                 else:
                     entry["blocked"] += 1
         today = now.date().isoformat()
+        # O dialer grava em `voice_calls`; `call_attempts` só recebe registos
+        # manuais. A KPI "Tentativas hoje" tem de refletir as chamadas reais.
         attempts_today = int(
             conn.execute(
-                "SELECT COUNT(*) FROM call_attempts WHERE substr(started_at, 1, 10)=?",
+                "SELECT COUNT(*) FROM voice_calls "
+                "WHERE date(COALESCE(created_at, started_at))=? "
+                "AND COALESCE(campaign_id,'') <> 'test_call' "
+                "AND COALESCE(status,'') <> 'dry_run'",
                 (today,),
             ).fetchone()[0]
             or 0
@@ -2016,20 +2028,88 @@ def rebuild_segments() -> int:
         conn.close()
 
 
-def cached_segments(
-    city: str = "", trade: str = "", state: str = ""
-) -> list[dict]:
-    """Lê voice_segments; reconstrói se ainda não existir."""
+def _segments_built_at() -> datetime | None:
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            "SELECT MAX(built_at) AS built_at FROM voice_segments"
+        ).fetchone()
+    finally:
+        conn.close()
+    text = str((row["built_at"] if row else "") or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _inside_calling_window() -> bool:
+    try:
+        start, end = _call_window()
+        local = datetime.now(timezone.utc).astimezone(_state_tz("NY"))
+        return start <= local.hour < end
+    except Exception:  # noqa: BLE001 - nunca bloquear a leitura por horário
+        return False
+
+
+def _has_callable_inventory() -> bool:
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM prospect_companies "
+            "WHERE status NOT IN ('do_not_call','invalid','meeting') "
+            "AND LENGTH(phone)=12 AND phone LIKE '+1%' LIMIT 1"
+        ).fetchone()
+        return row is not None
+    finally:
+        conn.close()
+
+
+def ensure_segments_fresh() -> bool:
+    """Reconstrói `voice_segments` se estiver vazio, velho ou zerado na janela.
+
+    Fora da janela de chamadas um `callable=0` é legítimo; não se reconstrói em
+    loop. Dentro da janela, se o stock diz 0 mas há telefones elegíveis por
+    estado, força rebuild imediato.
+    """
     init()
     conn = get_conn()
     try:
-        count = int(
-            conn.execute("SELECT COUNT(*) FROM voice_segments").fetchone()[0] or 0
-        )
+        row = conn.execute(
+            "SELECT COUNT(1) AS n, MAX(built_at) AS built_at, "
+            "COALESCE(SUM(callable),0) AS callable FROM voice_segments"
+        ).fetchone()
     finally:
         conn.close()
-    if count == 0:
+    count = int((row["n"] if row else 0) or 0)
+    callable_count = int((row["callable"] if row else 0) or 0)
+    built_at = _segments_built_at()
+    stale = count == 0 or built_at is None
+    if not stale and built_at is not None:
+        age = (datetime.now(timezone.utc) - built_at).total_seconds()
+        stale = age > VOICE_SEGMENTS_TTL_SECONDS
+    if (
+        not stale
+        and callable_count == 0
+        and _inside_calling_window()
+        and _has_callable_inventory()
+    ):
+        stale = True
+    if stale:
         rebuild_segments()
+        return True
+    return False
+
+
+def cached_segments(
+    city: str = "", trade: str = "", state: str = ""
+) -> list[dict]:
+    """Lê voice_segments com TTL/gatilho de frescura."""
+    init()
+    ensure_segments_fresh()
     where = []
     params: list[Any] = []
     if city.strip():
@@ -2770,9 +2850,10 @@ def voice_liquidity(city: str = "", trade: str = "") -> dict:
 
     Usa `voice_segments` como stock materializado e desconta as empresas
     chamadas nos últimos 7 dias. `built_at` é exposto para o Admin mostrar a
-    idade do stock.
+    idade do stock. A frescura é garantida por TTL/gatilho antes da leitura.
     """
     init()
+    ensure_segments_fresh()
     from . import showcase
 
     city_filter = str(city or "").strip()

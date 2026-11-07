@@ -863,9 +863,9 @@ def _gather_sync() -> dict:
         cities = [dict(r) for r in conn.execute(
             """
             SELECT UPPER(TRIM(city)) AS city, COUNT(*) AS total,
-                   SUM(CASE WHEN date_reported >= datetime('now','-24 hours')
+                   SUM(CASE WHEN datetime(date_reported) >= datetime('now','-24 hours')
                             THEN 1 ELSE 0 END) AS facts_24h,
-                   SUM(CASE WHEN created_at >= datetime('now','-24 hours')
+                   SUM(CASE WHEN datetime(created_at) >= datetime('now','-24 hours')
                             THEN 1 ELSE 0 END) AS created_24h,
                    MAX(date_reported) AS last_fact,
                    SUM(CASE WHEN COALESCE(TRIM(owner_name),'') <> ''
@@ -901,7 +901,7 @@ def _gather_sync() -> dict:
         runs_24h = dict(conn.execute(
             "SELECT COUNT(*) AS runs, COALESCE(SUM(inserted), 0) AS inserted, "
             "COALESCE(SUM(total_raw), 0) AS raw FROM scraper_runs "
-            "WHERE started_at >= datetime('now','-24 hours')"
+            "WHERE datetime(started_at) >= datetime('now','-24 hours')"
         ).fetchone())
         states = [dict(r) for r in conn.execute(
             "SELECT s.city, s.jobs_today, s.domain_jobs_today, s.last_run_at, "
@@ -954,19 +954,19 @@ def _gather_sync() -> dict:
         searchbug = dict(conn.execute(
             """
             SELECT
-              COALESCE(SUM(CASE WHEN called_at >= datetime('now','-24 hours')
+              COALESCE(SUM(CASE WHEN datetime(called_at) >= datetime('now','-24 hours')
                                 THEN cost_usd ELSE 0 END), 0) AS cost_24h,
-              COALESCE(SUM(CASE WHEN called_at >= datetime('now','-24 hours')
+              COALESCE(SUM(CASE WHEN datetime(called_at) >= datetime('now','-24 hours')
                                 THEN 1 ELSE 0 END), 0) AS calls_24h,
-              COALESCE(SUM(CASE WHEN called_at >= datetime('now','-1 hour')
+              COALESCE(SUM(CASE WHEN datetime(called_at) >= datetime('now','-1 hour')
                                 THEN cost_usd ELSE 0 END), 0) AS cost_1h,
-              COALESCE(SUM(CASE WHEN called_at >= datetime('now','-15 minutes')
+              COALESCE(SUM(CASE WHEN datetime(called_at) >= datetime('now','-15 minutes')
                                 THEN 1 ELSE 0 END), 0) AS calls_15m,
-              COALESCE(SUM(CASE WHEN called_at >= datetime('now','-15 minutes')
+              COALESCE(SUM(CASE WHEN datetime(called_at) >= datetime('now','-15 minutes')
                                 AND transport_error=1 THEN 1 ELSE 0 END), 0) AS transport_15m,
-              COALESCE(SUM(CASE WHEN called_at >= datetime('now','-24 hours')
+              COALESCE(SUM(CASE WHEN datetime(called_at) >= datetime('now','-24 hours')
                                 AND billed=1 THEN 1 ELSE 0 END), 0) AS billed,
-              COALESCE(SUM(CASE WHEN called_at >= datetime('now','-24 hours')
+              COALESCE(SUM(CASE WHEN datetime(called_at) >= datetime('now','-24 hours')
                                 AND billed=1 AND outcome<>'success' THEN 1 ELSE 0 END), 0) AS ghost
             FROM searchbug_calls
             """
@@ -980,7 +980,7 @@ def _gather_sync() -> dict:
               COALESCE(SUM(CASE WHEN outcome='rejected_dead' THEN 1 ELSE 0 END), 0) AS rejected_dead,
               COALESCE(SUM(CASE WHEN outcome='not_configured' THEN 1 ELSE 0 END), 0) AS not_configured,
               COALESCE(SUM(CASE WHEN clicked_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS clicks
-            FROM push_deliveries WHERE sent_at >= datetime('now','-24 hours')
+            FROM push_deliveries WHERE datetime(sent_at) >= datetime('now','-24 hours')
             """
         ).fetchone())
         subs = dict(conn.execute(
@@ -997,7 +997,7 @@ def _gather_sync() -> dict:
         push["notifications_24h"] = int(
             conn.execute(
                 "SELECT COUNT(*) FROM notifications "
-                "WHERE created_at >= datetime('now','-24 hours')"
+                "WHERE datetime(created_at) >= datetime('now','-24 hours')"
             ).fetchone()[0]
             or 0
         )

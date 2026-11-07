@@ -214,7 +214,7 @@ def _check_ingestion_freshness() -> dict:
         ).fetchone()
         captured_24h = conn.execute(
             "SELECT COUNT(1) FROM leads "
-            "WHERE created_at >= datetime('now', '-24 hours')"
+            "WHERE datetime(created_at) >= datetime('now', '-24 hours')"
         ).fetchone()[0]
     finally:
         conn.close()
@@ -292,12 +292,12 @@ def _check_searchbug_cost() -> dict:
         try:
             row = conn.execute(
                 """SELECT
-                     COALESCE(SUM(CASE WHEN called_at >= datetime('now','-1 hour')
+                     COALESCE(SUM(CASE WHEN datetime(called_at) >= datetime('now','-1 hour')
                                        THEN cost_usd ELSE 0 END), 0) AS cost_1h,
                      COALESCE(SUM(cost_usd), 0) AS cost_24h,
-                     SUM(CASE WHEN called_at >= datetime('now','-15 minutes')
+                     SUM(CASE WHEN datetime(called_at) >= datetime('now','-15 minutes')
                               THEN 1 ELSE 0 END) AS calls_15m,
-                     SUM(CASE WHEN called_at >= datetime('now','-15 minutes')
+                     SUM(CASE WHEN datetime(called_at) >= datetime('now','-15 minutes')
                               AND outcome = 'transport_error' THEN 1 ELSE 0 END) AS transport_15m,
                      SUM(CASE WHEN billed = 1 THEN 1 ELSE 0 END) AS billed_24h,
                      SUM(CASE WHEN billed = 1 AND outcome != 'success'
@@ -306,7 +306,7 @@ def _check_searchbug_cost() -> dict:
                               THEN 1 ELSE 0 END) AS resolved_24h,
                      SUM(CASE WHEN outcome = 'name_mismatch' THEN 1 ELSE 0 END) AS mismatch_24h
                    FROM searchbug_calls
-                   WHERE called_at >= datetime('now', '-24 hours')"""
+                   WHERE datetime(called_at) >= datetime('now', '-24 hours')"""
             ).fetchone()
         finally:
             conn.close()
@@ -709,7 +709,7 @@ def _check_push_health() -> dict:
                      SUM(CASE WHEN outcome = 'rejected_dead' THEN 1 ELSE 0 END) AS dead,
                      SUM(CASE WHEN outcome = 'not_configured' THEN 1 ELSE 0 END) AS not_configured
                    FROM push_deliveries
-                   WHERE sent_at >= datetime('now', '-24 hours')"""
+                   WHERE datetime(sent_at) >= datetime('now', '-24 hours')"""
             ).fetchone()
             subs = conn.execute(
                 "SELECT COUNT(*) AS total, "
@@ -719,7 +719,7 @@ def _check_push_health() -> dict:
             notifications_24h = int(
                 conn.execute(
                     "SELECT COUNT(*) FROM notifications "
-                    "WHERE created_at >= datetime('now', '-24 hours')"
+                    "WHERE datetime(created_at) >= datetime('now', '-24 hours')"
                 ).fetchone()[0]
                 or 0
             )

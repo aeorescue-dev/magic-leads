@@ -252,7 +252,7 @@ def _prune_processed(days: int = 30) -> None:
     try:
         con.execute(
             "DELETE FROM inbox_processed_messages "
-            "WHERE processed_at < datetime('now', ?)",
+            "WHERE datetime(processed_at) < datetime('now', ?)",
             (f"-{max(1, int(days))} days",),
         )
         con.commit()

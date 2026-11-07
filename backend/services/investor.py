@@ -426,8 +426,10 @@ CREATE TABLE IF NOT EXISTS meta (
 """
 
 _LOCK = threading.Lock()
+_REFRESH_LOCK = threading.Lock()
 _INIT = {"path": None}
 _CACHE: dict[str, tuple[float, dict]] = {}
+SNAPSHOT_MAX_AGE_SECONDS = 30 * 60
 
 
 def db_path() -> str:
@@ -585,7 +587,7 @@ def _gather() -> dict:
             )[0] or 0),
             "completed_30d": int(one(
                 "SELECT COUNT(*) FROM checkout_sessions WHERE status='completed' "
-                "AND created_at >= datetime('now','-30 days')"
+                "AND datetime(created_at) >= datetime('now','-30 days')"
             )[0] or 0),
             "completed_cents": int(one(
                 "SELECT COALESCE(SUM(amount_cents),0) FROM checkout_sessions WHERE status='completed'"
@@ -606,8 +608,8 @@ def _gather() -> dict:
               SUM(CASE WHEN COALESCE(TRIM(address),'')<>'' THEN 1 ELSE 0 END) addresses,
               SUM(CASE WHEN COALESCE(TRIM(owner_phone),'')<>'' THEN 1 ELSE 0 END) phones,
               SUM(CASE WHEN COALESCE(TRIM(owner_email),'')<>'' THEN 1 ELSE 0 END) emails,
-              SUM(CASE WHEN date_reported >= datetime('now','-7 days') THEN 1 ELSE 0 END) fresh7,
-              SUM(CASE WHEN date_reported >= datetime('now','-30 days') THEN 1 ELSE 0 END) fresh30,
+              SUM(CASE WHEN datetime(date_reported) >= datetime('now','-7 days') THEN 1 ELSE 0 END) fresh7,
+              SUM(CASE WHEN datetime(date_reported) >= datetime('now','-30 days') THEN 1 ELSE 0 END) fresh30,
               SUM(CASE WHEN source_type IS NOT NULL AND external_id IS NOT NULL THEN 1 ELSE 0 END) provenance
             FROM leads
             """
@@ -616,7 +618,7 @@ def _gather() -> dict:
             """
             SELECT UPPER(TRIM(city)) city, COUNT(*) total,
               SUM(CASE WHEN COALESCE(TRIM(owner_name),'')<>'' THEN 1 ELSE 0 END) owners,
-              SUM(CASE WHEN date_reported >= datetime('now','-7 days') THEN 1 ELSE 0 END) fresh7
+              SUM(CASE WHEN datetime(date_reported) >= datetime('now','-7 days') THEN 1 ELSE 0 END) fresh7
             FROM leads GROUP BY 1 ORDER BY total DESC
             """
         ).fetchall()]
@@ -647,7 +649,7 @@ def _gather() -> dict:
                 "SELECT outcome, COUNT(*) calls, "
                 "SUM(CASE WHEN billed=1 THEN 1 ELSE 0 END) billed, "
                 "COALESCE(SUM(cost_usd),0) cost "
-                "FROM searchbug_calls WHERE called_at >= datetime('now','-30 days') "
+                "FROM searchbug_calls WHERE datetime(called_at) >= datetime('now','-30 days') "
                 "GROUP BY outcome"
             ).fetchall()
         }
@@ -666,7 +668,7 @@ def _gather() -> dict:
         suppressions = int(one("SELECT COUNT(*) FROM suppressions")[0] or 0)
         replies = int(one(
             "SELECT COUNT(*) FROM outbound_contacts "
-            "WHERE replied_at IS NOT NULL AND replied_at >= datetime('now','-30 days')"
+            "WHERE replied_at IS NOT NULL AND datetime(replied_at) >= datetime('now','-30 days')"
         )[0] or 0)
         health = one(
             "SELECT overall_status, overall_score, captured_at FROM system_health_snapshots "
@@ -1073,15 +1075,47 @@ def latest() -> Optional[dict]:
         conn.close()
 
 
+def _snapshot_age_seconds(snap: dict) -> float | None:
+    text = str((snap or {}).get("generated_at") or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - parsed).total_seconds()
+
+
 def get_snapshot() -> dict:
+    """Devolve o snapshot; reconstrói automaticamente se tiver >30 min.
+
+    O GET era apenas leitura do último snapshot persistido, podendo mostrar
+    métricas de prova com um dia de atraso. O refresh é serializado para não
+    haver duas reconstruções concorrentes.
+    """
+    init()
     cached = _CACHE.get("snapshot")
     if cached and datetime.now(timezone.utc).timestamp() - cached[0] < 60:
         return cached[1]
-    snap = latest()
-    if snap is None:
-        snap = build_snapshot()
-    _CACHE["snapshot"] = (datetime.now(timezone.utc).timestamp(), snap)
-    return snap
+    with _REFRESH_LOCK:
+        cached = _CACHE.get("snapshot")
+        if cached and datetime.now(timezone.utc).timestamp() - cached[0] < 60:
+            return cached[1]
+        snap = latest()
+        age = _snapshot_age_seconds(snap) if snap else None
+        if snap is None or age is None or age > SNAPSHOT_MAX_AGE_SECONDS:
+            try:
+                snap = build_snapshot()
+            except Exception as exc:  # noqa: BLE001 - GET não deve cair
+                logger.warning(
+                    "[INVESTOR] refresh automático falhou: %s", type(exc).__name__
+                )
+                if snap is None:
+                    raise
+        _CACHE["snapshot"] = (datetime.now(timezone.utc).timestamp(), snap)
+        return snap
 
 
 def refresh(force: bool = False) -> dict:

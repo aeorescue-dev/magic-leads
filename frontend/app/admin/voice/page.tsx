@@ -1334,7 +1334,7 @@ export default function VoiceB2BPage() {
           sub="passam o gate"
         />
         <Stat label="Bloqueadas" value={String(stats?.blocked ?? 0)} tone="amber" sub="com motivo" />
-        <Stat label="Tentativas hoje" value={String(stats?.attempts_today ?? 0)} sub="desde 00:00 ET" />
+        <Stat label="Tentativas hoje" value={String(stats?.attempts_today ?? 0)} sub="chamadas reais desde 00:00 UTC" />
         <Stat label="DNC listados" value={String(stats?.dnc_listed ?? 0)} tone="rose" sub={`${stats?.dnc_checked ?? 0} checks`} />
         <Stat label="Suprimidos" value={String(stats?.suppressed ?? 0)} tone="amber" sub="opt-out / manual" />
       </section>

@@ -4506,17 +4506,18 @@ async def admin_alerts(
 async def admin_ack_alert(
     alert_id: int, _admin: dict = Depends(_require_admin_user)
 ):
-    """Reconhece um alerta a partir do painel (sessão de admin).
+    """Reconhece o grupo aberto do mesmo `code` a partir do painel.
 
-    Diferente de `/api/system/alerts/{id}/ack` (secret global para cron), esta
-    rota usa o mesmo gate do painel. Invalida o cache do System Health para o
-    score refletir o ack no refresh seguinte.
+    O painel deduplica por código; reconhecer só a linha mais recente deixava
+    as anteriores abertas e o grupo voltava no refresh. Esta rota fecha todas
+    as linhas abertas do código de forma atómica. Invalida o cache do System
+    Health para o score refletir o ack no refresh seguinte.
     """
-    alert = await db_service.acknowledge_system_alert(alert_id)
-    if not alert:
+    result = await db_service.acknowledge_system_alert_group(alert_id)
+    if not result:
         raise HTTPException(status_code=404, detail="Alerta não encontrado")
     system_health.clear_cache()
-    return {"ok": True, "alert": alert}
+    return {"ok": True, **result}
 
 
 # ============================================================
@@ -6675,7 +6676,7 @@ async def admin_requalify_leads(request: Request, _admin: bool = Depends(_requir
 
         old_total = conn.execute(f"SELECT COUNT(*) FROM leads WHERE {old_qualified_where()}").fetchone()[0]
         old_7d = conn.execute(f"SELECT COUNT(*) FROM leads WHERE date_reported IS NOT NULL AND date(date_reported)>=date('now','-7 days') AND {old_qualified_where()}").fetchone()[0]
-        old_24h = conn.execute(f"SELECT COUNT(*) FROM leads WHERE created_at>=datetime('now','-1 day') AND {old_qualified_where()}").fetchone()[0]
+        old_24h = conn.execute(f"SELECT COUNT(*) FROM leads WHERE datetime(created_at) >= datetime('now','-1 day') AND {old_qualified_where()}").fetchone()[0]
 
         # 2. Reclassificação
         rows = conn.execute("SELECT id, issue_category, source_type, case_title, issue_description, descriptor FROM leads").fetchall()
@@ -6711,7 +6712,7 @@ async def admin_requalify_leads(request: Request, _admin: bool = Depends(_requir
 
         new_total = conn.execute(f"SELECT COUNT(*) FROM leads WHERE {_qualified_where()}").fetchone()[0]
         new_7d = conn.execute(f"SELECT COUNT(*) FROM leads WHERE date_reported IS NOT NULL AND date(date_reported)>=date('now','-7 days') AND {_qualified_where()}").fetchone()[0]
-        new_24h = conn.execute(f"SELECT COUNT(*) FROM leads WHERE created_at>=datetime('now','-1 day') AND {_qualified_where()}").fetchone()[0]
+        new_24h = conn.execute(f"SELECT COUNT(*) FROM leads WHERE datetime(created_at) >= datetime('now','-1 day') AND {_qualified_where()}").fetchone()[0]
 
         # Por cidade (novo)
         city_rows = conn.execute(f"SELECT city, COUNT(*) c FROM leads WHERE {_qualified_where()} GROUP BY city ORDER BY c DESC").fetchall()
