@@ -117,8 +117,9 @@ def _did_pool_for_city(city: str) -> list[str]:
                             "[VOICE] DID invalido no pool de %s: %r", city, item
                         )
                 return pool
-    single = _did_for_city(city)
-    return [single] if single else []
+    # Sem pool explicito, o chamador usa o mapeamento singular legado
+    # (`_did_for_city`), preservando Dallas e o transbordo secundario.
+    return []
 
 
 def _campaign_batch_size(campaign: dict) -> int:

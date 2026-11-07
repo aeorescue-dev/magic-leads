@@ -826,7 +826,8 @@ def test_did_pool_por_cidade(monkeypatch):
         "+19292562550",
         "+19294480511",
     ]
-    assert auto_dialer._did_pool_for_city("Dallas") == ["+14699607326"]
+    assert auto_dialer._did_pool_for_city("Dallas") == []
+    assert auto_dialer._did_for_city("Dallas") == "+14699607326"
     assert auto_dialer._did_pool_for_city("Chicago") == []
 
 
