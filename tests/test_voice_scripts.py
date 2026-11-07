@@ -417,22 +417,35 @@ def test_guard_bundle_requires_two_trades(monkeypatch):
     assert guard["ready"] is False
 
 
-def test_guard_city_allows_gc_only(monkeypatch):
+def test_guard_city_only_in_authorized_cities(monkeypatch):
     monkeypatch.setattr(
         voice_scripts.settings, "VOICE_GUARD_SCOPES", "exact,bundle,city"
     )
+    monkeypatch.setattr(
+        voice_scripts.settings, "VOICE_CITY_SCOPE_CITIES", "Dallas"
+    )
+    monkeypatch.setattr(voice_scripts.settings, "VOICE_CITY_MIN_TOTAL", 3000)
     monkeypatch.setattr(
         showcase,
         "available",
         lambda city, trade, **kwargs: _guard_info(0, 12806),
     )
-    gc = voice_scripts.showcase_guard("general_contractor", "New York")
-    assert gc["ready"] is True
-    assert gc["scope"] == "city"
-    assert "property opportunities" in gc["line"]
 
-    roofing = voice_scripts.showcase_guard("roofing", "New York")
-    assert roofing["ready"] is False
+    # Nova Iorque não está na allowlist: nem GC nem roofing podem usar city.
+    gc_ny = voice_scripts.showcase_guard("general_contractor", "New York")
+    assert gc_ny["ready"] is False
+    assert gc_ny["scope"] == "none"
+    roofing_ny = voice_scripts.showcase_guard("roofing", "New York")
+    assert roofing_ny["ready"] is False
+
+    # Dallas está na allowlist: city vale para GC e para os restantes trades.
+    gc_dallas = voice_scripts.showcase_guard("general_contractor", "Dallas")
+    assert gc_dallas["ready"] is True
+    assert gc_dallas["scope"] == "city"
+    assert "property opportunities" in gc_dallas["line"]
+    roofing_dallas = voice_scripts.showcase_guard("roofing", "Dallas")
+    assert roofing_dallas["ready"] is True
+    assert roofing_dallas["scope"] == "city"
 
 
 def test_template_version_propaga_para_scripts_existentes():

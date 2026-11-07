@@ -4,8 +4,8 @@ Executar depois do deploy da Fase 1, quando `voice_scripts` já tem a versão
 global. O corpo usa `{{showcase_line}}` (linha city-wide da guard) e não
 `{{count}}`, para não colidir com a regra exact-only do V7.4.
 
-Uso:
-    python scripts/seed_dallas_city_override.py
+Uso (dentro do contentor, com `PYTHONPATH=/app`):
+    python -m backend.scripts.seed_dallas_city_override
 """
 from __future__ import annotations
 

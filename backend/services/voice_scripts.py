@@ -823,12 +823,12 @@ def showcase_guard(trade_code: str, city: str = "") -> dict:
         if bundle.get("ready"):
             return bundle
 
-    # City: apenas general_contractor, porque é o único trade sem página
-    # exata. Nunca para roofing/hvac/etc. — esses teriam de ter exact.
-    city_scope_allowed = (
-        code == "general_contractor"
-        or city_label.strip().lower() in _city_scope_cities()
-    )
+    # City: só nas cidades explicitamente autorizadas em
+    # VOICE_CITY_SCOPE_CITIES. O scope é global (uma env para todos os
+    # trades), por isso não pode depender do trade: se Dallas está ligado,
+    # Nova Iorque/Chicago/Boston continuam exact-only. Isto evita ativar
+    # city_fallback em GC de mercados onde o template V7.4 usa {{count}}.
+    city_scope_allowed = city_label.strip().lower() in _city_scope_cities()
     if "city" in scopes and city_scope_allowed and fresh:
         minimum = _city_min_total()
         if city_total >= minimum:
