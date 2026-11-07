@@ -757,3 +757,40 @@ def test_source_http_csv_importa_e_rebuilda_segmentos(monkeypatch):
     segments = voice.cached_segments(city="Chicago", trade="Painting")
     assert segments
     assert segments[0]["showcase_mode"] == "dedicated"
+
+
+def test_did_por_cidade_dallas_nao_usa_ny(monkeypatch):
+    monkeypatch.setattr(
+        auto_dialer.settings,
+        "VOICE_DID_BY_CITY",
+        '{"dallas":"+14699607326"}',
+    )
+    monkeypatch.setattr(
+        auto_dialer.settings, "TELNYX_FROM_NUMBER", "+19292562550"
+    )
+    monkeypatch.setattr(
+        auto_dialer.settings, "TELNYX_FROM_NUMBER_SECONDARY", "+15189429910"
+    )
+    for idx in range(3):
+        _import_company(
+            f"+12145550{idx:03d}", "Dallas", "TX", "Roofing"
+        )
+    campaign = voice.create_campaign(
+        name="did-dallas",
+        city="Dallas",
+        trade="Roofing",
+        max_calls=3,
+        quota_total=3,
+        trade_plan=[{"trade": "roofing", "quota": 3}],
+    )
+    captured: list[str] = []
+
+    def fake_call(*args, **kwargs):
+        captured.append(kwargs.get("from_number") or args[6])
+        return {"ok": True, "dry_run": False, "voice_call_id": 0}
+
+    monkeypatch.setattr(auto_dialer.telnyx_voice, "create_call", fake_call)
+    asyncio.run(auto_dialer.run_campaign(campaign["id"]))
+    assert captured == ["+14699607326"] * 3
+    assert auto_dialer._did_for_city("New York") == ""
+    assert auto_dialer._did_for_city("Dallas") == "+14699607326"

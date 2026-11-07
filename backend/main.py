@@ -3660,6 +3660,23 @@ async def admin_voice_liquidity(
     )
 
 
+@app.get("/api/admin/voice/candidates/audit")
+async def admin_voice_candidates_audit(
+    campaign_id: int = 12,
+    at: str = "",
+    sample_limit: int = 5,
+    _admin: bool = Depends(_require_admin),
+):
+    """Auditoria pré-call: quota, verificados, permitidos e amostra."""
+    parsed = b2b_voice.parse_dt(at) if at.strip() else None
+    return await anyio.to_thread.run_sync(
+        b2b_voice.audit_campaign_candidates,
+        campaign_id,
+        parsed,
+        sample_limit,
+    )
+
+
 @app.get("/api/admin/voice/sources")
 async def admin_voice_sources(_admin: dict = Depends(_require_admin_user)):
     return {"sources": await anyio.to_thread.run_sync(b2b_voice.list_sources)}

@@ -35,6 +35,33 @@ def _campaign_start_hour(campaign: dict) -> int:
         return 9
 
 
+def _did_for_city(city: str) -> str:
+    """Resolve o DID local da cidade a partir de VOICE_DID_BY_CITY.
+
+    Formato: JSON {"dallas":"+14699607326"}. Cidade desconhecida -> "".
+    """
+    raw = str(getattr(settings, "VOICE_DID_BY_CITY", "") or "").strip()
+    if not raw:
+        return ""
+    try:
+        mapping = json.loads(raw)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        logger.warning("[VOICE] VOICE_DID_BY_CITY invalido; ignorado")
+        return ""
+    if not isinstance(mapping, dict):
+        return ""
+    wanted = str(city or "").strip().lower()
+    for key, value in mapping.items():
+        if str(key).strip().lower() != wanted:
+            continue
+        did = str(value or "").strip()
+        if len(did) == 12 and did.startswith("+1"):
+            return did
+        logger.warning("[VOICE] DID invalido para %s: %r", city, value)
+        return ""
+    return ""
+
+
 def _campaign_batch_size(campaign: dict) -> int:
     """Escolhe o lote do dia a partir de `batch_plan` (ramp) ou `batch_size`."""
     raw = campaign.get("batch_plan")
@@ -183,7 +210,8 @@ async def run_campaign(campaign_id: int) -> None:
                     return
                 if calls >= batch_end:
                     break
-                from_number = (
+                city_did = _did_for_city(current.get("city") or city)
+                from_number = city_did or (
                     secondary_from if secondary_from and calls >= did_cap else ""
                 )
                 result = await _run_sync(

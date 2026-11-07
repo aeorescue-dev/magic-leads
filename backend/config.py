@@ -64,6 +64,8 @@ class Settings(BaseSettings):
     TELNYX_STATIC_GATHER_TIMEOUT_MS: int = 10000
     # Segundo DID para dividir o volume e respeitar 50/dia por número.
     TELNYX_FROM_NUMBER_SECONDARY: str = ""
+    # Mapa JSON cidade->DID, ex.: {"dallas":"+14699607326"}.
+    VOICE_DID_BY_CITY: str = ""
     VOICE_DID_DAILY_CAP: int = 50
     # Pacing: 75s base +/-20% = 60-90s; pausa de 10 min a cada 25 chamadas.
     VOICE_CALL_INTERVAL_JITTER: float = 0.2

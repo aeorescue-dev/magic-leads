@@ -1739,6 +1739,102 @@ def validate_campaign_niche(campaign_id: int) -> dict:
     return {"ok": True, "campaign_id": int(campaign_id), "city": city, "trades": checked}
 
 
+def audit_campaign_candidates(
+    campaign_id: int,
+    at: Optional[datetime] = None,
+    sample_limit: int = 5,
+) -> dict:
+    """Auditoria pré-call: quota vs verificados vs permitidos no horário."""
+    campaign = get_campaign(int(campaign_id))
+    if not campaign:
+        raise ValueError(f"campaign_not_found: {campaign_id}")
+    city = str(campaign.get("city") or "").strip()
+    raw = campaign.get("trade_plan")
+    try:
+        plan = json.loads(raw) if raw else []
+    except (TypeError, ValueError, json.JSONDecodeError):
+        plan = []
+    if not plan:
+        plan = [
+            {
+                "trade": str(campaign.get("trade") or "").strip(),
+                "quota": int(campaign.get("quota_total") or 0),
+            }
+        ]
+    limit = max(1, min(20, int(sample_limit or 5)))
+    trades: list[dict] = []
+    total_quota = 0
+    total_verified = 0
+    total_candidates = 0
+    total_allowed = 0
+    gc_in_plan = 0
+    all_green = True
+    for item in plan:
+        trade = str(item.get("trade") or "").strip()
+        quota = max(0, int(item.get("quota") or 0))
+        if not trade or quota <= 0:
+            continue
+        if trade == "general_contractor":
+            gc_in_plan += quota
+        verified = verified_candidate_count(city, trade)
+        rows = campaign_candidates(
+            int(campaign_id), city, trade, limit=quota, include_fallback=True
+        )
+        allowed = 0
+        samples: list[dict] = []
+        for row in rows:
+            if can_call(row, now=at).get("allowed"):
+                allowed += 1
+            if len(samples) < limit:
+                phone = str(row.get("phone") or "")
+                masked = (
+                    phone[:2] + "*" * max(0, len(phone) - 6) + phone[-4:]
+                    if len(phone) >= 6
+                    else phone
+                )
+                samples.append(
+                    {
+                        "company": row.get("company_name"),
+                        "phone": masked,
+                        "trade": trade,
+                        "license": row.get("license_number"),
+                    }
+                )
+        green = verified >= quota and allowed >= quota
+        all_green = all_green and green
+        total_quota += quota
+        total_verified += verified
+        total_candidates += len(rows)
+        total_allowed += allowed
+        trades.append(
+            {
+                "trade": trade,
+                "quota": quota,
+                "verified": verified,
+                "candidates": len(rows),
+                "allowed_at": allowed,
+                "green": green,
+                "sample": samples,
+            }
+        )
+    return {
+        "campaign_id": int(campaign_id),
+        "city": city,
+        "status": campaign.get("status"),
+        "next_batch_at": campaign.get("next_batch_at"),
+        "quota_total": int(campaign.get("quota_total") or 0),
+        "at": at.isoformat() if at else None,
+        "total_quota": total_quota,
+        "total_verified": total_verified,
+        "total_candidates": total_candidates,
+        "total_allowed": total_allowed,
+        "gc_in_plan": gc_in_plan,
+        "gc_verified_city": verified_candidate_count(city, "general_contractor"),
+        "all_green": bool(all_green and gc_in_plan == 0 and total_allowed >= total_quota),
+        "trades": trades,
+    }
+
+
 def campaign_candidates(
     campaign_id: int,
     city: str = "",

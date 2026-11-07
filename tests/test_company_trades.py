@@ -228,3 +228,29 @@ def test_validate_campaign_niche_exige_quota_verificada():
     gate = voice.validate_campaign_niche(int(ok["id"]))
     assert gate["ok"] is True
     assert gate["trades"][0]["verified"] == 2
+
+
+def test_audit_campaign_candidates_all_green():
+    from datetime import datetime, timezone
+
+    for phone in ("+12125550131", "+12125550132"):
+        voice.import_licenses_csv(_csv("Gamma Electric", phone, "electrical"))
+        voice.check_dnc(phone, listed=False, source="pytest")
+    voice.sync_company_trades()
+    campaign = voice.create_campaign(
+        name="audit-green",
+        city="New York",
+        trade="electrical",
+        max_calls=2,
+        quota_total=2,
+        trade_plan=[{"trade": "electrical", "quota": 2}],
+    )
+    audit = voice.audit_campaign_candidates(
+        int(campaign["id"]),
+        at=datetime(2026, 11, 2, 16, 0, tzinfo=timezone.utc),
+    )
+    assert audit["all_green"] is True
+    assert audit["gc_in_plan"] == 0
+    assert audit["total_quota"] == 2
+    assert audit["total_allowed"] == 2
+    assert audit["trades"][0]["green"] is True
