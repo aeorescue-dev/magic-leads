@@ -254,3 +254,12 @@ def test_audit_campaign_candidates_all_green():
     assert audit["total_quota"] == 2
     assert audit["total_allowed"] == 2
     assert audit["trades"][0]["green"] is True
+
+
+def test_infer_trade_word_boundary_casos_reais():
+    assert voice._infer_trade("JD DESIGN AND DEVELOPERS LLC") == ""
+    assert voice._infer_trade("CLEAR CHANNEL OUTDOOR INC") == ""
+    assert voice._infer_trade("CLEANLEAF ENERGY LLC") == ""
+    assert voice._infer_trade("MOTOR CONTROLS INC") == ""
+    assert voice._infer_trade("ABC SIGNS & WRAPS") == "signage"
+    assert voice._infer_trade("ABC DOOR & WINDOW LLC") == "windows"

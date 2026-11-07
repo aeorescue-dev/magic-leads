@@ -2815,7 +2815,7 @@ def ensure_builtin_source(name: str, kind: str) -> dict:
 
 
 def _infer_trade(name: str, niche_key: str = "") -> str:
-    from . import showcase
+    from . import showcase, voice_taxonomy
 
     raw = (niche_key or "").strip().lower()
     mapping = {
@@ -2853,7 +2853,7 @@ def _infer_trade(name: str, niche_key: str = "") -> str:
         ("builders", "remodeling"),
     )
     for token, code in keywords:
-        if token in lowered:
+        if voice_taxonomy.token_matches(lowered, token):
             return code
     # Sem sinal explícito, NÃO inventar general_contractor. A empresa fica
     # unclassified e só entra em campanha se `company_trades` a promover com

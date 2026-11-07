@@ -80,3 +80,22 @@ def test_site_text_classifica_oficio_sem_nome():
     trades = _trades(signals)
     assert trades["plumbing"] >= 0.80
     assert signals[0].source in ("site_text", "name")
+
+
+def test_word_boundary_nao_confunde_design_com_signage():
+    assert "signage" not in _trades(tax.name_signals("JD DESIGN AND DEVELOPERS LLC"))
+    assert "signage" in _trades(tax.name_signals("ABC SIGNS & WRAPS"))
+
+
+def test_word_boundary_nao_confunde_outdoor_com_windows():
+    assert "windows" not in _trades(tax.name_signals("CLEAR CHANNEL OUTDOOR INC"))
+    assert "windows" in _trades(tax.name_signals("ABC DOOR & WINDOW LLC"))
+
+
+def test_word_boundary_nao_confunde_cleanleaf_com_cleaning():
+    assert "cleaning" not in _trades(tax.name_signals("CLEANLEAF ENERGY LLC"))
+    assert "cleaning" in _trades(tax.name_signals("ABC COMMERCIAL CLEANING LLC"))
+
+
+def test_word_boundary_nao_confunde_motor_controls_com_landscaping():
+    assert "landscaping" not in _trades(tax.name_signals("MOTOR CONTROLS INC"))

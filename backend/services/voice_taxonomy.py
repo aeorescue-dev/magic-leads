@@ -256,6 +256,12 @@ NAME_RULES: dict[str, tuple[tuple[str, float], ...]] = {
         ("renovation", 0.86),
         ("renovat", 0.84),
     ),
+    "signage": (
+        ("sign", 0.86),
+        ("signage", 0.92),
+        ("sign company", 0.88),
+        ("sign hanger", 0.90),
+    ),
     "general_contractor": (
         ("general contractor", 0.80),
         ("general contractors", 0.80),
@@ -348,6 +354,27 @@ def _has_negative(name: str) -> bool:
     return any(token in name for token in NEGATIVE_TOKENS)
 
 
+_AMBIGUOUS_TOKEN_PATTERNS = {
+    # "sign" dentro de "design" e "door" dentro de "outdoor" são falsos
+    # positivos clássicos; "clean" dentro de "cleanleaf" idem.
+    "sign": r"(?<![a-z0-9])(sign|signs|signage|sign company|sign hanger)(?![a-z0-9])",
+    "door": r"(?<![a-z0-9])(door|doors|doorway|doorways)(?![a-z0-9])",
+    "clean": r"(?<![a-z0-9])(clean|cleans|cleaning|cleaner|cleaners|cleanup)(?![a-z0-9])",
+}
+
+
+def token_matches(text: object, token: object) -> bool:
+    """Match por início de palavra, com exceções para tokens ambíguos."""
+    haystack = normalize_text(text)
+    needle = normalize_text(token)
+    if not haystack or not needle:
+        return False
+    pattern = _AMBIGUOUS_TOKEN_PATTERNS.get(needle)
+    if pattern:
+        return re.search(pattern, haystack) is not None
+    return re.search(r"(?<![a-z0-9])" + re.escape(needle), haystack) is not None
+
+
 def name_signals(company_name: object) -> list[TradeSignal]:
     raw = normalize_text(company_name)
     name = _strip_legal_suffixes(raw)
@@ -355,7 +382,11 @@ def name_signals(company_name: object) -> list[TradeSignal]:
         return []
     out: list[TradeSignal] = []
     for trade, rules in NAME_RULES.items():
-        matches = [(token, weight) for token, weight in rules if token in name]
+        matches = [
+            (token, weight)
+            for token, weight in rules
+            if token_matches(name, token)
+        ]
         if not matches:
             continue
         best = max(weight for _, weight in matches)
@@ -385,7 +416,11 @@ def site_signals(site_text: object) -> list[TradeSignal]:
         return []
     out: list[TradeSignal] = []
     for trade, rules in NAME_RULES.items():
-        matches = [(token, weight) for token, weight in rules if token in raw]
+        matches = [
+            (token, weight)
+            for token, weight in rules
+            if token_matches(raw, token)
+        ]
         if not matches:
             continue
         best = min(0.84, max(weight for _, weight in matches) - 0.06)

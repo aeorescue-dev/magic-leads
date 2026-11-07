@@ -85,6 +85,12 @@ TDLR_FILES: dict[str, str] = {
     "electrical_sign_contractors": "Ltescele.csv",
     "elevator_contractors": "ltelectr.csv",
 }
+TDLR_TRADE: dict[str, str] = {
+    "ac_contractors": "hvac",
+    "electrical_contractors": "electrical",
+    "electrical_sign_contractors": "signage",
+    "elevator_contractors": "elevator",
+}
 # Metro Dallas (entity city = DALLAS para a esteira de NYC/CHI/BOS/DAL).
 DFW_CITIES = {
     "DALLAS", "IRVING", "GARLAND", "MESQUITE", "CARROLLTON", "RICHARDSON",
@@ -378,7 +384,9 @@ def _split_city_zip(value: object) -> tuple[str, str]:
     return match.group(1).strip(), match.group(3)
 
 
-def extract_tdlr_licenses(rows: Iterable[dict]) -> list[dict]:
+def extract_tdlr_licenses(
+    rows: Iterable[dict], niche_key: str = ""
+) -> list[dict]:
     """Linhas dos CSV do TDLR -> entidades do metro de Dallas (puro)."""
     out: list[dict] = []
     seen: set[str] = set()
@@ -411,6 +419,7 @@ def extract_tdlr_licenses(rows: Iterable[dict]) -> list[dict]:
             "license": license_no,
             "source": "tdlr_tx",
             "external_id": f"tdlr:{license_no}",
+            "niche_key": niche_key or None,
             "phone": _phone(
                 row.get("BUSINESS PHONE") or row.get("PHONE NUMBER")
             ),
@@ -442,13 +451,33 @@ async def ingest_tdlr(limit: int = 12000) -> dict:
     per_file: dict[str, int] = {}
     for label, filename in TDLR_FILES.items():
         rows = await fetch_tdlr_file(filename)
-        extracted = extract_tdlr_licenses(rows)
+        extracted = extract_tdlr_licenses(
+            rows, niche_key=TDLR_TRADE.get(label, "")
+        )
         per_file[label] = len(extracted)
         records.extend(extracted)
         logger.info(
             "[LICENSES] TDLR %s: rows=%s dallas=%s", label, len(rows), len(extracted)
         )
     result = await record_entities(records, max_records=max(limit, len(records)))
+    # O upsert usa COALESCE e não sobrescreve tags antigas. Para o TDLR a
+    # licença é a fonte de verdade, por isso forçamos o niche_key correto.
+    from .db import get_connection
+
+    conn = get_connection()
+    try:
+        for rec in records:
+            if not rec.get("niche_key"):
+                continue
+            conn.execute(
+                "UPDATE contractor_entities SET niche_key=?, "
+                "updated_at=CURRENT_TIMESTAMP "
+                "WHERE license=? AND state='TX'",
+                (rec["niche_key"], rec.get("license")),
+            )
+        conn.commit()
+    finally:
+        conn.close()
     result["extracted"] = len(records)
     result["per_file"] = per_file
     logger.info(
