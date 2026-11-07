@@ -1085,6 +1085,16 @@ CREATE TABLE IF NOT EXISTS contractor_entity_sources (
   UNIQUE(source, external_id, role)
 );
 
+-- Backoff de dominio: uma entidade com falha transitoria nao volta no tick
+-- seguinte nem queima quota; e' retomada quando next_attempt_at expira.
+CREATE TABLE IF NOT EXISTS domain_retry (
+  entity_id INTEGER PRIMARY KEY REFERENCES contractor_entities(id) ON DELETE CASCADE,
+  failures INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at TEXT,
+  last_error TEXT,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Cursor/quota do scheduler autonomo por cidade.
 CREATE TABLE IF NOT EXISTS city_enrichment_state (
   city TEXT PRIMARY KEY,
@@ -4622,9 +4632,12 @@ class DatabaseService:
         conn = get_connection()
         try:
             rows = conn.execute(
-                "SELECT * FROM contractor_entities "
+                "SELECT * FROM contractor_entities e "
                 "WHERE UPPER(TRIM(city))=? AND status='new' "
                 "AND COALESCE(domain,'')='' AND domain_attempts < 2 "
+                "AND NOT EXISTS (SELECT 1 FROM domain_retry dr "
+                "  WHERE dr.entity_id=e.id AND dr.next_attempt_at IS NOT NULL "
+                "  AND datetime(dr.next_attempt_at) > datetime('now')) "
                 "ORDER BY (COALESCE(phone,'')<>'') DESC, "
                 "         (license IS NOT NULL) DESC, id LIMIT ?",
                 (city.strip().upper(), max(1, min(int(limit), 50))),
@@ -4684,6 +4697,9 @@ class DatabaseService:
                     "ELSE NULL END, updated_at=CURRENT_TIMESTAMP WHERE id=?",
                     (attempts, status, status, int(entity_id)),
                 )
+            conn.execute(
+                "DELETE FROM domain_retry WHERE entity_id=?", (int(entity_id),)
+            )
             conn.commit()
             return {"attempts": attempts, "status": status if not domain else "domain"}
         finally:

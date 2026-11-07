@@ -21,6 +21,7 @@ from . import (
     licensing_sources,
     osm_extract,
     owner_email,
+    self_healing,
     timeutil,
 )
 from .company_discovery import CompanyDiscovery
@@ -116,38 +117,54 @@ async def _domain_stage(entity: dict) -> str:
         return "deferred"
     async with _global_sem:
         await _throttle_overpass()
-        # 1) busca paga (Brave) com cache/orcamento: maior cobertura.
         try:
-            resolved = await brave_search.find_domain(
-                entity.get("legal_name") or "", entity.get("city") or ""
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("[BRAVE] erro inesperado: %s", exc)
             resolved = None
-        # 2) OSM/Overpass (bloqueado no Railway; circuit breaker).
-        if not resolved:
-            resolved = await resolve_domain(
-                entity.get("legal_name") or "", entity.get("city") or ""
-            )
-        if not resolved:
-            # Fallback autónomo: heurística de domínio (DNS + site + corroboração)
-            # quando o Overpass está bloqueado/indisponível.
-            lead = {
-                "owner_name": entity.get("legal_name") or "",
-                "city": entity.get("city") or "",
-            }
-            found = await asyncio.to_thread(
-                _discovery.heuristic_domain,
-                lead,
-                _discovery._clock() + 12.0,
-            )
-            if found:
-                resolved = {
-                    "domain": found.domain,
-                    "confidence": 0.55,
-                    "source": "heuristic",
-                    "snippet": getattr(found, "snippet", "") or "",
+            # 1) busca paga (Brave) com cache/orcamento: maior cobertura.
+            try:
+                resolved = await brave_search.find_domain(
+                    entity.get("legal_name") or "", entity.get("city") or ""
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[BRAVE] erro inesperado: %s", exc)
+                resolved = None
+            # 2) OSM/Overpass (bloqueado no Railway; circuit breaker).
+            if not resolved:
+                resolved = await resolve_domain(
+                    entity.get("legal_name") or "", entity.get("city") or ""
+                )
+            if not resolved:
+                # Fallback autónomo: heurística de domínio (DNS + site +
+                # corroboração) quando o Overpass está bloqueado.
+                lead = {
+                    "owner_name": entity.get("legal_name") or "",
+                    "city": entity.get("city") or "",
                 }
+                found = await asyncio.to_thread(
+                    _discovery.heuristic_domain,
+                    lead,
+                    _discovery._clock() + 12.0,
+                )
+                if found:
+                    resolved = {
+                        "domain": found.domain,
+                        "confidence": 0.55,
+                        "source": "heuristic",
+                        "snippet": getattr(found, "snippet", "") or "",
+                    }
+        except Exception as exc:  # noqa: BLE001
+            # Falha transitoria/inesperada: NÃO conta quota. Guarda backoff e
+            # devolve a entidade à fila quando `next_attempt_at` expirar.
+            logger.warning(
+                "[ENRICH-SCHED] domain exception entity=%s: %s",
+                entity.get("id"),
+                exc,
+            )
+            await asyncio.to_thread(
+                self_healing.record_domain_failure,
+                int(entity["id"]),
+                exc,
+            )
+            return "error"
     if resolved:
         await db_service.mark_contractor_domain_attempt(
             int(entity["id"]),
@@ -210,6 +227,7 @@ async def run_once(
     """Um ciclo: quota por cidade, estágios e contagens por resultado."""
     if _run_lock.locked():
         return {"status": "busy", "processed": 0, "cities": {}}
+    await asyncio.to_thread(self_healing.ensure_schema)
     async with _run_lock:
         now = now or datetime.now(timezone.utc)
         day = timeutil.day_key(now)
@@ -261,8 +279,12 @@ async def run_once(
                 counts[result] = counts.get(result, 0) + 1
             # `deferred` não consumiu tentativa nem quota de domínio.
             processed = sum(v for k, v in counts.items() if k != "deferred")
-            # Só os jobs realmente lançados contam para a quota de domínio.
-            domain_processed = len(domain_jobs) - int(counts.get("deferred", 0))
+            # Só domínio resolvido/no_domain conta quota. `deferred` e
+            # `error` não queimam a cota diária.
+            domain_results = results[: len(domain_jobs)]
+            domain_processed = sum(
+                1 for result in domain_results if result in ("domain", "no_domain")
+            )
             total += processed
             last_id = (domain_jobs + email_jobs)[-1]["id"] if (domain_jobs or email_jobs) else None
             await db_service.bump_city_enrichment_state(
