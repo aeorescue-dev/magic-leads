@@ -335,6 +335,7 @@ CREATE TABLE IF NOT EXISTS voice_meta (
 """
 
 _LOCK = threading.Lock()
+_SEGMENTS_LOCK = threading.Lock()
 _INIT: dict[str, Optional[str]] = {"path": None}
 
 
@@ -2076,31 +2077,32 @@ def ensure_segments_fresh() -> bool:
     estado, força rebuild imediato.
     """
     init()
-    conn = get_conn()
-    try:
-        row = conn.execute(
-            "SELECT COUNT(1) AS n, MAX(built_at) AS built_at, "
-            "COALESCE(SUM(callable),0) AS callable FROM voice_segments"
-        ).fetchone()
-    finally:
-        conn.close()
-    count = int((row["n"] if row else 0) or 0)
-    callable_count = int((row["callable"] if row else 0) or 0)
-    built_at = _segments_built_at()
-    stale = count == 0 or built_at is None
-    if not stale and built_at is not None:
-        age = (datetime.now(timezone.utc) - built_at).total_seconds()
-        stale = age > VOICE_SEGMENTS_TTL_SECONDS
-    if (
-        not stale
-        and callable_count == 0
-        and _inside_calling_window()
-        and _has_callable_inventory()
-    ):
-        stale = True
-    if stale:
-        rebuild_segments()
-        return True
+    with _SEGMENTS_LOCK:
+        conn = get_conn()
+        try:
+            row = conn.execute(
+                "SELECT COUNT(1) AS n, MAX(built_at) AS built_at, "
+                "COALESCE(SUM(callable),0) AS callable FROM voice_segments"
+            ).fetchone()
+        finally:
+            conn.close()
+        count = int((row["n"] if row else 0) or 0)
+        callable_count = int((row["callable"] if row else 0) or 0)
+        built_at = _segments_built_at()
+        stale = count == 0 or built_at is None
+        if not stale and built_at is not None:
+            age = (datetime.now(timezone.utc) - built_at).total_seconds()
+            stale = age > VOICE_SEGMENTS_TTL_SECONDS
+        if (
+            not stale
+            and callable_count == 0
+            and _inside_calling_window()
+            and _has_callable_inventory()
+        ):
+            stale = True
+        if stale:
+            rebuild_segments()
+            return True
     return False
 
 
