@@ -840,3 +840,20 @@ def test_reserve_did_respeita_cap_e_rotacao():
     assert picked[:4].count("+19292562550") == 2
     assert picked[:4].count("+19294480511") == 2
     assert picked[4] == ""
+
+def test_reserve_did_aplica_warmup_nos_primeiros_dias(monkeypatch):
+    monkeypatch.setattr(voice.settings, "VOICE_DID_WARMUP_CAPS", "1,2")
+    pool = ["+19292562550", "+19294480511"]
+    day1 = "2026-11-09"
+    day2 = "2026-11-10"
+    status = voice.did_capacity_status(pool, day=day1, cap=50)
+    assert status["warmup_caps"] == [1, 2]
+    assert status["capacity"] == 2
+    picked = [voice.reserve_did(pool, day=day1, cap=50) for _ in range(3)]
+    assert picked[:2].count("+19292562550") == 1
+    assert picked[:2].count("+19294480511") == 1
+    assert picked[2] == ""
+    picked2 = [voice.reserve_did(pool, day=day2, cap=50) for _ in range(5)]
+    assert picked2[:4].count("+19292562550") == 2
+    assert picked2[:4].count("+19294480511") == 2
+    assert picked2[4] == ""

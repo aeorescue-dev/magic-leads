@@ -3153,6 +3153,19 @@ def _valid_did(value: object) -> str:
     return did if len(did) == 12 and did.startswith("+1") else ""
 
 
+def _did_warmup_caps() -> list[int]:
+    raw = str(getattr(settings, "VOICE_DID_WARMUP_CAPS", "") or "")
+    caps: list[int] = []
+    for part in raw.split(","):
+        try:
+            value = int(part.strip())
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            caps.append(value)
+    return caps
+
+
 def reserve_did(
     pool: list[str], day: Optional[str] = None, cap: Optional[int] = None
 ) -> str:
@@ -3180,17 +3193,45 @@ def reserve_did(
     )
     if cap_value <= 0:
         return ""
+    warmup_caps = _did_warmup_caps()
+    try:
+        today = datetime.strptime(day_key, "%Y-%m-%d").date()
+    except ValueError:
+        today = datetime.now(timezone.utc).date()
     conn = get_conn()
     try:
         conn.execute("BEGIN IMMEDIATE")
         placeholders = ",".join("?" for _ in dids)
         rows = conn.execute(
-            "SELECT did, calls FROM voice_did_usage "
-            f"WHERE day=? AND did IN ({placeholders})",
+            "SELECT did, MIN(day) AS first_day, "
+            "SUM(CASE WHEN day=? THEN calls ELSE 0 END) AS today_calls "
+            f"FROM voice_did_usage WHERE did IN ({placeholders}) "
+            "GROUP BY did",
             (day_key, *dids),
         ).fetchall()
-        used = {str(row["did"]): int(row["calls"] or 0) for row in rows}
-        candidates = [d for d in dids if used.get(d, 0) < cap_value]
+        used: dict[str, int] = {}
+        first_days: dict[str, str] = {}
+        for row in rows:
+            did = str(row["did"])
+            used[did] = int(row["today_calls"] or 0)
+            first_days[did] = str(row["first_day"] or day_key)
+
+        def effective_cap(did: str) -> int:
+            first = first_days.get(did) or day_key
+            try:
+                age = max(
+                    0,
+                    (today - datetime.strptime(first, "%Y-%m-%d").date()).days,
+                )
+            except ValueError:
+                age = 0
+            if warmup_caps and age < len(warmup_caps):
+                return min(cap_value, warmup_caps[age])
+            return cap_value
+
+        candidates = [
+            d for d in dids if used.get(d, 0) < effective_cap(d)
+        ]
         if not candidates:
             conn.rollback()
             return ""
@@ -3249,29 +3290,63 @@ def did_capacity_status(
         if cap is not None
         else (getattr(settings, "VOICE_DID_DAILY_CAP", 50) or 50)
     )
+    warmup_caps = _did_warmup_caps()
+    try:
+        today = datetime.strptime(day_key, "%Y-%m-%d").date()
+    except ValueError:
+        today = datetime.now(timezone.utc).date()
     used: dict[str, int] = {}
+    first_days: dict[str, str] = {}
     conn = get_conn()
     try:
         if dids:
             placeholders = ",".join("?" for _ in dids)
             rows = conn.execute(
-                "SELECT did, calls FROM voice_did_usage "
-                f"WHERE day=? AND did IN ({placeholders})",
+                "SELECT did, MIN(day) AS first_day, "
+                "SUM(CASE WHEN day=? THEN calls ELSE 0 END) AS today_calls "
+                f"FROM voice_did_usage WHERE did IN ({placeholders}) "
+                "GROUP BY did",
                 (day_key, *dids),
             ).fetchall()
-            used = {str(row["did"]): int(row["calls"] or 0) for row in rows}
+            for row in rows:
+                did = str(row["did"])
+                used[did] = int(row["today_calls"] or 0)
+                first_days[did] = str(row["first_day"] or day_key)
     finally:
         conn.close()
-    items = [
-        {"did": d, "calls": used.get(d, 0), "cap": cap_value}
-        for d in dids
-    ]
+
+    def effective_cap(did: str) -> tuple[int, int]:
+        first = first_days.get(did) or day_key
+        try:
+            age = max(
+                0,
+                (today - datetime.strptime(first, "%Y-%m-%d").date()).days,
+            )
+        except ValueError:
+            age = 0
+        if warmup_caps and age < len(warmup_caps):
+            return min(cap_value, warmup_caps[age]), age
+        return cap_value, age
+
+    items = []
+    for did in dids:
+        effective, age = effective_cap(did)
+        items.append(
+            {
+                "did": did,
+                "calls": used.get(did, 0),
+                "cap": effective,
+                "base_cap": cap_value,
+                "age_days": age,
+            }
+        )
     return {
         "day": day_key,
         "cap": cap_value,
+        "warmup_caps": warmup_caps,
         "dids": items,
         "total_calls": sum(item["calls"] for item in items),
-        "capacity": cap_value * len(dids),
+        "capacity": sum(item["cap"] for item in items),
     }
 
 

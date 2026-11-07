@@ -3438,14 +3438,39 @@ async def admin_voice_dial(
     company = await anyio.to_thread.run_sync(b2b_voice.get_company, company_id)
     if not company:
         raise HTTPException(status_code=404, detail="empresa não encontrada")
-    return await anyio.to_thread.run_sync(
+    # O dial manual também consome o pool/cap da cidade, para não existir um
+    # caminho administrativo que fure o limite de 50/DID/dia.
+    pool = auto_dialer._did_pool_for_city(company.get("city") or "")
+    from_number = None
+    if pool:
+        from_number = await anyio.to_thread.run_sync(
+            b2b_voice.reserve_did,
+            pool,
+            None,
+            int(getattr(settings, "VOICE_DID_DAILY_CAP", 50) or 50),
+        )
+        if not from_number:
+            raise HTTPException(
+                status_code=409,
+                detail="pool de DIDs esgotado para hoje; tenta novamente amanhã",
+            )
+    result = await anyio.to_thread.run_sync(
         telnyx_voice.create_call,
         company,
         str(payload.get("campaign_id") or ""),
         str(payload.get("script_id") or ""),
         payload.get("city"),
         payload.get("trade"),
+        False,
+        from_number,
     )
+    if (
+        not result.get("ok")
+        and from_number
+        and not result.get("voice_call_id")
+    ):
+        await anyio.to_thread.run_sync(b2b_voice.release_did, from_number)
+    return result
 
 
 @app.post("/api/admin/voice/ingest")

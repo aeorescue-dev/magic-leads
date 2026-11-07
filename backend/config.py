@@ -72,6 +72,9 @@ class Settings(BaseSettings):
     # mapeamento singular acima e activa rotacao least-used por dia.
     VOICE_DID_POOL_BY_CITY: str = ""
     VOICE_DID_DAILY_CAP: int = 50
+    # Warm-up dos DIDs novos: cap por dia de uso (dia 0, dia 1, dia 2...).
+    # Depois da lista, aplica VOICE_DID_DAILY_CAP. Vazio = sem warm-up.
+    VOICE_DID_WARMUP_CAPS: str = "20,25,30"
     # Pacing: 75s base +/-20% = 60-90s; pausa de 10 min a cada 25 chamadas.
     VOICE_CALL_INTERVAL_JITTER: float = 0.2
     VOICE_PAUSE_EVERY_CALLS: int = 25
