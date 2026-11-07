@@ -794,3 +794,14 @@ def test_did_por_cidade_dallas_nao_usa_ny(monkeypatch):
     assert captured == ["+14699607326"] * 3
     assert auto_dialer._did_for_city("New York") == ""
     assert auto_dialer._did_for_city("Dallas") == "+14699607326"
+
+
+def test_did_por_cidade_aceita_formato_simples(monkeypatch):
+    monkeypatch.setattr(
+        auto_dialer.settings,
+        "VOICE_DID_BY_CITY",
+        "dallas=+14699607326,new york=+19292562550",
+    )
+    assert auto_dialer._did_for_city("Dallas") == "+14699607326"
+    assert auto_dialer._did_for_city("New York") == "+19292562550"
+    assert auto_dialer._did_for_city("Chicago") == ""

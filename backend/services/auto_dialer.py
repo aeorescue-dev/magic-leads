@@ -38,17 +38,25 @@ def _campaign_start_hour(campaign: dict) -> int:
 def _did_for_city(city: str) -> str:
     """Resolve o DID local da cidade a partir de VOICE_DID_BY_CITY.
 
-    Formato: JSON {"dallas":"+14699607326"}. Cidade desconhecida -> "".
+    Aceita JSON ({"dallas":"+14699607326"}) ou pares simples
+    (dallas=+14699607326,new york=+1929...). Cidade desconhecida -> "".
     """
     raw = str(getattr(settings, "VOICE_DID_BY_CITY", "") or "").strip()
     if not raw:
         return ""
+    mapping: dict = {}
     try:
-        mapping = json.loads(raw)
+        if raw.startswith("{"):
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                mapping = parsed
+        else:
+            for part in raw.split(","):
+                key, sep, value = part.partition("=")
+                if sep and key.strip():
+                    mapping[key.strip()] = value.strip()
     except (TypeError, ValueError, json.JSONDecodeError):
         logger.warning("[VOICE] VOICE_DID_BY_CITY invalido; ignorado")
-        return ""
-    if not isinstance(mapping, dict):
         return ""
     wanted = str(city or "").strip().lower()
     for key, value in mapping.items():
