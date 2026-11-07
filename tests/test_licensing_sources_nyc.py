@@ -100,3 +100,43 @@ def test_dsny_extrai_debris_e_deduplica():
     assert len(out) == 1
     assert out[0]["niche_key"] == "debris_removal"
     assert out[0]["license"] == "BIC-1"
+
+
+def test_upsert_nao_colide_licenca_tdlr_entre_tipos():
+    import asyncio
+
+    from backend.services.db import db_service, get_connection
+
+    asyncio.run(
+        db_service.upsert_contractor_entity(
+            "PURVIS AIR CONDITIONING & REFRIGERATION",
+            "DALLAS",
+            state="TX",
+            license="20724",
+            license_type="ac_contractors",
+            source="tdlr_tx",
+            external_id="tdlr:ac_contractors:20724",
+        )
+    )
+    asyncio.run(
+        db_service.upsert_contractor_entity(
+            "INTEGRITY COMMERCIAL FLOORING LLC",
+            "DALLAS",
+            state="TX",
+            license="20724",
+            license_type="elevator_contractors",
+            source="tdlr_tx",
+            external_id="tdlr:elevator_contractors:20724",
+        )
+    )
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT legal_name, license_type FROM contractor_entities "
+            "WHERE license='20724' ORDER BY legal_name"
+        ).fetchall()
+    finally:
+        conn.close()
+    names = [(r["legal_name"], r["license_type"]) for r in rows]
+    assert ("PURVIS AIR CONDITIONING & REFRIGERATION", "ac_contractors") in names
+    assert ("INTEGRITY COMMERCIAL FLOORING LLC", "elevator_contractors") in names

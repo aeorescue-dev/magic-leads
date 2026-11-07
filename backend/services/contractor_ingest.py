@@ -43,6 +43,7 @@ def _record(
     license: Optional[str],
     source: str,
     external_id: str,
+    license_type: Optional[str] = None,
 ) -> Optional[dict]:
     name = _clean(legal_name)
     if not name or not is_usable_company_name(name):
@@ -53,6 +54,7 @@ def _record(
         "state": state,
         "role": normalize_role(role),
         "license": (_clean(license) or None),
+        "license_type": (_clean(license_type) or None),
         "source": source,
         "external_id": _clean(external_id),
     }
@@ -190,6 +192,7 @@ async def record_entities(records: list[dict], max_records: int = 2000) -> dict:
     for rec in records:
         key = (
             (rec.get("license") or "").upper(),
+            (rec.get("license_type") or "").upper(),
             (rec.get("legal_name") or "").upper(),
             (rec.get("state") or "").upper(),
         )

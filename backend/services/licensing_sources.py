@@ -385,7 +385,7 @@ def _split_city_zip(value: object) -> tuple[str, str]:
 
 
 def extract_tdlr_licenses(
-    rows: Iterable[dict], niche_key: str = ""
+    rows: Iterable[dict], niche_key: str = "", license_type: str = ""
 ) -> list[dict]:
     """Linhas dos CSV do TDLR -> entidades do metro de Dallas (puro)."""
     out: list[dict] = []
@@ -417,8 +417,9 @@ def extract_tdlr_licenses(
             "state": "TX",
             "role": "contractor",
             "license": license_no,
+            "license_type": license_type or None,
             "source": "tdlr_tx",
-            "external_id": f"tdlr:{license_no}",
+            "external_id": f"tdlr:{license_type}:{license_no}" if license_type else f"tdlr:{license_no}",
             "niche_key": niche_key or None,
             "phone": _phone(
                 row.get("BUSINESS PHONE") or row.get("PHONE NUMBER")
@@ -452,7 +453,9 @@ async def ingest_tdlr(limit: int = 12000) -> dict:
     for label, filename in TDLR_FILES.items():
         rows = await fetch_tdlr_file(filename)
         extracted = extract_tdlr_licenses(
-            rows, niche_key=TDLR_TRADE.get(label, "")
+            rows,
+            niche_key=TDLR_TRADE.get(label, ""),
+            license_type=label,
         )
         per_file[label] = len(extracted)
         records.extend(extracted)
@@ -471,9 +474,14 @@ async def ingest_tdlr(limit: int = 12000) -> dict:
                 continue
             conn.execute(
                 "UPDATE contractor_entities SET niche_key=?, "
-                "updated_at=CURRENT_TIMESTAMP "
-                "WHERE license=? AND state='TX'",
-                (rec["niche_key"], rec.get("license")),
+                "license_type=?, updated_at=CURRENT_TIMESTAMP "
+                "WHERE license=? AND legal_name=? AND state='TX'",
+                (
+                    rec["niche_key"],
+                    rec.get("license_type"),
+                    rec.get("license"),
+                    rec.get("legal_name"),
+                ),
             )
         conn.commit()
     finally:

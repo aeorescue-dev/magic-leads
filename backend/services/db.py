@@ -1041,6 +1041,7 @@ CREATE TABLE IF NOT EXISTS contractor_entities (
   legal_name TEXT NOT NULL,
   normalized_name TEXT NOT NULL,
   license TEXT,
+  license_type TEXT,
   city TEXT,
   state TEXT,
   role TEXT,
@@ -2187,6 +2188,7 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         ("outbound_lead_id", "INTEGER"),
         ("site_snippet", "TEXT"),
         ("email_source", "TEXT"),
+        ("license_type", "TEXT"),
     ):
         if name not in ent_cols:
             conn.execute(f"ALTER TABLE contractor_entities ADD COLUMN {name} {ddl}")
@@ -4139,6 +4141,7 @@ class DatabaseService:
         state: Optional[str] = None,
         role: Optional[str] = None,
         license: Optional[str] = None,
+        license_type: Optional[str] = None,
         source: Optional[str] = None,
         external_id: Optional[str] = None,
         domain: Optional[str] = None,
@@ -4161,6 +4164,7 @@ class DatabaseService:
         city = (city or "").strip()
         st = (state or "").strip().upper() or None
         lic = (license or "").strip() or None
+        lt = (license_type or "").strip() or None
         tel = (phone or "").strip() or None
         conn = get_connection()
         try:
@@ -4169,8 +4173,9 @@ class DatabaseService:
             if lic:
                 row = conn.execute(
                     "SELECT * FROM contractor_entities WHERE license=? "
+                    "AND COALESCE(license_type,'')=COALESCE(?, '') "
                     "AND COALESCE(state,'')=COALESCE(?, '') LIMIT 1",
-                    (lic, st),
+                    (lic, lt, st),
                 ).fetchone()
             if not row:
                 row = conn.execute(
@@ -4184,25 +4189,28 @@ class DatabaseService:
                     "legal_name=COALESCE(NULLIF(legal_name,''), ?), "
                     "city=COALESCE(NULLIF(city,''), ?), "
                     "license=COALESCE(license, ?), role=COALESCE(role, ?), "
+                    "license_type=COALESCE(?, license_type), "
                     "phone=COALESCE(phone, ?), "
                     "domain=COALESCE(domain, ?), "
                     "niche_key=COALESCE(niche_key, ?), "
                     "status=CASE WHEN COALESCE(domain,'')<>'' AND status='new' "
                     "            THEN 'domain' ELSE status END, "
                     "updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                    (legal_name, city, lic, role, tel, domain, niche_key, eid),
+                    (legal_name, city, lic, role, lt, tel, domain, niche_key, eid),
                 )
             else:
                 cur = conn.execute(
                     "INSERT INTO contractor_entities "
-                    "(entity_key, legal_name, normalized_name, license, city, state, "
-                    " role, phone, domain, niche_key, status) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "(entity_key, legal_name, normalized_name, license, "
+                    " license_type, city, state, role, phone, domain, niche_key, "
+                    " status) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         key,
                         legal_name,
                         norm,
                         lic,
+                        lt,
                         city,
                         st,
                         role,
