@@ -29,6 +29,17 @@ class Settings(BaseSettings):
     # Voice guardrails: nunca prometer contagens fracas nem inventário antigo.
     VOICE_MIN_SHOWCASE_ITEMS: int = 5
     VOICE_SHOWCASE_MAX_AGE_HOURS: int = 72
+    # Âmbitos do guard: "exact" (default), "exact,bundle", "exact,bundle,city".
+    # `city` só é aceite para general_contractor e nunca acima de
+    # VOICE_CITY_SCOPE_MAX_PCT do lote (o limite é validado em create_campaign).
+    VOICE_GUARD_SCOPES: str = "exact"
+    VOICE_BUNDLE_MIN_TOTAL: int = 25
+    VOICE_CITY_MIN_TOTAL: int = 3000
+    VOICE_CITY_SCOPE_MAX_PCT: int = 10
+    # Cidades onde o scope city-wide é permitido para todos os trades (Dallas
+    # não tem inventário exacto em electrical/GC/elevator, mas tem 3.857
+    # oportunidades abertas na cidade).
+    VOICE_CITY_SCOPE_CITIES: str = "Dallas"
     SHOWCASE_SIGNAL_TYPES: str = "open_request,authorized_work"
     PUBLIC_API_URL: str = "https://magic-leads-production.up.railway.app"
 

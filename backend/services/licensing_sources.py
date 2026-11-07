@@ -12,6 +12,7 @@ licenca/nome). Nunca levanta: devolve contagens e loga.
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 from typing import Iterable, Optional
 
 import httpx
@@ -31,6 +32,48 @@ NYC_WHERE = (
     "AND license_status='Active' AND license_type='Premises'"
 )
 MAX_ROWS = 20000
+
+# NYC DOB License Info (Socrata t8hj-ruu2): a única fonte pública que diz o
+# ofício da empresa (MASTER PLUMBER, ELECTRICAL FIRM, ELEVATOR AGENCY, ...).
+NYC_DOB_URL = "https://data.cityofnewyork.us/resource/t8hj-ruu2.json"
+NYC_DOB_SOURCE = "nyc_dob_licenses"
+NYC_DOB_SELECT = (
+    "business_name,business_phone_number,license_business_city,"
+    "business_state,license_number,license_type,license_status"
+)
+NYC_DOB_LICENSE_TRADES: dict[str, str] = {
+    "MASTER PLUMBER": "plumbing",
+    "ELECTRICAL FIRM": "electrical",
+    "ELECTRICAL CONTRACTOR": "electrical",
+    "ELEVATOR AGENCY / INSPECTOR": "elevator",
+    "OIL BURNER INSTALLER": "hvac",
+    "SIGN HANGER": "signage",
+}
+NYC_DOB_WHERE = (
+    "license_status='ACTIVE' AND business_phone_number IS NOT NULL "
+    "AND license_type IN ("
+    + ",".join(f"'{name}'" for name in NYC_DOB_LICENSE_TRADES)
+    + ")"
+)
+
+# DSNY/BIC Trade Waste Hauler Licensees (Socrata 867j-5pgi): telefone e
+# licença. O dataset tem centenas de milhares de linhas históricas; só
+# interessam licenças com expiration_date futura.
+DSNY_TRADE_WASTE_URL = "https://data.cityofnewyork.us/resource/867j-5pgi.json"
+DSNY_TRADE_WASTE_SOURCE = "dsny_trade_waste"
+DSNY_TRADE_WASTE_SELECT = (
+    "bic_number,account_name,trade_name,address,city,state,postcode,phone,"
+    "application_type,effective_date,expiration_date"
+)
+NYC_BOROUGHS = (
+    "NEW YORK",
+    "BROOKLYN",
+    "QUEENS",
+    "BRONX",
+    "STATEN ISLAND",
+    "MANHATTAN",
+    "NYC",
+)
 
 # Texas TDLR: ficheiros CSV publicos, atualizados diariamente. Nao ha
 # licenciamento estadual de canalizadores (e' outro board), por isso entram
@@ -142,6 +185,189 @@ async def fetch_nyc_licenses(limit: int = 5000) -> list[dict]:
     except Exception as exc:  # noqa: BLE001
         logger.warning("[LICENSES] NYC fetch falhou: %s", exc)
     return out
+
+
+def extract_nyc_dob_licenses(rows: Iterable[dict]) -> list[dict]:
+    """Linhas do DOB License Info -> entidades com trade explícito (puro)."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    for row in rows or []:
+        if _clean(row.get("license_status")).upper() != "ACTIVE":
+            continue
+        name = _clean(row.get("business_name"))
+        license_no = _clean(row.get("license_number"))
+        license_type = " ".join(
+            _clean(row.get("license_type")).upper().split()
+        )
+        trade = NYC_DOB_LICENSE_TRADES.get(license_type)
+        phone = _phone(row.get("business_phone_number"))
+        if (
+            not name
+            or not license_no
+            or not phone
+            or not trade
+            or not is_usable_company_name(name)
+        ):
+            continue
+        key = f"{license_type}:{license_no}"
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(
+            {
+                "legal_name": name,
+                # Manter NYC canónico: Brooklyn/Queens/etc. não são cidades
+                # separadas para a campanha de voz.
+                "city": "NYC",
+                "state": "NY",
+                "role": "contractor",
+                "license": key,
+                "source": NYC_DOB_SOURCE,
+                "external_id": key,
+                "phone": phone,
+                "niche_key": trade,
+            }
+        )
+    return out
+
+
+async def fetch_nyc_dob_licenses(limit: int = 5000) -> list[dict]:
+    """Licenças DOB ativas com telefone, paginadas (sem chave)."""
+    limit = max(1, min(int(limit), MAX_ROWS))
+    page = 5000
+    out: list[dict] = []
+    offset = 0
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            while len(out) < limit:
+                params = {
+                    "$select": NYC_DOB_SELECT,
+                    "$where": NYC_DOB_WHERE,
+                    "$order": "license_number DESC",
+                    "$limit": str(min(page, limit - len(out))),
+                    "$offset": str(offset),
+                }
+                resp = await client.get(NYC_DOB_URL, params=params)
+                if resp.status_code != 200:
+                    logger.warning(
+                        "[LICENSES] DOB HTTP %s", resp.status_code
+                    )
+                    break
+                data = resp.json()
+                if not isinstance(data, list) or not data:
+                    break
+                out.extend(data)
+                if len(data) < page:
+                    break
+                offset += len(data)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[LICENSES] DOB fetch falhou: %s", exc)
+    return out
+
+
+async def ingest_nyc_dob_licenses(limit: int = 5000) -> dict:
+    rows = await fetch_nyc_dob_licenses(limit)
+    records = extract_nyc_dob_licenses(rows)
+    result = await record_entities(records, max_records=max(limit, len(records)))
+    result["fetched"] = len(rows)
+    result["extracted"] = len(records)
+    logger.info(
+        "[LICENSES] DOB: fetched=%s extraidas=%s guardadas=%s",
+        len(rows),
+        len(records),
+        result.get("saved"),
+    )
+    return result
+
+
+def extract_dsny_trade_waste(rows: Iterable[dict]) -> list[dict]:
+    """Licenças DSNY/BIC ativas -> entidades de debris removal (puro)."""
+    today = datetime.now(timezone.utc).date().isoformat()
+    out: list[dict] = []
+    seen: set[str] = set()
+    for row in rows or []:
+        expiration = _clean(row.get("expiration_date"))[:10]
+        if not expiration or expiration < today:
+            continue
+        name = _clean(row.get("account_name") or row.get("trade_name"))
+        phone = _phone(row.get("phone"))
+        bic = _clean(row.get("bic_number"))
+        if not name or not phone or not is_usable_company_name(name):
+            continue
+        key = bic or phone
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(
+            {
+                "legal_name": name,
+                "city": "NYC",
+                "state": "NY",
+                "role": "contractor",
+                "license": key,
+                "source": DSNY_TRADE_WASTE_SOURCE,
+                "external_id": key,
+                "phone": phone,
+                "niche_key": "debris_removal",
+            }
+        )
+    return out
+
+
+async def fetch_dsny_trade_waste(limit: int = 5000) -> list[dict]:
+    """Licenças DSNY/BIC ativas em NYC, paginadas (sem chave)."""
+    limit = max(1, min(int(limit), MAX_ROWS))
+    page = 5000
+    out: list[dict] = []
+    offset = 0
+    today = datetime.now(timezone.utc).date().isoformat()
+    where = (
+        f"expiration_date > '{today}T00:00:00.000' "
+        "AND phone IS NOT NULL AND upper(city) IN ("
+        + ",".join(f"'{name}'" for name in NYC_BOROUGHS)
+        + ")"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            while len(out) < limit:
+                params = {
+                    "$select": DSNY_TRADE_WASTE_SELECT,
+                    "$where": where,
+                    "$order": "account_name ASC",
+                    "$limit": str(min(page, limit - len(out))),
+                    "$offset": str(offset),
+                }
+                resp = await client.get(DSNY_TRADE_WASTE_URL, params=params)
+                if resp.status_code != 200:
+                    logger.warning(
+                        "[LICENSES] DSNY HTTP %s", resp.status_code
+                    )
+                    break
+                data = resp.json()
+                if not isinstance(data, list) or not data:
+                    break
+                out.extend(data)
+                if len(data) < page:
+                    break
+                offset += len(data)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[LICENSES] DSNY fetch falhou: %s", exc)
+    return out
+
+
+async def ingest_dsny_trade_waste(limit: int = 5000) -> dict:
+    rows = await fetch_dsny_trade_waste(limit)
+    records = extract_dsny_trade_waste(rows)
+    result = await record_entities(records, max_records=max(limit, len(records)))
+    result["fetched"] = len(rows)
+    result["extracted"] = len(records)
+    logger.info(
+        "[LICENSES] DSNY: fetched=%s extraidas=%s guardadas=%s",
+        len(rows),
+        len(records),
+        result.get("saved"),
+    )
+    return result
 
 
 def _split_city_zip(value: object) -> tuple[str, str]:

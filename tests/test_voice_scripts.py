@@ -44,9 +44,13 @@ def test_seed_cria_roteiros_com_template_oficial():
         assert item["status"] == "approved"
         assert item["version"] == 1
         assert "{{company | Contractor}}" in item["body"]
-        assert "MagicLeads.app" in item["body"]
+        assert "magicleads.app" in item["body"]
+        assert "{{count}}" in item["body"]
+        assert "automated message" in item["body"]
+        assert "verified address" in item["body"]
+        assert "send a letter" in item["body"]
         assert "press 2" in item["body"].lower()
-        assert "5 to 8" in item["body"]
+        assert "five local contractors" in item["body"]
         assert "If Yes / Press 1" not in item["body"]
 
 
@@ -123,7 +127,7 @@ def test_render_variaveis_e_showcase_line(monkeypatch):
     )
     assert "Acme Roofing" in result["body"]
     assert "New York" in result["body"]
-    assert "7 active roofing opportunities" in result["body"]
+    assert "7 active opportunities" in result["body"]
     assert "{{company}}" not in result["body"]
 
 
@@ -144,7 +148,7 @@ def test_render_company_fallback_usa_contractor(monkeypatch):
         },
     )
     result = voice_scripts.render("roofing", company="", city="New York")
-    assert result["greeting"].startswith("Hi Contractor,")
+    assert result["greeting"].startswith("Hi Contractor.")
     assert "Hi ," not in result["greeting"]
 
 
@@ -165,7 +169,7 @@ def test_render_usa_contagem_exata_do_nicho(monkeypatch):
         },
     )
     result = voice_scripts.render("roofing", city="Dallas")
-    assert "42 active roofing opportunities" in result["body"]
+    assert "42 active opportunities" in result["body"]
 
 
 def test_render_bloqueia_nicho_sem_inventario_exato(monkeypatch):
@@ -353,3 +357,150 @@ def test_sync_inclui_voz_nativa_tools_e_dtmf(monkeypatch):
             + "?secret=tool-secret"
         )
 
+
+
+def _guard_info(exact=0, city_total=12806, fresh=True):
+    return {
+        "available": exact > 0,
+        "exact_count": exact,
+        "city_total": city_total,
+        "min_items": 5,
+        "page_path": "/en/new-york",
+        "fresh": fresh,
+        "ready": exact > 0,
+        "built_at": "2026-11-05T12:00:00+00:00",
+        "age_hours": 1.0,
+    }
+
+
+def test_guard_default_exact_blocks_gc_even_with_city_total(monkeypatch):
+    monkeypatch.setattr(voice_scripts.settings, "VOICE_GUARD_SCOPES", "exact")
+    monkeypatch.setattr(
+        showcase,
+        "available",
+        lambda city, trade, **kwargs: _guard_info(0, 12806),
+    )
+    guard = voice_scripts.showcase_guard("general_contractor", "New York")
+    assert guard["ready"] is False
+    assert guard["scope"] == "none"
+
+
+def test_guard_bundle_allows_gc_when_two_trades_have_inventory(monkeypatch):
+    monkeypatch.setattr(
+        voice_scripts.settings, "VOICE_GUARD_SCOPES", "exact,bundle"
+    )
+    counts = {"plumbing": 10, "hvac": 20}
+
+    def fake_available(city, trade, **kwargs):
+        return _guard_info(counts.get(trade, 0), 12806)
+
+    monkeypatch.setattr(showcase, "available", fake_available)
+    guard = voice_scripts.showcase_guard("general_contractor", "New York")
+    assert guard["ready"] is True
+    assert guard["scope"] == "bundle"
+    assert guard["bundle_code"] == "home_services"
+    assert guard["count"] == 30
+    assert "home-service opportunities" in guard["line"]
+
+
+def test_guard_bundle_requires_two_trades(monkeypatch):
+    monkeypatch.setattr(
+        voice_scripts.settings, "VOICE_GUARD_SCOPES", "exact,bundle"
+    )
+    counts = {"plumbing": 30}
+
+    def fake_available(city, trade, **kwargs):
+        return _guard_info(counts.get(trade, 0), 12806)
+
+    monkeypatch.setattr(showcase, "available", fake_available)
+    guard = voice_scripts.showcase_guard("general_contractor", "New York")
+    assert guard["ready"] is False
+
+
+def test_guard_city_only_in_authorized_cities(monkeypatch):
+    monkeypatch.setattr(
+        voice_scripts.settings, "VOICE_GUARD_SCOPES", "exact,bundle,city"
+    )
+    monkeypatch.setattr(
+        voice_scripts.settings, "VOICE_CITY_SCOPE_CITIES", "Dallas"
+    )
+    monkeypatch.setattr(voice_scripts.settings, "VOICE_CITY_MIN_TOTAL", 3000)
+    monkeypatch.setattr(
+        showcase,
+        "available",
+        lambda city, trade, **kwargs: _guard_info(0, 12806),
+    )
+
+    # Nova Iorque não está na allowlist: nem GC nem roofing podem usar city.
+    gc_ny = voice_scripts.showcase_guard("general_contractor", "New York")
+    assert gc_ny["ready"] is False
+    assert gc_ny["scope"] == "none"
+    roofing_ny = voice_scripts.showcase_guard("roofing", "New York")
+    assert roofing_ny["ready"] is False
+
+    # Dallas está na allowlist: city vale para GC e para os restantes trades.
+    gc_dallas = voice_scripts.showcase_guard("general_contractor", "Dallas")
+    assert gc_dallas["ready"] is True
+    assert gc_dallas["scope"] == "city"
+    assert "property opportunities" in gc_dallas["line"]
+    roofing_dallas = voice_scripts.showcase_guard("roofing", "Dallas")
+    assert roofing_dallas["ready"] is True
+    assert roofing_dallas["scope"] == "city"
+
+
+def test_template_version_propaga_para_scripts_existentes():
+    conn = b2b_voice.get_conn()
+    try:
+        conn.execute("UPDATE voice_scripts SET version=3, body='OLD BODY'")
+        conn.execute(
+            "UPDATE voice_meta SET value='2026-11-04.3' "
+            "WHERE key='scripts_template_version'"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    voice_scripts._INIT["path"] = None
+    voice_scripts.init()
+    scripts = voice_scripts.list_scripts()
+    assert len(scripts) == 15
+    assert all(item["version"] == 4 for item in scripts)
+    assert all(item["body"] == voice_scripts.DEFAULT_TEMPLATE for item in scripts)
+    assert all(item["status"] == "approved" for item in scripts)
+
+
+def test_render_bloqueia_count_fora_do_scope_exact(monkeypatch):
+    monkeypatch.setattr(
+        voice_scripts,
+        "showcase_guard",
+        lambda *args, **kwargs: {
+            "ready": True,
+            "line": "over 5,000 active home-service opportunities",
+            "count": 5000,
+            "scope": "bundle",
+        },
+    )
+    with pytest.raises(ValueError, match="count_requires_exact_scope"):
+        voice_scripts.render("plumbing", company="Acme", city="New York")
+
+
+def test_guard_city_dallas_permite_trades_sem_exact(monkeypatch):
+    monkeypatch.setattr(
+        voice_scripts.settings, "VOICE_GUARD_SCOPES", "exact,bundle,city"
+    )
+    monkeypatch.setattr(
+        voice_scripts.settings, "VOICE_CITY_SCOPE_CITIES", "Dallas"
+    )
+    monkeypatch.setattr(voice_scripts.settings, "VOICE_CITY_MIN_TOTAL", 3000)
+    monkeypatch.setattr(
+        showcase,
+        "available",
+        lambda city, trade, **kwargs: _guard_info(0, 3857),
+    )
+    dallas = voice_scripts.showcase_guard("electrical", "Dallas")
+    assert dallas["ready"] is True
+    assert dallas["scope"] == "city"
+    assert "property opportunities" in dallas["line"]
+
+    new_york = voice_scripts.showcase_guard("electrical", "New York")
+    assert new_york["ready"] is False

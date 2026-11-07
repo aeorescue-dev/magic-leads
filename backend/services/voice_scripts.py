@@ -20,7 +20,7 @@ from . import b2b_voice, showcase
 
 DISCLOSURE = "Hi {{company | Contractor}}, this is an automated assistant from Magic Leads."
 
-TEMPLATE_VERSION = "2026-11-04.3"
+TEMPLATE_VERSION = "2026-11-06.1"
 
 # Guardrails do voice: nunca prometer uma vitrine com contagem fraca/zero
 # nem usar inventário antigo. O valor pode ser afinado por ambiente.
@@ -28,14 +28,14 @@ VOICE_MIN_SHOWCASE_ITEMS = 5
 VOICE_SHOWCASE_MAX_AGE_HOURS = 72.0
 
 DEFAULT_TEMPLATE = (
-    "Hi {{company | Contractor}}, this is an automated assistant from Magic "
-    "Leads. We have {{showcase_line}} on MagicLeads.app right now. Stop wasting "
-    "money competing with 5 to 8 other contractors on traditional platforms "
-    "that only bleed your pocket. With us, you get exclusive opportunities up "
-    "to 7 days before anyone else, with the client's name, address, and job "
-    "details. Go to MagicLeads.app on your phone's browser to close your first "
-    "deal today. To remove your number from our list, press 2 now. Have a "
-    "great day!"
+    "Hi {{company | Contractor}}. This is an automated message from Magic "
+    "Leads in New York. We just unlocked {{count}} active opportunities in "
+    "your trade right now on magicleads.app. While shared lead apps sell the "
+    "same contact to five local contractors and eat into your margins, we "
+    "give you the owner's direct name, verified address, and job details 5 "
+    "to 7 days before anyone else in your area. You just call, visit, or "
+    "send a letter, and close the deal before your competitors do. Go to "
+    "magicleads.app right now. To opt out, press 2."
 )
 
 TRADES = (
@@ -668,12 +668,115 @@ def _voice_max_age_hours() -> float:
         return VOICE_SHOWCASE_MAX_AGE_HOURS
 
 
+def _guard_scopes() -> set[str]:
+    raw = str(getattr(settings, "VOICE_GUARD_SCOPES", "exact") or "exact")
+    scopes = {part.strip().lower() for part in raw.split(",") if part.strip()}
+    scopes.add("exact")
+    return scopes
+
+
+def _bundle_min_total() -> int:
+    try:
+        return max(1, int(getattr(settings, "VOICE_BUNDLE_MIN_TOTAL", 25) or 25))
+    except (TypeError, ValueError):
+        return 25
+
+
+def _city_min_total() -> int:
+    try:
+        return max(1, int(getattr(settings, "VOICE_CITY_MIN_TOTAL", 3000) or 3000))
+    except (TypeError, ValueError):
+        return 3000
+
+
+def _city_scope_cities() -> set[str]:
+    raw = str(getattr(settings, "VOICE_CITY_SCOPE_CITIES", "Dallas") or "")
+    return {part.strip().lower() for part in raw.split(",") if part.strip()}
+
+
+def _bundle_guard(city_label: str, threshold: int) -> dict:
+    """Soma apenas inventário exato de trades com página própria.
+
+    O bundle é honesto: a linha não nomeia um trade com 0 itens e a soma é
+    sempre de contagens reais. Exige pelo menos dois trades com inventário
+    suficiente e um total mínimo configurável.
+    """
+    from . import voice_taxonomy
+
+    per_trade: dict[str, int] = {}
+    built_at = None
+    age_hours = None
+    city_total = 0
+    for trade in voice_taxonomy.HOME_SERVICES_BUNDLE:
+        info = showcase.available(
+            city_label,
+            trade,
+            min_items=threshold,
+            max_age_hours=_voice_max_age_hours(),
+        )
+        exact = int(info.get("exact_count") or 0)
+        if info.get("fresh") is False:
+            return {
+                "ready": False,
+                "reason": "stale_inventory",
+                "line": "",
+                "scope": "none",
+                "count": 0,
+                "exact_count": 0,
+                "city_total": int(info.get("city_total") or 0),
+                "threshold": threshold,
+                "built_at": info.get("built_at"),
+                "age_hours": info.get("age_hours"),
+            }
+        if exact >= threshold:
+            per_trade[trade] = exact
+        city_total = max(city_total, int(info.get("city_total") or 0))
+        if built_at is None:
+            built_at = info.get("built_at")
+            age_hours = info.get("age_hours")
+
+    total = sum(per_trade.values())
+    if len(per_trade) < 2 or total < _bundle_min_total():
+        return {
+            "ready": False,
+            "reason": "insufficient_bundle_inventory",
+            "line": "",
+            "scope": "none",
+            "count": total,
+            "exact_count": 0,
+            "city_total": city_total,
+            "threshold": threshold,
+            "built_at": built_at,
+            "age_hours": age_hours,
+            "bundle": per_trade,
+        }
+    line = (
+        f"over {_spoken_count(total)} active home-service opportunities "
+        f"in {city_label} this week"
+    )
+    return {
+        "ready": True,
+        "reason": "",
+        "line": line,
+        "scope": "bundle",
+        "bundle_code": "home_services",
+        "count": total,
+        "exact_count": 0,
+        "city_total": city_total,
+        "threshold": threshold,
+        "built_at": built_at,
+        "age_hours": age_hours,
+        "bundle": per_trade,
+    }
+
+
 def showcase_guard(trade_code: str, city: str = "") -> dict:
     """Fonte única da linha falada e do gate de disparo.
 
-    Nunca devolve uma linha com 0. Se a contagem exata ou city-wide estiver
-    abaixo do mínimo, ou se o inventário estiver velho, `ready=False` e a
-    chamada real é bloqueada por `telnyx_voice.create_call`.
+    O default continua estrito (`exact`): só fala de um trade quando existem
+    pelo menos 5 itens exatos e o inventário tem ≤72 h. Os âmbitos `bundle` e
+    `city` são opt-in por ambiente (`VOICE_GUARD_SCOPES`) e nunca inventam
+    contagens por trade.
     """
     code = showcase.normalize_trade(trade_code) or str(trade_code or "").strip()
     city_label = str(city or "").strip() or "your city"
@@ -686,20 +789,23 @@ def showcase_guard(trade_code: str, city: str = "") -> dict:
     )
     exact = int(info.get("exact_count") or 0)
     city_total = int(info.get("city_total") or 0)
-    # Voz é estrita: o número tem de ser do nicho exato. Um total city-wide
-    # ("863 property opportunities") não serve para um HVAC/roofing e seria
-    # exatamente o tipo de número estranho que queremos evitar.
+    fresh = info.get("fresh") is not False
     problems: list[str] = []
-    if info.get("fresh") is False:
+    if not fresh:
         problems.append("stale_inventory")
     if exact < threshold:
         problems.append("insufficient_trade_inventory")
-    if problems:
+
+    if not problems:
+        line = (
+            f"{_spoken_count(exact)} active {showcase.trade_label(code).lower()} "
+            f"opportunities in {city_label} this week"
+        )
         return {
-            "ready": False,
-            "reason": ",".join(problems),
-            "line": "",
-            "scope": "none",
+            "ready": True,
+            "reason": "",
+            "line": line,
+            "scope": "exact",
             "count": exact,
             "exact_count": exact,
             "city_total": city_total,
@@ -707,15 +813,47 @@ def showcase_guard(trade_code: str, city: str = "") -> dict:
             "built_at": info.get("built_at"),
             "age_hours": info.get("age_hours"),
         }
-    line = (
-        f"{_spoken_count(exact)} active {showcase.trade_label(code).lower()} "
-        f"opportunities in {city_label} this week"
-    )
+
+    scopes = _guard_scopes()
+
+    # Bundle: qualquer empresa multi-trade, mas só quando há inventário exato
+    # em pelo menos dois trades. Não substitui o exact; é um fallback honesto.
+    if "bundle" in scopes and code == "general_contractor":
+        bundle = _bundle_guard(city_label, threshold)
+        if bundle.get("ready"):
+            return bundle
+
+    # City: só nas cidades explicitamente autorizadas em
+    # VOICE_CITY_SCOPE_CITIES. O scope é global (uma env para todos os
+    # trades), por isso não pode depender do trade: se Dallas está ligado,
+    # Nova Iorque/Chicago/Boston continuam exact-only. Isto evita ativar
+    # city_fallback em GC de mercados onde o template V7.4 usa {{count}}.
+    city_scope_allowed = city_label.strip().lower() in _city_scope_cities()
+    if "city" in scopes and city_scope_allowed and fresh:
+        minimum = _city_min_total()
+        if city_total >= minimum:
+            line = (
+                f"over {_spoken_count(city_total)} active property "
+                f"opportunities in {city_label} this week"
+            )
+            return {
+                "ready": True,
+                "reason": "",
+                "line": line,
+                "scope": "city",
+                "count": city_total,
+                "exact_count": exact,
+                "city_total": city_total,
+                "threshold": minimum,
+                "built_at": info.get("built_at"),
+                "age_hours": info.get("age_hours"),
+            }
+
     return {
-        "ready": True,
-        "reason": "",
-        "line": line,
-        "scope": "trade",
+        "ready": False,
+        "reason": ",".join(problems) or "insufficient_trade_inventory",
+        "line": "",
+        "scope": "none",
         "count": exact,
         "exact_count": exact,
         "city_total": city_total,
@@ -741,11 +879,20 @@ def render(
     guard = showcase_guard(code, city_label)
     if not guard["ready"]:
         raise ValueError(f"showcase_unavailable: {guard['reason']}")
+    # `{{count}}` só pode ser falado com uma contagem do trade exato. Os
+    # scopes `bundle`/`city` devolvem totais agregados e tornariam a frase
+    # "in your trade" falsa.
+    if "{{count}}" in str(script.get("body") or "") and guard.get("scope") not in (
+        "trade",
+        "exact",
+    ):
+        raise ValueError("count_requires_exact_scope")
     values = {
         "company": _clean_company(company) or "Contractor",
         "city": city_label,
         "trade": showcase.trade_label(code),
         "permit_count": str(int(permit_count or 0)),
+        "count": f"{int(guard.get('count') or 0):,}",
         "showcase_line": guard["line"],
         "price_weekly": "$120",
         "price_monthly": "$520",

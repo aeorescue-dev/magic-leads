@@ -47,6 +47,8 @@ import {
   downloadVoiceTemplate,
   fetchShowcaseStats,
   fetchVoiceCampaigns,
+  fetchVoiceLiquidity,
+  fetchVoiceLive,
   fetchVoiceMetrics,
   fetchVoiceQueue,
   fetchVoiceScripts,
@@ -71,6 +73,8 @@ import {
   syncVoiceSource,
   type VoiceCampaign,
   type VoiceCompany,
+  type VoiceLiquidity,
+  type VoiceLive,
   type VoiceMetrics,
   type VoiceMetricsGroup,
   type VoiceRetentionBucket,
@@ -97,7 +101,6 @@ const OUTCOMES: Array<{ value: string; label: string }> = [
   { value: "no_answer", label: "Sem resposta" },
   { value: "busy", label: "Ocupado" },
   { value: "callback", label: "Pediu callback" },
-  { value: "meeting_booked", label: "Reunião marcada" },
   { value: "not_interested", label: "Sem interesse (suprimir)" },
   { value: "wrong_number", label: "Número errado (suprimir)" },
   { value: "do_not_call", label: "Não contactar (suprimir)" },
@@ -703,7 +706,17 @@ export default function VoiceB2BPage() {
   const { data: metrics, mutate: mutateMetrics } = useSWR(
     `voice-metrics-${metricsDays}`,
     () => fetchVoiceMetrics(metricsDays),
-    { refreshInterval: 60_000 }
+    { refreshInterval: 30_000, revalidateOnFocus: true }
+  );
+  const { data: liveData } = useSWR<VoiceLive>(
+    "voice-live",
+    () => fetchVoiceLive(),
+    { refreshInterval: 30_000, revalidateOnFocus: true }
+  );
+  const { data: liquidityData } = useSWR<VoiceLiquidity>(
+    "voice-liquidity",
+    () => fetchVoiceLiquidity(),
+    { refreshInterval: 30_000, revalidateOnFocus: true }
   );
   const { data: sourcesData, mutate: mutateSources } = useSWR(
     "voice-sources",
@@ -1142,7 +1155,6 @@ export default function VoiceB2BPage() {
         />
         <Stat label="Bloqueadas" value={String(stats?.blocked ?? 0)} tone="amber" sub="com motivo" />
         <Stat label="Tentativas hoje" value={String(stats?.attempts_today ?? 0)} />
-        <Stat label="Reuniões" value={String(stats?.meetings ?? 0)} tone="emerald" />
         <Stat label="DNC listados" value={String(stats?.dnc_listed ?? 0)} tone="rose" sub={`${stats?.dnc_checked ?? 0} checks`} />
       </section>
 
@@ -1232,6 +1244,187 @@ export default function VoiceB2BPage() {
       </Card>
 
       <Card
+        title="Live calls — atualiza a cada 30 s"
+        icon={<PhoneCall className="h-4 w-4 text-emerald-400" />}
+        hint="Campanha ativa, chamadas em curso, resposta e stock por cidade/nicho"
+        className={tab === "overview" ? "" : "hidden"}
+      >
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-8">
+          <Stat
+            label="Campanha"
+            value={liveData?.campaign?.status ?? "—"}
+            sub={`#${liveData?.campaign?.id ?? "—"} · ${liveData?.campaign?.city ?? ""}`}
+          />
+          <Stat
+            label="Planeadas"
+            value={String(liveData?.day_cycle.planned_calls ?? 0)}
+            sub={`feitas ${liveData?.day_cycle.calls_done ?? 0}`}
+          />
+          <Stat
+            label="Faltam"
+            value={String(liveData?.day_cycle.calls_remaining ?? 0)}
+            sub="para fechar o ciclo"
+          />
+          <Stat
+            label="Início"
+            value={`${liveData?.campaign?.start_hour_et ?? 9}:00 ET`}
+            sub="hora local"
+          />
+          <Stat
+            label="Fim previsto"
+            value={
+              liveData?.day_cycle.estimated_finish_at
+                ? new Date(liveData.day_cycle.estimated_finish_at).toLocaleTimeString(
+                    "en-US",
+                    {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      timeZone: "America/New_York",
+                    }
+                  )
+                : "—"
+            }
+            sub={`${liveData?.day_cycle.estimated_finish_earliest ? "± jitter 60–90s" : ""}`}
+          />
+          <Stat
+            label="Atendidos reais"
+            value={String(liveData?.summary.real_attended ?? 0)}
+            sub={`${liveData?.summary.answer_rate ?? 0}% resposta`}
+          />
+          <Stat
+            label="Desligados/falhados"
+            value={String((liveData?.summary.disconnected ?? 0) + (liveData?.summary.failed ?? 0))}
+            sub={`${liveData?.summary.voicemail ?? 0} voicemail · ${liveData?.summary.failed ?? 0} falhas`}
+          />
+          <Stat
+            label="Opt-outs (tecla 2)"
+            value={String(liveData?.summary.optouts ?? 0)}
+            sub={`${liveData?.summary.optout_rate ?? 0}% · bloqueados`}
+          />
+        </div>
+
+        <div className="mt-4">
+          <div className="flex items-center justify-between text-[10px]">
+            <p className="font-semibold uppercase tracking-wide text-slate-500">
+              Termómetro da copy — escuta real
+            </p>
+            <p className="text-slate-500">
+              {liveData?.thermometer.total ?? 0} chamadas não-voicemail
+            </p>
+          </div>
+          <div className="mt-1.5 flex h-3 overflow-hidden rounded-full bg-white/5">
+            <div
+              className="bg-rose-500"
+              style={{ width: `${liveData?.thermometer.red_pct ?? 0}%` }}
+              title={`<15s: ${liveData?.thermometer.red ?? 0}`}
+            />
+            <div
+              className="bg-amber-400"
+              style={{ width: `${liveData?.thermometer.yellow_pct ?? 0}%` }}
+              title={`15–39s: ${liveData?.thermometer.yellow ?? 0}`}
+            />
+            <div
+              className="bg-emerald-500"
+              style={{ width: `${liveData?.thermometer.green_pct ?? 0}%` }}
+              title={`≥40s: ${liveData?.thermometer.green ?? 0}`}
+            />
+          </div>
+          <div className="mt-1 flex justify-between text-[10px]">
+            <span className="text-rose-300">
+              Vermelho &lt;15s · {liveData?.thermometer.red_pct ?? 0}%
+            </span>
+            <span className="text-amber-300">
+              Amarelo 15–39s · {liveData?.thermometer.yellow_pct ?? 0}%
+            </span>
+            <span className="text-emerald-300">
+              Verde ≥40s · {liveData?.thermometer.green_pct ?? 0}%
+            </span>
+          </div>
+        </div>
+
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full min-w-[680px] text-left text-[10px]">
+            <thead className="text-slate-500">
+              <tr>
+                <th className="pb-1">Empresa</th>
+                <th className="pb-1">Nicho</th>
+                <th className="pb-1">Estado</th>
+                <th className="pb-1 text-right">Em curso</th>
+                <th className="pb-1 text-right">Escuta</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(liveData?.active_calls ?? []).map((call) => (
+                <tr key={call.id} className="border-t border-white/5">
+                  <td className="py-1.5 text-slate-200">{call.company || "—"}</td>
+                  <td className="py-1.5 text-slate-400">{call.trade || "—"}</td>
+                  <td className="py-1.5 text-slate-400">{call.status}</td>
+                  <td className="py-1.5 text-right tabular-nums text-cyan-300">
+                    {call.elapsed_seconds}s
+                  </td>
+                  <td className="py-1.5 text-right tabular-nums text-emerald-300">
+                    {call.listen_seconds}s
+                  </td>
+                </tr>
+              ))}
+              {!liveData?.active_calls?.length ? (
+                <tr>
+                  <td colSpan={5} className="py-2 text-slate-600">
+                    Sem chamadas ativas neste instante.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="mt-4 border-t border-white/5 pt-3">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+            Liquidez por cidade e nicho
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {(liquidityData?.rows ?? [])
+              .slice()
+              .sort(
+                (a, b) =>
+                  Number(b.exact) - Number(a.exact) ||
+                  b.available - a.available
+              )
+              .slice(0, 12)
+              .map((row) => (
+                <div
+                  key={`${row.city}-${row.trade}`}
+                  className="rounded-lg border border-white/5 bg-white/[0.02] px-2.5 py-1.5 text-[10px]"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-slate-200">
+                      {row.city}
+                    </span>
+                    <span
+                      className={
+                        row.exact ? "text-emerald-300" : "text-amber-300"
+                      }
+                    >
+                      {row.scope}
+                    </span>
+                  </div>
+                  <span className="text-slate-500">{row.trade}</span>
+                  <div className="mt-0.5 flex justify-between text-slate-400">
+                    <span>{row.available} disponíveis</span>
+                    <span>{row.used_7d} usados/7d</span>
+                  </div>
+                </div>
+              ))}
+            {!liquidityData?.rows?.length ? (
+              <p className="text-[10px] text-slate-600">
+                Sem stock materializado. Reconstrói os segmentos.
+              </p>
+            ) : null}
+          </div>
+        </div>
+      </Card>
+
+      <Card
         title="Command Center"
         icon={<Gauge className="h-4 w-4 text-emerald-400" />}
         hint="Velocímetros de conversão e saúde operacional"
@@ -1275,24 +1468,6 @@ export default function VoiceB2BPage() {
             sub={`${metrics?.summary.engaged ?? 0} chamadas`}
             tone={gaugeTone(metrics?.summary.engagement_rate ?? 0, 50, 30)}
           />
-          <GaugeCard
-            label="Showcase CTR"
-            value={metrics?.summary.showcase_ctr ?? 0}
-            sub={`${metrics?.summary.clicks ?? 0} cliques`}
-            tone={gaugeTone(metrics?.summary.showcase_ctr ?? 0, 15, 8)}
-          />
-          <GaugeCard
-            label="Voice Accept"
-            value={metrics?.summary.accept_rate ?? 0}
-            sub={`${metrics?.summary.accepts ?? 0} aceites / ${metrics?.summary.answered ?? 0} atendidas`}
-            tone={gaugeTone(metrics?.summary.accept_rate ?? 0, 30, 15)}
-          />
-          <GaugeCard
-            label="Assinatura"
-            value={metrics?.summary.subscription_rate ?? 0}
-            sub={`${metrics?.summary.checkouts ?? 0} assinaturas / ${metrics?.summary.accepts ?? 0} aceites`}
-            tone={gaugeTone(metrics?.summary.subscription_rate ?? 0, 10, 3)}
-          />
         </div>
         <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
           <Stat
@@ -1301,19 +1476,9 @@ export default function VoiceB2BPage() {
             sub="chamadas atendidas"
           />
           <Stat
-            label="Receita"
-            value={money0(metrics?.summary.revenue_usd ?? 0)}
-            tone="emerald"
-          />
-          <Stat
             label="Custo"
             value={money0(metrics?.summary.cost_usd ?? 0)}
             tone="amber"
-          />
-          <Stat
-            label="Net"
-            value={money0(metrics?.summary.net_usd ?? 0)}
-            tone={(metrics?.summary.net_usd ?? 0) >= 0 ? "emerald" : "rose"}
           />
         </div>
         {!metrics?.summary.dialed ? (
@@ -1334,6 +1499,7 @@ export default function VoiceB2BPage() {
           title="Funil de conversão"
           icon={<TrendingUp className="h-4 w-4 text-sky-400" />}
           hint="Discadas → atendidas → escuta → vitrine → checkout"
+          className="hidden"
         >
           <FunnelChart
             funnel={
@@ -1365,17 +1531,12 @@ export default function VoiceB2BPage() {
         title="Matriz de conversão cidade × nicho"
         icon={<BarChart3 className="h-4 w-4 text-indigo-400" />}
         hint="Verde = lucro; vermelho = burn. Ordenado por net."
-        className={tab === "overview" ? "" : "hidden"}
+        className="hidden"
       >
         <HeatmapMatrix rows={metrics?.by_city_trade ?? []} />
       </Card>
 
-      <div
-        className={cn(
-          "mb-5 grid gap-4 xl:grid-cols-3",
-          tab === "overview" ? "" : "hidden"
-        )}
-      >
+      <div className="hidden">
         <Card
           title="Aceite por estado"
           icon={<MapPin className="h-4 w-4 text-sky-400" />}
@@ -1853,17 +2014,10 @@ export default function VoiceB2BPage() {
           </button>
         }
       >
-        <div className="grid grid-cols-3 gap-2 md:grid-cols-6">
+        <div className="grid grid-cols-3 gap-2 md:grid-cols-3">
           <Stat label="Páginas" value={String(showcaseStats?.pages ?? 0)} tone="emerald" />
           <Stat label="Links" value={String(showcaseStats?.links ?? 0)} />
           <Stat label="Visitas" value={String(showcaseStats?.visits ?? 0)} />
-          <Stat label="Checkouts" value={String(showcaseStats?.checkouts ?? 0)} />
-          <Stat label="Pagos" value={String(showcaseStats?.completed ?? 0)} tone="emerald" />
-          <Stat
-            label="Receita"
-            value={money0((showcaseStats?.revenue_cents ?? 0) / 100)}
-            tone="emerald"
-          />
         </div>
         <p className="mt-3 text-[10px] text-slate-600">
           A vitrine só publica com ≥3 oportunidades abertas em 30 dias. Usa

@@ -24,7 +24,7 @@ import httpx
 
 from ..config import settings
 from ..utils.logger import logger
-from . import b2b_voice, showcase
+from . import b2b_voice, showcase, voice_taxonomy
 
 API_BASE = "https://api.telnyx.com/v2"
 
@@ -162,6 +162,7 @@ def create_call(
     )
     assistant_id = (script or {}).get("assistant_id") or ""
     staging = bool(getattr(settings, "VOICE_STAGING_MODE", False))
+    guard: dict = {}
     if configured() and not dry_run:
         if not script:
             return {
@@ -193,6 +194,7 @@ def create_call(
                     "message": guard.get("reason") or "showcase_unavailable",
                     "showcase": guard,
                 }
+    call_trade = trade or company.get("trade") or ""
     call = b2b_voice.create_voice_call(
         company,
         provider="telnyx",
@@ -201,6 +203,8 @@ def create_call(
         city=city or company.get("city"),
         trade_code=trade,
         assistant_id=assistant_id,
+        category_code=voice_taxonomy.category_for_trade(call_trade) or "",
+        script_scope=str(guard.get("scope") or ""),
     )
     if not configured() or dry_run:
         b2b_voice.update_voice_call(call["id"], status="dry_run")

@@ -2534,6 +2534,14 @@ async def admin_contractor_sources_refresh(
     source = (source or "").strip().lower()
     if source == "licenses":
         asyncio.create_task(licensing_sources.ingest_nyc_licenses(limit=4000))
+    elif source == "dob_licenses":
+        asyncio.create_task(
+            licensing_sources.ingest_nyc_dob_licenses(limit=5000)
+        )
+    elif source == "dsny_trade_waste":
+        asyncio.create_task(
+            licensing_sources.ingest_dsny_trade_waste(limit=5000)
+        )
     elif source == "tdlr":
         asyncio.create_task(licensing_sources.ingest_tdlr(limit=12000))
     elif source == "il_roofing":
@@ -2545,6 +2553,23 @@ async def admin_contractor_sources_refresh(
     else:
         raise HTTPException(status_code=400, detail="source invalido")
     return {"status": "started", "source": source}
+
+
+@app.post("/api/admin/contractors/phones/run")
+async def admin_contractor_phones_run(
+    limit: int = 200,
+    states: str = "IL,TX,MA",
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Crawl gratuito de websites para telefones em falta (sem APIs pagas)."""
+    from backend.services import phone_enrichment
+
+    selected = tuple(part.strip().upper() for part in states.split(",") if part.strip())
+    return await phone_enrichment.enrich_contractor_phones(
+        limit=max(1, min(2000, int(limit))),
+        states=selected,
+        concurrency=6,
+    )
 
 
 @app.post("/api/admin/contractors/run")
@@ -3451,6 +3476,29 @@ async def admin_voice_segments(
     }
 
 
+@app.post("/api/admin/voice/company-trades/rebuild")
+async def admin_voice_company_trades_rebuild(
+    limit: int = 0, _admin: dict = Depends(_require_admin_user)
+):
+    """Reconstrói a classificação multi-label (idempotente, sem chamadas)."""
+    return await anyio.to_thread.run_sync(
+        b2b_voice.sync_company_trades, limit
+    )
+
+
+@app.get("/api/admin/voice/company-trades/stats")
+async def admin_voice_company_trades_stats(
+    city: str = "",
+    state: str = "",
+    _admin: dict = Depends(_require_admin_user),
+):
+    return {
+        "stats": await anyio.to_thread.run_sync(
+            b2b_voice.company_trade_stats, city, state
+        )
+    }
+
+
 @app.post("/api/admin/voice/campaigns/start")
 async def admin_voice_campaign_start(
     request: Request, _admin: dict = Depends(_require_admin_user)
@@ -3473,6 +3521,7 @@ async def admin_voice_campaign_start(
     start_hour_et = payload.get("start_hour_et")
     call_interval_seconds = payload.get("call_interval_seconds")
     batch_plan = payload.get("batch_plan")
+    trade_plan = payload.get("trade_plan") or payload.get("category_plan")
     name = str(payload.get("name") or "").strip() or (
         f"Auto {city or 'todas'} {trade or 'todos'}"
     )
@@ -3493,6 +3542,7 @@ async def admin_voice_campaign_start(
         start_hour_et,
         call_interval_seconds,
         batch_plan,
+        trade_plan,
     )
     _launch_voice_campaign(int(campaign["id"]))
     return {"ok": True, "campaign": campaign}
@@ -3548,6 +3598,30 @@ async def admin_voice_metrics(
 ):
     return await anyio.to_thread.run_sync(
         b2b_voice.metrics, days, city, trade
+    )
+
+
+@app.get("/api/admin/voice/live")
+async def admin_voice_live(
+    campaign_id: int | None = None,
+    recent_limit: int = 15,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Snapshot vivo da campanha para polling de 30 s no Admin."""
+    return await anyio.to_thread.run_sync(
+        b2b_voice.live_dashboard, campaign_id, recent_limit
+    )
+
+
+@app.get("/api/admin/voice/liquidity")
+async def admin_voice_liquidity(
+    city: str = "",
+    trade: str = "",
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Stock chamável por cidade/trade, exact vs city_fallback."""
+    return await anyio.to_thread.run_sync(
+        b2b_voice.voice_liquidity, city, trade
     )
 
 
