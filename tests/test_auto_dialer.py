@@ -33,6 +33,7 @@ def _clean(monkeypatch):
             "voice_campaign_skips",
             "voice_campaigns",
             "voice_calls",
+            "voice_did_usage",
             "call_attempts",
             "voice_suppressions",
             "dnc_checks",
@@ -805,3 +806,36 @@ def test_did_por_cidade_aceita_formato_simples(monkeypatch):
     assert auto_dialer._did_for_city("Dallas") == "+14699607326"
     assert auto_dialer._did_for_city("New York") == "+19292562550"
     assert auto_dialer._did_for_city("Chicago") == ""
+
+def test_did_pool_por_cidade(monkeypatch):
+    monkeypatch.setattr(
+        auto_dialer.settings,
+        "VOICE_DID_POOL_BY_CITY",
+        '{"new york":["+19292562550","+19294480511"]}',
+    )
+    monkeypatch.setattr(
+        auto_dialer.settings,
+        "VOICE_DID_BY_CITY",
+        '{"dallas":"+14699607326"}',
+    )
+    assert auto_dialer._did_pool_for_city("New York") == [
+        "+19292562550",
+        "+19294480511",
+    ]
+    assert auto_dialer._did_pool_for_city("NYC") == [
+        "+19292562550",
+        "+19294480511",
+    ]
+    assert auto_dialer._did_pool_for_city("Dallas") == ["+14699607326"]
+    assert auto_dialer._did_pool_for_city("Chicago") == []
+
+
+def test_reserve_did_respeita_cap_e_rotacao():
+    pool = ["+19292562550", "+19294480511"]
+    picked = [
+        voice.reserve_did(pool, day="2026-11-09", cap=2)
+        for _ in range(5)
+    ]
+    assert picked[:4].count("+19292562550") == 2
+    assert picked[:4].count("+19294480511") == 2
+    assert picked[4] == ""

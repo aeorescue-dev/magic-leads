@@ -15,7 +15,7 @@ import anyio
 from ..config import settings
 from ..utils.logger import logger
 from . import b2b_voice, telnyx_voice
-from .timeutil import NY_TZ, next_day_hour_utc, next_or_today_hour_utc
+from .timeutil import NY_TZ, day_key, next_day_hour_utc, next_or_today_hour_utc
 
 MAX_GUARD_MULTIPLIER = 10
 # Erros que nao sao do contacto: pausam a campanha em vez de o saltar.
@@ -25,6 +25,22 @@ TRANSIENT_API_REASONS = {
     "http_403",
     "http_429",
     "network_error",
+}
+# Bloqueios que acontecem antes de a Telnyx receber a chamada: a reserva do
+# DID pode ser devolvida sem risco de ultrapassar o cap.
+PRE_CALL_BLOCK_REASONS = {
+    "dnc_not_checked",
+    "dnc_stale",
+    "dnc_listed",
+    "suppressed",
+    "invalid_phone",
+    "not_business",
+    "state_not_enabled",
+    "status_blocked",
+    "attempt_cap",
+    "showcase_unavailable",
+    "script_not_approved",
+    "assistant_missing",
 }
 
 
@@ -68,6 +84,41 @@ def _did_for_city(city: str) -> str:
         logger.warning("[VOICE] DID invalido para %s: %r", city, value)
         return ""
     return ""
+
+
+def _did_pool_for_city(city: str) -> list[str]:
+    """Resolve o pool de DIDs locais de `VOICE_DID_POOL_BY_CITY`.
+
+    Formato: {"new york":["+1929...","+1917..."]}. Sem pool configurado,
+    cai no mapeamento singular de `_did_for_city` (compatibilidade Dallas).
+    """
+    raw = str(getattr(settings, "VOICE_DID_POOL_BY_CITY", "") or "").strip()
+    if raw:
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            logger.warning("[VOICE] VOICE_DID_POOL_BY_CITY invalido; ignorado")
+            parsed = {}
+        if isinstance(parsed, dict):
+            alias = b2b_voice.CITY_ALIASES.get(str(city or "").strip().upper())
+            wanted = str(alias or city or "").strip().lower()
+            for key, value in parsed.items():
+                if str(key).strip().lower() != wanted:
+                    continue
+                values = value if isinstance(value, list) else [value]
+                pool: list[str] = []
+                for item in values:
+                    did = str(item or "").strip()
+                    if len(did) == 12 and did.startswith("+1"):
+                        if did not in pool:
+                            pool.append(did)
+                    else:
+                        logger.warning(
+                            "[VOICE] DID invalido no pool de %s: %r", city, item
+                        )
+                return pool
+    single = _did_for_city(city)
+    return [single] if single else []
 
 
 def _campaign_batch_size(campaign: dict) -> int:
@@ -218,10 +269,71 @@ async def run_campaign(campaign_id: int) -> None:
                     return
                 if calls >= batch_end:
                     break
-                city_did = _did_for_city(current.get("city") or city)
-                from_number = city_did or (
-                    secondary_from if secondary_from and calls >= did_cap else ""
-                )
+                city_name = current.get("city") or city
+                pool = _did_pool_for_city(city_name)
+                if pool:
+                    # Nao reservar DID para um contacto que o gate ja rejeita
+                    # (ex.: DNC em falta). Isso queimaria capacidade do pool.
+                    gate = await _run_sync(b2b_voice.can_call, company)
+                    if not gate.get("allowed"):
+                        reasons = [
+                            str(item) for item in (gate.get("reasons") or [])
+                        ]
+                        if "outside_hours" in reasons:
+                            next_batch = (
+                                b2b_voice._utc_now() + timedelta(hours=1)
+                            ).isoformat()
+                            await _run_sync(
+                                lambda: b2b_voice.update_campaign(
+                                    campaign_id,
+                                    status="paused",
+                                    next_batch_at=next_batch,
+                                    error="outside_hours",
+                                )
+                            )
+                            logger.info(
+                                "[AUTO-DIALER] campanha %s pausada: fora da janela",
+                                campaign_id,
+                            )
+                            return
+                        await _run_sync(
+                            b2b_voice.skip_campaign_company,
+                            campaign_id,
+                            company["id"],
+                            ",".join(reasons) or "blocked",
+                        )
+                        await _run_sync(
+                            b2b_voice.bump_campaign, campaign_id, 0, 0, 1
+                        )
+                        continue
+                    from_number = await _run_sync(
+                        b2b_voice.reserve_did, pool, day_key(), did_cap
+                    )
+                    if not from_number:
+                        next_batch = next_day_hour_utc(
+                            start_hour, now=b2b_voice._utc_now()
+                        )
+                        await _run_sync(
+                            lambda: b2b_voice.update_campaign(
+                                campaign_id,
+                                status="paused",
+                                next_batch_at=next_batch,
+                                error="did_capacity_reached",
+                            )
+                        )
+                        logger.warning(
+                            "[AUTO-DIALER] campanha %s pausada: pool de DIDs "
+                            "esgotado no dia",
+                            campaign_id,
+                        )
+                        return
+                else:
+                    city_did = _did_for_city(city_name)
+                    from_number = city_did or (
+                        secondary_from
+                        if secondary_from and calls >= did_cap
+                        else ""
+                    )
                 result = await _run_sync(
                     telnyx_voice.create_call,
                     company,
@@ -238,6 +350,10 @@ async def run_campaign(campaign_id: int) -> None:
                         "total_budget_reached",
                         "days_limit_reached",
                     ):
+                        if from_number:
+                            await _run_sync(
+                                b2b_voice.release_did, from_number, day_key()
+                            )
                         await _run_sync(
                             lambda: b2b_voice.update_campaign(
                                 campaign_id,
@@ -259,6 +375,10 @@ async def run_campaign(campaign_id: int) -> None:
                         # Fora da janela local do estado: nao queimar o
                         # contacto. Pausa e o loop de retoma tenta daqui a
                         # uma hora (o candidato continua na fila).
+                        if from_number:
+                            await _run_sync(
+                                b2b_voice.release_did, from_number, day_key()
+                            )
                         next_batch = (
                             b2b_voice._utc_now() + timedelta(hours=1)
                         ).isoformat()
@@ -279,6 +399,10 @@ async def run_campaign(campaign_id: int) -> None:
                         "daily_budget_reached",
                         "daily_calls_reached",
                     ):
+                        if from_number:
+                            await _run_sync(
+                                b2b_voice.release_did, from_number, day_key()
+                            )
                         next_batch = next_day_hour_utc(
                             start_hour, now=b2b_voice._utc_now()
                         )
@@ -304,6 +428,10 @@ async def run_campaign(campaign_id: int) -> None:
                         # Erro de conta/rede: a chamada nunca saiu. Remove a
                         # linha failed para o contacto voltar a ser candidato
                         # e pausa; nao marca a empresa como saltada.
+                        if from_number:
+                            await _run_sync(
+                                b2b_voice.release_did, from_number, day_key()
+                            )
                         voice_call_id = result.get("voice_call_id")
                         if voice_call_id:
                             await _run_sync(
@@ -327,6 +455,10 @@ async def run_campaign(campaign_id: int) -> None:
                             reason,
                         )
                         return
+                    if from_number and reason in PRE_CALL_BLOCK_REASONS:
+                        await _run_sync(
+                            b2b_voice.release_did, from_number, day_key()
+                        )
                     await _run_sync(
                         b2b_voice.skip_campaign_company,
                         campaign_id,

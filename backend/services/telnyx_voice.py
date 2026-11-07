@@ -205,6 +205,7 @@ def create_call(
         assistant_id=assistant_id,
         category_code=voice_taxonomy.category_for_trade(call_trade) or "",
         script_scope=str(guard.get("scope") or ""),
+        from_number=from_number,
     )
     if not configured() or dry_run:
         b2b_voice.update_voice_call(call["id"], status="dry_run")

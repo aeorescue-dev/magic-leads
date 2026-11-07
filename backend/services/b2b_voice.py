@@ -218,6 +218,17 @@ CREATE TABLE IF NOT EXISTS voice_calls (
 CREATE INDEX IF NOT EXISTS idx_voice_calls_company ON voice_calls (company_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_voice_calls_provider ON voice_calls (provider_call_id);
 
+-- Reserva atomica de DID por dia operacional (America/New_York).
+CREATE TABLE IF NOT EXISTS voice_did_usage (
+  day TEXT NOT NULL,
+  did TEXT NOT NULL,
+  calls INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (day, did)
+);
+
+CREATE INDEX IF NOT EXISTS idx_voice_did_usage_day
+  ON voice_did_usage (day, calls);
+
 CREATE TABLE IF NOT EXISTS voice_campaigns (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
@@ -373,6 +384,7 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         ("showcase_clicked_at", "TEXT"),
         ("revenue_cents", "INTEGER DEFAULT 0"),
         ("assistant_id", "TEXT"),
+        ("from_number", "TEXT"),
         ("phone", "TEXT"),
         ("fallback_audio_started_at", "TEXT"),
         ("amd_result", "TEXT"),
@@ -3108,6 +3120,133 @@ def get_company(company_id: int) -> Optional[dict]:
         conn.close()
 
 
+def _valid_did(value: object) -> str:
+    did = str(value or "").strip()
+    return did if len(did) == 12 and did.startswith("+1") else ""
+
+
+def reserve_did(
+    pool: list[str], day: Optional[str] = None, cap: Optional[int] = None
+) -> str:
+    """Reserva atomicamente o DID menos usado do pool para o dia.
+
+    Devolve "" quando todos os DIDs do pool atingiram o cap. A reserva e'
+    gravada em `voice_did_usage` antes da chamada, para que dois processos
+    concorrentes nunca ultrapassem o cap diario.
+    """
+    init()
+    dids: list[str] = []
+    for value in pool or []:
+        did = _valid_did(value)
+        if did and did not in dids:
+            dids.append(did)
+    if not dids:
+        return ""
+    from . import timeutil
+
+    day_key = str(day or timeutil.day_key())
+    cap_value = int(
+        cap
+        if cap is not None
+        else (getattr(settings, "VOICE_DID_DAILY_CAP", 50) or 50)
+    )
+    if cap_value <= 0:
+        return ""
+    conn = get_conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        placeholders = ",".join("?" for _ in dids)
+        rows = conn.execute(
+            "SELECT did, calls FROM voice_did_usage "
+            f"WHERE day=? AND did IN ({placeholders})",
+            (day_key, *dids),
+        ).fetchall()
+        used = {str(row["did"]): int(row["calls"] or 0) for row in rows}
+        candidates = [d for d in dids if used.get(d, 0) < cap_value]
+        if not candidates:
+            conn.rollback()
+            return ""
+        chosen = min(candidates, key=lambda d: (used.get(d, 0), dids.index(d)))
+        conn.execute(
+            "INSERT INTO voice_did_usage (day, did, calls) VALUES (?, ?, 1) "
+            "ON CONFLICT(day, did) DO UPDATE SET "
+            "calls=voice_did_usage.calls+1",
+            (day_key, chosen),
+        )
+        conn.commit()
+        return chosen
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def release_did(did: str, day: Optional[str] = None) -> None:
+    """Devolve uma reserva que nao chegou a originar chamada."""
+    init()
+    valid = _valid_did(did)
+    if not valid:
+        return
+    from . import timeutil
+
+    day_key = str(day or timeutil.day_key())
+    conn = get_conn()
+    try:
+        conn.execute(
+            "UPDATE voice_did_usage SET calls=MAX(0, calls-1) "
+            "WHERE day=? AND did=?",
+            (day_key, valid),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def did_capacity_status(
+    pool: list[str], day: Optional[str] = None, cap: Optional[int] = None
+) -> dict:
+    """Uso do pool por DID no dia (preflight do auto-dialer)."""
+    init()
+    dids = []
+    for value in pool or []:
+        did = _valid_did(value)
+        if did and did not in dids:
+            dids.append(did)
+    from . import timeutil
+
+    day_key = str(day or timeutil.day_key())
+    cap_value = int(
+        cap
+        if cap is not None
+        else (getattr(settings, "VOICE_DID_DAILY_CAP", 50) or 50)
+    )
+    used: dict[str, int] = {}
+    conn = get_conn()
+    try:
+        if dids:
+            placeholders = ",".join("?" for _ in dids)
+            rows = conn.execute(
+                "SELECT did, calls FROM voice_did_usage "
+                f"WHERE day=? AND did IN ({placeholders})",
+                (day_key, *dids),
+            ).fetchall()
+            used = {str(row["did"]): int(row["calls"] or 0) for row in rows}
+    finally:
+        conn.close()
+    items = [
+        {"did": d, "calls": used.get(d, 0), "cap": cap_value}
+        for d in dids
+    ]
+    return {
+        "day": day_key,
+        "cap": cap_value,
+        "dids": items,
+        "total_calls": sum(item["calls"] for item in items),
+        "capacity": cap_value * len(dids),
+    }
+
+
 def create_voice_call(
     company: dict,
     provider: str = "telnyx",
@@ -3118,6 +3257,7 @@ def create_voice_call(
     assistant_id: Optional[str] = None,
     category_code: Optional[str] = None,
     script_scope: Optional[str] = None,
+    from_number: Optional[str] = None,
 ) -> dict:
     init()
     now = _iso()
@@ -3127,9 +3267,9 @@ def create_voice_call(
             """
             INSERT INTO voice_calls
               (provider, company_id, campaign_id, script_id, phone, city,
-               trade_code, category_code, script_scope, assistant_id, status,
-               started_at, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
+               trade_code, category_code, script_scope, assistant_id,
+               from_number, status, started_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
             """,
             (
                 provider,
@@ -3142,6 +3282,7 @@ def create_voice_call(
                 category_code or "",
                 script_scope or "",
                 assistant_id or "",
+                str(from_number or "").strip(),
                 now,
                 now,
             ),
