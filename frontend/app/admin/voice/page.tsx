@@ -651,6 +651,8 @@ export default function VoiceB2BPage() {
   const [dncSource, setDncSource] = useState("manual_csv");
   const [dncScrub, setDncScrub] = useState(true);
   const [working, setWorking] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [liveCampaignId, setLiveCampaignId] = useState<number | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [outcome, setOutcome] = useState("connected");
@@ -700,7 +702,7 @@ export default function VoiceB2BPage() {
   );
   const { data: campaignsData, mutate: mutateCampaigns } = useSWR(
     "voice-campaigns",
-    () => fetchVoiceCampaigns(20),
+    () => fetchVoiceCampaigns(50),
     { refreshInterval: 5_000 }
   );
   const { data: metrics, mutate: mutateMetrics } = useSWR(
@@ -708,12 +710,12 @@ export default function VoiceB2BPage() {
     () => fetchVoiceMetrics(metricsDays),
     { refreshInterval: 30_000, revalidateOnFocus: true }
   );
-  const { data: liveData } = useSWR<VoiceLive>(
-    "voice-live",
-    () => fetchVoiceLive(),
+  const { data: liveData, mutate: mutateLive } = useSWR<VoiceLive>(
+    `voice-live-${liveCampaignId ?? "auto"}`,
+    () => fetchVoiceLive(liveCampaignId ?? undefined),
     { refreshInterval: 30_000, revalidateOnFocus: true }
   );
-  const { data: liquidityData } = useSWR<VoiceLiquidity>(
+  const { data: liquidityData, mutate: mutateLiquidity } = useSWR<VoiceLiquidity>(
     "voice-liquidity",
     () => fetchVoiceLiquidity(),
     { refreshInterval: 30_000, revalidateOnFocus: true }
@@ -741,7 +743,26 @@ export default function VoiceB2BPage() {
   }, [currentScript?.trade_code, currentScript?.version]);
 
   const refreshAll = async () => {
-    await Promise.all([mutateQueue(), mutateStats()]);
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      // Forca revalidacao de todos os endpoints da pagina, nao apenas a
+      // fila e as estatisticas. Um endpoint em erro nao bloqueia os outros.
+      await Promise.allSettled([
+        mutateQueue(),
+        mutateStats(),
+        mutateShowcase(),
+        mutateSegments(),
+        mutateCampaigns(),
+        mutateMetrics(),
+        mutateLive(),
+        mutateLiquidity(),
+        mutateSources(),
+        mutateScripts(),
+      ]);
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const callable = useMemo(
@@ -1128,9 +1149,11 @@ export default function VoiceB2BPage() {
         <button
           type="button"
           onClick={() => void refreshAll()}
-          className="inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/5"
+          disabled={refreshing}
+          className="inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/5 disabled:cursor-wait disabled:opacity-50"
         >
-          <RefreshCcw className="h-3.5 w-3.5" /> Refresh
+          <RefreshCcw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
+          {refreshing ? "A atualizar…" : "Refresh"}
         </button>
       </header>
 
@@ -1246,8 +1269,31 @@ export default function VoiceB2BPage() {
       <Card
         title="Live calls — atualiza a cada 30 s"
         icon={<PhoneCall className="h-4 w-4 text-emerald-400" />}
-        hint="Campanha ativa, chamadas em curso, resposta e stock por cidade/nicho"
+        hint="Campanha de hoje ou a que estiver a correr. Alterna no seletor para ver outra campanha."
         className={tab === "overview" ? "" : "hidden"}
+        action={
+          <label className="flex max-w-full items-center gap-2 text-[10px] text-slate-500">
+            <span className="whitespace-nowrap">Campanha</span>
+            <select
+              aria-label="Campanha do Live calls"
+              value={liveCampaignId === null ? "" : String(liveCampaignId)}
+              onChange={(event) =>
+                setLiveCampaignId(
+                  event.target.value ? Number(event.target.value) : null
+                )
+              }
+              className="max-w-[320px] rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-[11px] text-slate-200"
+            >
+              <option value="">Auto — campanha de hoje</option>
+              {(campaignsData?.campaigns ?? []).map((campaign) => (
+                <option key={campaign.id} value={campaign.id}>
+                  #{campaign.id} {campaign.name} · {campaign.calls_started}/
+                  {campaign.quota_total ?? campaign.max_calls}
+                </option>
+              ))}
+            </select>
+          </label>
+        }
       >
         <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-8">
           <Stat

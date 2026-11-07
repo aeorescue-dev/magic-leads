@@ -2492,12 +2492,34 @@ def live_dashboard(
     conn = get_conn()
     try:
         if campaign_id is None:
+            # Preferencia: campanha a correr -> campanha com chamadas nas
+            # ultimas 24h -> proxima agendada -> ultimo id. Evita ficar
+            # presa na campanha de maior id (ex.: uma rampa futura).
             row = conn.execute(
-                "SELECT id FROM voice_campaigns "
-                "ORDER BY CASE status WHEN 'running' THEN 0 ELSE 1 END, id DESC "
-                "LIMIT 1"
+                "SELECT id FROM voice_campaigns WHERE status='running' "
+                "ORDER BY id DESC LIMIT 1"
             ).fetchone()
-            campaign_id = int(row["id"]) if row else None
+            if row is None:
+                row = conn.execute(
+                    "SELECT campaign_id AS id, MAX(created_at) AS last_at "
+                    "FROM voice_calls "
+                    "WHERE COALESCE(campaign_id,'') NOT IN ('', 'test_call') "
+                    "AND datetime(created_at) >= datetime('now','-24 hours') "
+                    "GROUP BY campaign_id "
+                    "ORDER BY last_at DESC LIMIT 1"
+                ).fetchone()
+            if row is None:
+                row = conn.execute(
+                    "SELECT id FROM voice_campaigns WHERE status='paused' "
+                    "AND next_batch_at IS NOT NULL "
+                    "AND datetime(next_batch_at) >= datetime('now') "
+                    "ORDER BY datetime(next_batch_at) ASC, id ASC LIMIT 1"
+                ).fetchone()
+            if row is None:
+                row = conn.execute(
+                    "SELECT id FROM voice_campaigns ORDER BY id DESC LIMIT 1"
+                ).fetchone()
+            campaign_id = int(row["id"]) if row and row["id"] is not None else None
         campaign = get_campaign(int(campaign_id)) if campaign_id else None
         if not campaign:
             return {
