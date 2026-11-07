@@ -113,6 +113,14 @@ const money0 = (value: number) =>
     maximumFractionDigits: 0,
   }).format(value);
 
+const money2 = (value: number) =>
+  new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+
 function cn(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
 }
@@ -157,14 +165,23 @@ function Card({
   className?: string;
 }) {
   return (
-    <section className={cn("rounded-2xl border border-white/10 bg-[#10131a] p-4", className)}>
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+    <section
+      className={cn(
+        "rounded-2xl border border-slate-700/70 bg-[#10131a] p-5 shadow-[0_20px_60px_-40px_rgba(0,0,0,0.9)]",
+        className
+      )}
+    >
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="flex items-center gap-2 text-sm font-bold text-slate-100">
+          <h2 className="flex items-center gap-2 text-base font-bold text-white">
             {icon}
             {title}
           </h2>
-          {hint ? <p className="mt-0.5 text-[11px] text-slate-500">{hint}</p> : null}
+          {hint ? (
+            <p className="mt-1 max-w-3xl text-xs leading-relaxed text-slate-400">
+              {hint}
+            </p>
+          ) : null}
         </div>
         {action}
       </div>
@@ -172,6 +189,58 @@ function Card({
     </section>
   );
 }
+
+function SectionHeader({
+  eyebrow,
+  title,
+  description,
+  icon,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  icon: ReactNode;
+}) {
+  return (
+    <div className="mb-3 mt-2 flex items-start gap-3">
+      <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-emerald-400/20 bg-emerald-500/10 text-emerald-300">
+        {icon}
+      </div>
+      <div>
+        <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-300/80">
+          {eyebrow}
+        </p>
+        <h2 className="text-lg font-black tracking-tight text-white">{title}</h2>
+        <p className="max-w-4xl text-xs leading-relaxed text-slate-400">
+          {description}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: ReactNode;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400">
+        {label}
+      </span>
+      {children}
+      {hint ? <span className="mt-1 block text-[10px] text-slate-500">{hint}</span> : null}
+    </label>
+  );
+}
+
+const FIELD_CLASS =
+  "w-full rounded-xl border border-slate-600 bg-slate-950/90 px-3 py-2.5 text-sm font-medium text-white shadow-inner outline-none transition placeholder:text-slate-500 hover:border-slate-500 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/20";
 
 function Stat({
   label,
@@ -185,25 +254,25 @@ function Stat({
   tone?: Tone;
 }) {
   return (
-    <div className="rounded-xl border border-white/5 bg-white/[0.02] p-3">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+    <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
+      <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400">
         {label}
       </p>
       <p
         className={cn(
-          "mt-1 text-xl font-black tabular-nums",
+          "mt-1 text-2xl font-black tabular-nums tracking-tight",
           tone === "emerald"
             ? "text-emerald-300"
             : tone === "amber"
               ? "text-amber-300"
               : tone === "rose"
                 ? "text-rose-300"
-                : "text-slate-100"
+                : "text-white"
         )}
       >
         {value}
       </p>
-      {sub ? <p className="mt-0.5 text-[10px] text-slate-500">{sub}</p> : null}
+      {sub ? <p className="mt-1 text-[11px] leading-snug text-slate-400">{sub}</p> : null}
     </div>
   );
 }
@@ -216,12 +285,14 @@ function SelectMenu({
   options,
   placeholder,
   className,
+  buttonClassName,
 }: {
   value: string;
   onChange: (value: string) => void;
   options: SelectOption[];
   placeholder?: string;
   className?: string;
+  buttonClassName?: string;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -244,7 +315,10 @@ function SelectMenu({
         onClick={() => setOpen((current) => !current)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className="flex w-full items-center justify-between gap-2 rounded-lg border border-white/15 bg-[#1a1d24] px-2.5 py-1.5 text-[10px] font-semibold text-white shadow-sm transition-colors hover:border-white/30"
+        className={cn(
+          "flex w-full items-center justify-between gap-2 rounded-xl border border-slate-600 bg-slate-950/90 px-3 py-2.5 text-sm font-semibold text-white shadow-inner transition-colors hover:border-slate-500",
+          buttonClassName
+        )}
       >
         <span className="truncate">{selected?.label ?? placeholder ?? "Selecionar"}</span>
         <ChevronDown
@@ -270,7 +344,7 @@ function SelectMenu({
                 setOpen(false);
               }}
               className={cn(
-                "flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-[10px] transition-colors",
+                "flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-xs transition-colors",
                 option.value === value
                   ? "bg-emerald-500/15 font-bold text-emerald-200"
                   : "text-slate-200 hover:bg-white/10 hover:text-white"
@@ -769,6 +843,18 @@ export default function VoiceB2BPage() {
     () => queue?.items.filter((item) => item.eligibility.allowed).length ?? 0,
     [queue]
   );
+  const liquidityRows = useMemo(
+    () =>
+      (liquidityData?.rows ?? [])
+        .slice()
+        .sort(
+          (a, b) =>
+            Number(b.exact) - Number(a.exact) ||
+            b.available - a.available ||
+            b.callable - a.callable
+        ),
+    [liquidityData]
+  );
 
   useEffect(() => {
     setPage(1);
@@ -1168,6 +1254,12 @@ export default function VoiceB2BPage() {
         </div>
       ) : null}
 
+      <div className="mb-2 flex flex-wrap items-end justify-between gap-1">
+        <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
+          Resumo da base
+        </p>
+        <p className="text-[10px] text-slate-500">inventário e gate de chamada</p>
+      </div>
       <section className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-6">
         <Stat label="Empresas" value={String(stats?.total ?? queue?.total ?? 0)} sub="pessoas jurídicas" />
         <Stat
@@ -1177,8 +1269,9 @@ export default function VoiceB2BPage() {
           sub="passam o gate"
         />
         <Stat label="Bloqueadas" value={String(stats?.blocked ?? 0)} tone="amber" sub="com motivo" />
-        <Stat label="Tentativas hoje" value={String(stats?.attempts_today ?? 0)} />
+        <Stat label="Tentativas hoje" value={String(stats?.attempts_today ?? 0)} sub="desde 00:00 ET" />
         <Stat label="DNC listados" value={String(stats?.dnc_listed ?? 0)} tone="rose" sub={`${stats?.dnc_checked ?? 0} checks`} />
+        <Stat label="Suprimidos" value={String(stats?.suppressed ?? 0)} tone="amber" sub="opt-out / manual" />
       </section>
 
       <nav className="mb-5 inline-flex flex-wrap gap-1 rounded-xl border border-white/10 bg-white/[0.02] p-1">
@@ -1199,81 +1292,114 @@ export default function VoiceB2BPage() {
         ))}
       </nav>
 
-      <Card
-        title="Test Call"
-        icon={<PhoneOutgoing className="h-4 w-4 text-emerald-400" />}
-        hint="Chamada real para um número em VOICE_TEST_NUMBERS. A Tecla 2 suprime o número; o próximo test-call limpa a supressão automaticamente."
-        className={tab === "overview" ? "mb-5" : "hidden"}
-        action={
-          <button
-            type="button"
-            onClick={() => void fireTestCall()}
-            disabled={working === "test-call"}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-1.5 text-[11px] font-bold text-[#052018] hover:bg-emerald-400 disabled:opacity-50"
-          >
-            {working === "test-call" ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <PhoneCall className="h-3.5 w-3.5" />
-            )}
-            Disparar Test Call
-          </button>
-        }
+      <div className={tab === "overview" ? "" : "hidden"}>
+        <SectionHeader
+          eyebrow="Tempo real"
+          title="Operação em tempo real"
+          description="Chamadas em curso, ritmo do lote e um test call controlado. Esta área responde a “o que está a acontecer agora”."
+          icon={<Activity className="h-4 w-4" />}
+        />
+      </div>
+      <div
+        className={cn(
+          "mb-6 grid gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(340px,0.95fr)]",
+          tab === "overview" ? "" : "hidden"
+        )}
       >
-        <div className="grid gap-2 md:grid-cols-5">
-          <input
-            value={testPhone}
-            onChange={(event) => setTestPhone(event.target.value)}
-            placeholder="+1XXXXXXXXXX"
-            inputMode="tel"
-            className="rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-[11px] text-slate-200 placeholder:text-slate-600"
-          />
-          <input
-            value={testCity}
-            onChange={(event) => setTestCity(event.target.value)}
-            placeholder="Cidade"
-            className="rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-[11px] text-slate-200 placeholder:text-slate-600"
-          />
-          <input
-            value={testState}
-            onChange={(event) => setTestState(event.target.value)}
-            placeholder="Estado"
-            maxLength={2}
-            className="rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-[11px] uppercase text-slate-200 placeholder:text-slate-600"
-          />
-          <SelectMenu
-            value={testTrade}
-            onChange={setTestTrade}
-            placeholder="Trade"
-            className="min-w-[130px]"
-            options={(scripts.length
-              ? scripts.map((item) => ({
-                  value: item.trade_code,
-                  label: item.trade_code.replace(/_/g, " "),
-                }))
-              : [{ value: "remodeling", label: "remodeling" }])}
-          />
-          <input
-            value={testCompanyName}
-            onChange={(event) => setTestCompanyName(event.target.value)}
-            placeholder="Nome (vazio = Contractor)"
-            className="rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-[11px] text-slate-200 placeholder:text-slate-600"
-          />
-        </div>
-        <p className="mt-2 text-[10px] text-slate-600">
-          O número tem de estar na allowlist `VOICE_TEST_NUMBERS`. Deixa o nome
-          vazio para ouvir o fallback “Hi Contractor”.
-        </p>
-      </Card>
+        <Card
+          title="Test Call"
+          icon={<PhoneOutgoing className="h-4 w-4 text-emerald-400" />}
+          hint="Chamada real de escuta. A tecla 2 suprime o número; o próximo test call limpa a supressão."
+          className="order-2 xl:order-2"
+        >
+          <div className="space-y-3">
+            <Field
+              label="Número de teste"
+              hint="Tem de estar na allowlist VOICE_TEST_NUMBERS."
+            >
+              <input
+                value={testPhone}
+                onChange={(event) => setTestPhone(event.target.value)}
+                placeholder="+1XXXXXXXXXX"
+                inputMode="tel"
+                className={FIELD_CLASS}
+              />
+            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Cidade">
+                <input
+                  value={testCity}
+                  onChange={(event) => setTestCity(event.target.value)}
+                  placeholder="New York"
+                  className={FIELD_CLASS}
+                />
+              </Field>
+              <Field label="Estado">
+                <input
+                  value={testState}
+                  onChange={(event) => setTestState(event.target.value)}
+                  placeholder="NY"
+                  maxLength={2}
+                  className={cn(FIELD_CLASS, "uppercase")}
+                />
+              </Field>
+            </div>
+            <Field label="Nicho">
+              <SelectMenu
+                value={testTrade}
+                onChange={setTestTrade}
+                placeholder="Trade"
+                className="w-full"
+                buttonClassName="w-full"
+                options={(scripts.length
+                  ? scripts.map((item) => ({
+                      value: item.trade_code,
+                      label: item.trade_code.replace(/_/g, " "),
+                    }))
+                  : [{ value: "remodeling", label: "remodeling" }])}
+              />
+            </Field>
+            <Field
+              label="Nome da empresa"
+              hint="Deixa vazio para ouvir o fallback “Hi Contractor”."
+            >
+              <input
+                value={testCompanyName}
+                onChange={(event) => setTestCompanyName(event.target.value)}
+                placeholder="Ex.: Example Contracting"
+                className={FIELD_CLASS}
+              />
+            </Field>
+            <button
+              type="button"
+              onClick={() => void fireTestCall()}
+              disabled={working === "test-call"}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-3 py-2.5 text-xs font-bold text-[#052018] transition hover:bg-emerald-400 disabled:opacity-50"
+            >
+              {working === "test-call" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <PhoneCall className="h-4 w-4" />
+              )}
+              Disparar Test Call
+            </button>
+            <p className="text-[11px] leading-relaxed text-slate-400">
+              O teste mantém a linha aberta até 120 s. A tecla 2 faz opt-out,
+              diz “Goodbye” e encerra a chamada.
+            </p>
+          </div>
+        </Card>
 
       <Card
-        title="Live calls — atualiza a cada 30 s"
+        title="Live calls"
         icon={<PhoneCall className="h-4 w-4 text-emerald-400" />}
-        hint="Campanha de hoje ou a que estiver a correr. Alterna no seletor para ver outra campanha."
-        className={tab === "overview" ? "" : "hidden"}
+        hint="Campanha de hoje ou a que estiver a correr. Atualiza a cada 30 s; alterna no seletor para ver outra campanha."
+        className="order-1 xl:order-1"
         action={
-          <label className="flex max-w-full items-center gap-2 text-[10px] text-slate-500">
-            <span className="whitespace-nowrap">Campanha</span>
+          <label className="flex max-w-full items-center gap-2 text-[11px] text-slate-400">
+            <span className="whitespace-nowrap font-semibold uppercase tracking-wide">
+              Campanha
+            </span>
             <select
               aria-label="Campanha do Live calls"
               value={liveCampaignId === null ? "" : String(liveCampaignId)}
@@ -1282,7 +1408,7 @@ export default function VoiceB2BPage() {
                   event.target.value ? Number(event.target.value) : null
                 )
               }
-              className="max-w-[320px] rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-[11px] text-slate-200"
+              className="max-w-[320px] rounded-lg border border-slate-600 bg-slate-950 px-2.5 py-1.5 text-xs font-medium text-white outline-none focus:border-emerald-400"
             >
               <option value="">Auto — campanha de hoje</option>
               {(campaignsData?.campaigns ?? []).map((campaign) => (
@@ -1295,7 +1421,7 @@ export default function VoiceB2BPage() {
           </label>
         }
       >
-        <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-8">
+        <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
           <Stat
             label="Campanha"
             value={liveData?.campaign?.status ?? "—"}
@@ -1388,34 +1514,36 @@ export default function VoiceB2BPage() {
           </div>
         </div>
 
-        <div className="mt-3 overflow-x-auto">
-          <table className="w-full min-w-[680px] text-left text-[10px]">
-            <thead className="text-slate-500">
+        <div className="mt-4 overflow-x-auto rounded-xl border border-slate-700/60">
+          <table className="w-full min-w-[680px] text-left text-xs">
+            <thead className="bg-slate-900/80 text-[10px] uppercase tracking-[0.12em] text-slate-400">
               <tr>
-                <th className="pb-1">Empresa</th>
-                <th className="pb-1">Nicho</th>
-                <th className="pb-1">Estado</th>
-                <th className="pb-1 text-right">Em curso</th>
-                <th className="pb-1 text-right">Escuta</th>
+                <th className="px-3 py-2">Empresa</th>
+                <th className="px-3 py-2">Nicho</th>
+                <th className="px-3 py-2">Estado</th>
+                <th className="px-3 py-2 text-right">Em curso</th>
+                <th className="px-3 py-2 text-right">Escuta</th>
               </tr>
             </thead>
             <tbody>
               {(liveData?.active_calls ?? []).map((call) => (
-                <tr key={call.id} className="border-t border-white/5">
-                  <td className="py-1.5 text-slate-200">{call.company || "—"}</td>
-                  <td className="py-1.5 text-slate-400">{call.trade || "—"}</td>
-                  <td className="py-1.5 text-slate-400">{call.status}</td>
-                  <td className="py-1.5 text-right tabular-nums text-cyan-300">
+                <tr key={call.id} className="border-t border-slate-800/80">
+                  <td className="px-3 py-2 font-medium text-slate-100">
+                    {call.company || "—"}
+                  </td>
+                  <td className="px-3 py-2 text-slate-300">{call.trade || "—"}</td>
+                  <td className="px-3 py-2 text-slate-300">{call.status}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-cyan-300">
                     {call.elapsed_seconds}s
                   </td>
-                  <td className="py-1.5 text-right tabular-nums text-emerald-300">
+                  <td className="px-3 py-2 text-right tabular-nums text-emerald-300">
                     {call.listen_seconds}s
                   </td>
                 </tr>
               ))}
               {!liveData?.active_calls?.length ? (
                 <tr>
-                  <td colSpan={5} className="py-2 text-slate-600">
+                  <td colSpan={5} className="px-3 py-6 text-center text-slate-500">
                     Sem chamadas ativas neste instante.
                   </td>
                 </tr>
@@ -1424,56 +1552,21 @@ export default function VoiceB2BPage() {
           </table>
         </div>
 
-        <div className="mt-4 border-t border-white/5 pt-3">
-          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-            Liquidez por cidade e nicho
-          </p>
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {(liquidityData?.rows ?? [])
-              .slice()
-              .sort(
-                (a, b) =>
-                  Number(b.exact) - Number(a.exact) ||
-                  b.available - a.available
-              )
-              .slice(0, 12)
-              .map((row) => (
-                <div
-                  key={`${row.city}-${row.trade}`}
-                  className="rounded-lg border border-white/5 bg-white/[0.02] px-2.5 py-1.5 text-[10px]"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold text-slate-200">
-                      {row.city}
-                    </span>
-                    <span
-                      className={
-                        row.exact ? "text-emerald-300" : "text-amber-300"
-                      }
-                    >
-                      {row.scope}
-                    </span>
-                  </div>
-                  <span className="text-slate-500">{row.trade}</span>
-                  <div className="mt-0.5 flex justify-between text-slate-400">
-                    <span>{row.available} disponíveis</span>
-                    <span>{row.used_7d} usados/7d</span>
-                  </div>
-                </div>
-              ))}
-            {!liquidityData?.rows?.length ? (
-              <p className="text-[10px] text-slate-600">
-                Sem stock materializado. Reconstrói os segmentos.
-              </p>
-            ) : null}
-          </div>
-        </div>
       </Card>
+      </div>
 
+      <div className={tab === "overview" ? "" : "hidden"}>
+        <SectionHeader
+          eyebrow="Consolidado"
+          title="Desempenho histórico"
+          description="Resultados do período escolhido: atendimento, engagement, custo real e retorno. Esta área responde a “o que já aconteceu”."
+          icon={<TrendingUp className="h-4 w-4" />}
+        />
+      </div>
       <Card
-        title="Command Center"
+        title="Desempenho do período"
         icon={<Gauge className="h-4 w-4 text-emerald-400" />}
-        hint="Velocímetros de conversão e saúde operacional"
+        hint="Métricas consolidadas de chamadas, custo e conversão no período selecionado."
         action={
           <SelectMenu
             value={String(metricsDays)}
@@ -1526,9 +1619,64 @@ export default function VoiceB2BPage() {
             value={money0(metrics?.summary.cost_usd ?? 0)}
             tone="amber"
           />
+          <Stat
+            label="Chamadas"
+            value={String(metrics?.summary.dialed ?? 0)}
+            sub="discadas no período"
+          />
+          <Stat
+            label="Custo / atendida"
+            value={money2(
+              (metrics?.summary.cost_usd ?? 0) /
+                Math.max(1, metrics?.summary.answered ?? 0)
+            )}
+            tone="amber"
+            sub="custo real médio"
+          />
+        </div>
+        <div className="mt-4 overflow-x-auto rounded-xl border border-slate-700/60">
+          <table className="w-full min-w-[820px] text-left text-xs">
+            <thead className="bg-slate-900/80 text-[10px] uppercase tracking-[0.12em] text-slate-400">
+              <tr>
+                <th className="px-3 py-2">Discadas</th>
+                <th className="px-3 py-2">Atendidas</th>
+                <th className="px-3 py-2">Answer rate</th>
+                <th className="px-3 py-2">Engajadas ≥30s</th>
+                <th className="px-3 py-2">Custo</th>
+                <th className="px-3 py-2">Receita</th>
+                <th className="px-3 py-2">Net</th>
+                <th className="px-3 py-2">Custo / atendida</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="border-t border-slate-800 text-slate-200">
+                <td className="px-3 py-2 tabular-nums">{metrics?.summary.dialed ?? 0}</td>
+                <td className="px-3 py-2 tabular-nums">{metrics?.summary.answered ?? 0}</td>
+                <td className="px-3 py-2 tabular-nums text-emerald-300">
+                  {metrics?.summary.answer_rate ?? 0}%
+                </td>
+                <td className="px-3 py-2 tabular-nums">{metrics?.summary.engaged ?? 0}</td>
+                <td className="px-3 py-2 tabular-nums text-amber-300">
+                  {money2(metrics?.summary.cost_usd ?? 0)}
+                </td>
+                <td className="px-3 py-2 tabular-nums text-sky-300">
+                  {money2(metrics?.summary.revenue_usd ?? 0)}
+                </td>
+                <td className="px-3 py-2 tabular-nums text-emerald-300">
+                  {money2(metrics?.summary.net_usd ?? 0)}
+                </td>
+                <td className="px-3 py-2 tabular-nums text-amber-300">
+                  {money2(
+                    (metrics?.summary.cost_usd ?? 0) /
+                      Math.max(1, metrics?.summary.answered ?? 0)
+                  )}
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
         {!metrics?.summary.dialed ? (
-          <p className="mt-3 text-[10px] text-slate-600">
+          <p className="mt-3 text-[11px] text-slate-500">
             Sem chamadas no período. Inicia uma campanha em “Campanhas” para
             alimentar o funil.
           </p>
@@ -1545,7 +1693,6 @@ export default function VoiceB2BPage() {
           title="Funil de conversão"
           icon={<TrendingUp className="h-4 w-4 text-sky-400" />}
           hint="Discadas → atendidas → escuta → vitrine → checkout"
-          className="hidden"
         >
           <FunnelChart
             funnel={
@@ -1570,6 +1717,90 @@ export default function VoiceB2BPage() {
             buckets={metrics?.retention ?? []}
             answered={metrics?.summary.answered ?? 0}
           />
+        </Card>
+      </div>
+
+      <div className={tab === "overview" ? "" : "hidden"}>
+        <SectionHeader
+          eyebrow="Capacidade"
+          title="Cobertura e liquidez"
+          description="Stock chamável por cidade e nicho, com separação entre inventário exato e fallback. Tabela operacional, sem duplicar os cards de campanha."
+          icon={<Database className="h-4 w-4" />}
+        />
+        <Card
+          title="Liquidez por cidade e nicho"
+          icon={<BarChart3 className="h-4 w-4 text-indigo-400" />}
+          hint="Top 12 por disponibilidade. Usa os segmentos materializados; reconstrói os segmentos se a tabela estiver vazia."
+          className="mb-6"
+        >
+          <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+            <span className="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-3 py-1 text-emerald-200">
+              Exact disponível: <b>{liquidityData?.exact_available ?? 0}</b>
+            </span>
+            <span className="rounded-full border border-slate-600/70 bg-slate-900/60 px-3 py-1 text-slate-300">
+              Combinações: <b>{liquidityRows.length}</b>
+            </span>
+            <span className="text-[10px] text-slate-500">
+              Atualizado: {liquidityData?.generated_at ? new Date(liquidityData.generated_at).toLocaleString("pt-PT") : "—"}
+            </span>
+          </div>
+          <div className="max-h-[420px] overflow-auto rounded-xl border border-slate-700/60">
+            <table className="w-full min-w-[880px] text-left text-xs">
+              <thead className="sticky top-0 bg-slate-900/95 text-[10px] uppercase tracking-[0.12em] text-slate-400">
+                <tr>
+                  <th className="px-3 py-2">Cidade</th>
+                  <th className="px-3 py-2">Nicho</th>
+                  <th className="px-3 py-2">Escopo</th>
+                  <th className="px-3 py-2 text-right">Disponível</th>
+                  <th className="px-3 py-2 text-right">Usado 7d</th>
+                  <th className="px-3 py-2 text-right">Total</th>
+                  <th className="px-3 py-2 text-right">Chamáveis</th>
+                  <th className="px-3 py-2 text-right">Vitrine</th>
+                </tr>
+              </thead>
+              <tbody>
+                {liquidityRows.slice(0, 12).map((row) => (
+                  <tr
+                    key={`${row.city}-${row.trade}`}
+                    className="border-t border-slate-800/80 text-slate-300 hover:bg-white/[0.03]"
+                  >
+                    <td className="px-3 py-2 font-semibold text-slate-100">
+                      {row.city}
+                      <span className="ml-1 text-[10px] text-slate-500">{row.state}</span>
+                    </td>
+                    <td className="px-3 py-2">{row.trade}</td>
+                    <td className="px-3 py-2">
+                      <span
+                        className={cn(
+                          "rounded-full border px-2 py-0.5 text-[10px] font-semibold",
+                          row.exact
+                            ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-300"
+                            : "border-amber-400/20 bg-amber-500/10 text-amber-300"
+                        )}
+                      >
+                        {row.scope}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-right font-bold tabular-nums text-emerald-300">
+                      {row.available}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">{row.used_7d}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{row.total}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{row.callable}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{row.showcase_items}</td>
+                  </tr>
+                ))}
+                {!liquidityRows.length ? (
+                  <tr>
+                    <td colSpan={8} className="px-3 py-6 text-center text-slate-500">
+                      Sem stock materializado. Reconstrói os segmentos na aba
+                      “Segmentos”.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
         </Card>
       </div>
 
