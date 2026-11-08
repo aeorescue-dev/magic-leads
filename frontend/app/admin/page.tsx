@@ -2545,68 +2545,68 @@ export default function AdminPage() {
   const load = useCallback(async () => {
     setBusy(true);
     setDataErrors({});
-    try {
-      const [ov, src, rn, rv, al] = await Promise.all([
-        safeRequest(fetchAdminOverview()),
-        safeRequest(fetchAdminSources()),
-        safeRequest(fetchAdminScraperRuns(15)),
-        safeRequest(fetchAdminReveals(50, true)),
-        safeRequest(fetchAdminAlerts(20)),
-      ]);
+    setGate((current) => (current === "loading" ? "ok" : current));
 
-      const primary = { overview: ov, sources: src, scraperRuns: rn, reveals: rv, alerts: al };
-      for (const result of Object.values(primary)) {
-        if (
-          !result.ok &&
-          result.error instanceof AdminApiError &&
-          (result.error.status === 401 || result.error.status === 403)
-        ) {
-          setGate(result.error.status === 401 ? "unauthenticated" : "forbidden");
-          return;
-        }
-      }
-
-      const errors: Record<string, string> = {};
-      if (ov.ok) setOverview(ov.value); else errors.overview = errorMessage(ov.error);
-      if (src.ok) setSources(src.value); else errors.sources = errorMessage(src.error);
-      if (rn.ok) setRuns(rn.value.runs); else errors.scraperRuns = errorMessage(rn.error);
-      if (rv.ok) setReveals(rv.value.reveals); else errors.reveals = errorMessage(rv.error);
-      if (al.ok) setAlerts(al.value.alerts); else errors.alerts = errorMessage(al.error);
-      setDataErrors(errors);
-      setGate("ok");
-
-      // Secundários não bloqueiam o render principal nem uns aos outros.
-      void Promise.all([
-        safeRequest(fetchAdminSearchbug(7, 25)),
-        safeRequest(fetchAdminPhoneSampleProgress(90)),
-        safeRequest(fetchAdminPush(7, 25)),
-        safeRequest(fetchAdminDigestAb(30)),
-        safeRequest(fetchAdminPlanner()),
-        safeRequest(fetchAdminCreditLedger(1, 50)),
-        safeRequest(fetchAdminCreditBalance(1)),
-        safeRequest(fetchAdminSessions(200)),
-      ]).then(([sb, ps, pu, ab, pl, cl, cb, ss]) => {
-        const secondary: Record<string, string> = {};
-        if (sb.ok) setSearchbug(sb.value); else secondary.searchbug = errorMessage(sb.error);
-        if (ps.ok) setPhoneSamples(ps.value); else secondary.phoneSamples = errorMessage(ps.error);
-        if (pu.ok) setPush(pu.value); else secondary.push = errorMessage(pu.error);
-        if (ab.ok) setDigestAb(ab.value); else secondary.digestAb = errorMessage(ab.error);
-        if (pl.ok) setPlanner(pl.value); else secondary.planner = errorMessage(pl.error);
-        if (cl.ok) setCreditLedger(cl.value); else secondary.creditLedger = errorMessage(cl.error);
-        if (cb.ok) setCreditBalance(cb.value); else secondary.creditBalance = errorMessage(cb.error);
-        if (ss.ok) setSessions(ss.value.sessions ?? []); else secondary.sessions = errorMessage(ss.error);
-        setDataErrors((prev) => ({ ...prev, ...secondary }));
-      });
-    } catch (error) {
-      if (error instanceof AdminApiError && (error.status === 401 || error.status === 403)) {
+    const fail = (key: string, error: unknown) => {
+      if (
+        error instanceof AdminApiError &&
+        (error.status === 401 || error.status === 403)
+      ) {
         setGate(error.status === 401 ? "unauthenticated" : "forbidden");
         return;
       }
-      setDataErrors({ overview: errorMessage(error) });
-      setGate("ok");
-    } finally {
-      setBusy(false);
-    }
+      setDataErrors((prev) => ({ ...prev, [key]: errorMessage(error) }));
+    };
+
+    // Cada widget primário resolve de forma independente; um 5xx/timeout
+    // afecta apenas o seu cartão, não o resto do Overview.
+    const primary = [
+      safeRequest(fetchAdminOverview()).then((result) => {
+        if (result.ok) setOverview(result.value);
+        else fail("overview", result.error);
+      }),
+      safeRequest(fetchAdminSources()).then((result) => {
+        if (result.ok) setSources(result.value);
+        else fail("sources", result.error);
+      }),
+      safeRequest(fetchAdminScraperRuns(15)).then((result) => {
+        if (result.ok) setRuns(result.value.runs);
+        else fail("scraperRuns", result.error);
+      }),
+      safeRequest(fetchAdminReveals(50, true)).then((result) => {
+        if (result.ok) setReveals(result.value.reveals);
+        else fail("reveals", result.error);
+      }),
+      safeRequest(fetchAdminAlerts(20)).then((result) => {
+        if (result.ok) setAlerts(result.value.alerts);
+        else fail("alerts", result.error);
+      }),
+    ];
+    await Promise.allSettled(primary);
+
+    // Secundários: independentes e fora do caminho crítico.
+    void Promise.all([
+      safeRequest(fetchAdminSearchbug(7, 25)),
+      safeRequest(fetchAdminPhoneSampleProgress(90)),
+      safeRequest(fetchAdminPush(7, 25)),
+      safeRequest(fetchAdminDigestAb(30)),
+      safeRequest(fetchAdminPlanner()),
+      safeRequest(fetchAdminCreditLedger(1, 50)),
+      safeRequest(fetchAdminCreditBalance(1)),
+      safeRequest(fetchAdminSessions(200)),
+    ]).then(([sb, ps, pu, ab, pl, cl, cb, ss]) => {
+      const secondary: Record<string, string> = {};
+      if (sb.ok) setSearchbug(sb.value); else secondary.searchbug = errorMessage(sb.error);
+      if (ps.ok) setPhoneSamples(ps.value); else secondary.phoneSamples = errorMessage(ps.error);
+      if (pu.ok) setPush(pu.value); else secondary.push = errorMessage(pu.error);
+      if (ab.ok) setDigestAb(ab.value); else secondary.digestAb = errorMessage(ab.error);
+      if (pl.ok) setPlanner(pl.value); else secondary.planner = errorMessage(pl.error);
+      if (cl.ok) setCreditLedger(cl.value); else secondary.creditLedger = errorMessage(cl.error);
+      if (cb.ok) setCreditBalance(cb.value); else secondary.creditBalance = errorMessage(cb.error);
+      if (ss.ok) setSessions(ss.value.sessions ?? []); else secondary.sessions = errorMessage(ss.error);
+      setDataErrors((prev) => ({ ...prev, ...secondary }));
+    });
+    setBusy(false);
   }, []);
 
 
