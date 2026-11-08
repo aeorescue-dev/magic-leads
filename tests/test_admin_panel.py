@@ -265,6 +265,8 @@ def test_admin_can_read_overview(admin_client):
     for key in ("leads", "users", "reveals", "credits", "alerts", "last_scraper_run"):
         assert key in body, f"falta {key} no overview"
     assert body["leads"]["total"] >= 0
+    assert "reported_today" in body["leads"]
+    assert "inserted_24h" in body["leads"]
     assert isinstance(body["credits"]["used_today"], int)
     assert isinstance(body["alerts"]["unacknowledged"], int)
 
@@ -1323,6 +1325,11 @@ def test_admin_billing_funnel_exposes_funnel_and_recovery(admin_client):
         "sessions_expired",
         "sessions_open",
         "sessions_recovered",
+        "sessions_reminded",
+        "sessions_recovered_paid",
+        "stripe_completed",
+        "stripe_expired",
+        "reconciliation_status",
         "email_capture_rate",
         "conversion_rate",
     ):

@@ -30,25 +30,84 @@ function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+const ADMIN_FETCH_TIMEOUT_MS = 15_000;
+const ADMIN_FETCH_RETRIES = 2;
+
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+function isRetryableStatus(status: number): boolean {
+  return (
+    status === 0 ||
+    status === 408 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504
+  );
+}
+
 async function adminFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const { headers: optHeaders, ...rest } = options ?? {};
-  const res = await fetch(`${API_URL}/api/admin${path}`, {
-    credentials: "include",
-    cache: "no-store",
-    ...rest,
-    headers: { ...authHeaders(), ...(optHeaders as Record<string, string> | undefined) },
-  });
-  if (!res.ok) {
-    let detail = res.statusText;
+  const method = String(rest.method ?? "GET").toUpperCase();
+  const retryable = method === "GET";
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt <= (retryable ? ADMIN_FETCH_RETRIES : 0); attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), ADMIN_FETCH_TIMEOUT_MS);
     try {
-      const body = await res.json();
-      if (body?.detail) detail = String(body.detail);
-    } catch {
-      /* resposta sem JSON (ex.: 502 do proxy) */
+      const res = await fetch(`${API_URL}/api/admin${path}`, {
+        credentials: "include",
+        cache: "no-store",
+        ...rest,
+        signal: controller.signal,
+        headers: {
+          ...authHeaders(),
+          ...(optHeaders as Record<string, string> | undefined),
+        },
+      });
+      if (!res.ok) {
+        let detail = res.statusText;
+        try {
+          const body = await res.json();
+          if (body?.detail) detail = String(body.detail);
+        } catch {
+          /* resposta sem JSON (ex.: 502 do proxy) */
+        }
+        throw new AdminApiError(res.status, detail);
+      }
+      return (await res.json()) as T;
+    } catch (error) {
+      lastError = error;
+      const status =
+        error instanceof AdminApiError
+          ? error.status
+          : (error as { name?: string })?.name === "AbortError"
+            ? 408
+            : 0;
+      if (
+        retryable &&
+        attempt < ADMIN_FETCH_RETRIES &&
+        isRetryableStatus(status)
+      ) {
+        await sleep(250 * 2 ** attempt + Math.random() * 250);
+        continue;
+      }
+      if (error instanceof AdminApiError) throw error;
+      if ((error as { name?: string })?.name === "AbortError") {
+        throw new AdminApiError(408, "timeout ao contactar o painel");
+      }
+      throw new AdminApiError(
+        0,
+        error instanceof Error ? error.message : "falha de rede"
+      );
+    } finally {
+      clearTimeout(timeout);
     }
-    throw new AdminApiError(res.status, detail);
   }
-  return (await res.json()) as T;
+  throw lastError instanceof Error
+    ? lastError
+    : new AdminApiError(0, "falha de rede");
 }
 
 // --------------------------------------------------------------- tipos
@@ -56,7 +115,13 @@ async function adminFetch<T>(path: string, options?: RequestInit): Promise<T> {
 export interface AdminOverview {
   generated_at: string;
   today: string;
-  leads: { total: number; today: number; last_24h: number };
+  leads: {
+    total: number;
+    today: number;
+    last_24h: number;
+    reported_today?: number;
+    inserted_24h?: number;
+  };
   users: { total: number; today: number };
   reveals: { today: number; active: number; returned_to_pool: number };
   credits: { used_today: number; refunded_today: number };
@@ -944,7 +1009,12 @@ export interface AdminBillingFunnel {
     sessions_completed: number;
     sessions_expired: number;
     sessions_open: number;
-    sessions_recovered: number;
+    sessions_reminded: number;
+    sessions_recovered_paid: number;
+    sessions_recovered?: number;
+    stripe_completed: number;
+    stripe_expired: number;
+    reconciliation_status: string;
     email_capture_rate: number;
     conversion_rate: number;
   };

@@ -1,12 +1,12 @@
 /**
  * Escala do Scoring V2.
  *
- * O modelo atual produz scores entre 0 e 63 (inteiros na lista, decimais no
+ * O modelo atual observado vai até 64,22; usamos 65 como teto de exibição.
  * snapshot). A UI antiga assumia 0–100 e pintava tudo de cinzento porque
  * ninguém chegava aos 70. Estes helpers são a única fonte de verdade para
  * barras, cores e filtros.
  */
-export const SCORE_MAX = 63;
+export const SCORE_MAX = 65;
 
 export type ScoreBand =
   | "elite"
@@ -24,7 +24,7 @@ export interface ScoreRange {
 
 export const SCORE_RANGES: ScoreRange[] = [
   { id: "all", label: "Todos", min: null, max: null },
-  { id: "elite", label: "55–63", min: 55, max: 63 },
+  { id: "elite", label: "55+", min: 55, max: null },
   { id: "strong", label: "40–54", min: 40, max: 54 },
   { id: "developing", label: "25–39", min: 25, max: 39 },
   { id: "low", label: "0–24", min: 0, max: 24 },

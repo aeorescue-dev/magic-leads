@@ -3040,7 +3040,7 @@ export default function VoiceB2BPage() {
                     className={`rounded-full border px-2 py-0.5 text-[9px] font-bold ${SCORE_BAND_META[scoreBand(selected.score)].chip}`}
                   >
                     {SCORE_BAND_META[scoreBand(selected.score)].label} ·{" "}
-                    {formatScore(selected.score)}/63
+                    {formatScore(selected.score)}/65
                   </span>
                   {scoreDetail?.snapshot ? (
                     <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[9px] text-slate-400">

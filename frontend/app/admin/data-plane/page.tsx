@@ -221,7 +221,7 @@ export default function DataPlanePage() {
           footer={
             <div className="flex items-center gap-2 text-[10px] text-slate-500">
               <StatusPill state="info">
-                {score ? `${score.min}–${score.max}` : "0–63"}
+                {score ? `${score.min}–${score.max}` : "0–65"}
               </StatusPill>
               <span>{score?.snapshots.toLocaleString("pt-PT") ?? 0} snapshots</span>
             </div>
@@ -234,7 +234,7 @@ export default function DataPlanePage() {
         <SectionHeader
           eyebrow="Scoring V2"
           title="Distribuição real dos prospects"
-          description="A régua foi corrigida para 0–63. As barras mostram a concentração por faixa e o detalhe do prospect passa a expor os componentes do snapshot."
+          description="A régua usa o teto observado (0–65). As barras mostram a concentração por faixa e o detalhe do prospect expõe os componentes do snapshot."
           icon={<Layers className="h-5 w-5" />}
           action={
             score?.last_run ? (

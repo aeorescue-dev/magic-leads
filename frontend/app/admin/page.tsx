@@ -116,6 +116,33 @@ import { AUTH_TOKEN_KEY } from "@/lib/api-client";
 
 type Gate = "loading" | "unauthenticated" | "forbidden" | "ok" | "error";
 
+type SafeResult<T> = { ok: true; value: T } | { ok: false; error: unknown };
+
+async function safeRequest<T>(promise: Promise<T>): Promise<SafeResult<T>> {
+  try {
+    return { ok: true, value: await promise };
+  } catch (error) {
+    return { ok: false, error };
+  }
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof AdminApiError) {
+    return `${error.status ? `${error.status}: ` : ""}${error.message}`;
+  }
+  if (error instanceof Error) return error.message;
+  return "Falha ao carregar.";
+}
+
+function WidgetError({ message }: { message?: string | null }) {
+  if (!message) return null;
+  return (
+    <div className="mb-3 rounded-lg border border-rose-400/20 bg-rose-500/[0.05] px-3 py-2 text-[11px] text-rose-200">
+      Falha ao carregar este cartão: {message}
+    </div>
+  );
+}
+
 const fmtPct = (value: number) => `${(value * 100).toFixed(1)}%`;
 
 // --------------------------------------------------------------- UI bits
@@ -400,6 +427,8 @@ function OutboundPanel() {
   const [contractorStats, setContractorStats] = useState<AdminContractorStats | null>(null);
   const [enrichBusy, setEnrichBusy] = useState(false);
   const [controlsBusy, setControlsBusy] = useState<number | null>(null);
+  const [refreshToken, setRefreshToken] = useState(0);
+  const lastRefreshRef = useRef(0);
 
   const loadConfig = useCallback(async () => {
     setLoading(true);
@@ -530,7 +559,9 @@ function OutboundPanel() {
           result.no_email
         } sem e-mail. O worker envia respeitando tetos e quiet hours.`,
       });
-      void loadConfig();
+      void loadBatches();
+      setRefreshToken((value) => value + 1);
+      setStatus(await fetchAdminOutboundStatus().catch(() => null));
     } catch (e) {
       if (e instanceof AdminApiError) {
         setSendState({ state: "blocked", message: e.message });
@@ -538,7 +569,7 @@ function OutboundPanel() {
         setSendState({ state: "error", message: "Falha ao contactar o servidor." });
       }
     }
-  }, [sim, city, loadConfig]);
+  }, [sim, city, loadConfig, loadBatches]);
 
   const toggleFlag = useCallback(
     async (key: "send_enabled" | "enrich_enabled", next: boolean) => {
@@ -562,6 +593,8 @@ function OutboundPanel() {
     try {
       const result = await triggerAdminOutboundWorker();
       setStatus(await fetchAdminOutboundStatus());
+      void loadBatches();
+      setRefreshToken((value) => value + 1);
       setSendState({
         state: "ok",
         message: `Tick do worker: ${result.sent} enviado(s)${
@@ -573,7 +606,7 @@ function OutboundPanel() {
     } finally {
       setToggling(false);
     }
-  }, []);
+  }, [loadBatches]);
 
   const loadHealth = useCallback(async () => {
     setHealthBusy(true);
@@ -943,7 +976,7 @@ function OutboundPanel() {
               </span>
               <span className="text-[11px] text-slate-400">
                 válidos {readiness.valid} · confirmados {readiness.confirmed} ·
-                quarentena {readiness.quarantined}
+                sem nicho {readiness.quarantined}
               </span>
               <span className="ml-auto text-[11px] text-slate-400">
                 capacidade hoje: {readiness.capacity_today}
@@ -1148,7 +1181,7 @@ function OutboundPanel() {
                     prontas <b className="text-emerald-300">{by.ready ?? 0}</b>
                   </span>
                   <span>
-                    quarentena <b className="text-amber-300">{by.quarantined ?? 0}</b>
+                    bloqueadas <b className="text-amber-300">{by.quarantined ?? 0}</b>
                   </span>
                   <span className="ml-auto">
                     hoje {stats.state.jobs_today}/{stats.quota ?? 750} · enriquecimento{" "}
@@ -2336,13 +2369,31 @@ function BillingFunnelPanel() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchAdminBillingFunnel()
-      .then(setData)
-      .catch((e) =>
-        setError(
-          e instanceof AdminApiError ? e.message : "Falha ao carregar o funil de checkout."
-        )
-      );
+    let alive = true;
+    const load = () => {
+      fetchAdminBillingFunnel()
+        .then((value) => {
+          if (alive) {
+            setData(value);
+            setError(null);
+          }
+        })
+        .catch((e) => {
+          if (alive) {
+            setError(
+              e instanceof AdminApiError
+                ? e.message
+                : "Falha ao carregar o funil de checkout."
+            );
+          }
+        });
+    };
+    load();
+    const id = setInterval(load, 30_000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
   }, []);
 
   const f = data?.funnel;
@@ -2355,17 +2406,19 @@ function BillingFunnelPanel() {
       <div data-testid="billing-funnel">
         {error ? <p className="text-xs text-rose-400">{error}</p> : null}
         {!f ? (
-          <p className="text-xs text-slate-500">A carregar…</p>
+          error ? null : <p className="text-xs text-slate-500">A carregar…</p>
         ) : (
           <>
             <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
               {[
                 { label: "Sessões criadas", value: f.sessions_created },
                 { label: "Com e-mail", value: f.sessions_with_email },
-                { label: "Pagas", value: f.sessions_completed },
-                { label: "Recuperadas", value: f.sessions_recovered },
+                { label: "Pagas (checkout)", value: f.sessions_completed },
+                { label: "Lembretes enviados", value: f.sessions_reminded },
+                { label: "Recuperadas (pagas)", value: f.sessions_recovered_paid },
                 { label: "Abertas", value: f.sessions_open },
                 { label: "Expiradas", value: f.sessions_expired },
+                { label: "Stripe completos", value: f.stripe_completed },
               ].map((k) => (
                 <div key={k.label} className="rounded-lg border border-white/10 p-2">
                   <div className="text-[10px] uppercase tracking-wider text-slate-500">
@@ -2395,6 +2448,18 @@ function BillingFunnelPanel() {
               </span>
               <span className="text-slate-600">{data?.open_sessions} sessão(ões) aberta(s)</span>
             </div>
+            <p
+              className={cn(
+                "mt-2 rounded-lg border px-2.5 py-2 text-[10px]",
+                f.reconciliation_status === "ok"
+                  ? "border-emerald-500/15 bg-emerald-500/[0.04] text-emerald-200"
+                  : "border-amber-500/20 bg-amber-500/[0.05] text-amber-200"
+              )}
+            >
+              {f.reconciliation_status === "ok"
+                ? "Stripe e checkout reconciliados."
+                : `Reconciliação pendente (${f.reconciliation_status}): Stripe completos ${f.stripe_completed}, checkout pagas ${f.sessions_completed}, Stripe expirados ${f.stripe_expired}.`}
+            </p>
           </>
         )}
       </div>
@@ -2470,6 +2535,7 @@ export default function AdminPage() {
   const [sessions, setSessions] = useState<AdminSession[]>([]);
   const [revoking, setRevoking] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  const [dataErrors, setDataErrors] = useState<Record<string, string>>({});
   const [acking, setAcking] = useState<number | null>(null);
   const [ackError, setAckError] = useState<string | null>(null);
   const [pushTest, setPushTest] = useState<{ state: "idle" | "sending" | "ok" | "error"; message?: string }>(
@@ -2478,59 +2544,79 @@ export default function AdminPage() {
 
   const load = useCallback(async () => {
     setBusy(true);
+    setDataErrors({});
     try {
-      // searchbug falha isoladamente: a telemetria é secundária e não deve
-      // apagar o resto do painel.
-      const sb = fetchAdminSearchbug(7, 25).catch(() => null);
-      const ps = fetchAdminPhoneSampleProgress(90).catch(() => null);
-      const pu = fetchAdminPush(7, 25).catch(() => null);
-      const ab = fetchAdminDigestAb(30).catch(() => null);
-      const pl = fetchAdminPlanner().catch(() => null);
-      const cl = fetchAdminCreditLedger(1, 50).catch(() => null);
-      const cb = fetchAdminCreditBalance(1).catch(() => null);
-      const ss = fetchAdminSessions(200).catch(() => null);
-      const [ov, src, rn, rv, al, sbm, psm, pum, abm, plm, clm, cbm, ssm] = await Promise.all([
-        fetchAdminOverview(),
-        fetchAdminSources(),
-        fetchAdminScraperRuns(15),
-        fetchAdminReveals(50, true),
-        fetchAdminAlerts(20),
-        sb,
-        ps,
-        pu,
-        ab,
-        pl,
-        cl,
-        cb,
-        ss,
+      const [ov, src, rn, rv, al] = await Promise.all([
+        safeRequest(fetchAdminOverview()),
+        safeRequest(fetchAdminSources()),
+        safeRequest(fetchAdminScraperRuns(15)),
+        safeRequest(fetchAdminReveals(50, true)),
+        safeRequest(fetchAdminAlerts(20)),
       ]);
-      setOverview(ov);
-      setSources(src);
-      setRuns(rn.runs);
-      setReveals(rv.reveals);
-      setAlerts(al.alerts);
-      setSearchbug(sbm);
-      setPhoneSamples(psm);
-      setPush(pum);
-      setDigestAb(abm);
-      setPlanner(plm);
-      setCreditLedger(clm);
-      setCreditBalance(cbm);
-      setSessions(ssm?.sessions ?? []);
-      setGate("ok");
-    } catch (e) {
-      if (e instanceof AdminApiError) {
-        if (e.status === 401) return setGate("unauthenticated");
-        if (e.status === 403) return setGate("forbidden");
+
+      const primary = { overview: ov, sources: src, scraperRuns: rn, reveals: rv, alerts: al };
+      for (const result of Object.values(primary)) {
+        if (
+          !result.ok &&
+          result.error instanceof AdminApiError &&
+          (result.error.status === 401 || result.error.status === 403)
+        ) {
+          setGate(result.error.status === 401 ? "unauthenticated" : "forbidden");
+          return;
+        }
       }
-      setGate("error");
+
+      const errors: Record<string, string> = {};
+      if (ov.ok) setOverview(ov.value); else errors.overview = errorMessage(ov.error);
+      if (src.ok) setSources(src.value); else errors.sources = errorMessage(src.error);
+      if (rn.ok) setRuns(rn.value.runs); else errors.scraperRuns = errorMessage(rn.error);
+      if (rv.ok) setReveals(rv.value.reveals); else errors.reveals = errorMessage(rv.error);
+      if (al.ok) setAlerts(al.value.alerts); else errors.alerts = errorMessage(al.error);
+      setDataErrors(errors);
+      setGate("ok");
+
+      // Secundários não bloqueiam o render principal nem uns aos outros.
+      void Promise.all([
+        safeRequest(fetchAdminSearchbug(7, 25)),
+        safeRequest(fetchAdminPhoneSampleProgress(90)),
+        safeRequest(fetchAdminPush(7, 25)),
+        safeRequest(fetchAdminDigestAb(30)),
+        safeRequest(fetchAdminPlanner()),
+        safeRequest(fetchAdminCreditLedger(1, 50)),
+        safeRequest(fetchAdminCreditBalance(1)),
+        safeRequest(fetchAdminSessions(200)),
+      ]).then(([sb, ps, pu, ab, pl, cl, cb, ss]) => {
+        const secondary: Record<string, string> = {};
+        if (sb.ok) setSearchbug(sb.value); else secondary.searchbug = errorMessage(sb.error);
+        if (ps.ok) setPhoneSamples(ps.value); else secondary.phoneSamples = errorMessage(ps.error);
+        if (pu.ok) setPush(pu.value); else secondary.push = errorMessage(pu.error);
+        if (ab.ok) setDigestAb(ab.value); else secondary.digestAb = errorMessage(ab.error);
+        if (pl.ok) setPlanner(pl.value); else secondary.planner = errorMessage(pl.error);
+        if (cl.ok) setCreditLedger(cl.value); else secondary.creditLedger = errorMessage(cl.error);
+        if (cb.ok) setCreditBalance(cb.value); else secondary.creditBalance = errorMessage(cb.error);
+        if (ss.ok) setSessions(ss.value.sessions ?? []); else secondary.sessions = errorMessage(ss.error);
+        setDataErrors((prev) => ({ ...prev, ...secondary }));
+      });
+    } catch (error) {
+      if (error instanceof AdminApiError && (error.status === 401 || error.status === 403)) {
+        setGate(error.status === 401 ? "unauthenticated" : "forbidden");
+        return;
+      }
+      setDataErrors({ overview: errorMessage(error) });
+      setGate("ok");
     } finally {
       setBusy(false);
     }
   }, []);
 
+
   useEffect(() => {
     void load();
+    const onFocus = () => {
+      void load();
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, [load]);
 
   const ackAlert = useCallback(async (alert: AdminAlert) => {
@@ -2621,14 +2707,21 @@ export default function AdminPage() {
   const criticalAlerts = alerts.filter((alert) =>
     ["critical", "error", "fail"].includes(String(alert.level).toLowerCase())
   );
+  const dataDegraded = Boolean(
+    dataErrors.overview || dataErrors.sources || dataErrors.alerts
+  );
   const overallState: "ok" | "warn" | "fail" =
     criticalAlerts.length > 0 ||
     sources?.freshness?.state === "fail" ||
     cities.some(([, v]) => v.state === "fail")
       ? "fail"
-      : unhealthy.length > 0 || sources?.freshness?.state === "warn"
+      : dataDegraded || unhealthy.length > 0 || sources?.freshness?.state === "warn"
         ? "warn"
         : "ok";
+  const secondaryErrors = Object.entries(dataErrors).filter(
+    ([key]) => !["overview", "sources", "scraperRuns", "reveals", "alerts"].includes(key)
+  );
+
   const overallLabel =
     overallState === "fail"
       ? "Operação crítica"
@@ -2665,12 +2758,23 @@ export default function AdminPage() {
           Atualizar
         </button>
       </header>
+      {dataErrors.overview ? (
+        <WidgetError message={dataErrors.overview} />
+      ) : null}
+      {secondaryErrors.length ? (
+        <div className="rounded-xl border border-amber-400/20 bg-amber-500/[0.05] px-3 py-2 text-[11px] text-amber-200">
+          Falhas parciais: {" "}
+          {secondaryErrors
+            .map(([key, message]) => `${key} (${message})`)
+            .join(" · ")}
+        </div>
+      ) : null}
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           label="Leads"
           value={overview?.leads.total ?? "—"}
-          sub={`${overview?.leads.today ?? 0} hoje · ${overview?.leads.last_24h ?? 0} em 24h`}
+          sub={`${overview?.leads.reported_today ?? overview?.leads.today ?? 0} reportados hoje · ${overview?.leads.inserted_24h ?? overview?.leads.last_24h ?? 0} inseridos nas últimas 24h`}
           icon={<Database className="h-4 w-4" />}
           tone="sky"
         />
@@ -2710,6 +2814,7 @@ export default function AdminPage() {
           icon={<Database className="h-4 w-4" />}
           hint={sources?.freshness ? `frescura ${sources.freshness.state}` : "city health"}
         >
+          <WidgetError message={dataErrors.sources} />
           <div className="mb-4 flex flex-wrap items-center gap-2.5">
             <StatusPill
               state={
@@ -2743,6 +2848,12 @@ export default function AdminPage() {
               {cities.map(([city, v]) => {
                 const state = v.state ?? "unknown";
                 const age = v.age_hours ?? null;
+                const rawAge = v.raw_age_hours ?? age;
+                const ageTitle = `Idade útil (SLA de fim de semana): ${
+                  age === null ? "n/d" : `${age.toFixed(1)}h`
+                } · idade bruta: ${
+                  rawAge === null ? "n/d" : `${rawAge.toFixed(1)}h`
+                } · factos na fonte nas últimas 24h: ${v.facts_24h ?? 0}`;
                 const barWidth = Math.min(100, Math.max(2, ((age ?? 0) / 48) * 100));
                 const barClass =
                   state === "fail"
@@ -2779,14 +2890,19 @@ export default function AdminPage() {
                     </div>
                     <div className="mt-2 grid grid-cols-3 gap-1 text-[9px] text-slate-500">
                       <span>
-                        <b className="block text-[11px] text-slate-300">{(v.facts_24h ?? 0).toLocaleString("pt-PT")}</b>
-                        factos 24h
+                        <b
+                          className="block text-[11px] text-slate-300"
+                          title="Registos com date_reported nas últimas 24h na fonte"
+                        >
+                          {(v.facts_24h ?? 0).toLocaleString("pt-PT")}
+                        </b>
+                        factos fonte 24h
                       </span>
-                      <span>
+                      <span title={ageTitle}>
                         <b className="block text-[11px] text-slate-300">
                           {age === null ? "—" : age < 48 ? `${age.toFixed(1)}h` : `${Math.round(age / 24)}d`}
                         </b>
-                        idade
+                        idade útil ⓘ
                       </span>
                       <span>
                         <b className="block text-[11px] text-slate-300">{v.failure_count ?? 0}</b>
@@ -3491,6 +3607,7 @@ export default function AdminPage() {
         icon={<Activity className="h-4 w-4" />}
         hint={`${reveals.length} registo(s)`}
       >
+          <WidgetError message={dataErrors.reveals} />
         {reveals.length === 0 ? (
           <p className="text-xs text-slate-500">Nada pendente: nenhum reveal voltou ao pool sem estorno.</p>
         ) : (
@@ -3539,6 +3656,7 @@ export default function AdminPage() {
       <div className="grid gap-5 lg:grid-cols-2">
         {/* -------------------------------------------------- runs */}
         <Card title="Histórico de runs do scraper" icon={<RefreshCcw className="h-4 w-4" />}>
+          <WidgetError message={dataErrors.scraperRuns} />
           {runs.length === 0 ? (
             <p className="text-xs text-slate-500">Sem runs registados.</p>
           ) : (
@@ -3581,6 +3699,7 @@ export default function AdminPage() {
           icon={<AlertTriangle className="h-4 w-4" />}
           hint={`${alerts.length} código(s)`}
         >
+          <WidgetError message={dataErrors.alerts} />
           {ackError ? (
             <p className="mb-2 rounded-lg border border-rose-400/20 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-200">
               {ackError}

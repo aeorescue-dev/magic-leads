@@ -53,7 +53,7 @@ export default function DataPlaneStrip() {
             Data Plane
           </p>
           <p className="text-[11px] text-slate-500">
-            Ingestão, quarentena, frescura e scoring em tempo quase real.
+            Ingestão, placeholders, frescura e scoring em tempo quase real.
           </p>
         </div>
         <Link
@@ -72,9 +72,9 @@ export default function DataPlaneStrip() {
           tone={failures ? "amber" : "emerald"}
         />
         <MetricCard
-          label="Quarentena"
+          label="Placeholders de teste"
           value={data ? placeholders : "—"}
-          sub={`${(data?.quarantine.other_quarantined ?? 0).toLocaleString("pt-PT")} outras entidades`}
+          sub={`${(data?.quarantine.other_quarantined ?? 0).toLocaleString("pt-PT")} entidades bloqueadas no enriquecimento`}
           icon={<ShieldCheck className="h-4 w-4" />}
           tone="violet"
         />
@@ -106,7 +106,7 @@ export default function DataPlaneStrip() {
           {failures ? "ingestão com falhas" : "ingestão limpa"}
         </StatusPill>
         <StatusPill state={placeholders ? "warn" : "ok"}>
-          {placeholders ? `${placeholders} placeholders` : "quarentena limpa"}
+          {placeholders ? `${placeholders} placeholders ativos` : "sem placeholders ativos"}
         </StatusPill>
         <span className={cn("ml-auto", lastFreshness?.status === "ok" ? "text-emerald-300" : "text-amber-300")}>
           {lastFreshness?.status === "ok" ? "frescura ok" : "frescura a rever"}

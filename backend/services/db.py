@@ -6108,19 +6108,43 @@ class DatabaseService:
                 " SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) AS completed, "
                 " SUM(CASE WHEN status='expired' THEN 1 ELSE 0 END) AS expired, "
                 " SUM(CASE WHEN status='open' THEN 1 ELSE 0 END) AS still_open, "
-                " SUM(CASE WHEN reminders > 0 THEN 1 ELSE 0 END) AS recovered "
+                " SUM(CASE WHEN reminders > 0 THEN 1 ELSE 0 END) AS reminded, "
+                " SUM(CASE WHEN status='completed' AND reminders > 0 THEN 1 ELSE 0 END) AS recovered_paid "
                 "FROM checkout_sessions"
+            ).fetchone()
+            stripe = conn.execute(
+                "SELECT "
+                " SUM(CASE WHEN event_type='checkout.session.completed' THEN 1 ELSE 0 END) AS completed, "
+                " SUM(CASE WHEN event_type='checkout.session.expired' THEN 1 ELSE 0 END) AS expired "
+                "FROM stripe_events"
             ).fetchone()
             created = int(row["created"] or 0)
             with_email = int(row["with_email"] or 0)
             completed = int(row["completed"] or 0)
+            stripe_completed = int(stripe["completed"] or 0)
+            stripe_expired = int(stripe["expired"] or 0)
+            if completed == stripe_completed:
+                reconciliation = "ok"
+            elif stripe_completed and not completed:
+                reconciliation = "stripe_events_without_checkout"
+            elif completed and not stripe_completed:
+                reconciliation = "checkout_without_stripe_event"
+            else:
+                reconciliation = "count_mismatch"
             return {
                 "sessions_created": created,
                 "sessions_with_email": with_email,
                 "sessions_completed": completed,
                 "sessions_expired": int(row["expired"] or 0),
                 "sessions_open": int(row["still_open"] or 0),
-                "sessions_recovered": int(row["recovered"] or 0),
+                # `reminded` = lembrete enviado (nao pagamento recuperado).
+                "sessions_reminded": int(row["reminded"] or 0),
+                "sessions_recovered_paid": int(row["recovered_paid"] or 0),
+                # Alias retrocompativel: nao usar na UI como "recuperadas".
+                "sessions_recovered": int(row["reminded"] or 0),
+                "stripe_completed": stripe_completed,
+                "stripe_expired": stripe_expired,
+                "reconciliation_status": reconciliation,
                 "email_capture_rate": round(with_email / created, 4) if created else 0.0,
                 "conversion_rate": round(completed / created, 4) if created else 0.0,
             }
@@ -7360,8 +7384,13 @@ class DatabaseService:
                 "today": today,
                 "leads": {
                     "total": total_leads,
+                    # `today`/`last_24h` ficam como aliases retrocompatíveis;
+                    # os nomes explícitos evitam misturar data do incidente
+                    # (`date_reported`) com data de inserção (`created_at`).
                     "today": leads_today,
                     "last_24h": leads_24h,
+                    "reported_today": leads_today,
+                    "inserted_24h": leads_24h,
                 },
                 "users": {"total": total_users, "today": users_today},
                 "reveals": {
