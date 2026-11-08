@@ -13,6 +13,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Iterable, Optional
 
+from .freshness_policy import effective_age_hours, raw_age_hours
+
 # Códigos gravados em `system_alerts` (o painel/Control Tower filtra por eles).
 CODE_CITY_STALE = "SCRAPER_CITY_STALE"
 CODE_ZERO_INSERTS = "SCRAPER_ZERO_INSERTS"
@@ -127,9 +129,10 @@ def freshness_problems(
     for city in stale_cities if stale_cities is not None else last_dates.keys():
         key = str(city).strip().upper()
         last = parse_dt(last_dates.get(key))
-        if last is not None and now - last <= timedelta(hours=stale_hours):
+        age_h = effective_age_hours(key, last, now)
+        if age_h is not None and age_h <= stale_hours:
             continue
-        age_h = round((now - last).total_seconds() / 3600, 1) if last else None
+        raw_age = raw_age_hours(key, last, now)
         problems.append(
             {
                 "code": CODE_CITY_STALE,
@@ -144,6 +147,7 @@ def freshness_problems(
                     "city": key,
                     "last_date_reported": last.isoformat() if last else None,
                     "age_hours": age_h,
+                    "raw_age_hours": raw_age,
                     "threshold_hours": stale_hours,
                 },
             }

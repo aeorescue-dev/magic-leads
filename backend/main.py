@@ -100,6 +100,7 @@ from .services import (
     enrichment_queue,
     enrichment_scheduler,
     freshness,
+    freshness_policy,
     geo_lookup,
     inbox_sync,
     investor,
@@ -2068,7 +2069,12 @@ async def admin_sources(_admin: dict = Depends(_require_admin_user)):
     counts = {"ok": 0, "warn": 0, "fail": 0, "unknown": 0}
     for city, health in city_health.items():
         fact = facts.get(str(city).strip().upper(), {})
-        age = age_hours(fact.get("last_fact"))
+        age = freshness_policy.effective_age_hours(
+            city, fact.get("last_fact"), datetime.now(timezone.utc)
+        )
+        raw_age = freshness_policy.raw_age_hours(
+            city, fact.get("last_fact"), datetime.now(timezone.utc)
+        )
         failures = int(health.get("failure_count") or 0)
         circuit = health.get("circuit_open_until")
         if circuit or failures >= 3 or (age is not None and age > 36):
@@ -2102,6 +2108,7 @@ async def admin_sources(_admin: dict = Depends(_require_admin_user)):
                 "created_24h": int(fact.get("created_24h") or 0),
                 "lead_total": int(fact.get("total") or 0),
                 "age_hours": age,
+                "raw_age_hours": raw_age,
                 "state": state,
                 "state_reason": reason,
             }
@@ -5010,7 +5017,10 @@ async def _boston_source_alert(
         )
         return
 
-    age_h = (now - source_max).total_seconds() / 3600
+    age_h = freshness_policy.effective_age_hours("BOSTON", source_max, now)
+    raw_age_h = freshness_policy.raw_age_hours("BOSTON", source_max, now)
+    if age_h is None:
+        age_h = 0.0
     if modified and resource_changed:
         await emit(
             "warning",
@@ -5026,16 +5036,25 @@ async def _boston_source_alert(
                 "SCRAPER_SOURCE_STALE:BOSTON",
                 (
                     f"BOSTON: CKAN atualizado ha {lag_h:.1f}h a frente do "
-                    f"ultimo facto ({age_h:.1f}h)"
+                    f"ultimo facto ({age_h:.1f}h uteis; {raw_age_h:.1f}h brutas)"
                 ),
-                {**base_ctx, "resource_lag_hours": round(lag_h, 1)},
+                {
+                    **base_ctx,
+                    "resource_lag_hours": round(lag_h, 1),
+                    "age_hours": round(age_h, 1),
+                    "raw_age_hours": raw_age_h,
+                },
             )
     if age_h > BOSTON_SOURCE_STALE_HOURS:
         await emit(
             "warning",
             "SCRAPER_CITY_STALE:BOSTON",
             f"BOSTON: {age_h:.1f}h sem factos na fonte {resource_name}",
-            {**base_ctx, "age_hours": round(age_h, 1)},
+            {
+                **base_ctx,
+                "age_hours": round(age_h, 1),
+                "raw_age_hours": raw_age_h,
+            },
         )
     if modified and (now - modified).total_seconds() / 3600 > BOSTON_CONNECTOR_STALE_HOURS:
         await emit(
@@ -5142,7 +5161,8 @@ async def _fetch_boston_311(entry: dict) -> dict:
 
         # Se a fonte voltou a estar fresca, fecha automaticamente os alertas
         # antigos de Boston (o histórico fica com acknowledged=1).
-        if new_max and (now - new_max).total_seconds() / 3600 <= BOSTON_SOURCE_STALE_HOURS:
+        boston_age = freshness_policy.effective_age_hours("BOSTON", new_max, now)
+        if new_max and boston_age is not None and boston_age <= BOSTON_SOURCE_STALE_HOURS:
             for stale_code in (
                 "SCRAPER_CITY_STALE:BOSTON",
                 "SCRAPER_SOURCE_STALE:BOSTON",

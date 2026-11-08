@@ -115,18 +115,22 @@ def test_zero_insert_streak_stops_at_error_run():
 
 # ------------------------------------------------------------ freshness
 def test_stale_city_is_flagged_with_age():
-    city_last = {
-        "NYC": _iso(NOW - timedelta(hours=3)),
-        "BOSTON": _iso(NOW - timedelta(hours=30)),
-    }
+    city_last = {"NYC": _iso(NOW - timedelta(hours=30))}
     runs = [{"status": "success", "inserted": 5, "started_at": _iso(NOW - timedelta(hours=1))}]
     problems = sg.freshness_problems(NOW, city_last, runs, interval_hours=6)
     codes = [p["code"] for p in problems]
     assert sg.CODE_CITY_STALE in codes
     stale = [p for p in problems if p["code"] == sg.CODE_CITY_STALE]
     assert len(stale) == 1
-    assert stale[0]["city"] == "BOSTON"
+    assert stale[0]["city"] == "NYC"
     assert stale[0]["context"]["age_hours"] == 30.0
+
+
+def test_boston_weekend_is_not_stale():
+    city_last = {"BOSTON": _iso(NOW - timedelta(hours=30))}
+    runs = [{"status": "success", "inserted": 5, "started_at": _iso(NOW - timedelta(hours=1))}]
+    problems = sg.freshness_problems(NOW, city_last, runs, interval_hours=6)
+    assert sg.CODE_CITY_STALE not in [p["code"] for p in problems]
 
 
 def test_missing_last_date_is_flagged():

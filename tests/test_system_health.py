@@ -85,9 +85,17 @@ def test_ingest_city_40h_is_warn_com_limite_36h():
 
 
 def test_ingest_city_40h_is_fail():
-    layer = sh.score_ingest([_city("BOSTON", 40)], [_run()], NOW)
+    layer = sh.score_ingest([_city("NYC", 40)], [_run()], NOW)
     assert layer["score"] == 50
     assert layer["status"] == "fail"
+
+
+def test_ingest_boston_weekend_uses_business_age():
+    # NOW e' segunda 11:00 ET; 40h brutas caiem no fim de semana.
+    layer = sh.score_ingest([_city("BOSTON", 40)], [_run()], NOW)
+    assert layer["score"] == 100
+    assert layer["status"] == "ok"
+    assert layer["reasons"] == []
 
 
 def test_ingest_missing_city_date_is_fail():

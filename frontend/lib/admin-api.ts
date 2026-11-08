@@ -84,6 +84,7 @@ export interface AdminCityHealth {
     created_24h?: number;
     lead_total?: number;
     age_hours?: number | null;
+    raw_age_hours?: number | null;
     state?: "ok" | "warn" | "fail" | "unknown";
     state_reason?: string;
   };

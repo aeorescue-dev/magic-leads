@@ -29,6 +29,7 @@ from ..utils.time import utcnow_aware
 from . import control_tower
 from .alert_dedup import dedupe_alerts
 from .db import SERVED_CITIES, db_service, get_connection
+from .freshness_policy import effective_age_hours, raw_age_hours
 from .scrape_guard import parse_dt, zero_insert_streak
 
 LAYER_ORDER = (
@@ -166,7 +167,10 @@ def score_ingest(
     oldest = 0.0
     for row in cities:
         city = str(row.get("city") or "").upper()
-        age = _age_hours(row.get("last_fact"), now)
+        # Boston publica em dias uteis: a idade efetiva desconta o fim de
+        # semana. `raw_age_h` fica no payload para diagnostico.
+        age = effective_age_hours(city, row.get("last_fact"), now)
+        row["raw_age_h"] = raw_age_hours(city, row.get("last_fact"), now)
         row["age_h"] = age
         total = int(row.get("total") or 0)
         row["owner_pct"] = (
