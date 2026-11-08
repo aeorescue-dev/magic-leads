@@ -352,6 +352,13 @@ def test_infra_healthy_is_100():
     assert layer["score"] == 100
 
 
+def test_infra_gmail_warn_penalises_no_active_mailbox():
+    checks = [{"check_name": "gmail_tokens", "status": "warn"}]
+    layer = sh.score_infra(checks, 50.0, 1.0, 2.0, NOW)
+    assert layer["score"] == 80
+    assert layer["status"] == "warn"
+
+
 def test_infra_worker_and_gmail_fail():
     checks = [
         {"check_name": "worker", "status": "fail"},

@@ -23,6 +23,8 @@ AUTH_MARKERS = (
     "invalid grant",
     "unauthorized",
     "insufficient",
+    "missing_credentials",
+    "gmail auth failed",
     "401",
     "403",
 )

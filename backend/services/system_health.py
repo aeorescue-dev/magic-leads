@@ -624,9 +624,13 @@ def score_infra(
     elif status_of("worker") == "warn" or (worker_age_min is not None and worker_age_min > 5):
         penalties.append(10)
         reasons.append("Worker com heartbeat atrasado")
-    if status_of("gmail_tokens") == "fail":
+    gmail_status = status_of("gmail_tokens")
+    if gmail_status == "fail":
         penalties.append(40)
-        reasons.append("Tokens Gmail inválidos")
+        reasons.append("Tokens Gmail inv?lidos")
+    elif gmail_status == "warn":
+        penalties.append(20)
+        reasons.append("Gmail sem caixa ativa / aviso de autentica??o")
     if status_of("backup") == "fail" or (backup_age_h is not None and backup_age_h > 72):
         penalties.append(30)
         reasons.append("Backup em falta/antigo")

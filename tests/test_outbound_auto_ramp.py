@@ -273,6 +273,7 @@ def test_effective_cap_auto_ramp():
 
 def test_looks_like_auth_error():
     assert mailbox_guard.looks_like_auth_error("invalid_grant", None)
+    assert mailbox_guard.looks_like_auth_error("gmail auth failed: invalid_grant", 400)
     assert mailbox_guard.looks_like_auth_error("HTTP 403", 403)
     assert not mailbox_guard.looks_like_auth_error("HTTP 500", 500)
 

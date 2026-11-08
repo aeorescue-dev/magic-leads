@@ -78,6 +78,10 @@ class GmailSender:
         self._client: Optional[httpx.AsyncClient] = None
         self._tokens: dict[str, tuple[str, float]] = {}
         self._lock = asyncio.Lock()
+        # Ultima falha de autenticacao, para o sender devolver um erro
+        # classificavel por mailbox_guard (invalid_grant/401/403).
+        self._last_token_status: Optional[int] = None
+        self._last_token_error: Optional[str] = None
 
     def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
@@ -113,7 +117,10 @@ class GmailSender:
     async def _access_token(self, creds: dict) -> Optional[str]:
         client_id = creds.get("client_id")
         refresh_token = creds.get("refresh_token")
+        self._last_token_status = None
+        self._last_token_error = None
         if not (client_id and creds.get("client_secret") and refresh_token):
+            self._last_token_error = "missing_credentials"
             return None
         cache_key = f"{client_id}:{refresh_token[:12]}"
         cached = self._tokens.get(cache_key)
@@ -134,16 +141,30 @@ class GmailSender:
                     },
                 )
             except Exception as e:
+                self._last_token_error = f"network:{type(e).__name__}"
                 logger.warning(f"[GMAIL] Falha ao renovar token: {e}")
                 return None
             if resp.status_code != 200:
-                logger.warning(f"[GMAIL] Token HTTP {resp.status_code}: {resp.text[:200]}")
+                error_code = ""
+                try:
+                    body = resp.json()
+                    error_code = str(body.get("error") or "")
+                except Exception:
+                    error_code = ""
+                self._last_token_status = resp.status_code
+                self._last_token_error = error_code or f"HTTP_{resp.status_code}"
+                logger.warning(
+                    f"[GMAIL] Token HTTP {resp.status_code}: "
+                    f"{self._last_token_error} {resp.text[:160]}"
+                )
                 return None
             try:
                 token = resp.json().get("access_token")
             except Exception:
                 token = None
             if not token:
+                self._last_token_status = resp.status_code
+                self._last_token_error = "missing_access_token"
                 return None
             expires = int(resp.json().get("expires_in") or 3600)
             self._tokens[cache_key] = (token, time.monotonic() + max(60, expires - 60))
@@ -164,6 +185,12 @@ class GmailSender:
         creds = self._credentials(mailbox)
         token = await self._access_token(creds)
         if not token:
+            if self._last_token_status is not None:
+                return SendResult(
+                    success=False,
+                    error=f"gmail auth failed: {self._last_token_error or 'invalid_grant'}",
+                    http_status=self._last_token_status,
+                )
             return SendResult(success=False, error="gmail not configured")
 
         from_email = mailbox.get("email")
