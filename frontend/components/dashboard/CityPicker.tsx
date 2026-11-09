@@ -58,7 +58,7 @@ export function CityPicker({
           aria-haspopup="dialog"
           aria-expanded={open}
           onClick={() => setOpen((prev) => !prev)}
-          className="max-w-[190px] justify-between"
+          className="max-w-[132px] justify-between sm:max-w-[190px]"
         >
           <MapPin className="h-3.5 w-3.5 text-[var(--sd-accent)]" />
           <span className="truncate">{label}</span>
