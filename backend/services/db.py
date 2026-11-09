@@ -53,10 +53,10 @@ MAX_PUSH_DEVICES = 5
 # dashboard (`get_dashboard_summary`) e a aba Oportunidades (/api/leads/today)
 # nunca filtrarem universos diferentes.
 _JUNK_TERMS = [
-    "parking enforcement", "traffic signal", "general traffic", "signal",
+    "parking enforcement", "traffic signal", "general traffic",
     "sign repair", "missing sign", "bike rack", "boston bikes",
     "abandoned vehicle", "abandoned bicycle", "abandoned bike", "illegal auto",
-    "dead animal", "hydrant", "towing", "tpw", "transportation",
+    "dead animal", "hydrant", "towing", "transportation",
     "debug test", "test issue", "contractors complaint", "fair housing",
     "needle", "working beyond hours",
 ]
