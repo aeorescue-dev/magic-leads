@@ -440,8 +440,7 @@ def _send_ack(
             "Obrigado por contactar a Magic Leads. Recebemos a sua mensagem e "
             "um especialista está a analisá-la.",
             "",
-            f"Pode esperar uma resposta em até {sla} horas úteis. A sua "
-            f"referência é #LP-{thread.get('id')}.",
+            f"Pode esperar uma resposta em até {sla} horas úteis.",
         ]
         subject = "Recebemos a sua mensagem — Magic Leads"
     elif base == "es":
@@ -452,8 +451,7 @@ def _send_ack(
             "Gracias por contactar Magic Leads. Hemos recibido tu mensaje y un "
             "especialista lo está revisando.",
             "",
-            f"Puedes esperar una respuesta en un plazo de {sla} horas hábiles. "
-            f"Tu referencia es #LP-{thread.get('id')}.",
+            f"Puedes esperar una respuesta en un plazo de {sla} horas hábiles.",
         ]
         subject = "Hemos recibido tu mensaje — Magic Leads"
     else:
@@ -464,8 +462,7 @@ def _send_ack(
             "Thanks for reaching out to Magic Leads. We received your message and "
             "a specialist is reviewing it.",
             "",
-            f"You can expect a reply within {sla} business hours. Your reference is "
-            f"#LP-{thread.get('id')}.",
+            f"You can expect a reply within {sla} business hours.",
         ]
         subject = "We received your message - Magic Leads"
     if availability and availability.get("status") == "offline":
@@ -494,6 +491,28 @@ def _send_ack(
     )
 
 
+def send_acknowledgment(
+    *,
+    thread_id: int,
+    token: str,
+    email: str,
+    name: str,
+    lead_lang: str,
+    availability: Optional[dict] = None,
+) -> bool:
+    """Envia o acknowledgment fora do caminho crítico do pedido."""
+    return _send_ack(
+        {
+            "id": thread_id,
+            "email": email,
+            "name": name,
+            "lead_lang": lead_lang,
+        },
+        token,
+        availability=availability,
+    )
+
+
 def create_thread(
     *,
     email: str,
@@ -510,6 +529,7 @@ def create_thread(
     source_section: str = "",
     ip: str = "",
     user_agent: str = "",
+    send_ack: bool = True,
 ) -> dict:
     """Cria o fio e a primeira mensagem. Devolve o token em claro uma única vez."""
     init()
@@ -585,7 +605,9 @@ def create_thread(
         conn.close()
 
     availability = get_availability()
-    ack_sent = _send_ack(thread, token, availability=availability)
+    ack_sent = (
+        _send_ack(thread, token, availability=availability) if send_ack else False
+    )
     logger.info(
         "[LP-WIDGET] thread #%s criado intent=%s ack=%s",
         thread["id"],
@@ -595,6 +617,9 @@ def create_thread(
     return {
         "id": thread["id"],
         "token": token,
+        "email": email,
+        "name": _clean(name, 80),
+        "lead_lang": lead_lang,
         "created_at": thread["created_at"],
         "ack_sent": ack_sent,
         "sla_hours": int(getattr(settings, "LP_WIDGET_SLA_HOURS", 4) or 4),
@@ -680,7 +705,11 @@ def add_lead_message(token: str, message: str) -> Optional[dict]:
             raise ValueError("thread_full")
 
         now = _now()
-        lang = lp_ai.detect_language(text)
+        detected = lp_ai.detect_language(text)
+        existing_lang = _clean(thread["lead_lang"], 8)
+        lead_lang = existing_lang or detected
+        if existing_lang == "en" and detected != "en" and len(text) >= 12:
+            lead_lang = detected
         sla_at = now + timedelta(
             hours=max(1, int(getattr(settings, "LP_WIDGET_SLA_HOURS", 4) or 4))
         )
@@ -688,13 +717,13 @@ def add_lead_message(token: str, message: str) -> Optional[dict]:
             "INSERT INTO lp_messages ("
             "thread_id, direction, channel, body, lang, author_type, created_at"
             ") VALUES (?, 'inbound', 'widget', ?, ?, 'lead', ?)",
-            (thread["id"], text, lang, _iso(now)),
+            (thread["id"], text, detected, _iso(now)),
         )
         conn.execute(
             "UPDATE lp_threads SET status = 'new', updated_at = ?, "
             "last_message_at = ?, sla_due_at = ?, lead_lang = ?, "
             "ai_status = 'pending', ai_error = NULL WHERE id = ?",
-            (_iso(now), _iso(now), _iso(sla_at), lang, thread["id"]),
+            (_iso(now), _iso(now), _iso(sla_at), lead_lang, thread["id"]),
         )
         _event(conn, int(thread["id"]), "lead_message", {"message_id": cur.lastrowid})
         conn.commit()
@@ -742,6 +771,13 @@ def update_message_translation(
 
 
 MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+_ALLOWED_IMAGE_TYPES = {
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "image/bmp",
+}
 _ALLOWED_ATTACHMENT_TYPES = {
     "application/pdf",
     "text/plain",
@@ -790,7 +826,7 @@ def save_attachment(
     if len(payload) > MAX_ATTACHMENT_BYTES:
         raise ValueError("attachment_too_large")
     ctype = (content_type or "application/octet-stream").lower()
-    if not (ctype.startswith("image/") or ctype in _ALLOWED_ATTACHMENT_TYPES):
+    if not (ctype in _ALLOWED_IMAGE_TYPES or ctype in _ALLOWED_ATTACHMENT_TYPES):
         raise ValueError("unsupported_file_type")
 
     check = db.get_connection()
@@ -902,9 +938,14 @@ def enrich_thread(thread_id: int) -> dict:
             return {"ok": False, "status": "no_message"}
 
         text = message["body"] or ""
-        # O idioma guardado pode vir do locale do site; o texto é a fonte de
-        # verdade. Detetamos sempre para suportar EN/PT/ES/FR/DE/IT.
-        source = lp_ai.detect_language(text)
+        # `detected` descreve a mensagem; `reply_lang` é o idioma estável do
+        # lead e nunca deve oscilar por causa de um follow-up curto ("ok").
+        detected = lp_ai.detect_language(text)
+        existing_lang = _clean(thread["lead_lang"], 8)
+        reply_lang = existing_lang or detected
+        if existing_lang == "en" and detected != "en" and len(text) >= 12:
+            reply_lang = detected
+        source = detected
         existing_pt = _clean(message["body_pt"], MAX_REPLY_CHARS)
         provider = "existing"
 
@@ -917,7 +958,7 @@ def enrich_thread(thread_id: int) -> dict:
                 conn.execute(
                     "UPDATE lp_threads SET lead_lang = ?, ai_status = 'needs_key', "
                     "ai_error = ?, ai_updated_at = ? WHERE id = ?",
-                    (source, str(exc)[:300], _iso(), int(thread_id)),
+                    (reply_lang, str(exc)[:300], _iso(), int(thread_id)),
                 )
                 conn.commit()
                 return {"ok": False, "status": "needs_key", "error": str(exc)}
@@ -926,7 +967,7 @@ def enrich_thread(thread_id: int) -> dict:
                     "UPDATE lp_threads SET lead_lang = ?, ai_status = 'failed', "
                     "ai_error = ?, ai_updated_at = ? WHERE id = ?",
                     (
-                        source,
+                        reply_lang,
                         f"{type(exc).__name__}: {exc}"[:300],
                         _iso(),
                         int(thread_id),
@@ -952,18 +993,18 @@ def enrich_thread(thread_id: int) -> dict:
         out_provider = provider
         if not draft_out:
             try:
-                draft_out, out_provider = lp_ai.translate(draft_pt, "pt", source)
+                draft_out, out_provider = lp_ai.translate(draft_pt, "pt", reply_lang)
             except lp_ai.AiNotConfigured as exc:
                 conn.execute(
                     "UPDATE lp_threads SET lead_lang = ?, ai_status = 'needs_key', "
                     "ai_provider = ?, ai_error = ?, draft_pt = ?, draft_out = NULL, "
                     "draft_out_lang = ?, ai_updated_at = ? WHERE id = ?",
                     (
-                        source,
+                        reply_lang,
                         provider,
                         str(exc)[:300],
                         draft_pt,
-                        source,
+                        reply_lang,
                         _iso(),
                         int(thread_id),
                     ),
@@ -980,11 +1021,11 @@ def enrich_thread(thread_id: int) -> dict:
                     "ai_provider = ?, ai_error = ?, draft_pt = ?, draft_out = NULL, "
                     "draft_out_lang = ?, ai_updated_at = ? WHERE id = ?",
                     (
-                        source,
+                        reply_lang,
                         provider,
                         f"{type(exc).__name__}: {exc}"[:300],
                         draft_pt,
-                        source,
+                        reply_lang,
                         _iso(),
                         int(thread_id),
                     ),
@@ -997,11 +1038,11 @@ def enrich_thread(thread_id: int) -> dict:
             "ai_provider = ?, ai_error = NULL, draft_pt = ?, draft_out = ?, "
             "draft_out_lang = ?, ai_updated_at = ? WHERE id = ?",
             (
-                source,
+                reply_lang,
                 out_provider,
                 draft_pt,
                 draft_out,
-                source,
+                reply_lang,
                 _iso(),
                 int(thread_id),
             ),
@@ -1010,19 +1051,19 @@ def enrich_thread(thread_id: int) -> dict:
             conn,
             int(thread_id),
             "ai_enriched",
-            {"provider": out_provider, "lead_lang": source},
+            {"provider": out_provider, "lead_lang": reply_lang},
         )
         conn.commit()
         logger.info(
             "[LP-WIDGET] AI thread #%s provider=%s lang=%s",
             thread_id,
             out_provider,
-            source,
+            reply_lang,
         )
         return {
             "ok": True,
             "status": "ready",
-            "lead_lang": source,
+            "lead_lang": reply_lang,
             "provider": out_provider,
             "draft_pt": draft_pt,
             "draft_out": draft_out,

@@ -107,6 +107,27 @@ def test_lead_follow_up_reopens_thread():
     assert public["messages"][-1]["text"] == "One more question."
 
 
+def test_follow_up_does_not_flip_lead_language(monkeypatch):
+    monkeypatch.setattr(
+        lp_widget.lp_ai,
+        "translate",
+        lambda text, source, target: (text, "identity"),
+    )
+    created = _create(
+        message="Quero saber o preço e a disponibilidade na minha cidade."
+    )
+    before = lp_widget.get_thread_admin(created["id"])
+    assert before is not None
+    assert before["lead_lang"] == "pt"
+
+    lp_widget.add_lead_message(created["token"], "ok")
+    lp_widget.enrich_thread(created["id"])
+    after = lp_widget.get_thread_admin(created["id"])
+    assert after is not None
+    assert after["lead_lang"] == "pt"
+    assert after["draft_out_lang"] == "pt"
+
+
 def test_invalid_token_is_none():
     assert lp_widget.get_thread_public("not-a-real-token") is None
     assert lp_widget.add_lead_message("not-a-real-token", "hello") is None
@@ -278,6 +299,26 @@ def test_attachment_roundtrip():
     assert stored["content_type"] == "image/png"
 
 
+def test_attachment_rejects_svg_and_unknown_types():
+    created = _create()
+    with pytest.raises(ValueError):
+        lp_widget.save_attachment(
+            created["id"],
+            direction="inbound",
+            filename="vector.svg",
+            content_type="image/svg+xml",
+            data=b"<svg xmlns='http://www.w3.org/2000/svg'></svg>",
+        )
+    with pytest.raises(ValueError):
+        lp_widget.save_attachment(
+            created["id"],
+            direction="inbound",
+            filename="payload.bin",
+            content_type="application/octet-stream",
+            data=b"\x00\x01",
+        )
+
+
 def test_status_and_period_filters():
     created = _create()
     result = lp_widget.set_thread_status(created["id"], "archived")
@@ -331,6 +372,8 @@ def test_acknowledgment_uses_lead_language(monkeypatch):
     assert sent[1]["subject"].startswith("Recebemos")
     assert sent[2]["text"].startswith("Hi Mike,")
     assert sent[2]["subject"].startswith("We received")
+    assert all("#LP" not in item["text"] for item in sent)
+    assert all("refer" not in item["text"].lower() for item in sent)
 
 
 def test_reply_email_uses_lead_language(monkeypatch):

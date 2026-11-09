@@ -83,6 +83,22 @@ function now(): number {
   return Date.now();
 }
 
+function toThreadItems(
+  messages: {
+    id: number;
+    role: "lead" | "team";
+    text: string;
+    created_at: string;
+  }[]
+): ThreadItem[] {
+  return messages.map((message) => ({
+    id: `${message.role}-${message.id}`,
+    role: message.role,
+    text: message.text,
+    at: Number(new Date(message.created_at)) || now(),
+  }));
+}
+
 export default function LpWidgetPanel({
   mode,
   onClose,
@@ -122,15 +138,20 @@ export default function LpWidgetPanel({
   useEffect(() => {
     if (mode !== "live") return;
     let active = true;
-    fetchLpAvailability()
-      .then((data) => {
-        if (active) setAvailability(data);
-      })
-      .catch(() => {
-        // Sem disponibilidade, o widget assume o estado normal (nunca bloqueia).
-      });
+    const load = () => {
+      fetchLpAvailability()
+        .then((data) => {
+          if (active) setAvailability(data);
+        })
+        .catch(() => {
+          // Sem disponibilidade, o widget assume o estado normal (nunca bloqueia).
+        });
+    };
+    load();
+    const interval = window.setInterval(load, 60000);
     return () => {
       active = false;
+      window.clearInterval(interval);
     };
   }, [mode]);
 
@@ -222,14 +243,7 @@ export default function LpWidgetPanel({
       try {
         const data = await fetchLpThread(token);
         if (stopped) return;
-        setThread(
-          data.messages.map((message) => ({
-            id: `${message.role}-${message.id}`,
-            role: message.role,
-            text: message.text,
-            at: Number(new Date(message.created_at)) || now(),
-          }))
-        );
+        setThread(toThreadItems(data.messages));
         setAttachments(data.attachments || []);
         if (data.messages.some((message) => message.role === "team")) {
           setSending(false);
@@ -245,6 +259,40 @@ export default function LpWidgetPanel({
       window.clearInterval(interval);
     };
   }, [mode, token, step]);
+
+  useEffect(() => {
+    if (mode !== "live") return;
+    let stored: string | null = null;
+    try {
+      stored = window.sessionStorage.getItem("lp_widget_thread");
+    } catch {
+      return;
+    }
+    if (!stored) return;
+    let active = true;
+    fetchLpThread(stored)
+      .then((data) => {
+        if (!active) return;
+        setToken(stored);
+        setThread(toThreadItems(data.messages));
+        setAttachments(data.attachments || []);
+        setSending(false);
+        setStep(5);
+      })
+      .catch((err) => {
+        const status = (err as { status?: number } | null)?.status;
+        if (status === 400 || status === 404) {
+          try {
+            window.sessionStorage.removeItem("lp_widget_thread");
+          } catch {
+            // sessão indisponível
+          }
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [mode]);
 
   useEffect(() => {
     return () => {
@@ -270,6 +318,11 @@ export default function LpWidgetPanel({
     setSending(false);
     setToken(null);
     setAttachments([]);
+    try {
+      window.sessionStorage.removeItem("lp_widget_thread");
+    } catch {
+      // sessão indisponível
+    }
     onIntentChange?.(null);
     trackLpWidget("lp_widget_reset");
   }
@@ -905,7 +958,7 @@ export default function LpWidgetPanel({
                       type="file"
                       className="hidden"
                       disabled={uploadingAttachment}
-                      accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv"
+                      accept="image/png,image/jpeg,image/gif,image/webp,image/bmp,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv"
                       onChange={(event) => {
                         const file = event.target.files?.[0];
                         if (file) void uploadAttachment(file);

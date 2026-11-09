@@ -43,7 +43,10 @@ export default function AdminNav() {
   }, []);
 
   return (
-    <header className="sticky top-0 z-50 border-b border-white/[0.06] bg-[#080a0f]/80 backdrop-blur-2xl">
+    <header
+      data-admin-nav
+      className="sticky top-0 z-50 border-b border-white/[0.06] bg-[#080a0f]/80 backdrop-blur-2xl"
+    >
       <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-x-5 gap-y-2 px-4 py-2.5">
         <Link href="/admin" className="group flex items-center gap-2.5">
           <span className="relative flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-400 to-sky-500 text-[#06110d] shadow-[0_0_30px_-8px_rgba(16,185,129,0.8)]">

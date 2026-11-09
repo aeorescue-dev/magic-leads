@@ -99,27 +99,133 @@ def normalize_lang(value: Optional[str]) -> str:
     return base if base in LANG_NAMES else "en"
 
 
-def detect_language(text: str) -> str:
-    """Heurística para EN/PT/ES/FR/DE/IT.
+_LANG_MARKERS = {
+    "pt": (
+        "não",
+        "você",
+        "vocês",
+        "obrigado",
+        "obrigada",
+        "qual é",
+        "porque é",
+        "anúncios",
+        "proprietário",
+        "diferença",
+        "partilham",
+        "cidade",
+        "ofício",
+        "quero",
+        "gostaria",
+        "também",
+        "disponível",
+        "preço",
+        "orçamento",
+        "contato",
+        "contacto",
+        "trabalho",
+        "empresa",
+        "semana",
+        "oportunidade",
+    ),
+    "es": (
+        "estoy",
+        "anuncios",
+        "cómo",
+        "qué",
+        "dónde",
+        "cuánto",
+        "propietario",
+        "oportunidades",
+        "semana",
+        "cancelar",
+        "diferencia",
+        "comparten",
+        "como funciona",
+        "precio",
+        "ciudad",
+        "oficio",
+        "disponibilidad",
+        "quiero",
+        "gracias",
+        "hola",
+        "presupuesto",
+        "trabajo",
+        "también",
+        "disponible",
+        "necesito",
+        "puedo",
+        "tienen",
+        "día",
+        "hábil",
+    ),
+    "fr": (
+        "bonjour",
+        "je ",
+        "vous",
+        "nous",
+        "prix",
+        "travaux",
+        "est-ce",
+        "merci",
+        "avec",
+        "pour",
+    ),
+    "de": (
+        "hallo",
+        "ich ",
+        "sie ",
+        "preis",
+        "danke",
+        "arbeiten",
+        "und",
+        "nicht",
+    ),
+    "it": (
+        "ciao",
+        "sono ",
+        "prezzo",
+        "lavoro",
+        "grazie",
+        "preventivo",
+    ),
+}
 
-    O widget envia a pergunta já no idioma escolhido; para texto livre usamos
-    marcadores distintivos. O default é EN.
+
+def detect_language(text: str) -> str:
+    """Heurística por pontuação para EN/PT/ES/FR/DE/IT.
+
+    O widget envia a pergunta já no idioma escolhido; para texto livre contamos
+    marcadores distintivos e acentos fortes. O default é EN.
     """
     raw = (text or "").strip()
     low = raw.lower()
+    if not low:
+        return "en"
 
-    if any(token in low for token in ["não", "você", "vocês", "obrigado", "obrigada", "qual é", "porque é", "gasto", "anúncios", "oportunidades", "proprietário", "cancele", "diferença", "partilham", "oportunidade", "quero", "cidade", "ofício"]):
+    scores = {
+        lang: sum(1 for marker in markers if marker in low)
+        for lang, markers in _LANG_MARKERS.items()
+    }
+
+    pt_accent = any(char in low for char in "ãõç")
+    es_accent = any(char in raw for char in "¿¡") or "ñ" in low
+    if pt_accent:
+        scores["pt"] += 2
+    if es_accent:
+        scores["es"] += 2
+    if "ß" in low:
+        scores["de"] += 2
+
+    best_score = max(scores.values())
+    if best_score == 0:
+        return "en"
+    leaders = [lang for lang, score in scores.items() if score == best_score]
+    if len(leaders) == 1:
+        return leaders[0]
+    if pt_accent and "pt" in leaders:
         return "pt"
-    if any(token in raw for token in ["¿", "¡", "ñ"]) or any(
-        token in low for token in ["estoy", "anuncios", "cómo", "qué", "dónde", "cuánto", "propietario", "oportunidades", "semana", "cancelar", "diferencia", "comparten", "como funciona", "precio", "ciudad", "oficio", "disponibilidad", "quiero", "gracias", "hola", "presupuesto", "trabajo"]
-    ):
+    if es_accent and "es" in leaders:
         return "es"
-    if any(token in low for token in ["bonjour", "je ", "vous", "nous", "prix", "travaux", "est-ce"]):
-        return "fr"
-    if any(token in low for token in ["hallo", "ich ", "sie ", "preis", "danke", "arbeiten"]):
-        return "de"
-    if any(token in low for token in ["ciao", "sono ", "prezzo", "lavoro", "grazie"]):
-        return "it"
     return "en"
 
 

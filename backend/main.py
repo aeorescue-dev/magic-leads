@@ -9457,18 +9457,27 @@ async def lp_widget_create_thread(
                 source_section=payload.source_section or "landing_widget",
                 ip=request.client.host if request.client else "",
                 user_agent=request.headers.get("user-agent", ""),
+                send_ack=False,
             )
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    background_tasks.add_task(
+        lp_widget.send_acknowledgment,
+        thread_id=result["id"],
+        token=result["token"],
+        email=result["email"],
+        name=result["name"],
+        lead_lang=result["lead_lang"],
+        availability=result.get("availability"),
+    )
     background_tasks.add_task(lp_widget.enrich_thread, result["id"])
     return {
         "ok": True,
         "token": result["token"],
         "thread_id": result["id"],
         "sla_hours": result["sla_hours"],
-        "ack_sent": result["ack_sent"],
         "availability": _lp_public_availability(result.get("availability") or {}),
     }
 
@@ -9538,7 +9547,10 @@ async def lp_widget_upload_attachment(
 
 
 @app.get("/api/public/lp/threads/{token}/attachments/{attachment_id}")
-async def lp_widget_download_attachment(token: str, attachment_id: int):
+@limiter.limit("120/minute")
+async def lp_widget_download_attachment(
+    request: Request, token: str, attachment_id: int
+):
     _lp_widget_guard()
     thread_id = await anyio.to_thread.run_sync(
         lambda: lp_widget.thread_id_for_token(token)

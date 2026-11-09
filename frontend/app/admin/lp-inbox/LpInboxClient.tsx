@@ -88,6 +88,17 @@ function fmtNextOpen(value: string | null | undefined, timezone: string): string
   }
 }
 
+const WEEKDAY_LABELS = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
+
+function businessDaysLabel(days?: number[]): string {
+  const sorted = [...(days || [])].sort((a, b) => a - b);
+  if (sorted.join(",") === "0,1,2,3,4") return "Seg–Sex";
+  const labels = sorted
+    .map((day) => WEEKDAY_LABELS[day])
+    .filter((label): label is string => Boolean(label));
+  return labels.length ? labels.join(", ") : "Seg–Sex";
+}
+
 function statusLabel(status: string): string {
   if (status === "new") return "Novo";
   if (status === "replied") return "Respondido";
@@ -210,6 +221,7 @@ export default function LpInboxClient() {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const knownNewIdsRef = useRef<Set<number>>(new Set());
   const newAlertsReadyRef = useRef(false);
+  const baseTitleRef = useRef("");
 
   const {
     data: list,
@@ -241,7 +253,7 @@ export default function LpInboxClient() {
     shouldRetryOnError: false,
   });
 
-  const { data: newLeadsFeed } = useSWR(
+  const { data: newLeadsFeed, mutate: mutateNewLeads } = useSWR(
     demo ? null : "lp-inbox-new-leads",
     () => fetchLpThreads({ status: "new", limit: 200 }),
     {
@@ -369,14 +381,38 @@ export default function LpInboxClient() {
   }, [newLeadsFeed, demo]);
 
   useEffect(() => {
+    if (!baseTitleRef.current) {
+      baseTitleRef.current = document.title || "LP Inbox";
+    }
     document.title =
       unseenNew.length > 0
         ? `(${unseenNew.length}) Novo Lead - LP Inbox`
-        : "LP Inbox";
+        : baseTitleRef.current;
     return () => {
-      document.title = "LP Inbox";
+      document.title = baseTitleRef.current || "LP Inbox";
     };
   }, [unseenNew.length]);
+
+  useEffect(() => {
+    const nav = document.querySelector<HTMLElement>("[data-admin-nav]");
+    if (!nav) return;
+    const root = document.documentElement;
+    const update = () => {
+      root.style.setProperty(
+        "--admin-nav-height",
+        `${Math.ceil(nav.getBoundingClientRect().height)}px`
+      );
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(nav);
+    window.addEventListener("resize", update);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", update);
+      root.style.removeProperty("--admin-nav-height");
+    };
+  }, []);
 
   async function refresh() {
     if (refreshing) return;
@@ -384,7 +420,12 @@ export default function LpInboxClient() {
     const started = Date.now();
     try {
       if (!demo) {
-        await Promise.allSettled([mutateList(), mutateThread()]);
+        await Promise.allSettled([
+          mutateList(),
+          mutateThread(),
+          mutateNewLeads(),
+          mutateAvailability(),
+        ]);
       }
     } finally {
       const elapsed = Date.now() - started;
@@ -418,6 +459,7 @@ export default function LpInboxClient() {
 
   async function handleArchive(threadId: number, status: "new" | "archived") {
     await setLpThreadStatus(threadId, status);
+    setSelectedId(null);
     await Promise.all([mutateList(), mutateThread()]);
   }
 
@@ -492,7 +534,11 @@ export default function LpInboxClient() {
       className="min-h-screen bg-slate-50 text-slate-900"
       style={{ colorScheme: "light" }}
     >
-      <header className="border-b border-slate-200 bg-white">
+      <div
+        className="sticky z-40 shadow-sm"
+        style={{ top: "var(--admin-nav-height, 0px)" }}
+      >
+        <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-3">
           <Link
             href="/admin"
@@ -577,7 +623,7 @@ export default function LpInboxClient() {
       </header>
 
       {!demo && (
-        <div className="border-b border-slate-200 bg-white">
+        <div className="border-b border-slate-200 bg-white/95 backdrop-blur">
           <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-2 px-4 py-2">
             {availability ? (
               <>
@@ -602,7 +648,7 @@ export default function LpInboxClient() {
                   {availability.mode === "auto"
                     ? "Modo automático"
                     : "Override manual"}{" "}
-                  · Seg–Sex{" "}
+                  · {businessDaysLabel(availability.business_days)}{" "}
                   {String(availability.business_start).padStart(2, "0")}:00–
                   {String(availability.business_end).padStart(2, "0")}:00 ET
                 </span>
@@ -666,6 +712,7 @@ export default function LpInboxClient() {
           )}
         </div>
       )}
+      </div>
 
       {demo && (
         <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-[10.5px] font-semibold text-amber-900">
@@ -770,7 +817,10 @@ export default function LpInboxClient() {
                     <button
                       key={option.value}
                       type="button"
-                      onClick={() => setPeriod(option.value)}
+                      onClick={() => {
+                        setPeriod(option.value);
+                        setSelectedId(null);
+                      }}
                       className={`rounded-full border px-2 py-0.5 text-[9.5px] font-bold ${
                         period === option.value
                           ? "border-slate-900 bg-slate-900 text-white"
@@ -791,7 +841,10 @@ export default function LpInboxClient() {
                     <button
                       key={option.value}
                       type="button"
-                      onClick={() => setStatusFilter(option.value)}
+                      onClick={() => {
+                        setStatusFilter(option.value);
+                        setSelectedId(null);
+                      }}
                       className={`rounded-full border px-2 py-0.5 text-[9.5px] font-bold ${
                         statusFilter === option.value
                           ? "border-emerald-600 bg-emerald-600 text-white"
@@ -1192,7 +1245,7 @@ function ThreadDetail({
               type="file"
               className="hidden"
               disabled={uploading}
-              accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv"
+              accept="image/png,image/jpeg,image/gif,image/webp,image/bmp,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv"
               onChange={(event) => {
                 const file = event.target.files?.[0];
                 if (file) void handleUpload(file);
@@ -1293,6 +1346,7 @@ function ThreadDetail({
       )}
 
       <ReplyComposer
+        key={thread.id}
         thread={thread}
         onSend={onSend}
         initialPt={thread.draft_pt || ""}
@@ -1447,8 +1501,10 @@ function ReplyComposer({
   initialOut?: string;
   leadLang?: string;
 }) {
-  const [pt, setPt] = useState(initialPt);
-  const [en, setEn] = useState(initialOut);
+  const [ptEdit, setPtEdit] = useState<string | null>(null);
+  const [enEdit, setEnEdit] = useState<string | null>(null);
+  const pt = ptEdit ?? initialPt;
+  const en = enEdit ?? initialOut;
   const [sending, setSending] = useState(false);
   const [translating, setTranslating] = useState(false);
   const translatingRef = useRef(false);
@@ -1461,6 +1517,12 @@ function ReplyComposer({
   const [error, setError] = useState("");
   const finalLabel = (leadLang || "en").toUpperCase();
 
+  useEffect(() => {
+    if (ptEdit === null) {
+      lastTranslatedRef.current = initialPt;
+    }
+  }, [initialPt, ptEdit]);
+
   async function translate(): Promise<string | null> {
     if (!pt.trim() || translatingRef.current) return null;
     translatingRef.current = true;
@@ -1468,7 +1530,7 @@ function ReplyComposer({
     setTranslateError("");
     try {
       const out = await translateLpDraft(thread.id, pt.trim());
-      setEn(out.body_out);
+      setEnEdit(out.body_out);
       lastTranslatedRef.current = pt;
       return out.body_out;
     } catch (err) {
@@ -1503,8 +1565,8 @@ function ReplyComposer({
     try {
       const response = await onSend(thread.id, pt.trim(), finalText);
       setResult(response);
-      setPt("");
-      setEn("");
+      setPtEdit("");
+      setEnEdit("");
       lastTranslatedRef.current = "";
     } catch (err) {
       setError(
@@ -1538,7 +1600,7 @@ function ReplyComposer({
           </label>
           <textarea
             value={pt}
-            onChange={(event) => setPt(event.target.value)}
+            onChange={(event) => setPtEdit(event.target.value)}
             onBlur={() => void handlePtBlur()}
             rows={5}
             placeholder="Escreva a resposta em português para revisão…"
@@ -1562,7 +1624,7 @@ function ReplyComposer({
           </div>
           <textarea
             value={en}
-            onChange={(event) => setEn(event.target.value)}
+            onChange={(event) => setEnEdit(event.target.value)}
             onKeyDown={(event) => {
               if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
                 event.preventDefault();
