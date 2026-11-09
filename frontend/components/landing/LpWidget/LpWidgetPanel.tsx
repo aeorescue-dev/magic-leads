@@ -13,7 +13,6 @@ import {
   Flame,
   Lock,
   MessageCircle,
-  Phone,
   Send,
   ShieldCheck,
   X,
@@ -30,8 +29,15 @@ import {
   LP_INTENTS,
   LP_SAMPLES,
   LP_TRADES,
+  type LpIntentFlow,
   type LpIntentKey,
 } from "./data";
+import LpLanguagePicker from "./LpLanguagePicker";
+import {
+  INTENT_L10N,
+  WIDGET_COPY,
+  type WidgetLang,
+} from "./i18n";
 
 export interface LpDemoSubmission {
   intent: LpIntentKey;
@@ -41,7 +47,6 @@ export interface LpDemoSubmission {
   company: string;
   city: string;
   trade: string;
-  call: boolean;
 }
 
 type Step = 1 | 2 | 3 | 4;
@@ -56,7 +61,12 @@ interface ThreadItem {
 export interface LpWidgetPanelProps {
   mode: "demo" | "live";
   onClose: () => void;
-  onIntentChange?: (intent: LpIntentKey | null, question?: string) => void;
+  onIntentChange?: (
+    intent: LpIntentKey | null,
+    question?: string,
+    defaultQuestion?: string
+  ) => void;
+  onLanguageChange?: (lang: WidgetLang) => void;
   onDemoSubmit?: (submission: LpDemoSubmission) => void;
   teamReply?: { text: string; at: number } | null;
   className?: string;
@@ -72,6 +82,7 @@ export default function LpWidgetPanel({
   mode,
   onClose,
   onIntentChange,
+  onLanguageChange,
   onDemoSubmit,
   teamReply,
   className = "",
@@ -81,6 +92,8 @@ export default function LpWidgetPanel({
   const threadRef = useRef<HTMLDivElement | null>(null);
   const demoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const [lang, setLang] = useState<WidgetLang>("en");
+  const [edited, setEdited] = useState(false);
   const [step, setStep] = useState<Step>(1);
   const [intent, setIntent] = useState<LpIntentKey | null>(null);
   const [trade, setTrade] = useState("");
@@ -90,7 +103,6 @@ export default function LpWidgetPanel({
   const [name, setName] = useState("");
   const [company, setCompany] = useState("");
   const [consent, setConsent] = useState(false);
-  const [call, setCall] = useState(false);
   const [error, setError] = useState("");
   const [thread, setThread] = useState<ThreadItem[]>([]);
   const [sending, setSending] = useState(false);
@@ -125,6 +137,31 @@ export default function LpWidgetPanel({
       ),
     []
   );
+
+  const copy = WIDGET_COPY[lang];
+
+  function flowCopy(flow: LpIntentFlow) {
+    if (lang === "en") {
+      return { chip: flow.chip, sub: flow.sub, question: flow.question };
+    }
+    return INTENT_L10N[lang][flow.key];
+  }
+
+  function changeLang(next: WidgetLang) {
+    setLang(next);
+    onLanguageChange?.(next);
+    if (!intent) return;
+    const nextDefault =
+      next === "en"
+        ? LP_FLOWS[intent].question
+        : INTENT_L10N[next][intent].question;
+    if (!edited) {
+      setQuestion(nextDefault);
+      onIntentChange?.(intent, nextDefault, nextDefault);
+    } else {
+      onIntentChange?.(intent, question, nextDefault);
+    }
+  }
 
   const onCloseRef = useRef(onClose);
   useEffect(() => {
@@ -174,7 +211,7 @@ export default function LpWidgetPanel({
       }
     };
     void load();
-    const interval = window.setInterval(load, 8000);
+    const interval = window.setInterval(load, 5000);
     return () => {
       stopped = true;
       window.clearInterval(interval);
@@ -197,8 +234,8 @@ export default function LpWidgetPanel({
     setName("");
     setCompany("");
     setConsent(false);
-    setCall(false);
     setError("");
+    setEdited(false);
     setThread([]);
     setSending(false);
     setToken(null);
@@ -208,14 +245,15 @@ export default function LpWidgetPanel({
   }
 
   function selectIntent(key: LpIntentKey) {
+    const nextCopy = flowCopy(LP_FLOWS[key]);
     setIntent(key);
-    setQuestion(LP_FLOWS[key].question);
-    setCall(false);
+    setQuestion(nextCopy.question);
+    setEdited(false);
     setError("");
     setThread([]);
     setToken(null);
     setStep(key === "area" ? 2 : 3);
-    onIntentChange?.(key, LP_FLOWS[key].question);
+    onIntentChange?.(key, nextCopy.question, nextCopy.question);
     trackLpWidget("lp_widget_intent", { intent: key });
   }
 
@@ -224,8 +262,13 @@ export default function LpWidgetPanel({
     if (!value) return;
     setIntent("question");
     setQuestion(value);
+    setEdited(true);
     setStep(3);
-    onIntentChange?.("question", value);
+    onIntentChange?.(
+      "question",
+      value,
+      flowCopy(LP_FLOWS.question).question
+    );
     trackLpWidget("lp_widget_intent", { intent: "question", custom: true });
   }
 
@@ -235,15 +278,15 @@ export default function LpWidgetPanel({
 
   function validate(): boolean {
     if (!question.trim()) {
-      setError("Write a short message so we can help.");
+      setError(copy.errMessage);
       return false;
     }
     if (!EMAIL_RE.test(email.trim())) {
-      setError("Enter a valid work email.");
+      setError(copy.errEmail);
       return false;
     }
     if (!consent) {
-      setError("Please confirm you agree to receive a reply by email.");
+      setError(copy.errConsent);
       return false;
     }
     setError("");
@@ -260,7 +303,6 @@ export default function LpWidgetPanel({
       company: company.trim(),
       city,
       trade,
-      call,
     };
 
     setSending(true);
@@ -275,7 +317,7 @@ export default function LpWidgetPanel({
       {
         id: `system-${now()}`,
         role: "system",
-        text: "Message received. A specialist will reply within 4 business hours.",
+        text: copy.systemAck,
         at: now(),
       },
     ]);
@@ -283,7 +325,6 @@ export default function LpWidgetPanel({
       intent,
       city: city || undefined,
       trade: trade || undefined,
-      call,
       mode,
     });
 
@@ -322,7 +363,7 @@ export default function LpWidgetPanel({
       setError(
         err instanceof Error
           ? err.message
-          : "Could not send your message. Please try again."
+          : copy.networkError
       );
     }
   }
@@ -339,26 +380,33 @@ export default function LpWidgetPanel({
       aria-modal="true"
       aria-labelledby={titleId}
       tabIndex={-1}
-      className={`fixed bottom-4 right-4 z-[80] flex max-h-[min(760px,calc(100dvh-24px))] w-[calc(100vw-24px)] max-w-[430px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/15 outline-none ${className}`}
+      className={`fixed bottom-4 right-4 z-[80] flex max-h-[min(760px,calc(100dvh-24px))] w-[calc(100vw-24px)] max-w-[430px] flex-col overflow-visible rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/15 outline-none ${className}`}
     >
-      <header className="flex items-center gap-3 border-b border-slate-100 bg-white px-4 py-3">
+      <header className="flex items-center gap-2 rounded-t-2xl border-b border-slate-100 bg-white px-4 py-3">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-[11px] font-black text-emerald-700 ring-1 ring-emerald-100">
           ML
         </div>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p id={titleId} className="truncate text-[13px] font-bold text-slate-900">
             Magic Leads
           </p>
-          <p className="mt-0.5 flex items-center gap-1.5 text-[10.5px] text-slate-500">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-            Online · avg. reply under 4 business hours
+          <p className="mt-0.5 flex items-center gap-1.5 truncate text-[10.5px] text-slate-500">
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
+            {copy.online}
           </p>
         </div>
+        <LpLanguagePicker
+          lang={lang}
+          onChange={changeLang}
+          title={copy.language}
+          searchPlaceholder={copy.searchLanguage}
+          emptyLabel={copy.noLanguage}
+        />
         <button
           type="button"
           onClick={onClose}
-          aria-label="Close chat"
-          className="ml-auto rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-50 hover:text-slate-700"
+          aria-label={copy.close}
+          className="shrink-0 rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-50 hover:text-slate-700"
         >
           <X className="h-4 w-4" />
         </button>
@@ -379,10 +427,10 @@ export default function LpWidgetPanel({
         {step === 1 && (
           <div>
             <p className="text-[15px] font-bold tracking-tight text-slate-900">
-              Where are you losing money right now?
+              {copy.q1}
             </p>
             <p className="mt-1 text-[12px] leading-relaxed text-slate-500">
-              Pick the one that hurts most. About 30 seconds.
+              {copy.hint1}
             </p>
 
             <div className="mt-3 space-y-2">
@@ -396,10 +444,10 @@ export default function LpWidgetPanel({
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-[12.5px] font-bold leading-snug text-slate-900">
-                    {LP_FLOWS.vs_ads.chip}
+                    {flowCopy(LP_FLOWS.vs_ads).chip}
                   </span>
                   <span className="mt-0.5 block text-[10.5px] leading-snug text-slate-500">
-                    {LP_FLOWS.vs_ads.sub}
+                    {flowCopy(LP_FLOWS.vs_ads).sub}
                   </span>
                 </span>
                 <ArrowRight className="h-4 w-4 shrink-0 text-emerald-500 transition group-hover:translate-x-0.5" />
@@ -414,10 +462,10 @@ export default function LpWidgetPanel({
                     className="group rounded-xl border border-slate-200 bg-white p-2.5 text-left transition hover:border-emerald-300 hover:bg-emerald-50/40"
                   >
                     <span className="block text-[11.5px] font-bold leading-snug text-slate-900">
-                      {item.chip}
+                      {flowCopy(item).chip}
                     </span>
                     <span className="mt-1 flex items-center justify-between gap-2 text-[9.5px] leading-snug text-slate-500">
-                      {item.sub}
+                      {flowCopy(item).sub}
                       <ArrowRight className="h-3 w-3 shrink-0 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-emerald-500" />
                     </span>
                   </button>
@@ -436,20 +484,20 @@ export default function LpWidgetPanel({
                 value={ownQuestion}
                 onChange={(event) => setOwnQuestion(event.target.value)}
                 maxLength={300}
-                placeholder="Or type your question…"
-                aria-label="Or type your question"
+                placeholder={copy.ownPlaceholder}
+                aria-label={copy.ownPlaceholder}
                 className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2.5 text-[12.5px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
               />
               <button
                 type="submit"
-                aria-label="Send question"
+                aria-label={copy.sendQuestion}
                 className="flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-lg bg-slate-900 text-white transition hover:bg-slate-800"
               >
                 <Send className="h-4 w-4" />
               </button>
             </form>
             <p className="mt-2 text-center text-[10px] text-slate-400">
-              No contract · Cancel anytime · $120/week
+              {copy.micro}
             </p>
           </div>
         )}
@@ -457,10 +505,10 @@ export default function LpWidgetPanel({
         {step === 2 && (
           <div>
             <p className="text-[15px] font-bold tracking-tight text-slate-900">
-              Where do you work?
+              {copy.q2}
             </p>
             <p className="mt-1 text-[12px] leading-relaxed text-slate-500">
-              This is how we check today&apos;s availability.
+              {copy.hint2}
             </p>
 
             <div className="mt-3 flex flex-wrap gap-1.5">
@@ -505,14 +553,14 @@ export default function LpWidgetPanel({
               onClick={() => setStep(3)}
               className="mt-4 w-full rounded-lg bg-emerald-500 py-2.5 text-[12.5px] font-bold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              Check availability
+              {copy.check}
             </button>
             <button
               type="button"
               onClick={() => setStep(1)}
               className="mt-2 w-full py-1 text-[11px] font-semibold text-slate-400 hover:text-slate-600"
             >
-              ← Back
+              {copy.back}
             </button>
           </div>
         )}
@@ -520,31 +568,39 @@ export default function LpWidgetPanel({
         {step === 3 && (
           <div>
             <p className="text-[15px] font-bold tracking-tight text-slate-900">
-              Where should we send the answer?
+              {copy.q3}
             </p>
             <p className="mt-1 text-[12px] leading-relaxed text-slate-500">
-              Edit your message if you want. We reply in English.
+              {copy.hint3}
             </p>
 
             {intent === "question" && (
               <div className="mt-2 flex flex-wrap gap-1.5">
-                {LP_SAMPLES.map((sample) => (
-                  <button
-                    key={sample.en}
-                    type="button"
-                    onClick={() => {
-                      setQuestion(sample.en);
-                      onIntentChange?.("question", sample.en);
-                    }}
-                    className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold transition ${
-                      question === sample.en
-                        ? "border-emerald-500 bg-emerald-50 text-emerald-700"
-                        : "border-slate-200 bg-white text-slate-500 hover:border-emerald-300"
-                    }`}
-                  >
-                    {sample.en}
-                  </button>
-                ))}
+                {LP_SAMPLES.map((sample) => {
+                  const sampleText = lang === "pt" ? sample.pt : sample.en;
+                  return (
+                    <button
+                      key={sample.en}
+                      type="button"
+                      onClick={() => {
+                        setQuestion(sampleText);
+                        setEdited(false);
+                        onIntentChange?.(
+                          "question",
+                          sampleText,
+                          flowCopy(LP_FLOWS.question).question
+                        );
+                      }}
+                      className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold transition ${
+                        question === sampleText
+                          ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                          : "border-slate-200 bg-white text-slate-500 hover:border-emerald-300"
+                      }`}
+                    >
+                      {sampleText}
+                    </button>
+                  );
+                })}
               </div>
             )}
 
@@ -552,13 +608,18 @@ export default function LpWidgetPanel({
               value={question}
               onChange={(event) => {
                 setQuestion(event.target.value);
+                setEdited(true);
                 if (intent) {
-                  onIntentChange?.(intent, event.target.value);
+                  onIntentChange?.(
+                    intent,
+                    event.target.value,
+                    flowCopy(LP_FLOWS[intent]).question
+                  );
                 }
               }}
               rows={3}
               maxLength={2000}
-              aria-label="Your message"
+              aria-label={copy.message}
               className="mt-2 w-full resize-y rounded-lg border border-slate-200 px-3 py-2.5 text-[12.5px] leading-relaxed text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
             />
 
@@ -568,8 +629,8 @@ export default function LpWidgetPanel({
               autoComplete="email"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
-              placeholder="Work email"
-              aria-label="Work email"
+              placeholder={copy.email}
+              aria-label={copy.email}
               className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-[12.5px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
             />
 
@@ -579,8 +640,8 @@ export default function LpWidgetPanel({
                 autoComplete="given-name"
                 value={name}
                 onChange={(event) => setName(event.target.value)}
-                placeholder="First name (optional)"
-                aria-label="First name"
+                placeholder={copy.firstName}
+                aria-label={copy.firstName}
                 className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-[12.5px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
               />
               <input
@@ -588,8 +649,8 @@ export default function LpWidgetPanel({
                 autoComplete="organization"
                 value={company}
                 onChange={(event) => setCompany(event.target.value)}
-                placeholder="Company (optional)"
-                aria-label="Company"
+                placeholder={copy.company}
+                aria-label={copy.company}
                 className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-[12.5px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
               />
             </div>
@@ -601,8 +662,7 @@ export default function LpWidgetPanel({
                 onChange={(event) => setConsent(event.target.checked)}
                 className="mt-0.5 h-3.5 w-3.5 accent-emerald-500"
               />
-              I agree to receive a reply by email. No marketing spam, unsubscribe
-              anytime.
+              {copy.consent}
             </label>
 
             {error && (
@@ -617,26 +677,12 @@ export default function LpWidgetPanel({
               disabled={sending}
               className="mt-3 w-full rounded-lg bg-emerald-500 py-2.5 text-[12.5px] font-bold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {sending ? "Sending…" : "Send message"}
+              {sending ? copy.sending : copy.send}
             </button>
-
-            <button
-              type="button"
-              onClick={() => setCall((value) => !value)}
-              className="mt-2 flex w-full items-center justify-center gap-1.5 py-1 text-[11px] font-semibold text-emerald-700 hover:text-emerald-800"
-            >
-              <Phone className="h-3.5 w-3.5" />
-              Prefer to talk? Request a 15-min call
-            </button>
-            {call && (
-              <p className="mt-1 rounded-lg border border-emerald-100 bg-emerald-50 px-2.5 py-2 text-center text-[10px] text-emerald-800">
-                Call request added. We&apos;ll include a time in our reply.
-              </p>
-            )}
 
             <p className="mt-2 flex items-center justify-center gap-1 text-center text-[10px] text-slate-400">
               <Lock className="h-3 w-3" />
-              Private · No spam · Reply under 4 business hours
+              {copy.private}
             </p>
 
             <button
@@ -644,7 +690,7 @@ export default function LpWidgetPanel({
               onClick={backFromContact}
               className="mt-2 w-full py-1 text-[11px] font-semibold text-slate-400 hover:text-slate-600"
             >
-              ← Back
+              {copy.back}
             </button>
           </div>
         )}
@@ -652,10 +698,10 @@ export default function LpWidgetPanel({
         {step === 4 && (
           <div>
             <p className="text-[15px] font-bold tracking-tight text-slate-900">
-              Conversation
+              {copy.conversation}
             </p>
             <p className="mt-1 text-[12px] leading-relaxed text-slate-500">
-              A specialist is reviewing your message.
+              {copy.reviewing}
             </p>
 
             <div
@@ -694,7 +740,7 @@ export default function LpWidgetPanel({
               {sending && (
                 <p className="flex items-center gap-1.5 px-1 text-[10px] text-slate-400">
                   <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-slate-400" />
-                  Magic Leads is typing…
+                  {copy.typing}
                 </p>
               )}
             </div>
@@ -703,18 +749,18 @@ export default function LpWidgetPanel({
               <div className="mt-3 rounded-xl border border-emerald-100 bg-emerald-50/70 p-3">
                 <p className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-800">
                   <CheckCircle2 className="h-3.5 w-3.5" />
-                  Reply delivered
+                  {copy.delivered}
                 </p>
                 <div className="mt-1.5 flex flex-wrap gap-1.5">
                   <span className="rounded bg-white px-1.5 py-0.5 text-[9px] font-bold text-emerald-700 ring-1 ring-emerald-100">
-                    Widget · instant
+                    {copy.widgetBadge}
                   </span>
                   <span className="rounded bg-white px-1.5 py-0.5 text-[9px] font-bold text-emerald-700 ring-1 ring-emerald-100">
-                    Email · Resend
+                    {copy.emailBadge}
                   </span>
                 </div>
                 <p className="mt-2 text-[10px] leading-relaxed text-emerald-800/70">
-                  The reply was also sent to {email || "your email"}.
+                  {copy.replySentTo} {email || "—"}.
                 </p>
               </div>
             )}
@@ -724,22 +770,22 @@ export default function LpWidgetPanel({
               onClick={checkAvailability}
               className="mt-3 w-full rounded-lg bg-emerald-500 py-2.5 text-[12.5px] font-bold text-white transition hover:bg-emerald-600"
             >
-              Check availability in my city →
+              {copy.checkCity}
             </button>
             <button
               type="button"
               onClick={resetAll}
               className="mt-2 w-full py-1 text-[11px] font-semibold text-slate-400 hover:text-slate-600"
             >
-              ↺ Start over
+              {copy.startOver}
             </button>
           </div>
         )}
       </div>
 
-      <footer className="flex items-center justify-center gap-1.5 border-t border-slate-100 bg-slate-50/50 px-4 py-2 text-[10px] font-semibold text-slate-500">
+      <footer className="flex items-center justify-center gap-1.5 rounded-b-2xl border-t border-slate-100 bg-slate-50/50 px-4 py-2 text-[10px] font-semibold text-slate-500">
         <ShieldCheck className="h-3 w-3 text-emerald-600" />
-        No contract · Cancel anytime · $120/week
+        {copy.noContract}
       </footer>
     </div>
   );

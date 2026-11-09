@@ -15,11 +15,14 @@ import LpWidgetInline from "@/components/landing/LpWidget/LpWidgetInline";
 import LpWidgetLauncher from "@/components/landing/LpWidget/LpWidgetLauncher";
 import type { LpDemoSubmission } from "@/components/landing/LpWidget/LpWidgetPanel";
 import type { LpIntentKey } from "@/components/landing/LpWidget/data";
+import type { WidgetLang } from "@/components/landing/LpWidget/i18n";
 
 export default function LpWidgetPreview() {
   const [open, setOpen] = useState(false);
   const [intent, setIntent] = useState<LpIntentKey | null>(null);
   const [intentQuestion, setIntentQuestion] = useState("");
+  const [intentDefaultQuestion, setIntentDefaultQuestion] = useState("");
+  const [leadLang, setLeadLang] = useState<WidgetLang>("en");
   const [submission, setSubmission] = useState<LpDemoSubmission | null>(null);
   const [submissionId, setSubmissionId] = useState(0);
   const [teamReply, setTeamReply] = useState<{ text: string; at: number } | null>(
@@ -192,6 +195,8 @@ export default function LpWidgetPreview() {
             intent={intent}
             submission={submission}
             questionPreview={intentQuestion}
+            defaultQuestion={intentDefaultQuestion}
+            leadLang={leadLang}
             onSendReply={(text) =>
               setTeamReply({ text, at: Date.now() })
             }
@@ -231,10 +236,12 @@ export default function LpWidgetPreview() {
         mode="demo"
         open={open}
         onOpenChange={setOpen}
-        onIntentChange={(next, question) => {
+        onIntentChange={(next, question, defaultQuestion) => {
           setIntent(next);
           setIntentQuestion(question ?? "");
+          setIntentDefaultQuestion(defaultQuestion ?? "");
         }}
+        onLanguageChange={setLeadLang}
         onDemoSubmit={(payload) => {
           setSubmission(payload);
           setSubmissionId((value) => value + 1);

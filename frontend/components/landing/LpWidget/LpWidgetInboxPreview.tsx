@@ -8,12 +8,15 @@ import {
   type LpIntentKey,
   type LpReplySuggestion,
 } from "./data";
+import type { WidgetLang } from "./i18n";
 import type { LpDemoSubmission } from "./LpWidgetPanel";
 
 interface Props {
   intent: LpIntentKey | null;
   submission: LpDemoSubmission | null;
   questionPreview?: string;
+  defaultQuestion?: string;
+  leadLang?: WidgetLang;
   onSendReply: (text: string) => void;
 }
 
@@ -26,6 +29,8 @@ export default function LpWidgetInboxPreview({
   intent,
   submission,
   questionPreview = "",
+  defaultQuestion = "",
+  leadLang = "en",
   onSendReply,
 }: Props) {
   const flow = intent ? LP_FLOWS[intent] : null;
@@ -74,12 +79,13 @@ export default function LpWidgetInboxPreview({
     );
   }
 
+  const baseline = defaultQuestion || flow.question;
   const custom = Boolean(
     (submission?.question || questionPreview) &&
-      (submission?.question || questionPreview) !== flow.question
+      (submission?.question || questionPreview) !== baseline
   );
   const effectiveQuestion =
-    submission?.question || questionPreview || flow.question;
+    submission?.question || questionPreview || baseline;
 
   return (
     <aside className="flex max-h-[calc(100vh-40px)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:sticky lg:top-5">
@@ -120,11 +126,6 @@ export default function LpWidgetInboxPreview({
               city: {submission.city}
             </span>
           )}
-          {submission?.call && (
-            <span className="rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[8.5px] font-bold text-emerald-700">
-              request: 15-min call
-            </span>
-          )}
           <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[8.5px] font-bold text-slate-500">
             source: LP widget
           </span>
@@ -132,7 +133,7 @@ export default function LpWidgetInboxPreview({
 
         <div className="rounded-xl border border-slate-200 p-2.5">
           <p className="flex items-center justify-between text-[8.5px] font-black uppercase tracking-wide text-slate-400">
-            Original do lead <b className="text-violet-600">EN</b>
+            Original do lead <b className="text-violet-600">{leadLang.toUpperCase()}</b>
           </p>
           <p className="mt-1 text-[11.5px] leading-relaxed text-slate-600">
             {effectiveQuestion}

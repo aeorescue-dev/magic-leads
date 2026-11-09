@@ -30,6 +30,8 @@ com `LP_WIDGET_PREVIEW=true` (ou com a flag pública ligada num build de staging
   e entrega simulada/real.
 - `components/landing/LpWidget/LpWidgetInline.tsx` — faixa inline opcional,
   leve (não é um segundo widget embutido).
+- `components/landing/LpWidget/LpLanguagePicker.tsx` + `LpFlag.tsx` — seletor
+  EN/PT/ES com bandeiras, busca rápida e EN por omissão.
 - `components/landing/LpWidget/LpWidgetInboxPreview.tsx` — lado interno PT-BR
   usado **apenas** na pré-visualização.
 - `lib/lp-widget.ts` — flag, tipos, cliente HTTP e eventos.
@@ -59,6 +61,10 @@ com `LP_WIDGET_PREVIEW=true` (ou com a flag pública ligada num build de staging
 - Parsing de respostas de e-mail (Fase 2). O e-mail é entrega; a conversa
   instantânea é o widget.
 - SMS/WhatsApp.
+- Atendimento telefónico e agendamento de chamadas. A captação é 100% por
+  mensagem/e-mail.
+- UI visual da inbox admin (Fase 1b). Os endpoints admin já existem; a página
+  com polling de 5 s é o próximo passo.
 - Montagem do widget na LP oficial. Só depois de aprovação explícita.
 
 ## Pré-visualizar localmente
