@@ -104,7 +104,18 @@ export function OpportunityCard({
 
   return (
     <article
-      className={`group relative rounded-2xl border p-4 transition-all duration-200 ${cardSurface} ${
+      data-testid="lead-card"
+      data-lead-id={lead.id}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          ctx.openLeadDetail(lead);
+        }
+      }}
+      className={`sd-focus group relative cursor-pointer rounded-2xl border p-4 transition-all duration-200 ${cardSurface} ${
         isReservedByOther ? "opacity-65" : ""
       }`}
       aria-label={`${lead.address}, ${lead.city}`}
@@ -144,12 +155,7 @@ export function OpportunityCard({
             <SignalBadge tone="neutral" icon={Clock}>
               {t("dashboard.badge.closed")}
             </SignalBadge>
-          ) : (
-            <SignalBadge tone="success">
-              <span className="mr-0.5 inline-block h-1.5 w-1.5 rounded-full bg-[var(--sd-success)]" />
-              {t("dashboard.status.available")}
-            </SignalBadge>
-          )}
+          ) : null}
         </div>
 
         <button
@@ -201,14 +207,16 @@ export function OpportunityCard({
           {t("dashboard.freshness.reported")}: {ctx.relativeTime(lead.date_reported)}
         </span>
         {lead.phone_confidence === "verified" ? (
-          <SignalBadge tone="success" icon={Phone}>
+          <span className="inline-flex items-center gap-1 text-[var(--sd-success)]">
+            <Phone className="h-3.5 w-3.5" />
             {t("dashboard.phone.verified")}
-          </SignalBadge>
+          </span>
         ) : lead.phone_confidence === "high" ? (
-          <SignalBadge tone="info" icon={Phone}>
+          <span className="inline-flex items-center gap-1 text-[var(--sd-info)]">
+            <Phone className="h-3.5 w-3.5" />
             {t("dashboard.phone.high")}
             {lead.phone_success_pct != null ? ` · ${lead.phone_success_pct}%` : ""}
-          </SignalBadge>
+          </span>
         ) : null}
         {ctx.shouldShowAddressWarning(lead) ? (
           <span className="inline-flex items-center gap-1 text-[var(--sd-warn)]">

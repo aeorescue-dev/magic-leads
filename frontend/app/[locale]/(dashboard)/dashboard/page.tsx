@@ -15,7 +15,7 @@ import {
   Trash2, HardHat, CheckCircle2, ArrowUpRight, Clock, Filter,
   X, Sun, Moon, Phone, MessageSquare, Mail, Copy, Check,
   ExternalLink, Lock, BadgeCheck, RefreshCcw, ShieldCheck,
-  AlertCircle, Tag, Loader2, BarChart3, History,
+  AlertCircle, Tag, Loader2, History,
   Flame, Zap, Forklift, Droplets, Bug, Droplet, AlertTriangle,
   DoorOpen, AppWindow, Package, Wind,
   TrendingUp, Navigation, Smartphone, FolderOpen, Archive,
@@ -1769,14 +1769,14 @@ function DashboardPageInner() {
       },
     },
     {
-      label: t("dashboard.kpi.with_contact") || "Com contato",
+      label: t("dashboard.kpi.with_contact_short") || "Com dono",
       value: dashboardSummary?.with_contact ?? 0,
       delta: t("dashboard.kpi.owner_identified") || "com proprietário identificado",
       icon: Phone,
       tone: "info" as const,
     },
     {
-      label: t("dashboard.kpi.last_scrape") || "Novas oportunidades",
+      label: t("dashboard.kpi.new_short") || "Novas",
       value: publicMetrics?.last_scrape?.novas_oportunidades ?? dashboardSummary?.recent_count ?? scrapeCount,
       delta: t("dashboard.kpi.updated_now") || "atualizado agora",
       icon: TrendingUp,
@@ -2146,10 +2146,11 @@ function DashboardPageInner() {
               {/* Trial CTA button */}
             <button
               onClick={() => setShowCheckout(true)}
-              className="flex items-center gap-1.5 shrink-0 whitespace-nowrap bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-semibold text-xs md:text-sm px-3.5 py-2 rounded-xl shadow-md shadow-emerald-500/20 transition"
+              title={t("dashboard.trial.scribe")}
+              className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 px-2.5 py-2 text-xs font-semibold text-slate-950 shadow-md shadow-emerald-500/20 transition hover:from-emerald-400 hover:to-teal-400 sm:px-3.5 md:text-sm"
             >
               <CreditCard className="h-4 w-4" />
-              <span>{t("dashboard.trial.scribe")}</span>
+              <span className="hidden sm:inline">{t("dashboard.trial.scribe")}</span>
             </button>
           </div>
         </header>
@@ -2227,35 +2228,19 @@ function DashboardPageInner() {
             </div>
           </div>
 
-          {/* DAILY LIMIT BAR (10 leads/dia) */}
-          <div className={`rounded-xl border p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${T.subtle}`}>
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
-                <BarChart3 className="h-5 w-5" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-amber-400">
-                  {t("dashboard.trial.daily_limit_label", { used: dailyStats?.used ?? 0, limit: dailyStats?.limit ?? 10 })}
-                </p>
-                <div className={`w-full max-w-xs h-2 rounded-full overflow-hidden mt-1 ${T.track}`}>
-                  <div 
-                    className="h-full bg-amber-500 transition-all duration-300" 
-                    style={{ width: dailyStats && dailyStats.limit > 0 ? `${Math.min(100, (dailyStats.used / dailyStats.limit) * 100)}%` : '0%' }}
-                  />
-                </div>
-              </div>
-            </div>
-            {dailyStats && dailyStats.remaining === 0 && (
-              <div className="text-xs text-red-400 font-medium">
-                {t("dashboard.trial.daily_limit_exceeded").replace("{reset_at}", dailyStats.reset_at ? formatRelativeTime(dailyStats.reset_at, t) : "breve")}
-                <div className={`text-xs font-normal mt-0.5 ${T.text2}`}>
-                  {t("dashboard.trial.corporate_still_free")}
-                </div>
-              </div>
-            )}
-          </div>
+          {/* KPI PULSE — 1 herói + 3 satélites acionáveis */}
+          <KpiPulse
+            hero={{
+              label: t("dashboard.kpi.interested") || "No seu interesse",
+              value: realTotalLeads,
+              delta: t("dashboard.kpi.opportunities") || "oportunidades reais",
+              icon: Building2,
+            }}
+            satellites={kpiSatellites}
+            onHero={() => setActiveTab("opportunities")}
+          />
 
-          {/* FILTER BAR — inline em desktop, gaveta (sheet) em mobile */}
+{/* FILTER BAR — inline em desktop, gaveta (sheet) em mobile */}
           <div className="hidden rounded-2xl border border-[var(--sd-border)] bg-[var(--sd-surface)] p-4 lg:block">
             {filterControls}
             <div className={`mt-2 flex items-center justify-between gap-2 text-xs ${T.text2}`}>
@@ -2416,19 +2401,7 @@ function DashboardPageInner() {
             </div>
           </div>
 
-                    {/* KPI PULSE — 1 herói + 3 satélites acionáveis */}
-          <KpiPulse
-            hero={{
-              label: t("dashboard.kpi.interested") || "No seu interesse",
-              value: realTotalLeads,
-              delta: t("dashboard.kpi.opportunities") || "oportunidades reais",
-              icon: Building2,
-            }}
-            satellites={kpiSatellites}
-            onHero={() => setActiveTab("opportunities")}
-          />
-
-{/* ALERTS TAB: NOTIFICAÇÕES */}
+                    {/* ALERTS TAB: NOTIFICAÇÕES */}
           {activeTab === "alerts" ? (
             <section className="space-y-5">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
