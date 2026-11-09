@@ -232,7 +232,7 @@ _NEGATIVE: tuple[tuple[str, re.Pattern[str]], ...] = (
         r"\bbilling inquiry\b|\bwater/wastewater line\b"
     )),
     ("not_trade.tree", _rx(
-        r"\bovergrown tree\b|\btree/?branches?\b|\btree branches?\b|"
+        r"\bovergrown tree\b|\btree/?branch(?:es)?\b|\btree branch(?:es)?\b|"
         r"\bprune\b|\bpruning\b"
     )),
     ("not_trade.brush_collection", _rx(
@@ -290,8 +290,9 @@ _POSITIVE: tuple[tuple[str, IssueCategory, re.Pattern[str]], ...] = (
     )),
     # Heating / HVAC
     ("heating.strong", IssueCategory.HEATING, _rx(
-        r"\b(?:no heat|heat/hot water|hot water(?:er|ers)?|boilers?|radiators?|"
-        r"furnaces?|hvac|heating systems?|steam heat|water heaters?)\b"
+        r"\b(?:no heat|heat/hot water|hot ?water(?:er|ers)?|hotwater|boilers?|"
+        r"radiators?|furnaces?|hvac|heating systems?|steam heat|"
+        r"water heaters?)\b"
     )),
     ("heating.word", IssueCategory.HEATING, _rx(r"\bheat\b")),
     # Gas
@@ -309,7 +310,7 @@ _POSITIVE: tuple[tuple[str, IssueCategory, re.Pattern[str]], ...] = (
         r"\b(?:electrical? (?:wiring|panels?|outlets?|circuits?|service|work|"
         r"violations?|hazards?)|wiring|outlets?|circuit breakers?|"
         r"breaker panels?|live wires?|exposed wires?|short circuits?|"
-        r"solar panels?)\b"
+        r"solar panels?|fire alarms?)\b"
     )),
     ("electrical.word", IssueCategory.ELECTRICAL, _rx(r"\b(?:electric|electrical)\b")),
     # Rodent / pest
@@ -327,9 +328,16 @@ _POSITIVE: tuple[tuple[str, IssueCategory, re.Pattern[str]], ...] = (
         r"\b(?:molds?|mildew|fungus|fungi|mold remediation|chronic dampness|"
         r"water damage)\b"
     )),
+    # Envelope/fachada antes de Door_Window: "window lintel & parapet" e'
+    # Structure, nao uma janela. "broken window sash" continua Door_Window.
+    ("structure.envelope", IssueCategory.STRUCTURE, _rx(
+        r"\b(?:parapets?|lintels?|water tables?|terracotta|masonry|brick|"
+        r"face brick|siding|vinyl siding|change of face|scaffold(?:ing)?|"
+        r"facade (?:repair|restoration))\b"
+    )),
     # Door / window (word boundary: indoor/outdoor NAO casam)
     ("door_window", IssueCategory.DOOR_WINDOW, _rx(
-        r"\b(?:doors?|windows?|sashes?|jambs?|door frames?|window frames?|"
+        r"\b(?:doors?|windows?|sash(?:es)?|jamb(?:s)?|door frames?|window frames?|"
         r"broken windows?|stuck windows?)\b"
     )),
     # Debris / trash / dumping
@@ -337,7 +345,27 @@ _POSITIVE: tuple[tuple[str, IssueCategory, re.Pattern[str]], ...] = (
         r"\b(?:debris|garbage|trash|rubbish|litter|dumping|junk|dumpsters?|"
         r"bulk removal|overflowing garbage|construction debris)\b"
     )),
-    # Roof (word boundary: proof/waterproof/fireproof NAO casam)
+    # Paint before building envelope: "garage painting" e' Paint, nao Structure.
+    ("paint", IssueCategory.PAINT, _rx(
+        r"\b(?:paints?|painting|painted|plasters?|plastering|graffiti|"
+        r"peeling paint|facade painting)\b"
+    )),
+    # Envelope/estrutura construida. Termos especificos (nao "garage" isolado)
+    # para nao roubar "garage roof replacement" a Roof.
+    ("structure.building", IssueCategory.STRUCTURE, _rx(
+        r"\b(?:porch(?:es)?|decks?|stoops?|carports?|sheds?|stairs?|"
+        r"stairways?|framing|frame (?:garage|building|residence|house)|"
+        r"new (?:detached )?(?:wood )?(?:frame )?(?:garage|building|residence|house)|"
+        r"new construction|full rebuild|renovations?|remodel(?:ing)?|"
+        r"build[- ]outs?|general contractors?|demolition|wreck|excavation|"
+        r"change of face|siding|vinyl siding|masonry|brick|face brick|"
+        r"parapets?|lintels?|water tables?|terracotta|tuckpoint|"
+        r"scaffold(?:ing)?|facade (?:repair|restoration)|"
+        r"bathroom (?:modifications?|remodels?|renovations?)|"
+        r"install shower|remove tub)\b"
+    )),
+    # Roof depois de estrutura construida: "new detached wood frame garage...
+    # roof covering" e' Structure; "roof replacement" e' Roof.
     ("roof", IssueCategory.ROOF, _rx(
         r"\b(?:roofs?|roofing|roof leaks?|roof replacements?|roof repairs?|"
         r"shingles?|gutters?|rooftops?)\b"
@@ -356,16 +384,11 @@ _POSITIVE: tuple[tuple[str, IssueCategory, re.Pattern[str]], ...] = (
     ("plumbing.word", IssueCategory.PLUMBING, _rx(
         r"\b(?:plumb|leaks?|leaking|pipes?)\b"
     )),
-    # Paint / plaster / graffiti
-    ("paint", IssueCategory.PAINT, _rx(
-        r"\b(?:paints?|painting|painted|plasters?|plastering|graffiti|"
-        r"peeling paint|facade painting)\b"
-    )),
-    # Structure: sinais estruturais especificos e obra geral identificavel.
+    # Structure: sinais estruturais especificos.
     ("structure.strong", IssueCategory.STRUCTURE, _rx(
         r"\b(?:structural|structures?|foundations?|load[- ]bearing|collapses?|"
         r"collapsed|unsafe buildings?|sagging|buckling|deteriorat(?:ed|ing|ion)|"
-        r"parapets?|chimneys?|masonry|tuckpoint|stoops?|porches?|decks?|"
+        r"parapets?|chimneys?|masonry|tuckpoint|stoops?|porch(?:es)?|decks?|"
         r"retaining walls?|party walls?|garages?|framing|"
         r"frames? (?:garages?|buildings?|residences?|houses?)|"
         r"new construction|renovations?|remodel(?:ing)?|build[- ]outs?|"
@@ -373,10 +396,8 @@ _POSITIVE: tuple[tuple[str, IssueCategory, re.Pattern[str]], ...] = (
         r"fire-damaged|smoke damage)\b"
     )),
     ("structure.word", IssueCategory.STRUCTURE, _rx(
-        r"\b(?:wall|walls|crack|cracked|cracks)\b"
+        r"\b(?:walls?|cracks?|cracked|leaning)\b"
     )),
-    # Permit issue explicito. Fica depois dos oficios concretos (um "roof
-    # without permit" continua Roof) e antes de Grass/Structure generico.
     ("permit.rejected", IssueCategory.PERMIT_REJECTED, _rx(
         r"\b(?:permit (?:rejected|denied|revoked|expired)|stop work order|"
         r"work (?:without|w/o|w/out) (?:a )?permit|no building permit|"
