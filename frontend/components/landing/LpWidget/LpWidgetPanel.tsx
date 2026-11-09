@@ -353,6 +353,7 @@ export default function LpWidgetPanel({
         website: "",
       });
       setToken(result.token);
+      setSending(false);
       try {
         window.sessionStorage.setItem("lp_widget_thread", result.token);
       } catch {

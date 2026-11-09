@@ -116,6 +116,20 @@ partir da LP.
 cd frontend && npx tsc --noEmit && npm run build
 ```
 
+## Staging E2E
+
+Backend isolado: `https://magic-leads-staging-staging.up.railway.app`
+(serviço `magic-leads-staging`, volume próprio, `VOICE_FREEZE=1`,
+`SCRAPER_SELF_SCHEDULED=false`, `ENRICH_SCHEDULER_ENABLED=false`).
+
+Verificado em 2026-11-09:
+
+1. Lead submete no widget live → thread criada em staging.
+2. Inbox admin atualiza em ≤5 s e mostra o original EN.
+3. Tradução PT-BR guardada (`PATCH .../messages/{id}`).
+4. Equipa aprova PT/EN → `POST .../reply` com `email_sent=true`.
+5. Widget live atualiza em ≤5 s com a resposta EN e os selos Widget + Resend.
+
 ## Isolamento
 
 - Nenhuma alteração a `app/[locale]/(marketing)/page.tsx`, `LandingShell.tsx`,
