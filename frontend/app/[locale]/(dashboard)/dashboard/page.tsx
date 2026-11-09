@@ -2762,7 +2762,7 @@ function DashboardPageInner() {
                       {t("dashboard.interests.title")}
                     </h2>
                     <p className="text-[11px] text-[var(--sd-muted)]">
-                      {interests.size} {t("dashboard.filter.showing") || "ofícios ativos"} · {t("dashboard.interests.live_alert")}
+                      {interests.size} {t("dashboard.interests.active_count") || "ofícios ativos"} · {t("dashboard.interests.live_alert")}
                     </p>
                   </div>
                 </div>
@@ -2805,7 +2805,7 @@ function DashboardPageInner() {
                   className="w-full"
                   onClick={() => setInterestsSheetOpen(false)}
                 >
-                  {t("dashboard.filter.apply") || "Concluir"}
+                  {t("dashboard.interests.done") || "Concluir"}
                 </SignalButton>
               }
             >
