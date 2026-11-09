@@ -2694,6 +2694,8 @@ export interface LpAdminThreadSummary {
   trade: string | null;
   intent: string;
   status: string;
+  lead_lang?: string;
+  ai_status?: string;
   created_at: string;
   last_message_at: string | null;
   sla_due_at: string | null;
@@ -2726,6 +2728,14 @@ export interface LpAdminThreadDetail {
   status: string;
   locale: string;
   source_section: string | null;
+  lead_lang?: string;
+  ai_status?: string;
+  ai_provider?: string | null;
+  ai_error?: string | null;
+  draft_pt?: string | null;
+  draft_out?: string | null;
+  draft_out_lang?: string | null;
+  ai_updated_at?: string | null;
   created_at: string;
   updated_at: string;
   last_message_at: string | null;
@@ -2769,5 +2779,33 @@ export function replyLpThread(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ body_pt: bodyPt, body_en: bodyEn }),
+  });
+}
+
+export function translateLpDraft(
+  threadId: number,
+  bodyPt: string
+): Promise<{
+  ok: boolean;
+  body_out: string;
+  lang: string;
+  provider: string;
+}> {
+  return lpAdminFetch(`/lp/threads/${threadId}/translate-draft`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ body_pt: bodyPt }),
+  });
+}
+
+export function enrichLpThread(threadId: number): Promise<{
+  ok: boolean;
+  status: string;
+  lead_lang?: string;
+  provider?: string;
+  error?: string;
+}> {
+  return lpAdminFetch(`/lp/threads/${threadId}/ai-enrich`, {
+    method: "POST",
   });
 }

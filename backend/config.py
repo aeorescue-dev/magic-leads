@@ -252,6 +252,16 @@ class Settings(BaseSettings):
     LP_WIDGET_REPLY_TO: str = "contato@magicleads.app"
     LP_WIDGET_PUBLIC_URL: str = ""
 
+    # Pipeline de tradução/sugestão da inbox (Fase 2).
+    # Provider: "gemini" | "openai" | "mymemory" (fallback sem chave).
+    LP_AI_PROVIDER: str = ""
+    LP_AI_FREE_FALLBACK: bool = False
+    LP_AI_TIMEOUT_SECONDS: int = 12
+    LP_AI_MYMEMORY_EMAIL: str = ""
+    OPENAI_API_KEY: str = ""
+    ANTHROPIC_API_KEY: str = ""
+    LP_AI_MODEL: str = ""
+
     # E-mail de recuperação de senha — Gmail SMTP (100% gratuito).
     # Defaults prontos para Gmail. Para ATIVAR o envio real basta definir no Railway:
     #   SMTP_USER=helpmagicleads@gmail.com e SMTP_PASS=<App Password do Gmail>

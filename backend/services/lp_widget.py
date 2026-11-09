@@ -21,7 +21,7 @@ import httpx
 
 from ..config import settings
 from ..utils.logger import logger
-from . import db
+from . import db, lp_ai
 
 MAX_MESSAGE_CHARS = 2000
 MAX_REPLY_CHARS = 4000
@@ -49,7 +49,15 @@ CREATE TABLE IF NOT EXISTS lp_threads (
   assigned_to INTEGER,
   sla_due_at TEXT,
   ip_hash TEXT,
-  user_agent TEXT
+  user_agent TEXT,
+  lead_lang TEXT DEFAULT 'en',
+  ai_status TEXT DEFAULT 'pending',
+  ai_provider TEXT,
+  ai_error TEXT,
+  draft_pt TEXT,
+  draft_out TEXT,
+  draft_out_lang TEXT,
+  ai_updated_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_lp_threads_status
   ON lp_threads (status, created_at DESC);
@@ -86,6 +94,24 @@ CREATE INDEX IF NOT EXISTS idx_lp_events_thread
 
 _initialized = False
 
+_THREAD_MIGRATIONS = {
+    "lead_lang": "TEXT DEFAULT 'en'",
+    "ai_status": "TEXT DEFAULT 'pending'",
+    "ai_provider": "TEXT",
+    "ai_error": "TEXT",
+    "draft_pt": "TEXT",
+    "draft_out": "TEXT",
+    "draft_out_lang": "TEXT",
+    "ai_updated_at": "TEXT",
+}
+
+
+def _migrate_threads(conn: sqlite3.Connection) -> None:
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(lp_threads)")}
+    for name, ddl in _THREAD_MIGRATIONS.items():
+        if name not in cols:
+            conn.execute(f"ALTER TABLE lp_threads ADD COLUMN {name} {ddl}")
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -117,6 +143,7 @@ def init() -> None:
         conn = db.get_connection()
         try:
             conn.executescript(_SCHEMA)
+            _migrate_threads(conn)
             conn.commit()
         finally:
             conn.close()
@@ -266,6 +293,7 @@ def create_thread(
 
     token = secrets.token_urlsafe(32)
     now = _now()
+    lead_lang = lp_ai.detect_language(message)
     sla_at = now + timedelta(
         hours=max(1, int(getattr(settings, "LP_WIDGET_SLA_HOURS", 4) or 4))
     )
@@ -276,8 +304,9 @@ def create_thread(
             "INSERT INTO lp_threads ("
             "token_hash, email, name, company, city, trade, intent, status, "
             "locale, source_section, consent_email, consent_at, created_at, "
-            "updated_at, last_message_at, sla_due_at, ip_hash, user_agent"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)",
+            "updated_at, last_message_at, sla_due_at, ip_hash, user_agent, "
+            "lead_lang, ai_status"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')",
             (
                 _hash_token(token),
                 email,
@@ -295,6 +324,7 @@ def create_thread(
                 _iso(sla_at),
                 _ip_hash(ip),
                 _clean(user_agent, 300),
+                lead_lang,
             ),
         )
         thread_id = int(cur.lastrowid)
@@ -303,7 +333,7 @@ def create_thread(
             "thread_id, direction, channel, body, body_pt, body_en, lang, "
             "author_type, created_at"
             ") VALUES (?, 'inbound', 'widget', ?, NULL, NULL, ?, 'lead', ?)",
-            (thread_id, message, _clean(locale, 8) or "en", _iso(now)),
+            (thread_id, message, lead_lang, _iso(now)),
         )
         _event(conn, thread_id, "thread_created", {"intent": intent})
         conn.commit()
@@ -401,6 +431,7 @@ def add_lead_message(token: str, message: str) -> Optional[dict]:
             raise ValueError("thread_full")
 
         now = _now()
+        lang = lp_ai.detect_language(text)
         sla_at = now + timedelta(
             hours=max(1, int(getattr(settings, "LP_WIDGET_SLA_HOURS", 4) or 4))
         )
@@ -408,16 +439,21 @@ def add_lead_message(token: str, message: str) -> Optional[dict]:
             "INSERT INTO lp_messages ("
             "thread_id, direction, channel, body, lang, author_type, created_at"
             ") VALUES (?, 'inbound', 'widget', ?, ?, 'lead', ?)",
-            (thread["id"], text, _clean(thread["locale"], 8) or "en", _iso(now)),
+            (thread["id"], text, lang, _iso(now)),
         )
         conn.execute(
             "UPDATE lp_threads SET status = 'new', updated_at = ?, "
-            "last_message_at = ?, sla_due_at = ? WHERE id = ?",
-            (_iso(now), _iso(now), _iso(sla_at), thread["id"]),
+            "last_message_at = ?, sla_due_at = ?, lead_lang = ?, "
+            "ai_status = 'pending', ai_error = NULL WHERE id = ?",
+            (_iso(now), _iso(now), _iso(sla_at), lang, thread["id"]),
         )
         _event(conn, int(thread["id"]), "lead_message", {"message_id": cur.lastrowid})
         conn.commit()
-        return {"ok": True, "message_id": int(cur.lastrowid)}
+        return {
+            "ok": True,
+            "message_id": int(cur.lastrowid),
+            "thread_id": int(thread["id"]),
+        }
     finally:
         conn.close()
 
@@ -456,6 +492,196 @@ def update_message_translation(
         conn.close()
 
 
+def enrich_thread(thread_id: int) -> dict:
+    """Traduz a última mensagem do lead e pré-preenche os rascunhos da equipa.
+
+    Idempotente: não sobrescreve traduções ou rascunhos já editados por humanos.
+    """
+    init()
+    conn = db.get_connection()
+    try:
+        thread = conn.execute(
+            "SELECT * FROM lp_threads WHERE id = ?", (int(thread_id),)
+        ).fetchone()
+        if not thread:
+            return {"ok": False, "status": "not_found"}
+        message = conn.execute(
+            "SELECT * FROM lp_messages "
+            "WHERE thread_id = ? AND direction = 'inbound' "
+            "ORDER BY id DESC LIMIT 1",
+            (int(thread_id),),
+        ).fetchone()
+        if not message:
+            return {"ok": False, "status": "no_message"}
+
+        text = message["body"] or ""
+        source = _clean(message["lang"], 8) or lp_ai.detect_language(text)
+        existing_pt = _clean(message["body_pt"], MAX_REPLY_CHARS)
+        provider = "existing"
+
+        if existing_pt:
+            pt = existing_pt
+        else:
+            try:
+                pt, provider = lp_ai.translate(text, source, "pt")
+            except lp_ai.AiNotConfigured as exc:
+                conn.execute(
+                    "UPDATE lp_threads SET lead_lang = ?, ai_status = 'needs_key', "
+                    "ai_error = ?, ai_updated_at = ? WHERE id = ?",
+                    (source, str(exc)[:300], _iso(), int(thread_id)),
+                )
+                conn.commit()
+                return {"ok": False, "status": "needs_key", "error": str(exc)}
+            except Exception as exc:  # noqa: BLE001
+                conn.execute(
+                    "UPDATE lp_threads SET lead_lang = ?, ai_status = 'failed', "
+                    "ai_error = ?, ai_updated_at = ? WHERE id = ?",
+                    (
+                        source,
+                        f"{type(exc).__name__}: {exc}"[:300],
+                        _iso(),
+                        int(thread_id),
+                    ),
+                )
+                conn.commit()
+                return {"ok": False, "status": "failed", "error": str(exc)}
+            conn.execute(
+                "UPDATE lp_messages SET body_pt = ?, lang = ? WHERE id = ?",
+                (pt, source, int(message["id"])),
+            )
+
+        suggestion_pt = lp_ai.suggest_reply_pt(
+            thread["intent"], thread["city"] or "", thread["trade"] or ""
+        )
+        draft_pt = _clean(thread["draft_pt"], MAX_REPLY_CHARS) or suggestion_pt
+        draft_out = _clean(thread["draft_out"], MAX_REPLY_CHARS)
+        out_provider = provider
+        if not draft_out:
+            try:
+                draft_out, out_provider = lp_ai.translate(draft_pt, "pt", source)
+            except lp_ai.AiNotConfigured as exc:
+                conn.execute(
+                    "UPDATE lp_threads SET lead_lang = ?, ai_status = 'needs_key', "
+                    "ai_provider = ?, ai_error = ?, draft_pt = ?, draft_out = NULL, "
+                    "draft_out_lang = ?, ai_updated_at = ? WHERE id = ?",
+                    (
+                        source,
+                        provider,
+                        str(exc)[:300],
+                        draft_pt,
+                        source,
+                        _iso(),
+                        int(thread_id),
+                    ),
+                )
+                conn.commit()
+                return {
+                    "ok": False,
+                    "status": "needs_key",
+                    "error": str(exc),
+                }
+            except Exception as exc:  # noqa: BLE001
+                conn.execute(
+                    "UPDATE lp_threads SET lead_lang = ?, ai_status = 'failed', "
+                    "ai_provider = ?, ai_error = ?, draft_pt = ?, draft_out = NULL, "
+                    "draft_out_lang = ?, ai_updated_at = ? WHERE id = ?",
+                    (
+                        source,
+                        provider,
+                        f"{type(exc).__name__}: {exc}"[:300],
+                        draft_pt,
+                        source,
+                        _iso(),
+                        int(thread_id),
+                    ),
+                )
+                conn.commit()
+                return {"ok": False, "status": "failed", "error": str(exc)}
+
+        conn.execute(
+            "UPDATE lp_threads SET lead_lang = ?, ai_status = 'ready', "
+            "ai_provider = ?, ai_error = NULL, draft_pt = ?, draft_out = ?, "
+            "draft_out_lang = ?, ai_updated_at = ? WHERE id = ?",
+            (
+                source,
+                out_provider,
+                draft_pt,
+                draft_out,
+                source,
+                _iso(),
+                int(thread_id),
+            ),
+        )
+        _event(
+            conn,
+            int(thread_id),
+            "ai_enriched",
+            {"provider": out_provider, "lead_lang": source},
+        )
+        conn.commit()
+        logger.info(
+            "[LP-WIDGET] AI thread #%s provider=%s lang=%s",
+            thread_id,
+            out_provider,
+            source,
+        )
+        return {
+            "ok": True,
+            "status": "ready",
+            "lead_lang": source,
+            "provider": out_provider,
+            "draft_pt": draft_pt,
+            "draft_out": draft_out,
+        }
+    finally:
+        conn.close()
+
+
+def translate_draft(thread_id: int, body_pt: str) -> Optional[dict]:
+    """Traduz o rascunho PT-BR para o idioma de origem do lead."""
+    init()
+    pt = _clean(body_pt, MAX_REPLY_CHARS)
+    if not pt:
+        raise ValueError("empty_reply")
+
+    conn = db.get_connection()
+    try:
+        thread = conn.execute(
+            "SELECT * FROM lp_threads WHERE id = ?", (int(thread_id),)
+        ).fetchone()
+        if not thread:
+            return None
+        lead_lang = _clean(thread["lead_lang"], 8) or "en"
+        try:
+            out, provider = lp_ai.translate(pt, "pt", lead_lang)
+        except lp_ai.AiNotConfigured as exc:
+            raise ValueError(f"translation_not_configured: {exc}") from exc
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"translation_failed: {exc}") from exc
+
+        conn.execute(
+            "UPDATE lp_threads SET draft_pt = ?, draft_out = ?, "
+            "draft_out_lang = ?, ai_provider = ?, ai_status = 'ready', "
+            "ai_error = NULL, ai_updated_at = ? WHERE id = ?",
+            (pt, out, lead_lang, provider, _iso(), int(thread_id)),
+        )
+        _event(
+            conn,
+            int(thread_id),
+            "draft_translated",
+            {"provider": provider, "lang": lead_lang},
+        )
+        conn.commit()
+        return {
+            "ok": True,
+            "body_out": out,
+            "lang": lead_lang,
+            "provider": provider,
+        }
+    finally:
+        conn.close()
+
+
 def list_threads(status: str = "", limit: int = 50) -> list[dict]:
     init()
     limit = max(1, min(200, int(limit or 50)))
@@ -464,7 +690,8 @@ def list_threads(status: str = "", limit: int = 50) -> list[dict]:
     try:
         rows = conn.execute(
             "SELECT t.id, t.email, t.name, t.company, t.city, t.trade, "
-            "t.intent, t.status, t.created_at, t.last_message_at, t.sla_due_at, "
+            "t.intent, t.status, t.lead_lang, t.ai_status, t.created_at, "
+            "t.last_message_at, t.sla_due_at, "
             "(SELECT body FROM lp_messages m WHERE m.thread_id = t.id "
             " ORDER BY m.id DESC LIMIT 1) AS last_message, "
             "(SELECT COUNT(*) FROM lp_messages m WHERE m.thread_id = t.id) "
@@ -486,8 +713,10 @@ def get_thread_admin(thread_id: int) -> Optional[dict]:
     try:
         thread = conn.execute(
             "SELECT id, email, name, company, city, trade, intent, status, "
-            "locale, source_section, created_at, updated_at, last_message_at, "
-            "sla_due_at FROM lp_threads WHERE id = ?",
+            "locale, source_section, lead_lang, ai_status, ai_provider, "
+            "ai_error, draft_pt, draft_out, draft_out_lang, ai_updated_at, "
+            "created_at, updated_at, last_message_at, sla_due_at "
+            "FROM lp_threads WHERE id = ?",
             (int(thread_id),),
         ).fetchone()
         if not thread:
@@ -512,7 +741,7 @@ def reply(
     body_en: str,
     admin_id: Optional[int] = None,
 ) -> Optional[dict]:
-    """Resposta da equipa: guarda PT-BR + EN, envia o EN por e-mail e devolve."""
+    """Resposta da equipa: guarda PT-BR + versão no idioma do lead e envia."""
     init()
     pt = _clean(body_pt, MAX_REPLY_CHARS)
     en = _clean(body_en, MAX_REPLY_CHARS)
@@ -528,18 +757,20 @@ def reply(
             return None
 
         now = _now()
+        lead_lang = _clean(thread["lead_lang"], 8) or "en"
         cur = conn.execute(
             "INSERT INTO lp_messages ("
             "thread_id, direction, channel, body, body_pt, body_en, lang, "
             "author_type, author_id, email_status, created_at"
-            ") VALUES (?, 'outbound', 'widget+email', ?, ?, ?, 'en', 'team', ?, "
+            ") VALUES (?, 'outbound', 'widget+email', ?, ?, ?, ?, 'team', ?, "
             "'pending', ?)",
-            (int(thread_id), en, pt, en, admin_id, _iso(now)),
+            (int(thread_id), en, pt, en, lead_lang, admin_id, _iso(now)),
         )
         message_id = int(cur.lastrowid)
         conn.execute(
             "UPDATE lp_threads SET status = 'replied', updated_at = ?, "
-            "last_message_at = ? WHERE id = ?",
+            "last_message_at = ?, draft_pt = NULL, draft_out = NULL, "
+            "draft_out_lang = NULL WHERE id = ?",
             (_iso(now), _iso(now), int(thread_id)),
         )
         _event(conn, int(thread_id), "team_reply", {"message_id": message_id})

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import useSWR from "swr";
 import {
   AlertTriangle,
@@ -23,10 +23,12 @@ import {
 
 import {
   AdminApiError,
+  enrichLpThread,
   fetchLpThread,
   fetchLpThreads,
   replyLpThread,
   saveLpTranslation,
+  translateLpDraft,
   type LpAdminMessage,
   type LpAdminThreadDetail,
   type LpAdminThreadSummary,
@@ -106,6 +108,15 @@ function makeDemoThread(): LpAdminThreadDetail {
     intent: "vs_ads",
     status: "new",
     locale: "en",
+    lead_lang: "en",
+    ai_status: "ready",
+    ai_provider: "demo",
+    ai_updated_at: now,
+    draft_pt:
+      "Porque aqui não paga por cliques. Paga $120 por semana por oportunidades concretas, com proprietário identificado e telefone verificado — reservadas 60 minutos só para si. Se um único trabalho fechar, o passe pagou-se.",
+    draft_out:
+      "Because here you don't pay for clicks. You pay $120 a week for concrete opportunities, with an identified owner and a verified phone — reserved for 60 minutes only for you. If a single job closes, the pass pays for itself.",
+    draft_out_lang: "en",
     source_section: "landing_widget",
     created_at: now,
     updated_at: now,
@@ -494,11 +505,16 @@ export default function LpInboxClient() {
                 </div>
               ) : activeThread ? (
                 <ThreadDetail
-                  key={demo ? "demo" : activeThread.id}
+                  key={
+                    demo
+                      ? "demo"
+                      : `${activeThread.id}-${activeThread.ai_updated_at ?? "none"}`
+                  }
                   thread={activeThread}
                   demo={demo}
                   onSend={handleSend}
                   onSaveTranslation={handleSaveTranslation}
+                  onRefresh={() => void mutateThread()}
                 />
               ) : (
                 <div className="rounded-2xl border border-slate-200 bg-white px-4 py-16 text-center text-[11.5px] text-slate-400">
@@ -518,6 +534,7 @@ function ThreadDetail({
   demo,
   onSend,
   onSaveTranslation,
+  onRefresh,
 }: {
   thread: LpAdminThreadDetail;
   demo: boolean;
@@ -531,8 +548,44 @@ function ThreadDetail({
     messageId: number,
     bodyPt: string
   ) => Promise<{ ok: boolean }>;
+  onRefresh: () => void;
 }) {
   const overdue = isOverdue(thread.sla_due_at);
+  const [enriching, setEnriching] = useState(false);
+  const [enrichError, setEnrichError] = useState("");
+  const aiStatus = thread.ai_status || "pending";
+  const aiLabel =
+    aiStatus === "ready"
+      ? "IA pronta"
+      : aiStatus === "needs_key"
+        ? "IA sem chave"
+        : aiStatus === "failed"
+          ? "IA falhou"
+          : "IA a preparar";
+  const aiClass =
+    aiStatus === "ready"
+      ? "bg-emerald-100 text-emerald-700"
+      : aiStatus === "failed"
+        ? "bg-rose-100 text-rose-700"
+        : "bg-amber-100 text-amber-800";
+
+  async function handleEnrich() {
+    setEnriching(true);
+    setEnrichError("");
+    try {
+      const result = await enrichLpThread(thread.id);
+      if (!result.ok) {
+        setEnrichError(result.error || "A IA não conseguiu concluir.");
+      }
+      onRefresh();
+    } catch (err) {
+      setEnrichError(
+        err instanceof Error ? err.message : "Falha ao executar a IA."
+      );
+    } finally {
+      setEnriching(false);
+    }
+  }
 
   return (
     <div className="space-y-3">
@@ -553,6 +606,14 @@ function ThreadDetail({
               </span>
               <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[8.5px] font-black uppercase tracking-wide text-violet-700">
                 {INTENT_LABEL[thread.intent] || thread.intent}
+              </span>
+              <span
+                className={cls(
+                  "rounded-full px-2 py-0.5 text-[8.5px] font-black uppercase tracking-wide",
+                  aiClass
+                )}
+              >
+                {aiLabel}
               </span>
               {overdue && (
                 <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[8.5px] font-black uppercase tracking-wide text-rose-700">
@@ -591,15 +652,30 @@ function ThreadDetail({
             <p className="mt-0.5 font-bold text-slate-500">
               {thread.messages.length} mensagem(ns)
             </p>
+            {aiStatus !== "ready" && !demo && (
+              <button
+                type="button"
+                onClick={() => void handleEnrich()}
+                disabled={enriching}
+                className="mt-1.5 inline-flex items-center gap-1 rounded-lg border border-violet-200 bg-white px-2 py-1 text-[9px] font-bold text-violet-700 hover:border-violet-300 disabled:opacity-50"
+              >
+                {enriching ? "A gerar…" : "Gerar com IA"}
+              </button>
+            )}
           </div>
         </div>
+        {!demo && aiStatus !== "ready" && (thread.ai_error || enrichError) && (
+          <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[9.5px] leading-relaxed text-amber-800">
+            {enrichError || thread.ai_error}
+          </p>
+        )}
       </div>
 
       <div className="space-y-2.5">
         {thread.messages.map((message) =>
           message.direction === "inbound" ? (
             <InboundMessage
-              key={message.id}
+              key={`${message.id}-${message.body_pt ? "pt" : "pending"}`}
               threadId={thread.id}
               message={message}
               demo={demo}
@@ -611,7 +687,13 @@ function ThreadDetail({
         )}
       </div>
 
-      <ReplyComposer thread={thread} demo={demo} onSend={onSend} />
+      <ReplyComposer
+        thread={thread}
+        onSend={onSend}
+        initialPt={thread.draft_pt || ""}
+        initialOut={thread.draft_out || ""}
+        leadLang={thread.lead_lang || "en"}
+      />
     </div>
   );
 }
@@ -673,7 +755,11 @@ function InboundMessage({
             Tradução PT-BR
           </p>
           <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wide text-violet-700">
-            {demo ? "demo" : "revisão humana"}
+            {demo
+              ? "demo"
+              : message.body_pt
+                ? "IA · pré-preenchido"
+                : "revisão humana"}
           </span>
         </div>
         <textarea
@@ -710,7 +796,7 @@ function OutboundMessage({ message }: { message: LpAdminMessage }) {
       <div className="flex items-center justify-between gap-2 text-[9px] font-black uppercase tracking-wide text-emerald-800">
         <span className="flex items-center gap-1.5">
           <CheckCircle2 className="h-3 w-3" />
-          Equipa · EN enviado
+          Equipa · {message.lang.toUpperCase()} enviado
         </span>
         <span>{fmtDate(message.created_at)}</span>
       </div>
@@ -741,25 +827,56 @@ function OutboundMessage({ message }: { message: LpAdminMessage }) {
 
 function ReplyComposer({
   thread,
-  demo,
   onSend,
+  initialPt = "",
+  initialOut = "",
+  leadLang = "en",
 }: {
   thread: LpAdminThreadDetail;
-  demo: boolean;
   onSend: (
     threadId: number,
     bodyPt: string,
     bodyEn: string
   ) => Promise<{ email_sent: boolean; simulated?: boolean }>;
+  initialPt?: string;
+  initialOut?: string;
+  leadLang?: string;
 }) {
-  const [pt, setPt] = useState("");
-  const [en, setEn] = useState("");
+  const [pt, setPt] = useState(initialPt);
+  const [en, setEn] = useState(initialOut);
   const [sending, setSending] = useState(false);
+  const [translating, setTranslating] = useState(false);
+  const [translateError, setTranslateError] = useState("");
+  const lastTranslatedRef = useRef(initialPt);
   const [result, setResult] = useState<{
     email_sent: boolean;
     simulated?: boolean;
   } | null>(null);
   const [error, setError] = useState("");
+  const finalLabel = (leadLang || "en").toUpperCase();
+
+  async function translate() {
+    if (!pt.trim() || translating) return;
+    setTranslating(true);
+    setTranslateError("");
+    try {
+      const out = await translateLpDraft(thread.id, pt.trim());
+      setEn(out.body_out);
+      lastTranslatedRef.current = pt;
+    } catch (err) {
+      setTranslateError(
+        err instanceof Error ? err.message : "Não foi possível traduzir."
+      );
+    } finally {
+      setTranslating(false);
+    }
+  }
+
+  async function handlePtBlur() {
+    if (pt.trim() && (pt !== lastTranslatedRef.current || !en.trim())) {
+      await translate();
+    }
+  }
 
   async function send() {
     if (!pt.trim() || !en.trim() || sending) return;
@@ -771,6 +888,7 @@ function ReplyComposer({
       setResult(response);
       setPt("");
       setEn("");
+      lastTranslatedRef.current = "";
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Não foi possível enviar."
@@ -788,7 +906,7 @@ function ReplyComposer({
             Resposta da equipa
           </p>
           <p className="mt-0.5 text-[12px] font-bold text-slate-900">
-            Rascunho PT-BR + versão EN
+            Rascunho PT-BR + versão {finalLabel}
           </p>
         </div>
         <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[8.5px] font-black uppercase tracking-wide text-emerald-700">
@@ -804,15 +922,26 @@ function ReplyComposer({
           <textarea
             value={pt}
             onChange={(event) => setPt(event.target.value)}
+            onBlur={() => void handlePtBlur()}
             rows={5}
             placeholder="Escreva a resposta em português para revisão…"
             className="mt-1 w-full resize-y rounded-lg border border-slate-200 px-2.5 py-2 text-[11.5px] leading-relaxed text-slate-700 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
           />
         </div>
         <div>
-          <label className="text-[9px] font-black uppercase tracking-wide text-slate-400">
-            Versão EN (enviada ao lead)
-          </label>
+          <div className="flex items-center justify-between gap-2">
+            <label className="text-[9px] font-black uppercase tracking-wide text-slate-400">
+              Versão {finalLabel} (enviada ao lead)
+            </label>
+            <button
+              type="button"
+              onClick={() => void translate()}
+              disabled={translating || !pt.trim()}
+              className="rounded border border-violet-200 bg-white px-1.5 py-1 text-[8.5px] font-bold text-violet-700 hover:border-violet-300 disabled:opacity-40"
+            >
+              {translating ? "A traduzir…" : "Traduzir PT →"}
+            </button>
+          </div>
           <textarea
             value={en}
             onChange={(event) => setEn(event.target.value)}
@@ -823,15 +952,21 @@ function ReplyComposer({
               }
             }}
             rows={5}
-            placeholder="Write the final English reply…"
+            placeholder={`Write the final ${finalLabel} reply…`}
             className="mt-1 w-full resize-y rounded-lg border border-slate-200 px-2.5 py-2 text-[11.5px] leading-relaxed text-slate-700 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
           />
         </div>
       </div>
 
+      {translateError && (
+        <p className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-2 text-[10px] font-semibold text-rose-700">
+          {translateError}
+        </p>
+      )}
+
       <p className="mt-2 text-[9px] leading-relaxed text-slate-400">
-        Fase 2: a IA vai pré-traduzir o rascunho. Nesta fase, a versão EN é
-        escrita/revisada pela equipa e o original PT-BR fica na auditoria.
+        A IA pré-preenche e traduz o rascunho PT-BR para {finalLabel}. Edita a
+        versão final e revê antes de aprovar. O original PT-BR fica na auditoria.
       </p>
 
       {error && (

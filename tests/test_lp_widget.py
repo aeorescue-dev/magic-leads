@@ -162,3 +162,51 @@ def test_save_translation_rejects_wrong_thread():
         )
         is None
     )
+
+
+def test_enrich_thread_prefills_translation_and_drafts(monkeypatch):
+    created = _create(
+        message="Hello, I spend 70 a day on Ads and barely convert."
+    )
+
+    def fake_translate(text: str, source: str, target: str):
+        if target == "pt":
+            return "Olá, tradução PT-BR.", "fake"
+        return "Hello, English draft.", "fake"
+
+    monkeypatch.setattr(lp_widget.lp_ai, "translate", fake_translate)
+    result = lp_widget.enrich_thread(created["id"])
+
+    assert result["ok"] is True
+    assert result["status"] == "ready"
+    assert result["lead_lang"] == "en"
+
+    admin = lp_widget.get_thread_admin(created["id"])
+    assert admin is not None
+    assert admin["messages"][0]["body_pt"].startswith("Olá")
+    assert admin["draft_pt"]
+    assert admin["draft_out"] == "Hello, English draft."
+    assert admin["draft_out_lang"] == "en"
+    assert admin["ai_status"] == "ready"
+    assert admin["ai_provider"] == "fake"
+
+
+def test_translate_draft_uses_lead_language(monkeypatch):
+    created = _create()
+
+    monkeypatch.setattr(
+        lp_widget.lp_ai,
+        "translate",
+        lambda text, source, target: ("Translated reply", "fake"),
+    )
+    result = lp_widget.translate_draft(created["id"], "Olá, resposta da equipa")
+
+    assert result is not None
+    assert result["body_out"] == "Translated reply"
+    assert result["lang"] == "en"
+
+    admin = lp_widget.get_thread_admin(created["id"])
+    assert admin is not None
+    assert admin["draft_pt"] == "Olá, resposta da equipa"
+    assert admin["draft_out"] == "Translated reply"
+    assert admin["ai_status"] == "ready"

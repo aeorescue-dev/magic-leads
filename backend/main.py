@@ -16,6 +16,7 @@ import anyio
 import httpx
 import stripe
 from fastapi import (
+    BackgroundTasks,
     Body,
     Cookie,
     Depends,
@@ -9390,7 +9391,9 @@ def _lp_widget_guard() -> None:
 @app.post("/api/public/lp/threads")
 @limiter.limit("6/hour")
 async def lp_widget_create_thread(
-    request: Request, payload: LpThreadCreateRequest
+    request: Request,
+    payload: LpThreadCreateRequest,
+    background_tasks: BackgroundTasks,
 ):
     _lp_widget_guard()
     if (payload.website or "").strip():
@@ -9426,6 +9429,7 @@ async def lp_widget_create_thread(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    background_tasks.add_task(lp_widget.enrich_thread, result["id"])
     return {
         "ok": True,
         "token": result["token"],
@@ -9450,7 +9454,10 @@ async def lp_widget_get_thread(request: Request, token: str):
 @app.post("/api/public/lp/threads/{token}/messages")
 @limiter.limit("20/hour")
 async def lp_widget_lead_message(
-    request: Request, token: str, payload: LpLeadMessageRequest
+    request: Request,
+    token: str,
+    payload: LpLeadMessageRequest,
+    background_tasks: BackgroundTasks,
 ):
     _lp_widget_guard()
     try:
@@ -9461,6 +9468,7 @@ async def lp_widget_lead_message(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not result:
         raise HTTPException(status_code=404, detail="Thread not found")
+    background_tasks.add_task(lp_widget.enrich_thread, result["thread_id"])
     return result
 
 
@@ -9510,6 +9518,44 @@ async def admin_lp_message_translation(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not result:
         raise HTTPException(status_code=404, detail="Message not found")
+    return result
+
+
+@app.post("/api/admin/lp/threads/{thread_id}/translate-draft")
+@limiter.limit("120/hour")
+async def admin_lp_translate_draft(
+    request: Request,
+    thread_id: int,
+    payload: LpTranslationRequest,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Traduz o rascunho PT-BR para o idioma de origem do lead."""
+    _lp_widget_guard()
+    try:
+        result = await anyio.to_thread.run_sync(
+            lambda: lp_widget.translate_draft(thread_id, payload.body_pt)
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not result:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    return result
+
+
+@app.post("/api/admin/lp/threads/{thread_id}/ai-enrich")
+@limiter.limit("30/hour")
+async def admin_lp_ai_enrich(
+    request: Request,
+    thread_id: int,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """(Re)gera tradução + sugestão para um fio existente."""
+    _lp_widget_guard()
+    result = await anyio.to_thread.run_sync(
+        lambda: lp_widget.enrich_thread(thread_id)
+    )
+    if result.get("status") == "not_found":
+        raise HTTPException(status_code=404, detail="Thread not found")
     return result
 
 
