@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 import {
   AlertTriangle,
   ArrowLeft,
+  Bell,
+  BellOff,
   CheckCircle2,
   Clock,
   Inbox,
@@ -196,6 +198,18 @@ export default function LpInboxClient() {
   const [savingAvailability, setSavingAvailability] = useState(false);
   const [availabilityError, setAvailabilityError] = useState("");
   const [demoThread, setDemoThread] = useState<LpAdminThreadDetail | null>(null);
+  const [soundEnabled, setSoundEnabled] = useState(() => {
+    if (typeof window === "undefined") return true;
+    try {
+      return window.localStorage.getItem("lp_inbox_sound") !== "off";
+    } catch {
+      return true;
+    }
+  });
+  const [unseenNew, setUnseenNew] = useState<number[]>([]);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const knownNewIdsRef = useRef<Set<number>>(new Set());
+  const newAlertsReadyRef = useRef(false);
 
   const {
     data: list,
@@ -227,6 +241,16 @@ export default function LpInboxClient() {
     shouldRetryOnError: false,
   });
 
+  const { data: newLeadsFeed } = useSWR(
+    demo ? null : "lp-inbox-new-leads",
+    () => fetchLpThreads({ status: "new", limit: 200 }),
+    {
+      refreshInterval: 5000,
+      revalidateOnFocus: true,
+      shouldRetryOnError: false,
+    }
+  );
+
   const threads = list?.threads ?? [];
   const activeId = selectedId ?? threads[0]?.id ?? null;
 
@@ -252,6 +276,103 @@ export default function LpInboxClient() {
   const activeThreads = demo ? (summary ? [summary] : []) : threads;
   const activeThread = demo ? demoThread : thread;
   const activeThreadId = demo ? demoThread?.id ?? null : activeId;
+
+  function ensureAudioContext(): AudioContext | null {
+    if (typeof window === "undefined") return null;
+    if (!audioCtxRef.current) {
+      const Ctor =
+        window.AudioContext ??
+        (
+          window as unknown as {
+            webkitAudioContext?: typeof AudioContext;
+          }
+        ).webkitAudioContext;
+      if (!Ctor) return null;
+      audioCtxRef.current = new Ctor();
+    }
+    if (audioCtxRef.current.state === "suspended") {
+      void audioCtxRef.current.resume();
+    }
+    return audioCtxRef.current;
+  }
+
+  function playAlertTone(force = false) {
+    if (!force && !soundEnabled) return;
+    const ctx = ensureAudioContext();
+    if (!ctx) return;
+    const start = ctx.currentTime;
+    [880, 1174.66].forEach((frequency, index) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = frequency;
+      const at = start + index * 0.16;
+      gain.gain.setValueAtTime(0.0001, at);
+      gain.gain.exponentialRampToValueAtTime(0.16, at + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.14);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(at);
+      osc.stop(at + 0.16);
+    });
+  }
+
+  function toggleSound() {
+    const next = !soundEnabled;
+    setSoundEnabled(next);
+    try {
+      window.localStorage.setItem("lp_inbox_sound", next ? "on" : "off");
+    } catch {
+      // localStorage indisponível
+    }
+    if (next) playAlertTone(true);
+  }
+
+  useEffect(() => {
+    const unlock = () => {
+      ensureAudioContext();
+    };
+    window.addEventListener("pointerdown", unlock, { once: true });
+    window.addEventListener("keydown", unlock, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("keydown", unlock);
+      if (audioCtxRef.current) {
+        void audioCtxRef.current.close();
+        audioCtxRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (demo || !newLeadsFeed) return;
+    const currentIds = new Set(newLeadsFeed.threads.map((item) => item.id));
+    if (!newAlertsReadyRef.current) {
+      knownNewIdsRef.current = currentIds;
+      newAlertsReadyRef.current = true;
+      return;
+    }
+    const fresh = Array.from(currentIds).filter(
+      (id) => !knownNewIdsRef.current.has(id)
+    );
+    knownNewIdsRef.current = currentIds;
+    setUnseenNew((prev) => {
+      const kept = prev.filter((id) => currentIds.has(id));
+      return fresh.length ? Array.from(new Set([...kept, ...fresh])) : kept;
+    });
+    if (fresh.length > 0) playAlertTone();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newLeadsFeed, demo]);
+
+  useEffect(() => {
+    document.title =
+      unseenNew.length > 0
+        ? `(${unseenNew.length}) Novo Lead - LP Inbox`
+        : "LP Inbox";
+    return () => {
+      document.title = "LP Inbox";
+    };
+  }, [unseenNew.length]);
 
   async function refresh() {
     if (refreshing) return;
@@ -410,6 +531,31 @@ export default function LpInboxClient() {
             >
               {demo ? "Demo" : apiDisabled ? "API off" : listError ? "Erro" : "Live"}
             </span>
+            <button
+              type="button"
+              onClick={toggleSound}
+              aria-pressed={soundEnabled}
+              aria-label={
+                soundEnabled ? "Silenciar alertas sonoros" : "Ativar alertas sonoros"
+              }
+              title={
+                soundEnabled
+                  ? "Alertas sonoros ligados"
+                  : "Alertas sonoros desligados"
+              }
+              className={cls(
+                "flex h-[30px] w-[30px] items-center justify-center rounded-lg border transition",
+                soundEnabled
+                  ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                  : "border-slate-300 bg-white text-slate-500"
+              )}
+            >
+              {soundEnabled ? (
+                <Bell className="h-3.5 w-3.5" />
+              ) : (
+                <BellOff className="h-3.5 w-3.5" />
+              )}
+            </button>
             <button
               type="button"
               onClick={() => void refresh()}
@@ -670,18 +816,26 @@ export default function LpInboxClient() {
                   {activeThreads.map((item) => {
                     const selected = item.id === activeThreadId;
                     const overdue = isOverdue(item.sla_due_at);
+                    const isNewAlert = unseenNew.includes(item.id);
                     return (
                       <li key={item.id}>
                         <button
                           type="button"
                           onClick={() => {
-                            if (!demo) setSelectedId(item.id);
+                            if (!demo) {
+                              setSelectedId(item.id);
+                              setUnseenNew((prev) =>
+                                prev.filter((id) => id !== item.id)
+                              );
+                            }
                           }}
                           className={cls(
                             "w-full rounded-xl border p-2.5 text-left transition",
                             selected
                               ? "border-emerald-400 bg-emerald-50/70 shadow-[0_0_0_3px_rgba(16,185,129,0.08)]"
-                              : "border-transparent hover:border-slate-200 hover:bg-slate-50"
+                              : isNewAlert
+                                ? "border-amber-300 bg-amber-50/60 hover:border-amber-400 hover:bg-amber-50"
+                                : "border-transparent hover:border-slate-200 hover:bg-slate-50"
                           )}
                         >
                           <div className="flex items-start justify-between gap-2">
@@ -693,6 +847,12 @@ export default function LpInboxClient() {
                                 {item.email}
                               </p>
                             </div>
+                            {isNewAlert && (
+                              <span className="relative mt-1 flex h-2 w-2 shrink-0">
+                                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
+                                <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500" />
+                              </span>
+                            )}
                             <span
                               className={cls(
                                 "shrink-0 rounded-full px-1.5 py-0.5 text-[9.5px] font-black uppercase tracking-wide",
@@ -779,7 +939,10 @@ export default function LpInboxClient() {
                   onSend={handleSend}
                   onSaveTranslation={handleSaveTranslation}
                   onRefresh={() => void mutateThread()}
-                  onOpenThread={(id) => setSelectedId(id)}
+                  onOpenThread={(id) => {
+                    setSelectedId(id);
+                    setUnseenNew((prev) => prev.filter((item) => item !== id));
+                  }}
                   onArchive={() =>
                     void handleArchive(
                       activeThread.id,

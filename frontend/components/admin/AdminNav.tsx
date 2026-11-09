@@ -7,6 +7,7 @@ import {
   Activity,
   BarChart3,
   Database,
+  Inbox,
   LayoutDashboard,
   Phone,
   Sparkles,
@@ -15,6 +16,7 @@ import {
 
 const LINKS = [
   { href: "/admin", label: "Overview", icon: LayoutDashboard },
+  { href: "/admin/lp-inbox", label: "LP Inbox", icon: Inbox },
   { href: "/admin/data-plane", label: "Data Plane", icon: Database },
   { href: "/admin/voice", label: "Voice B2B", icon: Phone },
   { href: "/admin/system-health", label: "System Health", icon: Activity },
