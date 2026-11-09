@@ -256,6 +256,12 @@ Validado em 2026-11-09 com EN, PT e ES (incluindo edição PT → ES e envio),
 
 ## Fase 2 — plano de montagem na LP oficial
 
+**Estado atual:** `LpWidgetMount` já está montado no `LandingShell`. A branch de
+integração e o build de pré-produção usam obrigatoriamente
+`NEXT_PUBLIC_LP_WIDGET=false`: o componente devolve `null`, o chunk do
+launcher/panel não é descarregado e não há pedidos a `/api/public/lp/*`.
+A ativação continua dependente de autorização explícita.
+
 Objetivo: deixar o widget **montado mas invisível** na LP oficial com
 `NEXT_PUBLIC_LP_WIDGET=false`, para que a ativação futura seja só uma mudança de
 flag (com aprovação explícita), sem novo desenvolvimento.
