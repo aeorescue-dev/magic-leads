@@ -815,3 +815,89 @@
   background-color: rgba(16, 185, 129, 0.3);
   color: white;
 }
+
+/* ============================================================
+   SIGNAL DESK — design tokens (Fase 0)
+   Obsidiana + mint. Os componentes novos usam estas variáveis;
+   o resto do dashboard migra progressivamente sem alterar dados.
+   ============================================================ */
+[data-theme="dark"] {
+  --sd-bg: #07090d;
+  --sd-surface: #0e1218;
+  --sd-surface-2: #141a22;
+  --sd-surface-3: #1a222c;
+  --sd-border: #232b36;
+  --sd-border-strong: #344152;
+  --sd-text: #f5f7fa;
+  --sd-muted: #8c99a8;
+  --sd-faint: #5f6b7a;
+  --sd-accent: #5eead4;
+  --sd-accent-strong: #2dd4bf;
+  --sd-accent-soft: rgba(94, 234, 212, 0.12);
+  --sd-accent-text: #062a26;
+  --sd-urgent: #fb7185;
+  --sd-urgent-soft: rgba(251, 113, 133, 0.13);
+  --sd-warn: #fbbf24;
+  --sd-warn-soft: rgba(251, 191, 36, 0.12);
+  --sd-info: #60a5fa;
+  --sd-info-soft: rgba(96, 165, 250, 0.12);
+  --sd-success: #34d399;
+  --sd-shadow: 0 18px 50px rgba(0, 0, 0, 0.42);
+  --sd-ring: rgba(94, 234, 212, 0.55);
+}
+
+[data-theme="light"] {
+  --sd-bg: #f7f8fa;
+  --sd-surface: #ffffff;
+  --sd-surface-2: #f1f3f6;
+  --sd-surface-3: #e9edf2;
+  --sd-border: #e3e7ed;
+  --sd-border-strong: #cdd5df;
+  --sd-text: #0b1220;
+  --sd-muted: #5b6675;
+  --sd-faint: #7b8797;
+  --sd-accent: #0f766e;
+  --sd-accent-strong: #0d9488;
+  --sd-accent-soft: rgba(15, 118, 110, 0.10);
+  --sd-accent-text: #ffffff;
+  --sd-urgent: #be123c;
+  --sd-urgent-soft: rgba(190, 18, 60, 0.08);
+  --sd-warn: #b45309;
+  --sd-warn-soft: rgba(180, 83, 9, 0.08);
+  --sd-info: #1d4ed8;
+  --sd-info-soft: rgba(29, 78, 216, 0.08);
+  --sd-success: #047857;
+  --sd-shadow: 0 18px 45px rgba(15, 23, 42, 0.12);
+  --sd-ring: rgba(15, 118, 110, 0.45);
+}
+
+.sd-tabular { font-variant-numeric: tabular-nums lining-nums; }
+.sd-surface {
+  background: var(--sd-surface);
+  border: 1px solid var(--sd-border);
+}
+.sd-elevated {
+  background: var(--sd-surface-2);
+  border: 1px solid var(--sd-border);
+  box-shadow: var(--sd-shadow);
+}
+.sd-muted { color: var(--sd-muted); }
+.sd-faint { color: var(--sd-faint); }
+.sd-focus:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--sd-bg), 0 0 0 4px var(--sd-ring);
+}
+.sd-scroll-x {
+  scrollbar-width: none;
+}
+.sd-scroll-x::-webkit-scrollbar { display: none; }
+.sd-gradient-fade-r {
+  mask-image: linear-gradient(to right, black 92%, transparent 100%);
+}
+@media (prefers-reduced-motion: reduce) {
+  .sd-motion, .sd-motion * {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

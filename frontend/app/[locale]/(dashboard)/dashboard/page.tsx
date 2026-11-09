@@ -19,7 +19,7 @@ import {
   Flame, Zap, Forklift, Droplets, Bug, Droplet, AlertTriangle,
   DoorOpen, AppWindow, Package, Wind,
   TrendingUp, Navigation, Smartphone, FolderOpen, Archive,
-  Landmark,
+  Landmark, Command, PanelLeftClose, PanelLeftOpen, UserRound,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
@@ -45,6 +45,15 @@ import { StageBadge } from "@/components/ui/StageBadge";
 import { StageGuidePanel } from "@/components/ui/StageGuidePanel";
 import { ReserveGuideModal } from "@/components/ui/ReserveGuideModal";
 import { playAlertChime, primeAlertChime } from "@/lib/alert-chime";
+import { CityPicker, type CityOption } from "@/components/dashboard/CityPicker";
+import { CommandPalette, type PaletteAction } from "@/components/dashboard/CommandPalette";
+import { KpiPulse } from "@/components/dashboard/KpiPulse";
+import {
+  SegmentedControl,
+  SignalButton,
+  SignalChip,
+  Sheet,
+} from "@/components/ui/signal";
 import {
   LeadResponse, LeadStats, Notification, Note, HistoryEvent,
   ContractorMetrics,
@@ -126,55 +135,45 @@ function categoryOf(lead: LeadResponse): Category {
 }
 
 const DARK = {
-  bg: "#0b0d12",
-  bg2: "#10121a",
-  card: "#10121a",
-  sidebar: "#0f1117",
-  border: "border-white/10",
-  // Divisor mais discreto que a borda de cartao.
-  divider: "border-white/5",
-  // Superficie de painel/seccao (cartao elevado).
-  panel: "bg-[#10121a] border-white/5",
-  // Superficie secundaria (faixas, chips, blocos internos).
-  subtle: "bg-white/5 border-white/10",
-  // Track de barras de progresso.
-  track: "bg-white/10",
-  // Chip/botao selecionado (nao-primario).
-  chipActive: "bg-white/10 text-slate-100 border-white/20",
-  // Botao secundario (mapa, copiar).
-  ghost: "bg-slate-500/15 text-slate-300 hover:bg-slate-500/25",
-  // Botao destrutivo/neutro (largar lead).
-  ghostDanger: "bg-white/10 text-slate-300 hover:bg-rose-500/20 hover:text-rose-400",
-  // Texto secundario com contraste AA.
-  text: "text-slate-100",
-  text2: "text-slate-400",
-  input: "bg-white/5",
-  navHover: "hover:bg-white/5",
-  section: "bg-[#10121a] border-white/10",
-  header: "bg-[#0b0d12]/90",
+  bg: "var(--sd-bg)",
+  bg2: "var(--sd-surface)",
+  card: "var(--sd-surface)",
+  sidebar: "var(--sd-surface)",
+  border: "border-[var(--sd-border)]",
+  divider: "border-[var(--sd-border)]",
+  panel: "bg-[var(--sd-surface)] border-[var(--sd-border)]",
+  subtle: "bg-[var(--sd-surface-2)] border-[var(--sd-border)]",
+  track: "bg-[var(--sd-surface-3)]",
+  chipActive: "bg-[var(--sd-surface-3)] text-[var(--sd-text)] border-[var(--sd-border-strong)]",
+  ghost: "bg-[var(--sd-surface-2)] text-[var(--sd-muted)] hover:bg-[var(--sd-surface-3)] hover:text-[var(--sd-text)]",
+  ghostDanger: "bg-[var(--sd-surface-2)] text-[var(--sd-muted)] hover:bg-[var(--sd-urgent-soft)] hover:text-[var(--sd-urgent)]",
+  text: "text-[var(--sd-text)]",
+  text2: "text-[var(--sd-muted)]",
+  input: "bg-[var(--sd-surface)]",
+  navHover: "hover:bg-[var(--sd-surface-2)]",
+  section: "bg-[var(--sd-surface)] border-[var(--sd-border)]",
+  header: "bg-[var(--sd-bg)]/90",
 };
 
 const LIGHT = {
-  bg: "#f8fafc",
-  bg2: "#ffffff",
-  card: "#ffffff",
-  sidebar: "#ffffff",
-  border: "border-slate-200",
-  divider: "border-slate-200",
-  panel: "bg-white border-slate-200 shadow-sm",
-  subtle: "bg-slate-50 border-slate-200",
-  track: "bg-slate-200",
-  chipActive: "bg-slate-200 text-slate-900 border-slate-300",
-  ghost: "bg-slate-100 text-slate-700 hover:bg-slate-200",
-  ghostDanger: "bg-slate-100 text-slate-700 hover:bg-rose-100 hover:text-rose-600",
-  // slate-600 (7:1 sobre branco) em vez de slate-500, que ficava abaixo de AA
-  // em superficies cinzentas.
-  text: "text-slate-900",
-  text2: "text-slate-600",
-  input: "bg-slate-100",
-  navHover: "hover:bg-slate-100",
-  section: "bg-white border-slate-200",
-  header: "bg-white/90",
+  bg: "var(--sd-bg)",
+  bg2: "var(--sd-surface)",
+  card: "var(--sd-surface)",
+  sidebar: "var(--sd-surface)",
+  border: "border-[var(--sd-border)]",
+  divider: "border-[var(--sd-border)]",
+  panel: "bg-[var(--sd-surface)] border-[var(--sd-border)] shadow-sm",
+  subtle: "bg-[var(--sd-surface-2)] border-[var(--sd-border)]",
+  track: "bg-[var(--sd-surface-3)]",
+  chipActive: "bg-[var(--sd-surface-3)] text-[var(--sd-text)] border-[var(--sd-border-strong)]",
+  ghost: "bg-[var(--sd-surface-2)] text-[var(--sd-muted)] hover:bg-[var(--sd-surface-3)] hover:text-[var(--sd-text)]",
+  ghostDanger: "bg-[var(--sd-surface-2)] text-[var(--sd-muted)] hover:bg-[var(--sd-urgent-soft)] hover:text-[var(--sd-urgent)]",
+  text: "text-[var(--sd-text)]",
+  text2: "text-[var(--sd-muted)]",
+  input: "bg-[var(--sd-surface-2)]",
+  navHover: "hover:bg-[var(--sd-surface-2)]",
+  section: "bg-[var(--sd-surface)] border-[var(--sd-border)]",
+  header: "bg-[var(--sd-surface)]/90",
 };
 
 function formatRelativeTime(dateStr: string, t: (k: string) => string): string {
@@ -272,14 +271,14 @@ function DashboardPageInner() {
   const [selectedOwnerType, setSelectedOwnerType] = useState<string>("all");
   // Gaveta de filtros em mobile (<lg). Em desktop os filtros ficam inline.
   const [filtersOpen, setFiltersOpen] = useState(false);
+  // Shell Signal Desk: rail colapsável, command palette e sheet de interesses.
+  const [railCollapsed, setRailCollapsed] = useState(false);
+  const [commandOpen, setCommandOpen] = useState(false);
+  const [interestsSheetOpen, setInterestsSheetOpen] = useState(false);
   const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
   const [publicMetrics, setPublicMetrics] = useState<PublicMetrics>(EMPTY_PUBLIC_METRICS);
   const [scraperState, setScraperState] = useState<ScraperRunState | null>(null);
   const [shown, setShown] = useState<Set<string>>(new Set());
-
-  const CITIES = ["all", "NYC", "Chicago", "Dallas", "Boston"];
-  const CATEGORIES_FILTER = ["all", ...CATEGORIES.map(c => c.key)];
-const URGENCIES = ["all", "high", "medium", "low"];
 
   // Estados que significam que o chamado ja terminou. Espelham a lista usada
   // pelo backend em /api/leads/services. Um lead nestas condicoes aparece
@@ -456,6 +455,18 @@ const URGENCIES = ["all", "high", "medium", "low"];
   // move o foco para a folha ao abrir e devolve-o ao botao ao fechar.
   const filtersSheetRef = useRef<HTMLDivElement | null>(null);
   const filtersTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const searchRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setCommandOpen((prev) => !prev);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
   useEffect(() => {
     if (!filtersOpen) return;
     const onKey = (e: KeyboardEvent) => {
@@ -1518,11 +1529,6 @@ const URGENCIES = ["all", "high", "medium", "low"];
   const modalActionButtons = selectedLead ? getModalActionButtons() : null;
 
   // ---- Filtros: uma unica definicao usada inline (desktop) e na gaveta mobile.
-  const selectCls = `px-3 py-1.5 rounded-lg text-sm border outline-none transition ${
-    isDark
-      ? "bg-[#0b0d1a] border-white/10 text-white"
-      : "bg-white border-slate-200 text-slate-900"
-  }`;
   const activeFilterCount = [
     selectedCity !== "all",
     selectedCategory !== "all",
@@ -1540,127 +1546,240 @@ const URGENCIES = ["all", "high", "medium", "low"];
     setIncludeClosed(false);
   };
 
+  const urgencyOptions = [
+    { value: "all", label: t("dashboard.filter.all_urgency") || "Todas", icon: Filter },
+    { value: "high", label: t("dashboard.feed.urgency.high") || "Alta", icon: Flame, tone: "urgent" as const },
+    { value: "medium", label: t("dashboard.feed.urgency.medium") || "Média", icon: AlertCircle, tone: "warn" as const },
+    { value: "low", label: t("dashboard.feed.urgency.low") || "Baixa", icon: Clock, tone: "muted" as const },
+  ];
+  const ownerOptions = [
+    { value: "all", label: t("dashboard.filter.all_owner_types") || "Todos", icon: Filter },
+    { value: "private", label: t("dashboard.filter.owner_type_private") || "Privado", icon: UserRound },
+    { value: "institutional", label: t("dashboard.filter.owner_type_institutional") || "Instituição", icon: Landmark },
+    { value: "unknown", label: t("dashboard.filter.owner_type_unknown") || "Desconhecido", icon: Tag },
+  ];
+  const typeOptions = [
+    { value: "all", label: t("dashboard.filter.all_types") || "Todos", icon: Filter },
+    { value: "legal_obligation", label: t("dashboard.lead_type.obligation") || "Obrigação", icon: AlertTriangle },
+    { value: "authorized_work", label: t("dashboard.lead_type.permit") || "Permitido", icon: HardHat },
+    { value: "open_request", label: t("dashboard.lead_type.open") || "Aberto", icon: FolderOpen },
+  ];
+
   const filterControls = (
-    <>
-      <label className="flex items-center gap-2 min-w-0">
-        <span className={`text-xs font-medium whitespace-nowrap ${T.text2}`}>
-          {t("dashboard.filter.city") || "📍 Cidade:"}
-        </span>
-        <select
-          value={selectedCity}
-          onChange={(e) => setSelectedCity(e.target.value)}
-          className={`${selectCls} flex-1 lg:flex-none`}
+    <div className="space-y-3">
+      <div className="sd-scroll-x flex items-center gap-2 overflow-x-auto pb-1">
+        <SignalChip
+          active={selectedCategory === "all"}
+          icon={Sparkles}
+          onClick={() => setSelectedCategory("all")}
         >
-          {CITIES.map((c) => (
-            <option key={c} value={c}>
-              {c === "all" ? t("dashboard.filter.all_cities") || "Todas" : c}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="flex items-center gap-2 min-w-0">
-        <span className={`text-xs font-medium whitespace-nowrap ${T.text2}`}>
-          {t("dashboard.filter.category") || "🔧 Categoria:"}
-        </span>
-        <select
-          value={selectedCategory}
-          onChange={(e) => setSelectedCategory(e.target.value)}
-          className={`${selectCls} flex-1 lg:flex-none`}
-        >
-          {CATEGORIES_FILTER.map((c) => (
-            <option key={c} value={c}>
-              {c === "all"
-                ? t("dashboard.filter.all_categories") || "Todas"
-                : t(CATEGORIES.find((x) => x.key === c)?.labelKey || c)}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="flex items-center gap-2 min-w-0">
-        <span className={`text-xs font-medium whitespace-nowrap ${T.text2}`}>
-          {t("dashboard.filter.urgency") || "⚡ Urgência:"}
-        </span>
-        <select
+          {t("dashboard.filter.all_categories") || "Todas"}
+        </SignalChip>
+        {CATEGORIES.map((cat) => (
+          <SignalChip
+            key={cat.key}
+            active={selectedCategory === cat.key}
+            icon={cat.icon}
+            onClick={() => setSelectedCategory(cat.key)}
+            title={t(cat.labelKey)}
+          >
+            {t(cat.labelKey)}
+          </SignalChip>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <SegmentedControl
+          options={urgencyOptions}
           value={selectedUrgency}
-          onChange={(e) => setSelectedUrgency(e.target.value)}
-          className={`${selectCls} flex-1 lg:flex-none`}
-        >
-          {URGENCIES.map((u) => (
-            <option key={u} value={u}>
-              {u === "all"
-                ? t("dashboard.filter.all_urgency") || "Todas"
-                : t(`dashboard.feed.urgency.${u}`) || u.charAt(0).toUpperCase() + u.slice(1)}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="flex items-center gap-2 min-w-0">
-        <span className={`text-xs font-medium whitespace-nowrap ${T.text2}`}>
-          {t("dashboard.filter.owner_type") || "👤 Proprietário:"}
-        </span>
-        <select
+          onChange={setSelectedUrgency}
+          ariaLabel={t("dashboard.filter.urgency") || "Urgência"}
+        />
+        <SegmentedControl
+          options={ownerOptions}
           value={selectedOwnerType}
-          onChange={(e) => setSelectedOwnerType(e.target.value)}
-          className={`${selectCls} flex-1 lg:flex-none`}
-        >
-          {OWNER_TYPES.map((ot) => {
-            const count =
-              ot.value === "all"
-                ? realTotalLeads
-                : ot.value === "institutional"
-                  ? (dashboardSummary?.by_owner_type?.institutional ?? 0)
-                  : ot.value === "private"
-                    ? (dashboardSummary?.by_owner_type?.private ?? 0)
-                    : (dashboardSummary?.by_owner_type as any)?.unknown ?? 0;
-            return (
-              <option key={ot.value} value={ot.value}>
-                {t(ot.labelKey) || ot.value}
-                {ot.value !== "all" ? ` (${count})` : ""}
-              </option>
-            );
-          })}
-        </select>
-      </label>
-      <label className="flex items-center gap-2 min-w-0">
-        <span className={`text-xs font-medium whitespace-nowrap ${T.text2}`}>
-          {t("dashboard.filter.type") || "Tipo:"}
-        </span>
-        <select
+          onChange={setSelectedOwnerType}
+          ariaLabel={t("dashboard.filter.owner_type") || "Proprietário"}
+        />
+        <SegmentedControl
+          options={typeOptions}
           value={selectedType}
-          onChange={(e) => {
-            const newType = e.target.value;
-            setSelectedType(newType);
-            if (newType !== "all") {
-              setSelectedCategory("all");
-            }
+          onChange={(value) => {
+            setSelectedType(value);
+            if (value !== "all") setSelectedCategory("all");
           }}
-          className={`${selectCls} flex-1 lg:flex-none`}
-        >
-          {LEAD_TYPES.map((lt) => (
-            <option key={lt.value} value={lt.value}>
-              {t(lt.labelKey)}
-            </option>
-          ))}
-        </select>
-      </label>
-      <button
-        onClick={() => setIncludeClosed((v) => !v)}
-        aria-pressed={includeClosed}
-        title={t("dashboard.badge.closed_hint")}
-        className={`flex items-center justify-center gap-1.5 text-[11px] font-semibold px-2.5 py-2 rounded-lg border transition ${
-          includeClosed
-            ? isDark
-              ? "bg-slate-500/20 border-slate-400/40 text-slate-200"
-              : "bg-slate-200 border-slate-300 text-slate-900"
-            : isDark
-              ? "bg-transparent border-white/10 text-slate-400 hover:text-slate-200"
-              : "bg-white border-slate-200 text-slate-600 hover:text-slate-900"
-        }`}
-      >
-        <Archive className="h-3.5 w-3.5" /> {t("dashboard.filter.include_closed")}
-      </button>
-    </>
+          ariaLabel={t("dashboard.filter.type") || "Tipo"}
+        />
+      </div>
+
+      {activeFilterCount > 0 ? (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {selectedCity !== "all" ? (
+            <SignalChip active onClick={() => setSelectedCity("all")}>
+              {selectedCity} ×
+            </SignalChip>
+          ) : null}
+          {selectedCategory !== "all" ? (
+            <SignalChip active onClick={() => setSelectedCategory("all")}>
+              {t(CATEGORIES.find((c) => c.key === selectedCategory)?.labelKey || selectedCategory)} ×
+            </SignalChip>
+          ) : null}
+          {selectedUrgency !== "all" ? (
+            <SignalChip active onClick={() => setSelectedUrgency("all")}>
+              {t(`dashboard.feed.urgency.${selectedUrgency}`) || selectedUrgency} ×
+            </SignalChip>
+          ) : null}
+          {selectedOwnerType !== "all" ? (
+            <SignalChip active onClick={() => setSelectedOwnerType("all")}>
+              {t(OWNER_TYPES.find((o) => o.value === selectedOwnerType)?.labelKey || selectedOwnerType)} ×
+            </SignalChip>
+          ) : null}
+          {selectedType !== "all" ? (
+            <SignalChip active onClick={() => setSelectedType("all")}>
+              {t(LEAD_TYPES.find((o) => o.value === selectedType)?.labelKey || selectedType)} ×
+            </SignalChip>
+          ) : null}
+          {includeClosed ? (
+            <SignalChip active onClick={() => setIncludeClosed(false)}>
+              {t("dashboard.filter.include_closed") || "Encerrados"} ×
+            </SignalChip>
+          ) : null}
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="sd-focus ml-1 text-[11px] font-semibold text-[var(--sd-muted)] underline-offset-2 hover:text-[var(--sd-text)] hover:underline"
+          >
+            {t("dashboard.filter.clear") || "Limpar tudo"}
+          </button>
+        </div>
+      ) : null}
+    </div>
   );
+
+  const cityOptions: CityOption[] = (() => {
+    const byCity = dashboardSummary?.by_city ?? {};
+    const counts: Record<string, number> = {};
+    Object.entries(byCity).forEach(([name, count]) => {
+      counts[name.trim().toUpperCase()] = count;
+    });
+    return [
+      {
+        value: "all",
+        label: t("dashboard.filter.all_cities") || "Todas",
+        count: realTotalLeads,
+      },
+      ...["NYC", "Chicago", "Dallas", "Boston"].map((city) => ({
+        value: city,
+        label: city,
+        count: counts[city.toUpperCase()] ?? 0,
+      })),
+    ];
+  })();
+
+  const paletteActions: PaletteAction[] = [
+    {
+      id: "nav-overview",
+      group: "Navegação",
+      label: t("dashboard.nav.overview") || "Overview",
+      icon: LayoutDashboard,
+      run: () => setActiveTab("overview"),
+    },
+    {
+      id: "nav-opportunities",
+      group: "Navegação",
+      label: t("dashboard.nav.opportunities") || "Oportunidades",
+      icon: FolderKanban,
+      run: () => setActiveTab("opportunities"),
+    },
+    {
+      id: "nav-alerts",
+      group: "Navegação",
+      label: t("dashboard.nav.alerts") || "Alertas",
+      icon: Bell,
+      run: () => setActiveTab("alerts"),
+    },
+    {
+      id: "nav-history",
+      group: "Navegação",
+      label: t("dashboard.nav.history") || "Histórico",
+      icon: History,
+      run: () => setActiveTab("history"),
+    },
+    ...["all", "NYC", "Chicago", "Dallas", "Boston"].map((city) => ({
+      id: `city-${city}`,
+      group: "Cidades",
+      label: city === "all" ? (t("dashboard.filter.all_cities") || "Todas") : city,
+      icon: MapPin,
+      run: () => setSelectedCity(city),
+    })),
+    ...CATEGORIES.map((cat) => ({
+      id: `cat-${cat.key}`,
+      group: "Ofícios",
+      label: t(cat.labelKey),
+      icon: cat.icon,
+      run: () => {
+        setSelectedCategory(cat.key);
+        setActiveTab("opportunities");
+      },
+    })),
+    {
+      id: "open-filters",
+      group: "Ações",
+      label: t("dashboard.filter.open") || "Filtros avançados",
+      icon: SlidersHorizontal,
+      run: () => setFiltersOpen(true),
+    },
+    {
+      id: "clear-filters",
+      group: "Ações",
+      label: t("dashboard.filter.clear") || "Limpar filtros",
+      icon: X,
+      run: clearFilters,
+    },
+    {
+      id: "focus-search",
+      group: "Ações",
+      label: t("dashboard.topbar.search_placeholder") || "Buscar oportunidades",
+      icon: Search,
+      run: () => searchRef.current?.focus(),
+    },
+    {
+      id: "toggle-theme",
+      group: "Ações",
+      label: t("dashboard.topbar.theme") || "Alternar tema",
+      icon: isDark ? Sun : Moon,
+      run: () => setTheme(isDark ? "light" : "dark"),
+    },
+  ];
+
+  const kpiSatellites = [
+    {
+      label: t("dashboard.kpi.urgent") || "Urgentes",
+      value: dashboardSummary?.urgent ?? 0,
+      delta: t("dashboard.kpi.need_action") || "precisam ação",
+      icon: AlertCircle,
+      tone: "urgent" as const,
+      onClick: () => {
+        setSelectedUrgency("high");
+        setActiveTab("opportunities");
+      },
+    },
+    {
+      label: t("dashboard.kpi.with_contact") || "Com contato",
+      value: dashboardSummary?.with_contact ?? 0,
+      delta: t("dashboard.kpi.owner_identified") || "com proprietário identificado",
+      icon: Phone,
+      tone: "info" as const,
+    },
+    {
+      label: t("dashboard.kpi.last_scrape") || "Novas oportunidades",
+      value: publicMetrics?.last_scrape?.novas_oportunidades ?? dashboardSummary?.recent_count ?? scrapeCount,
+      delta: t("dashboard.kpi.updated_now") || "atualizado agora",
+      icon: TrendingUp,
+      tone: "accent" as const,
+      onClick: () => setActiveTab("opportunities"),
+    },
+  ];
 
   return (
     <div
@@ -1674,21 +1793,31 @@ const URGENCIES = ["all", "high", "medium", "low"];
 
       {/* SIDEBAR */}
       <aside
-        className={`fixed lg:sticky top-0 z-50 h-screen w-64 shrink-0 flex flex-col border-r transition-all duration-300 lg:translate-x-0 ${T.border} ${
+        className={`fixed lg:sticky top-0 z-50 h-screen shrink-0 flex flex-col border-r transition-all duration-300 lg:translate-x-0 ${
+          railCollapsed ? "lg:w-[84px]" : "lg:w-64"
+        } w-64 ${T.border} ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         }`}
         style={{ backgroundColor: T.sidebar }}
       >
-        <div className={`flex items-center gap-2.5 px-5 h-16 border-b ${T.border}`}>
-          <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-indigo-500 via-indigo-600 to-fuchsia-600 flex items-center justify-center shadow-md shadow-indigo-500/20">
-            <Sparkles className="h-4 w-4 text-white" />
+        <div className={`flex h-16 items-center gap-2.5 border-b px-5 ${T.border} ${railCollapsed ? "lg:justify-center lg:gap-1 lg:px-2" : ""}`}>
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--sd-accent)] text-[var(--sd-accent-text)] shadow-sm">
+            <Sparkles className="h-4 w-4" />
           </div>
-          <div>
-            <div className={`font-bold text-[15px] leading-tight ${isDark ? "text-white" : "text-slate-900"}`}>
+          <div className={railCollapsed ? "lg:hidden" : ""}>
+            <div className={`text-[15px] font-bold leading-tight ${isDark ? "text-white" : "text-slate-900"}`}>
               {t("dashboard.sidebar.brand")}
             </div>
             <div className={`text-[10px] ${T.text2}`}>{t("dashboard.sidebar.sub")}</div>
           </div>
+          <button
+            type="button"
+            onClick={() => setRailCollapsed((prev) => !prev)}
+            className="sd-focus ml-auto hidden h-7 w-7 items-center justify-center rounded-lg text-[var(--sd-muted)] hover:bg-[var(--sd-surface-2)] hover:text-[var(--sd-text)] lg:inline-flex"
+            aria-label={railCollapsed ? "Expandir navegação" : "Colapsar navegação"}
+          >
+            {railCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+          </button>
         </div>
 
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
@@ -1708,17 +1837,20 @@ const URGENCIES = ["all", "high", "medium", "low"];
                   setActiveTab(item.id as any);
                   setSidebarOpen(false);
                 }}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition ${
+                title={railCollapsed ? item.label : undefined}
+                className={`w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${
+                  railCollapsed ? "lg:justify-center lg:px-2" : ""
+                } ${
                   active
-                    ? "bg-gradient-to-r from-indigo-500/20 to-fuchsia-500/10 text-indigo-400 border border-indigo-500/30 shadow-sm"
+                    ? "border border-[var(--sd-accent)]/25 bg-[var(--sd-accent-soft)] text-[var(--sd-accent)]"
                     : `${T.text2} ${T.navHover} ${isDark ? "hover:text-slate-200" : "hover:text-slate-900"}`
                 }`}
               >
-                <item.icon className="h-4 w-4" />
-                <span className="flex-1 text-left">{item.label}</span>
+                <item.icon className="h-4 w-4 shrink-0" />
+                <span className={`flex-1 text-left ${railCollapsed ? "lg:hidden" : ""}`}>{item.label}</span>
                 {item.badge && (
-                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                    active ? "bg-indigo-500 text-white" : `${T.chipActive}`
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${railCollapsed ? "lg:hidden" : ""} ${
+                    active ? "bg-[var(--sd-accent)] text-[var(--sd-accent-text)]" : `${T.chipActive}`
                   }`}>
                     {item.badge}
                   </span>
@@ -1730,11 +1862,12 @@ const URGENCIES = ["all", "high", "medium", "low"];
           <div className={`pt-4 mt-4 border-t space-y-1 ${T.divider}`}>
             <button
               onClick={() => setShowCheckout(true)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition ${T.text2} ${T.navHover}`}
+              title={railCollapsed ? t("dashboard.nav.plans") : undefined}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition ${railCollapsed ? "lg:justify-center lg:px-2" : ""} ${T.text2} ${T.navHover}`}
             >
-              <CreditCard className="h-4 w-4 text-emerald-500" />
-              <span className="flex-1 text-left">{t("dashboard.nav.plans")}</span>
-              <span className="text-[10px] font-bold bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full">
+              <CreditCard className="h-4 w-4 shrink-0 text-emerald-500" />
+              <span className={`flex-1 text-left ${railCollapsed ? "lg:hidden" : ""}`}>{t("dashboard.nav.plans")}</span>
+              <span className={`text-[10px] font-bold bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full ${railCollapsed ? "lg:hidden" : ""}`}>
                   {t("dashboard.trial.week_badge")}
               </span>
             </button>
@@ -1743,16 +1876,17 @@ const URGENCIES = ["all", "high", "medium", "low"];
               prefetch
               onMouseEnter={() => router.prefetch(`/${lang}/dashboard/settings`)}
               onFocus={() => router.prefetch(`/${lang}/dashboard/settings`)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition ${T.text2} ${T.navHover}`}
+              title={railCollapsed ? t("dashboard.nav.settings") : undefined}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition ${railCollapsed ? "lg:justify-center lg:px-2" : ""} ${T.text2} ${T.navHover}`}
             >
-              <Settings className="h-4 w-4" />
-              <span className="flex-1 text-left">{t("dashboard.nav.settings")}</span>
+              <Settings className="h-4 w-4 shrink-0" />
+              <span className={`flex-1 text-left ${railCollapsed ? "lg:hidden" : ""}`}>{t("dashboard.nav.settings")}</span>
             </Link>
           </div>
         </nav>
 
         {/* Daily reveal quota (modelo de passe semanal; sem "créditos") */}
-        <div data-testid="daily-quota" className={`px-3 py-2 border-t ${T.border}`}>
+        <div data-testid="daily-quota" className={`px-3 py-2 border-t ${T.border} ${railCollapsed ? "lg:hidden" : ""}`}>
           <div
             className="text-[10px] font-semibold uppercase tracking-wider mb-1.5"
             style={{ color: "var(--text-muted)" }}
@@ -1809,7 +1943,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
             <div className="h-9 w-9 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-xs font-bold text-white shadow-sm">
               {(user?.company_name || user?.email || "U").slice(0, 2).toUpperCase()}
             </div>
-            <div className="flex-1 min-w-0">
+            <div className={`flex-1 min-w-0 ${railCollapsed ? "lg:hidden" : ""}`}>
               <div className={`text-sm font-semibold truncate ${isDark ? "text-white" : "text-slate-900"}`}>
                 {user?.company_name || "Contratante Pro"}
               </div>
@@ -1845,24 +1979,47 @@ const URGENCIES = ["all", "high", "medium", "low"];
             </svg>
           </button>
 
-          <div className="flex-1 max-w-md hidden sm:block">
-            <div className={`flex items-center gap-2 rounded-xl px-3 py-2 text-sm border ${T.border} ${T.input}`}>
-              <Search className="h-4 w-4 text-slate-400" />
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <CityPicker
+              value={selectedCity}
+              options={cityOptions}
+              onChange={setSelectedCity}
+              allLabel={t("dashboard.filter.all_cities") || "Todas"}
+            />
+            <div className="hidden min-w-0 flex-1 items-center gap-2 rounded-xl border border-[var(--sd-border)] bg-[var(--sd-surface)] px-3 py-2 text-sm sm:flex">
+              <Search className="h-4 w-4 shrink-0 text-[var(--sd-faint)]" />
               <input
+                ref={searchRef}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder={t("dashboard.topbar.search_placeholder")}
-                className={`bg-transparent outline-none flex-1 text-sm ${isDark ? "text-slate-100 placeholder:text-slate-500" : "text-slate-900 placeholder:text-slate-400"}`}
+                className="min-w-0 flex-1 bg-transparent text-sm text-[var(--sd-text)] outline-none placeholder:text-[var(--sd-faint)]"
               />
-              {searchQuery && (
-                <button onClick={() => setSearchQuery("")} className="text-slate-400 hover:text-slate-200">
+              {searchQuery ? (
+                <button onClick={() => setSearchQuery("")} className="text-[var(--sd-faint)] hover:text-[var(--sd-text)]" aria-label="Limpar busca">
                   <X className="h-3.5 w-3.5" />
                 </button>
-              )}
+              ) : null}
+              <button
+                type="button"
+                onClick={() => setCommandOpen(true)}
+                className="sd-focus hidden items-center gap-1 rounded-md border border-[var(--sd-border)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--sd-faint)] transition hover:text-[var(--sd-text)] md:inline-flex"
+                aria-label="Abrir command palette"
+              >
+                <Command className="h-3 w-3" /> K
+              </button>
             </div>
           </div>
 
           <div className="ml-auto flex items-center gap-2 md:gap-3">
+            <button
+              type="button"
+              onClick={() => setCommandOpen(true)}
+              className="sd-focus inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--sd-border)] text-[var(--sd-muted)] transition hover:text-[var(--sd-text)] sm:hidden"
+              aria-label="Abrir command palette"
+            >
+              <Command className="h-4 w-4" />
+            </button>
             {/* Theme Toggle */}
             <button
               data-testid="theme-toggle"
@@ -2067,13 +2224,28 @@ const URGENCIES = ["all", "high", "medium", "low"];
           </div>
 
           {/* FILTER BAR — inline em desktop, gaveta (sheet) em mobile */}
-          <div className={`hidden lg:flex flex-wrap items-center gap-3 p-4 rounded-xl border ${T.panel}`}>
+          <div className="hidden rounded-2xl border border-[var(--sd-border)] bg-[var(--sd-surface)] p-4 lg:block">
             {filterControls}
-            <div className="flex-1" />
-            <div className={`flex items-center gap-2 text-xs ${T.text2}`}>
-              <span>{filteredLeads.length} {t("dashboard.filter.showing") || "oportunidades"}</span>
-              <span>·</span>
-              <span>{newAlerts.length} {t("dashboard.filter.new") || "novas"}</span>
+            <div className={`mt-2 flex items-center justify-between gap-2 text-xs ${T.text2}`}>
+              <SignalButton
+                type="button"
+                variant="secondary"
+                size="sm"
+                icon={SlidersHorizontal}
+                onClick={() => setFiltersOpen(true)}
+              >
+                {t("dashboard.filter.open") || "Filtros"}
+                {activeFilterCount > 0 ? (
+                  <span className="ml-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--sd-accent)] px-1 text-[9px] font-bold text-[var(--sd-accent-text)]">
+                    {activeFilterCount}
+                  </span>
+                ) : null}
+              </SignalButton>
+              <div className="flex items-center gap-2">
+                <span>{filteredLeads.length} {t("dashboard.filter.showing") || "oportunidades"}</span>
+                <span>·</span>
+                <span>{newAlerts.length} {t("dashboard.filter.new") || "novas"}</span>
+              </div>
             </div>
           </div>
 
@@ -2102,7 +2274,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
 
           {filtersOpen && (
             <div
-              className="lg:hidden fixed inset-0 z-[80]"
+              className="fixed inset-0 z-[80]"
               role="dialog"
               aria-modal="true"
               aria-labelledby="filters-sheet-title"
@@ -2152,6 +2324,24 @@ const URGENCIES = ["all", "high", "medium", "low"];
                   </button>
                 </div>
                 <div className="flex flex-col gap-3">{filterControls}</div>
+                <button
+                  type="button"
+                  onClick={() => setIncludeClosed((v) => !v)}
+                  aria-pressed={includeClosed}
+                  className={`flex items-center justify-between rounded-xl border px-3 py-2.5 text-xs font-semibold transition ${
+                    includeClosed
+                      ? "border-[var(--sd-accent)]/35 bg-[var(--sd-accent-soft)] text-[var(--sd-accent)]"
+                      : "border-[var(--sd-border)] text-[var(--sd-muted)]"
+                  }`}
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <Archive className="h-3.5 w-3.5" />
+                    {t("dashboard.filter.include_closed") || "Incluir encerrados"}
+                  </span>
+                  <span className={`h-4 w-7 rounded-full p-0.5 transition ${includeClosed ? "bg-[var(--sd-accent)]" : "bg-[var(--sd-border-strong)]"}`}>
+                    <span className={`block h-3 w-3 rounded-full bg-white transition ${includeClosed ? "translate-x-3" : ""}`} />
+                  </span>
+                </button>
                 <div className="flex gap-2 pt-2">
                   <button
                     type="button"
@@ -2194,81 +2384,19 @@ const URGENCIES = ["all", "high", "medium", "low"];
             </div>
           </div>
 
-          {/* KPI CARDS - Real stats from Dashboard Summary */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
-            {[
-              { label: t("dashboard.kpi.interested") || "No seu interesse", value: dashboardSummary?.total_interested ?? 0, delta: t("dashboard.kpi.opportunities") || "oportunidades reais", icon: Building2, color: isDark ? "#6366f1" : "#4338ca" },
-              // Card "Última varredura": número canónico e ESTÁVEL do último lote
-              // concluído do scraper — a MESMA fonte da landing
-              // (`/api/metrics/public` → last_scrape.novas_oportunidades).
-              // Antes usava `recent_count` (janela móvel de 2h sobre `updated_at`,
-              // reescrito por cada re-scrape) e oscilava >5000 ↔ 1100 ↔ 1.
-              // Agora ambos (dashboard e landing) exibem exatamente o mesmo valor.
-              { label: t("dashboard.kpi.last_scrape"), value: publicMetrics?.last_scrape?.novas_oportunidades ?? dashboardSummary?.recent_count ?? scrapeCount, delta: t("dashboard.kpi.updated_now"), icon: TrendingUp, color: isDark ? "#22c55e" : "#15803d" },
-              // `with_contact` conta leads COM PROPRIETÁRIO IDENTIFICADO — não
-              // telefone (as validações de ligações só acontecem na reserva, de
-              // propósito: o número é pago). "prontas p/ ligar" era mentira.
-              { label: t("dashboard.kpi.with_contact") || "Com contato", value: dashboardSummary?.with_contact ?? 0, delta: t("dashboard.kpi.owner_identified") || "com proprietário identificado", icon: Phone, color: isDark ? "#f59e0b" : "#b45309" },
-              { label: t("dashboard.kpi.urgent") || "Urgentes", value: dashboardSummary?.urgent ?? 0, delta: t("dashboard.kpi.need_action") || "precisam ação", icon: AlertCircle, color: isDark ? "#ef4444" : "#b91c1c" },
-            ].map((k) => (
-              <div key={k.label} className={`border rounded-xl p-4 transition-colors ${theme === "dark" ? "bg-[#10121a] border-white/5" : "bg-white border-slate-200 shadow-sm"}`}>
-                <div className="flex items-center gap-2">
-                  <div className={`text-xs ${T.text2}`}>{k.label}</div>
-                  <k.icon className="h-4 w-4" style={{ color: k.color }} />
-                </div>
-                <div className="text-2xl md:text-3xl font-bold mt-1" style={{ color: k.color }}>{Number(k.value ?? 0).toLocaleString()}</div>
-                <div className={`text-[11px] mt-2 flex items-center gap-1 ${T.text2}`}>
-                  <span>{k.delta}</span>
-                </div>
-              </div>
-            ))}
-          </div>
+                    {/* KPI PULSE — 1 herói + 3 satélites acionáveis */}
+          <KpiPulse
+            hero={{
+              label: t("dashboard.kpi.interested") || "No seu interesse",
+              value: realTotalLeads,
+              delta: t("dashboard.kpi.opportunities") || "oportunidades reais",
+              icon: Building2,
+            }}
+            satellites={kpiSatellites}
+            onHero={() => setActiveTab("opportunities")}
+          />
 
-          {/* DYNAMIC CITY FILTER BAR - Always show all 4 cities fixed */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-            <span className={`text-xs font-medium uppercase tracking-wider shrink-0 mr-1 ${T.text2}`}>
-              <MapPin className="h-3.5 w-3.5 inline mr-1" />
-              {t("db.city")}:
-            </span>
-            <button
-              onClick={() => setSelectedCity("all")}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 transition border ${
-                selectedCity === "all"
-                  ? "bg-indigo-600 text-white border-indigo-600"
-                  : `${T.border} ${T.navHover} ${T.text2}`
-              }`}
-            >
-              {t("dashboard.feed.all_cities")} ({realTotalLeads.toLocaleString()})
-            </button>
-            {(() => {
-              // Fixed list of all 4 cities - always show all
-              const allCities = ["NYC", "Chicago", "Dallas", "Boston"];
-              // Mesma base canônica do totalizador (dashboardSummary.by_city):
-              // garante soma(cidades) == totalizador por identidade matemática.
-              const byCity = dashboardSummary?.by_city ?? {};
-              const apiCounts: Record<string, number> = {};
-              Object.entries(byCity).forEach(([name, n]) => { apiCounts[name.trim().toUpperCase()] = n; });
-              return allCities.map((city) => {
-                const key = city.toLowerCase();
-                const count = apiCounts[city.toUpperCase()] ?? 0;
-                return (
-                  <button
-                    key={city}
-                    onClick={() => setSelectedCity(city)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 transition border ${
-                      selectedCity.toLowerCase() === key
-                        ? "bg-indigo-600 text-white border-indigo-600"
-                        : `${T.border} ${T.navHover} ${T.text2}`
-                    }`}
-                  >
-                    {city} ({count.toLocaleString()})
-                  </button>
-                );
-              });
-            })()}
-          </div>
-
-          {/* ALERTS TAB: NOTIFICAÇÕES */}
+{/* ALERTS TAB: NOTIFICAÇÕES */}
           {activeTab === "alerts" ? (
             <section className="space-y-5">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -2618,62 +2746,119 @@ const URGENCIES = ["all", "high", "medium", "low"];
           ) : (
           <>
           {/* GRID: INTERESTS CONFIG + OPPORTUNITIES FEED */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="space-y-4">
             {/* INTERESTS SECTION */}
-            <section id="interests-config" className={`border rounded-2xl p-5 space-y-4 transition ${isDark ? "bg-[#10121a] border-white/5" : "bg-white border-slate-200 shadow-sm"}`}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="font-bold text-base">{t("dashboard.interests.title")}</h2>
-                  <p className={`text-xs ${T.text2}`}>{t("dashboard.interests.sub")}</p>
+                        <section
+              id="interests-config"
+              className="rounded-2xl border border-[var(--sd-border)] bg-[var(--sd-surface)] p-4"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--sd-accent-soft)] text-[var(--sd-accent)]">
+                    <SlidersHorizontal className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h2 className="text-sm font-semibold text-[var(--sd-text)]">
+                      {t("dashboard.interests.title")}
+                    </h2>
+                    <p className="text-[11px] text-[var(--sd-muted)]">
+                      {interests.size} {t("dashboard.filter.showing") || "ofícios ativos"} · {t("dashboard.interests.live_alert")}
+                    </p>
+                  </div>
                 </div>
-                <SlidersHorizontal className={`h-4 w-4 ${T.text2}`} />
-              </div>
 
-              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {CATEGORIES.filter((cat) => interests.has(cat.key))
+                    .slice(0, 6)
+                    .map((cat) => (
+                      <SignalChip key={cat.key} active icon={cat.icon}>
+                        {t(cat.labelKey)}
+                      </SignalChip>
+                    ))}
+                  {interests.size > 6 ? (
+                    <span className="text-[10px] font-semibold text-[var(--sd-faint)]">
+                      +{interests.size - 6}
+                    </span>
+                  ) : null}
+                </div>
+
+                <SignalButton
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  icon={SlidersHorizontal}
+                  onClick={() => setInterestsSheetOpen(true)}
+                >
+                  {t("dashboard.interests.title") || "Editar interesses"}
+                </SignalButton>
+              </div>
+            </section>
+
+            <Sheet
+              open={interestsSheetOpen}
+              onClose={() => setInterestsSheetOpen(false)}
+              title={t("dashboard.interests.title") || "Meus interesses"}
+              description={t("dashboard.interests.sub")}
+              footer={
+                <SignalButton
+                  type="button"
+                  className="w-full"
+                  onClick={() => setInterestsSheetOpen(false)}
+                >
+                  {t("dashboard.filter.apply") || "Concluir"}
+                </SignalButton>
+              }
+            >
+              <div className="grid grid-cols-1 gap-2">
                 {CATEGORIES.map((cat) => {
                   const active = interests.has(cat.key);
                   const Icon = cat.icon;
                   return (
                     <button
                       key={cat.key}
+                      type="button"
                       onClick={() => toggleInterest(cat.key)}
-                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition ${
+                      className={`sd-focus flex items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition ${
                         active
-                          ? "bg-white/5 shadow-sm"
-                          : "opacity-60 hover:opacity-100"
-                      } ${isDark ? "border-white/10" : "border-slate-200"}`}
-                      style={active ? { borderColor: `${cat.color}66`, backgroundColor: `${cat.color}10` } : {}}
+                          ? "border-[var(--sd-accent)]/35 bg-[var(--sd-accent-soft)]"
+                          : "border-[var(--sd-border)] opacity-70 hover:opacity-100"
+                      }`}
                     >
                       <div
-                        className="h-9 w-9 rounded-xl flex items-center justify-center shrink-0"
-                        style={{ backgroundColor: `${cat.color}22` }}
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+                        style={{ backgroundColor: `${cat.color}20` }}
                       >
                         <Icon className="h-4 w-4" style={{ color: cat.color }} />
                       </div>
-                      <div className="flex-1 text-left">
-                        <div className="text-sm font-semibold">{t(cat.labelKey)}</div>
-                        <div className={`text-[11px] ${T.text2}`}>{t("dashboard.interests.live_alert")}</div>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-semibold text-[var(--sd-text)]">
+                          {t(cat.labelKey)}
+                        </div>
+                        <div className="text-[10px] text-[var(--sd-muted)]">
+                          {t("dashboard.interests.live_alert")}
+                        </div>
                       </div>
-                      <div
-                        className={`h-5 w-5 rounded-md flex items-center justify-center border transition ${
-                          active ? "text-white" : "text-transparent border-slate-400"
+                      <span
+                        className={`flex h-5 w-5 items-center justify-center rounded-md border ${
+                          active
+                            ? "border-[var(--sd-accent)] bg-[var(--sd-accent)] text-[var(--sd-accent-text)]"
+                            : "border-[var(--sd-border-strong)] text-transparent"
                         }`}
-                        style={active ? { backgroundColor: cat.color, borderColor: cat.color } : {}}
                       >
-                        <CheckCircle2 className="h-4 w-4" />
-                      </div>
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                      </span>
                     </button>
                   );
                 })}
               </div>
-
-              <div className={`rounded-xl border p-3 text-xs leading-relaxed ${isDark ? "bg-indigo-500/10 border-indigo-500/20 text-slate-300" : "bg-indigo-50 border-indigo-200 text-slate-700"}`}>
+              <div className="mt-4 rounded-xl border border-[var(--sd-border)] bg-[var(--sd-surface-2)] p-3 text-xs leading-relaxed text-[var(--sd-muted)]">
                 {t("dashboard.interests.tip")}
               </div>
-            </section>
+            </Sheet>
+
 
             {/* OPPORTUNITIES FEED */}
-            <section className={`lg:col-span-2 border rounded-2xl overflow-hidden flex flex-col transition ${isDark ? "bg-[#10121a] border-white/5" : "bg-white border-slate-200 shadow-sm"}`}>
+            <section className="flex flex-col overflow-hidden rounded-2xl border border-[var(--sd-border)] bg-[var(--sd-surface)]">
               <div className={`px-5 py-4 border-b flex items-center justify-between ${T.border}`}>
                 <div>
                   <h2 className="font-bold text-base flex items-center gap-2">
@@ -3100,6 +3285,12 @@ const URGENCIES = ["all", "high", "medium", "low"];
           )}
         </main>
       </div>
+
+      <CommandPalette
+        open={commandOpen}
+        onClose={() => setCommandOpen(false)}
+        actions={paletteActions}
+      />
 
       {/* LEAD DETAIL MODAL */}
       {selectedLead && (
