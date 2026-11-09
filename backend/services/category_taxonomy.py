@@ -303,7 +303,7 @@ _POSITIVE: tuple[tuple[str, IssueCategory, re.Pattern[str]], ...] = (
     ("gas.word", IssueCategory.GAS, _rx(r"\bgas\b")),
     # Elevator (antes de Electrical: descricoes de elevador citam eletricidade)
     ("elevator", IssueCategory.ELEVATOR, _rx(
-        r"\b(?:elevators?|escalators?|chair lifts?|platform lifts?)\b"
+        r"\b(?:elevators?|escalators?|chair lifts?|platform lifts?|lula)\b"
     )),
     # Electrical
     ("electrical.strong", IssueCategory.ELECTRICAL, _rx(
@@ -332,7 +332,8 @@ _POSITIVE: tuple[tuple[str, IssueCategory, re.Pattern[str]], ...] = (
     # Structure, nao uma janela. "broken window sash" continua Door_Window.
     ("structure.envelope", IssueCategory.STRUCTURE, _rx(
         r"\b(?:parapets?|lintels?|water tables?|terracotta|masonry|brick|"
-        r"face brick|siding|vinyl siding|change of face|scaffold(?:ing)?|"
+        r"brickwork|mortar|face brick|siding|vinyl siding|change of face|"
+        r"scaffold(?:ing)?|fire escapes?|fire escape steps?|"
         r"facade (?:repair|restoration))\b"
     )),
     # Door / window (word boundary: indoor/outdoor NAO casam)
@@ -353,11 +354,12 @@ _POSITIVE: tuple[tuple[str, IssueCategory, re.Pattern[str]], ...] = (
     # Envelope/estrutura construida. Termos especificos (nao "garage" isolado)
     # para nao roubar "garage roof replacement" a Roof.
     ("structure.building", IssueCategory.STRUCTURE, _rx(
-        r"\b(?:porch(?:es)?|decks?|stoops?|carports?|sheds?|stairs?|"
-        r"stairways?|framing|frame (?:garage|building|residence|house)|"
+        r"\b(?:porch(?:es)?|decks?|stoops?|carports?|sheds?|"
+        r"framing|frame (?:garage|building|residence|house)|"
         r"new (?:detached )?(?:wood )?(?:frame )?(?:garage|building|residence|house)|"
         r"new construction|full rebuild|renovations?|remodel(?:ing)?|"
         r"build[- ]outs?|general contractors?|demolition|wreck|excavation|"
+        r"(?:building|vertical|horizontal) extensions?|"
         r"change of face|siding|vinyl siding|masonry|brick|face brick|"
         r"parapets?|lintels?|water tables?|terracotta|tuckpoint|"
         r"scaffold(?:ing)?|facade (?:repair|restoration)|"
@@ -379,7 +381,7 @@ _POSITIVE: tuple[tuple[str, IssueCategory, re.Pattern[str]], ...] = (
         r"low water pressure|water maintenance|water closets?|"
         r"flushing apparatus|cold water(?: supply)?|"
         r"no utilities[^.;]{0,40}\bwater\b|"
-        r"leaky|faucets?|toilets?|bathtubs?|washbasins?)\b"
+        r"leaky|faucets?|toilets?|bathtubs?|wash basins?|washbasins?)\b"
     )),
     ("plumbing.word", IssueCategory.PLUMBING, _rx(
         r"\b(?:plumb|leaks?|leaking|pipes?)\b"
@@ -389,14 +391,14 @@ _POSITIVE: tuple[tuple[str, IssueCategory, re.Pattern[str]], ...] = (
         r"\b(?:structural|structures?|foundations?|load[- ]bearing|collapses?|"
         r"collapsed|unsafe buildings?|sagging|buckling|deteriorat(?:ed|ing|ion)|"
         r"parapets?|chimneys?|masonry|tuckpoint|stoops?|porch(?:es)?|decks?|"
-        r"retaining walls?|party walls?|garages?|framing|"
+        r"stairs?|stairways?|retaining walls?|party walls?|garages?|framing|"
         r"frames? (?:garages?|buildings?|residences?|houses?)|"
         r"new construction|renovations?|remodel(?:ing)?|build[- ]outs?|"
         r"general contractors?|demolition|wreck|excavation|fire damage|"
         r"fire-damaged|smoke damage)\b"
     )),
     ("structure.word", IssueCategory.STRUCTURE, _rx(
-        r"\b(?:walls?|cracks?|cracked|leaning)\b"
+        r"\b(?:walls?|cracks?|cracked|cracking|leaning)\b"
     )),
     ("permit.rejected", IssueCategory.PERMIT_REJECTED, _rx(
         r"\b(?:permit (?:rejected|denied|revoked|expired)|stop work order|"
