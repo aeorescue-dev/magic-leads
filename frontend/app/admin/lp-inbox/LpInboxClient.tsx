@@ -143,6 +143,7 @@ export default function LpInboxClient() {
   } = useSWR(demo ? null : "lp-inbox-threads", () => fetchLpThreads(100), {
     refreshInterval: 5000,
     revalidateOnFocus: true,
+    shouldRetryOnError: false,
   });
 
   const threads = list?.threads ?? [];
@@ -156,7 +157,7 @@ export default function LpInboxClient() {
   } = useSWR(
     demo ? null : activeId ? ["lp-inbox-thread", activeId] : null,
     () => fetchLpThread(activeId as number),
-    { refreshInterval: 5000, revalidateOnFocus: true }
+    { refreshInterval: 5000, revalidateOnFocus: true, shouldRetryOnError: false }
   );
 
   const authError =
@@ -320,7 +321,7 @@ export default function LpInboxClient() {
               Esta página exige uma sessão real com <code>users.is_admin = 1</code>.
             </p>
             <Link
-              href="/auth"
+              href="/auth?next=/admin/lp-inbox"
               className="mt-4 inline-block rounded-lg bg-slate-900 px-4 py-2 text-[11px] font-bold text-white"
             >
               Entrar

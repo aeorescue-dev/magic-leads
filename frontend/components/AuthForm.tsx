@@ -153,7 +153,8 @@ function AuthFormInner() {
       setAuthCookie();
       updateUser(out.user);
       await refreshSubscription();
-      router.push(nextPath || localePath('/dashboard'));
+      const destination = nextPath || (out.user.is_admin ? '/admin/lp-inbox' : localePath('/dashboard'));
+      router.push(destination);
       router.refresh();
     } catch (e) {
       if (attempt !== attemptRef.current) return;
@@ -233,8 +234,9 @@ function AuthFormInner() {
         }, 600);
       } else {
         setSuccess(true);
+        const destination = nextPath || (user.is_admin ? '/admin/lp-inbox' : localePath('/dashboard'));
         setTimeout(() => {
-          router.push(nextPath || localePath('/dashboard'));
+          router.push(destination);
           router.refresh();
         }, 800);
       }

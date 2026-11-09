@@ -2643,6 +2643,8 @@ async function lpAdminFetch<T>(
   options?: RequestInit
 ): Promise<T> {
   const { headers: optHeaders, ...rest } = options ?? {};
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 15_000);
   let response: Response;
   try {
     // Caminho relativo: usa o rewrite `/api` do Next/Vercel, evita CORS nos
@@ -2651,13 +2653,19 @@ async function lpAdminFetch<T>(
       credentials: "include",
       cache: "no-store",
       ...rest,
+      signal: controller.signal,
       headers: {
         ...authHeaders(),
         ...(optHeaders as Record<string, string> | undefined),
       },
     });
-  } catch {
+  } catch (err) {
+    if ((err as { name?: string })?.name === "AbortError") {
+      throw new AdminApiError(408, "O backend demorou a responder. Tente novamente.");
+    }
     throw new AdminApiError(0, "Sem ligação ao backend.");
+  } finally {
+    window.clearTimeout(timeout);
   }
 
   if (!response.ok) {
