@@ -66,6 +66,10 @@ const EN = {
   systemAck:
     "Message received. A specialist will reply within 4 business hours.",
   networkError: "Could not send your message. Please try again.",
+  offlineStatus: "Outside business hours · reply next business day",
+  offlineTitle: "We received your message",
+  offlineNotice:
+    "Our team is currently outside business hours. We will reply first thing on the next business day.",
 };
 
 type Copy = { [K in keyof typeof EN]: string };
@@ -123,6 +127,10 @@ const PT: Copy = {
   systemAck:
     "Mensagem recebida. Um especialista responde em até 4 horas úteis.",
   networkError: "Não foi possível enviar a mensagem. Tente novamente.",
+  offlineStatus: "Fora do horário · resposta no próximo dia útil",
+  offlineTitle: "Recebemos a sua mensagem",
+  offlineNotice:
+    "A nossa equipa está fora do horário de atendimento. Responderemos nas primeiras horas do próximo dia útil.",
 };
 
 const ES: Copy = {
@@ -178,6 +186,10 @@ const ES: Copy = {
   systemAck:
     "Mensaje recibido. Un especialista responderá en un plazo de 4 horas hábiles.",
   networkError: "No se pudo enviar el mensaje. Inténtalo de nuevo.",
+  offlineStatus: "Fuera del horario · respuesta el próximo día hábil",
+  offlineTitle: "Hemos recibido tu mensaje",
+  offlineNotice:
+    "Nuestro equipo está fuera del horario de atención. Te responderemos a primera hora del próximo día hábil.",
 };
 
 export const WIDGET_COPY: Record<WidgetLang, Copy> = {

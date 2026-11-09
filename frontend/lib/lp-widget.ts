@@ -59,11 +59,21 @@ export interface LpAttachment {
   created_at: string;
 }
 
+export interface LpAvailability {
+  status: "online" | "offline";
+  next_open_at: string | null;
+  timezone: string;
+  business_start: number;
+  business_end: number;
+  business_days: number[];
+}
+
 export interface LpThreadCreateResult {
   ok: boolean;
   token: string;
   thread_id: number;
   sla_hours: number;
+  availability?: LpAvailability;
 }
 
 export class LpWidgetApiError extends Error {
@@ -135,6 +145,10 @@ export async function createLpThread(
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export async function fetchLpAvailability(): Promise<LpAvailability> {
+  return request<LpAvailability>("/api/public/lp/availability");
 }
 
 export async function fetchLpThread(token: string): Promise<LpThread> {

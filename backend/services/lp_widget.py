@@ -18,6 +18,7 @@ import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -108,6 +109,13 @@ CREATE TABLE IF NOT EXISTS lp_attachments (
 );
 CREATE INDEX IF NOT EXISTS idx_lp_attachments_thread
   ON lp_attachments (thread_id, id ASC);
+
+CREATE TABLE IF NOT EXISTS lp_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT,
+  updated_at TEXT,
+  updated_by INTEGER
+);
 """
 
 _initialized = False
@@ -171,6 +179,118 @@ def init() -> None:
         logger.warning("[LP-WIDGET] não foi possível criar tabelas: %s", exc)
         return
     _initialized = True
+
+
+AVAILABILITY_MODES = {"auto", "online", "offline"}
+
+
+def _business_config() -> tuple[int, int, set[int], ZoneInfo]:
+    start = max(
+        0,
+        min(23, int(getattr(settings, "LP_WIDGET_BUSINESS_START", 8) or 8)),
+    )
+    end = max(
+        start + 1,
+        min(24, int(getattr(settings, "LP_WIDGET_BUSINESS_END", 18) or 18)),
+    )
+    raw_days = str(
+        getattr(settings, "LP_WIDGET_BUSINESS_DAYS", "0,1,2,3,4") or "0,1,2,3,4"
+    )
+    days = {
+        int(part)
+        for part in raw_days.split(",")
+        if part.strip().lstrip("-").isdigit()
+    }
+    days = {day for day in days if 0 <= day <= 6} or {0, 1, 2, 3, 4}
+    tz_name = (
+        str(getattr(settings, "LP_WIDGET_TZ", "America/New_York") or "")
+        or "America/New_York"
+    )
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:  # noqa: BLE001 - tz invalida cai para o default comercial
+        tz = ZoneInfo("America/New_York")
+    return start, end, days, tz
+
+
+def _next_open_at(
+    local_now: datetime, days: set[int], start_hour: int
+) -> Optional[datetime]:
+    for offset in range(0, 15):
+        day = (local_now + timedelta(days=offset)).date()
+        if day.weekday() not in days:
+            continue
+        candidate = datetime(
+            day.year, day.month, day.day, start_hour, 0, tzinfo=local_now.tzinfo
+        )
+        if offset == 0 and candidate <= local_now:
+            continue
+        return candidate
+    return None
+
+
+def get_availability(now: Optional[datetime] = None) -> dict:
+    """Estado de atendimento efetivo (automatico ou override manual)."""
+    init()
+    start_hour, end_hour, days, tz = _business_config()
+    local_now = (now or _now()).astimezone(tz)
+    conn = db.get_connection()
+    try:
+        row = conn.execute(
+            "SELECT value, updated_at, updated_by FROM lp_settings "
+            "WHERE key = 'availability_mode'"
+        ).fetchone()
+    finally:
+        conn.close()
+    mode = _clean(row["value"], 20).lower() if row else "auto"
+    if mode not in AVAILABILITY_MODES:
+        mode = "auto"
+    minutes = local_now.hour * 60 + local_now.minute
+    in_business = local_now.weekday() in days and (
+        start_hour * 60 <= minutes < end_hour * 60
+    )
+    if mode == "online":
+        status = "online"
+    elif mode == "offline":
+        status = "offline"
+    else:
+        status = "online" if in_business else "offline"
+    next_open = _next_open_at(local_now, days, start_hour)
+    return {
+        "status": status,
+        "mode": mode,
+        "timezone": str(tz),
+        "business_start": start_hour,
+        "business_end": end_hour,
+        "business_days": sorted(days),
+        "local_now": local_now.isoformat(),
+        "next_open_at": _iso(next_open) if next_open else None,
+        "updated_at": row["updated_at"] if row else None,
+        "updated_by": int(row["updated_by"]) if row and row["updated_by"] else None,
+    }
+
+
+def set_availability(mode: str, admin_id: Optional[int] = None) -> dict:
+    """Grava o modo (`auto`/`online`/`offline`) e devolve o estado efetivo."""
+    init()
+    mode = _clean(mode, 20).lower()
+    if mode not in AVAILABILITY_MODES:
+        raise ValueError("invalid_mode")
+    conn = db.get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO lp_settings (key, value, updated_at, updated_by) "
+            "VALUES ('availability_mode', ?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, "
+            "updated_at = excluded.updated_at, updated_by = excluded.updated_by",
+            (mode, _iso(), int(admin_id) if admin_id else None),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    logger.info("[LP-WIDGET] availability mode=%s admin=%s", mode, admin_id)
+    return get_availability()
+
 
 
 def _event(conn: sqlite3.Connection, thread_id: int, event: str, payload: Any = None) -> None:
@@ -248,7 +368,66 @@ def _public_url(base: str, token: str) -> str:
     return f"{base}{separator}thread={token}"
 
 
-def _send_ack(thread: dict, token: str) -> bool:
+_OFFLINE_ACK = {
+    "pt": (
+        "A nossa equipa est\u00e1 fora do hor\u00e1rio de atendimento. "
+        "Responderemos nas primeiras horas do pr\u00f3ximo dia \u00fatil{next}."
+    ),
+    "es": (
+        "Nuestro equipo est\u00e1 fuera del horario de atenci\u00f3n. "
+        "Te responderemos a primera hora del pr\u00f3ximo d\u00eda h\u00e1bil{next}."
+    ),
+    "en": (
+        "Our team is currently outside business hours. "
+        "We'll reply first thing on the next business day{next}."
+    ),
+}
+
+_WEEKDAYS = {
+    "pt": ["seg", "ter", "qua", "qui", "sex", "s\u00e1b", "dom"],
+    "es": ["lun", "mar", "mi\u00e9", "jue", "vie", "s\u00e1b", "dom"],
+    "en": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+}
+_MONTHS = {
+    "pt": ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"],
+    "es": ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"],
+    "en": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+}
+
+
+def _format_next_open(value: Optional[str], base: str) -> str:
+    if not value:
+        return ""
+    base = base if base in {"pt", "es", "en"} else "en"
+    try:
+        moment = datetime.fromisoformat(str(value))
+    except ValueError:
+        return ""
+    if base == "en":
+        label = "{}, {} {:02d} {:02d}:{:02d}".format(
+            _WEEKDAYS[base][moment.weekday()],
+            _MONTHS[base][moment.month - 1],
+            moment.day,
+            moment.hour,
+            moment.minute,
+        )
+    else:
+        label = "{}, {:02d} {} {:02d}:{:02d}".format(
+            _WEEKDAYS[base][moment.weekday()],
+            moment.day,
+            _MONTHS[base][moment.month - 1],
+            moment.hour,
+            moment.minute,
+        )
+    return f" ({label})"
+
+
+def _send_ack(
+    thread: dict,
+    token: str,
+    *,
+    availability: Optional[dict] = None,
+) -> bool:
     name = _clean(thread.get("name"), 80)
     lang = _clean(thread.get("lead_lang"), 8) or "en"
     base = lang[:2]
@@ -288,7 +467,12 @@ def _send_ack(thread: dict, token: str) -> bool:
             f"You can expect a reply within {sla} business hours. Your reference is "
             f"#LP-{thread.get('id')}.",
         ]
-        subject = "We received your message — Magic Leads"
+        subject = "We received your message - Magic Leads"
+    if availability and availability.get("status") == "offline":
+        next_label = _format_next_open(availability.get("next_open_at"), base)
+        lines.extend(
+            ["", _OFFLINE_ACK.get(base, _OFFLINE_ACK["en"]).format(next=next_label)]
+        )
     link = _public_url(
         str(getattr(settings, "LP_WIDGET_PUBLIC_URL", "") or ""),
         token,
@@ -400,7 +584,8 @@ def create_thread(
     finally:
         conn.close()
 
-    ack_sent = _send_ack(thread, token)
+    availability = get_availability()
+    ack_sent = _send_ack(thread, token, availability=availability)
     logger.info(
         "[LP-WIDGET] thread #%s criado intent=%s ack=%s",
         thread["id"],
@@ -413,6 +598,7 @@ def create_thread(
         "created_at": thread["created_at"],
         "ack_sent": ack_sent,
         "sla_hours": int(getattr(settings, "LP_WIDGET_SLA_HOURS", 4) or 4),
+        "availability": availability,
     }
 
 

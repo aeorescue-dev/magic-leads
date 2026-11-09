@@ -2685,6 +2685,19 @@ async function lpAdminFetch<T>(
 // LP Inbox (Fase 1b) — threads do widget, tradução e resposta
 // ============================================================
 
+export interface LpAvailability {
+  status: "online" | "offline";
+  mode: "auto" | "online" | "offline";
+  timezone: string;
+  business_start: number;
+  business_end: number;
+  business_days: number[];
+  local_now: string;
+  next_open_at: string | null;
+  updated_at?: string | null;
+  updated_by?: number | null;
+}
+
 export interface LpAdminThreadSummary {
   id: number;
   email: string;
@@ -2766,6 +2779,20 @@ export interface LpAdminThreadDetail {
   messages: LpAdminMessage[];
   history?: LpHistoryItem[];
   attachments?: LpAttachment[];
+}
+
+export function fetchLpAvailability(): Promise<LpAvailability> {
+  return lpAdminFetch("/lp/availability");
+}
+
+export function setLpAvailability(
+  mode: "auto" | "online" | "offline"
+): Promise<LpAvailability> {
+  return lpAdminFetch("/lp/availability", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode }),
+  });
 }
 
 export function fetchLpThreads(params: {

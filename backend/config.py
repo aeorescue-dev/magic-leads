@@ -251,6 +251,10 @@ class Settings(BaseSettings):
     LP_WIDGET_SLA_HOURS: int = 4
     LP_WIDGET_REPLY_TO: str = "contato@magicleads.app"
     LP_WIDGET_PUBLIC_URL: str = ""
+    LP_WIDGET_TZ: str = "America/New_York"
+    LP_WIDGET_BUSINESS_START: int = 8
+    LP_WIDGET_BUSINESS_END: int = 18
+    LP_WIDGET_BUSINESS_DAYS: str = "0,1,2,3,4"
 
     # Pipeline de tradução/sugestão da inbox (Fase 2).
     # Provider: "gemini" | "openai" | "mymemory" (fallback sem chave).

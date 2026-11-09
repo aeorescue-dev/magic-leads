@@ -5,6 +5,9 @@ aponta `LEADS_DB_PATH` para um SQLite temporário; aqui isolamos novamente por
 teste para garantir que as tabelas `lp_*` nascem limpas.
 """
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 import pytest
 
 from backend.config import settings
@@ -355,3 +358,85 @@ def test_reply_email_uses_lead_language(monkeypatch):
     assert len(sent) == 1
     assert sent[0]["text"] == "Tenemos oportunidades en Dallas esta semana."
     assert sent[0]["subject"].startswith("Re: tu pregunta")
+
+
+def test_availability_auto_business_hours(monkeypatch):
+    monkeypatch.setattr(settings, "LP_WIDGET_TZ", "America/New_York", raising=False)
+    monkeypatch.setattr(settings, "LP_WIDGET_BUSINESS_START", 8, raising=False)
+    monkeypatch.setattr(settings, "LP_WIDGET_BUSINESS_END", 18, raising=False)
+    monkeypatch.setattr(settings, "LP_WIDGET_BUSINESS_DAYS", "0,1,2,3,4", raising=False)
+    lp_widget._initialized = False
+
+    et = ZoneInfo("America/New_York")
+    monday_morning = datetime(2026, 11, 9, 10, 0, tzinfo=et)
+    monday_evening = datetime(2026, 11, 9, 19, 0, tzinfo=et)
+    saturday = datetime(2026, 11, 14, 12, 0, tzinfo=et)
+
+    online = lp_widget.get_availability(monday_morning)
+    assert online["status"] == "online"
+    assert online["mode"] == "auto"
+
+    offline = lp_widget.get_availability(monday_evening)
+    assert offline["status"] == "offline"
+    assert offline["next_open_at"] is not None
+    next_open = datetime.fromisoformat(offline["next_open_at"])
+    assert next_open.astimezone(et).hour == 8
+    assert next_open.astimezone(et).day == 10
+
+    weekend = lp_widget.get_availability(saturday)
+    assert weekend["status"] == "offline"
+    weekend_next = datetime.fromisoformat(weekend["next_open_at"])
+    assert weekend_next.astimezone(et).weekday() == 0
+    assert weekend_next.astimezone(et).hour == 8
+
+
+def test_availability_manual_override():
+    result = lp_widget.set_availability("offline", admin_id=42)
+    assert result["status"] == "offline"
+    assert result["mode"] == "offline"
+    assert result["updated_by"] == 42
+
+    result = lp_widget.set_availability("online", admin_id=42)
+    assert result["status"] == "online"
+    assert result["mode"] == "online"
+
+    result = lp_widget.set_availability("auto", admin_id=42)
+    assert result["mode"] == "auto"
+
+    with pytest.raises(ValueError):
+        lp_widget.set_availability("always")
+
+
+def test_ack_includes_offline_notice(monkeypatch):
+    sent: list[dict] = []
+
+    def fake_send(to, subject, text, **kwargs):
+        sent.append({"to": to, "subject": subject, "text": text})
+        return True
+
+    monkeypatch.setattr(lp_widget, "send_email", fake_send)
+
+    lp_widget._send_ack(
+        {"id": 12, "email": "lead@example.com", "name": "Mike", "lead_lang": "en"},
+        "tok",
+        availability={
+            "status": "offline",
+            "next_open_at": "2026-11-10T08:00:00-05:00",
+        },
+    )
+
+    assert "outside business hours" in sent[0]["text"]
+    assert "next business day" in sent[0]["text"]
+    assert "Nov 10" in sent[0]["text"]
+
+
+def test_create_thread_returns_availability(monkeypatch):
+    monkeypatch.setattr(lp_widget, "send_email", lambda *args, **kwargs: True)
+    lp_widget.set_availability("offline")
+
+    created = _create()
+    assert created["availability"]["status"] == "offline"
+
+    admin = lp_widget.get_thread_admin(created["id"])
+    assert admin is not None
+    assert admin["status"] == "new"

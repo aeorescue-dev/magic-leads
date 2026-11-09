@@ -9390,10 +9390,33 @@ class LpStatusRequest(BaseModel):
     status: str
 
 
+class LpAvailabilityRequest(BaseModel):
+    mode: str
+
+
+def _lp_public_availability(data: dict) -> dict:
+    return {
+        "status": data.get("status"),
+        "next_open_at": data.get("next_open_at"),
+        "timezone": data.get("timezone"),
+        "business_start": data.get("business_start"),
+        "business_end": data.get("business_end"),
+        "business_days": data.get("business_days"),
+    }
+
+
 def _lp_widget_guard() -> None:
     """404 quando a fase está desligada — não revela a superfície da API."""
     if not bool(getattr(settings, "LP_WIDGET_ENABLED", False)):
         raise HTTPException(status_code=404, detail="Not found")
+
+
+@app.get("/api/public/lp/availability")
+@limiter.limit("120/minute")
+async def lp_widget_availability(request: Request):
+    _lp_widget_guard()
+    data = await anyio.to_thread.run_sync(lp_widget.get_availability)
+    return _lp_public_availability(data)
 
 
 @app.post("/api/public/lp/threads")
@@ -9446,6 +9469,7 @@ async def lp_widget_create_thread(
         "thread_id": result["id"],
         "sla_hours": result["sla_hours"],
         "ack_sent": result["ack_sent"],
+        "availability": _lp_public_availability(result.get("availability") or {}),
     }
 
 
@@ -9531,6 +9555,28 @@ async def lp_widget_download_attachment(token: str, attachment_id: int):
         filename=attachment["filename"],
         media_type=attachment.get("content_type") or "application/octet-stream",
     )
+
+
+@app.get("/api/admin/lp/availability")
+async def admin_lp_availability(_admin: dict = Depends(_require_admin_user)):
+    _lp_widget_guard()
+    return await anyio.to_thread.run_sync(lp_widget.get_availability)
+
+
+@app.put("/api/admin/lp/availability")
+async def admin_lp_set_availability(
+    payload: LpAvailabilityRequest,
+    _admin: dict = Depends(_require_admin_user),
+):
+    _lp_widget_guard()
+    try:
+        return await anyio.to_thread.run_sync(
+            lambda: lp_widget.set_availability(
+                payload.mode, int(_admin.get("id") or 0)
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/admin/lp/threads")

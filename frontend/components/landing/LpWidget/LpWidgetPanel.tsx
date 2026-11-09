@@ -12,16 +12,19 @@ import {
   CheckCircle2,
   Flame,
   Lock,
+  Moon,
   ShieldCheck,
   X,
 } from "lucide-react";
 import {
   createLpThread,
+  fetchLpAvailability,
   fetchLpThread,
   lpAttachmentUrl,
   trackLpWidget,
   uploadLpAttachment,
   type LpAttachment,
+  type LpAvailability,
 } from "@/lib/lp-widget";
 import {
   LP_CITIES,
@@ -114,6 +117,24 @@ export default function LpWidgetPanel({
   const [attachments, setAttachments] = useState<LpAttachment[]>([]);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const [attachmentError, setAttachmentError] = useState("");
+  const [availability, setAvailability] = useState<LpAvailability | null>(null);
+
+  useEffect(() => {
+    if (mode !== "live") return;
+    let active = true;
+    fetchLpAvailability()
+      .then((data) => {
+        if (active) setAvailability(data);
+      })
+      .catch(() => {
+        // Sem disponibilidade, o widget assume o estado normal (nunca bloqueia).
+      });
+    return () => {
+      active = false;
+    };
+  }, [mode]);
+
+  const offline = availability?.status === "offline";
 
   const totalSteps = 4;
   const currentStep =
@@ -367,6 +388,7 @@ export default function LpWidgetPanel({
         website: "",
       });
       setToken(result.token);
+      if (result.availability) setAvailability(result.availability);
       setSending(false);
       try {
         window.sessionStorage.setItem("lp_widget_thread", result.token);
@@ -420,8 +442,12 @@ export default function LpWidgetPanel({
             Magic Leads
           </p>
           <p className="mt-0.5 flex items-center gap-1.5 truncate text-[10.5px] text-slate-500">
-            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
-            {copy.online}
+            <span
+              className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                offline ? "bg-amber-500" : "bg-emerald-500"
+              }`}
+            />
+            {offline ? copy.offlineStatus : copy.online}
           </p>
         </div>
         <LpLanguagePicker
@@ -748,6 +774,13 @@ export default function LpWidgetPanel({
               </p>
             )}
 
+            {offline && (
+              <p className="mt-2 flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[10.5px] leading-relaxed text-amber-900">
+                <Moon className="mt-0.5 h-3 w-3 shrink-0" />
+                {copy.offlineStatus}
+              </p>
+            )}
+
             <button
               type="button"
               onClick={() => void submit()}
@@ -780,6 +813,20 @@ export default function LpWidgetPanel({
             <p className="mt-1 text-[12px] leading-relaxed text-slate-500">
               {copy.reviewing}
             </p>
+
+            {offline && (
+              <div className="mt-2 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">
+                <Moon className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                <div>
+                  <p className="text-[11.5px] font-bold text-amber-900">
+                    {copy.offlineTitle}
+                  </p>
+                  <p className="mt-0.5 text-[10.5px] leading-relaxed text-amber-900">
+                    {copy.offlineNotice}
+                  </p>
+                </div>
+              </div>
+            )}
 
             <div
               ref={threadRef}

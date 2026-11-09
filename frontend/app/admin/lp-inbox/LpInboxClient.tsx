@@ -13,11 +13,13 @@ import {
   Mail,
   MapPin,
   MessageSquare,
+  Moon,
   Paperclip,
   RefreshCw,
   Send,
   ShieldCheck,
   Sparkles,
+  Sun,
   Upload,
   User,
   Wrench,
@@ -26,10 +28,12 @@ import {
 import {
   AdminApiError,
   enrichLpThread,
+  fetchLpAvailability,
   fetchLpThread,
   fetchLpThreads,
   replyLpThread,
   saveLpTranslation,
+  setLpAvailability,
   setLpThreadStatus,
   translateLpDraft,
   uploadLpAttachment,
@@ -53,15 +57,33 @@ function cls(...values: Array<string | false | null | undefined>) {
 }
 
 function fmtDate(value?: string | null): string {
-  if (!value) return "—";
+  if (!value) return "-";
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
+  if (Number.isNaN(date.getTime())) return "-";
   return date.toLocaleString("pt-BR", {
     day: "2-digit",
     month: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function fmtNextOpen(value: string | null | undefined, timezone: string): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  try {
+    return date.toLocaleString("pt-BR", {
+      timeZone: timezone,
+      weekday: "short",
+      day: "2-digit",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return "";
+  }
 }
 
 function statusLabel(status: string): string {
@@ -171,6 +193,8 @@ export default function LpInboxClient() {
   const [statusFilter, setStatusFilter] = useState("");
   const [demo, setDemo] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [savingAvailability, setSavingAvailability] = useState(false);
+  const [availabilityError, setAvailabilityError] = useState("");
   const [demoThread, setDemoThread] = useState<LpAdminThreadDetail | null>(null);
 
   const {
@@ -192,6 +216,16 @@ export default function LpInboxClient() {
       shouldRetryOnError: false,
     }
   );
+
+  const {
+    data: availability,
+    error: availabilityLoadError,
+    mutate: mutateAvailability,
+  } = useSWR(demo ? null : "lp-inbox-availability", fetchLpAvailability, {
+    refreshInterval: 30000,
+    revalidateOnFocus: true,
+    shouldRetryOnError: false,
+  });
 
   const threads = list?.threads ?? [];
   const activeId = selectedId ?? threads[0]?.id ?? null;
@@ -233,6 +267,22 @@ export default function LpInboxClient() {
         await new Promise((resolve) => setTimeout(resolve, 450 - elapsed));
       }
       setRefreshing(false);
+    }
+  }
+
+  async function handleAvailability(mode: "auto" | "online" | "offline") {
+    if (savingAvailability) return;
+    setSavingAvailability(true);
+    setAvailabilityError("");
+    try {
+      await setLpAvailability(mode);
+      await mutateAvailability();
+    } catch (err) {
+      setAvailabilityError(
+        err instanceof Error ? err.message : "Não foi possível guardar o estado."
+      );
+    } finally {
+      setSavingAvailability(false);
     }
   }
 
@@ -375,6 +425,97 @@ export default function LpInboxClient() {
           </div>
         </div>
       </header>
+
+      {!demo && (
+        <div className="border-b border-slate-200 bg-white">
+          <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-2 px-4 py-2">
+            {availability ? (
+              <>
+                <span
+                  className={cls(
+                    "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[9.5px] font-black uppercase tracking-wide",
+                    availability.status === "online"
+                      ? "bg-emerald-100 text-emerald-700"
+                      : "bg-amber-100 text-amber-800"
+                  )}
+                >
+                  {availability.status === "online" ? (
+                    <Sun className="h-3 w-3" />
+                  ) : (
+                    <Moon className="h-3 w-3" />
+                  )}
+                  {availability.status === "online"
+                    ? "Online"
+                    : "Fora de horário"}
+                </span>
+                <span className="text-[10.5px] font-semibold text-slate-600">
+                  {availability.mode === "auto"
+                    ? "Modo automático"
+                    : "Override manual"}{" "}
+                  · Seg–Sex{" "}
+                  {String(availability.business_start).padStart(2, "0")}:00–
+                  {String(availability.business_end).padStart(2, "0")}:00 ET
+                </span>
+                {availability.status === "offline" && (
+                  <span className="text-[10.5px] text-amber-800">
+                    Volta{" "}
+                    {fmtNextOpen(
+                      availability.next_open_at,
+                      availability.timezone
+                    ) || "no próximo dia útil"}
+                  </span>
+                )}
+                <div className="ml-auto flex items-center gap-1">
+                  {(
+                    [
+                      { mode: "auto", label: "Automático" },
+                      { mode: "online", label: "Online" },
+                      { mode: "offline", label: "Fora de horário" },
+                    ] as const
+                  ).map((option) => (
+                    <button
+                      key={option.mode}
+                      type="button"
+                      onClick={() => void handleAvailability(option.mode)}
+                      disabled={savingAvailability}
+                      aria-pressed={availability.mode === option.mode}
+                      className={cls(
+                        "rounded-full border px-2.5 py-1 text-[9.5px] font-bold transition disabled:opacity-50",
+                        availability.mode === option.mode
+                          ? option.mode === "offline"
+                            ? "border-amber-600 bg-amber-600 text-white"
+                            : "border-slate-900 bg-slate-900 text-white"
+                          : "border-slate-300 bg-white text-slate-700 hover:border-slate-400"
+                      )}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                  {savingAvailability && (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-500" />
+                  )}
+                </div>
+              </>
+            ) : (
+              <span className="flex items-center gap-1.5 text-[10.5px] text-slate-600">
+                {availabilityLoadError ? (
+                  <>Estado de atendimento indisponível.</>
+                ) : (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    A carregar estado de atendimento…
+                  </>
+                )}
+              </span>
+            )}
+          </div>
+          {availabilityError && (
+            <p className="mx-auto max-w-7xl px-4 pb-2 text-[10px] font-semibold text-rose-600">
+              {availabilityError}
+            </p>
+          )}
+        </div>
+      )}
 
       {demo && (
         <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-[10.5px] font-semibold text-amber-900">

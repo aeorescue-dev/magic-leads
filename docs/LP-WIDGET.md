@@ -15,6 +15,10 @@ preços ou no motor de voz.
 | `LP_WIDGET_SLA_HOURS` | backend | `4` | Prazo mostrado ao lead e gravado no fio. |
 | `LP_WIDGET_REPLY_TO` | backend | `contato@magicleads.app` | `reply_to` dos e-mails transacionais. |
 | `LP_WIDGET_PUBLIC_URL` | backend | vazio | Link opcional no e-mail de acknowledgment. |
+| `LP_WIDGET_TZ` | backend | `America/New_York` | Fuso do horário de atendimento. |
+| `LP_WIDGET_BUSINESS_START` | backend | `8` | Hora de abertura (0–23) no fuso acima. |
+| `LP_WIDGET_BUSINESS_END` | backend | `18` | Hora de fecho (1–24) no fuso acima. |
+| `LP_WIDGET_BUSINESS_DAYS` | backend | `0,1,2,3,4` | Dias úteis (0=segunda … 6=domingo). |
 
 `NEXT_PUBLIC_LP_WIDGET=false` é o estado de produção. A prévia funciona apenas
 com `LP_WIDGET_PREVIEW=true` (ou com a flag pública ligada num build de staging).
@@ -117,7 +121,23 @@ cartão e no detalhe.
   pré-visualizadas; PDF, Word, Excel, TXT, CSV e imagens até 10 MB. Guardados
   em `LP_UPLOAD_DIR` (default `$DATA_DIR/lp_uploads`), um diretório por thread.
 
-## E-mail transacional (idioma do lead)
+## Horário de atendimento (online / fora de horário)
+
+- **Modo automático** (default): segunda a sexta, 08:00–18:00 em
+  `America/New_York` (`LP_WIDGET_TZ`/`LP_WIDGET_BUSINESS_*`). Fora dessa janela
+  o estado efetivo é `offline`.
+- **Override manual** na inbox (`GET/PUT /api/admin/lp/availability`):
+  `auto`, `online` ou `offline`. O override é persistido em `lp_settings`
+  (`availability_mode`) e não altera o cálculo automático.
+- **Widget**: nunca bloqueia a mensagem. O lead vê o estado no topo; ao enviar
+  fora de horário, aparece um aviso no idioma dele a dizer que a equipa recebeu
+  a mensagem e responde nas primeiras horas do próximo dia útil.
+- **E-mail**: o acknowledgment inclui a mesma frase no idioma do lead, com o
+  próximo dia/hora úteis calculados. O assunto e o corpo continuam localizados.
+- **API pública**: `GET /api/public/lp/availability` devolve apenas estado e
+  próximo horário útil (o modo manual e o autor ficam internos).
+
+
 
 - O acknowledgment inicial e o assunto são gerados no idioma detetado do lead
   (`lead_lang`: EN/PT/ES), não no locale do browser.
