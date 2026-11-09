@@ -279,21 +279,25 @@ export default function LpInboxClient() {
 
   function ensureAudioContext(): AudioContext | null {
     if (typeof window === "undefined") return null;
-    if (!audioCtxRef.current) {
-      const Ctor =
-        window.AudioContext ??
-        (
-          window as unknown as {
-            webkitAudioContext?: typeof AudioContext;
-          }
-        ).webkitAudioContext;
-      if (!Ctor) return null;
-      audioCtxRef.current = new Ctor();
+    try {
+      if (!audioCtxRef.current) {
+        const Ctor =
+          window.AudioContext ??
+          (
+            window as unknown as {
+              webkitAudioContext?: typeof AudioContext;
+            }
+          ).webkitAudioContext;
+        if (!Ctor) return null;
+        audioCtxRef.current = new Ctor();
+      }
+      if (audioCtxRef.current.state === "suspended") {
+        void audioCtxRef.current.resume();
+      }
+      return audioCtxRef.current;
+    } catch {
+      return null;
     }
-    if (audioCtxRef.current.state === "suspended") {
-      void audioCtxRef.current.resume();
-    }
-    return audioCtxRef.current;
   }
 
   function playAlertTone(force = false) {

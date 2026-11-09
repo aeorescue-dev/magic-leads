@@ -121,6 +121,26 @@ cartão e no detalhe.
   pré-visualizadas; PDF, Word, Excel, TXT, CSV e imagens até 10 MB. Guardados
   em `LP_UPLOAD_DIR` (default `$DATA_DIR/lp_uploads`), um diretório por thread.
 
+### Alertas de novos leads
+
+- A inbox mantém uma consulta própria de threads `status=new` (polling de 5 s),
+  independente dos filtros ativos.
+- Quando surge um ID novo, o operador recebe:
+  - **som** de dois tons via Web Audio (respeita o bloqueio de autoplay; o
+    contexto é desbloqueado no primeiro clique/tecla);
+  - **pulso visual** no cartão (ponto âmbar animado + fundo âmbar);
+  - **título da aba** `(N) Novo Lead - LP Inbox`.
+- Abrir o cartão limpa o alerta daquele lead; responder/arquivar também o
+  remove no ciclo seguinte.
+- O botão de campainha no cabeçalho liga/desliga o som e guarda a preferência
+  em `localStorage`.
+
+### Acesso no Control Tower
+
+O menu superior do admin (`components/admin/AdminNav.tsx`) inclui
+**LP Inbox** entre `Overview` e `Data Plane`, com o ícone de inbox. A rota
+continua protegida por sessão real + `users.is_admin`.
+
 ## Horário de atendimento (online / fora de horário)
 
 - **Modo automático** (default): segunda a sexta, 08:00–18:00 em
@@ -233,6 +253,60 @@ Verificado em 2026-11-09:
 
 Validado em 2026-11-09 com EN, PT e ES (incluindo edição PT → ES e envio),
 8 threads em staging, incluindo uma fora da cobertura (Miami → 🔴).
+
+## Fase 2 — plano de montagem na LP oficial
+
+Objetivo: deixar o widget **montado mas invisível** na LP oficial com
+`NEXT_PUBLIC_LP_WIDGET=false`, para que a ativação futura seja só uma mudança de
+flag (com aprovação explícita), sem novo desenvolvimento.
+
+### 2.1 Pré-condições
+
+- Sign-off do staging atual (widget, inbox, horário, alertas, anexos, e-mail).
+- Chave LLM de produção (`GEMINI_API_KEY` ou `OPENAI_API_KEY`) configurada.
+- `LP_WIDGET_ENABLED=true` no serviço de produção **apenas** no dia da ativação.
+- `ALLOWED_ORIGINS` com `https://magicleads.app` e o domínio base Vercel exato
+  (sem wildcards `project-*`/`-git-*`).
+
+### 2.2 Montagem com a flag desligada
+
+1. Criar `components/landing/LpWidget/LpWidgetMount.tsx`:
+   - lê `LP_WIDGET_ENABLED` (`NEXT_PUBLIC_LP_WIDGET`);
+   - devolve `null` quando `false`;
+   - só importa o launcher/panel quando ligado (evita custo no bundle).
+2. Incluir `<LpWidgetMount />` no fim do `LandingShell` (ou da página de
+   marketing), sem alterar `AuthForm`, checkout Stripe, preços ou `voice_*`.
+3. Build de produção com `NEXT_PUBLIC_LP_WIDGET=false`.
+4. Validar no artefacto de produção:
+   - nenhum launcher visível;
+   - nenhum pedido a `/api/public/lp/*`;
+   - nenhuma alteração no HTML/SSR da LP;
+   - Lighthouse/acessibilidade sem regressões.
+
+### 2.3 Ativação controlada (depois da autorização)
+
+1. Ativar primeiro num preview/canary com a flag `true` e o backend de
+   produção com `LP_WIDGET_ENABLED=true`.
+2. Smoke test: lead EN/PT/ES, inbox, tradução, aprovação, Resend, polling,
+   anexos, horário online/offline e alertas.
+3. Só então rebuild de produção com `NEXT_PUBLIC_LP_WIDGET=true`.
+4. Monitorizar 24–48 h: erros 5xx, taxa de entrega Resend, SLA, volume de
+   threads e custo do provider LLM.
+
+### 2.4 Rollback
+
+- Rebuild com `NEXT_PUBLIC_LP_WIDGET=false` remove o launcher.
+- `LP_WIDGET_ENABLED=false` faz a API devolver 404, mantendo os dados `lp_*`
+  intactos para reativação.
+- Nenhuma migração destrutiva e nenhuma alteração a tabelas existentes.
+
+### 2.5 Critérios de aceitação da Fase 2
+
+- Widget visível apenas com a flag `true`.
+- LP oficial, `AuthForm`, Stripe, preços e motor de voz sem alterações.
+- Inbox acessível no menu do Control Tower.
+- E-mail final no idioma do lead, com acknowledgment offline correto.
+- Nenhum merge/deploy de produção antes de autorização explícita.
 
 ## Isolamento
 
