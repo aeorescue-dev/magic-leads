@@ -49,6 +49,10 @@ import { CityPicker, type CityOption } from "@/components/dashboard/CityPicker";
 import { CommandPalette, type PaletteAction } from "@/components/dashboard/CommandPalette";
 import { KpiPulse } from "@/components/dashboard/KpiPulse";
 import {
+  OpportunityCard,
+  type OpportunityCardContext,
+} from "@/components/dashboard/OpportunityCard";
+import {
   SegmentedControl,
   SignalButton,
   SignalChip,
@@ -1781,6 +1785,34 @@ function DashboardPageInner() {
     },
   ];
 
+  const opportunityCardCtx: OpportunityCardContext = {
+    t,
+    isDark,
+    T,
+    openLeadDetail,
+    handleQuickReserve,
+    revealPhoneForLead,
+    handleToggleFav,
+    openReleaseModal,
+    openMaps,
+    copyToClipboard,
+    recordContact,
+    waHref,
+    smsHref,
+    buildMsgs,
+    countdownLabel,
+    relativeTime: (date: string) => formatRelativeTime(date, t),
+    isClosedCase,
+    isCorporateLead,
+    shouldShowAddressWarning,
+    isFreeLead,
+    isBlockedByQuota,
+    subscription,
+    dailyStats,
+    busyAction,
+    phoneRevealing,
+  };
+
   return (
     <div
       data-theme={theme}
@@ -2922,340 +2954,17 @@ function DashboardPageInner() {
                         </span>
                       </div>
                     )}
-                    {filteredLeads.map((lead) => {
-                      const cat = categoryOf(lead);
-                      const CatIcon = cat.icon;
-                      const vis = lead.visibility_status || (lead.status === "reserved" ? "reserved_by_other" : "available");
-                      const reservedUntil = lead.reserved_by_me?.expires_at || lead.reserved_by_other?.expires_at;
-                      const isMine = vis === "reserved_by_me";
-                      return (
-                        <div
-                          key={lead.id}
-                          data-testid="lead-card"
-                          data-lead-id={lead.id}
-                          role="button"
-                          tabIndex={0}
-                          aria-label={`${lead.address}, ${lead.city}`}
-                          onClick={() => openLeadDetail(lead)}
-                          onKeyDown={(e) => {
-                            // Só quando o foco está no próprio cartão: Enter num
-                            // botão/anchor filho não pode abrir o detalhe.
-                            if (e.target !== e.currentTarget) return;
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              openLeadDetail(lead);
-                            }
-                          }}
-                          className={`px-5 py-4 cursor-pointer transition ${T.navHover} group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/70 focus-visible:ring-inset ${vis === "reserved_by_other" ? "opacity-60" : ""}`}
-                        >
-                          <div className="flex items-center gap-2 mb-2 flex-wrap">
-                            <span
-                              className="text-[10px] font-semibold uppercase tracking-wider flex items-center gap-1.5 px-2.5 py-1 rounded-full"
-                              style={{ backgroundColor: `${cat.color}1a`, color: cat.color }}
-                            >
-                              <CatIcon className="h-3 w-3" /> {t(cat.labelKey)}
-                            </span>
-
-                            {(lead.signal_type && (() => {
-                              const st = lead.signal_type;
-                              if (st === "legal_obligation") return <span className="text-[10px] font-semibold uppercase tracking-wider bg-amber-500/15 text-amber-400 px-2.5 py-1 rounded-full flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> {t("dashboard.lead_type.obligation")}</span>;
-                              if (st === "authorized_work") return <span className="text-[10px] font-semibold uppercase tracking-wider bg-sky-500/15 text-sky-400 px-2.5 py-1 rounded-full flex items-center gap-1"><HardHat className="h-3 w-3" /> {t("dashboard.lead_type.permit")}</span>;
-                              return <span className={`text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-full flex items-center gap-1 ${isDark ? "bg-slate-500/15 text-slate-400" : "bg-slate-100 text-slate-600"}`}><FolderOpen className="h-3 w-3" /> {t("dashboard.lead_type.open")}</span>;
-                            })())}
-
-                            {lead.phone_confidence === "verified" && (
-                              <span className="text-[10px] font-semibold uppercase tracking-wider bg-emerald-500/15 text-emerald-400 px-2.5 py-1 rounded-full flex items-center gap-1">
-                                <Phone className="h-3 w-3" /> {t("dashboard.phone.verified")}
-                              </span>
-                            )}
-                            {lead.phone_confidence === "high" && (
-                              <span
-                                className="text-[10px] font-semibold uppercase tracking-wider bg-sky-500/15 text-sky-400 px-2.5 py-1 rounded-full flex items-center gap-1"
-                                title={
-                                  lead.phone_success_pct != null
-                                    ? t("dashboard.phone.pct_hint").replace(
-                                        "{n}",
-                                        String(lead.phone_sample_size ?? 0)
-                                      )
-                                    : undefined
-                                }
-                              >
-                                <Phone className="h-3 w-3" /> {t("dashboard.phone.high")}
-                                {lead.phone_success_pct != null && (
-                                  <span className="font-bold"> · {lead.phone_success_pct}%</span>
-                                )}
-                              </span>
-                            )}
-
-                            {(lead.signal_status === "closed" || isClosedCase(lead.case_status)) && (
-                              <span
-                                className={`text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-full flex items-center gap-1 ${
-                                  isDark
-                                    ? "bg-slate-500/20 text-slate-300"
-                                    : "bg-slate-200 text-slate-600"
-                                }`}
-                                title={t("dashboard.badge.closed_hint")}
-                              >
-                                <Archive className="h-3 w-3" /> {t("dashboard.badge.closed")}
-                              </span>
-                            )}
-
-                            {lead.institutional ? (
-                              <span
-                                className="text-[10px] font-semibold uppercase bg-cyan-500/15 text-cyan-400 px-2.5 py-1 rounded-full flex items-center gap-1"
-                                title={t("dashboard.badge.institutional_hint")}
-                              >
-                                <Landmark className="h-3 w-3" /> {t("dashboard.badge.institutional")} · {t("dashboard.badge.institutional_channel")}
-                              </span>
-                            ) : isCorporateLead(lead) ? (
-                              <span className="text-[10px] font-semibold uppercase bg-purple-500/15 text-purple-400 px-2.5 py-1 rounded-full flex items-center gap-1">
-                                <Building2 className="h-3 w-3" /> {t("dashboard.badge.private_corporate")}
-                              </span>
-                            ) : lead.owner_name && (
-                              <span className="text-[10px] font-semibold uppercase bg-emerald-500/15 text-emerald-400 px-2.5 py-1 rounded-full flex items-center gap-1">
-                                <CheckCircle2 className="h-3 w-3" /> {t("dashboard.badge.private_person")}
-                              </span>
-                            )}
-
-{vis === "available" && (
-                                <>
-                                  <span className="text-[10px] font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-400 px-2.5 py-1 rounded-full flex items-center gap-1">
-                                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" /> {t("dashboard.status.available")}
-                                  </span>
-                                  {lead.owner_name && !lead.owner_phone && (
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); revealPhoneForLead(lead); }}
-                                      disabled={busyAction || phoneRevealing?.loading || phoneRevealing?.leadId === lead.id}
-                                      className="flex items-center gap-1.5 text-[11px] font-bold border border-violet-500/40 text-violet-400 hover:bg-violet-500/10 px-3 py-1.5 rounded-lg transition disabled:opacity-50"
-                                    >
-                                      <Smartphone className="h-3 w-3" /> {t("dashboard.action.reveal_phone") || "Revelar Telefone"}
-                                    </button>
-                                  )}
-                                  {shouldShowAddressWarning(lead) && (
-                                    <span className="text-[10px] text-amber-500/90 flex items-center gap-1">
-                                      <AlertTriangle className="h-3 w-3" /> {t("dashboard.badge.address_unresolvable")}
-                                    </span>
-                                  )}
-                                </>
-                              )}
-                            {isMine && (
-                              <>
-                                <span className="text-[10px] font-bold uppercase tracking-wider bg-rose-500/15 text-rose-400 px-2.5 py-1 rounded-full flex items-center gap-1">
-                                  <Lock className="h-3 w-3" /> {t("dashboard.badge.yours").replace("{time}", reservedUntil ? countdownLabel(reservedUntil) : HOLD_FALLBACK)}
-                                </span>
-                                <StageBadge stage={lead.stage} stageExpiresAt={lead.stage_expires_at} serverNow={lead.server_now} />
-                                <div className="flex items-center gap-2 mt-2 flex-wrap">
-                                  {lead.owner_phone && (
-                                    <a
-                                      href={waHref(lead.owner_phone, buildMsgs(lead))}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        recordContact(lead.id, "whatsapp").catch(() => {});
-                                      }}
-                                      className="flex items-center gap-1.5 text-[11px] font-semibold bg-emerald-500/15 text-emerald-400 px-3 py-1.5 rounded-lg hover:bg-emerald-500/25 transition"
-                                    >
-                                      <MessageSquare className="h-3.5 w-3.5" /> {t("dashboard.detail.whatsapp")}
-                                    </a>
-                                  )}
-                                  {lead.owner_phone && (
-                                    <a
-                                      href={smsHref(lead.owner_phone, buildMsgs(lead))}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        recordContact(lead.id, "sms").catch(() => {});
-                                      }}
-                                      className="flex items-center gap-1.5 text-[11px] font-semibold bg-green-500/15 text-green-400 px-3 py-1.5 rounded-lg hover:bg-green-500/25 transition"
-                                    >
-                                      <MessageSquare className="h-3.5 w-3.5" /> {t("dashboard.detail.sms")}
-                                    </a>
-                                  )}
-                                  {lead.owner_email && (
-                                    <a
-                                      href={`mailto:${lead.owner_email}?subject=${encodeURIComponent(buildMsgs(lead).emailSubject)}&body=${encodeURIComponent(buildMsgs(lead).emailBody)}`}
-                                      onClick={(e) => e.stopPropagation()}
-                                      className="flex items-center gap-1.5 text-[11px] font-semibold bg-blue-500/15 text-blue-400 px-3 py-1.5 rounded-lg hover:bg-blue-500/25 transition"
-                                    >
-                                      <Mail className="h-3.5 w-3.5" /> {t("dashboard.detail.email")}
-                                    </a>
-                                  )}
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); openMaps(lead.address); }}
-                                    className={`flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-lg transition ${T.ghost}`}
-                                  >
-                                    <Navigation className="h-3.5 w-3.5" /> {t("dashboard.action.map")}
-                                  </button>
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); copyToClipboard(lead.owner_phone || '', 'phone'); }}
-                                    className={`flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-lg transition ${T.ghost}`}
-                                  >
-                                    <Copy className="h-3.5 w-3.5" /> {t("dashboard.detail.copy_phone")}
-                                  </button>
-                                </div>
-                              </>
-                            )}
-
-                            <span className={`ml-auto text-xs flex items-center gap-1 font-medium capitalize ${T.text2}`}>
-                              <MapPin className="h-3.5 w-3.5" /> {lead.city}
-                            </span>
-                          </div>
-
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex-1 min-w-0">
-                              <h3 className="font-semibold text-base leading-snug">{lead.address}</h3>
-                              <p className={`text-xs mt-1 line-clamp-2 ${T.text2}`}>
-                                {lead.issue_description || lead.case_title || t("dashboard.feed.address_fallback")}
-                              </p>
-                              {((lead.repeat_365 ?? 0) > 1 || (lead.oldest_open_days ?? 0) > 0) && (
-                                <div className={`flex items-center gap-2 text-[11px] mt-1 ${T.text2} flex-wrap`}>
-                                  {(lead.repeat_365 ?? 0) > 1 && (
-                                    <span>
-                                      {t("dashboard.why.repeat").replace("{count}", String(lead.repeat_365))}
-                                    </span>
-                                  )}
-                                  {(lead.oldest_open_days ?? 0) > 0 && (
-                                    <span>
-                                      {t("dashboard.why.open").replace("{days}", String(lead.oldest_open_days))}
-                                    </span>
-                                  )}
-                                </div>
-                              )}
-                              <div className={`flex items-center gap-3 text-[11px] mt-2 flex-wrap ${T.text2}`}>
-                                {lead.owner_name && (
-                                  <>
-                                    <span className={`font-medium ${T.text}`}>
-                                      {t("dashboard.field.owner")}: {lead.owner_name}
-                                    </span>
-                                    {lead.mailing_address && (
-                                      <span className={T.text2}>📬 {lead.mailing_address}</span>
-                                    )}
-                                  </>
-                                )}
-                                <span>·</span>
-                                <span>{t("dashboard.freshness.reported")}: {formatRelativeTime(lead.date_reported, t)}</span>
-                                {lead.last_synced && (
-                                  <>
-                                    <span>·</span>
-                                    <span>{t("dashboard.freshness.synced")}: {formatRelativeTime(lead.last_synced, t)}</span>
-                                  </>
-                                )}
-                              </div>
-
-                              {vis === "available" && (
-                                <div className="flex items-center gap-2 mt-3 flex-wrap">
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); handleQuickReserve(lead); }}
-                                    disabled={busyAction || (subscription && !subscription.can_access) || isBlockedByQuota(lead, dailyStats?.remaining)}
-                                    className={`flex items-center gap-1.5 text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2.5 rounded-xl transition shadow-md shadow-indigo-600/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 disabled:opacity-50 ${
-                                      (subscription && !subscription.can_access) || isBlockedByQuota(lead, dailyStats?.remaining) ? "opacity-30 cursor-not-allowed" : ""
-                                    }`}
-                                  >
-                                    <Lock className="h-3.5 w-3.5" /> {isFreeLead(lead) ? t("dashboard.action.reserve_corporate") : t("dashboard.action.reserve_1h")}
-                                  </button>
-                                  <span className={`text-[10px] flex items-center gap-1 ${T.text2}`}>
-                                    <ShieldCheck className="h-3 w-3" /> {t("dashboard.data_protected")}
-                                  </span>
-                                  {shouldShowAddressWarning(lead) && (
-                                    <span className="text-[10px] text-amber-500/90 flex items-center gap-1">
-                                      <AlertTriangle className="h-3 w-3" /> {t("dashboard.badge.address_unresolvable")}
-                                    </span>
-                                  )}
-                                </div>
-                              )}
-                              {isMine && (
-                                <>
-                                <div className="flex items-center gap-2 mt-3 flex-wrap">
-                                  <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-400 px-2.5 py-1 rounded-full">
-                                    <BadgeCheck className="h-3 w-3" /> {t("dashboard.action.revealed")}
-                                  </span>
-                                  {/* Reveal Phone button - for my leads with owner_name but no owner_phone */}
-                                  {lead.owner_name && !lead.owner_phone && (
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); revealPhoneForLead(lead); }}
-                                      disabled={busyAction || phoneRevealing?.loading || phoneRevealing?.leadId === lead.id}
-                                      className="flex items-center gap-1.5 text-[11px] font-bold border border-violet-500/40 text-violet-400 hover:bg-violet-500/10 px-3 py-1.5 rounded-lg transition disabled:opacity-50"
-                                    >
-                                      <Smartphone className="h-3 w-3" /> {t("dashboard.action.reveal_phone") || "Revelar Telefone"}
-                                    </button>
-                                  )}
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); openMaps(lead.address); }}
-                                    className={`flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-lg transition ${T.ghost}`}
-                                  >
-                                    <Navigation className="h-3 w-3" /> {t("dashboard.action.map")}
-                                  </button>
-                                  {lead.owner_phone && (
-                                    <a
-                                      href={waHref(lead.owner_phone, buildMsgs(lead))}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        recordContact(lead.id, "whatsapp").catch(() => {});
-                                      }}
-                                      className="flex items-center gap-1.5 text-[11px] font-semibold bg-emerald-500/15 text-emerald-400 px-3 py-1.5 rounded-lg hover:bg-emerald-500/25 transition"
-                                    >
-                                      {t("dashboard.detail.whatsapp")}
-                                    </a>
-                                  )}
-                                  {lead.owner_phone && (
-                                    <a
-                                      href={smsHref(lead.owner_phone, buildMsgs(lead))}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        recordContact(lead.id, "sms").catch(() => {});
-                                      }}
-                                      className="flex items-center gap-1.5 text-[11px] font-semibold bg-green-500/15 text-green-400 px-3 py-1.5 rounded-lg hover:bg-green-500/25 transition"
-                                    >
-                                      <MessageSquare className="h-3 w-3" /> {t("dashboard.detail.sms")}
-                                    </a>
-                                  )}
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); openReleaseModal(lead); }}
-                                    disabled={busyAction}
-                                    className={`flex items-center gap-1.5 text-[11px] font-semibold ${T.ghostDanger} px-3 py-1.5 rounded-lg transition disabled:opacity-50`}
-                                  >
-<RefreshCcw className="h-3 w-3" /> {t("dashboard.action.drop")}
-                                  </button>
-                                </div>
-                                {/* Embedded map + navigation buttons */}
-                                {lead.address && (
-                                  <div className="mt-3">
-                                    <LeadLocationMap
-                                      address={lead.address}
-                                      city={lead.city}
-                                      compact
-                                      isDark={isDark}
-                                      mapLabel={t("dashboard.action.map") || "Mapa"}
-                                      googleLabel={t("dashboard.map.google") || "Google Maps"}
-                                      appleLabel={t("dashboard.map.apple") || "Apple Maps"}
-                                    />
-                                  </div>
-                                )}
-                                </>
-                              )}
-                            </div>
-
-                            <div className="flex flex-col items-end gap-2 shrink-0">
-                              <button
-                                onClick={(e) => handleToggleFav(lead, e)}
-                                className={`p-2 rounded-xl border ${T.border} transition ${
-                                  lead.favorited ? "text-amber-400 bg-amber-400/10 border-amber-400/20" : `${T.text2} hover:text-amber-400`
-                                }`}
-                                title={t("dashboard.fav.title")}
-                              >
-                                <Star className={`h-4 w-4 ${lead.favorited ? "fill-amber-400" : ""}`} />
-                              </button>
-                              <span className="flex items-center gap-1 text-xs font-semibold text-indigo-400 group-hover:translate-x-0.5 transition">
-                                Ver análise <ArrowUpRight className="h-3.5 w-3.5" />
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                    {hasMoreLeads && (
+                    <div className="space-y-3 p-3">
+                    {filteredLeads.map((lead) => (
+                      <OpportunityCard
+                        key={lead.id}
+                        lead={lead}
+                        category={categoryOf(lead)}
+                        ctx={opportunityCardCtx}
+                      />
+                    ))}
+                  </div>
+                                      {hasMoreLeads && (
                       <div className={`px-5 py-4 border-t ${T.divider}`}>
                         <button
                           onClick={loadMoreLeads}
@@ -3294,15 +3003,15 @@ function DashboardPageInner() {
 
       {/* LEAD DETAIL MODAL */}
       {selectedLead && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onClick={() => setSelectedLead(null)}>
+        <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm" onClick={() => setSelectedLead(null)}>
           <div
             ref={detailDialogRef}
             role="dialog"
             aria-modal="true"
             aria-labelledby="lead-detail-title"
             tabIndex={-1}
-            className={`relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border p-6 shadow-2xl space-y-6 animate-scale-in outline-none ${
-              isDark ? "bg-[#14161d] border-white/10 text-slate-100" : "bg-white border-slate-200 text-slate-900"
+            className={`absolute right-0 top-0 h-full w-full max-w-[540px] space-y-5 overflow-y-auto border-l p-5 pb-10 shadow-2xl outline-none ${
+              isDark ? "bg-[#0e1218] border-[var(--sd-border)] text-slate-100" : "bg-white border-[var(--sd-border)] text-slate-900"
             }`}
             onClick={(e) => e.stopPropagation()}
           >
