@@ -151,6 +151,11 @@ async def _run_sync(fn, *args):
 
 
 async def run_campaign(campaign_id: int) -> None:
+    if bool(getattr(settings, "VOICE_FREEZE", True)):
+        logger.warning(
+            "[VOICE] VOICE_FREEZE=1: campanha %s nao arranca", campaign_id
+        )
+        return
     campaign = await _run_sync(b2b_voice.get_campaign, campaign_id)
     if not campaign or campaign.get("status") != "running":
         return

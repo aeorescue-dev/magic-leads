@@ -16,6 +16,11 @@ NOW = datetime(2026, 11, 2, 16, 0, tzinfo=timezone.utc)
 
 @pytest.fixture(autouse=True)
 def _clean(monkeypatch):
+    # Os testes exercitam o motor; a trava global de producao fica desligada
+    # apenas neste processo de teste. O default do produto continua True.
+    monkeypatch.setattr(auto_dialer.settings, "VOICE_FREEZE", False)
+    import backend.main as main_module
+    monkeypatch.setattr(main_module.settings, "VOICE_FREEZE", False)
     monkeypatch.setenv("VOICE_NOW_ISO", NOW.isoformat())
     monkeypatch.setattr(showcase.settings, "SHOWCASE_MIN_ITEMS", 3)
     monkeypatch.setattr(showcase.settings, "SHOWCASE_WINDOW_DAYS", 30)

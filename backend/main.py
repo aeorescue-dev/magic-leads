@@ -1625,8 +1625,19 @@ _voice_campaign_tasks: dict[int, asyncio.Task] = {}
 _MAX_SCRAPE_RUNS = 50
 
 
+def _voice_frozen() -> bool:
+    """Trava global: True bloqueia qualquer chamada/retoma de voz."""
+    return bool(getattr(settings, "VOICE_FREEZE", True))
+
+
 def _launch_voice_campaign(campaign_id: int) -> None:
     """Arranca o worker em background e mantém a referência viva."""
+    if _voice_frozen():
+        logger.warning(
+            "[VOICE] VOICE_FREEZE=1: launch bloqueado para campanha %s",
+            campaign_id,
+        )
+        return
     task = asyncio.create_task(auto_dialer.run_campaign(campaign_id))
     _voice_campaign_tasks[campaign_id] = task
     task.add_done_callback(
@@ -1642,6 +1653,11 @@ async def _resume_due_voice_campaigns() -> list[int]:
     parada para sempre depois do deploy. Campanhas que entretanto esgotaram o
     total ou os dias são fechadas aqui em vez de voltarem a arrancar.
     """
+    if _voice_frozen():
+        logger.warning(
+            "[VOICE] VOICE_FREEZE=1: retoma automatica bloqueada"
+        )
+        return []
     due = await anyio.to_thread.run_sync(b2b_voice.paused_campaigns_due)
     resumed: list[int] = []
     for campaign_id in due:
@@ -3689,6 +3705,8 @@ async def admin_voice_campaign_start(
     request: Request, _admin: dict = Depends(_require_admin_user)
 ):
     """Cria e arranca uma campanha autónoma (dry-run se Telnyx não configurado)."""
+    if _voice_frozen():
+        raise HTTPException(status_code=409, detail="voice_frozen: VOICE_FREEZE=1")
     try:
         payload = await request.json()
     except Exception:  # noqa: BLE001
@@ -3775,6 +3793,8 @@ async def admin_voice_campaign_stop(
 async def admin_voice_campaign_resume(
     campaign_id: int, _admin: dict = Depends(_require_admin_user)
 ):
+    if _voice_frozen():
+        raise HTTPException(status_code=409, detail="voice_frozen: VOICE_FREEZE=1")
     campaign = await anyio.to_thread.run_sync(
         b2b_voice.get_campaign, campaign_id
     )

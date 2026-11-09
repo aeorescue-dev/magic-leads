@@ -115,6 +115,10 @@ class Settings(BaseSettings):
     VOICE_CALL_START_HOUR: int = 9
     VOICE_CALL_END_HOUR: int = 20
     VOICE_AUTOSCHED_DELAY_SECONDS: int = 30
+    # TRAVA GLOBAL DE VOZ. `1` (default) bloqueia retoma automatica, workers e
+    # endpoints de create/resume. So' uma alteracao explicita para `0` liberta
+    # chamadas; nenhum deploy ou scheduler as retoma com a trava ligada.
+    VOICE_FREEZE: bool = True
     # Cadencia do loop que retoma campanhas pausadas (orcamento diario,
     # lote do dia ou fora da janela).
     VOICE_CAMPAIGN_RESUME_INTERVAL_SECONDS: int = 300

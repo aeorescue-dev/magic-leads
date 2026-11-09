@@ -2,7 +2,13 @@
   "$schema": "https://railway.app/railway.schema.json",
   "build": {
     "builder": "DOCKERFILE",
-    "dockerfilePath": "Dockerfile"
+    "dockerfilePath": "Dockerfile",
+    "watchPatterns": [
+      "backend/**",
+      "Dockerfile",
+      "railway.json",
+      ".dockerignore"
+    ]
   },
   "deploy": {
     "startCommand": "python seed_production_users.py; uvicorn backend.main:app --host 0.0.0.0 --port $PORT --forwarded-allow-ips='*'",
