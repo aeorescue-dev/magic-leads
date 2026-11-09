@@ -105,6 +105,7 @@ from .services import (
     inbox_sync,
     investor,
     lifecycle_push,
+    lp_widget,
     notifier,
     outbound_templates,
     owner_backfill,
@@ -9342,6 +9343,173 @@ async def my_leads_history(
     except Exception as e:
         logger.error(f"Erro ao buscar histórico de leads: {e}")
         raise HTTPException(status_code=500, detail="Erro ao buscar histórico")
+
+
+# ============================================================
+# LP WIDGET — Fase 0/1 (captação + inbox interna)
+#
+# Isolamento: endpoints públicos com rate limit e honeypot; admin exige sessão
+# real + users.is_admin. Nenhuma tabela de leads, users, faturação ou voz é
+# tocada. A flag `LP_WIDGET_ENABLED` (default False) fecha tudo com 404.
+# ============================================================
+
+
+class LpThreadCreateRequest(BaseModel):
+    intent: str
+    message: str
+    email: EmailStr
+    name: str = ""
+    company: str = ""
+    city: str = ""
+    trade: str = ""
+    consent_email: bool = False
+    locale: str = "en"
+    source_section: str = ""
+    website: str = ""  # honeypot: deve chegar vazio
+
+
+class LpLeadMessageRequest(BaseModel):
+    message: str
+
+
+class LpTeamReplyRequest(BaseModel):
+    body_pt: str
+    body_en: str
+
+
+def _lp_widget_guard() -> None:
+    """404 quando a fase está desligada — não revela a superfície da API."""
+    if not bool(getattr(settings, "LP_WIDGET_ENABLED", False)):
+        raise HTTPException(status_code=404, detail="Not found")
+
+
+@app.post("/api/public/lp/threads")
+@limiter.limit("6/hour")
+async def lp_widget_create_thread(
+    request: Request, payload: LpThreadCreateRequest
+):
+    _lp_widget_guard()
+    if (payload.website or "").strip():
+        # Honeypot: resposta indistinguível de sucesso, sem criar registo.
+        return {
+            "ok": True,
+            "token": secrets.token_urlsafe(18),
+            "thread_id": 0,
+            "sla_hours": int(getattr(settings, "LP_WIDGET_SLA_HOURS", 4) or 4),
+        }
+    if not payload.consent_email:
+        raise HTTPException(status_code=400, detail="consent_required")
+    if len((payload.message or "").strip()) < 2:
+        raise HTTPException(status_code=400, detail="empty_message")
+
+    try:
+        result = await anyio.to_thread.run_sync(
+            lambda: lp_widget.create_thread(
+                email=str(payload.email),
+                intent=payload.intent,
+                message=payload.message,
+                name=payload.name,
+                company=payload.company,
+                city=payload.city,
+                trade=payload.trade,
+                consent_email=payload.consent_email,
+                locale=payload.locale,
+                source_section=payload.source_section or "landing_widget",
+                ip=request.client.host if request.client else "",
+                user_agent=request.headers.get("user-agent", ""),
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {
+        "ok": True,
+        "token": result["token"],
+        "thread_id": result["id"],
+        "sla_hours": result["sla_hours"],
+        "ack_sent": result["ack_sent"],
+    }
+
+
+@app.get("/api/public/lp/threads/{token}")
+@limiter.limit("120/minute")
+async def lp_widget_get_thread(request: Request, token: str):
+    _lp_widget_guard()
+    thread = await anyio.to_thread.run_sync(
+        lambda: lp_widget.get_thread_public(token)
+    )
+    if not thread:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    return thread
+
+
+@app.post("/api/public/lp/threads/{token}/messages")
+@limiter.limit("20/hour")
+async def lp_widget_lead_message(
+    request: Request, token: str, payload: LpLeadMessageRequest
+):
+    _lp_widget_guard()
+    try:
+        result = await anyio.to_thread.run_sync(
+            lambda: lp_widget.add_lead_message(token, payload.message)
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not result:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    return result
+
+
+@app.get("/api/admin/lp/threads")
+async def admin_lp_threads(
+    status: str = "",
+    limit: int = 50,
+    _admin: dict = Depends(_require_admin_user),
+):
+    _lp_widget_guard()
+    threads = await anyio.to_thread.run_sync(
+        lambda: lp_widget.list_threads(status, limit)
+    )
+    return {"threads": threads, "count": len(threads)}
+
+
+@app.get("/api/admin/lp/threads/{thread_id}")
+async def admin_lp_thread(
+    thread_id: int,
+    _admin: dict = Depends(_require_admin_user),
+):
+    _lp_widget_guard()
+    thread = await anyio.to_thread.run_sync(
+        lambda: lp_widget.get_thread_admin(thread_id)
+    )
+    if not thread:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    return thread
+
+
+@app.post("/api/admin/lp/threads/{thread_id}/reply")
+@limiter.limit("120/hour")
+async def admin_lp_thread_reply(
+    request: Request,
+    thread_id: int,
+    payload: LpTeamReplyRequest,
+    admin: dict = Depends(_require_admin_user),
+):
+    _lp_widget_guard()
+    try:
+        result = await anyio.to_thread.run_sync(
+            lambda: lp_widget.reply(
+                thread_id,
+                body_pt=payload.body_pt,
+                body_en=payload.body_en,
+                admin_id=admin.get("id"),
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not result:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    return result
 
 
 if __name__ == "__main__":

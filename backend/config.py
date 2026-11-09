@@ -244,6 +244,14 @@ class Settings(BaseSettings):
     # e.g., "magicleads-oficial.vercel.app,magic-leads-frontend-final.vercel.app"
     VERCEL_PREVIEW_BASE_DOMAINS: str = "magicleads-oficial.vercel.app,magic-leads-frontend-final.vercel.app"
 
+    # LP widget (Fase 0/1). Desligado por omissão. A rota pública só responde
+    # quando `LP_WIDGET_ENABLED=true`; o frontend tem a sua própria flag
+    # `NEXT_PUBLIC_LP_WIDGET`. Nada aqui toca em leads, users ou voz.
+    LP_WIDGET_ENABLED: bool = False
+    LP_WIDGET_SLA_HOURS: int = 4
+    LP_WIDGET_REPLY_TO: str = "contato@magicleads.app"
+    LP_WIDGET_PUBLIC_URL: str = ""
+
     # E-mail de recuperação de senha — Gmail SMTP (100% gratuito).
     # Defaults prontos para Gmail. Para ATIVAR o envio real basta definir no Railway:
     #   SMTP_USER=helpmagicleads@gmail.com e SMTP_PASS=<App Password do Gmail>
