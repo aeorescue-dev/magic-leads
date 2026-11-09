@@ -515,7 +515,9 @@ def enrich_thread(thread_id: int) -> dict:
             return {"ok": False, "status": "no_message"}
 
         text = message["body"] or ""
-        source = _clean(message["lang"], 8) or lp_ai.detect_language(text)
+        # O idioma guardado pode vir do locale do site; o texto é a fonte de
+        # verdade. Detetamos sempre para suportar EN/PT/ES/FR/DE/IT.
+        source = lp_ai.detect_language(text)
         existing_pt = _clean(message["body_pt"], MAX_REPLY_CHARS)
         provider = "existing"
 
@@ -549,6 +551,11 @@ def enrich_thread(thread_id: int) -> dict:
                 "UPDATE lp_messages SET body_pt = ?, lang = ? WHERE id = ?",
                 (pt, source, int(message["id"])),
             )
+
+        conn.execute(
+            "UPDATE lp_messages SET lang = ? WHERE id = ?",
+            (source, int(message["id"])),
+        )
 
         suggestion_pt = lp_ai.suggest_reply_pt(
             thread["intent"], thread["city"] or "", thread["trade"] or ""

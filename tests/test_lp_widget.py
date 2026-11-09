@@ -210,3 +210,28 @@ def test_translate_draft_uses_lead_language(monkeypatch):
     assert admin["draft_pt"] == "Olá, resposta da equipa"
     assert admin["draft_out"] == "Translated reply"
     assert admin["ai_status"] == "ready"
+
+
+def test_enrich_thread_detects_portuguese_text(monkeypatch):
+    created = _create(
+        message=(
+            "Qual é a diferença entre a Magic Leads e o Angi? "
+            "Os leads não são partilhados?"
+        )
+    )
+
+    monkeypatch.setattr(
+        lp_widget.lp_ai,
+        "translate",
+        lambda text, source, target: (text, "identity"),
+    )
+    result = lp_widget.enrich_thread(created["id"])
+
+    assert result["ok"] is True
+    assert result["lead_lang"] == "pt"
+
+    admin = lp_widget.get_thread_admin(created["id"])
+    assert admin is not None
+    assert admin["lead_lang"] == "pt"
+    assert admin["draft_out_lang"] == "pt"
+    assert admin["messages"][0]["body_pt"] == admin["messages"][0]["body"]
