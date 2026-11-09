@@ -2304,7 +2304,7 @@ function DashboardPageInner() {
                     first.focus();
                   }
                 }}
-                className={`absolute bottom-0 left-0 right-0 max-h-[85vh] overflow-y-auto rounded-t-2xl border-t p-5 pb-8 space-y-4 animate-slide-up outline-none ${
+                className={`absolute bottom-0 left-0 right-0 max-h-[85vh] overflow-y-auto rounded-t-2xl border-t p-5 pb-8 space-y-4 animate-slide-up outline-none sm:bottom-0 sm:left-auto sm:right-0 sm:top-0 sm:h-full sm:max-h-none sm:w-[440px] sm:rounded-l-2xl sm:rounded-t-none ${
                   isDark
                     ? "bg-[#14161d] border-white/10 text-slate-100"
                     : "bg-white border-slate-200 text-slate-900 shadow-2xl"
