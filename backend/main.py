@@ -4952,7 +4952,7 @@ def _boston_lead_from_record(record: dict):
         created_at=opened,
         lat=_float(record.get("latitude")),
         lng=_float(record.get("longitude")),
-        issue_category=_s._infer_category(description),
+        issue_category=_s._infer_category(description, "311"),
         case_title=record.get("case_topic") or record.get("case_title"),
         subject=record.get("service_name") or record.get("subject"),
         reason=record.get("service_name") or record.get("reason"),
@@ -5349,7 +5349,7 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                                 city="NYC", state="NY",
                                 issue_description=desc,
                                 created_at=created,
-                                issue_category=_s._infer_category(desc),
+                                issue_category=_s._infer_category(desc, "dob_violation"),
                                 source_type="dob_violation",
                                 case_title=desc,
                                 descriptor=row.get("violation_type") or None,
@@ -5514,7 +5514,7 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                                 created_at=created,
                                 lat=float(row["latitude"]) if row.get("latitude") is not None else None,
                                 lng=float(row["longitude"]) if row.get("longitude") is not None else None,
-                                issue_category=_s._infer_category(desc),
+                                issue_category=_s._infer_category(desc, "permit"),
                                 source_type="permit",
                                 case_title=desc,
                                 type=row.get("work_type") or None,
@@ -5558,6 +5558,11 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                         entry["domain"], entry["dataset"], entry["city"], entry["state"],
                         field_names=fields, hours=city_hours, limit=entry.get("limit", 2000),
                         source_type=src_type, watermark=wm, overlap_hours=6, max_pages=10,
+                        # 311 puro: descarta Unclassified na origem. Fontes
+                        # legais (permit/HPD): preserva o registo como
+                        # Unclassified para auditoria; o feed exclui-o pela
+                        # lista das 16 categorias.
+                        trade_filter=src_type is None or src_type == "311",
                     )
                     meta = dict(socrata_scraper.last_meta or {})
                     logger.info(
@@ -6975,119 +6980,148 @@ async def enrich_all_leads(request: Request, limit_per_city: int = 200, _admin: 
 
 # Reclassificação dos leads existentes para o novo modelo (16 ofícios + gatilhos preditivos)
 @app.post("/api/admin/requalify")
-async def admin_requalify_leads(request: Request, _admin: bool = Depends(_require_admin)):
+async def admin_requalify_leads(
+    request: Request,
+    dry_run: bool = True,
+    confirm: bool = False,
+    _admin: bool = Depends(_require_admin),
+):
+    """Reclassifica com dry-run/diff/backup obrigatórios.
+
+    P1: `dry_run=True` é o default. Para escrever é preciso `dry_run=false` E
+    `confirm=true`; antes de qualquer UPDATE é criado um backup SQLite
+    consistente. O endpoint usa a mesma `category_taxonomy.classify` do ingest.
     """
-    Reclassifica todos os leads existentes no banco para o novo modelo:
-    - _infer_category aprimorado (16 ofícios, fallback Permit_Rejected para fontes legais)
-    - Retorna estatísticas antes/depois do filtro qualificado
-    """
+    from backend.services import db as dbmod
+    from backend.services.category_taxonomy import (
+        TRADE_CATEGORIES,
+        UNCLASSIFIED,
+        classify,
+        normalize_category,
+    )
+    from backend.services.db import (
+        DB_PATH,
+        _qualified_where,
+        clear_dashboard_summary_cache,
+        clear_global_metrics_cache,
+        refresh_lead_quality,
+    )
+
+    if not dry_run and not confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="requalify exige confirm=true quando dry_run=false",
+        )
+
+    conn = dbmod.get_connection()
+    conn.row_factory = sqlite3.Row
     try:
-        from backend.scrapers.socrata_311 import socrata_scraper
-        from backend.services import db as dbmod
+        rows = conn.execute(
+            "SELECT id, city, source_type, issue_category, issue_description, "
+            "case_title, descriptor FROM leads ORDER BY id"
+        ).fetchall()
 
-        conn = dbmod.get_connection()
-        conn.row_factory = sqlite3.Row
-
-        # 1. Estatísticas ANTES (filtro legado: essenciais + junk antigo)
-        old_junk_terms = [
-            "sanitation", "garbage", "trash", "refuse", "litter", "debris", "dumping",
-            "rodent", "rat", "mouse", "pest", "vermin", "roach", "insect",
-            "parking", "traffic", "signal", "sign", "street light", "pothole",
-            "sidewalk", "curb", "graffiti", "noise", "animal", "dog", "cat",
-            "dead animal", "abandoned vehicle", "towing", "tpw", "transportation",
-            "water leak", "hydrant", "sewer backup", "catch basin", "storm drain",
-            "illegal dumping", "bulk item", "recycling", "organics", "yard waste",
-        ]
-
-        def old_qualified_where(prefix=""):
-            conds = [
-                f"{prefix}department IS NOT NULL AND TRIM({prefix}department) != ''",
-                f"{prefix}case_status IS NOT NULL AND TRIM({prefix}case_status) != ''",
-                f"{prefix}descriptor IS NOT NULL AND TRIM({prefix}descriptor) != ''",
-                f"{prefix}neighborhood IS NOT NULL AND TRIM({prefix}neighborhood) != ''",
-            ]
-            for t in old_junk_terms:
-                for col in (f"{prefix}issue_category", f"{prefix}issue_description", f"{prefix}descriptor"):
-                    conds.append(f"LOWER(COALESCE({col}, '')) NOT LIKE '%{t}%'")
-            return " AND ".join(conds)
-
-        old_total = conn.execute(f"SELECT COUNT(*) FROM leads WHERE {old_qualified_where()}").fetchone()[0]
-        old_7d = conn.execute(f"SELECT COUNT(*) FROM leads WHERE date_reported IS NOT NULL AND date(date_reported)>=date('now','-7 days') AND {old_qualified_where()}").fetchone()[0]
-        old_24h = conn.execute(f"SELECT COUNT(*) FROM leads WHERE datetime(created_at) >= datetime('now','-1 day') AND {old_qualified_where()}").fetchone()[0]
-
-        # 2. Reclassificação
-        rows = conn.execute("SELECT id, issue_category, source_type, case_title, issue_description, descriptor FROM leads").fetchall()
-        changes = {}
-        kept = 0
+        updates: list[tuple[str, int]] = []
+        changes: dict[str, int] = {}
+        samples: dict[str, list[str]] = {}
+        old_counts: dict[str, int] = {}
+        new_counts: dict[str, int] = {}
+        by_city: dict[str, int] = {}
+        by_source: dict[str, int] = {}
 
         for r in rows:
-            text = (r["case_title"] or r["issue_description"] or r["descriptor"] or "") or ""
-            new_cat = socrata_scraper._infer_category(text, r["source_type"])
-            new_cat = new_cat.value if hasattr(new_cat, "value") else str(new_cat)
-            old = r["issue_category"]
-            if new_cat != old:
-                changes[f"{old}->{new_cat}"] = changes.get(f"{old}->{new_cat}", 0) + 1
-                conn.execute("UPDATE leads SET issue_category=? WHERE id=?", (new_cat, r["id"]))
+            old = str(r["issue_category"] or "")
+            src = str(r["source_type"] or "")
+            if src == "import_b2b":
+                canonical = normalize_category(old)
+                if canonical in TRADE_CATEGORIES:
+                    new = canonical
+                else:
+                    new = classify(
+                        r["issue_description"],
+                        src,
+                        city=r["city"],
+                        case_title=r["case_title"],
+                        descriptor=r["descriptor"],
+                    ).category.value
             else:
-                kept += 1
+                new = classify(
+                    r["issue_description"],
+                    src,
+                    city=r["city"],
+                    case_title=r["case_title"],
+                    descriptor=r["descriptor"],
+                ).category.value
 
-        conn.commit()
+            old_counts[old] = old_counts.get(old, 0) + 1
+            new_counts[new] = new_counts.get(new, 0) + 1
+            if old == new:
+                continue
+            key = f"{r['city'] or ''}|{src}|{old}->{new}"
+            changes[key] = changes.get(key, 0) + 1
+            by_city[f"{r['city'] or ''}|{new}"] = by_city.get(f"{r['city'] or ''}|{new}", 0) + 1
+            by_source[f"{src}|{new}"] = by_source.get(f"{src}|{new}", 0) + 1
+            updates.append((new, int(r["id"])))
+            if len(samples.setdefault(key, [])) < 2:
+                samples[key].append(str(r["issue_description"] or "")[:180])
 
-        # Fase 22: a categoria mudou em massa; os triggers recalculam a
-        # qualificação por linha. Aqui só invalidamos os caches in-process.
-        if changes:
-            from backend.services.db import (
-                clear_dashboard_summary_cache,
-                clear_global_metrics_cache,
-            )
-
-            clear_dashboard_summary_cache()
-            clear_global_metrics_cache()
-
-        # 3. Estatísticas DEPOIS (filtro qualificado novo)
-        from backend.services.db import _qualified_where
-
-        new_total = conn.execute(f"SELECT COUNT(*) FROM leads WHERE {_qualified_where()}").fetchone()[0]
-        new_7d = conn.execute(f"SELECT COUNT(*) FROM leads WHERE date_reported IS NOT NULL AND date(date_reported)>=date('now','-7 days') AND {_qualified_where()}").fetchone()[0]
-        new_24h = conn.execute(f"SELECT COUNT(*) FROM leads WHERE datetime(created_at) >= datetime('now','-1 day') AND {_qualified_where()}").fetchone()[0]
-
-        # Por cidade (novo)
-        city_rows = conn.execute(f"SELECT city, COUNT(*) c FROM leads WHERE {_qualified_where()} GROUP BY city ORDER BY c DESC").fetchall()
-        by_city = {r["city"]: r["c"] for r in city_rows}
-
-        # Por ofício (novo)
-        cat_rows = conn.execute(f"SELECT issue_category, COUNT(*) c FROM leads WHERE {_qualified_where()} GROUP BY issue_category ORDER BY c DESC").fetchall()
-        by_category = {r["issue_category"]: r["c"] for r in cat_rows}
-
-        conn.close()
-
-        return {
-            "status": "success",
-            "reclassified": sum(changes.values()),
-            "kept": kept,
+        result = {
+            "status": "dry_run" if dry_run else "applied",
+            "rows": len(rows),
+            "would_change": len(updates),
             "changes": changes,
-            "before": {
-                "total": old_total,
-                "last_7d": old_7d,
-                "last_24h": old_24h,
-            },
-            "after": {
-                "total": new_total,
-                "last_7d": new_7d,
-                "last_24h": new_24h,
-                "by_city": by_city,
-                "by_category": by_category,
-            },
-            "delta": {
-                "total": new_total - old_total,
-                "last_7d": new_7d - old_7d,
-                "last_24h": new_24h - old_24h,
+            "samples": samples,
+            "old_counts": dict(sorted(old_counts.items(), key=lambda kv: -kv[1])),
+            "new_counts": dict(sorted(new_counts.items(), key=lambda kv: -kv[1])),
+            "new_unclassified": new_counts.get(UNCLASSIFIED, 0),
+            "by_city_new_category": by_city,
+            "by_source_new_category": by_source,
+        }
+
+        if dry_run:
+            return result
+
+        # Backup consistente ANTES de qualquer escrita.
+        from datetime import datetime as _dt
+        backup_path = f"{DB_PATH}.bak-{_dt.now().strftime('%Y%m%d-%H%M%S')}"
+        dst = sqlite3.connect(backup_path)
+        try:
+            conn.backup(dst)
+        finally:
+            dst.close()
+        result["backup"] = backup_path
+
+        conn.execute("BEGIN IMMEDIATE")
+        conn.executemany("UPDATE leads SET issue_category=? WHERE id=?", updates)
+        refresh_lead_quality(conn, "1=1", ())
+        conn.commit()
+        result["applied"] = len(updates)
+
+        result["after"] = {
+            "qualified": conn.execute(
+                f"SELECT COUNT(*) FROM leads WHERE {_qualified_where()}"
+            ).fetchone()[0],
+            "by_category": {
+                row["issue_category"]: row["c"]
+                for row in conn.execute(
+                    "SELECT issue_category, COUNT(*) c FROM leads "
+                    "GROUP BY issue_category ORDER BY c DESC"
+                ).fetchall()
             },
         }
+        clear_dashboard_summary_cache()
+        clear_global_metrics_cache()
+        return result
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Erro na reclassificação: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Erro interno. Detalhe registado nos logs do servidor.")
-
+        logger.error("Erro na reclassificação: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Erro interno. Detalhe registado nos logs do servidor.",
+        )
+    finally:
+        conn.close()
 
 # Enriquecimento/consulta do dono de um único lead
 @app.post("/api/leads/{lead_id}/enrich")

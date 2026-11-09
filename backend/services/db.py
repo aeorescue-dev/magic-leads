@@ -24,6 +24,13 @@ from .access import (
     normalize_status,
     parse_dt,
 )
+from .category_taxonomy import (
+    TRADE_CATEGORIES as _TRADE_CATEGORIES,
+)
+from .category_taxonomy import (
+    normalize_category,
+    normalize_trade_categories,
+)
 from .lead_rules import (
     derive_signal,
     institutional_owner_name_matches,
@@ -51,7 +58,7 @@ _JUNK_TERMS = [
     "abandoned vehicle", "abandoned bicycle", "abandoned bike", "illegal auto",
     "dead animal", "hydrant", "towing", "tpw", "transportation",
     "debug test", "test issue", "contractors complaint", "fair housing",
-    "needle", "work w/out permit", "working beyond hours",
+    "needle", "working beyond hours",
 ]
 
 # Colunas de texto "ricas" avaliadas pelo filtro de ruído. Tem de ser idêntico
@@ -85,43 +92,9 @@ def _not_junk_where(alias: str = "") -> str:
 SENDABLE_EMAIL_STATUSES: tuple[str, ...] = ("valid", "verified")
 TRUSTED_EMAIL_SOURCES: tuple[str, ...] = ("import", "manual")
 
-# As 16 categorias de ofícios da plataforma (modelo de negócio).
-_TRADE_CATEGORIES = (
-    "Roof", "Structure", "Plumbing", "Grass", "Paint", "Permit_Rejected",
-    "Heating", "Electrical", "Elevator", "Gas", "Rodent", "Mold", "Lead",
-    "Unsanitary", "Door_Window", "Debris",
-)
-
-# Aliases legados (PT) que versões antigas do frontend gravavam como
-# "categoria de interesse". Mantidos para compatibilidade na leitura.
-_LEGACY_CATEGORY_ALIASES = {
-    "telhado": "Roof", "estrutura": "Structure", "encanamento": "Plumbing",
-    "mato": "Grass", "pintura": "Paint", "obras": "Permit_Rejected",
-    "heating": "Heating", "electrical": "Electrical", "elevator": "Elevator",
-    "gas": "Gas", "rodent": "Rodent", "mold": "Mold", "lead": "Lead",
-    "unsanitary": "Unsanitary", "door_window": "Door_Window", "debris": "Debris",
-}
-
-
-def normalize_trade_categories(values) -> List[str]:
-    """Normaliza categorias de interesse para o vocabulário canónico.
-
-    Aceita tanto as chaves canónicas (ex.: "Roof") como as legadas PT
-    (ex.: "telhado"). Devolve a lista canónica sem duplicados, na ordem de
-    entrada. Chaves desconhecidas/vazias são ignoradas.
-    """
-    canonical = set(_TRADE_CATEGORIES)
-    out: List[str] = []
-    seen: set = set()
-    for value in values or []:
-        if not value:
-            continue
-        key = str(value).strip()
-        resolved = key if key in canonical else _LEGACY_CATEGORY_ALIASES.get(key.lower())
-        if resolved and resolved not in seen:
-            seen.add(resolved)
-            out.append(resolved)
-    return out
+# As 16 categorias de ofício da plataforma (modelo de negócio). A fonte de
+# verdade é `category_taxonomy`; os aliases PT/B2B e o estado `Unclassified`
+# vivem lá para backend, alertas, B2B e frontend não divergirem.
 
 # Status considerados "chamado aberto / em andamento" (gatilho preditivo).
 _OPEN_STATUSES = (
@@ -2230,6 +2203,37 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         )
     except sqlite3.OperationalError as exc:
         logger.warning("Migracao de mailbox_bounce_events falhou: %s", exc)
+
+    # Normaliza interesses legados para as 16 chaves canonicas. Sem isto, um
+    # "telhado" antigo ficaria invisivel para o alerta e para o dashboard.
+    try:
+        rows = conn.execute(
+            "SELECT user_id, category, COALESCE(push_enabled, 1) AS push_enabled "
+            "FROM user_interests"
+        ).fetchall()
+        changed_interests = 0
+        for row in rows:
+            raw = str(row["category"] or "")
+            canonical = normalize_category(raw)
+            if canonical not in _TRADE_CATEGORIES or canonical == raw:
+                continue
+            conn.execute(
+                "INSERT OR IGNORE INTO user_interests (user_id, category, push_enabled) "
+                "VALUES (?, ?, ?)",
+                (row["user_id"], canonical, row["push_enabled"]),
+            )
+            conn.execute(
+                "DELETE FROM user_interests WHERE user_id = ? AND category = ?",
+                (row["user_id"], raw),
+            )
+            changed_interests += 1
+        if changed_interests:
+            conn.commit()
+            logger.info(
+                "[MIGRATE] user_interests normalizados: %s", changed_interests
+            )
+    except sqlite3.OperationalError as exc:
+        logger.warning("Migracao de user_interests falhou: %s", exc)
 
 
 
@@ -6155,6 +6159,10 @@ class DatabaseService:
     # Interesses por usuário
     # ---------------------------------------------------------------
     def set_user_interests(self, user_id: int, categories: List[str]) -> bool:
+        # Unica taxonomia: grava apenas as 16 chaves canonicas. Um alias PT ou
+        # B2B antigo nunca deve entrar em user_interests (senao o alerta e o
+        # dashboard procuram por uma chave que nao existe).
+        categories = normalize_trade_categories(categories)
         conn = get_connection()
         try:
             # Preserva o sino de push por categoria ao editar a selecao. Sem
@@ -6185,7 +6193,7 @@ class DatabaseService:
             rows = conn.execute(
                 "SELECT category FROM user_interests WHERE user_id = ?", (user_id,)
             ).fetchall()
-            return [r["category"] for r in rows]
+            return normalize_trade_categories([r["category"] for r in rows])
         finally:
             conn.close()
 
@@ -6198,14 +6206,28 @@ class DatabaseService:
                 "FROM user_interests WHERE user_id = ? ORDER BY category",
                 (user_id,),
             ).fetchall()
-            return [
-                {"category": r["category"], "push_enabled": bool(r["push_enabled"])}
-                for r in rows
-            ]
+            out: list[dict] = []
+            seen: set[str] = set()
+            for r in rows:
+                canonical = normalize_trade_categories([r["category"]])
+                if not canonical or canonical[0] in seen:
+                    continue
+                seen.add(canonical[0])
+                out.append(
+                    {
+                        "category": canonical[0],
+                        "push_enabled": bool(r["push_enabled"]),
+                    }
+                )
+            return out
         finally:
             conn.close()
 
     def set_user_interest_push(self, user_id: int, category: str, enabled: bool) -> bool:
+        canonical = normalize_trade_categories([category])
+        if not canonical:
+            return False
+        category = canonical[0]
         conn = get_connection()
         try:
             cur = conn.execute(
@@ -6262,6 +6284,10 @@ class DatabaseService:
           3. RECORTE DE CIDADE — se `city` informado e o usuário tiver
              `cities_filter`, a cidade precisa estar na lista.
         """
+        canonical = normalize_trade_categories([category])
+        if not canonical:
+            return []
+        category = canonical[0]
         conn = get_connection()
         try:
             if strict:

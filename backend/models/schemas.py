@@ -30,6 +30,9 @@ class IssueCategory(str, Enum):
     UNSANITARY = "Unsanitary"
     DOOR_WINDOW = "Door_Window"
     DEBRIS = "Debris"
+    # Estado seguro para tudo o que nao nomeia um dos 16 oficios. Nunca
+    # polui categorias nobres (Roof/Structure) e fica fora do feed publico.
+    UNCLASSIFIED = "Unclassified"
 
 
 class UrgencyLevel(str, Enum):
@@ -49,7 +52,7 @@ class RawLead311(BaseModel):
     created_at: datetime
     lat: Optional[float] = None
     lng: Optional[float] = None
-    issue_category: IssueCategory = IssueCategory.GRASS
+    issue_category: IssueCategory = IssueCategory.UNCLASSIFIED
     source_type: Optional[str] = None  # "311" | "permit" | "dob_violation" (None => 311)
     # BBL (borough-block-lot) de NYC: identificador canonico de imovel, permite
     # casar o lead com o proprietario de forma exacta

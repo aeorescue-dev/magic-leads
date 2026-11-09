@@ -599,7 +599,7 @@ def normalize_entity_phones() -> dict:
 
 def normalize_category_aliases() -> dict:
     """Mapeia aliases de issue_category para as 16 canónicas."""
-    from .alert_categories import canonical_category
+    from .category_taxonomy import normalize_category
 
     ensure_schema()
     conn = get_connection()
@@ -611,7 +611,7 @@ def normalize_category_aliases() -> dict:
         ).fetchall()
         for row in rows:
             raw = str(row["issue_category"] or "")
-            canonical = canonical_category(raw)
+            canonical = normalize_category(raw)
             if canonical and canonical != raw:
                 conn.execute(
                     "UPDATE leads SET issue_category=? WHERE issue_category=?",

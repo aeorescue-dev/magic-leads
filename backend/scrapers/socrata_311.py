@@ -9,6 +9,7 @@ import httpx
 
 from ..config import settings
 from ..models.schemas import IssueCategory, RawLead311, UrgencyLevel
+from ..services.category_taxonomy import classify
 from ..services.lead_rules import normalize_street
 from ..utils.logger import logger
 
@@ -396,7 +397,9 @@ class Socrata311Scraper:
                 created_at=created_at,
                 lat=float(row["latitude"]) if row.get("latitude") is not None else None,
                 lng=float(row["longitude"]) if row.get("longitude") is not None else None,
-                issue_category=self._infer_category(row.get("complaint_type") or ""),
+                issue_category=self._infer_category(
+                    row.get("complaint_type") or "", "311"
+                ),
                 case_title=row.get("complaint_type") or None,
                 department=row.get("agency_name") or None,
                 descriptor=row.get("descriptor") or None,
@@ -425,7 +428,9 @@ class Socrata311Scraper:
                 created_at=created_at,
                 lat=float(row["latitude"]) if row.get("latitude") is not None else None,
                 lng=float(row["longitude"]) if row.get("longitude") is not None else None,
-                issue_category=self._infer_category(row.get("sr_type") or ""),
+                issue_category=self._infer_category(
+                    row.get("sr_type") or "", "311"
+                ),
                 case_title=row.get("sr_type") or None,
                 department=row.get("owner_department") or None,
                 case_status=row.get("status") or None,
@@ -695,86 +700,47 @@ class Socrata311Scraper:
     def _infer_category_ex(
         self, description: str, source_type: str = None
     ) -> tuple["IssueCategory", bool]:
-        """Like `_infer_category`, but also says whether a SPECIFIC trade matched.
+        """Classifica sem substring cega; devolve (categoria, matched).
 
-        The second element is False when the category is the generic fallback
-        (Structure) - i.e. the description did not name a trade. That is what
-        separates a real signal ("SEWER - Complaint") from noise ("Missed
-        Collection"), and it is what the scraper filter uses to keep the former
-        and drop the latter. The keyword list in `SCRAPER_KEYWORDS` cannot do
-        this: it misses real trades whose wording differs from the list
-        (measured: 156 PLUMBING + 16 GRASS + 14 RODENT records per cycle were
-        being dropped in Dallas alone).
+        `matched=False` => `Unclassified` (nao e' um dos 16 oficios). O
+        chamador que aplica `trade_filter` descarta estes registos; o feed
+        publico tambem os exclui pela lista de categorias canonicas.
         """
-        desc = (description or "").lower()
-        # Specific categories (must come BEFORE the generic ones so they are not
-        # captured by the broader keywords).
-        if any(k in desc for k in ["heat", "hot water", "heating", "boiler", "no heat", "radiator", "no hot water"]):
-            return IssueCategory.HEATING, True
-        if any(k in desc for k in ["gas", "gas leak", "cooking gas", "gas odor", "gas smell"]):
-            return IssueCategory.GAS, True
-        if any(k in desc for k in ["electric", "electrical", "wiring", "outlet", "circuit", "panel", "short circuit"]):
-            return IssueCategory.ELECTRICAL, True
-        if any(k in desc for k in ["elevator", "lift"]):
-            return IssueCategory.ELEVATOR, True
-        if any(k in desc for k in ["rodent", "rat", "mice", "mouse", "vermin", "roach", "pest", "cockroach", "bed bug", "infestation", "pigeon"]):
-            return IssueCategory.RODENT, True
-        if any(k in desc for k in ["mold", "mildew", "fungus", "water damage"]):
-            return IssueCategory.MOLD, True
-        if any(re.search(r'\b' + k + r'(?:s)?\b', desc) for k in ["lead paint", "lead hazard", "lead inspection"]):
-            return IssueCategory.LEAD, True
-        if any(k in desc for k in ["unsanitary", "sanitary", "filth", "sewage backup", "unsatisfactory living conditions", "hoarding", "sewage", "septic", "raw sewage", "bad odor", "foul odor", "squalid"]):
-            return IssueCategory.UNSANITARY, True
-        if any(re.search(r'\b' + k + r'(?:s|es)?\b', desc) for k in ["door", "window", "frame", "sash", "jamb", "broken window", "stuck window"]):
-            return IssueCategory.DOOR_WINDOW, True
-        if any(k in desc for k in ["debris", "garbage", "trash", "rubbish", "litter", "dumping", "junk", "dumpster", "bulk removal", "overflowing garbage"]):
-            return IssueCategory.DEBRIS, True
-        # Generic categories (come after)
-        if any(k in desc for k in ["roof", "gutter", "shingle", "roof leak", "shed"]):
-            return IssueCategory.ROOF, True
-        if any(k in desc for k in ["plumb", "water", "leak", "pipe", "sewer", "drain", "backflow"]):
-            return IssueCategory.PLUMBING, True
-        if any(k in desc for k in ["paint", "plaster", "graffiti", "facade", "façade", "peeling"]):
-            return IssueCategory.PAINT, True
-        if any(k in desc for k in ["structur", "foundation", "wall", "collapse", "crack", "unsafe building", "sagging", "deterioration", "buckling", "leaning"]):
-            return IssueCategory.STRUCTURE, True
-        if any(k in desc for k in ["grass", "weed", "vegetation", "overgrown", "blight", "high weeds", "vacant lot", "tall grass", "brush", "excessive vegetation"]):
-            return IssueCategory.GRASS, True
-        if source_type in ("permit", "dob_violation", "hpd_violation", "tax_delinquency"):
-            # Works & Permits: a legal-obligation source IS a trade signal, even
-            # when the description does not name one.
-            return IssueCategory.PERMIT_REJECTED, True
-        return IssueCategory.STRUCTURE, False
+        result = classify(description, source_type)
+        return result.category, result.matched
 
     def _infer_urgency(self, description: str) -> UrgencyLevel:
-        """Infere o nível de urgência a partir da descrição do chamado 311.
+        """Infere urgencia com palavras completas (nunca por substring).
 
-        HIGH: risco à habitabilidade/saúde/estrutura (sem aquecimento, elevador,
-              gás, mofo, chumbo, esgoto, colapso estrutural, inundação/prevenção de incêndio).
-        LOW:  manutenção rotineira (coleta perdida, lixo, iluminação pública, pichação).
-        Padrão: MEDIUM.
+        Antes `"gas"` casava `"gasket"` e `"lead"` casava `"leading"`, elevando
+        a urgencia de chamados que nao tinham risco nenhum.
         """
         desc = (description or "").lower()
         high_keywords = [
-            "no heat", "heating", "boiler", "radiator",
-            "elevator", "lift",
-            "gas leak", "gas odor", "gas smell", "gas",
-            "mold", "mildew",
-            "lead", "lead paint", "lead hazard",
-            "sewage", "sewer backup",
-            "water main break", "water main leak", "burst pipe",
-            "collapse", "collapsed", "unsafe building", "falling debris",
-            "flood", "fire hazard", "electrical fire", "live wire",
+            r"\bno heat\b", r"\bheating\b", r"\bboiler\b", r"\bradiator\b",
+            r"\belevator\b", r"\bchair lift\b", r"\bplatform lift\b",
+            r"\bgas leak\b", r"\bgas odor\b", r"\bgas smell\b",
+            r"\bmold\b", r"\bmildew\b",
+            r"\blead paint\b", r"\blead hazard\b", r"\blead-based paint\b",
+            r"\blead dust\b", r"\blead poisoning\b",
+            r"\bsewage backup\b", r"\bsewage discharge\b", r"\braw sewage\b",
+            r"\bwater main break\b", r"\bwater main leak\b", r"\bburst pipe\b",
+            r"\bcollapse\b", r"\bcollapsed\b", r"\bunsafe building\b",
+            r"\bfalling debris\b", r"\bflood\b", r"\bfire hazard\b",
+            r"\belectrical fire\b", r"\blive wire\b",
         ]
         low_keywords = [
-            "missed garbage", "missed trash", "missed recycling", "missed collection",
-            "missed pickup", "bulk item", "leaf collection", "holiday tree",
-            "graffiti", "street light", "pothole", "noise", "litter basket",
-            "request for info", "information", "duplicate",
+            r"\bmissed garbage\b", r"\bmissed trash\b",
+            r"\bmissed recycling\b", r"\bmissed collection\b",
+            r"\bmissed pickup\b", r"\bmissed pick up\b",
+            r"\bbulk item\b", r"\bleaf collection\b",
+            r"\bholiday tree\b", r"\bgraffiti\b", r"\bstreet light\b",
+            r"\bpothole\b", r"\bnoise\b", r"\blitter basket\b",
+            r"\brequest for info\b", r"\binformation\b", r"\bduplicate\b",
         ]
-        if any(k in desc for k in high_keywords):
+        if any(re.search(pattern, desc) for pattern in high_keywords):
             return UrgencyLevel.HIGH
-        if any(k in desc for k in low_keywords):
+        if any(re.search(pattern, desc) for pattern in low_keywords):
             return UrgencyLevel.LOW
         return UrgencyLevel.MEDIUM
 

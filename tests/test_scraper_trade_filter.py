@@ -43,7 +43,7 @@ def test_infer_category_ex_flags_real_trades():
 
 
 def test_infer_category_ex_flags_generic_fallback():
-    """Ruido de 311 (recolha, candeeiros, informacao) cai no fallback."""
+    """Ruido de 311 (recolha, candeeiros, informacao) cai em Unclassified."""
     for desc in (
         "Missed Collection",
         "Street Lights Out",
@@ -52,29 +52,33 @@ def test_infer_category_ex_flags_generic_fallback():
         "Industrial Waste Complaints",
     ):
         cat, matched = socrata_scraper._infer_category_ex(desc)
-        assert matched is False, f"{desc!r} devia ser ruido (fallback)"
-        assert cat == IssueCategory.STRUCTURE
+        assert matched is False, f"{desc!r} devia ser ruido (Unclassified)"
+        assert cat == IssueCategory.UNCLASSIFIED
 
 
 def test_infer_category_ex_indoor_is_not_door():
     """F1: "Indoor Air Quality" NAO deve casar com "door" (word boundary)."""
     cat, matched = socrata_scraper._infer_category_ex("Indoor Air Quality")
     assert matched is False
-    assert cat == IssueCategory.STRUCTURE
+    assert cat == IssueCategory.UNCLASSIFIED
 
 
-def test_infer_category_ex_legal_source_is_always_a_trade():
-    """Fontes de obrigacao legal (permit/violacao) sao oficio, mesmo sem texto."""
+def test_infer_category_ex_legal_source_is_not_always_a_trade():
+    """Fonte legal sem oficio nao vira Permit_Rejected/Structure.
+
+    O fallback cego anterior era a causa de 8 mil Structure e 1,4 mil
+    Permit_Rejected sem qualquer oficio nomeado.
+    """
     for stype in ("permit", "dob_violation", "hpd_violation", "tax_delinquency"):
         cat, matched = socrata_scraper._infer_category_ex("X", stype)
-        assert matched is True, stype
-        assert cat == IssueCategory.PERMIT_REJECTED
+        assert matched is False, stype
+        assert cat == IssueCategory.UNCLASSIFIED
 
 
 def test_infer_category_backwards_compatible():
     """`_infer_category` continua a devolver so' a categoria."""
     assert socrata_scraper._infer_category("SEWER - Complaint") == IssueCategory.PLUMBING
-    assert socrata_scraper._infer_category("Missed Collection") == IssueCategory.STRUCTURE
+    assert socrata_scraper._infer_category("Missed Collection") == IssueCategory.UNCLASSIFIED
 
 
 # ------------------------------------------------------- 2. filtro do scraper
@@ -100,13 +104,13 @@ def test_trade_filter_keeps_trades_and_drops_noise():
     assert fake.keep("Missed Collection") is False
     assert fake.keep("Heat - Hot Water") is True
     assert fake.keep("Street Lights Out") is False
-    # "Garbage" e' uma das 16 categorias (entulho) -> conta como oficio.
-    assert fake.keep("Sanitation Missed Garbage - SAN") is True
+    # "Missed Garbage" e' coleta municipal, nao entulho de obra.
+    assert fake.keep("Sanitation Missed Garbage - SAN") is False
 
 
-def test_trade_filter_keeps_legal_source_without_keywords():
+def test_trade_filter_drops_legal_source_without_keywords():
     fake = _FakeScraper([], source_type="permit")
-    assert fake.keep("CL2 - Exempt") is True
+    assert fake.keep("CL2 - Exempt") is False
 
 
 # ------------------------------------------------------- 3. colunas de permisos

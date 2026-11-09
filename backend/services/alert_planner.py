@@ -868,6 +868,10 @@ async def plan_and_dispatch(leads: list) -> PlanReport:
         if not ok:
             continue
         raw_cat = (ld.get("issue_category") or "").strip()
+        # Unclassified nao e' oficio: nao tem audiencia e nao gera alerta.
+        # Nao vale a pena poluir o log com um warning por cada lead.
+        if raw_cat == "Unclassified":
+            continue
         cat = alert_categories.canonical_category(raw_cat)
         if not cat:
             logger.warning(

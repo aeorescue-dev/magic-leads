@@ -83,40 +83,46 @@ type Category = {
   labelKey: string;
   icon: any;
   color: string;
-  keywords: string[];
 };
 
+// Metadados de apresentação. NÃO há keywords aqui: a categoria é sempre
+// `lead.issue_category`, gravada pelo backend. Uma segunda classificação no
+// cliente foi a causa de 67,4% dos cartões mostrarem a categoria errada.
 const CATEGORIES: Category[] = [
-  { key: "Roof", labelKey: "dashboard.cat.telhado", icon: HardHat, color: "#6366f1", keywords: ["roof", "structure", "collaps", "foundation", "telhado", "estrutura"] },
-  { key: "Structure", labelKey: "dashboard.cat.estrutura", icon: Building2, color: "#6366f1", keywords: ["structure", "collaps", "foundation", "building", "estrutura", "fundacao"] },
-  { key: "Plumbing", labelKey: "dashboard.cat.encanamento", icon: Waves, color: "#0ea5e9", keywords: ["plumb", "water", "sewer", "leak", "encanamento", "vazamento"] },
-  { key: "Grass", labelKey: "dashboard.cat.mato", icon: Trash2, color: "#22c55e", keywords: ["grass", "weed", "overgrown", "vegetation", "litter", "trash", "debris", "garbage", "dirty", "unsanitary", "rodent", "mato", "entulho"] },
-  { key: "Paint", labelKey: "dashboard.cat.pintura", icon: Paintbrush, color: "#f59e0b", keywords: ["paint", "lead", "pintura"] },
-  { key: "Permit_Rejected", labelKey: "dashboard.cat.obras", icon: Hammer, color: "#ec4899", keywords: ["permit", "construction", "illegal", "building", "obra", "permissao"] },
-  { key: "Heating", labelKey: "dashboard.cat.heating", icon: Flame, color: "#ef4444", keywords: ["heat", "hot water", "heating", "boiler", "radiator", "no heat", "aquecimento"] },
-  { key: "Electrical", labelKey: "dashboard.cat.electrical", icon: Zap, color: "#fbbf24", keywords: ["electric", "electrical", "wiring", "outlet", "circuit", "panel", "eletrica"] },
-  { key: "Elevator", labelKey: "dashboard.cat.elevator", icon: Forklift, color: "#8b5cf6", keywords: ["elevator", "lift", "elevador"] },
-  { key: "Gas", labelKey: "dashboard.cat.gas", icon: Droplets, color: "#f97316", keywords: ["gas", "gas leak", "cooking gas", "gas", "vazamento"] },
-  { key: "Rodent", labelKey: "dashboard.cat.rodent", icon: Bug, color: "#84cc16", keywords: ["rodent", "rat", "mouse", "vermin", "roach", "pest", "cockroach", "bed bug", "roedor", "praga"] },
-  { key: "Mold", labelKey: "dashboard.cat.mold", icon: Droplet, color: "#06b6d4", keywords: ["mold", "mildew", "fungus", "mofo", "umidade"] },
-  { key: "Lead", labelKey: "dashboard.cat.lead", icon: AlertTriangle, color: "#a855f7", keywords: ["lead", "lead paint", "lead hazard", "chumbo"] },
-  { key: "Unsanitary", labelKey: "dashboard.cat.unsanitary", icon: Package, color: "#ec4899", keywords: ["unsanitary", "sanitary", "filth", "sewage", "sewer backup", "insanitario", "esgoto"] },
-  { key: "Door_Window", labelKey: "dashboard.cat.door_window", icon: DoorOpen, color: "#14b8a6", keywords: ["door", "window", "frame", "sash", "jamb", "porta", "janela"] },
-  { key: "Debris", labelKey: "dashboard.cat.debris", icon: Wind, color: "#64748b", keywords: ["debris", "garbage", "trash", "rubbish", "litter", "dumping", "entulho", "lixo"] },
+  { key: "Roof", labelKey: "dashboard.cat.telhado", icon: HardHat, color: "#6366f1" },
+  { key: "Structure", labelKey: "dashboard.cat.estrutura", icon: Building2, color: "#6366f1" },
+  { key: "Plumbing", labelKey: "dashboard.cat.encanamento", icon: Waves, color: "#0ea5e9" },
+  { key: "Grass", labelKey: "dashboard.cat.mato", icon: Trash2, color: "#22c55e" },
+  { key: "Paint", labelKey: "dashboard.cat.pintura", icon: Paintbrush, color: "#f59e0b" },
+  { key: "Permit_Rejected", labelKey: "dashboard.cat.obras", icon: Hammer, color: "#ec4899" },
+  { key: "Heating", labelKey: "dashboard.cat.heating", icon: Flame, color: "#ef4444" },
+  { key: "Electrical", labelKey: "dashboard.cat.electrical", icon: Zap, color: "#fbbf24" },
+  { key: "Elevator", labelKey: "dashboard.cat.elevator", icon: Forklift, color: "#8b5cf6" },
+  { key: "Gas", labelKey: "dashboard.cat.gas", icon: Droplets, color: "#f97316" },
+  { key: "Rodent", labelKey: "dashboard.cat.rodent", icon: Bug, color: "#84cc16" },
+  { key: "Mold", labelKey: "dashboard.cat.mold", icon: Droplet, color: "#06b6d4" },
+  { key: "Lead", labelKey: "dashboard.cat.lead", icon: AlertTriangle, color: "#a855f7" },
+  { key: "Unsanitary", labelKey: "dashboard.cat.unsanitary", icon: Package, color: "#ec4899" },
+  { key: "Door_Window", labelKey: "dashboard.cat.door_window", icon: DoorOpen, color: "#14b8a6" },
+  { key: "Debris", labelKey: "dashboard.cat.debris", icon: Wind, color: "#64748b" },
 ];
 
-// Todas as categorias da plataforma — default dos interesses e valor
-// auto-persistido quando o utilizador ainda não tem interesses gravados.
+// Todas as categorias da plataforma — default dos interesses.
 const ALL_CATEGORY_KEYS = CATEGORIES.map((cat) => cat.key);
 
-function matchCategory(lead: LeadResponse, keywords: string[]) {
-  const hay = `${lead.issue_category || ""} ${lead.issue_description || ""} ${lead.case_title || ""} ${lead.descriptor || ""} ${lead.department || ""}`.toLowerCase();
-  return keywords.some((k) => hay.includes(k));
-}
+const CATEGORY_BY_KEY = new Map<string, Category>(
+  CATEGORIES.map((cat) => [cat.key, cat] as const)
+);
+const UNCLASSIFIED_META: Category = {
+  key: "Unclassified",
+  labelKey: "dashboard.cat.unclassified",
+  icon: Tag,
+  color: "#94a3b8",
+};
 
-function catOfLead(lead: LeadResponse): Category {
-  const c = CATEGORIES.find((cat) => matchCategory(lead, cat.keywords));
-  return c || CATEGORIES[0];
+/** Metadados de exibição para a categoria GRAVADA pelo backend. */
+function categoryOf(lead: LeadResponse): Category {
+  return CATEGORY_BY_KEY.get(lead.issue_category || "") || UNCLASSIFIED_META;
 }
 
 const DARK = {
@@ -1295,14 +1301,13 @@ const URGENCIES = ["all", "high", "medium", "low"];
         }
       }
 
-      // Category filter
+      // Category filter: a categoria GRAVADA pelo backend e' a unica
+      // fonte de verdade. O cliente nao reclassifica.
       if (selectedCategory !== "all") {
-        const cat = catOfLead(lead);
-        if (cat.key !== selectedCategory) {
+        if ((lead.issue_category || "") !== selectedCategory) {
           return false;
         }
       }
-
       // Urgency filter
       if (selectedUrgency !== "all") {
         if (lead.urgency_level !== selectedUrgency) {
@@ -1335,8 +1340,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
       // Interest category filter (when in overview or opportunities)
       // Bypass when a specific lead type is selected (show all API results)
       if (activeTab === "overview" && selectedType === "all") {
-        const cat = catOfLead(lead);
-        if (!interests.has(cat.key)) return false;
+        if (!interests.has(lead.issue_category || "")) return false;
       }
 
       // Search query
@@ -2475,7 +2479,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
                   <Loader2 className="h-6 w-6 animate-spin text-indigo-500" />
                   <span className={`text-xs ${T.text2}`}>Carregando seu histórico...</span>
                 </div>
-              ) : historyLeads.filter((l) => !historyCategory || catOfLead(l).key === historyCategory).length === 0 ? (
+              ) : historyLeads.filter((l) => !historyCategory || (l.issue_category || "") === historyCategory).length === 0 ? (
                 <div className={`text-center py-16 border rounded-2xl ${T.border}`}>
                   <div className="text-4xl mb-3">📋</div>
                   <div className={`text-sm font-medium ${isDark ? "text-slate-300" : "text-slate-700"}`}>
@@ -2491,8 +2495,8 @@ const URGENCIES = ["all", "high", "medium", "low"];
                 </div>
               ) : (
                 <div className={`border rounded-2xl overflow-hidden divide-y ${T.border}`}>
-                  {historyLeads.filter((l) => !historyCategory || catOfLead(l).key === historyCategory).map((lead) => {
-                    const cat = catOfLead(lead);
+                  {historyLeads.filter((l) => !historyCategory || (l.issue_category || "") === historyCategory).map((lead) => {
+                    const cat = categoryOf(lead);
                     const CatIcon = cat.icon;
                     const badge =
                       lead.my_status === "reserved"
@@ -2734,7 +2738,7 @@ const URGENCIES = ["all", "high", "medium", "low"];
                       </div>
                     )}
                     {filteredLeads.map((lead) => {
-                      const cat = catOfLead(lead);
+                      const cat = categoryOf(lead);
                       const CatIcon = cat.icon;
                       const vis = lead.visibility_status || (lead.status === "reserved" ? "reserved_by_other" : "available");
                       const reservedUntil = lead.reserved_by_me?.expires_at || lead.reserved_by_other?.expires_at;
