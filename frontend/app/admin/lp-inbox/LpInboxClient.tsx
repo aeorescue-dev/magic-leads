@@ -846,6 +846,7 @@ function ReplyComposer({
   const [en, setEn] = useState(initialOut);
   const [sending, setSending] = useState(false);
   const [translating, setTranslating] = useState(false);
+  const translatingRef = useRef(false);
   const [translateError, setTranslateError] = useState("");
   const lastTranslatedRef = useRef(initialPt);
   const [result, setResult] = useState<{
@@ -855,19 +856,23 @@ function ReplyComposer({
   const [error, setError] = useState("");
   const finalLabel = (leadLang || "en").toUpperCase();
 
-  async function translate() {
-    if (!pt.trim() || translating) return;
+  async function translate(): Promise<string | null> {
+    if (!pt.trim() || translatingRef.current) return null;
+    translatingRef.current = true;
     setTranslating(true);
     setTranslateError("");
     try {
       const out = await translateLpDraft(thread.id, pt.trim());
       setEn(out.body_out);
       lastTranslatedRef.current = pt;
+      return out.body_out;
     } catch (err) {
       setTranslateError(
         err instanceof Error ? err.message : "Não foi possível traduzir."
       );
+      return null;
     } finally {
+      translatingRef.current = false;
       setTranslating(false);
     }
   }
@@ -879,12 +884,19 @@ function ReplyComposer({
   }
 
   async function send() {
-    if (!pt.trim() || !en.trim() || sending) return;
+    if (!pt.trim() || sending) return;
+    let finalText = en.trim();
+    if (!finalText || pt.trim() !== lastTranslatedRef.current) {
+      const out = await translate();
+      if (!out) return;
+      finalText = out;
+    }
+    if (!finalText) return;
     setSending(true);
     setError("");
     setResult(null);
     try {
-      const response = await onSend(thread.id, pt.trim(), en.trim());
+      const response = await onSend(thread.id, pt.trim(), finalText);
       setResult(response);
       setPt("");
       setEn("");
@@ -935,6 +947,7 @@ function ReplyComposer({
             </label>
             <button
               type="button"
+              onMouseDown={(event) => event.preventDefault()}
               onClick={() => void translate()}
               disabled={translating || !pt.trim()}
               className="rounded border border-violet-200 bg-white px-1.5 py-1 text-[8.5px] font-bold text-violet-700 hover:border-violet-300 disabled:opacity-40"
@@ -1008,6 +1021,7 @@ function ReplyComposer({
         </p>
         <button
           type="button"
+          onMouseDown={(event) => event.preventDefault()}
           onClick={() => void send()}
           disabled={sending || !pt.trim() || !en.trim()}
           className="flex items-center gap-1.5 rounded-lg bg-emerald-500 px-4 py-2 text-[11px] font-bold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-40"

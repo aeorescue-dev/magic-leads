@@ -116,6 +116,24 @@ partir da LP.
 cd frontend && npx tsc --noEmit && npm run build
 ```
 
+## Pipeline de IA (Fase 2)
+
+- Na criação da thread (e em cada follow-up), um background task chama
+  `enrich_thread`: deteta o idioma pelo texto, traduz para PT-BR, guarda
+  `body_pt`, escolhe uma sugestão da biblioteca aprovada e traduz esse rascunho
+  para o idioma do lead (`draft_pt` / `draft_out` / `draft_out_lang`).
+- A inbox admin pré-preenche a tradução e os dois campos. Ao editar o PT-BR, o
+  botão **Traduzir PT →** (e o blur do campo) chama `POST .../translate-draft` e
+  atualiza a versão final no idioma do lead.
+- Providers: `GEMINI_API_KEY` → Gemini; `OPENAI_API_KEY` → OpenAI;
+  `LP_AI_PROVIDER=mymemory`/`LP_AI_FREE_FALLBACK=true` → MyMemory (sem chave,
+  usado no staging). O staging atual usa MyMemory; produção deve usar uma chave
+  LLM dedicada.
+- PII (email/telefone) é redigida antes de sair para o provider e reinserida
+  depois. O texto do lead é tratado como dado, nunca como instrução.
+- Endpoints novos: `POST /api/admin/lp/threads/{id}/ai-enrich` e
+  `POST /api/admin/lp/threads/{id}/translate-draft`.
+
 ## Staging E2E
 
 Backend isolado: `https://magic-leads-staging-staging.up.railway.app`
@@ -125,10 +143,13 @@ Backend isolado: `https://magic-leads-staging-staging.up.railway.app`
 Verificado em 2026-11-09:
 
 1. Lead submete no widget live → thread criada em staging.
-2. Inbox admin atualiza em ≤5 s e mostra o original EN.
-3. Tradução PT-BR guardada (`PATCH .../messages/{id}`).
-4. Equipa aprova PT/EN → `POST .../reply` com `email_sent=true`.
-5. Widget live atualiza em ≤5 s com a resposta EN e os selos Widget + Resend.
+2. Inbox admin atualiza em ≤5 s; a IA pré-preenche tradução PT-BR e rascunhos.
+3. A equipa revê/edita o PT-BR; a versão final é gerada no idioma do lead.
+4. Equipa aprova → `POST .../reply` com `email_sent=true`.
+5. Widget live atualiza em ≤5 s com a resposta no idioma do lead e os selos
+   Widget + Resend.
+
+Validado em 2026-11-09 com EN, PT e ES (incluindo edição PT → ES e envio).
 
 ## Isolamento
 
