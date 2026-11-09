@@ -7,6 +7,7 @@ from backend.services import lp_ai
 def test_detect_language_pt_es_en():
     assert lp_ai.detect_language("Olá, não converto com os anúncios.") == "pt"
     assert lp_ai.detect_language("¿Cómo funciona? Estoy gastando en anuncios.") == "es"
+    assert lp_ai.detect_language("En que se diferencia de Angi? Los leads no se comparten.") == "es"
     assert lp_ai.detect_language("How does this work? I spend on ads.") == "en"
 
 

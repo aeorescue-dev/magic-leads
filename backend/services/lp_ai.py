@@ -108,10 +108,10 @@ def detect_language(text: str) -> str:
     raw = (text or "").strip()
     low = raw.lower()
 
-    if any(token in low for token in ["não", "você", "vocês", "obrigado", "obrigada", "qual é", "porque é", "gasto", "anúncios", "oportunidades", "proprietário", "cancele"]):
+    if any(token in low for token in ["não", "você", "vocês", "obrigado", "obrigada", "qual é", "porque é", "gasto", "anúncios", "oportunidades", "proprietário", "cancele", "diferença", "partilham", "oportunidade", "quero", "cidade", "ofício"]):
         return "pt"
     if any(token in raw for token in ["¿", "¡", "ñ"]) or any(
-        token in low for token in ["estoy", "anuncios", "cómo", "qué", "dónde", "cuánto", "propietario", "oportunidades", "semana", "cancelar"]
+        token in low for token in ["estoy", "anuncios", "cómo", "qué", "dónde", "cuánto", "propietario", "oportunidades", "semana", "cancelar", "diferencia", "comparten", "como funciona", "precio", "ciudad", "oficio", "disponibilidad", "quiero", "gracias", "hola", "presupuesto", "trabajo"]
     ):
         return "es"
     if any(token in low for token in ["bonjour", "je ", "vous", "nous", "prix", "travaux", "est-ce"]):
