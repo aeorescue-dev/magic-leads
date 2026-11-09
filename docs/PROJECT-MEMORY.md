@@ -2188,3 +2188,16 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Regras:** não usar o total city-wide (3.534) como se fosse o nicho; não relaxar o guard `count_requires_exact_scope` sem contagem verificada.
 - **Entrega:** função de contagem, cache/frescura, regra de render `count_city_verified`, testes e backtest.
 - **Prioridade:** próxima janela de produto, depois da campanha #12.
+
+---
+
+## 8. Categorização P0 — taxonomia única e `Unclassified` (2026-11-09)
+
+- **Fonte única:** `backend/services/category_taxonomy.py` (16 ofícios + `Unclassified`). Ingestão, alertas, B2B, `user_interests` e frontend leem a mesma chave; o frontend já não tem `catOfLead`/keywords.
+- **Regras:** word boundaries (`\b`), frases negativas e estado seguro. `Unclassified` nunca entra no feed (`_category_where` só aceita as 16), mas fica na BD para auditoria.
+- **Lead:** captura `Lead`, `Lead Dust`, `Lead-Based Paint`, `Lead Hazard`, `Lead Inspection`; `leading`/`lead singer` não casam.
+- **Ingestão:** DOB/Boston passam `source_type`; HPD/permits legais preservam `Unclassified`; 311 genérico descarta `Unclassified` na origem.
+- **Backfill:** dry-run + diff por cidade/fonte + backup `/data/leads.db.bak-20261109-040150`; 56.724 linhas alteradas, 50.395 `Unclassified`.
+- **Feed efetivo:** 107.106 -> 68.160. Zero `Unclassified` no feed; zero falsos positivos conhecidos (`rat`/`registration`, `shed`/`unleashed`, `leaning`/`cleaning`, `overgrown tree`, `cart maintenance`, `line locate`, `water lead test`).
+- **Voz:** intocada; campanhas #13-#24 continuam `paused`, 0 chamadas.
+- **Dívida/P2:** decidir política para graffiti->Paint, tree debris->Debris, water lead test->Unclassified; esconder categorias sem inventário por cidade; separar `inserted` bruto do KPI "novas oportunidades".
