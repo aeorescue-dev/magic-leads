@@ -99,6 +99,13 @@ testar a inbox admin com dados reais, o backend de staging tem de ter
 Enquanto isso não existir, `/admin/lp-inbox` mostra `API OFF` e o modo de
 demonstração local.
 
+Para o E2E completo (lead → inbox → tradução → aprovação → Resend → widget),
+construir o preview com `NEXT_PUBLIC_LP_WIDGET_LIVE=true` e
+`NEXT_PUBLIC_API_PROXY=true`, além de `API_PROXY_TARGET`. O login e o widget
+passam a usar `/api` relativo, sem CORS. O backend de staging deve ter
+`VOICE_FREEZE=1`, `SCRAPER_SELF_SCHEDULED=false`,
+`ENRICH_SCHEDULER_ENABLED=false` e `LP_WIDGET_ENABLED=true`.
+
 O deploy é um **preview**, não produção. A rota é `noindex` e não está ligada a
 partir da LP.
 

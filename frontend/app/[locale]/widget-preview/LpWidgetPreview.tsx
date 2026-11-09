@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import {
   ArrowRight,
@@ -18,6 +19,7 @@ import type { LpIntentKey } from "@/components/landing/LpWidget/data";
 import type { WidgetLang } from "@/components/landing/LpWidget/i18n";
 
 export default function LpWidgetPreview() {
+  const LIVE = process.env.NEXT_PUBLIC_LP_WIDGET_LIVE === "true";
   const [open, setOpen] = useState(false);
   const [intent, setIntent] = useState<LpIntentKey | null>(null);
   const [intentQuestion, setIntentQuestion] = useState("");
@@ -34,6 +36,9 @@ export default function LpWidgetPreview() {
       <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-[10.5px] font-semibold leading-relaxed text-amber-900">
         <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-amber-500 align-middle" />
         Preview isolado · <b>NEXT_PUBLIC_LP_WIDGET={String(LP_WIDGET_ENABLED)}</b> ·
+        <span className="mx-1.5 rounded bg-white px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-emerald-700 ring-1 ring-emerald-200">
+          {LIVE ? "LIVE E2E · STAGING" : "DEMO LOCAL"}
+        </span>
         nenhum código da LP oficial, AuthForm, Stripe ou voz foi alterado
       </div>
 
@@ -190,17 +195,39 @@ export default function LpWidgetPreview() {
         </section>
 
         <div className="space-y-3">
-          <LpWidgetInboxPreview
-            key={`${intent ?? "empty"}-${submissionId}`}
-            intent={intent}
-            submission={submission}
-            questionPreview={intentQuestion}
-            defaultQuestion={intentDefaultQuestion}
-            leadLang={leadLang}
-            onSendReply={(text) =>
-              setTeamReply({ text, at: Date.now() })
-            }
-          />
+          {LIVE ? (
+            <div className="rounded-2xl border border-emerald-200 bg-white p-4 shadow-sm">
+              <p className="text-[9px] font-black uppercase tracking-[0.12em] text-emerald-700">
+                Inbox real · staging
+              </p>
+              <p className="mt-1 text-[12px] font-bold text-slate-900">
+                O lead está a falar com o backend de staging.
+              </p>
+              <p className="mt-1 text-[10.5px] leading-relaxed text-slate-500">
+                A conversa aparece em <code>/admin/lp-inbox</code> com polling de
+                5 s. A resposta aprovada volta ao widget e é enviada por Resend.
+              </p>
+              <Link
+                href="/admin/lp-inbox"
+                className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-2 text-[10.5px] font-bold text-white hover:bg-emerald-600"
+              >
+                Abrir Inbox Admin
+                <ArrowRight className="h-3 w-3" />
+              </Link>
+            </div>
+          ) : (
+            <LpWidgetInboxPreview
+              key={`${intent ?? "empty"}-${submissionId}`}
+              intent={intent}
+              submission={submission}
+              questionPreview={intentQuestion}
+              defaultQuestion={intentDefaultQuestion}
+              leadLang={leadLang}
+              onSendReply={(text) =>
+                setTeamReply({ text, at: Date.now() })
+              }
+            />
+          )}
 
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <p className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-[0.12em] text-slate-400">
@@ -233,7 +260,7 @@ export default function LpWidgetPreview() {
       </main>
 
       <LpWidgetLauncher
-        mode="demo"
+        mode={LIVE ? "live" : "demo"}
         open={open}
         onOpenChange={setOpen}
         onIntentChange={(next, question, defaultQuestion) => {

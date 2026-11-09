@@ -67,8 +67,7 @@ export class LpWidgetApiError extends Error {
 }
 
 const API_URL = (
-  process.env.NEXT_PUBLIC_API_URL ||
-  ""
+  process.env.NEXT_PUBLIC_LP_WIDGET_API_URL || ""
 ).replace(/\/$/, "");
 
 function endpoint(path: string): string {

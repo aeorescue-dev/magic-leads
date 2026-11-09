@@ -1,10 +1,16 @@
 // Em produção, chama /api/leads do próprio domínio (Vercel serverless).
 // Em dev local, aponta para o backend local via NEXT_PUBLIC_API_URL.
-const API_URL = (
-  (typeof window !== "undefined" && (window as any).__NEXT_PUBLIC_API_URL) ||
-  process.env.NEXT_PUBLIC_API_URL ||
-  "https://magic-leads-production.up.railway.app"
-).replace(/\/$/, "");
+// Num preview de staging, NEXT_PUBLIC_API_PROXY=true força caminhos relativos
+// `/api`, que o rewrite do Next/Vercel encaminha para API_PROXY_TARGET.
+const API_PROXY_MODE = process.env.NEXT_PUBLIC_API_PROXY === "true";
+const API_URL = API_PROXY_MODE
+  ? ""
+  : (
+      (typeof window !== "undefined" &&
+        (window as any).__NEXT_PUBLIC_API_URL) ||
+      process.env.NEXT_PUBLIC_API_URL ||
+      "https://magic-leads-production.up.railway.app"
+    ).replace(/\/$/, "");
 
 // ------------------------------------------------------------------
 // Sessão (token) — armazenada em httpOnly cookie (definido pelo backend)
