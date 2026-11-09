@@ -250,17 +250,45 @@ def _public_url(base: str, token: str) -> str:
 
 def _send_ack(thread: dict, token: str) -> bool:
     name = _clean(thread.get("name"), 80)
-    greeting = f"Hi {name}," if name else "Hi,"
+    lang = _clean(thread.get("lead_lang"), 8) or "en"
+    base = lang[:2]
     sla = int(getattr(settings, "LP_WIDGET_SLA_HOURS", 4) or 4)
-    lines = [
-        greeting,
-        "",
-        "Thanks for reaching out to Magic Leads. We received your message and "
-        "a specialist is reviewing it.",
-        "",
-        f"You can expect a reply within {sla} business hours. Your reference is "
-        f"#LP-{thread.get('id')}.",
-    ]
+    if base == "pt":
+        greeting = f"Olá {name}," if name else "Olá,"
+        lines = [
+            greeting,
+            "",
+            "Obrigado por contactar a Magic Leads. Recebemos a sua mensagem e "
+            "um especialista está a analisá-la.",
+            "",
+            f"Pode esperar uma resposta em até {sla} horas úteis. A sua "
+            f"referência é #LP-{thread.get('id')}.",
+        ]
+        subject = "Recebemos a sua mensagem — Magic Leads"
+    elif base == "es":
+        greeting = f"Hola {name}," if name else "Hola,"
+        lines = [
+            greeting,
+            "",
+            "Gracias por contactar Magic Leads. Hemos recibido tu mensaje y un "
+            "especialista lo está revisando.",
+            "",
+            f"Puedes esperar una respuesta en un plazo de {sla} horas hábiles. "
+            f"Tu referencia es #LP-{thread.get('id')}.",
+        ]
+        subject = "Hemos recibido tu mensaje — Magic Leads"
+    else:
+        greeting = f"Hi {name}," if name else "Hi,"
+        lines = [
+            greeting,
+            "",
+            "Thanks for reaching out to Magic Leads. We received your message and "
+            "a specialist is reviewing it.",
+            "",
+            f"You can expect a reply within {sla} business hours. Your reference is "
+            f"#LP-{thread.get('id')}.",
+        ]
+        subject = "We received your message — Magic Leads"
     link = _public_url(
         str(getattr(settings, "LP_WIDGET_PUBLIC_URL", "") or ""),
         token,
@@ -276,7 +304,7 @@ def _send_ack(thread: dict, token: str) -> bool:
     )
     return send_email(
         str(thread.get("email") or ""),
-        "We received your message — Magic Leads",
+        subject,
         "\n".join(lines),
         reply_to=str(getattr(settings, "LP_WIDGET_REPLY_TO", "") or "") or None,
     )
@@ -366,6 +394,7 @@ def create_thread(
             "id": thread_id,
             "email": email,
             "name": name,
+            "lead_lang": lead_lang,
             "created_at": _iso(now),
         }
     finally:
@@ -1019,7 +1048,10 @@ def reply(
 
     email_sent = send_email(
         email,
-        "Re: your question about Magic Leads",
+        {
+            "pt": "Re: a sua pergunta sobre a Magic Leads",
+            "es": "Re: tu pregunta sobre Magic Leads",
+        }.get(lead_lang[:2], "Re: your question about Magic Leads"),
         en,
         reply_to=str(getattr(settings, "LP_WIDGET_REPLY_TO", "") or "") or None,
     )
