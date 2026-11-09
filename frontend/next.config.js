@@ -1,5 +1,11 @@
 /** @type {import('next').NextConfig} */
 const path = require("path");
+// Alvo do proxy `/api`. Default: produção. Num preview de staging, definir
+// API_PROXY_TARGET no build para o backend de staging, sem alterar a produção.
+const API_PROXY_TARGET = (
+  process.env.API_PROXY_TARGET ||
+  "https://magic-leads-production.up.railway.app"
+).replace(/\/$/, "");
 const nextConfig = {
   reactStrictMode: true,
   // Evita que o tracing suba até C:\Users e apanhe package-lock alheios.
@@ -11,7 +17,7 @@ const nextConfig = {
     return [
       {
         source: '/api/:path*',
-        destination: 'https://magic-leads-production.up.railway.app/api/:path*',
+        destination: `${API_PROXY_TARGET}/api/:path*`,
       },
       {
         // Links branded da vitrine: www.magicleads.app/r/<token> -> backend.

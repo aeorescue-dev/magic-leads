@@ -86,11 +86,18 @@ Sem backend, a prévia usa o modo `demo` (determinístico). Para testar o modo
 ## Staging (Vercel preview)
 
 ```bash
-vercel deploy --cwd frontend \
+vercel deploy --yes --project frontend \
   -b NEXT_PUBLIC_LP_WIDGET=true \
   -b LP_WIDGET_PREVIEW=true \
+  -b API_PROXY_TARGET=https://<staging-backend> \
   -e LP_WIDGET_PREVIEW=true
 ```
+
+Sem `API_PROXY_TARGET`, o rewrite `/api` continua a apontar para produção. Para
+testar a inbox admin com dados reais, o backend de staging tem de ter
+`LP_WIDGET_ENABLED=true` e o preview tem de ser construído com o alvo correto.
+Enquanto isso não existir, `/admin/lp-inbox` mostra `API OFF` e o modo de
+demonstração local.
 
 O deploy é um **preview**, não produção. A rota é `noindex` e não está ligada a
 partir da LP.
