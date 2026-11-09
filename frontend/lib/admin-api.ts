@@ -2637,3 +2637,129 @@ export function fetchSystemHealth(windowHours = 24): Promise<SystemHealth> {
     `/system-health?window=${encodeURIComponent(String(windowHours))}`
   );
 }
+
+async function lpAdminFetch<T>(
+  path: string,
+  options?: RequestInit
+): Promise<T> {
+  const { headers: optHeaders, ...rest } = options ?? {};
+  let response: Response;
+  try {
+    // Caminho relativo: usa o rewrite `/api` do Next/Vercel, evita CORS nos
+    // previews e mantém a sessão/cookie e o Authorization no mesmo origem.
+    response = await fetch(`/api/admin${path}`, {
+      credentials: "include",
+      cache: "no-store",
+      ...rest,
+      headers: {
+        ...authHeaders(),
+        ...(optHeaders as Record<string, string> | undefined),
+      },
+    });
+  } catch {
+    throw new AdminApiError(0, "Sem ligação ao backend.");
+  }
+
+  if (!response.ok) {
+    let detail = response.statusText;
+    try {
+      const body = await response.json();
+      if (body?.detail) detail = String(body.detail);
+    } catch {
+      /* resposta sem JSON */
+    }
+    throw new AdminApiError(response.status, detail);
+  }
+  return (await response.json()) as T;
+}
+
+// ============================================================
+// LP Inbox (Fase 1b) — threads do widget, tradução e resposta
+// ============================================================
+
+export interface LpAdminThreadSummary {
+  id: number;
+  email: string;
+  name: string | null;
+  company: string | null;
+  city: string | null;
+  trade: string | null;
+  intent: string;
+  status: string;
+  created_at: string;
+  last_message_at: string | null;
+  sla_due_at: string | null;
+  last_message: string | null;
+  message_count: number;
+}
+
+export interface LpAdminMessage {
+  id: number;
+  direction: "inbound" | "outbound";
+  channel: string;
+  body: string;
+  body_pt: string | null;
+  body_en: string | null;
+  lang: string;
+  author_type: string;
+  author_id: number | null;
+  email_status: string | null;
+  created_at: string;
+}
+
+export interface LpAdminThreadDetail {
+  id: number;
+  email: string;
+  name: string | null;
+  company: string | null;
+  city: string | null;
+  trade: string | null;
+  intent: string;
+  status: string;
+  locale: string;
+  source_section: string | null;
+  created_at: string;
+  updated_at: string;
+  last_message_at: string | null;
+  sla_due_at: string | null;
+  messages: LpAdminMessage[];
+}
+
+export function fetchLpThreads(
+  limit = 100
+): Promise<{ threads: LpAdminThreadSummary[]; count: number }> {
+  return lpAdminFetch(`/lp/threads?limit=${limit}`);
+}
+
+export function fetchLpThread(id: number): Promise<LpAdminThreadDetail> {
+  return lpAdminFetch(`/lp/threads/${id}`);
+}
+
+export function saveLpTranslation(
+  threadId: number,
+  messageId: number,
+  bodyPt: string
+): Promise<{ ok: boolean; message_id: number; body_pt: string }> {
+  return lpAdminFetch(`/lp/threads/${threadId}/messages/${messageId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ body_pt: bodyPt }),
+  });
+}
+
+export function replyLpThread(
+  threadId: number,
+  bodyPt: string,
+  bodyEn: string
+): Promise<{
+  ok: boolean;
+  message_id: number;
+  email_sent: boolean;
+  thread_id: number;
+}> {
+  return lpAdminFetch(`/lp/threads/${threadId}/reply`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ body_pt: bodyPt, body_en: bodyEn }),
+  });
+}

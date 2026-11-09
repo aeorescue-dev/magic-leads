@@ -9377,6 +9377,10 @@ class LpTeamReplyRequest(BaseModel):
     body_en: str
 
 
+class LpTranslationRequest(BaseModel):
+    body_pt: str
+
+
 def _lp_widget_guard() -> None:
     """404 quando a fase está desligada — não revela a superfície da API."""
     if not bool(getattr(settings, "LP_WIDGET_ENABLED", False)):
@@ -9485,6 +9489,28 @@ async def admin_lp_thread(
     if not thread:
         raise HTTPException(status_code=404, detail="Thread not found")
     return thread
+
+
+@app.patch("/api/admin/lp/threads/{thread_id}/messages/{message_id}")
+async def admin_lp_message_translation(
+    thread_id: int,
+    message_id: int,
+    payload: LpTranslationRequest,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Guarda a revisão humana da tradução PT-BR de uma mensagem do lead."""
+    _lp_widget_guard()
+    try:
+        result = await anyio.to_thread.run_sync(
+            lambda: lp_widget.update_message_translation(
+                thread_id, message_id, payload.body_pt
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not result:
+        raise HTTPException(status_code=404, detail="Message not found")
+    return result
 
 
 @app.post("/api/admin/lp/threads/{thread_id}/reply")

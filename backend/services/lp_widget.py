@@ -422,6 +422,40 @@ def add_lead_message(token: str, message: str) -> Optional[dict]:
         conn.close()
 
 
+def update_message_translation(
+    thread_id: int, message_id: int, body_pt: str
+) -> Optional[dict]:
+    """Guarda a tradução PT-BR de uma mensagem inbound (revisão humana)."""
+    init()
+    pt = _clean(body_pt, MAX_REPLY_CHARS)
+    if not pt:
+        raise ValueError("empty_translation")
+
+    conn = db.get_connection()
+    try:
+        row = conn.execute(
+            "SELECT id FROM lp_messages "
+            "WHERE id = ? AND thread_id = ? AND direction = 'inbound'",
+            (int(message_id), int(thread_id)),
+        ).fetchone()
+        if not row:
+            return None
+        conn.execute(
+            "UPDATE lp_messages SET body_pt = ? WHERE id = ?",
+            (pt, int(message_id)),
+        )
+        _event(
+            conn,
+            int(thread_id),
+            "translation_saved",
+            {"message_id": int(message_id)},
+        )
+        conn.commit()
+        return {"ok": True, "message_id": int(message_id), "body_pt": pt}
+    finally:
+        conn.close()
+
+
 def list_threads(status: str = "", limit: int = 50) -> list[dict]:
     init()
     limit = max(1, min(200, int(limit or 50)))

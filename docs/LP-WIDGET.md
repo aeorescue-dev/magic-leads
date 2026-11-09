@@ -37,6 +37,9 @@ com `LP_WIDGET_PREVIEW=true` (ou com a flag pública ligada num build de staging
 - `lib/lp-widget.ts` — flag, tipos, cliente HTTP e eventos.
 - `app/[locale]/widget-preview/page.tsx` — rota isolada, `noindex`, gated por
   `LP_WIDGET_PREVIEW`.
+- `app/admin/lp-inbox/page.tsx` + `LpInboxClient.tsx` — inbox admin real,
+  polling de 5 s, original + tradução PT-BR editável, rascunho PT/EN e envio.
+  Inclui um modo de demonstração local quando a API está desligada.
 
 ### Backend
 
@@ -52,6 +55,8 @@ com `LP_WIDGET_PREVIEW=true` (ou com a flag pública ligada num build de staging
   - `GET /api/admin/lp/threads/{id}`
   - `POST /api/admin/lp/threads/{id}/reply` — recebe `body_pt` (interno) e
     `body_en` (enviado), grava ambos e envia o EN por Resend.
+  - `PATCH /api/admin/lp/threads/{id}/messages/{message_id}` — guarda a
+    revisão humana da tradução PT-BR de uma mensagem inbound.
 
 ### Fora do âmbito desta fase
 
@@ -63,8 +68,7 @@ com `LP_WIDGET_PREVIEW=true` (ou com a flag pública ligada num build de staging
 - SMS/WhatsApp.
 - Atendimento telefónico e agendamento de chamadas. A captação é 100% por
   mensagem/e-mail.
-- UI visual da inbox admin (Fase 1b). Os endpoints admin já existem; a página
-  com polling de 5 s é o próximo passo.
+- SSE na inbox/widget. A entrega usa polling de 5 s; SSE fica como evolução.
 - Montagem do widget na LP oficial. Só depois de aprovação explícita.
 
 ## Pré-visualizar localmente

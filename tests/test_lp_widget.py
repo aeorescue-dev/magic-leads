@@ -130,3 +130,35 @@ def test_list_threads_filters_by_status():
     assert replied[0]["message_count"] == 2
 
     assert lp_widget.list_threads(status="new") == []
+
+
+def test_save_inbound_translation():
+    created = _create()
+    public = lp_widget.get_thread_public(created["token"])
+    assert public is not None
+    inbound_id = public["messages"][0]["id"]
+
+    result = lp_widget.update_message_translation(
+        created["id"], inbound_id, "Tradução revista pela equipa."
+    )
+    assert result is not None
+    assert result["ok"] is True
+
+    admin = lp_widget.get_thread_admin(created["id"])
+    assert admin is not None
+    assert admin["messages"][0]["body_pt"] == "Tradução revista pela equipa."
+
+
+def test_save_translation_rejects_wrong_thread():
+    created = _create()
+    other = _create(email="other@example.com")
+    public = lp_widget.get_thread_public(created["token"])
+    assert public is not None
+    inbound_id = public["messages"][0]["id"]
+
+    assert (
+        lp_widget.update_message_translation(
+            other["id"], inbound_id, "Não devia gravar"
+        )
+        is None
+    )
