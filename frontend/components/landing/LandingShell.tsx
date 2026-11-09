@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useI18n, type Lang } from "@/lib/i18n";
 import { AuthForm } from "@/components/AuthForm";
 import AnalyticsBeacon from "@/components/AnalyticsBeacon";
+import LpWidgetMount from "@/components/landing/LpWidget/LpWidgetMount";
 import { readStoredUser, useAuth } from "@/lib/auth";
 import { updateUserLocale } from "@/lib/api-client";
 
@@ -243,6 +244,7 @@ export default function LandingShell({ children }: { children: React.ReactNode }
           </div>
         )}
       </div>
+      <LpWidgetMount />
       <AnalyticsBeacon />
     </Ctx.Provider>
   );
