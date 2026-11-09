@@ -298,3 +298,60 @@ def test_history_by_email():
     assert admin is not None
     assert len(admin["history"]) == 1
     assert admin["history"][0]["id"] == first["id"]
+
+
+def test_acknowledgment_uses_lead_language(monkeypatch):
+    sent: list[dict] = []
+
+    def fake_send(to, subject, text, **kwargs):
+        sent.append({"to": to, "subject": subject, "text": text})
+        return True
+
+    monkeypatch.setattr(lp_widget, "send_email", fake_send)
+
+    lp_widget._send_ack(
+        {"id": 7, "email": "lead@example.com", "name": "Carlos", "lead_lang": "es"},
+        "tok",
+    )
+    lp_widget._send_ack(
+        {"id": 8, "email": "lead@example.com", "name": "Fábio", "lead_lang": "pt"},
+        "tok",
+    )
+    lp_widget._send_ack(
+        {"id": 9, "email": "lead@example.com", "name": "Mike", "lead_lang": "en"},
+        "tok",
+    )
+
+    assert sent[0]["text"].startswith("Hola Carlos,")
+    assert sent[0]["subject"].startswith("Hemos recibido")
+    assert sent[1]["text"].startswith("Olá Fábio,")
+    assert sent[1]["subject"].startswith("Recebemos")
+    assert sent[2]["text"].startswith("Hi Mike,")
+    assert sent[2]["subject"].startswith("We received")
+
+
+def test_reply_email_uses_lead_language(monkeypatch):
+    created = _create(
+        message=(
+            "Hola, necesito informacion sobre los precios y la disponibilidad "
+            "en Dallas esta semana, por favor."
+        )
+    )
+    sent: list[dict] = []
+
+    def fake_send(to, subject, text, **kwargs):
+        sent.append({"to": to, "subject": subject, "text": text})
+        return True
+
+    monkeypatch.setattr(lp_widget, "send_email", fake_send)
+
+    result = lp_widget.reply(
+        created["id"],
+        body_pt="Temos oportunidades em Dallas esta semana.",
+        body_en="Tenemos oportunidades en Dallas esta semana.",
+    )
+
+    assert result is not None
+    assert len(sent) == 1
+    assert sent[0]["text"] == "Tenemos oportunidades en Dallas esta semana."
+    assert sent[0]["subject"].startswith("Re: tu pregunta")

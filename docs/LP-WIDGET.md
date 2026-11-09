@@ -26,8 +26,12 @@ com `LP_WIDGET_PREVIEW=true` (ou com a flag pública ligada num build de staging
 - `components/landing/LpWidget/LpWidgetLauncher.tsx` — launcher flutuante,
   claro e de baixa intrusão. É o canal principal.
 - `components/landing/LpWidget/LpWidgetPanel.tsx` — painel de conversa,
-  branco, com chips, composer, fluxo adaptativo (2 passos; 3 para cidade+ofício)
-  e entrega simulada/real.
+  branco, com chips, composer e entrega simulada/real. Fluxo de captação em
+  **4 passos**: intenção → ofício + cidade → origem do lead → mensagem/contacto;
+  depois abre a conversa (passo 5) com polling de 5 s e anexos.
+- `components/landing/LpWidget/i18n.ts` — copy EN/PT/ES, as 16 categorias
+  canónicas (`TRADE_OPTIONS`) e as 4 origens (`WIDGET_SOURCES`), sempre
+  traduzidas pelo idioma ativo.
 - `components/landing/LpWidget/LpWidgetInline.tsx` — faixa inline opcional,
   leve (não é um segundo widget embutido).
 - `components/landing/LpWidget/LpLanguagePicker.tsx` + `LpFlag.tsx` — seletor
@@ -39,37 +43,88 @@ com `LP_WIDGET_PREVIEW=true` (ou com a flag pública ligada num build de staging
   `LP_WIDGET_PREVIEW`.
 - `app/admin/lp-inbox/page.tsx` + `LpInboxClient.tsx` — inbox admin real,
   polling de 5 s, original + tradução PT-BR editável, rascunho PT/EN e envio.
-  Inclui um modo de demonstração local quando a API está desligada.
+  Inclui filtros por período (Hoje/Semana/Mês) e estado (Novo/Respondido/
+  Arquivado), indicador de cobertura (cidade), origem do lead, histórico por
+  e-mail, anexos e arquivar/reabrir. Tem um modo de demonstração local quando a
+  API está desligada.
 
 ### Backend
 
-- `services/lp_widget.py` — tabelas `lp_threads`, `lp_messages`, `lp_events`;
-  criação de fio, follow-up do lead, lista/detalhe admin, resposta da equipa e
-  envio via Resend.
+- `services/lp_widget.py` — tabelas `lp_threads`, `lp_messages`, `lp_events`,
+  `lp_attachments`; criação de fio, follow-up do lead, lista/detalhe admin,
+  resposta da equipa e envio via Resend.
 - Endpoints públicos:
   - `POST /api/public/lp/threads` (6/hora, honeypot, consentimento)
   - `GET /api/public/lp/threads/{token}` (120/min)
   - `POST /api/public/lp/threads/{token}/messages` (20/hora)
+  - `POST /api/public/lp/threads/{token}/attachments` (30/hora, máx. 10 MB)
+  - `GET /api/public/lp/threads/{token}/attachments/{id}`
 - Endpoints admin (sessão real + `users.is_admin`):
-  - `GET /api/admin/lp/threads`
-  - `GET /api/admin/lp/threads/{id}`
+  - `GET /api/admin/lp/threads?status=&period=&limit=`
+  - `GET /api/admin/lp/threads/{id}` — inclui `history` (mesmo e-mail) e
+    `attachments`.
   - `POST /api/admin/lp/threads/{id}/reply` — recebe `body_pt` (interno) e
-    `body_en` (enviado), grava ambos e envia o EN por Resend.
+    `body_en` (texto final no idioma do lead), grava ambos e envia por Resend.
+  - `PATCH /api/admin/lp/threads/{id}/status` — `new` / `replied` /
+    `archived` (arquivar/reabrir).
+  - `POST /api/admin/lp/threads/{id}/attachments` (60/hora) e
+    `GET /api/admin/lp/threads/{id}/attachments/{id}`.
   - `PATCH /api/admin/lp/threads/{id}/messages/{message_id}` — guarda a
     revisão humana da tradução PT-BR de uma mensagem inbound.
 
 ### Fora do âmbito desta fase
 
-- Tradução automática EN ↔ PT-BR por LLM (Fase 2). Na Fase 1 a equipa revê e
-  escreve as duas versões manualmente; a inbox já está preparada para o campo
-  PT-BR e para o envio final em inglês.
 - Parsing de respostas de e-mail (Fase 2). O e-mail é entrega; a conversa
   instantânea é o widget.
+- Anexos dentro do e-mail transacional (os anexos circulam no widget/inbox;
+  o e-mail leva apenas o texto).
 - SMS/WhatsApp.
 - Atendimento telefónico e agendamento de chamadas. A captação é 100% por
   mensagem/e-mail.
 - SSE na inbox/widget. A entrega usa polling de 5 s; SSE fica como evolução.
 - Montagem do widget na LP oficial. Só depois de aprovação explícita.
+
+## Fluxo de captação (widget)
+
+Antes do campo de mensagem livre, o lead qualifica-se em dois passos de zero
+fricção:
+
+1. **Ofício + cidade** — 16 categorias canónicas da plataforma
+   (`Roof`, `Structure`, `Plumbing`, … em `lib/categories.ts`), apresentadas com
+   o nome traduzido no idioma ativo (EN/PT/ES), mais a cidade.
+2. **Origem do lead** — `Google / Search`, `Social Media`,
+   `Referral / Word of Mouth`, `Automated Phone Call / Direct Outreach`.
+
+O backend guarda `trade`, `trade_code`, `city` e `lead_source` na thread. A
+origem aparece na inbox como selo `Origem: …`; o ofício e a cidade aparecem no
+cartão e no detalhe.
+
+## Inbox admin
+
+- **Contraste**: os campos `RASCUNHO PT-BR` e `VERSÃO <idioma>` usam fundo
+  branco (`#FFFFFF`), texto `#0F172A`, `color-scheme: light` — legíveis tanto no
+  tema claro como no escuro do sistema.
+- **Cobertura**: 🟢 ponto verde = cidade atendida (New York, Boston, Dallas,
+  Chicago); 🔴 ponto vermelho = fora da cobertura ou sem cidade. O detalhe mostra
+  `Coberto` / `Fora da cobertura`.
+- **Histórico por e-mail**: threads anteriores do mesmo e-mail aparecem em
+  `Histórico deste e-mail` (até 10) e o selo `Cliente recorrente`; clicar abre a
+  thread antiga.
+- **Filtros**: período `Hoje` / `Semana` (7 d) / `Mês` (30 d) e estado
+  `Novo` / `Respondido` / `Arquivado`; o polling mantém os filtros ativos.
+- **Arquivar/reabrir**: `PATCH .../status`, sem apagar histórico.
+- **Anexos**: upload/download nos dois sentidos (lead e equipa), imagens
+  pré-visualizadas; PDF, Word, Excel, TXT, CSV e imagens até 10 MB. Guardados
+  em `LP_UPLOAD_DIR` (default `$DATA_DIR/lp_uploads`), um diretório por thread.
+
+## E-mail transacional (idioma do lead)
+
+- O acknowledgment inicial e o assunto são gerados no idioma detetado do lead
+  (`lead_lang`: EN/PT/ES), não no locale do browser.
+- Ao aprovar a resposta, `POST .../reply` grava o texto final no idioma do lead
+  e envia-o **nesse exato instante** por Resend, com assunto localizado. O
+  `body_pt` fica apenas como nota interna.
+- O widget mostra a resposta no idioma do lead no polling seguinte (≤5 s).
 
 ## Pré-visualizar localmente
 
@@ -112,8 +167,9 @@ partir da LP.
 ## Testes
 
 ```bash
-.venv/Scripts/python.exe -m pytest tests/test_lp_widget.py -v
-cd frontend && npx tsc --noEmit && npm run build
+.venv/Scripts/python.exe -m pytest tests/test_lp_widget.py tests/test_lp_ai.py -v
+.venv/Scripts/python.exe -m ruff check backend tests --select=E,F,W,I --ignore=E501
+cd frontend && npx tsc --noEmit && npm run lint && npm run build
 ```
 
 ## Pipeline de IA (Fase 2)
@@ -124,7 +180,8 @@ cd frontend && npx tsc --noEmit && npm run build
   para o idioma do lead (`draft_pt` / `draft_out` / `draft_out_lang`).
 - A inbox admin pré-preenche a tradução e os dois campos. Ao editar o PT-BR, o
   botão **Traduzir PT →** (e o blur do campo) chama `POST .../translate-draft` e
-  atualiza a versão final no idioma do lead.
+  atualiza a versão final no idioma do lead (`draft_out`/`draft_out_lang`), que
+  pode ser EN, PT, ES, FR, DE ou IT.
 - Providers: `GEMINI_API_KEY` → Gemini; `OPENAI_API_KEY` → OpenAI;
   `LP_AI_PROVIDER=mymemory`/`LP_AI_FREE_FALLBACK=true` → MyMemory (sem chave,
   usado no staging). O staging atual usa MyMemory; produção deve usar uma chave
@@ -142,14 +199,20 @@ Backend isolado: `https://magic-leads-staging-staging.up.railway.app`
 
 Verificado em 2026-11-09:
 
-1. Lead submete no widget live → thread criada em staging.
-2. Inbox admin atualiza em ≤5 s; a IA pré-preenche tradução PT-BR e rascunhos.
+1. Lead submete no widget live (ofício + cidade + origem + mensagem) → thread
+   criada em staging com `trade_code` e `lead_source`.
+2. Inbox admin atualiza em ≤5 s; a IA pré-preenche tradução PT-BR e rascunhos;
+   cobertura e origem aparecem no cartão.
 3. A equipa revê/edita o PT-BR; a versão final é gerada no idioma do lead.
-4. Equipa aprova → `POST .../reply` com `email_sent=true`.
+4. Equipa aprova → `POST .../reply` com `email_sent=true` e assunto no idioma
+   do lead.
 5. Widget live atualiza em ≤5 s com a resposta no idioma do lead e os selos
    Widget + Resend.
+6. Anexos (lead → inbox e equipa → widget) aparecem nos dois lados; filtros de
+   período/estado e arquivar/reabrir funcionam sem perder histórico.
 
-Validado em 2026-11-09 com EN, PT e ES (incluindo edição PT → ES e envio).
+Validado em 2026-11-09 com EN, PT e ES (incluindo edição PT → ES e envio),
+8 threads em staging, incluindo uma fora da cobertura (Miami → 🔴).
 
 ## Isolamento
 
