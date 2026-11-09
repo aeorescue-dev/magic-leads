@@ -195,7 +195,7 @@ export default function LpWidgetPanel({
   }, [displayThread, sending]);
 
   useEffect(() => {
-    if (mode !== "live" || !token || step !== 4) return;
+    if (mode !== "live" || !token || step !== 5) return;
     let stopped = false;
     const load = async () => {
       try {
