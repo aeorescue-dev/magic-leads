@@ -170,6 +170,7 @@ export default function LpInboxClient() {
   const [period, setPeriod] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [demo, setDemo] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [demoThread, setDemoThread] = useState<LpAdminThreadDetail | null>(null);
 
   const {
@@ -219,7 +220,20 @@ export default function LpInboxClient() {
   const activeThreadId = demo ? demoThread?.id ?? null : activeId;
 
   async function refresh() {
-    await Promise.all([mutateList(), mutateThread()]);
+    if (refreshing) return;
+    setRefreshing(true);
+    const started = Date.now();
+    try {
+      if (!demo) {
+        await Promise.allSettled([mutateList(), mutateThread()]);
+      }
+    } finally {
+      const elapsed = Date.now() - started;
+      if (elapsed < 450) {
+        await new Promise((resolve) => setTimeout(resolve, 450 - elapsed));
+      }
+      setRefreshing(false);
+    }
   }
 
   function startDemo() {
@@ -307,7 +321,7 @@ export default function LpInboxClient() {
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-3">
           <Link
             href="/admin"
-            className="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-bold text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+            className="flex items-center gap-1 rounded-lg px-2 py-1 text-[12px] font-bold text-slate-600 hover:bg-slate-50 hover:text-slate-900"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
             Admin
@@ -319,22 +333,22 @@ export default function LpInboxClient() {
             </span>
             <div>
               <h1 className="text-[15px] font-black tracking-tight">LP Inbox</h1>
-              <p className="text-[9.5px] font-semibold text-slate-400">
+              <p className="text-[10.5px] font-semibold text-slate-600">
                 Widget de captação · revisão humana PT-BR
               </p>
             </div>
           </div>
-          <span className="rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-slate-500">
+          <span className="rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[12px] font-black uppercase tracking-wide text-slate-600">
             Fase 1b
           </span>
           <div className="ml-auto flex items-center gap-2">
-            <span className="flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[9px] font-black uppercase tracking-wide text-emerald-700">
+            <span className="flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[12px] font-black uppercase tracking-wide text-emerald-700">
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
               Polling 5 s
             </span>
             <span
               className={cls(
-                "rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-wide",
+                "rounded-full px-2.5 py-1 text-[12px] font-black uppercase tracking-wide",
                 demo
                   ? "bg-violet-100 text-violet-700"
                   : apiDisabled
@@ -349,10 +363,14 @@ export default function LpInboxClient() {
             <button
               type="button"
               onClick={() => void refresh()}
-              className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-bold text-slate-600 hover:border-emerald-300"
+              aria-busy={refreshing}
+              aria-label="Atualizar conversas"
+              className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-slate-900 px-3 py-1.5 text-[10.5px] font-bold text-white shadow-sm transition hover:bg-slate-800 active:bg-slate-700"
             >
-              <RefreshCw className="h-3 w-3" />
-              Atualizar
+              <RefreshCw
+                className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`}
+              />
+              {refreshing ? "A atualizar…" : "Atualizar"}
             </button>
           </div>
         </div>
@@ -369,41 +387,41 @@ export default function LpInboxClient() {
       <main className="mx-auto max-w-7xl px-4 py-4">
         {authError ? (
           <div className="mx-auto mt-10 max-w-xl rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
-            <ShieldCheck className="mx-auto h-8 w-8 text-slate-400" />
+            <ShieldCheck className="mx-auto h-8 w-8 text-slate-600" />
             <h2 className="mt-3 text-[15px] font-black">Sessão admin necessária</h2>
-            <p className="mt-1 text-[11.5px] leading-relaxed text-slate-500">
+            <p className="mt-1 text-[12.5px] leading-relaxed text-slate-600">
               Esta página exige uma sessão real com <code>users.is_admin = 1</code>.
             </p>
             <Link
               href="/auth?next=/admin/lp-inbox"
-              className="mt-4 inline-block rounded-lg bg-slate-900 px-4 py-2 text-[11px] font-bold text-white"
+              className="mt-4 inline-block rounded-lg bg-slate-900 px-4 py-2 text-[12px] font-bold text-white"
             >
               Entrar
             </Link>
             <button
               type="button"
               onClick={startDemo}
-              className="mt-2 block w-full text-[10px] font-bold text-slate-400 underline underline-offset-2 hover:text-slate-600"
+              className="mt-2 block w-full text-[12px] font-bold text-slate-600 underline underline-offset-2 hover:text-slate-600"
             >
               Ver com dados de demonstração
             </button>
           </div>
         ) : apiDisabled && !demo ? (
           <div className="mx-auto mt-10 max-w-xl rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
-            <Inbox className="mx-auto h-8 w-8 text-slate-400" />
+            <Inbox className="mx-auto h-8 w-8 text-slate-600" />
             <h2 className="mt-3 text-[15px] font-black">API do widget desligada</h2>
-            <p className="mt-1 text-[11.5px] leading-relaxed text-slate-500">
+            <p className="mt-1 text-[12.5px] leading-relaxed text-slate-600">
               O backend está com <code>LP_WIDGET_ENABLED=false</code>. A inbox real
               só responde quando a flag estiver ligada em staging.
             </p>
             <button
               type="button"
               onClick={startDemo}
-              className="mt-4 rounded-lg bg-emerald-500 px-4 py-2 text-[11px] font-bold text-white hover:bg-emerald-600"
+              className="mt-4 rounded-lg bg-emerald-500 px-4 py-2 text-[12px] font-bold text-white hover:bg-emerald-600"
             >
               Ver com dados de demonstração
             </button>
-            <p className="mt-3 text-[9.5px] text-slate-400">
+            <p className="mt-3 text-[10.5px] text-slate-600">
               Nenhum dado de produção é lido ou alterado.
             </p>
           </div>
@@ -413,7 +431,7 @@ export default function LpInboxClient() {
             <h2 className="mt-3 text-[15px] font-black">
               Não foi possível ligar à API
             </h2>
-            <p className="mt-1 text-[11.5px] leading-relaxed text-slate-500">
+            <p className="mt-1 text-[12.5px] leading-relaxed text-slate-600">
               {listError instanceof Error
                 ? listError.message
                 : "Verifica a ligação ao backend."}
@@ -422,14 +440,14 @@ export default function LpInboxClient() {
               <button
                 type="button"
                 onClick={startDemo}
-                className="rounded-lg bg-emerald-500 px-4 py-2 text-[11px] font-bold text-white hover:bg-emerald-600"
+                className="rounded-lg bg-emerald-500 px-4 py-2 text-[12px] font-bold text-white hover:bg-emerald-600"
               >
                 Ver com dados de demonstração
               </button>
               <button
                 type="button"
                 onClick={() => void refresh()}
-                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-[11px] font-bold text-slate-600 hover:border-slate-300"
+                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-[12px] font-bold text-slate-600 hover:border-slate-300"
               >
                 Tentar novamente
               </button>
@@ -440,7 +458,7 @@ export default function LpInboxClient() {
             <aside className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
               <div className="flex items-center justify-between border-b border-slate-100 px-3.5 py-3">
                 <div>
-                  <p className="text-[9px] font-black uppercase tracking-[0.12em] text-slate-400">
+                  <p className="text-[12px] font-black uppercase tracking-[0.12em] text-slate-600">
                     Conversas
                   </p>
                   <p className="mt-0.5 text-[12px] font-bold">
@@ -462,10 +480,10 @@ export default function LpInboxClient() {
                       key={option.value}
                       type="button"
                       onClick={() => setPeriod(option.value)}
-                      className={`rounded-full border px-2 py-0.5 text-[8.5px] font-bold ${
+                      className={`rounded-full border px-2 py-0.5 text-[9.5px] font-bold ${
                         period === option.value
                           ? "border-slate-900 bg-slate-900 text-white"
-                          : "border-slate-200 bg-white text-slate-500"
+                          : "border-slate-200 bg-white text-slate-600"
                       }`}
                     >
                       {option.label}
@@ -483,10 +501,10 @@ export default function LpInboxClient() {
                       key={option.value}
                       type="button"
                       onClick={() => setStatusFilter(option.value)}
-                      className={`rounded-full border px-2 py-0.5 text-[8.5px] font-bold ${
+                      className={`rounded-full border px-2 py-0.5 text-[9.5px] font-bold ${
                         statusFilter === option.value
                           ? "border-emerald-600 bg-emerald-600 text-white"
-                          : "border-slate-200 bg-white text-slate-500"
+                          : "border-slate-200 bg-white text-slate-600"
                       }`}
                     >
                       {option.label}
@@ -496,12 +514,12 @@ export default function LpInboxClient() {
               </div>
 
               {listLoading && !demo ? (
-                <div className="flex items-center justify-center gap-2 px-4 py-10 text-[11px] text-slate-400">
+                <div className="flex items-center justify-center gap-2 px-4 py-10 text-[12px] text-slate-600">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   A carregar…
                 </div>
               ) : activeThreads.length === 0 ? (
-                <div className="px-4 py-10 text-center text-[11px] leading-relaxed text-slate-400">
+                <div className="px-4 py-10 text-center text-[12px] leading-relaxed text-slate-600">
                   Nenhuma conversa ainda.
                   <br />
                   O widget cria o primeiro fio quando um lead envia.
@@ -527,26 +545,26 @@ export default function LpInboxClient() {
                         >
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0">
-                              <p className="truncate text-[11.5px] font-bold text-slate-900">
+                              <p className="truncate text-[12.5px] font-bold text-slate-900">
                                 {item.name || item.email}
                               </p>
-                              <p className="truncate text-[9.5px] text-slate-400">
+                              <p className="truncate text-[10.5px] text-slate-600">
                                 {item.email}
                               </p>
                             </div>
                             <span
                               className={cls(
-                                "shrink-0 rounded-full px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wide",
+                                "shrink-0 rounded-full px-1.5 py-0.5 text-[9.5px] font-black uppercase tracking-wide",
                                 statusClass(item.status)
                               )}
                             >
                               {statusLabel(item.status)}
                             </span>
                           </div>
-                          <p className="mt-1.5 truncate text-[10px] text-slate-500">
+                          <p className="mt-1.5 truncate text-[12px] text-slate-600">
                             {item.last_message || "—"}
                           </p>
-                          <div className="mt-1.5 flex flex-wrap items-center gap-1 text-[8.5px] font-bold text-slate-400">
+                          <div className="mt-1.5 flex flex-wrap items-center gap-1 text-[9.5px] font-bold text-slate-600">
                             <span className="rounded bg-slate-100 px-1.5 py-0.5">
                               {INTENT_LABEL[item.intent] || item.intent}
                             </span>
@@ -584,7 +602,7 @@ export default function LpInboxClient() {
                             </span>
                           </div>
                           {overdue && (
-                            <p className="mt-1 flex items-center gap-1 text-[8.5px] font-black uppercase tracking-wide text-rose-600">
+                            <p className="mt-1 flex items-center gap-1 text-[9.5px] font-black uppercase tracking-wide text-rose-600">
                               <Clock className="h-2.5 w-2.5" />
                               SLA vencido
                             </p>
@@ -599,12 +617,12 @@ export default function LpInboxClient() {
 
             <section className="min-w-0">
               {threadLoading && !demo ? (
-                <div className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-16 text-[11px] text-slate-400">
+                <div className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-16 text-[12px] text-slate-600">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   A carregar conversa…
                 </div>
               ) : threadError && !demo ? (
-                <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-[11px] text-rose-700">
+                <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-[12px] text-rose-700">
                   Erro ao carregar a conversa.{" "}
                   {threadError instanceof Error ? threadError.message : ""}
                 </div>
@@ -629,7 +647,7 @@ export default function LpInboxClient() {
                   }
                 />
               ) : (
-                <div className="rounded-2xl border border-slate-200 bg-white px-4 py-16 text-center text-[11.5px] text-slate-400">
+                <div className="rounded-2xl border border-slate-200 bg-white px-4 py-16 text-center text-[12.5px] text-slate-600">
                   Selecione uma conversa à esquerda.
                 </div>
               )}
@@ -731,40 +749,27 @@ function ThreadDetail({
               </h2>
               <span
                 className={cls(
-                  "rounded-full px-2 py-0.5 text-[8.5px] font-black uppercase tracking-wide",
+                  "rounded-full px-2 py-0.5 text-[9.5px] font-black uppercase tracking-wide",
                   statusClass(thread.status)
                 )}
               >
                 {statusLabel(thread.status)}
               </span>
-              <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[8.5px] font-black uppercase tracking-wide text-violet-700">
-                {INTENT_LABEL[thread.intent] || thread.intent}
-              </span>
-              {thread.lead_source && (
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[8.5px] font-black uppercase tracking-wide text-slate-600">
-                  Origem: {SOURCE_LABEL[thread.lead_source] || thread.lead_source}
-                </span>
-              )}
               <span
                 className={cls(
-                  "rounded-full px-2 py-0.5 text-[8.5px] font-black uppercase tracking-wide",
+                  "rounded-full px-2 py-0.5 text-[9.5px] font-black uppercase tracking-wide",
                   aiClass
                 )}
               >
                 {aiLabel}
               </span>
               {overdue && (
-                <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[8.5px] font-black uppercase tracking-wide text-rose-700">
+                <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[9.5px] font-black uppercase tracking-wide text-rose-700">
                   SLA vencido
                 </span>
               )}
-              {thread.history && thread.history.length > 0 && (
-                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[8.5px] font-black uppercase tracking-wide text-emerald-700">
-                  Cliente recorrente
-                </span>
-              )}
             </div>
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-500">
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-slate-600">
               <span className="flex items-center gap-1">
                 <Mail className="h-3 w-3" />
                 {thread.email}
@@ -799,12 +804,26 @@ function ThreadDetail({
                   {thread.trade}
                 </span>
               )}
+              <span className="flex items-center gap-1">
+                <MessageSquare className="h-3 w-3" />
+                {INTENT_LABEL[thread.intent] || thread.intent}
+              </span>
+              {thread.lead_source && (
+                <span className="flex items-center gap-1">
+                  Origem: {SOURCE_LABEL[thread.lead_source] || thread.lead_source}
+                </span>
+              )}
+              {thread.history && thread.history.length > 0 && (
+                <span className="font-bold text-emerald-700">
+                  Cliente recorrente
+                </span>
+              )}
             </div>
           </div>
-          <div className="text-right text-[9.5px] text-slate-400">
+          <div className="text-right text-[10.5px] text-slate-600">
             <p>Criado {fmtDate(thread.created_at)}</p>
             <p>SLA {fmtDate(thread.sla_due_at)}</p>
-            <p className="mt-0.5 font-bold text-slate-500">
+            <p className="mt-0.5 font-bold text-slate-600">
               {thread.messages.length} mensagem(ns)
             </p>
             {aiStatus !== "ready" && !demo && (
@@ -812,7 +831,7 @@ function ThreadDetail({
                 type="button"
                 onClick={() => void handleEnrich()}
                 disabled={enriching}
-                className="mt-1.5 inline-flex items-center gap-1 rounded-lg border border-violet-200 bg-white px-2 py-1 text-[9px] font-bold text-violet-700 hover:border-violet-300 disabled:opacity-50"
+                className="mt-1.5 inline-flex items-center gap-1 rounded-lg border border-violet-200 bg-white px-2 py-1 text-[12px] font-bold text-violet-700 hover:border-violet-300 disabled:opacity-50"
               >
                 {enriching ? "A gerar…" : "Gerar com IA"}
               </button>
@@ -820,14 +839,14 @@ function ThreadDetail({
             <button
               type="button"
               onClick={onArchive}
-              className="mt-1.5 inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[9px] font-bold text-slate-500 hover:border-slate-300"
+              className="mt-1.5 inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[12px] font-bold text-slate-600 hover:border-slate-300"
             >
               {thread.status === "archived" ? "Reabrir" : "Arquivar"}
             </button>
           </div>
         </div>
         {!demo && aiStatus !== "ready" && (thread.ai_error || enrichError) && (
-          <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[9.5px] leading-relaxed text-amber-800">
+          <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[10.5px] leading-relaxed text-amber-800">
             {enrichError || thread.ai_error}
           </p>
         )}
@@ -851,11 +870,11 @@ function ThreadDetail({
 
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-[10px] font-black uppercase tracking-[0.12em] text-slate-400">
+          <p className="text-[12px] font-black uppercase tracking-[0.12em] text-slate-600">
             Anexos · {thread.attachments?.length ?? 0}
           </p>
           <label
-            className={`inline-flex cursor-pointer items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[9.5px] font-bold text-slate-600 hover:border-emerald-300 ${
+            className={`inline-flex cursor-pointer items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10.5px] font-bold text-slate-600 hover:border-emerald-300 ${
               uploading ? "pointer-events-none opacity-50" : ""
             }`}
           >
@@ -876,7 +895,7 @@ function ThreadDetail({
         </div>
 
         {(thread.attachments?.length ?? 0) === 0 ? (
-          <p className="mt-2 text-[9.5px] text-slate-400">
+          <p className="mt-2 text-[10.5px] text-slate-600">
             Nenhum ficheiro. Imagens, PDF, Word, Excel, TXT ou CSV até 10 MB.
           </p>
         ) : (
@@ -902,7 +921,7 @@ function ThreadDetail({
                       className="h-9 w-9 shrink-0 rounded object-cover ring-1 ring-slate-200"
                     />
                   ) : (
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-white text-slate-400 ring-1 ring-slate-200">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-white text-slate-600 ring-1 ring-slate-200">
                       <Paperclip className="h-3.5 w-3.5" />
                     </span>
                   )}
@@ -910,7 +929,7 @@ function ThreadDetail({
                     <span className="block truncate text-[10.5px] font-bold text-slate-700">
                       {attachment.filename}
                     </span>
-                    <span className="block text-[8.5px] text-slate-400">
+                    <span className="block text-[9.5px] text-slate-600">
                       {attachment.direction === "inbound" ? "Lead" : "Equipa"} ·{" "}
                       {Math.max(1, Math.round(attachment.size_bytes / 1024))} KB
                     </span>
@@ -921,7 +940,7 @@ function ThreadDetail({
           </div>
         )}
         {uploadError && (
-          <p className="mt-2 text-[9.5px] font-semibold text-rose-600">
+          <p className="mt-2 text-[10.5px] font-semibold text-rose-600">
             {uploadError}
           </p>
         )}
@@ -929,7 +948,7 @@ function ThreadDetail({
 
       {thread.history && thread.history.length > 0 && (
         <details className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <summary className="cursor-pointer px-4 py-3 text-[11px] font-bold text-slate-700">
+          <summary className="cursor-pointer px-4 py-3 text-[12px] font-bold text-slate-700">
             Histórico deste e-mail · {thread.history.length} conversa(s)
           </summary>
           <div className="space-y-1.5 border-t border-slate-100 p-3">
@@ -941,22 +960,22 @@ function ThreadDetail({
                 className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-left transition hover:border-emerald-300 hover:bg-emerald-50/40"
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="flex items-center gap-1.5 text-[9.5px] font-bold text-slate-700">
+                  <span className="flex items-center gap-1.5 text-[10.5px] font-bold text-slate-700">
                     #{item.id}
                     <span
                       className={cls(
-                        "rounded-full px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wide",
+                        "rounded-full px-1.5 py-0.5 text-[9.5px] font-black uppercase tracking-wide",
                         statusClass(item.status)
                       )}
                     >
                       {statusLabel(item.status)}
                     </span>
                   </span>
-                  <span className="text-[8.5px] text-slate-400">
+                  <span className="text-[9.5px] text-slate-600">
                     {fmtDate(item.created_at)}
                   </span>
                 </div>
-                <p className="mt-0.5 truncate text-[10px] text-slate-500">
+                <p className="mt-0.5 truncate text-[12px] text-slate-600">
                   {item.last_message || "—"}
                 </p>
               </button>
@@ -1015,8 +1034,8 @@ function InboundMessage({
 
   return (
     <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="flex items-center justify-between gap-2 text-[9px] font-black uppercase tracking-wide text-slate-400">
-        <span className="flex items-center gap-1.5 text-slate-500">
+      <div className="flex items-center justify-between gap-2 text-[12px] font-black uppercase tracking-wide text-slate-600">
+        <span className="flex items-center gap-1.5 text-slate-600">
           <User className="h-3 w-3" />
           Lead · {message.lang.toUpperCase()}
         </span>
@@ -1028,11 +1047,11 @@ function InboundMessage({
 
       <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50/40 p-3">
         <div className="flex items-center justify-between gap-2">
-          <p className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-wide text-violet-700">
+          <p className="flex items-center gap-1.5 text-[12px] font-black uppercase tracking-wide text-violet-700">
             <Sparkles className="h-3 w-3" />
             Tradução PT-BR
           </p>
-          <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wide text-violet-700">
+          <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[9.5px] font-black uppercase tracking-wide text-violet-700">
             {demo
               ? "demo"
               : message.body_pt
@@ -1045,23 +1064,23 @@ function InboundMessage({
           onChange={(event) => setPt(event.target.value)}
           rows={3}
           placeholder="Traduza ou reveja a mensagem do lead em PT-BR…"
-          className="mt-2 w-full resize-y rounded-lg border border-violet-200 bg-white px-2.5 py-2 text-[11.5px] leading-relaxed text-slate-900 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+          className="mt-2 w-full resize-y rounded-lg border border-violet-200 bg-white px-2.5 py-2 text-[12.5px] leading-relaxed text-slate-900 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
         />
         <div className="mt-1.5 flex items-center justify-between gap-2">
-          <span className="text-[9px] text-slate-400">
+          <span className="text-[12px] text-slate-600">
             {saved ? "Tradução guardada." : "O original permanece intacto."}
           </span>
           <button
             type="button"
             onClick={() => void save()}
             disabled={saving || !pt.trim()}
-            className="rounded-lg border border-violet-200 bg-white px-2.5 py-1.5 text-[9.5px] font-bold text-violet-700 hover:border-violet-300 disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded-lg border border-violet-200 bg-white px-2.5 py-1.5 text-[10.5px] font-bold text-violet-700 hover:border-violet-300 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {saving ? "A guardar…" : "Guardar tradução"}
           </button>
         </div>
         {error && (
-          <p className="mt-1 text-[9.5px] font-semibold text-rose-600">{error}</p>
+          <p className="mt-1 text-[10.5px] font-semibold text-rose-600">{error}</p>
         )}
       </div>
     </article>
@@ -1071,7 +1090,7 @@ function InboundMessage({
 function OutboundMessage({ message }: { message: LpAdminMessage }) {
   return (
     <article className="ml-auto max-w-[92%] rounded-2xl border border-emerald-200 bg-emerald-50/60 p-3.5 shadow-sm">
-      <div className="flex items-center justify-between gap-2 text-[9px] font-black uppercase tracking-wide text-emerald-800">
+      <div className="flex items-center justify-between gap-2 text-[12px] font-black uppercase tracking-wide text-emerald-800">
         <span className="flex items-center gap-1.5">
           <CheckCircle2 className="h-3 w-3" />
           Equipa · {message.lang.toUpperCase()} enviado
@@ -1083,7 +1102,7 @@ function OutboundMessage({ message }: { message: LpAdminMessage }) {
       </p>
       {message.body_pt && (
         <div className="mt-2 rounded-lg border border-emerald-200/70 bg-white/70 px-2.5 py-2">
-          <p className="text-[8.5px] font-black uppercase tracking-wide text-emerald-700">
+          <p className="text-[9.5px] font-black uppercase tracking-wide text-emerald-700">
             Versão interna PT-BR
           </p>
           <p className="mt-0.5 text-[10.5px] leading-relaxed text-slate-600">
@@ -1091,7 +1110,7 @@ function OutboundMessage({ message }: { message: LpAdminMessage }) {
           </p>
         </div>
       )}
-      <div className="mt-2 flex flex-wrap gap-1.5 text-[8.5px] font-bold">
+      <div className="mt-2 flex flex-wrap gap-1.5 text-[9.5px] font-bold">
         <span className="rounded bg-white px-1.5 py-0.5 text-emerald-700 ring-1 ring-emerald-100">
           Widget · polling 5 s
         </span>
@@ -1192,21 +1211,21 @@ function ReplyComposer({
     <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.12em] text-slate-400">
+          <p className="text-[12px] font-black uppercase tracking-[0.12em] text-slate-600">
             Resposta da equipa
           </p>
           <p className="mt-0.5 text-[12px] font-bold text-slate-900">
             Rascunho PT-BR + versão {finalLabel}
           </p>
         </div>
-        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[8.5px] font-black uppercase tracking-wide text-emerald-700">
+        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[9.5px] font-black uppercase tracking-wide text-emerald-700">
           Widget + Resend
         </span>
       </div>
 
       <div className="mt-3 grid gap-3 lg:grid-cols-2">
         <div>
-          <label className="text-[9px] font-black uppercase tracking-wide text-slate-400">
+          <label className="text-[12px] font-black uppercase tracking-wide text-slate-600">
             Rascunho PT-BR (interno)
           </label>
           <textarea
@@ -1215,12 +1234,12 @@ function ReplyComposer({
             onBlur={() => void handlePtBlur()}
             rows={5}
             placeholder="Escreva a resposta em português para revisão…"
-            className="mt-1 w-full resize-y rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-[11.5px] leading-relaxed text-slate-900 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+            className="mt-1 w-full resize-y rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-[12.5px] leading-relaxed text-slate-900 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
           />
         </div>
         <div>
           <div className="flex items-center justify-between gap-2">
-            <label className="text-[9px] font-black uppercase tracking-wide text-slate-400">
+            <label className="text-[12px] font-black uppercase tracking-wide text-slate-600">
               Versão {finalLabel} (enviada ao lead)
             </label>
             <button
@@ -1228,7 +1247,7 @@ function ReplyComposer({
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => void translate()}
               disabled={translating || !pt.trim()}
-              className="rounded border border-violet-200 bg-white px-1.5 py-1 text-[8.5px] font-bold text-violet-700 hover:border-violet-300 disabled:opacity-40"
+              className="rounded border border-violet-200 bg-white px-1.5 py-1 text-[9.5px] font-bold text-violet-700 hover:border-violet-300 disabled:opacity-40"
             >
               {translating ? "A traduzir…" : "Traduzir PT →"}
             </button>
@@ -1244,24 +1263,24 @@ function ReplyComposer({
             }}
             rows={5}
             placeholder={`Write the final ${finalLabel} reply…`}
-            className="mt-1 w-full resize-y rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-[11.5px] leading-relaxed text-slate-900 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+            className="mt-1 w-full resize-y rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-[12.5px] leading-relaxed text-slate-900 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
           />
         </div>
       </div>
 
       {translateError && (
-        <p className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-2 text-[10px] font-semibold text-rose-700">
+        <p className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-2 text-[12px] font-semibold text-rose-700">
           {translateError}
         </p>
       )}
 
-      <p className="mt-2 text-[9px] leading-relaxed text-slate-400">
+      <p className="mt-2 text-[12px] leading-relaxed text-slate-600">
         A IA pré-preenche e traduz o rascunho PT-BR para {finalLabel}. Edita a
         versão final e revê antes de aprovar. O original PT-BR fica na auditoria.
       </p>
 
       {error && (
-        <p className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-2 text-[10px] font-semibold text-rose-700">
+        <p className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-2 text-[12px] font-semibold text-rose-700">
           {error}
         </p>
       )}
@@ -1269,7 +1288,7 @@ function ReplyComposer({
       {result && (
         <div
           className={cls(
-            "mt-2 rounded-lg border px-2.5 py-2 text-[10px] leading-relaxed",
+            "mt-2 rounded-lg border px-2.5 py-2 text-[12px] leading-relaxed",
             result.email_sent
               ? "border-emerald-200 bg-emerald-50 text-emerald-800"
               : "border-amber-200 bg-amber-50 text-amber-800"
@@ -1293,7 +1312,7 @@ function ReplyComposer({
       )}
 
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-[9px] text-slate-400">
+        <p className="text-[12px] text-slate-600">
           Atalho: <kbd className="rounded bg-slate-100 px-1">⌘</kbd> +{" "}
           <kbd className="rounded bg-slate-100 px-1">↵</kbd> no campo EN.
         </p>
@@ -1302,7 +1321,7 @@ function ReplyComposer({
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => void send()}
           disabled={sending || !pt.trim() || !en.trim()}
-          className="flex items-center gap-1.5 rounded-lg bg-emerald-500 px-4 py-2 text-[11px] font-bold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex items-center gap-1.5 rounded-lg bg-emerald-500 px-4 py-2 text-[12px] font-bold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {sending ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
