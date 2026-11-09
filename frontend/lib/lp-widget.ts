@@ -25,6 +25,8 @@ export interface LpThreadCreatePayload {
   company?: string;
   city?: string;
   trade?: string;
+  trade_code?: string;
+  lead_source?: string;
   consent_email: boolean;
   locale?: string;
   source_section?: string;
@@ -45,6 +47,16 @@ export interface LpThread {
   created_at: string;
   sla_hours?: number;
   messages: LpThreadMessage[];
+  attachments?: LpAttachment[];
+}
+
+export interface LpAttachment {
+  id: number;
+  direction: "inbound" | "outbound";
+  filename: string;
+  content_type: string | null;
+  size_bytes: number;
+  created_at: string;
 }
 
 export interface LpThreadCreateResult {
@@ -141,6 +153,41 @@ export async function sendLpFollowUp(
       method: "POST",
       body: JSON.stringify({ message }),
     }
+  );
+}
+
+export async function uploadLpAttachment(
+  token: string,
+  file: File
+): Promise<LpAttachment> {
+  const form = new FormData();
+  form.append("file", file);
+  let response: Response;
+  try {
+    response = await fetch(
+      endpoint(`/api/public/lp/threads/${encodeURIComponent(token)}/attachments`),
+      { method: "POST", body: form, cache: "no-store" }
+    );
+  } catch {
+    throw new LpWidgetApiError(
+      "Não foi possível anexar o ficheiro.",
+      0,
+      "network_error"
+    );
+  }
+  if (!response.ok) {
+    throw new LpWidgetApiError(
+      "O ficheiro não foi aceite (máx. 10 MB).",
+      response.status,
+      "upload_failed"
+    );
+  }
+  return (await response.json()) as LpAttachment;
+}
+
+export function lpAttachmentUrl(token: string, attachmentId: number): string {
+  return endpoint(
+    `/api/public/lp/threads/${encodeURIComponent(token)}/attachments/${attachmentId}`
   );
 }
 

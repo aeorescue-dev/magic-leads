@@ -18,6 +18,7 @@ def _lp_widget_isolation(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "EMAIL_FROM", "", raising=False)
     monkeypatch.setattr(settings, "LP_WIDGET_ENABLED", True, raising=False)
     monkeypatch.setattr(settings, "LP_WIDGET_SLA_HOURS", 4, raising=False)
+    monkeypatch.setenv("LP_UPLOAD_DIR", str(tmp_path / "lp_uploads"))
     lp_widget._initialized = False
     yield
     lp_widget._initialized = False
@@ -235,3 +236,65 @@ def test_enrich_thread_detects_portuguese_text(monkeypatch):
     assert admin["lead_lang"] == "pt"
     assert admin["draft_out_lang"] == "pt"
     assert admin["messages"][0]["body_pt"] == admin["messages"][0]["body"]
+
+
+def test_create_thread_stores_trade_code_and_source():
+    created = _create(trade_code="Roof", lead_source="referral")
+    admin = lp_widget.get_thread_admin(created["id"])
+    assert admin is not None
+    assert admin["trade_code"] == "Roof"
+    assert admin["lead_source"] == "referral"
+
+
+def test_attachment_roundtrip():
+    created = _create()
+    data = b"\x89PNG\r\n\x1a\n" + b"0" * 32
+
+    result = lp_widget.save_attachment(
+        created["id"],
+        direction="inbound",
+        filename="foto.png",
+        content_type="image/png",
+        data=data,
+    )
+    assert result is not None
+    assert result["id"] > 0
+    assert result["size_bytes"] == len(data)
+
+    admin = lp_widget.get_thread_admin(created["id"])
+    assert admin is not None
+    assert len(admin["attachments"]) == 1
+    assert admin["attachments"][0]["filename"] == "foto.png"
+
+    public = lp_widget.get_thread_public(created["token"])
+    assert public is not None
+    assert len(public["attachments"]) == 1
+
+    stored = lp_widget.get_attachment(created["id"], result["id"])
+    assert stored is not None
+    assert stored["content_type"] == "image/png"
+
+
+def test_status_and_period_filters():
+    created = _create()
+    result = lp_widget.set_thread_status(created["id"], "archived")
+    assert result is not None
+    assert result["status"] == "archived"
+
+    assert len(lp_widget.list_threads(status="archived")) == 1
+    assert len(lp_widget.list_threads(status="new")) == 0
+    assert len(lp_widget.list_threads(period="today")) == 1
+    assert len(lp_widget.list_threads(period="week")) == 1
+
+
+def test_history_by_email():
+    first = _create(email="same@example.com")
+    second = _create(
+        email="same@example.com",
+        message="Second question about pricing and exclusivity.",
+    )
+
+    admin = lp_widget.get_thread_admin(second["id"])
+    assert admin is not None
+    assert len(admin["history"]) == 1
+    assert admin["history"][0]["id"] == first["id"]

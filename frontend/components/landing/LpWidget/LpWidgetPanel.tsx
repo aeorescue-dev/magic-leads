@@ -12,30 +12,31 @@ import {
   CheckCircle2,
   Flame,
   Lock,
-  MessageCircle,
-  Send,
   ShieldCheck,
   X,
 } from "lucide-react";
-
 import {
   createLpThread,
   fetchLpThread,
+  lpAttachmentUrl,
   trackLpWidget,
+  uploadLpAttachment,
+  type LpAttachment,
 } from "@/lib/lp-widget";
 import {
   LP_CITIES,
   LP_FLOWS,
   LP_INTENTS,
   LP_SAMPLES,
-  LP_TRADES,
   type LpIntentFlow,
   type LpIntentKey,
 } from "./data";
 import LpLanguagePicker from "./LpLanguagePicker";
 import {
   INTENT_L10N,
+  TRADE_OPTIONS,
   WIDGET_COPY,
+  WIDGET_SOURCES,
   type WidgetLang,
 } from "./i18n";
 
@@ -47,9 +48,10 @@ export interface LpDemoSubmission {
   company: string;
   city: string;
   trade: string;
+  source: string;
 }
 
-type Step = 1 | 2 | 3 | 4;
+type Step = 1 | 2 | 3 | 4 | 5;
 
 interface ThreadItem {
   id: string;
@@ -97,7 +99,9 @@ export default function LpWidgetPanel({
   const [step, setStep] = useState<Step>(1);
   const [intent, setIntent] = useState<LpIntentKey | null>(null);
   const [trade, setTrade] = useState("");
+  const [tradeCode, setTradeCode] = useState("");
   const [city, setCity] = useState("");
+  const [source, setSource] = useState("");
   const [question, setQuestion] = useState("");
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
@@ -107,11 +111,13 @@ export default function LpWidgetPanel({
   const [thread, setThread] = useState<ThreadItem[]>([]);
   const [sending, setSending] = useState(false);
   const [token, setToken] = useState<string | null>(null);
-  const [ownQuestion, setOwnQuestion] = useState("");
+  const [attachments, setAttachments] = useState<LpAttachment[]>([]);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const [attachmentError, setAttachmentError] = useState("");
 
-  const totalSteps = intent === "area" ? 3 : 2;
+  const totalSteps = 4;
   const currentStep =
-    step === 4 ? totalSteps : Math.min(step, totalSteps);
+    step === 5 ? 4 : Math.min(step, 4);
 
   const displayThread = useMemo(() => {
     if (!teamReply) return thread;
@@ -203,6 +209,7 @@ export default function LpWidgetPanel({
             at: Number(new Date(message.created_at)) || now(),
           }))
         );
+        setAttachments(data.attachments || []);
         if (data.messages.some((message) => message.role === "team")) {
           setSending(false);
         }
@@ -228,7 +235,9 @@ export default function LpWidgetPanel({
     setStep(1);
     setIntent(null);
     setTrade("");
+    setTradeCode("");
     setCity("");
+    setSource("");
     setQuestion("");
     setEmail("");
     setName("");
@@ -239,7 +248,7 @@ export default function LpWidgetPanel({
     setThread([]);
     setSending(false);
     setToken(null);
-    setOwnQuestion("");
+    setAttachments([]);
     onIntentChange?.(null);
     trackLpWidget("lp_widget_reset");
   }
@@ -252,28 +261,28 @@ export default function LpWidgetPanel({
     setError("");
     setThread([]);
     setToken(null);
-    setStep(key === "area" ? 2 : 3);
+    setAttachments([]);
+    setStep(2);
     onIntentChange?.(key, nextCopy.question, nextCopy.question);
     trackLpWidget("lp_widget_intent", { intent: key });
   }
 
-  function submitOwnQuestion() {
-    const value = ownQuestion.trim();
-    if (!value) return;
+  function startCustom() {
+    const nextCopy = flowCopy(LP_FLOWS.question);
     setIntent("question");
-    setQuestion(value);
-    setEdited(true);
-    setStep(3);
-    onIntentChange?.(
-      "question",
-      value,
-      flowCopy(LP_FLOWS.question).question
-    );
-    trackLpWidget("lp_widget_intent", { intent: "question", custom: true });
+    setQuestion(nextCopy.question);
+    setEdited(false);
+    setError("");
+    setThread([]);
+    setToken(null);
+    setAttachments([]);
+    setStep(2);
+    onIntentChange?.("question", nextCopy.question, nextCopy.question);
+    trackLpWidget("lp_widget_intent", { intent: "question" });
   }
 
   function backFromContact() {
-    setStep(totalSteps === 3 ? 2 : 1);
+    setStep(3);
   }
 
   function validate(): boolean {
@@ -303,10 +312,12 @@ export default function LpWidgetPanel({
       company: company.trim(),
       city,
       trade,
+      source,
     };
 
     setSending(true);
-    setStep(4);
+    setStep(5);
+    setAttachments([]);
     setThread([
       {
         id: `lead-${now()}`,
@@ -325,6 +336,7 @@ export default function LpWidgetPanel({
       intent,
       city: city || undefined,
       trade: trade || undefined,
+      source: source || undefined,
       mode,
     });
 
@@ -344,6 +356,8 @@ export default function LpWidgetPanel({
         company: payload.company,
         city: payload.city,
         trade: payload.trade,
+        trade_code: tradeCode,
+        lead_source: source,
         consent_email: consent,
         locale:
           typeof document !== "undefined"
@@ -372,6 +386,20 @@ export default function LpWidgetPanel({
   function checkAvailability() {
     resetAll();
     selectIntent("area");
+  }
+
+  async function uploadAttachment(file: File) {
+    if (!token) return;
+    setUploadingAttachment(true);
+    setAttachmentError("");
+    try {
+      const attachment = await uploadLpAttachment(token, file);
+      setAttachments((prev) => [...prev, attachment]);
+    } catch {
+      setAttachmentError(copy.attachError);
+    } finally {
+      setUploadingAttachment(false);
+    }
   }
 
   return (
@@ -474,29 +502,13 @@ export default function LpWidgetPanel({
               </div>
             </div>
 
-            <form
-              className="mt-3 flex gap-2"
-              onSubmit={(event) => {
-                event.preventDefault();
-                submitOwnQuestion();
-              }}
+            <button
+              type="button"
+              onClick={startCustom}
+              className="mt-2 w-full py-1 text-center text-[10.5px] font-semibold text-emerald-700 underline underline-offset-2 hover:text-emerald-800"
             >
-              <input
-                value={ownQuestion}
-                onChange={(event) => setOwnQuestion(event.target.value)}
-                maxLength={300}
-                placeholder={copy.ownPlaceholder}
-                aria-label={copy.ownPlaceholder}
-                className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2.5 text-[12.5px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
-              />
-              <button
-                type="submit"
-                aria-label={copy.sendQuestion}
-                className="flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-lg bg-slate-900 text-white transition hover:bg-slate-800"
-              >
-                <Send className="h-4 w-4" />
-              </button>
-            </form>
+              {copy.somethingElse}
+            </button>
             <p className="mt-2 text-center text-[10px] text-slate-400">
               {copy.micro}
             </p>
@@ -506,31 +518,37 @@ export default function LpWidgetPanel({
         {step === 2 && (
           <div>
             <p className="text-[15px] font-bold tracking-tight text-slate-900">
-              {copy.q2}
+              {copy.tradeTitle}
             </p>
             <p className="mt-1 text-[12px] leading-relaxed text-slate-500">
-              {copy.hint2}
+              {copy.tradeHint}
             </p>
 
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {LP_TRADES.map((item) => (
+            <div className="mt-3 grid max-h-56 grid-cols-2 gap-1.5 overflow-y-auto pr-1">
+              {TRADE_OPTIONS.map((option) => (
                 <button
-                  key={item}
+                  key={option.key}
                   type="button"
-                  onClick={() => setTrade(item)}
-                  aria-pressed={trade === item}
-                  className={`rounded-full border px-3 py-1.5 text-[11px] font-semibold transition ${
-                    trade === item
+                  onClick={() => {
+                    setTrade(option.en);
+                    setTradeCode(option.key);
+                  }}
+                  aria-pressed={trade === option.en}
+                  className={`rounded-lg border px-2.5 py-2 text-left text-[10.5px] font-semibold leading-tight transition ${
+                    trade === option.en
                       ? "border-emerald-500 bg-emerald-500 text-white"
                       : "border-slate-200 bg-white text-slate-600 hover:border-emerald-300"
                   }`}
                 >
-                  {item}
+                  {option[lang]}
                 </button>
               ))}
             </div>
 
-            <div className="mt-2 flex flex-wrap gap-1.5">
+            <p className="mt-3 text-[9px] font-black uppercase tracking-wide text-slate-400">
+              {copy.cityLabel}
+            </p>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
               {LP_CITIES.map((item) => (
                 <button
                   key={item}
@@ -554,7 +572,7 @@ export default function LpWidgetPanel({
               onClick={() => setStep(3)}
               className="mt-4 w-full rounded-lg bg-emerald-500 py-2.5 text-[12.5px] font-bold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {copy.check}
+              {copy.continue}
             </button>
             <button
               type="button"
@@ -567,6 +585,64 @@ export default function LpWidgetPanel({
         )}
 
         {step === 3 && (
+          <div>
+            <p className="text-[15px] font-bold tracking-tight text-slate-900">
+              {copy.sourceTitle}
+            </p>
+            <p className="mt-1 text-[12px] leading-relaxed text-slate-500">
+              {copy.sourceHint}
+            </p>
+
+            <div className="mt-3 space-y-2">
+              {WIDGET_SOURCES.map((option) => (
+                <button
+                  key={option.key}
+                  type="button"
+                  onClick={() => setSource(option.key)}
+                  aria-pressed={source === option.key}
+                  className={`flex w-full items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left transition ${
+                    source === option.key
+                      ? "border-emerald-500 bg-emerald-50"
+                      : "border-slate-200 bg-white hover:border-emerald-300"
+                  }`}
+                >
+                  <span
+                    className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border ${
+                      source === option.key
+                        ? "border-emerald-500"
+                        : "border-slate-300"
+                    }`}
+                  >
+                    {source === option.key && (
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                    )}
+                  </span>
+                  <span className="text-[11px] font-semibold leading-snug text-slate-800">
+                    {option[lang]}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              disabled={!source}
+              onClick={() => setStep(4)}
+              className="mt-4 w-full rounded-lg bg-emerald-500 py-2.5 text-[12.5px] font-bold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {copy.continue}
+            </button>
+            <button
+              type="button"
+              onClick={() => setStep(2)}
+              className="mt-2 w-full py-1 text-[11px] font-semibold text-slate-400 hover:text-slate-600"
+            >
+              {copy.back}
+            </button>
+          </div>
+        )}
+
+        {step === 4 && (
           <div>
             <p className="text-[15px] font-bold tracking-tight text-slate-900">
               {copy.q3}
@@ -696,7 +772,7 @@ export default function LpWidgetPanel({
           </div>
         )}
 
-        {step === 4 && (
+        {step === 5 && (
           <div>
             <p className="text-[15px] font-bold tracking-tight text-slate-900">
               {copy.conversation}
@@ -763,6 +839,76 @@ export default function LpWidgetPanel({
                 <p className="mt-2 text-[10px] leading-relaxed text-emerald-800/70">
                   {copy.replySentTo} {email || "—"}.
                 </p>
+              </div>
+            )}
+
+            {mode === "live" && token && (
+              <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[9px] font-black uppercase tracking-wide text-slate-400">
+                    {copy.attachments}
+                  </p>
+                  <label
+                    className={`cursor-pointer rounded-lg border border-slate-200 bg-white px-2 py-1 text-[9px] font-bold text-slate-600 hover:border-emerald-300 ${
+                      uploadingAttachment ? "pointer-events-none opacity-50" : ""
+                    }`}
+                  >
+                    {uploadingAttachment ? copy.uploading : copy.attach}
+                    <input
+                      type="file"
+                      className="hidden"
+                      disabled={uploadingAttachment}
+                      accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (file) void uploadAttachment(file);
+                        event.currentTarget.value = "";
+                      }}
+                    />
+                  </label>
+                </div>
+                {attachments.length === 0 ? (
+                  <p className="mt-1.5 text-[9.5px] text-slate-400">—</p>
+                ) : (
+                  <div className="mt-1.5 space-y-1.5">
+                    {attachments.map((attachment) => {
+                      const url = lpAttachmentUrl(token, attachment.id);
+                      const isImage = (attachment.content_type || "").startsWith(
+                        "image/"
+                      );
+                      return (
+                        <a
+                          key={attachment.id}
+                          href={url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/50 p-1.5 hover:border-emerald-300"
+                        >
+                          {isImage ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={url}
+                              alt={attachment.filename}
+                              className="h-8 w-8 rounded object-cover ring-1 ring-slate-200"
+                            />
+                          ) : (
+                            <span className="flex h-8 w-8 items-center justify-center rounded bg-white text-slate-400 ring-1 ring-slate-200">
+                              📎
+                            </span>
+                          )}
+                          <span className="min-w-0 flex-1 truncate text-[9.5px] font-semibold text-slate-600">
+                            {attachment.filename}
+                          </span>
+                        </a>
+                      );
+                    })}
+                  </div>
+                )}
+                {attachmentError && (
+                  <p className="mt-1 text-[9px] font-semibold text-rose-600">
+                    {attachmentError}
+                  </p>
+                )}
               </div>
             )}
 

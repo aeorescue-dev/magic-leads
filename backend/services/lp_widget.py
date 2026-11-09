@@ -12,8 +12,10 @@ Isolamento deliberado:
 from __future__ import annotations
 
 import hashlib
+import os
 import secrets
 import sqlite3
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -37,6 +39,8 @@ CREATE TABLE IF NOT EXISTS lp_threads (
   company TEXT,
   city TEXT,
   trade TEXT,
+  trade_code TEXT,
+  lead_source TEXT,
   intent TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'new',
   locale TEXT NOT NULL DEFAULT 'en',
@@ -90,11 +94,27 @@ CREATE TABLE IF NOT EXISTS lp_events (
 );
 CREATE INDEX IF NOT EXISTS idx_lp_events_thread
   ON lp_events (thread_id, id DESC);
+
+CREATE TABLE IF NOT EXISTS lp_attachments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_id INTEGER NOT NULL,
+  message_id INTEGER,
+  direction TEXT NOT NULL,
+  filename TEXT NOT NULL,
+  content_type TEXT,
+  size_bytes INTEGER NOT NULL DEFAULT 0,
+  storage_path TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_lp_attachments_thread
+  ON lp_attachments (thread_id, id ASC);
 """
 
 _initialized = False
 
 _THREAD_MIGRATIONS = {
+    "trade_code": "TEXT",
+    "lead_source": "TEXT",
     "lead_lang": "TEXT DEFAULT 'en'",
     "ai_status": "TEXT DEFAULT 'pending'",
     "ai_provider": "TEXT",
@@ -271,6 +291,8 @@ def create_thread(
     company: str = "",
     city: str = "",
     trade: str = "",
+    trade_code: str = "",
+    lead_source: str = "",
     consent_email: bool = False,
     locale: str = "en",
     source_section: str = "",
@@ -302,11 +324,12 @@ def create_thread(
     try:
         cur = conn.execute(
             "INSERT INTO lp_threads ("
-            "token_hash, email, name, company, city, trade, intent, status, "
+            "token_hash, email, name, company, city, trade, trade_code, "
+            "lead_source, intent, status, "
             "locale, source_section, consent_email, consent_at, created_at, "
             "updated_at, last_message_at, sla_due_at, ip_hash, user_agent, "
             "lead_lang, ai_status"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')",
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')",
             (
                 _hash_token(token),
                 email,
@@ -314,6 +337,8 @@ def create_thread(
                 _clean(company, 160),
                 _clean(city, 80),
                 _clean(trade, 80),
+                _clean(trade_code, 60),
+                _clean(lead_source, 40),
                 intent,
                 _clean(locale, 8) or "en",
                 _clean(source_section, 80),
@@ -406,6 +431,15 @@ def get_thread_public(token: str) -> Optional[dict]:
             "created_at": thread["created_at"],
             "sla_hours": int(getattr(settings, "LP_WIDGET_SLA_HOURS", 4) or 4),
             "messages": messages,
+            "attachments": [
+                dict(row)
+                for row in conn.execute(
+                    "SELECT id, direction, filename, content_type, size_bytes, "
+                    "created_at FROM lp_attachments WHERE thread_id = ? "
+                    "ORDER BY id ASC",
+                    (thread["id"],),
+                ).fetchall()
+            ],
         }
     finally:
         conn.close()
@@ -488,6 +522,144 @@ def update_message_translation(
         )
         conn.commit()
         return {"ok": True, "message_id": int(message_id), "body_pt": pt}
+    finally:
+        conn.close()
+
+
+MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+_ALLOWED_ATTACHMENT_TYPES = {
+    "application/pdf",
+    "text/plain",
+    "text/csv",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
+
+
+def _upload_dir(thread_id: int) -> str:
+    base = os.environ.get("LP_UPLOAD_DIR") or os.path.join(
+        os.environ.get("DATA_DIR", "/data"), "lp_uploads"
+    )
+    path = os.path.join(base, str(int(thread_id)))
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def thread_id_for_token(token: str) -> Optional[int]:
+    init()
+    conn = db.get_connection()
+    try:
+        row = _thread_by_token(conn, token)
+        return int(row["id"]) if row else None
+    finally:
+        conn.close()
+
+
+def save_attachment(
+    thread_id: int,
+    *,
+    direction: str,
+    filename: str,
+    content_type: str,
+    data: bytes,
+    message_id: Optional[int] = None,
+) -> Optional[dict]:
+    init()
+    if direction not in {"inbound", "outbound"}:
+        raise ValueError("invalid_direction")
+    payload = data or b""
+    if not payload:
+        raise ValueError("empty_attachment")
+    if len(payload) > MAX_ATTACHMENT_BYTES:
+        raise ValueError("attachment_too_large")
+    ctype = (content_type or "application/octet-stream").lower()
+    if not (ctype.startswith("image/") or ctype in _ALLOWED_ATTACHMENT_TYPES):
+        raise ValueError("unsupported_file_type")
+
+    check = db.get_connection()
+    try:
+        exists = check.execute(
+            "SELECT 1 FROM lp_threads WHERE id = ?", (int(thread_id),)
+        ).fetchone()
+        if not exists:
+            return None
+    finally:
+        check.close()
+
+    safe = os.path.basename(filename or "file")
+    safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in safe)[:120]
+    if not safe:
+        safe = "file"
+    stored = f"{uuid.uuid4().hex[:12]}_{safe}"
+    path = os.path.join(_upload_dir(thread_id), stored)
+    with open(path, "wb") as handle:
+        handle.write(payload)
+
+    conn = db.get_connection()
+    try:
+        cur = conn.execute(
+            "INSERT INTO lp_attachments ("
+            "thread_id, message_id, direction, filename, content_type, "
+            "size_bytes, storage_path, created_at"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                int(thread_id),
+                int(message_id) if message_id else None,
+                direction,
+                safe,
+                ctype,
+                len(payload),
+                path,
+                _iso(),
+            ),
+        )
+        _event(
+            conn,
+            int(thread_id),
+            "attachment",
+            {"attachment_id": cur.lastrowid, "direction": direction},
+        )
+        conn.commit()
+        return {
+            "id": int(cur.lastrowid),
+            "thread_id": int(thread_id),
+            "direction": direction,
+            "filename": safe,
+            "content_type": ctype,
+            "size_bytes": len(payload),
+            "created_at": _iso(),
+        }
+    finally:
+        conn.close()
+
+
+def list_attachments(thread_id: int) -> list[dict]:
+    init()
+    conn = db.get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT id, thread_id, message_id, direction, filename, "
+            "content_type, size_bytes, created_at "
+            "FROM lp_attachments WHERE thread_id = ? ORDER BY id ASC",
+            (int(thread_id),),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def get_attachment(thread_id: int, attachment_id: int) -> Optional[dict]:
+    init()
+    conn = db.get_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM lp_attachments "
+            "WHERE id = ? AND thread_id = ?",
+            (int(attachment_id), int(thread_id)),
+        ).fetchone()
+        return dict(row) if row else None
     finally:
         conn.close()
 
@@ -689,14 +861,27 @@ def translate_draft(thread_id: int, body_pt: str) -> Optional[dict]:
         conn.close()
 
 
-def list_threads(status: str = "", limit: int = 50) -> list[dict]:
+def list_threads(
+    status: str = "", limit: int = 50, period: str = ""
+) -> list[dict]:
     init()
     limit = max(1, min(200, int(limit or 50)))
     status = _clean(status, 30)
+    period = _clean(period, 20).lower()
+    now = _now()
+    if period == "today":
+        since = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    elif period == "week":
+        since = (now - timedelta(days=7)).isoformat()
+    elif period == "month":
+        since = (now - timedelta(days=30)).isoformat()
+    else:
+        since = ""
     conn = db.get_connection()
     try:
         rows = conn.execute(
             "SELECT t.id, t.email, t.name, t.company, t.city, t.trade, "
+            "t.trade_code, t.lead_source, "
             "t.intent, t.status, t.lead_lang, t.ai_status, t.created_at, "
             "t.last_message_at, t.sla_due_at, "
             "(SELECT body FROM lp_messages m WHERE m.thread_id = t.id "
@@ -705,11 +890,37 @@ def list_threads(status: str = "", limit: int = 50) -> list[dict]:
             " AS message_count "
             "FROM lp_threads t "
             "WHERE (? = '' OR t.status = ?) "
+            "AND (? = '' OR datetime(t.created_at) >= datetime(?)) "
             "ORDER BY COALESCE(t.last_message_at, t.created_at) DESC "
             "LIMIT ?",
-            (status, status, limit),
+            (status, status, since, since, limit),
         ).fetchall()
         return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def set_thread_status(thread_id: int, status: str) -> Optional[dict]:
+    """Muda o estado do fio (new/replied/archived)."""
+    init()
+    status = _clean(status, 30).lower()
+    if status not in {"new", "replied", "archived"}:
+        raise ValueError("invalid_status")
+    conn = db.get_connection()
+    try:
+        row = conn.execute(
+            "SELECT id FROM lp_threads WHERE id = ?", (int(thread_id),)
+        ).fetchone()
+        if not row:
+            return None
+        now = _iso()
+        conn.execute(
+            "UPDATE lp_threads SET status = ?, updated_at = ? WHERE id = ?",
+            (status, now, int(thread_id)),
+        )
+        _event(conn, int(thread_id), "status_changed", {"status": status})
+        conn.commit()
+        return {"ok": True, "thread_id": int(thread_id), "status": status}
     finally:
         conn.close()
 
@@ -719,7 +930,8 @@ def get_thread_admin(thread_id: int) -> Optional[dict]:
     conn = db.get_connection()
     try:
         thread = conn.execute(
-            "SELECT id, email, name, company, city, trade, intent, status, "
+            "SELECT id, email, name, company, city, trade, trade_code, "
+            "lead_source, intent, status, "
             "locale, source_section, lead_lang, ai_status, ai_provider, "
             "ai_error, draft_pt, draft_out, draft_out_lang, ai_updated_at, "
             "created_at, updated_at, last_message_at, sla_due_at "
@@ -736,6 +948,25 @@ def get_thread_admin(thread_id: int) -> Optional[dict]:
         ).fetchall()
         result = dict(thread)
         result["messages"] = [dict(row) for row in messages]
+        history = conn.execute(
+            "SELECT t.id, t.status, t.created_at, t.last_message_at, "
+            "(SELECT body FROM lp_messages m WHERE m.thread_id = t.id "
+            " ORDER BY m.id DESC LIMIT 1) AS last_message, "
+            "(SELECT COUNT(*) FROM lp_messages m WHERE m.thread_id = t.id) "
+            " AS message_count "
+            "FROM lp_threads t "
+            "WHERE t.email = ? AND t.id <> ? "
+            "ORDER BY t.created_at DESC LIMIT 10",
+            (thread["email"], int(thread_id)),
+        ).fetchall()
+        result["history"] = [dict(row) for row in history]
+        attachments = conn.execute(
+            "SELECT id, thread_id, message_id, direction, filename, "
+            "content_type, size_bytes, created_at "
+            "FROM lp_attachments WHERE thread_id = ? ORDER BY id ASC",
+            (int(thread_id),),
+        ).fetchall()
+        result["attachments"] = [dict(row) for row in attachments]
         return result
     finally:
         conn.close()

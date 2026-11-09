@@ -13,10 +13,12 @@ import {
   Mail,
   MapPin,
   MessageSquare,
+  Paperclip,
   RefreshCw,
   Send,
   ShieldCheck,
   Sparkles,
+  Upload,
   User,
   Wrench,
 } from "lucide-react";
@@ -28,7 +30,10 @@ import {
   fetchLpThreads,
   replyLpThread,
   saveLpTranslation,
+  setLpThreadStatus,
   translateLpDraft,
+  uploadLpAttachment,
+  lpAttachmentUrl,
   type LpAdminMessage,
   type LpAdminThreadDetail,
   type LpAdminThreadSummary,
@@ -62,6 +67,7 @@ function fmtDate(value?: string | null): string {
 function statusLabel(status: string): string {
   if (status === "new") return "Novo";
   if (status === "replied") return "Respondido";
+  if (status === "archived") return "Arquivado";
   if (status === "closed") return "Fechado";
   return status;
 }
@@ -69,6 +75,7 @@ function statusLabel(status: string): string {
 function statusClass(status: string): string {
   if (status === "new") return "bg-amber-100 text-amber-800";
   if (status === "replied") return "bg-emerald-100 text-emerald-700";
+  if (status === "archived") return "bg-slate-200 text-slate-600";
   return "bg-slate-100 text-slate-600";
 }
 
@@ -76,6 +83,19 @@ function isOverdue(value?: string | null): boolean {
   if (!value) return false;
   return new Date(value).getTime() < Date.now();
 }
+
+const COVERED_CITIES = new Set(["new york", "boston", "dallas", "chicago"]);
+
+function cityCovered(city?: string | null): boolean {
+  return !!city && COVERED_CITIES.has(city.trim().toLowerCase());
+}
+
+const SOURCE_LABEL: Record<string, string> = {
+  google: "Google / Search",
+  social: "Social Media",
+  referral: "Referral / Word of Mouth",
+  outreach: "Automated Call / Direct Outreach",
+};
 
 function toSummary(thread: LpAdminThreadDetail): LpAdminThreadSummary {
   const last = thread.messages[thread.messages.length - 1];
@@ -86,6 +106,8 @@ function toSummary(thread: LpAdminThreadDetail): LpAdminThreadSummary {
     company: thread.company,
     city: thread.city,
     trade: thread.trade,
+    trade_code: thread.trade_code,
+    lead_source: thread.lead_source,
     intent: thread.intent,
     status: thread.status,
     created_at: thread.created_at,
@@ -105,6 +127,8 @@ function makeDemoThread(): LpAdminThreadDetail {
     company: "Mike Roofing",
     city: "Dallas",
     trade: "Roofing",
+    trade_code: "Roof",
+    lead_source: "google",
     intent: "vs_ads",
     status: "new",
     locale: "en",
@@ -143,6 +167,8 @@ function makeDemoThread(): LpAdminThreadDetail {
 
 export default function LpInboxClient() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [period, setPeriod] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
   const [demo, setDemo] = useState(false);
   const [demoThread, setDemoThread] = useState<LpAdminThreadDetail | null>(null);
 
@@ -151,11 +177,20 @@ export default function LpInboxClient() {
     error: listError,
     isLoading: listLoading,
     mutate: mutateList,
-  } = useSWR(demo ? null : "lp-inbox-threads", () => fetchLpThreads(100), {
-    refreshInterval: 5000,
-    revalidateOnFocus: true,
-    shouldRetryOnError: false,
-  });
+  } = useSWR(
+    demo ? null : ["lp-inbox-threads", statusFilter, period],
+    () =>
+      fetchLpThreads({
+        status: statusFilter,
+        period,
+        limit: 100,
+      }),
+    {
+      refreshInterval: 5000,
+      revalidateOnFocus: true,
+      shouldRetryOnError: false,
+    }
+  );
 
   const threads = list?.threads ?? [];
   const activeId = selectedId ?? threads[0]?.id ?? null;
@@ -190,6 +225,11 @@ export default function LpInboxClient() {
   function startDemo() {
     setDemoThread(makeDemoThread());
     setDemo(true);
+  }
+
+  async function handleArchive(threadId: number, status: "new" | "archived") {
+    await setLpThreadStatus(threadId, status);
+    await Promise.all([mutateList(), mutateThread()]);
   }
 
   async function handleSend(
@@ -259,7 +299,10 @@ export default function LpInboxClient() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
+    <div
+      className="min-h-screen bg-slate-50 text-slate-900"
+      style={{ colorScheme: "light" }}
+    >
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-3">
           <Link
@@ -407,6 +450,51 @@ export default function LpInboxClient() {
                 <MessageSquare className="h-4 w-4 text-slate-300" />
               </div>
 
+              <div className="space-y-1.5 border-b border-slate-100 px-3 py-2">
+                <div className="flex flex-wrap gap-1">
+                  {[
+                    { value: "", label: "Tudo" },
+                    { value: "today", label: "Hoje" },
+                    { value: "week", label: "Semana" },
+                    { value: "month", label: "Mês" },
+                  ].map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setPeriod(option.value)}
+                      className={`rounded-full border px-2 py-0.5 text-[8.5px] font-bold ${
+                        period === option.value
+                          ? "border-slate-900 bg-slate-900 text-white"
+                          : "border-slate-200 bg-white text-slate-500"
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {[
+                    { value: "", label: "Todos" },
+                    { value: "new", label: "Novo" },
+                    { value: "replied", label: "Respondido" },
+                    { value: "archived", label: "Arquivado" },
+                  ].map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setStatusFilter(option.value)}
+                      className={`rounded-full border px-2 py-0.5 text-[8.5px] font-bold ${
+                        statusFilter === option.value
+                          ? "border-emerald-600 bg-emerald-600 text-white"
+                          : "border-slate-200 bg-white text-slate-500"
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {listLoading && !demo ? (
                 <div className="flex items-center justify-center gap-2 px-4 py-10 text-[11px] text-slate-400">
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -462,10 +550,27 @@ export default function LpInboxClient() {
                             <span className="rounded bg-slate-100 px-1.5 py-0.5">
                               {INTENT_LABEL[item.intent] || item.intent}
                             </span>
-                            {item.city && (
+                            {item.city ? (
                               <span className="flex items-center gap-0.5">
+                                <span
+                                  className={`h-1.5 w-1.5 rounded-full ${
+                                    cityCovered(item.city)
+                                      ? "bg-emerald-500"
+                                      : "bg-rose-500"
+                                  }`}
+                                  title={
+                                    cityCovered(item.city)
+                                      ? "Dentro da cobertura"
+                                      : "Fora da cobertura"
+                                  }
+                                />
                                 <MapPin className="h-2.5 w-2.5" />
                                 {item.city}
+                              </span>
+                            ) : (
+                              <span className="flex items-center gap-0.5">
+                                <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
+                                Sem cidade
                               </span>
                             )}
                             {item.trade && (
@@ -515,6 +620,13 @@ export default function LpInboxClient() {
                   onSend={handleSend}
                   onSaveTranslation={handleSaveTranslation}
                   onRefresh={() => void mutateThread()}
+                  onOpenThread={(id) => setSelectedId(id)}
+                  onArchive={() =>
+                    void handleArchive(
+                      activeThread.id,
+                      activeThread.status === "archived" ? "new" : "archived"
+                    )
+                  }
                 />
               ) : (
                 <div className="rounded-2xl border border-slate-200 bg-white px-4 py-16 text-center text-[11.5px] text-slate-400">
@@ -535,6 +647,8 @@ function ThreadDetail({
   onSend,
   onSaveTranslation,
   onRefresh,
+  onOpenThread,
+  onArchive,
 }: {
   thread: LpAdminThreadDetail;
   demo: boolean;
@@ -549,10 +663,14 @@ function ThreadDetail({
     bodyPt: string
   ) => Promise<{ ok: boolean }>;
   onRefresh: () => void;
+  onOpenThread: (id: number) => void;
+  onArchive: () => void;
 }) {
   const overdue = isOverdue(thread.sla_due_at);
   const [enriching, setEnriching] = useState(false);
   const [enrichError, setEnrichError] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
   const aiStatus = thread.ai_status || "pending";
   const aiLabel =
     aiStatus === "ready"
@@ -587,6 +705,21 @@ function ThreadDetail({
     }
   }
 
+  async function handleUpload(file: File) {
+    setUploading(true);
+    setUploadError("");
+    try {
+      await uploadLpAttachment(thread.id, file);
+      onRefresh();
+    } catch (err) {
+      setUploadError(
+        err instanceof Error ? err.message : "Não foi possível anexar."
+      );
+    } finally {
+      setUploading(false);
+    }
+  }
+
   return (
     <div className="space-y-3">
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -607,6 +740,11 @@ function ThreadDetail({
               <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[8.5px] font-black uppercase tracking-wide text-violet-700">
                 {INTENT_LABEL[thread.intent] || thread.intent}
               </span>
+              {thread.lead_source && (
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[8.5px] font-black uppercase tracking-wide text-slate-600">
+                  Origem: {SOURCE_LABEL[thread.lead_source] || thread.lead_source}
+                </span>
+              )}
               <span
                 className={cls(
                   "rounded-full px-2 py-0.5 text-[8.5px] font-black uppercase tracking-wide",
@@ -618,6 +756,11 @@ function ThreadDetail({
               {overdue && (
                 <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[8.5px] font-black uppercase tracking-wide text-rose-700">
                   SLA vencido
+                </span>
+              )}
+              {thread.history && thread.history.length > 0 && (
+                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[8.5px] font-black uppercase tracking-wide text-emerald-700">
+                  Cliente recorrente
                 </span>
               )}
             </div>
@@ -632,12 +775,24 @@ function ThreadDetail({
                   {thread.company}
                 </span>
               )}
-              {thread.city && (
-                <span className="flex items-center gap-1">
-                  <MapPin className="h-3 w-3" />
-                  {thread.city}
+              <span className="flex items-center gap-1">
+                <span
+                  className={`h-2 w-2 rounded-full ${
+                    cityCovered(thread.city) ? "bg-emerald-500" : "bg-rose-500"
+                  }`}
+                />
+                <MapPin className="h-3 w-3" />
+                {thread.city || "Sem cidade"}
+                <span
+                  className={
+                    cityCovered(thread.city)
+                      ? "font-bold text-emerald-700"
+                      : "font-bold text-rose-700"
+                  }
+                >
+                  {cityCovered(thread.city) ? "Coberto" : "Fora da cobertura"}
                 </span>
-              )}
+              </span>
               {thread.trade && (
                 <span className="flex items-center gap-1">
                   <Wrench className="h-3 w-3" />
@@ -662,6 +817,13 @@ function ThreadDetail({
                 {enriching ? "A gerar…" : "Gerar com IA"}
               </button>
             )}
+            <button
+              type="button"
+              onClick={onArchive}
+              className="mt-1.5 inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[9px] font-bold text-slate-500 hover:border-slate-300"
+            >
+              {thread.status === "archived" ? "Reabrir" : "Arquivar"}
+            </button>
           </div>
         </div>
         {!demo && aiStatus !== "ready" && (thread.ai_error || enrichError) && (
@@ -686,6 +848,122 @@ function ThreadDetail({
           )
         )}
       </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[10px] font-black uppercase tracking-[0.12em] text-slate-400">
+            Anexos · {thread.attachments?.length ?? 0}
+          </p>
+          <label
+            className={`inline-flex cursor-pointer items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[9.5px] font-bold text-slate-600 hover:border-emerald-300 ${
+              uploading ? "pointer-events-none opacity-50" : ""
+            }`}
+          >
+            <Upload className="h-3 w-3" />
+            {uploading ? "A enviar…" : "Anexar"}
+            <input
+              type="file"
+              className="hidden"
+              disabled={uploading}
+              accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void handleUpload(file);
+                event.currentTarget.value = "";
+              }}
+            />
+          </label>
+        </div>
+
+        {(thread.attachments?.length ?? 0) === 0 ? (
+          <p className="mt-2 text-[9.5px] text-slate-400">
+            Nenhum ficheiro. Imagens, PDF, Word, Excel, TXT ou CSV até 10 MB.
+          </p>
+        ) : (
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            {thread.attachments?.map((attachment) => {
+              const url = lpAttachmentUrl(thread.id, attachment.id);
+              const isImage = (attachment.content_type || "").startsWith(
+                "image/"
+              );
+              return (
+                <a
+                  key={attachment.id}
+                  href={url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/50 p-2 transition hover:border-emerald-300 hover:bg-emerald-50/40"
+                >
+                  {isImage ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={url}
+                      alt={attachment.filename}
+                      className="h-9 w-9 shrink-0 rounded object-cover ring-1 ring-slate-200"
+                    />
+                  ) : (
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-white text-slate-400 ring-1 ring-slate-200">
+                      <Paperclip className="h-3.5 w-3.5" />
+                    </span>
+                  )}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[10.5px] font-bold text-slate-700">
+                      {attachment.filename}
+                    </span>
+                    <span className="block text-[8.5px] text-slate-400">
+                      {attachment.direction === "inbound" ? "Lead" : "Equipa"} ·{" "}
+                      {Math.max(1, Math.round(attachment.size_bytes / 1024))} KB
+                    </span>
+                  </span>
+                </a>
+              );
+            })}
+          </div>
+        )}
+        {uploadError && (
+          <p className="mt-2 text-[9.5px] font-semibold text-rose-600">
+            {uploadError}
+          </p>
+        )}
+      </div>
+
+      {thread.history && thread.history.length > 0 && (
+        <details className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <summary className="cursor-pointer px-4 py-3 text-[11px] font-bold text-slate-700">
+            Histórico deste e-mail · {thread.history.length} conversa(s)
+          </summary>
+          <div className="space-y-1.5 border-t border-slate-100 p-3">
+            {thread.history.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => onOpenThread(item.id)}
+                className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-left transition hover:border-emerald-300 hover:bg-emerald-50/40"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="flex items-center gap-1.5 text-[9.5px] font-bold text-slate-700">
+                    #{item.id}
+                    <span
+                      className={cls(
+                        "rounded-full px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wide",
+                        statusClass(item.status)
+                      )}
+                    >
+                      {statusLabel(item.status)}
+                    </span>
+                  </span>
+                  <span className="text-[8.5px] text-slate-400">
+                    {fmtDate(item.created_at)}
+                  </span>
+                </div>
+                <p className="mt-0.5 truncate text-[10px] text-slate-500">
+                  {item.last_message || "—"}
+                </p>
+              </button>
+            ))}
+          </div>
+        </details>
+      )}
 
       <ReplyComposer
         thread={thread}
@@ -767,7 +1045,7 @@ function InboundMessage({
           onChange={(event) => setPt(event.target.value)}
           rows={3}
           placeholder="Traduza ou reveja a mensagem do lead em PT-BR…"
-          className="mt-2 w-full resize-y rounded-lg border border-violet-200 bg-white px-2.5 py-2 text-[11.5px] leading-relaxed text-slate-700 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+          className="mt-2 w-full resize-y rounded-lg border border-violet-200 bg-white px-2.5 py-2 text-[11.5px] leading-relaxed text-slate-900 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
         />
         <div className="mt-1.5 flex items-center justify-between gap-2">
           <span className="text-[9px] text-slate-400">
@@ -937,7 +1215,7 @@ function ReplyComposer({
             onBlur={() => void handlePtBlur()}
             rows={5}
             placeholder="Escreva a resposta em português para revisão…"
-            className="mt-1 w-full resize-y rounded-lg border border-slate-200 px-2.5 py-2 text-[11.5px] leading-relaxed text-slate-700 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+            className="mt-1 w-full resize-y rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-[11.5px] leading-relaxed text-slate-900 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
           />
         </div>
         <div>
@@ -966,7 +1244,7 @@ function ReplyComposer({
             }}
             rows={5}
             placeholder={`Write the final ${finalLabel} reply…`}
-            className="mt-1 w-full resize-y rounded-lg border border-slate-200 px-2.5 py-2 text-[11.5px] leading-relaxed text-slate-700 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+            className="mt-1 w-full resize-y rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-[11.5px] leading-relaxed text-slate-900 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
           />
         </div>
       </div>

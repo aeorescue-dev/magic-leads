@@ -26,6 +26,13 @@ const EN = {
   micro: "No contract · Cancel anytime · $120/week",
   q2: "Where do you work?",
   hint2: "This is how we check today's availability.",
+  tradeTitle: "What's your trade?",
+  tradeHint: "Pick the category closest to your work.",
+  cityLabel: "City",
+  sourceTitle: "How did you find us?",
+  sourceHint: "One quick tap — it helps us improve.",
+  continue: "Continue",
+  somethingElse: "Or ask something else →",
   check: "Check availability",
   back: "← Back",
   q3: "Where should we send the answer?",
@@ -51,6 +58,10 @@ const EN = {
   replySentTo: "The reply was also sent to",
   checkCity: "Check availability in my city →",
   startOver: "↺ Start over",
+  attachments: "Attachments",
+  attach: "Attach file",
+  uploading: "Uploading…",
+  attachError: "Could not upload. Max 10 MB.",
   noContract: "No contract · Cancel anytime · $120/week",
   systemAck:
     "Message received. A specialist will reply within 4 business hours.",
@@ -72,6 +83,13 @@ const PT: Copy = {
   micro: "Sem contrato · Cancele quando quiser · $120/semana",
   q2: "Onde trabalha?",
   hint2: "É assim que verificamos a disponibilidade de hoje.",
+  tradeTitle: "Qual é o seu ofício?",
+  tradeHint: "Escolha a categoria mais próxima do seu trabalho.",
+  cityLabel: "Cidade",
+  sourceTitle: "Como nos encontrou?",
+  sourceHint: "Um toque rápido — ajuda-nos a melhorar.",
+  continue: "Continuar",
+  somethingElse: "Ou faça outra pergunta →",
   check: "Ver disponibilidade",
   back: "← Voltar",
   q3: "Para onde enviamos a resposta?",
@@ -97,6 +115,10 @@ const PT: Copy = {
   replySentTo: "A resposta também foi enviada para",
   checkCity: "Ver disponibilidade na minha cidade →",
   startOver: "↺ Começar de novo",
+  attachments: "Anexos",
+  attach: "Anexar ficheiro",
+  uploading: "A enviar…",
+  attachError: "Não foi possível enviar. Máx. 10 MB.",
   noContract: "Sem contrato · Cancele quando quiser · $120/semana",
   systemAck:
     "Mensagem recebida. Um especialista responde em até 4 horas úteis.",
@@ -116,6 +138,13 @@ const ES: Copy = {
   micro: "Sin contrato · Cancela cuando quieras · $120/semana",
   q2: "¿Dónde trabajas?",
   hint2: "Así comprobamos la disponibilidad de hoy.",
+  tradeTitle: "¿Cuál es tu oficio?",
+  tradeHint: "Elige la categoría más cercana a tu trabajo.",
+  cityLabel: "Ciudad",
+  sourceTitle: "¿Cómo nos encontraste?",
+  sourceHint: "Un toque rápido — nos ayuda a mejorar.",
+  continue: "Continuar",
+  somethingElse: "O haz otra pregunta →",
   check: "Ver disponibilidad",
   back: "← Volver",
   q3: "¿A dónde enviamos la respuesta?",
@@ -141,6 +170,10 @@ const ES: Copy = {
   replySentTo: "La respuesta también se envió a",
   checkCity: "Ver disponibilidad en mi ciudad →",
   startOver: "↺ Empezar de nuevo",
+  attachments: "Archivos adjuntos",
+  attach: "Adjuntar archivo",
+  uploading: "Enviando…",
+  attachError: "No se pudo enviar. Máx. 10 MB.",
   noContract: "Sin contrato · Cancela cuando quieras · $120/semana",
   systemAck:
     "Mensaje recibido. Un especialista responderá en un plazo de 4 horas hábiles.",
@@ -158,6 +191,47 @@ export interface IntentCopy {
   sub: string;
   question: string;
 }
+
+export interface TradeOption {
+  key: string;
+  en: string;
+  pt: string;
+  es: string;
+}
+
+/** Categorias canónicas da plataforma (espelham `lib/categories.ts`). */
+export const TRADE_OPTIONS: TradeOption[] = [
+  { key: "Roof", en: "Roofing & Structure", pt: "Telhado & Estrutura", es: "Techos y Estructura" },
+  { key: "Structure", en: "Structure", pt: "Estrutura", es: "Estructura" },
+  { key: "Plumbing", en: "Plumbing", pt: "Encanamento", es: "Plomería" },
+  { key: "Grass", en: "Grass & Debris", pt: "Mato & Entulho", es: "Maleza y Escombros" },
+  { key: "Paint", en: "Painting", pt: "Pintura", es: "Pintura" },
+  { key: "Permit_Rejected", en: "Construction & Permits", pt: "Obras & Permissões", es: "Obras y Permisos" },
+  { key: "Heating", en: "Heating & Hot Water", pt: "Aquecimento & Água Quente", es: "Calefacción y Agua Caliente" },
+  { key: "Electrical", en: "Electrical", pt: "Elétrica", es: "Eléctrica" },
+  { key: "Elevator", en: "Elevators", pt: "Elevadores", es: "Ascensores" },
+  { key: "Gas", en: "Gas & Leaks", pt: "Gás & Vazamentos", es: "Gas y Fugas" },
+  { key: "Rodent", en: "Rodents & Pests", pt: "Roedores & Pragas", es: "Roedores y Plagas" },
+  { key: "Mold", en: "Mold & Moisture", pt: "Mofo & Umidade", es: "Moho y Humedad" },
+  { key: "Lead", en: "Lead & Paint", pt: "Chumbo & Tinta", es: "Plomo y Pintura" },
+  { key: "Unsanitary", en: "Unsanitary & Sewage", pt: "Insanitário & Esgoto", es: "Insalubridad y Alcantarillado" },
+  { key: "Door_Window", en: "Doors & Windows", pt: "Portas & Janelas", es: "Puertas y Ventanas" },
+  { key: "Debris", en: "Debris & Trash", pt: "Entulho & Lixo", es: "Escombros y Basura" },
+];
+
+export interface SourceOption {
+  key: string;
+  en: string;
+  pt: string;
+  es: string;
+}
+
+export const WIDGET_SOURCES: SourceOption[] = [
+  { key: "google", en: "Google / Search", pt: "Google / Pesquisa", es: "Google / Búsqueda" },
+  { key: "social", en: "Social Media (Instagram / Facebook)", pt: "Redes sociais (Instagram / Facebook)", es: "Redes sociales (Instagram / Facebook)" },
+  { key: "referral", en: "Referral / Word of Mouth", pt: "Indicação / Boca a boca", es: "Referencia / Boca a boca" },
+  { key: "outreach", en: "Automated Phone Call / Direct Outreach", pt: "Ligação automática / Contacto direto", es: "Llamada automática / Contacto directo" },
+];
 
 export const INTENT_L10N: Record<
   Exclude<WidgetLang, "en">,

@@ -21,10 +21,12 @@ from fastapi import (
     Cookie,
     Depends,
     FastAPI,
+    File,
     Header,
     HTTPException,
     Request,
     Response,
+    UploadFile,
 )
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, EmailStr
@@ -9363,6 +9365,8 @@ class LpThreadCreateRequest(BaseModel):
     company: str = ""
     city: str = ""
     trade: str = ""
+    trade_code: str = ""
+    lead_source: str = ""
     consent_email: bool = False
     locale: str = "en"
     source_section: str = ""
@@ -9380,6 +9384,10 @@ class LpTeamReplyRequest(BaseModel):
 
 class LpTranslationRequest(BaseModel):
     body_pt: str
+
+
+class LpStatusRequest(BaseModel):
+    status: str
 
 
 def _lp_widget_guard() -> None:
@@ -9419,6 +9427,8 @@ async def lp_widget_create_thread(
                 company=payload.company,
                 city=payload.city,
                 trade=payload.trade,
+                trade_code=payload.trade_code,
+                lead_source=payload.lead_source,
                 consent_email=payload.consent_email,
                 locale=payload.locale,
                 source_section=payload.source_section or "landing_widget",
@@ -9472,15 +9482,67 @@ async def lp_widget_lead_message(
     return result
 
 
+@app.post("/api/public/lp/threads/{token}/attachments")
+@limiter.limit("30/hour")
+async def lp_widget_upload_attachment(
+    request: Request, token: str, file: UploadFile = File(...)
+):
+    _lp_widget_guard()
+    thread_id = await anyio.to_thread.run_sync(
+        lambda: lp_widget.thread_id_for_token(token)
+    )
+    if not thread_id:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    data = await file.read(lp_widget.MAX_ATTACHMENT_BYTES + 1)
+    if len(data) > lp_widget.MAX_ATTACHMENT_BYTES:
+        raise HTTPException(status_code=413, detail="attachment_too_large")
+    try:
+        result = await anyio.to_thread.run_sync(
+            lambda: lp_widget.save_attachment(
+                thread_id,
+                direction="inbound",
+                filename=file.filename or "file",
+                content_type=file.content_type or "",
+                data=data,
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not result:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    return result
+
+
+@app.get("/api/public/lp/threads/{token}/attachments/{attachment_id}")
+async def lp_widget_download_attachment(token: str, attachment_id: int):
+    _lp_widget_guard()
+    thread_id = await anyio.to_thread.run_sync(
+        lambda: lp_widget.thread_id_for_token(token)
+    )
+    if not thread_id:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    attachment = await anyio.to_thread.run_sync(
+        lambda: lp_widget.get_attachment(thread_id, attachment_id)
+    )
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    return FileResponse(
+        attachment["storage_path"],
+        filename=attachment["filename"],
+        media_type=attachment.get("content_type") or "application/octet-stream",
+    )
+
+
 @app.get("/api/admin/lp/threads")
 async def admin_lp_threads(
     status: str = "",
+    period: str = "",
     limit: int = 50,
     _admin: dict = Depends(_require_admin_user),
 ):
     _lp_widget_guard()
     threads = await anyio.to_thread.run_sync(
-        lambda: lp_widget.list_threads(status, limit)
+        lambda: lp_widget.list_threads(status, limit, period)
     )
     return {"threads": threads, "count": len(threads)}
 
@@ -9518,6 +9580,72 @@ async def admin_lp_message_translation(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not result:
         raise HTTPException(status_code=404, detail="Message not found")
+    return result
+
+
+@app.post("/api/admin/lp/threads/{thread_id}/attachments")
+@limiter.limit("60/hour")
+async def admin_lp_upload_attachment(
+    request: Request,
+    thread_id: int,
+    file: UploadFile = File(...),
+    _admin: dict = Depends(_require_admin_user),
+):
+    _lp_widget_guard()
+    data = await file.read(lp_widget.MAX_ATTACHMENT_BYTES + 1)
+    if len(data) > lp_widget.MAX_ATTACHMENT_BYTES:
+        raise HTTPException(status_code=413, detail="attachment_too_large")
+    try:
+        result = await anyio.to_thread.run_sync(
+            lambda: lp_widget.save_attachment(
+                thread_id,
+                direction="outbound",
+                filename=file.filename or "file",
+                content_type=file.content_type or "",
+                data=data,
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not result:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    return result
+
+
+@app.get("/api/admin/lp/threads/{thread_id}/attachments/{attachment_id}")
+async def admin_lp_download_attachment(
+    thread_id: int,
+    attachment_id: int,
+    _admin: dict = Depends(_require_admin_user),
+):
+    _lp_widget_guard()
+    attachment = await anyio.to_thread.run_sync(
+        lambda: lp_widget.get_attachment(thread_id, attachment_id)
+    )
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    return FileResponse(
+        attachment["storage_path"],
+        filename=attachment["filename"],
+        media_type=attachment.get("content_type") or "application/octet-stream",
+    )
+
+
+@app.patch("/api/admin/lp/threads/{thread_id}/status")
+async def admin_lp_thread_status(
+    thread_id: int,
+    payload: LpStatusRequest,
+    _admin: dict = Depends(_require_admin_user),
+):
+    _lp_widget_guard()
+    try:
+        result = await anyio.to_thread.run_sync(
+            lambda: lp_widget.set_thread_status(thread_id, payload.status)
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not result:
+        raise HTTPException(status_code=404, detail="Thread not found")
     return result
 
 

@@ -2692,6 +2692,8 @@ export interface LpAdminThreadSummary {
   company: string | null;
   city: string | null;
   trade: string | null;
+  trade_code?: string | null;
+  lead_source?: string | null;
   intent: string;
   status: string;
   lead_lang?: string;
@@ -2717,6 +2719,25 @@ export interface LpAdminMessage {
   created_at: string;
 }
 
+export interface LpAttachment {
+  id: number;
+  thread_id?: number;
+  direction: "inbound" | "outbound";
+  filename: string;
+  content_type: string | null;
+  size_bytes: number;
+  created_at: string;
+}
+
+export interface LpHistoryItem {
+  id: number;
+  status: string;
+  created_at: string;
+  last_message_at: string | null;
+  last_message: string | null;
+  message_count: number;
+}
+
 export interface LpAdminThreadDetail {
   id: number;
   email: string;
@@ -2724,6 +2745,8 @@ export interface LpAdminThreadDetail {
   company: string | null;
   city: string | null;
   trade: string | null;
+  trade_code?: string | null;
+  lead_source?: string | null;
   intent: string;
   status: string;
   locale: string;
@@ -2741,12 +2764,20 @@ export interface LpAdminThreadDetail {
   last_message_at: string | null;
   sla_due_at: string | null;
   messages: LpAdminMessage[];
+  history?: LpHistoryItem[];
+  attachments?: LpAttachment[];
 }
 
-export function fetchLpThreads(
-  limit = 100
-): Promise<{ threads: LpAdminThreadSummary[]; count: number }> {
-  return lpAdminFetch(`/lp/threads?limit=${limit}`);
+export function fetchLpThreads(params: {
+  status?: string;
+  period?: string;
+  limit?: number;
+} = {}): Promise<{ threads: LpAdminThreadSummary[]; count: number }> {
+  const query = new URLSearchParams();
+  if (params.status) query.set("status", params.status);
+  if (params.period) query.set("period", params.period);
+  query.set("limit", String(params.limit ?? 100));
+  return lpAdminFetch(`/lp/threads?${query.toString()}`);
 }
 
 export function fetchLpThread(id: number): Promise<LpAdminThreadDetail> {
@@ -2808,4 +2839,31 @@ export function enrichLpThread(threadId: number): Promise<{
   return lpAdminFetch(`/lp/threads/${threadId}/ai-enrich`, {
     method: "POST",
   });
+}
+
+export function setLpThreadStatus(
+  threadId: number,
+  status: "new" | "replied" | "archived"
+): Promise<{ ok: boolean; thread_id: number; status: string }> {
+  return lpAdminFetch(`/lp/threads/${threadId}/status`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+}
+
+export function uploadLpAttachment(
+  threadId: number,
+  file: File
+): Promise<LpAttachment> {
+  const form = new FormData();
+  form.append("file", file);
+  return lpAdminFetch(`/lp/threads/${threadId}/attachments`, {
+    method: "POST",
+    body: form,
+  });
+}
+
+export function lpAttachmentUrl(threadId: number, attachmentId: number): string {
+  return `/api/admin/lp/threads/${threadId}/attachments/${attachmentId}`;
 }
