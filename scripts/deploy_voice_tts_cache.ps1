@@ -82,4 +82,14 @@ try {
     Log "tts probe status $status body=$body"
 }
 
+$cacheTest = @'
+import json
+from backend.services import voice_audio_cache as c
+c.init()
+r = c.get_or_create("Deploy probe. This is an automated test.")
+print("CACHE_PROBE", json.dumps({k: r.get(k) for k in ("ok","hash","url","chars","bytes","hit","reason")}, ensure_ascii=True))
+'@
+Log "running cache synthesis probe"
+$cacheTest | & railway ssh --service $service --environment $environment -p $project python 2>&1 | ForEach-Object { Log $_ }
+
 Log "=== deploy voice tts cache: end ==="
