@@ -93,15 +93,15 @@ DTMF 1 não é alcançável.
 | Versão | Estado | Data (ET) | Tam. | Texto |
 |---|---|---|---:|---|
 | v1 | draft (nunca aprovada) | 02/11 18:31 | 1.680–1.758 | Script de AI assistant com preço, email, objeções |
-| v2 | aprovada | 03/11 01:04 / 01:36 | 551 | "Opening & Pitch", pede email, press 1 |
-| v3 | aprovada | 04/11 14:41 | 514 | "Stop wasting money…", website-only, press 2 |
-| **v4** | **aprovada / ativa** | **06/11 21:39** | **532** | **Atual (secção 2)** |
+| v2 | aprovada | 02/11 20:36 | 551 | "Opening & Pitch", pede email, press 1 |
+| v3 | aprovada | 04/11 13:41 | 514 | "Stop wasting money…", website-only, press 2 |
+| **v4** | **aprovada / ativa** | **06/11 20:39** | **532** | **Atual (secção 2)** |
 
 - 75 registos em `voice_script_versions`; todos com `created_by=0` (seed
   automático). Não há edições manuais registadas (`updated_by=0` em todas as
   linhas).
-- Overrides de Dallas: 15 linhas, `approved_by=0`, criados em 07/11
-  (01:39–05:05 UTC). Nenhum override de estado ou de outra cidade.
+- Overrides de Dallas: 15 linhas, `approved_by=0`, criados em 06/11 20:39 –
+  07/11 00:05 ET. Nenhum override de estado ou de outra cidade.
 - `voice_meta.scripts_template_version = 2026-11-06.1`.
 
 ### Commits relevantes (`backend/services/voice_scripts.py`)
