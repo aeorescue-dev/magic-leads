@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ClipboardEvent } from "react";
 import useSWR from "swr";
+import AttachmentCard from "@/components/AttachmentCard";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -1246,43 +1247,20 @@ function ThreadDetail({
           </p>
         ) : (
           <div className="mt-2 grid gap-2 sm:grid-cols-2">
-            {thread.attachments?.map((attachment) => {
-              const url = lpAttachmentUrl(thread.id, attachment.id);
-              const isImage = (attachment.content_type || "").startsWith(
-                "image/"
-              );
-              return (
-                <a
-                  key={attachment.id}
-                  href={url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/50 p-2 transition hover:border-emerald-300 hover:bg-emerald-50/40"
-                >
-                  {isImage ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={url}
-                      alt={attachment.filename}
-                      className="h-9 w-9 shrink-0 rounded object-cover ring-1 ring-slate-200"
-                    />
-                  ) : (
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-white text-slate-600 ring-1 ring-slate-200">
-                      <Paperclip className="h-3.5 w-3.5" />
-                    </span>
-                  )}
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[10.5px] font-bold text-slate-700">
-                      {attachment.filename}
-                    </span>
-                    <span className="block text-[9.5px] text-slate-600">
-                      {attachment.direction === "inbound" ? "Lead" : "Equipa"} ·{" "}
-                      {Math.max(1, Math.round(attachment.size_bytes / 1024))} KB
-                    </span>
-                  </span>
-                </a>
-              );
-            })}
+            {thread.attachments?.map((attachment) => (
+              <AttachmentCard
+                key={attachment.id}
+                url={lpAttachmentUrl(thread.id, attachment.id)}
+                downloadUrl={`${lpAttachmentUrl(
+                  thread.id,
+                  attachment.id
+                )}?download=1`}
+                filename={attachment.filename}
+                contentType={attachment.content_type}
+                sizeBytes={attachment.size_bytes}
+                compact
+              />
+            ))}
           </div>
         )}
       </div>
@@ -1348,40 +1326,16 @@ function MessageAttachments({
   if (!attachments.length) return null;
   return (
     <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
-      {attachments.map((attachment) => {
-        const url = lpAttachmentUrl(threadId, attachment.id);
-        const isImage = (attachment.content_type || "").startsWith("image/");
-        return (
-          <a
-            key={attachment.id}
-            href={url}
-            target="_blank"
-            rel="noreferrer"
-            className="flex items-center gap-2 rounded-lg border border-white/70 bg-white/80 p-1.5 transition hover:border-emerald-300"
-          >
-            {isImage ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={url}
-                alt={attachment.filename}
-                className="h-12 w-12 shrink-0 rounded object-cover ring-1 ring-slate-200"
-              />
-            ) : (
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-white text-slate-500 ring-1 ring-slate-200">
-                <Paperclip className="h-4 w-4" />
-              </span>
-            )}
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[10.5px] font-bold text-slate-800">
-                {attachment.filename}
-              </span>
-              <span className="block text-[8.5px] text-slate-500">
-                {Math.max(1, Math.round(attachment.size_bytes / 1024))} KB
-              </span>
-            </span>
-          </a>
-        );
-      })}
+      {attachments.map((attachment) => (
+        <AttachmentCard
+          key={attachment.id}
+          url={lpAttachmentUrl(threadId, attachment.id)}
+          downloadUrl={`${lpAttachmentUrl(threadId, attachment.id)}?download=1`}
+          filename={attachment.filename}
+          contentType={attachment.content_type}
+          sizeBytes={attachment.size_bytes}
+        />
+      ))}
     </div>
   );
 }
@@ -1593,6 +1547,27 @@ function ReplyComposer({
     }
   }
 
+  function handlePaste(event: ClipboardEvent<HTMLDivElement>) {
+    const files = Array.from(event.clipboardData?.items || [])
+      .filter((item) => item.kind === "file")
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => Boolean(file));
+    if (!files.length) return;
+    event.preventDefault();
+    const named = files.map((file, index) => {
+      if (file.name && file.name !== "image.png") return file;
+      const extension = (file.type.split("/")[1] || "png")
+        .replace("jpeg", "jpg")
+        .replace("svg+xml", "txt");
+      return new File(
+        [file],
+        `print-${Date.now()}-${index + 1}.${extension}`,
+        { type: file.type }
+      );
+    });
+    void attachFiles(named);
+  }
+
   async function translate(): Promise<string | null> {
     if (!pt.trim() || translatingRef.current) return null;
     translatingRef.current = true;
@@ -1656,7 +1631,10 @@ function ReplyComposer({
   }
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+    <div
+      className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+      onPaste={handlePaste}
+    >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-[12px] font-black uppercase tracking-[0.12em] text-slate-600">
@@ -1738,6 +1716,9 @@ function ReplyComposer({
             }}
           />
         </label>
+        <span className="text-[9px] text-slate-500">
+          ou Ctrl+V para colar um print
+        </span>
         {pendingAttachments.map((attachment) => {
           const url = lpAttachmentUrl(thread.id, attachment.id);
           const isImage = (attachment.content_type || "").startsWith("image/");

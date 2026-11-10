@@ -14,7 +14,6 @@ import {
   Loader2,
   Lock,
   Moon,
-  Paperclip,
   Send,
   ShieldCheck,
   X,
@@ -39,6 +38,7 @@ import {
   type LpIntentKey,
 } from "./data";
 import LpLanguagePicker from "./LpLanguagePicker";
+import AttachmentCard from "@/components/AttachmentCard";
 import {
   INTENT_L10N,
   TRADE_OPTIONS,
@@ -92,41 +92,18 @@ function WidgetMessageAttachments({
   attachments: LpAttachment[];
 }) {
   return (
-    <div className="mt-1.5 space-y-1">
-      {attachments.map((attachment) => {
-        const url = lpAttachmentUrl(token, attachment.id);
-        const isImage = (attachment.content_type || "").startsWith("image/");
-        return (
-          <a
-            key={attachment.id}
-            href={url}
-            target="_blank"
-            rel="noreferrer"
-            className="flex items-center gap-2 rounded-lg border border-white/80 bg-white/80 p-1.5 transition hover:border-emerald-300"
-          >
-            {isImage ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={url}
-                alt={attachment.filename}
-                className="h-10 w-10 shrink-0 rounded object-cover ring-1 ring-slate-200"
-              />
-            ) : (
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-white text-slate-500 ring-1 ring-slate-200">
-                <Paperclip className="h-3.5 w-3.5" />
-              </span>
-            )}
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[9.5px] font-bold text-slate-800">
-                {attachment.filename}
-              </span>
-              <span className="block text-[8.5px] text-slate-500">
-                {Math.max(1, Math.round(attachment.size_bytes / 1024))} KB
-              </span>
-            </span>
-          </a>
-        );
-      })}
+    <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+      {attachments.map((attachment) => (
+        <AttachmentCard
+          key={attachment.id}
+          url={lpAttachmentUrl(token, attachment.id)}
+          downloadUrl={`${lpAttachmentUrl(token, attachment.id)}?download=1`}
+          filename={attachment.filename}
+          contentType={attachment.content_type}
+          sizeBytes={attachment.size_bytes}
+          compact
+        />
+      ))}
     </div>
   );
 }
@@ -1125,38 +1102,21 @@ export default function LpWidgetPanel({
                 {attachments.length === 0 ? (
                   <p className="mt-1.5 text-[9.5px] text-slate-400">—</p>
                 ) : (
-                  <div className="mt-1.5 space-y-1.5">
-                    {attachments.map((attachment) => {
-                      const url = lpAttachmentUrl(token, attachment.id);
-                      const isImage = (attachment.content_type || "").startsWith(
-                        "image/"
-                      );
-                      return (
-                        <a
-                          key={attachment.id}
-                          href={url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/50 p-1.5 hover:border-emerald-300"
-                        >
-                          {isImage ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={url}
-                              alt={attachment.filename}
-                              className="h-8 w-8 rounded object-cover ring-1 ring-slate-200"
-                            />
-                          ) : (
-                            <span className="flex h-8 w-8 items-center justify-center rounded bg-white text-slate-400 ring-1 ring-slate-200">
-                              📎
-                            </span>
-                          )}
-                          <span className="min-w-0 flex-1 truncate text-[9.5px] font-semibold text-slate-600">
-                            {attachment.filename}
-                          </span>
-                        </a>
-                      );
-                    })}
+                  <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+                    {attachments.map((attachment) => (
+                      <AttachmentCard
+                        key={attachment.id}
+                        url={lpAttachmentUrl(token, attachment.id)}
+                        downloadUrl={`${lpAttachmentUrl(
+                          token,
+                          attachment.id
+                        )}?download=1`}
+                        filename={attachment.filename}
+                        contentType={attachment.content_type}
+                        sizeBytes={attachment.size_bytes}
+                        compact
+                      />
+                    ))}
                   </div>
                 )}
                 {attachmentError && (

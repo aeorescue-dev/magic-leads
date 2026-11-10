@@ -9406,6 +9406,23 @@ def _lp_public_availability(data: dict) -> dict:
     }
 
 
+def _lp_attachment_response(attachment: dict, download: bool) -> FileResponse:
+    content_type = attachment.get("content_type") or "application/octet-stream"
+    inline = (
+        not download
+        and (
+            content_type.startswith("image/")
+            or content_type == "application/pdf"
+        )
+    )
+    return FileResponse(
+        attachment["storage_path"],
+        filename=attachment["filename"],
+        media_type=content_type,
+        content_disposition_type="inline" if inline else "attachment",
+    )
+
+
 def _lp_widget_guard() -> None:
     """404 quando a fase está desligada — não revela a superfície da API."""
     if not bool(getattr(settings, "LP_WIDGET_ENABLED", False)):
@@ -9549,7 +9566,7 @@ async def lp_widget_upload_attachment(
 @app.get("/api/public/lp/threads/{token}/attachments/{attachment_id}")
 @limiter.limit("120/minute")
 async def lp_widget_download_attachment(
-    request: Request, token: str, attachment_id: int
+    request: Request, token: str, attachment_id: int, download: bool = False
 ):
     _lp_widget_guard()
     thread_id = await anyio.to_thread.run_sync(
@@ -9562,11 +9579,7 @@ async def lp_widget_download_attachment(
     )
     if not attachment:
         raise HTTPException(status_code=404, detail="Attachment not found")
-    return FileResponse(
-        attachment["storage_path"],
-        filename=attachment["filename"],
-        media_type=attachment.get("content_type") or "application/octet-stream",
-    )
+    return _lp_attachment_response(attachment, download)
 
 
 @app.get("/api/admin/lp/availability")
@@ -9674,6 +9687,7 @@ async def admin_lp_upload_attachment(
 async def admin_lp_download_attachment(
     thread_id: int,
     attachment_id: int,
+    download: bool = False,
     _admin: dict = Depends(_require_admin_user),
 ):
     _lp_widget_guard()
@@ -9682,11 +9696,7 @@ async def admin_lp_download_attachment(
     )
     if not attachment:
         raise HTTPException(status_code=404, detail="Attachment not found")
-    return FileResponse(
-        attachment["storage_path"],
-        filename=attachment["filename"],
-        media_type=attachment.get("content_type") or "application/octet-stream",
-    )
+    return _lp_attachment_response(attachment, download)
 
 
 @app.patch("/api/admin/lp/threads/{thread_id}/status")
