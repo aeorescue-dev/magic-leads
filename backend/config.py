@@ -111,6 +111,20 @@ class Settings(BaseSettings):
     # URL publica do MP3 deterministico do fallback (tecla 2). Vazio deriva
     # de PUBLIC_API_URL + /api/voice/fallback.mp3.
     VOICE_FALLBACK_AUDIO_URL: str = ""
+    # Cache/pre-renderizacao do TTS do script estatico. Default OFF: o
+    # comportamento atual (gather_using_speak) mantem-se.
+    # mode="dial": sintetiza por chamada antes de discar (texto atual, latencia
+    # zero, custo TTS maior). mode="shared": texto generico por trade/cidade
+    # (sem nome da empresa) para reutilizar o mesmo MP3 e cortar custo.
+    VOICE_TTS_CACHE_ENABLED: bool = False
+    VOICE_TTS_CACHE_MODE: str = "dial"
+    VOICE_TTS_CACHE_DIR: str = ""
+    VOICE_TTS_CACHE_BASE_URL: str = ""
+    VOICE_TTS_CACHE_TTL_DAYS: int = 30
+    VOICE_TTS_VOICE: str = ""
+    VOICE_TTS_TIMEOUT_SECONDS: float = 20.0
+    VOICE_TTS_MAX_CHARS: int = 3000
+    VOICE_TTS_COST_PER_CHAR: float = 0.000032
     # Janela de chamada no fuso local do estado (TCPA-friendly). Fim exclusivo.
     VOICE_CALL_START_HOUR: int = 9
     VOICE_CALL_END_HOUR: int = 20

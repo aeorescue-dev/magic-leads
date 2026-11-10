@@ -14,7 +14,7 @@ import anyio
 
 from ..config import settings
 from ..utils.logger import logger
-from . import b2b_voice, telnyx_voice
+from . import b2b_voice, telnyx_voice, voice_audio_cache, voice_scripts
 from .timeutil import NY_TZ, day_key, next_day_hour_utc, next_or_today_hour_utc
 
 MAX_GUARD_MULTIPLIER = 10
@@ -231,6 +231,32 @@ async def run_campaign(campaign_id: int) -> None:
     used_by_trade = await _run_sync(
         b2b_voice.campaign_trade_counts, campaign_id
     )
+
+    if voice_audio_cache.enabled() and voice_audio_cache.mode() == "shared":
+        prewarm_texts: list[str] = []
+        for item in trade_plan:
+            trade_code = str(item.get("trade") or "").strip()
+            if not trade_code or int(item.get("quota") or 0) <= 0:
+                continue
+            try:
+                rendered = voice_scripts.render(
+                    trade_code,
+                    "there",
+                    campaign.get("city") or "",
+                    0,
+                    "",
+                    "",
+                )
+                prewarm_texts.append(str(rendered.get("greeting") or ""))
+            except Exception:  # noqa: BLE001
+                continue
+        if prewarm_texts:
+            warmed = await _run_sync(voice_audio_cache.prewarm, prewarm_texts)
+            logger.info(
+                "[TTS-CACHE] prewarm shared: %s criados, %s hits",
+                warmed.get("created"),
+                warmed.get("hits"),
+            )
 
     async def next_trade_batch(limit: int) -> tuple[str, list[dict]]:
         for item in trade_plan:

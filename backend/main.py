@@ -117,6 +117,7 @@ from .services import (
     showcase,
     system_health,
     telnyx_voice,
+    voice_audio_cache,
     voice_scripts,
 )
 from .services.boston_address import clean_boston_location
@@ -3510,6 +3511,21 @@ async def voice_fallback_mp3():
     path = Path(__file__).resolve().parent / "static" / "voice_fallback.mp3"
     if not path.exists():
         raise HTTPException(status_code=404, detail="fallback audio missing")
+    return FileResponse(
+        path,
+        media_type="audio/mpeg",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
+
+
+@app.get("/api/voice/tts/{audio_hash}.mp3")
+async def voice_tts_mp3(audio_hash: str):
+    """MP3 pré-sintetizado do script estático (gather_using_audio)."""
+    if not voice_audio_cache.HEX64.match(str(audio_hash or "")):
+        raise HTTPException(status_code=404, detail="tts audio not found")
+    path = voice_audio_cache.path_for(str(audio_hash))
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="tts audio missing")
     return FileResponse(
         path,
         media_type="audio/mpeg",

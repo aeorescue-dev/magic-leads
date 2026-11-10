@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from backend.services import b2b_voice as voice
-from backend.services import showcase, telnyx_voice
+from backend.services import showcase, telnyx_voice, voice_scripts
 from backend.services.db import get_connection
 
 NOW = datetime(2026, 11, 2, 16, 0, tzinfo=timezone.utc)
@@ -226,6 +226,158 @@ def test_hangup_sem_duracao_usa_answered_at():
     assert 40 <= call["duration_seconds"] <= 60
     assert call["listen_seconds"] >= 40
     assert call["cost_cents"] > 0
+
+
+def test_static_mode_usa_gather_using_audio_quando_cache_pronto(monkeypatch, tmp_path):
+    company = _seed_company()
+    _seed_showcase()
+    created = telnyx_voice.create_call(company, campaign_id="test_call", dry_run=True)
+    call_id = created["voice_call_id"]
+    voice.update_voice_call(call_id, status="assistant_pending")
+    monkeypatch.setattr(telnyx_voice.settings, "VOICE_SCRIPT_MODE", "static")
+    monkeypatch.setattr(telnyx_voice, "configured", lambda: True)
+    monkeypatch.setattr(
+        telnyx_voice.settings, "VOICE_TTS_CACHE_ENABLED", True, raising=False
+    )
+    monkeypatch.setattr(
+        telnyx_voice.settings, "VOICE_TTS_CACHE_DIR", str(tmp_path), raising=False
+    )
+    monkeypatch.setattr(
+        telnyx_voice.settings,
+        "VOICE_TTS_CACHE_BASE_URL",
+        "https://example.test",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        telnyx_voice.settings, "VOICE_TTS_VOICE", "voice.test", raising=False
+    )
+    telnyx_voice.voice_audio_cache.init()
+    text = "Hi. This is an automated message."
+    cache_hash = telnyx_voice.voice_audio_cache.key(text)
+    path = telnyx_voice.voice_audio_cache.path_for(cache_hash)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"ID3" + b"\x00" * 200)
+    actions: list[tuple[str, dict]] = []
+
+    def fake_action(call_control_id, action, payload):
+        actions.append((action, payload))
+        return {"ok": True}
+
+    monkeypatch.setattr(telnyx_voice, "_call_action", fake_action)
+    result = telnyx_voice._start_static_script_for_call(
+        call_id,
+        "v3:static-cache",
+        {
+            "voice_call_id": call_id,
+            "company_id": company["id"],
+            "tts_url": telnyx_voice.voice_audio_cache.public_url(cache_hash),
+            "tts_hash": cache_hash,
+        },
+    )
+    assert result["ok"] is True
+    assert [action for action, _ in actions] == ["gather_using_audio"]
+    payload = actions[0][1]
+    assert payload["audio_url"].endswith(f"/api/voice/tts/{cache_hash}.mp3")
+    assert payload["valid_digits"] == "2"
+    assert payload["maximum_tries"] == 1
+    assert voice.get_voice_call(call_id)["status"] == "in_call"
+
+
+def test_static_mode_faz_fallback_para_speak_se_audio_falhar(monkeypatch, tmp_path):
+    company = _seed_company()
+    _seed_showcase()
+    created = telnyx_voice.create_call(company, campaign_id="test_call", dry_run=True)
+    call_id = created["voice_call_id"]
+    voice.update_voice_call(call_id, status="assistant_pending")
+    monkeypatch.setattr(telnyx_voice.settings, "VOICE_SCRIPT_MODE", "static")
+    monkeypatch.setattr(telnyx_voice, "configured", lambda: True)
+    monkeypatch.setattr(
+        telnyx_voice.settings, "VOICE_TTS_CACHE_ENABLED", True, raising=False
+    )
+    monkeypatch.setattr(
+        telnyx_voice.settings, "VOICE_TTS_CACHE_DIR", str(tmp_path), raising=False
+    )
+    monkeypatch.setattr(
+        telnyx_voice.settings, "VOICE_TTS_VOICE", "voice.test", raising=False
+    )
+    telnyx_voice.voice_audio_cache.init()
+    cache_hash = telnyx_voice.voice_audio_cache.key("text")
+    path = telnyx_voice.voice_audio_cache.path_for(cache_hash)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"ID3" + b"\x00" * 200)
+    actions: list[str] = []
+
+    def fake_action(call_control_id, action, payload):
+        actions.append(action)
+        return {"ok": action == "gather_using_speak"}
+
+    monkeypatch.setattr(telnyx_voice, "_call_action", fake_action)
+    result = telnyx_voice._start_static_script_for_call(
+        call_id,
+        "v3:static-cache",
+        {
+            "voice_call_id": call_id,
+            "company_id": company["id"],
+            "tts_url": "https://example.test/audio.mp3",
+            "tts_hash": cache_hash,
+        },
+    )
+    assert result["ok"] is True
+    assert actions == ["gather_using_audio", "gather_using_speak"]
+
+
+def test_create_call_adiciona_tts_url_ao_client_state(monkeypatch, tmp_path):
+    company = _seed_company()
+    _seed_showcase()
+    voice_scripts.init()
+    voice_scripts.approve_all()
+    monkeypatch.setattr(telnyx_voice.settings, "TELNYX_API_KEY", "KEY")
+    monkeypatch.setattr(telnyx_voice.settings, "TELNYX_CONNECTION_ID", "conn")
+    monkeypatch.setattr(
+        telnyx_voice.settings, "TELNYX_FROM_NUMBER", "+15550000000"
+    )
+    monkeypatch.setattr(telnyx_voice, "configured", lambda: True)
+    monkeypatch.setattr(telnyx_voice.settings, "VOICE_SCRIPT_MODE", "static")
+    monkeypatch.setattr(
+        telnyx_voice.settings, "VOICE_TTS_CACHE_ENABLED", True, raising=False
+    )
+    monkeypatch.setattr(
+        telnyx_voice.settings, "VOICE_TTS_CACHE_DIR", str(tmp_path), raising=False
+    )
+    monkeypatch.setattr(
+        telnyx_voice.settings, "VOICE_TTS_VOICE", "voice.test", raising=False
+    )
+    telnyx_voice.voice_audio_cache.init()
+    monkeypatch.setattr(
+        telnyx_voice.voice_audio_cache,
+        "get_or_create",
+        lambda text: {
+            "ok": True,
+            "hash": "a" * 64,
+            "url": "https://example.test/audio.mp3",
+            "chars": len(text),
+            "hit": False,
+        },
+    )
+    captured: dict = {}
+
+    class FakeResp:
+        status_code = 200
+        content = b'{"data":{"call_control_id":"v3:test"}}'
+
+        def json(self):
+            return {"data": {"call_control_id": "v3:test"}}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        captured["json"] = json
+        return FakeResp()
+
+    monkeypatch.setattr(telnyx_voice.httpx, "post", fake_post)
+    result = telnyx_voice.create_call(company, campaign_id="14")
+    assert result["ok"] is True, result
+    state = json.loads(base64.b64decode(captured["json"]["client_state"]))
+    assert state["tts_url"] == "https://example.test/audio.mp3"
+    assert state["tts_hash"] == "a" * 64
 
 
 def test_static_mode_usa_gather_using_speak_sem_ai(monkeypatch):
