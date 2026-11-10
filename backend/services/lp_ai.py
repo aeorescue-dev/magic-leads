@@ -121,11 +121,7 @@ _LANG_MARKERS = {
         "preço",
         "orçamento",
         "contato",
-        "contacto",
         "trabalho",
-        "empresa",
-        "semana",
-        "oportunidade",
     ),
     "es": (
         "estoy",
