@@ -63,7 +63,7 @@ def test_category_trade_dropdown_labels():
     assert tax.category_trade("Heating & Hot Water") == "hvac"
     assert tax.category_trade("Doors & Windows") == "windows"
     assert tax.category_trade("Rodents & Pests") == "pest_control"
-    assert tax.category_trade("Construction & Permits") is None
+    assert tax.category_trade("Construction & Permits") == "remodeling"
 
 
 def test_category_for_trade():
