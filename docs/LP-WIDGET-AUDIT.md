@@ -76,6 +76,18 @@ SQLite `lp_*`, tradução/IA, anexos, Resend e montagem invisível na LP.
     - Validado E2E: thread #17, resposta da equipa, follow-up do lead e inbox
       com a mensagem e estado `NOVO`.
 
+12. **Pré-visualização e colagem de anexos**
+    - Anexos de imagem abrem num lightbox (overlay) em vez de forçar download;
+      o download só acontece no botão **Download** (`?download=1`).
+    - O backend serve imagens/PDF como `Content-Disposition: inline` por defeito
+      e `attachment` apenas com `?download=1`.
+    - O compositor da inbox aceita **Ctrl+V** de prints: o ficheiro é
+      renomeado (`print-<timestamp>.<ext>`), enviado, indexado e associado à
+      resposta no momento do envio.
+    - Validado E2E: print colado (`print-...png`), anexo `id=13`,
+      `message_id=37` da resposta, `email_status=sent`; lightbox no widget e na
+      inbox com `downloadHref=...?download=1`.
+
 ## Validações
 
 - `pytest tests/test_lp_widget.py tests/test_lp_ai.py`: **28 passed**.

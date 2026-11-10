@@ -119,8 +119,10 @@ cartão e no detalhe.
 - **Filtros**: período `Hoje` / `Semana` (7 d) / `Mês` (30 d) e estado
   `Novo` / `Respondido` / `Arquivado`; o polling mantém os filtros ativos.
 - **Arquivar/reabrir**: `PATCH .../status`, sem apagar histórico.
-- **Anexos**: upload/download nos dois sentidos (lead e equipa), imagens
-  pré-visualizadas; PDF, Word, Excel, TXT, CSV e imagens até 10 MB. Guardados
+- **Anexos**: upload/download nos dois sentidos (lead e equipa), com o ficheiro
+  inline na bolha da mensagem. Imagens abrem em lightbox; o download é explícito.
+  O compositor aceita `Ctrl+V` de prints. PDF, Word, Excel, TXT, CSV e imagens
+  até 10 MB; os anexos da resposta seguem no e-mail Resend (máx. 20 MB). Ficam
   em `LP_UPLOAD_DIR` (default `$DATA_DIR/lp_uploads`), um diretório por thread.
 
 ### Alertas de novos leads
