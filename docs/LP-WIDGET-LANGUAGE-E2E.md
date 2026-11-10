@@ -100,13 +100,23 @@ O relatório visual com as caixas está em
 - Staging preview: `https://frontend-m2acf2d9j-fabio-dev2.vercel.app`
   - `/en/widget-preview` (teste isolado; LP oficial escondida pelo flag)
 
-## Estado de segurança
+## Estado final de produção
 
-- Correção apenas na branch `fix/lp-language-persistence`
-  (`4b26d63`, `860a69a`).
-- **Não foi feito merge para `master`.**
-- **Não foi feito deploy de produção nesta correção.**
-- `master` continua em `586195e`; o deploy de produção anterior permanece
-  inalterado desde a ordem de STOP.
-- Produção mantém o widget ativo com a versão antiga; recomenda-se desativar a
-  flag ou fazer rollback até o fix ser aprovado.
+- Correção desenvolvida em `fix/lp-language-persistence`
+  (`4b26d63`, `860a69a`, `d1f3a86`).
+- Kill-switch aplicado em produção antes da aprovação final:
+  `NEXT_PUBLIC_LP_WIDGET=false`, com redeploy de `master` (`586195e`) e
+  `/admin/lp-inbox` a 404.
+- Após a validação final, a branch foi merged em `master` (`d1f3a86`) e o
+  backend/frontend de produção foram deployados com
+  `NEXT_PUBLIC_LP_WIDGET=true` e `LP_WIDGET_ENABLED=true`.
+- Verificação pós-deploy em `https://www.magicleads.app`:
+  - `/en`, `/pt`, `/es` → 200;
+  - launcher presente e painel abre no idioma da LP (EN/PT/ES);
+  - `/api/public/lp/availability` → 200;
+  - `/admin/lp-inbox` → 200 (protegido por sessão admin);
+  - base de produção limpa: 0 threads e 0 anexos;
+  - `/health` do backend → 200.
+- Produção usa MyMemory enquanto não existir uma chave Gemini/OpenAI dedicada;
+  recomenda-se configurar a chave para qualidade e privacidade de nível
+  enterprise.
