@@ -354,7 +354,16 @@ def send_email(
         return False
 
     if response.status_code in (200, 201, 202):
-        logger.info("[LP-WIDGET] e-mail enviado via Resend para %s", to)
+        try:
+            email_id = str(response.json().get("id") or "")
+        except ValueError:
+            email_id = ""
+        logger.info(
+            "[LP-WIDGET] e-mail enviado via Resend para %s id=%s subject=%s",
+            to,
+            email_id or "-",
+            subject,
+        )
         return True
 
     logger.error(
@@ -551,7 +560,15 @@ def create_thread(
 
     token = secrets.token_urlsafe(32)
     now = _now()
-    lead_lang = lp_ai.detect_language(message)
+    raw_locale = _clean(locale, 8)
+    selected_lang = lp_ai.normalize_lang(raw_locale) if raw_locale else ""
+    detected_lang = lp_ai.detect_language(message)
+    # O idioma escolhido no widget é a fonte de verdade. Só o default EN é
+    # corrigido pela deteção quando o lead escreve claramente noutro idioma.
+    lead_lang = selected_lang or detected_lang
+    if selected_lang == "en" and detected_lang != "en":
+        lead_lang = detected_lang
+    locale_value = selected_lang or detected_lang or "en"
     sla_at = now + timedelta(
         hours=max(1, int(getattr(settings, "LP_WIDGET_SLA_HOURS", 4) or 4))
     )
@@ -576,7 +593,7 @@ def create_thread(
                 _clean(trade_code, 60),
                 _clean(lead_source, 40),
                 intent,
-                _clean(locale, 8) or "en",
+                locale_value,
                 _clean(source_section, 80),
                 _iso(now),
                 _iso(now),
@@ -594,7 +611,7 @@ def create_thread(
             "thread_id, direction, channel, body, body_pt, body_en, lang, "
             "author_type, created_at"
             ") VALUES (?, 'inbound', 'widget', ?, NULL, NULL, ?, 'lead', ?)",
-            (thread_id, message, lead_lang, _iso(now)),
+            (thread_id, message, detected_lang, _iso(now)),
         )
         _event(conn, thread_id, "thread_created", {"intent": intent})
         conn.commit()
@@ -613,9 +630,13 @@ def create_thread(
         _send_ack(thread, token, availability=availability) if send_ack else False
     )
     logger.info(
-        "[LP-WIDGET] thread #%s criado intent=%s ack=%s",
+        "[LP-WIDGET] thread #%s criado intent=%s lead_lang=%s "
+        "(selected=%s detected=%s) ack=%s",
         thread["id"],
         intent,
+        lead_lang,
+        selected_lang or "-",
+        detected_lang,
         ack_sent,
     )
     return {
@@ -672,6 +693,7 @@ def get_thread_public(token: str) -> Optional[dict]:
         return {
             "id": int(thread["id"]),
             "status": thread["status"],
+            "lead_lang": thread["lead_lang"],
             "created_at": thread["created_at"],
             "sla_hours": int(getattr(settings, "LP_WIDGET_SLA_HOURS", 4) or 4),
             "messages": messages,
@@ -1446,12 +1468,13 @@ def reply(
     email_attachments = attachments_for_email(
         thread_id, clean_attachment_ids
     )
+    subject = {
+        "pt": "Re: a sua pergunta sobre a Magic Leads",
+        "es": "Re: tu pregunta sobre Magic Leads",
+    }.get(lead_lang[:2], "Re: your question about Magic Leads")
     email_sent = send_email(
         email,
-        {
-            "pt": "Re: a sua pergunta sobre a Magic Leads",
-            "es": "Re: tu pregunta sobre Magic Leads",
-        }.get(lead_lang[:2], "Re: your question about Magic Leads"),
+        subject,
         en,
         reply_to=str(getattr(settings, "LP_WIDGET_REPLY_TO", "") or "") or None,
         attachments=email_attachments or None,
@@ -1468,7 +1491,13 @@ def reply(
         conn.close()
 
     logger.info(
-        "[LP-WIDGET] resposta no thread #%s email=%s", thread_id, email_sent
+        "[LP-WIDGET] resposta no thread #%s lang=%s subject=%s email=%s "
+        "attachments=%s",
+        thread_id,
+        lead_lang,
+        subject,
+        email_sent,
+        len(email_attachments),
     )
     return {
         "ok": True,

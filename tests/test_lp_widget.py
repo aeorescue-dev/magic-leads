@@ -270,6 +270,59 @@ def test_create_thread_stores_trade_code_and_source():
     assert admin["lead_source"] == "referral"
 
 
+def test_selected_locale_pt_is_authoritative_for_lead_lang():
+    created = _create(
+        locale="pt-BR",
+        message="I need a roofer in Dallas this week.",
+    )
+    admin = lp_widget.get_thread_admin(created["id"])
+    assert admin is not None
+    assert admin["lead_lang"] == "pt"
+    assert admin["locale"] == "pt"
+    assert admin["messages"][0]["lang"] == "en"
+
+
+def test_selected_locale_es_is_authoritative_for_lead_lang():
+    created = _create(
+        locale="es-ES",
+        message="I need a roofer in Dallas this week.",
+    )
+    admin = lp_widget.get_thread_admin(created["id"])
+    assert admin is not None
+    assert admin["lead_lang"] == "es"
+    assert admin["messages"][0]["lang"] == "en"
+
+
+def test_en_default_defers_to_detected_spanish_text():
+    created = _create(
+        locale="en",
+        message="Hola, necesito informacion sobre los precios en Dallas.",
+    )
+    admin = lp_widget.get_thread_admin(created["id"])
+    assert admin is not None
+    assert admin["lead_lang"] == "es"
+
+
+def test_ack_subject_follows_selected_locale(monkeypatch):
+    sent: list[dict] = []
+
+    def fake_send(to, subject, text, **kwargs):
+        sent.append({"subject": subject, "text": text})
+        return True
+
+    monkeypatch.setattr(lp_widget, "send_email", fake_send)
+    _create(locale="pt-BR", message="I need a roofer in Dallas.")
+    _create(locale="en", message="I need a roofer in Dallas.")
+    _create(locale="es-ES", message="I need a roofer in Dallas.")
+
+    assert sent[0]["subject"].startswith("Recebemos")
+    assert "Olá" in sent[0]["text"]
+    assert sent[1]["subject"].startswith("We received")
+    assert "Hi" in sent[1]["text"]
+    assert sent[2]["subject"].startswith("Hemos recibido")
+    assert "Hola" in sent[2]["text"]
+
+
 def test_attachment_roundtrip():
     created = _create()
     data = b"\x89PNG\r\n\x1a\n" + b"0" * 32

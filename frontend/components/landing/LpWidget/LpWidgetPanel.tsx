@@ -144,7 +144,13 @@ export default function LpWidgetPanel({
   const threadRef = useRef<HTMLDivElement | null>(null);
   const demoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [lang, setLang] = useState<WidgetLang>("en");
+  const [lang, setLang] = useState<WidgetLang>(() => {
+    if (typeof document === "undefined") return "en";
+    const base = (document.documentElement.lang || "")
+      .split("-")[0]
+      .toLowerCase();
+    return base === "pt" || base === "es" ? base : "en";
+  });
   const [edited, setEdited] = useState(false);
   const [step, setStep] = useState<Step>(1);
   const [intent, setIntent] = useState<LpIntentKey | null>(null);
@@ -320,6 +326,9 @@ export default function LpWidgetPanel({
       .then((data) => {
         if (!active) return;
         setToken(stored);
+        if (data.lead_lang === "pt" || data.lead_lang === "es" || data.lead_lang === "en") {
+          setLang(data.lead_lang);
+        }
         setThread(toThreadItems(data.messages));
         setAttachments(data.attachments || []);
         setSending(false);
@@ -482,10 +491,7 @@ export default function LpWidgetPanel({
         trade_code: tradeCode,
         lead_source: source,
         consent_email: consent,
-        locale:
-          typeof document !== "undefined"
-            ? document.documentElement.lang || "en"
-            : "en",
+        locale: lang,
         source_section: "landing_inline",
         website: "",
       });

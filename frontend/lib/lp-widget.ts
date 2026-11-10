@@ -45,6 +45,7 @@ export interface LpThread {
   id: number;
   status: string;
   created_at: string;
+  lead_lang?: string;
   sla_hours?: number;
   messages: LpThreadMessage[];
   attachments?: LpAttachment[];
