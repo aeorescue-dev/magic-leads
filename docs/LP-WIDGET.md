@@ -81,8 +81,9 @@ com `LP_WIDGET_PREVIEW=true` (ou com a flag pública ligada num build de staging
 
 - Parsing de respostas de e-mail (Fase 2). O e-mail é entrega; a conversa
   instantânea é o widget.
-- Anexos dentro do e-mail transacional (os anexos circulam no widget/inbox;
-  o e-mail leva apenas o texto).
+- Anexos no e-mail inicial de acknowledgment (o acknowledgment é só texto). Os
+  anexos enviados com uma resposta da equipa seguem no e-mail Resend e ficam
+  inline na conversa.
 - SMS/WhatsApp.
 - Atendimento telefónico e agendamento de chamadas. A captação é 100% por
   mensagem/e-mail.

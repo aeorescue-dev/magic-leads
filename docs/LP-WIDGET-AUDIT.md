@@ -43,7 +43,13 @@ SQLite `lp_*`, tradução/IA, anexos, Resend e montagem invisível na LP.
    - SVG e tipos desconhecidos passam a ser rejeitados (evita SVG com script
      servido same-origin).
    - Imagens permitidas: PNG, JPEG, GIF, WebP, BMP. Documentos: PDF, Word,
-     Excel, TXT, CSV. Limite 10 MB.
+     Excel, TXT, CSV. Limite 10 MB por ficheiro.
+   - O anexo do lead fica associado à bolha da mensagem (`message_id`) e é
+     renderizado inline no widget e na inbox.
+   - O compositor de resposta da inbox tem botão **Anexar**; os ficheiros vão
+     no e-mail Resend (limite 20 MB) e ficam inline na bolha de saída.
+   - Se o lead anexa depois de uma resposta da equipa, é criada uma mensagem
+     inbound própria (`📎 ficheiro`) para o ficheiro aparecer no fim da conversa.
    - `accept` do widget e da inbox alinhado com o backend.
 
 8. **Latência do acknowledgment**
@@ -95,7 +101,8 @@ Resend. O motor de voz e o analytics permanecem intocados.
 
 ## Limitações conhecidas
 
-- Anexos não seguem no e-mail transacional (circulam no widget/inbox).
+- Anexos de resposta seguem no e-mail via Resend; o acknowledgment inicial não
+  leva anexos.
 - Sem chave LLM no staging, a tradução usa MyMemory; produção deve usar
   Gemini/OpenAI.
 - O alerta sonoro exige interação prévia com a página (política de autoplay dos
