@@ -32,7 +32,8 @@ com `LP_WIDGET_PREVIEW=true` (ou com a flag pública ligada num build de staging
 - `components/landing/LpWidget/LpWidgetPanel.tsx` — painel de conversa,
   branco, com chips, composer e entrega simulada/real. Fluxo de captação em
   **4 passos**: intenção → ofício + cidade → origem do lead → mensagem/contacto;
-  depois abre a conversa (passo 5) com polling de 5 s e anexos.
+  depois abre a conversa (passo 5) com polling de 5 s, anexos e caixa de
+  follow-up contínua (o lead responde na mesma thread sem reiniciar).
 - `components/landing/LpWidget/i18n.ts` — copy EN/PT/ES, as 16 categorias
   canónicas (`TRADE_OPTIONS`) e as 4 origens (`WIDGET_SOURCES`), sempre
   traduzidas pelo idioma ativo.

@@ -62,6 +62,14 @@ SQLite `lp_*`, tradução/IA, anexos, Resend e montagem invisível na LP.
       já não pertence à lista.
     - Label dos dias úteis vem de `business_days` (não hardcoded).
 
+11. **Conversa contínua no widget**
+    - Após a resposta da equipa, o passo 5 mantém uma caixa de mensagem ativa
+      (não força “Começar de novo”).
+    - O follow-up usa `POST /api/public/lp/threads/{token}/messages`, cai na
+      mesma thread, reabre o estado `new` e aparece na inbox por polling.
+    - Validado E2E: thread #17, resposta da equipa, follow-up do lead e inbox
+      com a mensagem e estado `NOVO`.
+
 ## Validações
 
 - `pytest tests/test_lp_widget.py tests/test_lp_ai.py`: **28 passed**.
