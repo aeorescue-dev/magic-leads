@@ -376,6 +376,27 @@ def test_acknowledgment_uses_lead_language(monkeypatch):
     assert all("refer" not in item["text"].lower() for item in sent)
 
 
+def test_send_acknowledgment_background_helper(monkeypatch):
+    sent: list[str] = []
+
+    def fake_send(to, subject, text, **kwargs):
+        sent.append(text)
+        return True
+
+    monkeypatch.setattr(lp_widget, "send_email", fake_send)
+    ok = lp_widget.send_acknowledgment(
+        thread_id=31,
+        token="tok",
+        email="lead@example.com",
+        name="Ana",
+        lead_lang="es",
+        availability={"status": "online", "next_open_at": None},
+    )
+    assert ok is True
+    assert sent and sent[0].startswith("Hola Ana,")
+    assert "#LP" not in sent[0]
+
+
 def test_reply_email_uses_lead_language(monkeypatch):
     created = _create(
         message=(
