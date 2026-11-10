@@ -69,7 +69,11 @@ def test_live_dashboard_mostra_ativa_e_resumo():
     assert live["active_calls"][0]["elapsed_seconds"] >= 10
 
 
-def test_voice_liquidity_separa_exact_e_desconta_7d():
+def test_voice_liquidity_separa_exact_e_desconta_7d(monkeypatch):
+    # `voice_liquidity` usa `datetime('now','-7 days')` no SQLite (relógio
+    # real). Alinha o relógio da criação da chamada com o real para o teste
+    # não expirar à medida que o calendário avança.
+    monkeypatch.setenv("VOICE_NOW_ISO", datetime.now(timezone.utc).isoformat())
     company = _company()
     conn = voice.get_conn()
     try:
