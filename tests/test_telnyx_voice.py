@@ -380,6 +380,65 @@ def test_create_call_adiciona_tts_url_ao_client_state(monkeypatch, tmp_path):
     assert state["tts_hash"] == "a" * 64
 
 
+def test_create_call_shared_usa_hi_there(monkeypatch, tmp_path):
+    company = _seed_company()
+    _seed_showcase()
+    voice_scripts.init()
+    voice_scripts.approve_all()
+    monkeypatch.setattr(telnyx_voice.settings, "TELNYX_API_KEY", "KEY")
+    monkeypatch.setattr(telnyx_voice.settings, "TELNYX_CONNECTION_ID", "conn")
+    monkeypatch.setattr(
+        telnyx_voice.settings, "TELNYX_FROM_NUMBER", "+15550000000"
+    )
+    monkeypatch.setattr(telnyx_voice, "configured", lambda: True)
+    monkeypatch.setattr(telnyx_voice.settings, "VOICE_SCRIPT_MODE", "static")
+    monkeypatch.setattr(
+        telnyx_voice.settings, "VOICE_TTS_CACHE_ENABLED", True, raising=False
+    )
+    monkeypatch.setattr(
+        telnyx_voice.settings, "VOICE_TTS_CACHE_MODE", "shared", raising=False
+    )
+    monkeypatch.setattr(
+        telnyx_voice.settings, "VOICE_TTS_CACHE_DIR", str(tmp_path), raising=False
+    )
+    monkeypatch.setattr(
+        telnyx_voice.settings, "VOICE_TTS_VOICE", "voice.test", raising=False
+    )
+    telnyx_voice.voice_audio_cache.init()
+    seen: dict = {}
+
+    def fake_cache(text):
+        seen["text"] = text
+        return {
+            "ok": True,
+            "hash": "b" * 64,
+            "url": "https://example.test/shared.mp3",
+            "chars": len(text),
+            "hit": False,
+        }
+
+    monkeypatch.setattr(telnyx_voice.voice_audio_cache, "get_or_create", fake_cache)
+    captured: dict = {}
+
+    class FakeResp:
+        status_code = 200
+        content = b'{"data":{"call_control_id":"v3:test"}}'
+
+        def json(self):
+            return {"data": {"call_control_id": "v3:test"}}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        captured["json"] = json
+        return FakeResp()
+
+    monkeypatch.setattr(telnyx_voice.httpx, "post", fake_post)
+    result = telnyx_voice.create_call(company, campaign_id="14")
+    assert result["ok"] is True, result
+    state = json.loads(base64.b64decode(captured["json"]["client_state"]))
+    assert state["tts_company"] == "there"
+    assert seen["text"].startswith("Hi there.")
+
+
 def test_static_mode_usa_gather_using_speak_sem_ai(monkeypatch):
     company = _seed_company()
     _seed_showcase()

@@ -227,16 +227,18 @@ def create_call(
 
     tts_url = ""
     tts_hash = ""
+    tts_company = ""
     if voice_audio_cache.enabled():
         try:
-            render_company = (
-                "there"
-                if voice_audio_cache.mode() == "shared"
-                else str(company.get("company_name") or "")
-            )
+            if voice_audio_cache.mode() == "shared":
+                tts_company = str(
+                    getattr(settings, "VOICE_TTS_SHARED_NAME", "there") or "there"
+                )
+            else:
+                tts_company = str(company.get("company_name") or "")
             rendered = voice_scripts.render(
                 call_trade,
-                render_company,
+                tts_company,
                 city or company.get("city") or "",
                 int(company.get("permit_count") or 0),
                 company.get("state") or "",
@@ -275,6 +277,7 @@ def create_call(
             "assistant_id": assistant_id,
             "tts_url": tts_url,
             "tts_hash": tts_hash,
+            "tts_company": tts_company,
         }
     )
     amd_mode = (
@@ -559,7 +562,8 @@ def _render_for_call(current: dict, client_state: dict) -> dict:
     company = b2b_voice.get_company(company_id) if company_id else {}
     company = company or {}
     company_name = (
-        company.get("company_name")
+        client_state.get("tts_company")
+        or company.get("company_name")
         or client_state.get("company_name")
         or ""
     )

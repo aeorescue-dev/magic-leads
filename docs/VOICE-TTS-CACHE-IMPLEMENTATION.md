@@ -49,6 +49,7 @@ chamadas do mesmo trade/cidade/contagem. O prewarm no arranque gera os ~9
 | `VOICE_TTS_CACHE_DIR` | `/data/voice_cache` | volume persistente |
 | `VOICE_TTS_CACHE_BASE_URL` | `PUBLIC_API_URL` | base do URL público |
 | `VOICE_TTS_VOICE` | `TELNYX_ASSISTANT_VOICE` | mesma voz |
+| `VOICE_TTS_SHARED_NAME` | `there` | nome genérico do modo `shared` |
 | `VOICE_TTS_CACHE_TTL_DAYS` | `30` | limpeza |
 | `VOICE_TTS_TIMEOUT_SECONDS` | `20` | timeout da síntese |
 | `VOICE_TTS_MAX_CHARS` | `3000` | limite por áudio |

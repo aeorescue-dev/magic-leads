@@ -233,6 +233,9 @@ async def run_campaign(campaign_id: int) -> None:
     )
 
     if voice_audio_cache.enabled() and voice_audio_cache.mode() == "shared":
+        shared_name = str(
+            getattr(settings, "VOICE_TTS_SHARED_NAME", "there") or "there"
+        )
         prewarm_texts: list[str] = []
         for item in trade_plan:
             trade_code = str(item.get("trade") or "").strip()
@@ -241,7 +244,7 @@ async def run_campaign(campaign_id: int) -> None:
             try:
                 rendered = voice_scripts.render(
                     trade_code,
-                    "there",
+                    shared_name,
                     campaign.get("city") or "",
                     0,
                     "",

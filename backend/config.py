@@ -122,6 +122,8 @@ class Settings(BaseSettings):
     VOICE_TTS_CACHE_BASE_URL: str = ""
     VOICE_TTS_CACHE_TTL_DAYS: int = 30
     VOICE_TTS_VOICE: str = ""
+    # Nome genérico usado no modo shared (substitui {{company}} no áudio).
+    VOICE_TTS_SHARED_NAME: str = "there"
     VOICE_TTS_TIMEOUT_SECONDS: float = 20.0
     VOICE_TTS_MAX_CHARS: int = 3000
     VOICE_TTS_COST_PER_CHAR: float = 0.000032
