@@ -11,8 +11,10 @@ import {
   ArrowRight,
   CheckCircle2,
   Flame,
+  Loader2,
   Lock,
   Moon,
+  Send,
   ShieldCheck,
   X,
 } from "lucide-react";
@@ -21,6 +23,7 @@ import {
   fetchLpAvailability,
   fetchLpThread,
   lpAttachmentUrl,
+  sendLpFollowUp,
   trackLpWidget,
   uploadLpAttachment,
   type LpAttachment,
@@ -109,6 +112,7 @@ export default function LpWidgetPanel({
   className = "",
 }: LpWidgetPanelProps) {
   const titleId = useId();
+  const followUpId = useId();
   const panelRef = useRef<HTMLDivElement | null>(null);
   const threadRef = useRef<HTMLDivElement | null>(null);
   const demoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -133,6 +137,9 @@ export default function LpWidgetPanel({
   const [attachments, setAttachments] = useState<LpAttachment[]>([]);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const [attachmentError, setAttachmentError] = useState("");
+  const [followUp, setFollowUp] = useState("");
+  const [followUpSending, setFollowUpSending] = useState(false);
+  const [followUpError, setFollowUpError] = useState("");
   const [availability, setAvailability] = useState<LpAvailability | null>(null);
 
   useEffect(() => {
@@ -318,6 +325,9 @@ export default function LpWidgetPanel({
     setSending(false);
     setToken(null);
     setAttachments([]);
+    setFollowUp("");
+    setFollowUpSending(false);
+    setFollowUpError("");
     try {
       window.sessionStorage.removeItem("lp_widget_thread");
     } catch {
@@ -474,6 +484,29 @@ export default function LpWidgetPanel({
       setAttachmentError(copy.attachError);
     } finally {
       setUploadingAttachment(false);
+    }
+  }
+
+  async function sendFollowUpMessage() {
+    const text = followUp.trim();
+    if (!token || !text || followUpSending) return;
+    const optimisticId = `lead-local-${Date.now()}`;
+    setFollowUpSending(true);
+    setFollowUpError("");
+    setFollowUp("");
+    setThread((prev) => [
+      ...prev,
+      { id: optimisticId, role: "lead", text, at: now() },
+    ]);
+    try {
+      await sendLpFollowUp(token, text);
+      trackLpWidget("lp_widget_follow_up");
+    } catch {
+      setFollowUpError(copy.followUpError);
+      setFollowUp(text);
+      setThread((prev) => prev.filter((item) => item.id !== optimisticId));
+    } finally {
+      setFollowUpSending(false);
     }
   }
 
@@ -864,7 +897,7 @@ export default function LpWidgetPanel({
               {copy.conversation}
             </p>
             <p className="mt-1 text-[12px] leading-relaxed text-slate-500">
-              {copy.reviewing}
+              {replied ? copy.chatOpen : copy.reviewing}
             </p>
 
             {offline && (
@@ -943,6 +976,55 @@ export default function LpWidgetPanel({
             )}
 
             {mode === "live" && token && (
+              <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50/40 p-3">
+                <label
+                  htmlFor={followUpId}
+                  className="text-[10px] font-black uppercase tracking-wide text-slate-600"
+                >
+                  {copy.followUpLabel}
+                </label>
+                <div className="mt-1.5 flex items-end gap-2">
+                  <textarea
+                    id={followUpId}
+                    value={followUp}
+                    onChange={(event) => setFollowUp(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && !event.shiftKey) {
+                        event.preventDefault();
+                        void sendFollowUpMessage();
+                      }
+                    }}
+                    rows={2}
+                    maxLength={2000}
+                    placeholder={copy.followUpPlaceholder}
+                    className="min-h-[44px] flex-1 resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12.5px] leading-relaxed text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void sendFollowUpMessage()}
+                    disabled={!followUp.trim() || followUpSending}
+                    aria-label={copy.followUpSend}
+                    className="flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-lg bg-emerald-500 text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {followUpSending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Send className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
+                {followUpError && (
+                  <p
+                    role="alert"
+                    className="mt-1.5 text-[10px] font-semibold text-rose-600"
+                  >
+                    {followUpError}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {mode === "live" && token && (
               <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-[9px] font-black uppercase tracking-wide text-slate-400">
@@ -1015,7 +1097,7 @@ export default function LpWidgetPanel({
             <button
               type="button"
               onClick={checkAvailability}
-              className="mt-3 w-full rounded-lg bg-emerald-500 py-2.5 text-[12.5px] font-bold text-white transition hover:bg-emerald-600"
+              className="mt-3 w-full rounded-lg border border-slate-200 bg-white py-2 text-[11px] font-semibold text-slate-600 transition hover:border-emerald-300 hover:text-emerald-700"
             >
               {copy.checkCity}
             </button>

@@ -70,6 +70,12 @@ const EN = {
   offlineTitle: "We received your message",
   offlineNotice:
     "Our team is currently outside business hours. We will reply first thing on the next business day.",
+  chatOpen: "You can keep the conversation going here.",
+  followUpLabel: "Your message",
+  followUpPlaceholder: "Write a follow-up…",
+  followUpSend: "Send",
+  followUpSending: "Sending…",
+  followUpError: "Could not send. Please try again.",
 };
 
 type Copy = { [K in keyof typeof EN]: string };
@@ -131,6 +137,12 @@ const PT: Copy = {
   offlineTitle: "Recebemos a sua mensagem",
   offlineNotice:
     "A nossa equipa está fora do horário de atendimento. Responderemos nas primeiras horas do próximo dia útil.",
+  chatOpen: "Pode continuar a conversa aqui.",
+  followUpLabel: "A sua mensagem",
+  followUpPlaceholder: "Escreva uma mensagem de seguimento…",
+  followUpSend: "Enviar",
+  followUpSending: "A enviar…",
+  followUpError: "Não foi possível enviar. Tente novamente.",
 };
 
 const ES: Copy = {
@@ -190,6 +202,12 @@ const ES: Copy = {
   offlineTitle: "Hemos recibido tu mensaje",
   offlineNotice:
     "Nuestro equipo está fuera del horario de atención. Te responderemos a primera hora del próximo día hábil.",
+  chatOpen: "Puedes seguir la conversación aquí.",
+  followUpLabel: "Tu mensaje",
+  followUpPlaceholder: "Escribe un mensaje de seguimiento…",
+  followUpSend: "Enviar",
+  followUpSending: "Enviando…",
+  followUpError: "No se pudo enviar. Inténtalo de nuevo.",
 };
 
 export const WIDGET_COPY: Record<WidgetLang, Copy> = {
