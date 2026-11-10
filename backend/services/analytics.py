@@ -78,6 +78,7 @@ _ALLOWED_EVENTS = {
     "cta_click",
     "form_start",
     "form_submit",
+    "checkout_started",
     "scroll",
     "outbound_click",
     "language_switch",

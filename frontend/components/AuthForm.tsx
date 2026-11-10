@@ -7,6 +7,7 @@ import { Loader2, Eye, EyeOff, Mail, Lock, Building2, ArrowRight, CheckCircle, A
 import { useAuth } from '@/lib/auth';
 import { useI18n } from '@/lib/i18n';
 import { useStartCheckout } from '@/lib/billing';
+import { trackEvent } from '@/lib/analytics';
 import { requestPasswordReset, setAuthCookie, setToken } from '@/lib/api-client';
 import { hasPasskeyHint, isPasskeySupported, loginWithPasskey, PasskeyError, passkeyMessageKey, passkeyPlatform, passkeyPlatformSuffix, setPasskeyHint } from '@/lib/webauthn';
 
@@ -103,6 +104,7 @@ function AuthFormInner() {
     rawNext && rawNext.startsWith('/') && !rawNext.startsWith('//')
       ? rawNext
       : null;
+  const checkoutIntent = searchParams.get('checkout') === '1';
 
   const localePath = (href: string) => `/${lang}${href}`;
 
@@ -229,9 +231,27 @@ function AuthFormInner() {
           return;
         }
         setSuccess(true);
+        trackEvent("checkout_started", "signup");
         setTimeout(() => {
           window.location.href = checkoutUrl;
         }, 600);
+      } else if (checkoutIntent) {
+        setSuccess(true);
+        try {
+          const res = await startCheckout();
+          if (!res.checkout_url) throw new Error("checkout_unavailable");
+          trackEvent("checkout_started", "login");
+          setTimeout(() => {
+            window.location.href = res.checkout_url!;
+          }, 600);
+        } catch (err: any) {
+          setSuccess(false);
+          const msg =
+            err?.response?.data?.detail ||
+            err?.message ||
+            'Pagamento indisponível no momento. Tente novamente.';
+          setErrors({ general: msg });
+        }
       } else {
         setSuccess(true);
         const destination = nextPath || (user.is_admin ? '/admin/lp-inbox' : localePath('/dashboard'));
@@ -292,7 +312,7 @@ function AuthFormInner() {
 
   // Render the actual form
   return (
-    <form onSubmit={handleSubmit} className="w-full max-w-md mx-auto space-y-4">
+    <form onSubmit={handleSubmit} data-track-form="auth_main" className="w-full max-w-md mx-auto space-y-4">
       <div className="flex justify-center gap-2 mb-2">
         <button
           type="button"

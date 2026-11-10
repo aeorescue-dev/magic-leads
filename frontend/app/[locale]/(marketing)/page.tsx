@@ -102,7 +102,6 @@ export default function LandingPage() {
   const [tplTrade, setTplTrade] = useState<TradeKey>("Telhado");
   const [tplChannel, setTplChannel] = useState<Channel>("whatsapp");
   const [ticketValue, setTicketValue] = useState(6500);
-  const [conversionRate, setConversionRate] = useState(3);
   const [openFaq, setOpenFaq] = useState<number | null>(0);
 
   // dados reais (métricas públicas — fonte única da verdade)
@@ -203,9 +202,9 @@ export default function LandingPage() {
     `${Math.floor(s / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;
   const validatedPhones = Math.round(300 * 0.7);
   const estimatedVisits = Math.round(validatedPhones * 0.25);
-  const closedJobs = Math.max(1, Math.round(estimatedVisits * (conversionRate / 20)));
+  const closedJobs = Math.max(0, Math.round(estimatedVisits / 20));
   const monthlyRevenue = closedJobs * ticketValue;
-  const monthsPaid = (ticketValue / 480).toFixed(1);
+  const monthsPaid = (ticketValue / 520).toFixed(1);
 
   const copyTpl = (text: string) => {
     navigator.clipboard?.writeText(text).catch(() => {});
@@ -234,13 +233,20 @@ export default function LandingPage() {
             </button>
             <button onClick={() => scrollTo("simulador")} data-track="sample_cta" className="btn-outline flex w-full items-center justify-center px-7 py-4 text-sm sm:w-auto">{t("landing.ctaSample")}</button>
           </div>
-          <div className="fade-up mt-8 flex flex-wrap items-center justify-center gap-x-8 gap-y-2 text-sm font-medium text-[#54617a]">
-            {L.trust.map((item) => (
-              <span key={item} className="flex items-center gap-1.5">
-                <svg className="h-4 w-4 text-[#10b981]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
-                {item}
-              </span>
-            ))}
+          <div className="fade-up mx-auto mt-7 max-w-3xl rounded-2xl border border-[#10b981]/25 bg-[#10b981]/[0.06] px-4 py-3">
+            <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs font-black text-[#0a8f65]">
+              {L.trust.map((item) => (
+                <span key={item} className="inline-flex items-center gap-1.5">
+                  <svg className="h-4 w-4 text-[#10b981]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
+                  {item}
+                </span>
+              ))}
+            </div>
+            {L.quotes[0] && (
+              <p className="mt-2 text-center text-[11px] font-semibold text-[#54617a]">
+                “{L.quotes[0].badge}” — {L.quotes[0].name}, {L.quotes[0].role}
+              </p>
+            )}
           </div>
           <p className="mt-4 text-sm text-[#94a3b8]">{t("landing.priceLine")}</p>
           <div className="pop-in mx-auto mt-14 max-w-4xl">
@@ -547,9 +553,11 @@ export default function LandingPage() {
               <div className="flex items-center justify-between"><span className="text-sm font-bold text-[#cbd5e1]">{t("landing.ticketAvg")}</span><span className="font-display text-2xl font-black text-[#34e0a1]">${ticketValue.toLocaleString("en-US")}</span></div>
               <input type="range" min={2000} max={15000} step={500} value={ticketValue} onChange={(e) => setTicketValue(Number(e.target.value))} className="range-dark mt-4 w-full" />
               <div className="mt-8 border-t border-white/10 pt-6">
-                <div className="flex items-center justify-between"><span className="text-sm font-bold text-[#cbd5e1]">{t("landing.closes20")}</span><span className="font-display text-2xl font-black text-[#9d80ff]">{conversionRate}</span></div>
-                <input type="range" min={1} max={6} step={1} value={conversionRate} onChange={(e) => setConversionRate(Number(e.target.value))} className="range-dark mt-4 w-full" />
-                <div className="mt-2 flex justify-between text-[10px] font-bold text-[#64748b]"><span>{t("landing.conservative")}</span><span>{t("landing.normal")}</span><span>{t("landing.high")}</span></div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-bold text-[#cbd5e1]">{t("landing.closes20")}</span>
+                  <span className="font-display text-2xl font-black text-[#9d80ff]">5%</span>
+                </div>
+                <p className="mt-2 text-[11px] font-semibold text-[#64748b]">{t("landing.calcNote")}</p>
               </div>
               <div className="mt-8 grid grid-cols-3 gap-3 border-t border-white/10 pt-6 text-center">
                 <div className="rounded-xl bg-white/5 p-3"><p className="font-display text-lg font-black">300</p><p className="text-[10px] text-[#9aa7ba]">{t("landing.leadsM")}</p></div>
@@ -564,11 +572,12 @@ export default function LandingPage() {
                 <p className="mt-3 text-sm font-bold">{L.aboutJobs(closedJobs, ticketValue.toLocaleString("en-US"))}</p>
               </div>
               <div className="my-6 space-y-3 border-y border-white/20 py-5 text-sm font-semibold">
-                <div className="flex justify-between"><span className="text-white/80">{t("landing.invest")}</span><span>$480{t("landing.perMo")}</span></div>
-                <div className="flex justify-between"><span className="text-white/80">{t("landing.costDelivered")}</span><span>~$2.29</span></div>
+                <div className="flex justify-between"><span className="text-white/80">{t("landing.invest")}</span><span>$520{t("landing.perMo")}</span></div>
+                <div className="flex justify-between"><span className="text-white/80">{t("landing.costDelivered")}</span><span>~$2.48</span></div>
                 <div className="flex justify-between text-base"><span>{t("landing.onePays")}</span><span className="rounded-lg bg-[#04231a] px-2.5 py-0.5 text-[#34e0a1]">{monthsPaid} {t("landing.months")}</span></div>
               </div>
               <button onClick={openModal} data-track="calc_cta" className="w-full rounded-xl bg-white py-4 text-sm font-black uppercase tracking-wider text-[#0a8f65]">{t("landing.calcCta")}</button>
+              <p className="mt-3 text-center text-[11px] font-black text-white/90">✓ {t("landing.trust2")} · ✓ {t("landing.trust3")}</p>
             </div>
           </div>
         </div>
@@ -622,6 +631,12 @@ export default function LandingPage() {
                 ))}
               </ul>
               <button onClick={openModal} data-track="plan_cta" className="btn-mint mt-8 w-full py-4 text-base uppercase tracking-wider">{t("landing.planCta")}</button>
+              <div className="mt-4 rounded-xl border border-[#34e0a1]/25 bg-[#34e0a1]/10 px-3 py-2.5 text-center">
+                <p className="text-[11px] font-black text-[#34e0a1]">✓ {t("landing.trust2")} · ✓ {t("landing.trust3")}</p>
+                {L.quotes[0] && (
+                  <p className="mt-1 text-[11px] font-semibold text-white/80">“{L.quotes[0].badge}” — {L.quotes[0].name}, {L.quotes[0].role}</p>
+                )}
+              </div>
               <p className="mt-3 text-center text-xs text-[#64748b]">{t("landing.planSafe")}</p>
             </div>
             <div className="flex flex-col gap-6">
@@ -685,6 +700,11 @@ export default function LandingPage() {
           <h2 className="font-display mt-6 text-4xl font-black sm:text-6xl">{t("landing.finalTitle")}<br /><span className="hl">{t("landing.finalHl")}</span></h2>
           <p className="mx-auto mt-6 max-w-xl text-lg text-[#9aa7ba]">{t("landing.finalSub")}</p>
           <button onClick={openModal} data-track="final_cta" className="btn-mint mx-auto mt-9 inline-flex items-center gap-2.5 px-9 py-4 text-base uppercase tracking-wider">{t("landing.finalCta")}</button>
+          <div className="mx-auto mt-5 flex max-w-xl flex-wrap items-center justify-center gap-x-5 gap-y-2 rounded-2xl border border-[#34e0a1]/20 bg-[#34e0a1]/10 px-4 py-3 text-xs font-black text-[#34e0a1]">
+            <span>✓ {t("landing.trust2")}</span>
+            <span>✓ {t("landing.trust3")}</span>
+            {L.quotes[0] && <span className="text-white/70">“{L.quotes[0].badge}” — {L.quotes[0].name}, NY</span>}
+          </div>
           <p className="mt-4 text-xs text-[#64748b]">{t("landing.finalFoot")}</p>
         </div>
       </section>
@@ -695,6 +715,7 @@ export default function LandingPage() {
           <div>
             <p className="font-display text-lg font-black leading-none">$120<span className="text-xs font-bold text-[#94a3b8]">{t("landing.week")}</span></p>
             <p className="text-[11px] font-bold text-[#10b981]">{t("landing.stickyArea")}</p>
+            <p className="text-[10px] font-bold text-[#0a8f65]">✓ {t("landing.trust2")} · ✓ {t("landing.trust3")}</p>
           </div>
           <button onClick={openModal} data-track="sticky_cta" className="btn-mint flex-1 py-3 text-sm">{t("landing.stickyNow")}</button>
         </div>

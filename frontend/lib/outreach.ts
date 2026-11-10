@@ -1,4 +1,5 @@
-import { DICTS, LANGS_VALID, Lang } from "@/lib/i18n";
+import { LANGS_VALID, Lang } from "@/lib/i18n";
+import { DICTS } from "@/lib/i18n/dicts";
 
 export interface OutreachData {
   owner?: string;

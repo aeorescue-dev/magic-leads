@@ -13,12 +13,14 @@ export function ShowcaseCta({
   city,
   trade,
   priceUsd,
+  locale,
   compact = false,
 }: {
   token: string;
   city: string;
   trade: string;
   priceUsd: number;
+  locale: string;
   compact?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
@@ -26,7 +28,8 @@ export function ShowcaseCta({
 
   const start = async () => {
     if (!token) {
-      window.location.href = "/en";
+      const next = `/${locale}/${city}/${trade}`;
+      window.location.href = `/${locale}/auth?next=${encodeURIComponent(next)}&checkout=1`;
       return;
     }
     setBusy(true);
