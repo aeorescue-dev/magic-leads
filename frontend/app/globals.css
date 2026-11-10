@@ -1157,3 +1157,143 @@
 @media (max-width: 640px) {
   .grid-fade { background-size: 40px 40px; }
 }
+
+/* ============================================================
+   Landing v3 — unified dark, product-led (staging)
+   ============================================================ */
+.dark-page {
+  background: #06080b;
+  color: #e9edf3;
+}
+.dark-grid {
+  background-image:
+    linear-gradient(to right, rgba(255,255,255,0.028) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255,255,255,0.028) 1px, transparent 1px);
+  background-size: 72px 72px;
+  -webkit-mask-image: radial-gradient(ellipse at 50% 0%, #000 10%, transparent 72%);
+  mask-image: radial-gradient(ellipse at 50% 0%, #000 10%, transparent 72%);
+}
+.dark-page ::selection { background: #19c37d; color: #04120d; }
+.dark-page h1, .dark-page h2, .dark-page h3, .dark-page h4 { color: #f5f7fa; }
+
+.dark-panel {
+  background: #0a0d12;
+  border: 1px solid rgba(255,255,255,0.075);
+  border-radius: 1.25rem;
+  box-shadow: 0 24px 60px -40px rgba(0,0,0,0.95), inset 0 1px 0 rgba(255,255,255,0.035);
+}
+.dark-panel-soft {
+  background: rgba(255,255,255,0.022);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 1rem;
+}
+.dark-hairline { border-color: rgba(255,255,255,0.07); }
+.dark-muted { color: #8b95a5; }
+.dark-dim { color: #5f6876; }
+
+.btn-emerald {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 0.7rem;
+  background: #19c37d;
+  color: #04120d;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  transition: background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: 0 10px 30px -14px rgba(25,195,125,0.6);
+}
+.btn-emerald:hover {
+  background: #22d38a;
+  transform: translateY(-1px);
+  box-shadow: 0 14px 36px -14px rgba(25,195,125,0.7);
+}
+.btn-emerald:active { transform: translateY(0); }
+.btn-ghost-dark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 0.7rem;
+  border: 1px solid rgba(255,255,255,0.13);
+  background: rgba(255,255,255,0.025);
+  color: #f2f5f8;
+  font-weight: 600;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+.btn-ghost-dark:hover {
+  border-color: rgba(255,255,255,0.26);
+  background: rgba(255,255,255,0.055);
+}
+
+.eyebrow-dark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 9999px;
+  border: 1px solid rgba(255,255,255,0.09);
+  background: rgba(255,255,255,0.025);
+  padding: 0.38rem 0.78rem;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: #8b95a5;
+}
+.eyebrow-dark .dot {
+  width: 0.35rem;
+  height: 0.35rem;
+  border-radius: 9999px;
+  background: #7d8796;
+}
+
+.app-window {
+  overflow: hidden;
+  border-radius: 1.1rem;
+  border: 1px solid rgba(255,255,255,0.09);
+  background: #0a0d12;
+  box-shadow: 0 50px 120px -50px rgba(0,0,0,0.95), 0 0 0 1px rgba(255,255,255,0.02) inset;
+}
+.app-window img { display: block; width: 100%; height: auto; }
+.app-chrome {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+  background: #0b0e13;
+  padding: 0.65rem 0.9rem;
+}
+.app-dot { width: 0.45rem; height: 0.45rem; border-radius: 9999px; background: rgba(255,255,255,0.16); }
+
+.photo-mono {
+  position: relative;
+  overflow: hidden;
+  border-radius: 1.25rem;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: #0a0d12;
+}
+.range-dark { accent-color: #19c37d; }
+.photo-mono img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: grayscale(1) contrast(1.04) brightness(0.86);
+}
+.photo-mono::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(6,8,11,0.05) 0%, rgba(6,8,11,0.4) 55%, rgba(6,8,11,0.9) 100%);
+  pointer-events: none;
+}
+
+.section-line {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.10), transparent);
+}
+.metric-cell + .metric-cell { border-left: 1px solid rgba(255,255,255,0.07); }
+@media (max-width: 640px) {
+  .metric-cell + .metric-cell { border-left: 0; border-top: 1px solid rgba(255,255,255,0.07); }
+}

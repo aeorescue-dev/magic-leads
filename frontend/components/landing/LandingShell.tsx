@@ -66,7 +66,7 @@ function Flag({ id, className = "h-5 w-7" }: { id: Lang; className?: string }) {
 
 function LangSwitch({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void }) {
   return (
-    <div className="flex items-center gap-1 rounded-[18px] bg-[#141820] p-1.5" role="group" aria-label="Language">
+    <div className="flex items-center gap-0.5 rounded-full border border-white/10 bg-white/[0.035] p-1" role="group" aria-label="Language">
       {LANGS.map((l) => (
         <button
           key={l.id}
@@ -74,9 +74,9 @@ function LangSwitch({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void 
           data-track={`language_${l.id}`}
           aria-label={l.label}
           aria-pressed={lang === l.id}
-          className={`grid h-10 w-11 place-items-center rounded-[12px] transition ${lang === l.id ? "bg-[#0f2a24] ring-2 ring-[#2feaa8]" : "opacity-70 hover:opacity-100"}`}
+          className={`grid h-8 w-9 place-items-center rounded-full transition ${lang === l.id ? "bg-white/[0.12] opacity-100" : "opacity-45 hover:opacity-85"}`}
         >
-          <Flag id={l.id} />
+          <Flag id={l.id} className="h-4 w-6" />
         </button>
       ))}
     </div>
@@ -151,39 +151,41 @@ export default function LandingShell({ children }: { children: React.ReactNode }
 
   return (
     <Ctx.Provider value={{ openModal, scrollTo }}>
-      <div className="landing-light min-h-screen bg-white text-[#0b1220]">
-        <header className={`sticky top-0 z-40 transition-all duration-300 ${scrolled ? "border-b border-white/10 bg-[#070A12]/85 backdrop-blur-xl shadow-2xl shadow-black/40" : "bg-[#070A12]/65 backdrop-blur-md"}`}>
-          <div className="mx-auto max-w-[1400px] px-4 sm:px-6">
-            <div className="flex h-16 items-center justify-between gap-4">
-              <button onClick={() => scrollTo("topo")} className="flex shrink-0 items-center gap-2.5">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-[#7c5cff] to-[#10b981] shadow-md shadow-[#10b981]/20">
-                  <svg className="h-4 w-4 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="m13 2-9 12h7l-1 8 10-13h-7V2Z" /></svg>
-                </div>
-                <span className="font-display text-lg font-black text-white">Magic<span className="text-[#34e0a1]">Leads</span></span>
-              </button>
-              <div className="flex shrink-0 items-center gap-3">
-                <LangSwitch lang={lang} setLang={changeLang} />
-                <button onClick={openModal} data-track="header_cta" className="btn-mint hidden px-5 py-2.5 text-[13px] sm:block">{t("landing.start")}</button>
-                <button onClick={() => setMenuOpen(!menuOpen)} className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 text-white lg:hidden" aria-label="Menu">
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    {menuOpen ? <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" /> : <path d="M4 7h16M4 12h16M4 17h16" strokeLinecap="round" />}
-                  </svg>
-                </button>
+      <div className="dark-page min-h-screen">
+        <header className={`sticky top-0 z-40 border-b transition-colors duration-300 ${scrolled ? "border-white/[0.08] bg-[#06080b]/90 backdrop-blur-xl" : "border-transparent bg-[#06080b]/70 backdrop-blur-md"}`}>
+          <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-3 px-4 sm:px-6">
+            <button onClick={() => scrollTo("topo")} className="flex shrink-0 items-center gap-2.5">
+              <div className="grid h-9 w-9 place-items-center rounded-xl border border-white/12 bg-white/[0.04]">
+                <svg className="h-4 w-4 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="m13 2-9 12h7l-1 8 10-13h-7V2Z" /></svg>
               </div>
-            </div>
-            <nav className="hidden h-11 items-center justify-center gap-8 border-t border-white/10 text-[13px] font-semibold text-[#9aa7ba] lg:flex">
+              <span className="font-display text-[17px] font-black tracking-[-0.02em] text-white">Magic<span className="text-white/45">Leads</span></span>
+            </button>
+
+            <nav className="hidden items-center gap-6 text-[12.5px] font-medium text-white/50 xl:flex">
               {navPairs.map(([label, id]) => (
                 <button key={id} onClick={() => scrollTo(id)} className="whitespace-nowrap transition hover:text-white">{label}</button>
               ))}
             </nav>
+
+            <div className="flex shrink-0 items-center gap-2.5">
+              <LangSwitch lang={lang} setLang={changeLang} />
+              <div className="hidden sm:block">
+                <button onClick={openModal} data-track="header_cta" className="btn-emerald px-4 py-2.5 text-[12.5px]">{t("landing.start")}</button>
+              </div>
+              <button onClick={() => setMenuOpen(!menuOpen)} className="grid h-9 w-9 place-items-center rounded-lg border border-white/12 text-white/80 xl:hidden" aria-label="Menu">
+                <svg className="h-4.5 w-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                  {menuOpen ? <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" /> : <path d="M4 7h16M4 12h16M4 17h16" strokeLinecap="round" />}
+                </svg>
+              </button>
+            </div>
           </div>
           {menuOpen && (
-            <div className="border-t border-white/10 bg-[#070A12] px-4 py-4 lg:hidden">
-              <div className="flex flex-col gap-1">
+            <div className="border-t border-white/[0.07] bg-[#06080b] px-4 py-3 xl:hidden">
+              <div className="flex flex-col gap-0.5">
                 {navPairs.map(([label, id]) => (
-                  <button key={id} onClick={() => scrollTo(id)} className="rounded-lg px-3 py-2.5 text-left text-sm font-semibold text-[#9aa7ba] hover:bg-white/5 hover:text-white">{label}</button>
+                  <button key={id} onClick={() => scrollTo(id)} className="rounded-lg px-3 py-2.5 text-left text-sm font-medium text-white/60 hover:bg-white/[0.04] hover:text-white">{label}</button>
                 ))}
-                <button onClick={openModal} data-track="mobile_menu_cta" className="btn-mint mt-2 py-3 text-sm">{t("landing.start")}</button>
+                <button onClick={openModal} data-track="mobile_menu_cta" className="btn-emerald mt-2 py-3 text-sm">{t("landing.start")}</button>
               </div>
             </div>
           )}
@@ -191,32 +193,31 @@ export default function LandingShell({ children }: { children: React.ReactNode }
 
         {children}
 
-        <FoldWave from="#070a12" to="#080d16" />
-        <footer className="bg-[#080d16] pb-16 pt-8 text-sm text-[#64748b] sm:pb-12">
+        <footer className="border-t border-white/[0.06] bg-[#05070a] pb-16 pt-12 text-sm text-white/40 sm:pb-12">
           <div className="mx-auto max-w-7xl px-4 sm:px-6">
-            <div className="grid gap-10 border-b border-white/10 pb-10 md:grid-cols-4">
+            <div className="grid gap-10 border-b border-white/[0.06] pb-10 md:grid-cols-4">
               <div className="md:col-span-2">
                 <div className="flex items-center gap-2.5 text-white">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-tr from-[#7c5cff] to-[#10b981]"><svg className="h-4 w-4 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="m13 2-9 12h7l-1 8 10-13h-7V2Z" /></svg></div>
-                  <span className="font-display text-lg font-black">Magic<span className="text-[#34e0a1]">Leads</span></span>
+                  <div className="grid h-9 w-9 place-items-center rounded-xl border border-white/12 bg-white/[0.04]"><svg className="h-4 w-4 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="m13 2-9 12h7l-1 8 10-13h-7V2Z" /></svg></div>
+                  <span className="font-display text-[17px] font-black tracking-[-0.02em]">Magic<span className="text-white/45">Leads</span></span>
                 </div>
-                <p className="mt-4 max-w-sm leading-relaxed">{t("landing.footerBio")}</p>
-                <p className="mt-4 text-xs font-semibold text-[#9aa7ba]">New York · Boston · Dallas · Chicago</p>
+                <p className="mt-4 max-w-sm leading-relaxed text-white/35">{t("landing.footerBio")}</p>
+                <p className="mt-4 text-[11px] font-semibold uppercase tracking-[0.14em] text-white/25">New York · Boston · Dallas · Chicago</p>
               </div>
               <div>
-                <p className="text-xs font-black uppercase tracking-widest text-white">{t("landing.platform")}</p>
-                <div className="mt-4 flex flex-col gap-2.5">{navPairs.slice(0, 4).map(([label, id]) => <button key={id} onClick={() => scrollTo(id)} className="text-left hover:text-white">{label}</button>)}</div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/70">{t("landing.platform")}</p>
+                <div className="mt-4 flex flex-col gap-2.5">{navPairs.slice(0, 4).map(([label, id]) => <button key={id} onClick={() => scrollTo(id)} className="text-left transition hover:text-white">{label}</button>)}</div>
               </div>
               <div>
-                <p className="text-xs font-black uppercase tracking-widest text-white">{t("landing.account")}</p>
+                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/70">{t("landing.account")}</p>
                 <div className="mt-4 flex flex-col gap-2.5">
-                  {navPairs.slice(4).map(([label, id]) => <button key={id} onClick={() => scrollTo(id)} className="text-left hover:text-white">{label}</button>)}
-                  <a href="mailto:contato@magicleads.app" className="hover:text-white">{t("landing.talk")}</a>
-                  <button onClick={openModal} data-track="footer_start_week" className="text-left font-semibold text-[#34e0a1]">{t("landing.startWeek")}</button>
+                  {navPairs.slice(4).map(([label, id]) => <button key={id} onClick={() => scrollTo(id)} className="text-left transition hover:text-white">{label}</button>)}
+                  <a href="mailto:contato@magicleads.app" className="transition hover:text-white">{t("landing.talk")}</a>
+                  <button onClick={openModal} data-track="footer_start_week" className="text-left font-semibold text-[#19c37d]">{t("landing.startWeek")}</button>
                 </div>
               </div>
             </div>
-            <div className="mt-8 flex flex-col justify-between gap-3 text-xs text-[#475569] sm:flex-row">
+            <div className="mt-8 flex flex-col justify-between gap-3 text-[11px] text-white/25 sm:flex-row">
               <span>© {new Date().getFullYear()} Magic Leads. {t("landing.rights")}</span>
               <span>{t("landing.vary")}</span>
             </div>
@@ -224,22 +225,22 @@ export default function LandingShell({ children }: { children: React.ReactNode }
         </footer>
 
         {modalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0b1220]/60 p-4 backdrop-blur-md" onClick={() => setModalOpen(false)}>
-            <div className="relative w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl sm:p-8" onClick={(e) => e.stopPropagation()}>
-              <button onClick={() => setModalOpen(false)} className="absolute right-4 top-4 text-[#94a3b8]">✕</button>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-md" onClick={() => setModalOpen(false)}>
+            <div className="dark-panel relative w-full max-w-md rounded-2xl p-6 sm:p-8" onClick={(e) => e.stopPropagation()}>
+              <button onClick={() => setModalOpen(false)} className="absolute right-4 top-4 text-white/35 hover:text-white" aria-label="Close">✕</button>
               <div className="flex items-center gap-2">
-                <span className="rounded bg-[#e8f9ef] px-2.5 py-0.5 text-[10px] font-black text-[#0a8f65]">{t("landing.modalTag")}</span>
-                <span className="text-xs text-[#94a3b8]">{t("landing.noLock")}</span>
+                <span className="rounded border border-white/10 bg-white/[0.05] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-white/60">{t("landing.modalTag")}</span>
+                <span className="text-[11px] text-white/35">{t("landing.noLock")}</span>
               </div>
-              <h3 className="font-display mt-3 text-2xl font-black">{t("landing.modalTitle")}</h3>
-              <p className="mt-1 text-sm text-[#54617a]">{t("landing.modalSub")}</p>
+              <h3 className="font-display mt-3 text-2xl font-black tracking-[-0.02em] text-white">{t("landing.modalTitle")}</h3>
+              <p className="mt-1 text-sm text-white/45">{t("landing.modalSub")}</p>
               <div className="mt-5">
                 <AuthForm />
               </div>
-              <button onClick={() => { setModalOpen(false); router.push(localePath("/auth")); }} className="mt-6 w-full rounded-xl border border-[#e2e8f0] py-3 text-sm font-bold text-[#54617a] hover:border-[#0b1220]">
+              <button onClick={() => { setModalOpen(false); router.push(localePath("/auth")); }} className="mt-6 w-full rounded-xl border border-white/12 py-3 text-sm font-semibold text-white/55 transition hover:border-white/25 hover:text-white">
                 {t("landing.enter")}
               </button>
-              <p className="mt-4 text-center text-[11px] text-[#94a3b8]">{t("landing.seven")}</p>
+              <p className="mt-4 text-center text-[11px] text-white/30">{t("landing.seven")}</p>
             </div>
           </div>
         )}
