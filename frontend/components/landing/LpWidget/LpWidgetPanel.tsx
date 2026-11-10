@@ -14,6 +14,7 @@ import {
   Loader2,
   Lock,
   Moon,
+  Paperclip,
   Send,
   ShieldCheck,
   X,
@@ -64,6 +65,7 @@ interface ThreadItem {
   role: "lead" | "team" | "system";
   text: string;
   at: number;
+  messageId?: number;
 }
 
 export interface LpWidgetPanelProps {
@@ -82,6 +84,53 @@ export interface LpWidgetPanelProps {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
+function WidgetMessageAttachments({
+  token,
+  attachments,
+}: {
+  token: string;
+  attachments: LpAttachment[];
+}) {
+  return (
+    <div className="mt-1.5 space-y-1">
+      {attachments.map((attachment) => {
+        const url = lpAttachmentUrl(token, attachment.id);
+        const isImage = (attachment.content_type || "").startsWith("image/");
+        return (
+          <a
+            key={attachment.id}
+            href={url}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-2 rounded-lg border border-white/80 bg-white/80 p-1.5 transition hover:border-emerald-300"
+          >
+            {isImage ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={url}
+                alt={attachment.filename}
+                className="h-10 w-10 shrink-0 rounded object-cover ring-1 ring-slate-200"
+              />
+            ) : (
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-white text-slate-500 ring-1 ring-slate-200">
+                <Paperclip className="h-3.5 w-3.5" />
+              </span>
+            )}
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[9.5px] font-bold text-slate-800">
+                {attachment.filename}
+              </span>
+              <span className="block text-[8.5px] text-slate-500">
+                {Math.max(1, Math.round(attachment.size_bytes / 1024))} KB
+              </span>
+            </span>
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
 function now(): number {
   return Date.now();
 }
@@ -99,6 +148,7 @@ function toThreadItems(
     role: message.role,
     text: message.text,
     at: Number(new Date(message.created_at)) || now(),
+    messageId: message.id,
   }));
 }
 
@@ -163,6 +213,18 @@ export default function LpWidgetPanel({
   }, [mode]);
 
   const offline = availability?.status === "offline";
+
+  const attachmentsByMessage = useMemo(() => {
+    const map = new Map<number, LpAttachment[]>();
+    for (const attachment of attachments) {
+      if (attachment.message_id) {
+        const list = map.get(attachment.message_id) || [];
+        list.push(attachment);
+        map.set(attachment.message_id, list);
+      }
+    }
+    return map;
+  }, [attachments]);
 
   const totalSteps = 4;
   const currentStep =
@@ -944,6 +1006,17 @@ export default function LpWidgetPanel({
                       {item.role === "lead" ? "You · EN" : "Magic Leads · EN"}
                     </span>
                     {item.text}
+                    {token &&
+                      item.messageId &&
+                      (attachmentsByMessage.get(item.messageId)?.length ?? 0) >
+                        0 && (
+                        <WidgetMessageAttachments
+                          token={token}
+                          attachments={
+                            attachmentsByMessage.get(item.messageId) || []
+                          }
+                        />
+                      )}
                   </div>
                 );
               })}

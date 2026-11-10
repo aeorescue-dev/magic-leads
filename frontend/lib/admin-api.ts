@@ -2735,6 +2735,7 @@ export interface LpAdminMessage {
 export interface LpAttachment {
   id: number;
   thread_id?: number;
+  message_id?: number | null;
   direction: "inbound" | "outbound";
   filename: string;
   content_type: string | null;
@@ -2826,17 +2827,23 @@ export function saveLpTranslation(
 export function replyLpThread(
   threadId: number,
   bodyPt: string,
-  bodyEn: string
+  bodyEn: string,
+  attachmentIds: number[] = []
 ): Promise<{
   ok: boolean;
   message_id: number;
   email_sent: boolean;
   thread_id: number;
+  attachments?: number;
 }> {
   return lpAdminFetch(`/lp/threads/${threadId}/reply`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ body_pt: bodyPt, body_en: bodyEn }),
+    body: JSON.stringify({
+      body_pt: bodyPt,
+      body_en: bodyEn,
+      attachment_ids: attachmentIds,
+    }),
   });
 }
 

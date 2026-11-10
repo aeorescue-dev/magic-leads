@@ -52,6 +52,7 @@ export interface LpThread {
 
 export interface LpAttachment {
   id: number;
+  message_id?: number | null;
   direction: "inbound" | "outbound";
   filename: string;
   content_type: string | null;

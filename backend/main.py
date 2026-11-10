@@ -9380,6 +9380,7 @@ class LpLeadMessageRequest(BaseModel):
 class LpTeamReplyRequest(BaseModel):
     body_pt: str
     body_en: str
+    attachment_ids: list[int] = []
 
 
 class LpTranslationRequest(BaseModel):
@@ -9531,9 +9532,8 @@ async def lp_widget_upload_attachment(
         raise HTTPException(status_code=413, detail="attachment_too_large")
     try:
         result = await anyio.to_thread.run_sync(
-            lambda: lp_widget.save_attachment(
+            lambda: lp_widget.save_inbound_attachment(
                 thread_id,
-                direction="inbound",
                 filename=file.filename or "file",
                 content_type=file.content_type or "",
                 data=data,
@@ -9761,6 +9761,7 @@ async def admin_lp_thread_reply(
                 body_pt=payload.body_pt,
                 body_en=payload.body_en,
                 admin_id=admin.get("id"),
+                attachment_ids=payload.attachment_ids,
             )
         )
     except ValueError as exc:

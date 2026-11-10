@@ -11,6 +11,7 @@ Isolamento deliberado:
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import os
 import secrets
@@ -316,6 +317,7 @@ def send_email(
     text: str,
     *,
     reply_to: Optional[str] = None,
+    attachments: Optional[list[dict[str, str]]] = None,
 ) -> bool:
     """Envia e-mail transacional via Resend. Fail-soft: devolve False."""
     if not settings.EMAIL_API_KEY or not settings.EMAIL_FROM:
@@ -334,6 +336,8 @@ def send_email(
     }
     if reply_to:
         payload["reply_to"] = reply_to
+    if attachments:
+        payload["attachments"] = attachments
 
     try:
         response = httpx.post(
@@ -674,8 +678,8 @@ def get_thread_public(token: str) -> Optional[dict]:
             "attachments": [
                 dict(row)
                 for row in conn.execute(
-                    "SELECT id, direction, filename, content_type, size_bytes, "
-                    "created_at FROM lp_attachments WHERE thread_id = ? "
+                    "SELECT id, message_id, direction, filename, content_type, "
+                    "size_bytes, created_at FROM lp_attachments WHERE thread_id = ? "
                     "ORDER BY id ASC",
                     (thread["id"],),
                 ).fetchall()
@@ -880,10 +884,37 @@ def save_attachment(
             "filename": safe,
             "content_type": ctype,
             "size_bytes": len(payload),
+            "message_id": int(message_id) if message_id else None,
             "created_at": _iso(),
         }
     finally:
         conn.close()
+
+
+def save_inbound_attachment(
+    thread_id: int,
+    *,
+    filename: str,
+    content_type: str,
+    data: bytes,
+) -> Optional[dict]:
+    """Guarda o anexo do lead e liga-o à bolha da mensagem adequada."""
+    attachment = save_attachment(
+        thread_id,
+        direction="inbound",
+        filename=filename,
+        content_type=content_type,
+        data=data,
+    )
+    if not attachment:
+        return None
+    message_id = message_id_for_inbound_attachment(thread_id, filename)
+    if message_id:
+        attach_attachments_to_message(
+            thread_id, [int(attachment["id"])], message_id
+        )
+        attachment["message_id"] = message_id
+    return attachment
 
 
 def list_attachments(thread_id: int) -> list[dict]:
@@ -913,6 +944,134 @@ def get_attachment(thread_id: int, attachment_id: int) -> Optional[dict]:
         return dict(row) if row else None
     finally:
         conn.close()
+
+
+def message_id_for_inbound_attachment(
+    thread_id: int, filename: str
+) -> Optional[int]:
+    """Escolhe a mensagem onde o anexo do lead deve aparecer.
+
+    Se a última mensagem for do lead e recente, o anexo entra nessa bolha. Se a
+    equipa já respondeu (ou passou demasiado tempo), cria uma mensagem inbound
+    própria para o ficheiro aparecer no fim da conversa.
+    """
+    init()
+    conn = db.get_connection()
+    try:
+        thread = conn.execute(
+            "SELECT lead_lang FROM lp_threads WHERE id = ?", (int(thread_id),)
+        ).fetchone()
+        if not thread:
+            return None
+        last = conn.execute(
+            "SELECT id, direction, created_at FROM lp_messages "
+            "WHERE thread_id = ? ORDER BY id DESC LIMIT 1",
+            (int(thread_id),),
+        ).fetchone()
+        if last and last["direction"] == "inbound":
+            try:
+                age = _now() - datetime.fromisoformat(str(last["created_at"]))
+            except ValueError:
+                age = timedelta(days=1)
+            if age <= timedelta(minutes=10):
+                return int(last["id"])
+
+        now = _now()
+        body = _clean(filename, 200) or "Attachment"
+        sla_at = now + timedelta(
+            hours=max(1, int(getattr(settings, "LP_WIDGET_SLA_HOURS", 4) or 4))
+        )
+        cur = conn.execute(
+            "INSERT INTO lp_messages ("
+            "thread_id, direction, channel, body, lang, author_type, created_at"
+            ") VALUES (?, 'inbound', 'widget', ?, ?, 'lead', ?)",
+            (
+                int(thread_id),
+                f"\U0001f4ce {body}",
+                _clean(thread["lead_lang"], 8) or "en",
+                _iso(now),
+            ),
+        )
+        conn.execute(
+            "UPDATE lp_threads SET status = 'new', updated_at = ?, "
+            "last_message_at = ?, sla_due_at = ? WHERE id = ?",
+            (_iso(now), _iso(now), _iso(sla_at), int(thread_id)),
+        )
+        _event(
+            conn,
+            int(thread_id),
+            "attachment_message",
+            {"message_id": int(cur.lastrowid)},
+        )
+        conn.commit()
+        return int(cur.lastrowid)
+    finally:
+        conn.close()
+
+
+def attach_attachments_to_message(
+    thread_id: int, attachment_ids: list[int], message_id: int
+) -> int:
+    init()
+    ids = [int(item) for item in attachment_ids if int(item) > 0]
+    if not ids:
+        return 0
+    placeholders = ",".join("?" for _ in ids)
+    conn = db.get_connection()
+    try:
+        cur = conn.execute(
+            f"UPDATE lp_attachments SET message_id = ? "
+            f"WHERE thread_id = ? AND id IN ({placeholders})",
+            (int(message_id), int(thread_id), *ids),
+        )
+        conn.commit()
+        return int(cur.rowcount or 0)
+    finally:
+        conn.close()
+
+
+def attachments_for_email(
+    thread_id: int, attachment_ids: list[int]
+) -> list[dict[str, str]]:
+    init()
+    ids = [int(item) for item in attachment_ids if int(item) > 0]
+    if not ids:
+        return []
+    placeholders = ",".join("?" for _ in ids)
+    conn = db.get_connection()
+    try:
+        rows = conn.execute(
+            f"SELECT filename, storage_path FROM lp_attachments "
+            f"WHERE thread_id = ? AND id IN ({placeholders}) ORDER BY id ASC",
+            (int(thread_id), *ids),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    payload: list[dict[str, str]] = []
+    total = 0
+    for row in rows:
+        try:
+            with open(row["storage_path"], "rb") as handle:
+                data = handle.read()
+        except OSError:
+            logger.warning(
+                "[LP-WIDGET] anexo em falta para e-mail: %s", row["storage_path"]
+            )
+            continue
+        if not data:
+            continue
+        if total + len(data) > 20 * 1024 * 1024:
+            logger.warning("[LP-WIDGET] anexos acima de 20 MB; restantes ignorados")
+            break
+        total += len(data)
+        payload.append(
+            {
+                "filename": row["filename"],
+                "content": base64.b64encode(data).decode("ascii"),
+            }
+        )
+    return payload
 
 
 def enrich_thread(thread_id: int) -> dict:
@@ -1234,6 +1393,7 @@ def reply(
     body_pt: str,
     body_en: str,
     admin_id: Optional[int] = None,
+    attachment_ids: Optional[list[int]] = None,
 ) -> Optional[dict]:
     """Resposta da equipa: guarda PT-BR + versão no idioma do lead e envia."""
     init()
@@ -1261,6 +1421,16 @@ def reply(
             (int(thread_id), en, pt, en, lead_lang, admin_id, _iso(now)),
         )
         message_id = int(cur.lastrowid)
+        clean_attachment_ids = [
+            int(item) for item in (attachment_ids or []) if int(item) > 0
+        ]
+        if clean_attachment_ids:
+            placeholders = ",".join("?" for _ in clean_attachment_ids)
+            conn.execute(
+                f"UPDATE lp_attachments SET message_id = ? "
+                f"WHERE thread_id = ? AND id IN ({placeholders})",
+                (message_id, int(thread_id), *clean_attachment_ids),
+            )
         conn.execute(
             "UPDATE lp_threads SET status = 'replied', updated_at = ?, "
             "last_message_at = ?, draft_pt = NULL, draft_out = NULL, "
@@ -1273,6 +1443,9 @@ def reply(
     finally:
         conn.close()
 
+    email_attachments = attachments_for_email(
+        thread_id, clean_attachment_ids
+    )
     email_sent = send_email(
         email,
         {
@@ -1281,6 +1454,7 @@ def reply(
         }.get(lead_lang[:2], "Re: your question about Magic Leads"),
         en,
         reply_to=str(getattr(settings, "LP_WIDGET_REPLY_TO", "") or "") or None,
+        attachments=email_attachments or None,
     )
 
     conn = db.get_connection()
@@ -1301,4 +1475,5 @@ def reply(
         "message_id": message_id,
         "email_sent": email_sent,
         "thread_id": int(thread_id),
+        "attachments": len(email_attachments),
     }

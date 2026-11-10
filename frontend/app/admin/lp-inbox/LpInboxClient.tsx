@@ -22,7 +22,6 @@ import {
   ShieldCheck,
   Sparkles,
   Sun,
-  Upload,
   User,
   Wrench,
 } from "lucide-react";
@@ -43,6 +42,7 @@ import {
   type LpAdminMessage,
   type LpAdminThreadDetail,
   type LpAdminThreadSummary,
+  type LpAttachment,
 } from "@/lib/admin-api";
 
 const INTENT_LABEL: Record<string, string> = {
@@ -466,7 +466,8 @@ export default function LpInboxClient() {
   async function handleSend(
     threadId: number,
     bodyPt: string,
-    bodyEn: string
+    bodyEn: string,
+    attachmentIds: number[] = []
   ): Promise<{ email_sent: boolean; simulated?: boolean }> {
     if (demo) {
       const now = new Date().toISOString();
@@ -499,7 +500,12 @@ export default function LpInboxClient() {
       return { email_sent: true, simulated: true };
     }
 
-    const result = await replyLpThread(threadId, bodyPt, bodyEn);
+    const result = await replyLpThread(
+      threadId,
+      bodyPt,
+      bodyEn,
+      attachmentIds
+    );
     await refresh();
     return { email_sent: result.email_sent };
   }
@@ -1034,7 +1040,8 @@ function ThreadDetail({
   onSend: (
     threadId: number,
     bodyPt: string,
-    bodyEn: string
+    bodyEn: string,
+    attachmentIds?: number[]
   ) => Promise<{ email_sent: boolean; simulated?: boolean }>;
   onSaveTranslation: (
     threadId: number,
@@ -1046,10 +1053,16 @@ function ThreadDetail({
   onArchive: () => void;
 }) {
   const overdue = isOverdue(thread.sla_due_at);
+  const attachmentsByMessage = new Map<number, LpAttachment[]>();
+  for (const attachment of thread.attachments || []) {
+    if (attachment.message_id) {
+      const list = attachmentsByMessage.get(attachment.message_id) || [];
+      list.push(attachment);
+      attachmentsByMessage.set(attachment.message_id, list);
+    }
+  }
   const [enriching, setEnriching] = useState(false);
   const [enrichError, setEnrichError] = useState("");
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState("");
   const aiStatus = thread.ai_status || "pending";
   const aiLabel =
     aiStatus === "ready"
@@ -1081,21 +1094,6 @@ function ThreadDetail({
       );
     } finally {
       setEnriching(false);
-    }
-  }
-
-  async function handleUpload(file: File) {
-    setUploading(true);
-    setUploadError("");
-    try {
-      await uploadLpAttachment(thread.id, file);
-      onRefresh();
-    } catch (err) {
-      setUploadError(
-        err instanceof Error ? err.message : "Não foi possível anexar."
-      );
-    } finally {
-      setUploading(false);
     }
   }
 
@@ -1221,10 +1219,16 @@ function ThreadDetail({
               threadId={thread.id}
               message={message}
               demo={demo}
+              attachments={attachmentsByMessage.get(message.id) || []}
               onSave={onSaveTranslation}
             />
           ) : (
-            <OutboundMessage key={message.id} message={message} />
+            <OutboundMessage
+              key={message.id}
+              threadId={thread.id}
+              message={message}
+              attachments={attachmentsByMessage.get(message.id) || []}
+            />
           )
         )}
       </div>
@@ -1234,25 +1238,6 @@ function ThreadDetail({
           <p className="text-[12px] font-black uppercase tracking-[0.12em] text-slate-600">
             Anexos · {thread.attachments?.length ?? 0}
           </p>
-          <label
-            className={`inline-flex cursor-pointer items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10.5px] font-bold text-slate-600 hover:border-emerald-300 ${
-              uploading ? "pointer-events-none opacity-50" : ""
-            }`}
-          >
-            <Upload className="h-3 w-3" />
-            {uploading ? "A enviar…" : "Anexar"}
-            <input
-              type="file"
-              className="hidden"
-              disabled={uploading}
-              accept="image/png,image/jpeg,image/gif,image/webp,image/bmp,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                if (file) void handleUpload(file);
-                event.currentTarget.value = "";
-              }}
-            />
-          </label>
         </div>
 
         {(thread.attachments?.length ?? 0) === 0 ? (
@@ -1300,11 +1285,6 @@ function ThreadDetail({
             })}
           </div>
         )}
-        {uploadError && (
-          <p className="mt-2 text-[10.5px] font-semibold text-rose-600">
-            {uploadError}
-          </p>
-        )}
       </div>
 
       {thread.history && thread.history.length > 0 && (
@@ -1349,6 +1329,7 @@ function ThreadDetail({
         key={thread.id}
         thread={thread}
         onSend={onSend}
+        onRefresh={onRefresh}
         initialPt={thread.draft_pt || ""}
         initialOut={thread.draft_out || ""}
         leadLang={thread.lead_lang || "en"}
@@ -1357,15 +1338,65 @@ function ThreadDetail({
   );
 }
 
+function MessageAttachments({
+  threadId,
+  attachments,
+}: {
+  threadId: number;
+  attachments: LpAttachment[];
+}) {
+  if (!attachments.length) return null;
+  return (
+    <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
+      {attachments.map((attachment) => {
+        const url = lpAttachmentUrl(threadId, attachment.id);
+        const isImage = (attachment.content_type || "").startsWith("image/");
+        return (
+          <a
+            key={attachment.id}
+            href={url}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-2 rounded-lg border border-white/70 bg-white/80 p-1.5 transition hover:border-emerald-300"
+          >
+            {isImage ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={url}
+                alt={attachment.filename}
+                className="h-12 w-12 shrink-0 rounded object-cover ring-1 ring-slate-200"
+              />
+            ) : (
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-white text-slate-500 ring-1 ring-slate-200">
+                <Paperclip className="h-4 w-4" />
+              </span>
+            )}
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[10.5px] font-bold text-slate-800">
+                {attachment.filename}
+              </span>
+              <span className="block text-[8.5px] text-slate-500">
+                {Math.max(1, Math.round(attachment.size_bytes / 1024))} KB
+              </span>
+            </span>
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
 function InboundMessage({
   threadId,
   message,
   demo,
+  attachments,
   onSave,
 }: {
   threadId: number;
   message: LpAdminMessage;
   demo: boolean;
+  attachments: LpAttachment[];
   onSave: (
     threadId: number,
     messageId: number,
@@ -1406,6 +1437,8 @@ function InboundMessage({
       <p className="mt-2 rounded-xl bg-slate-50 px-3 py-2.5 text-[12.5px] leading-relaxed text-slate-800">
         {message.body}
       </p>
+
+      <MessageAttachments threadId={threadId} attachments={attachments} />
 
       <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50/40 p-3">
         <div className="flex items-center justify-between gap-2">
@@ -1449,7 +1482,15 @@ function InboundMessage({
   );
 }
 
-function OutboundMessage({ message }: { message: LpAdminMessage }) {
+function OutboundMessage({
+  threadId,
+  message,
+  attachments,
+}: {
+  threadId: number;
+  message: LpAdminMessage;
+  attachments: LpAttachment[];
+}) {
   return (
     <article className="ml-auto max-w-[92%] rounded-2xl border border-emerald-200 bg-emerald-50/60 p-3.5 shadow-sm">
       <div className="flex items-center justify-between gap-2 text-[12px] font-black uppercase tracking-wide text-emerald-800">
@@ -1462,6 +1503,7 @@ function OutboundMessage({ message }: { message: LpAdminMessage }) {
       <p className="mt-1.5 text-[12.5px] leading-relaxed text-emerald-950">
         {message.body_en || message.body}
       </p>
+      <MessageAttachments threadId={threadId} attachments={attachments} />
       {message.body_pt && (
         <div className="mt-2 rounded-lg border border-emerald-200/70 bg-white/70 px-2.5 py-2">
           <p className="text-[9.5px] font-black uppercase tracking-wide text-emerald-700">
@@ -1487,6 +1529,7 @@ function OutboundMessage({ message }: { message: LpAdminMessage }) {
 function ReplyComposer({
   thread,
   onSend,
+  onRefresh,
   initialPt = "",
   initialOut = "",
   leadLang = "en",
@@ -1495,8 +1538,10 @@ function ReplyComposer({
   onSend: (
     threadId: number,
     bodyPt: string,
-    bodyEn: string
+    bodyEn: string,
+    attachmentIds?: number[]
   ) => Promise<{ email_sent: boolean; simulated?: boolean }>;
+  onRefresh: () => void;
   initialPt?: string;
   initialOut?: string;
   leadLang?: string;
@@ -1515,6 +1560,11 @@ function ReplyComposer({
     simulated?: boolean;
   } | null>(null);
   const [error, setError] = useState("");
+  const [pendingAttachments, setPendingAttachments] = useState<LpAttachment[]>(
+    []
+  );
+  const [uploadingReply, setUploadingReply] = useState(false);
+  const [attachmentError, setAttachmentError] = useState("");
   const finalLabel = (leadLang || "en").toUpperCase();
 
   useEffect(() => {
@@ -1522,6 +1572,26 @@ function ReplyComposer({
       lastTranslatedRef.current = initialPt;
     }
   }, [initialPt, ptEdit]);
+
+  async function attachFiles(files: FileList | File[]) {
+    const list = Array.from(files);
+    if (!list.length || uploadingReply) return;
+    setUploadingReply(true);
+    setAttachmentError("");
+    try {
+      for (const file of list) {
+        const attachment = await uploadLpAttachment(thread.id, file);
+        setPendingAttachments((prev) => [...prev, attachment]);
+      }
+      onRefresh();
+    } catch (err) {
+      setAttachmentError(
+        err instanceof Error ? err.message : "Não foi possível anexar."
+      );
+    } finally {
+      setUploadingReply(false);
+    }
+  }
 
   async function translate(): Promise<string | null> {
     if (!pt.trim() || translatingRef.current) return null;
@@ -1551,7 +1621,7 @@ function ReplyComposer({
   }
 
   async function send() {
-    if (!pt.trim() || sending) return;
+    if (!pt.trim() || sending || uploadingReply) return;
     let finalText = en.trim();
     if (!finalText || pt.trim() !== lastTranslatedRef.current) {
       const out = await translate();
@@ -1563,10 +1633,18 @@ function ReplyComposer({
     setError("");
     setResult(null);
     try {
-      const response = await onSend(thread.id, pt.trim(), finalText);
+      const attachmentIds = pendingAttachments.map((item) => item.id);
+      const response = await onSend(
+        thread.id,
+        pt.trim(),
+        finalText,
+        attachmentIds
+      );
       setResult(response);
       setPtEdit("");
       setEnEdit("");
+      setPendingAttachments([]);
+      setAttachmentError("");
       lastTranslatedRef.current = "";
     } catch (err) {
       setError(
@@ -1638,6 +1716,57 @@ function ReplyComposer({
         </div>
       </div>
 
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <label
+          className={`inline-flex cursor-pointer items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[9.5px] font-bold text-slate-600 hover:border-emerald-300 ${
+            uploadingReply ? "pointer-events-none opacity-50" : ""
+          }`}
+        >
+          <Paperclip className="h-3 w-3" />
+          {uploadingReply ? "A enviar…" : "Anexar"}
+          <input
+            type="file"
+            multiple
+            className="hidden"
+            disabled={uploadingReply}
+            accept="image/png,image/jpeg,image/gif,image/webp,image/bmp,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv"
+            onChange={(event) => {
+              if (event.target.files?.length) {
+                void attachFiles(event.target.files);
+              }
+              event.currentTarget.value = "";
+            }}
+          />
+        </label>
+        {pendingAttachments.map((attachment) => {
+          const url = lpAttachmentUrl(thread.id, attachment.id);
+          const isImage = (attachment.content_type || "").startsWith("image/");
+          return (
+            <span
+              key={attachment.id}
+              className="inline-flex max-w-[220px] items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-[9px] font-semibold text-emerald-800"
+            >
+              {isImage ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={url}
+                  alt={attachment.filename}
+                  className="h-4 w-4 rounded object-cover"
+                />
+              ) : (
+                <Paperclip className="h-3 w-3" />
+              )}
+              <span className="truncate">{attachment.filename}</span>
+            </span>
+          );
+        })}
+      </div>
+      {attachmentError && (
+        <p className="mt-1 text-[9.5px] font-semibold text-rose-600">
+          {attachmentError}
+        </p>
+      )}
+
       {translateError && (
         <p className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-2 text-[12px] font-semibold text-rose-700">
           {translateError}
@@ -1690,7 +1819,7 @@ function ReplyComposer({
           type="button"
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => void send()}
-          disabled={sending || !pt.trim() || !en.trim()}
+          disabled={sending || uploadingReply || !pt.trim() || !en.trim()}
           className="flex items-center gap-1.5 rounded-lg bg-emerald-500 px-4 py-2 text-[12px] font-bold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {sending ? (

@@ -319,6 +319,59 @@ def test_attachment_rejects_svg_and_unknown_types():
         )
 
 
+def test_inbound_attachment_links_to_lead_message():
+    created = _create()
+    data = b"\x89PNG\r\n\x1a\n" + b"1" * 24
+    attachment = lp_widget.save_inbound_attachment(
+        created["id"],
+        filename="print.png",
+        content_type="image/png",
+        data=data,
+    )
+    assert attachment is not None
+    assert attachment["message_id"]
+
+    admin = lp_widget.get_thread_admin(created["id"])
+    assert admin is not None
+    assert admin["attachments"][0]["message_id"] == attachment["message_id"]
+
+    public = lp_widget.get_thread_public(created["token"])
+    assert public is not None
+    assert public["attachments"][0]["message_id"] == attachment["message_id"]
+
+
+def test_reply_attaches_files_to_message_and_email(monkeypatch):
+    created = _create()
+    attachment = lp_widget.save_attachment(
+        created["id"],
+        direction="outbound",
+        filename="team-note.txt",
+        content_type="text/plain",
+        data=b"hello from the team",
+    )
+    assert attachment is not None
+    sent: list[dict] = []
+
+    def fake_send(to, subject, text, **kwargs):
+        sent.append(kwargs)
+        return True
+
+    monkeypatch.setattr(lp_widget, "send_email", fake_send)
+    result = lp_widget.reply(
+        created["id"],
+        body_pt="Segue o ficheiro.",
+        body_en="Here is the file.",
+        attachment_ids=[attachment["id"]],
+    )
+    assert result is not None
+    assert result["attachments"] == 1
+    assert sent[0]["attachments"][0]["filename"] == "team-note.txt"
+
+    admin = lp_widget.get_thread_admin(created["id"])
+    assert admin is not None
+    assert admin["attachments"][0]["message_id"] == result["message_id"]
+
+
 def test_status_and_period_filters():
     created = _create()
     result = lp_widget.set_thread_status(created["id"], "archived")
