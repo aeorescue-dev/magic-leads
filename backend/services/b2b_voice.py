@@ -1670,12 +1670,21 @@ def stop_campaign(campaign_id: int) -> Optional[dict]:
 
 def mark_interrupted_campaigns(self_reason: str = "campanha interrompida (processo reiniciado)") -> int:
     init()
+    delay = max(
+        30,
+        int(
+            getattr(settings, "VOICE_INTERRUPTED_RESUME_DELAY_SECONDS", 120)
+            or 120
+        ),
+    )
+    now = _utc_now()
+    next_batch = (now + timedelta(seconds=delay)).isoformat()
     conn = get_conn()
     try:
         cur = conn.execute(
-            "UPDATE voice_campaigns SET status='error', error=?, finished_at=? "
-            "WHERE status='running'",
-            (self_reason, _iso()),
+            "UPDATE voice_campaigns SET status='paused', error=?, "
+            "next_batch_at=?, finished_at=NULL WHERE status='running'",
+            (self_reason[:300], next_batch),
         )
         conn.commit()
         return cur.rowcount
@@ -1714,7 +1723,7 @@ def campaign_trade_counts(campaign_id: int) -> dict[str, int]:
         conn.close()
 
 
-def _verified_trade_clause() -> str:
+def _verified_trade_clause(alias: str = "prospect_companies") -> str:
     """Cláusula única de verificação de nicho.
 
     Só aceita `company_trades` com confiança >=0.80, nunca
@@ -1724,11 +1733,11 @@ def _verified_trade_clause() -> str:
     """
     return (
         "EXISTS (SELECT 1 FROM company_trades ct "
-        "WHERE ct.company_id=prospect_companies.id "
+        f"WHERE ct.company_id={alias}.id "
         "AND LOWER(ct.trade_code)=LOWER(?) "
         "AND ct.confidence>=0.80 "
         "AND COALESCE(ct.source,'')<>'primary_unconfirmed' "
-        "AND (COALESCE(TRIM(prospect_companies.license_number),'')<>'' "
+        f"AND (COALESCE(TRIM({alias}.license_number),'')<>'' "
         "     OR ct.source IN ('license','niche_key','site_text')))"
     )
 
@@ -1891,6 +1900,96 @@ def audit_campaign_candidates(
     }
 
 
+def _retry_policy_enabled() -> bool:
+    return bool(getattr(settings, "VOICE_RETRY_ENABLED", False))
+
+
+def _retry_candidates(
+    conn: sqlite3.Connection,
+    campaign_id: int,
+    city: str = "",
+    trade: str = "",
+    limit: int = 50,
+) -> list[dict]:
+    """Contactos do mesmo lote elegíveis para uma segunda tentativa.
+
+    Só entra quem teve desfecho transitório (voicemail/no-answer/busy/timeout)
+    no mesmo lote, já passou o delay e ainda está abaixo do máximo de tentativas.
+    Qualquer chamada humana/meeting/opt-out ou noutra campanha nos últimos 7
+    dias exclui o contacto. Default OFF (`VOICE_RETRY_ENABLED=false`).
+    """
+    if not _retry_policy_enabled():
+        return []
+    delay_hours = max(
+        1, int(getattr(settings, "VOICE_RETRY_DELAY_HOURS", 48) or 48)
+    )
+    max_attempts = max(
+        1, int(getattr(settings, "VOICE_RETRY_MAX_ATTEMPTS", 2) or 2)
+    )
+    where = [
+        "pc.status NOT IN ('do_not_call','invalid','meeting')",
+        "LENGTH(pc.phone)=12 AND pc.phone LIKE '+1%'",
+        "pc.id NOT IN (SELECT company_id FROM voice_campaign_skips WHERE campaign_id=?)",
+    ]
+    params: list[Any] = [int(campaign_id)]
+    if city.strip():
+        where.append("UPPER(TRIM(pc.city))=UPPER(?)")
+        params.append(city.strip())
+    if trade.strip():
+        where.append(_verified_trade_clause("pc"))
+        params.append(trade.strip())
+    where.append(
+        "NOT EXISTS ("
+        " SELECT 1 FROM voice_calls bad"
+        " WHERE bad.company_id=pc.id"
+        "   AND COALESCE(bad.provider,'')='telnyx'"
+        "   AND bad.status<>'dry_run'"
+        "   AND ("
+        "     (COALESCE(bad.campaign_id,'')<>? AND "
+        "      datetime(COALESCE(bad.created_at,bad.started_at))>="
+        "      datetime('now','-7 days'))"
+        "     OR (COALESCE(bad.campaign_id,'')=? AND ("
+        "       COALESCE(bad.intent,'') IN "
+        "         ('meeting_booked','callback','opt_out','not_interested','wrong_number')"
+        "       OR COALESCE(bad.amd_result,'') IN "
+        "         ('human','human_business','human_residence')"
+        "     ))"
+        "   )"
+        ")"
+    )
+    params.extend([str(int(campaign_id)), str(int(campaign_id))])
+    where.append(
+        "EXISTS ("
+        " SELECT 1 FROM voice_calls vc"
+        " WHERE vc.company_id=pc.id"
+        "   AND vc.campaign_id=?"
+        "   AND COALESCE(vc.provider,'')='telnyx'"
+        "   AND vc.status<>'dry_run'"
+        "   AND datetime(COALESCE(vc.created_at,vc.started_at))<=datetime('now',?)"
+        "   AND ("
+        "     COALESCE(vc.amd_result,'') IN ('machine','not_sure')"
+        "     OR COALESCE(vc.hangup_cause,'') IN ('timeout','user_busy','no_answer')"
+        "     OR COALESCE(vc.intent,'')='voicemail'"
+        "   )"
+        ")"
+    )
+    params.extend([str(int(campaign_id)), f"-{delay_hours} hours"])
+    where.append(
+        "(SELECT COUNT(*) FROM voice_calls cnt"
+        " WHERE cnt.company_id=pc.id AND cnt.campaign_id=?"
+        "   AND COALESCE(cnt.provider,'')='telnyx' AND cnt.status<>'dry_run') < ?"
+    )
+    params.extend([str(int(campaign_id)), max_attempts])
+    sql = (
+        "SELECT pc.* FROM prospect_companies pc WHERE "
+        + " AND ".join(where)
+        + " ORDER BY pc.score DESC, pc.id ASC LIMIT ?"
+    )
+    params.append(max(1, min(1000, int(limit))))
+    rows = conn.execute(sql, tuple(params)).fetchall()
+    return [dict(row) for row in rows]
+
+
 def campaign_candidates(
     campaign_id: int,
     city: str = "",
@@ -1943,6 +2042,17 @@ def campaign_candidates(
                 (*params, max(1, min(1000, int(limit)))),
             ).fetchall()
         ]
+        if _retry_policy_enabled() and len(rows) < int(limit):
+            seen = {int(row["id"]) for row in rows}
+            for row in _retry_candidates(
+                conn, campaign_id, city, trade, int(limit)
+            ):
+                if int(row["id"]) in seen:
+                    continue
+                rows.append(row)
+                seen.add(int(row["id"]))
+                if len(rows) >= int(limit):
+                    break
         if not include_fallback and rows:
             from . import showcase
 

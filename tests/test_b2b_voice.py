@@ -1,7 +1,7 @@
 """Fase 1 do módulo de voz B2B: schema, gate can_call e importação."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -22,6 +22,9 @@ def _clean_voice_db(monkeypatch):
             "dnc_checks",
             "prospect_companies",
             "prospect_sources",
+            "voice_calls",
+            "voice_campaigns",
+            "voice_campaign_skips",
         ):
             conn.execute(f"DELETE FROM {table}")
         conn.commit()
@@ -385,3 +388,55 @@ def test_scrub_dnc_aplica_lista_a_toda_a_base():
 )
 def test_is_valid_us_phone(raw, expected):
     assert voice.is_valid_us_phone(raw) is expected
+
+
+def test_retry_policy_is_off_by_default_and_adds_transient_candidates(monkeypatch):
+    voice.import_licenses_csv(_csv(phone="+16175550991"))
+    voice.sync_company_trades()
+    conn = voice.get_conn()
+    try:
+        company_row = conn.execute(
+            "SELECT id FROM prospect_companies WHERE phone='+16175550991'"
+        ).fetchone()
+        conn.execute(
+            "UPDATE company_trades SET source='license', confidence=0.9 "
+            "WHERE company_id=?",
+            (int(company_row["id"]),),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    company = _company("+16175550991")
+    campaign = voice.create_campaign("Retry test", "Boston", "Roofing", 5)
+    call = voice.create_voice_call(
+        company,
+        campaign_id=str(campaign["id"]),
+        trade_code="Roofing",
+    )
+    old = (datetime.now(timezone.utc) - timedelta(hours=49)).isoformat()
+    conn = voice.get_conn()
+    try:
+        conn.execute(
+            "UPDATE voice_calls SET created_at=?, started_at=?, status='ended', "
+            "amd_result='machine', intent='voicemail', "
+            "hangup_cause='normal_clearing' WHERE id=?",
+            (old, old, call["id"]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Default OFF: o cooldown de 7 dias continua a excluir.
+    assert voice.campaign_candidates(
+        campaign["id"], "Boston", "Roofing", 5, True
+    ) == []
+
+    monkeypatch.setattr(voice.settings, "VOICE_RETRY_ENABLED", True, raising=False)
+    monkeypatch.setattr(
+        voice.settings, "VOICE_RETRY_DELAY_HOURS", 48, raising=False
+    )
+    monkeypatch.setattr(
+        voice.settings, "VOICE_RETRY_MAX_ATTEMPTS", 2, raising=False
+    )
+    rows = voice.campaign_candidates(campaign["id"], "Boston", "Roofing", 5, True)
+    assert [int(row["id"]) for row in rows] == [int(company["id"])]

@@ -167,13 +167,21 @@ def test_segments_classificam_dedicada_e_fallback():
     assert dallas["showcase_city_total"] >= 5
 
 
-def test_campanha_interrompida_e_fechada_no_arranque():
+def test_campanha_interrompida_e_reagendada_no_arranque(monkeypatch):
+    monkeypatch.setattr(
+        voice.settings,
+        "VOICE_INTERRUPTED_RESUME_DELAY_SECONDS",
+        60,
+        raising=False,
+    )
     campaign = voice.create_campaign("Auto interrupted", "Boston", "Roofing", 5)
-    closed = voice.mark_interrupted_campaigns()
-    assert closed >= 1
+    paused = voice.mark_interrupted_campaigns()
+    assert paused >= 1
     final = voice.get_campaign(campaign["id"])
-    assert final["status"] == "error"
-    assert "interrompida" in (final["error"] or "").lower()
+    assert final["status"] == "paused"
+    assert final["next_batch_at"]
+    due = voice.paused_campaigns_due(NOW + timedelta(seconds=120))
+    assert int(campaign["id"]) in due
 
 
 def test_cota_total_com_lote_diario_pausa_e_retoma():

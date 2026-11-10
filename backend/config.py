@@ -121,7 +121,15 @@ class Settings(BaseSettings):
     VOICE_FREEZE: bool = True
     # Cadencia do loop que retoma campanhas pausadas (orcamento diario,
     # lote do dia ou fora da janela).
-    VOICE_CAMPAIGN_RESUME_INTERVAL_SECONDS: int = 300
+    VOICE_CAMPAIGN_RESUME_INTERVAL_SECONDS: int = 30
+    # Uma campanha interrompida por restart fica `paused` com next_batch
+    # imediato (curto delay) em vez de `error` definitivo.
+    VOICE_INTERRUPTED_RESUME_DELAY_SECONDS: int = 120
+    # Politica de retry (default OFF). So' retoma contactos do mesmo lote com
+    # desfechos transitorios (voicemail/no_answer/busy/timeout) apos o delay.
+    VOICE_RETRY_ENABLED: bool = False
+    VOICE_RETRY_DELAY_HOURS: int = 48
+    VOICE_RETRY_MAX_ATTEMPTS: int = 2
     VOICE_SOURCE_ALLOWED_HOSTS: str = ""
     VOICE_SYNC_INTERVAL_HOURS: int = 6
     VOICE_STAGING_MODE: bool = False

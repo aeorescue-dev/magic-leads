@@ -1741,9 +1741,9 @@ async def _voice_campaign_resume_loop() -> None:
         30,
         int(
             getattr(
-                settings, "VOICE_CAMPAIGN_RESUME_INTERVAL_SECONDS", 300
+                settings, "VOICE_CAMPAIGN_RESUME_INTERVAL_SECONDS", 30
             )
-            or 300
+            or 30
         ),
     )
     logger.info(
@@ -6294,11 +6294,11 @@ async def _lifespan(app):
         )
         if interrupted_campaigns:
             logger.warning(
-                "Campanhas de voz interrompidas por deploy fechadas: %s",
+                "Campanhas de voz interrompidas por deploy reagendadas: %s",
                 interrupted_campaigns,
             )
     except Exception as e:
-        logger.warning("Falha ao fechar campanhas de voz interrompidas: %s", e)
+        logger.warning("Falha ao reagendar campanhas de voz interrompidas: %s", e)
 
     # Pausas por orcamento diario/lote/janela nunca podem ficar eternas.
     # O loop so' arranca campanhas com `next_batch_at` vencido.
