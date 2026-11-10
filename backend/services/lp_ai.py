@@ -121,6 +121,10 @@ _LANG_MARKERS = {
         "preço",
         "orçamento",
         "contato",
+        "recebo",
+        "exatamente",
+        "morada",
+        "equipa",
         "trabalho",
     ),
     "es": (
@@ -132,7 +136,6 @@ _LANG_MARKERS = {
         "cuánto",
         "propietario",
         "oportunidades",
-        "semana",
         "cancelar",
         "diferencia",
         "comparten",

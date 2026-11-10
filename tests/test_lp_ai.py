@@ -9,6 +9,18 @@ def test_detect_language_pt_es_en():
     assert lp_ai.detect_language("¿Cómo funciona? Estoy gastando en anuncios.") == "es"
     assert lp_ai.detect_language("En que se diferencia de Angi? Los leads no se comparten.") == "es"
     assert lp_ai.detect_language("How does this work? I spend on ads.") == "en"
+    assert (
+        lp_ai.detect_language(
+            "O que recebo exatamente por $120 por semana? Existe contrato?"
+        )
+        == "pt"
+    )
+    assert (
+        lp_ai.detect_language(
+            "Hola, necesito informacion sobre los precios en Dallas esta semana."
+        )
+        == "es"
+    )
 
 
 def test_suggest_reply_area_uses_city_and_trade():
