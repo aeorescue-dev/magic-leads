@@ -254,6 +254,15 @@ async def run_campaign(campaign_id: int) -> None:
             except Exception:  # noqa: BLE001
                 continue
         if prewarm_texts:
+            try:
+                cleaned = await _run_sync(voice_audio_cache.cleanup)
+                if cleaned.get("removed"):
+                    logger.info(
+                        "[TTS-CACHE] cleanup removeu %s áudios",
+                        cleaned.get("removed"),
+                    )
+            except Exception:  # noqa: BLE001
+                pass
             warmed = await _run_sync(voice_audio_cache.prewarm, prewarm_texts)
             logger.info(
                 "[TTS-CACHE] prewarm shared: %s criados, %s hits",
