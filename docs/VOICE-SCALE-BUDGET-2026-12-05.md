@@ -4,6 +4,24 @@ Data: 2026-11-10. Saldo Telnyx consultado: **$16.75**.
 Conta: **8 números** (6 no pool NY + 1 secundário 518 + 1 Dallas).
 Preços Telnyx confirmados na API: número 929 = **$1,00 upfront + $1,00/mês**.
 
+## Revisão 10/11 14:00 ET — decisão: sem compra de DIDs
+
+- O 518 entra no pool; o pool fica com **7 DIDs** e a conta continua com **8
+  números** (não 9).
+- **Rampa 11–21/11:** tráfego $5,69 + aluguel 8 × $1 = **$13,69**, sem upfront.
+  O saldo atual de **$16,75 cobre** (sobram $3,06; margem de 22%).
+- **300/dia com 7 DIDs:** 42,9 chamadas/DID = **86%** do cap de 50. É
+  operacional, mas acima do alvo de 75–80%. Para ≤80%, o máximo é
+  **280/dia**. Os dias de 300 só começam a 17/11; dá para decidir até lá.
+- **Fase 500/dia:** 14 DIDs no pool → 7 novos (o 518 já conta). Conta total
+  de 15 números: aluguel $15 + upfront $7 + tráfego $11,40 = **$33,40**.
+- **Consolidado até 05/12:** tráfego $17,09 + aluguel $15 + upfront $7 =
+  **$39,09**; com margem 50% = **$58,64**.
+- **Enriquecimento:** o primeiro passe importou **+777** empresas (NY total
+  14.878), mas **777 ficaram sem DNC** (`dnc_not_checked`) e **não são
+  chamáveis**. O alvo de +5.000 não foi atingido com a fonte atual; é preciso
+  uma extração direcionada + DNC oficial.
+
 ## 1. Rampa 11/11–21/11 (2.620 chamadas, 8 DIDs no pool)
 
 ### Premissas
