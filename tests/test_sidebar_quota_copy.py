@@ -10,6 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 I18N = ROOT / "frontend" / "lib" / "i18n.tsx"
+I18N_DIR = ROOT / "frontend" / "lib" / "i18n"
 DASHBOARD = (
     ROOT
     / "frontend"
@@ -41,16 +42,19 @@ FORBIDDEN_COPY = (
 
 
 def _locale_blocks() -> dict[str, str]:
-    text = I18N.read_text(encoding="utf-8")
-    pt = text.index("const PT: Dict = {")
-    en = text.index("const EN: Dict = {")
-    es = text.index("const ES: Dict = {")
-    end = text.index("export const DICTS")
+    # P0 split the dictionaries out of i18n.tsx; read the dedicated files.
     return {
-        "pt": text[pt:en],
-        "en": text[en:es],
-        "es": text[es:end],
+        lang: (I18N_DIR / f"{lang}.ts").read_text(encoding="utf-8")
+        for lang in ("pt", "en", "es")
     }
+
+
+def _all_i18n_text() -> str:
+    texts = []
+    for path in [I18N, *sorted(I18N_DIR.glob("*.ts"))]:
+        if path.exists():
+            texts.append(path.read_text(encoding="utf-8"))
+    return "\n".join(texts)
 
 
 def test_new_daily_quota_keys_exist_in_all_locales():
@@ -62,13 +66,13 @@ def test_new_daily_quota_keys_exist_in_all_locales():
 
 
 def test_old_credit_keys_removed():
-    text = I18N.read_text(encoding="utf-8")
+    text = _all_i18n_text()
     for key in OLD_KEYS:
         assert f'"{key}"' not in text, f"chave antiga ainda presente: {key}"
 
 
 def test_no_credit_selling_copy_anywhere_in_i18n():
-    text = I18N.read_text(encoding="utf-8").lower()
+    text = _all_i18n_text().lower()
     for phrase in FORBIDDEN_COPY:
         assert phrase not in text, f"copy de venda de créditos reapareceu: {phrase!r}"
 
