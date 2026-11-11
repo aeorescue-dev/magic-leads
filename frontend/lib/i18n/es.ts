@@ -940,7 +940,7 @@ const ES: Dict = {
   "landing.p1Title": "Estos son clientes reales esperando tu llamada ahora mismo.",
   "landing.p1Sub": "¡Trabajos cualificados actualizados hace un momento!",
   "landing.p1AllCities": "Todas las ciudades",
-  "landing.p1ZipPlaceholder": "Introduce tu código ZIP",
+  "landing.p1ZipPlaceholder": "Código ZIP",
   "landing.p1Update": "Actualizar",
   "landing.p1Active": "activas",
   "landing.p1Last7": "últimos 7 días",

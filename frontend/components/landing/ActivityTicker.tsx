@@ -80,7 +80,7 @@ export function ActivityTicker({
 
   return (
     <div
-      className="mx-auto mt-5 flex max-w-4xl items-center gap-3 rounded-2xl border border-[#34e0a1]/20 bg-[#0b1220] px-5 py-3 text-white shadow-[0_18px_45px_-28px_rgba(15,23,42,0.65)]"
+      className="mx-auto mt-3 flex max-w-4xl items-center gap-3 rounded-2xl border border-[#34e0a1]/20 bg-[#0b1220] px-5 py-2.5 text-white shadow-[0_18px_45px_-28px_rgba(15,23,42,0.65)]"
       aria-live="polite"
     >
       <span className="relative flex h-2 w-2 shrink-0">

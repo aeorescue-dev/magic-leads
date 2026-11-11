@@ -221,173 +221,85 @@ export default function LandingPage() {
 
   return (
     <>
-      {/* HERO */}
+      {/* HERO — Live Trade Grid first */}
       <section id="topo" className="landing-dark aurora-dark relative overflow-hidden">
         <div className="pointer-events-none absolute inset-0 grid-fade" />
-        <div className="pointer-events-none absolute -top-48 left-1/2 h-[720px] w-[1150px] -translate-x-1/2 rounded-full bg-[#10b981]/[0.13] blur-[170px]" />
-        <div className="pointer-events-none absolute -right-24 top-24 h-[440px] w-[440px] rounded-full bg-[#7c5cff]/[0.16] blur-[150px]" />
+        <div className="pointer-events-none absolute -top-56 left-1/2 h-[760px] w-[1200px] -translate-x-1/2 rounded-full bg-[#10b981]/[0.14] blur-[180px]" />
+        <div className="pointer-events-none absolute -right-24 top-20 h-[460px] w-[460px] rounded-full bg-[#7c5cff]/[0.14] blur-[160px]" />
 
-        <div className="relative mx-auto max-w-7xl px-4 pb-16 pt-14 sm:px-6 md:pb-20 md:pt-20">
-          <div className="grid items-center gap-14 lg:grid-cols-[1.04fr_0.96fr] lg:gap-10">
-            <div className="text-center lg:text-left">
-              <div className="fade-up eyebrow">
-                <span className="dot" />
-                {hasMetrics ? `${leadsBank.toLocaleString("en-US")} ${t("landing.heroKicker")}` : t("landing.heroLoading")}
-              </div>
-
-              <h1 className="fade-up font-display mt-7 text-[2.4rem] font-black leading-[0.95] tracking-[-0.04em] text-white sm:text-6xl lg:text-[4.35rem]">
-                {t("landing.heroTitle1")}
-                <br />
-                <span className="hl">
-                  {t("landing.heroTitle2")}
-                </span>
-              </h1>
-
-              <p className="fade-up mx-auto mt-7 max-w-xl text-base leading-relaxed text-[#9fb0c6] sm:text-lg lg:mx-0">
-                {t("landing.heroSub")}
-              </p>
-
-              <div className="fade-up mt-9 flex flex-col items-stretch justify-center gap-3 sm:flex-row lg:justify-start">
-                <button onClick={() => openModal()} data-track="hero_cta" className="btn-mint group flex items-center justify-center gap-2.5 px-8 py-4 text-[15px]">
-                  {t("landing.ctaPanel")}
-                  <svg className="h-5 w-5 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" /></svg>
-                </button>
-                <button onClick={() => scrollTo("simulador")} data-track="sample_cta" className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/14 bg-white/[0.055] px-7 py-4 text-sm font-bold text-white backdrop-blur-md transition hover:border-[#34e0a1]/40 hover:bg-white/[0.09]">
-                  {t("landing.ctaSample")}
-                </button>
-              </div>
-
-              <div className="fade-up mt-7 rounded-2xl border border-[#34e0a1]/20 bg-[#34e0a1]/[0.07] px-4 py-3.5 backdrop-blur-sm">
-                <div className="grid grid-cols-3 gap-x-1 gap-y-2 text-[8px] font-black uppercase tracking-[0.06em] text-[#8ff5c8] sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:gap-x-5 sm:text-[11px] sm:tracking-wider lg:justify-start">
-                  {L.trust.map((item) => (
-                    <span key={item} className="flex flex-col items-center justify-center gap-0.5 text-center sm:inline-flex sm:flex-row sm:gap-1.5 lg:justify-start">
-                      <svg className="h-3 w-3 shrink-0 text-[#34e0a1] sm:h-3.5 sm:w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
-                      {item}
-                    </span>
-                  ))}
-                </div>
-                {L.quotes[0] && (
-                  <p className="mt-2.5 flex items-start justify-center gap-2 text-[11px] font-semibold leading-snug text-white/65 lg:justify-start">
-                    <span className="mt-0.5 shrink-0 text-[#34e0a1]">★★★★★</span>
-                    <span>“{L.quotes[0].badge}” — {L.quotes[0].name}, {L.quotes[0].role}</span>
-                  </p>
-                )}
-              </div>
-
-              <p className="mt-4 text-xs font-medium text-white/40">{t("landing.priceLine")}</p>
+        <div className="relative mx-auto max-w-[1400px] px-4 pb-10 pt-6 sm:px-6 sm:pt-8 md:pb-14 md:pt-10">
+          <div className="mx-auto max-w-5xl text-center">
+            <div className="fade-up eyebrow mx-auto">
+              <span className="dot" />
+              {hasMetrics ? `${leadsBank.toLocaleString("en-US")} ${t("landing.heroKicker")}` : t("landing.heroLoading")}
             </div>
 
-            {/* Glass product console */}
-            <div className="pop-in relative mx-auto w-full max-w-[540px]">
-              <div className="pointer-events-none absolute -inset-6 rounded-[2.4rem] bg-[#10b981]/[0.10] blur-3xl" />
-              <div className="glass-panel relative rounded-[1.7rem] p-2">
-                <div className="overflow-hidden rounded-[1.35rem] border border-white/[0.06] bg-[#070c15]/95">
-                  <div className="browser-chrome flex items-center gap-3 px-4 py-3">
-                    <div className="flex gap-1.5">
-                      <span className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]/80" />
-                      <span className="h-2.5 w-2.5 rounded-full bg-[#febc2e]/80" />
-                      <span className="h-2.5 w-2.5 rounded-full bg-[#28c840]/80" />
-                    </div>
-                    <div className="flex flex-1 items-center gap-2 rounded-md border border-white/[0.07] bg-black/30 px-2.5 py-1">
-                      <svg className="h-3 w-3 text-[#34e0a1]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 0h10.5a1.5 1.5 0 0 1 1.5 1.5v7.5a1.5 1.5 0 0 1-1.5 1.5H6.75a1.5 1.5 0 0 1-1.5-1.5v-7.5a1.5 1.5 0 0 1 1.5-1.5Z" /></svg>
-                      <span className="mono-data text-[10px] tracking-tight text-white/60">painel.magicleads.app</span>
-                    </div>
-                    <span className="inline-flex items-center gap-1.5 text-[9px] font-black uppercase tracking-[0.16em] text-[#34e0a1]">
-                      <span className="blink-dot" /> live
-                    </span>
-                  </div>
+            <h1 className="fade-up font-display mx-auto mt-3 max-w-4xl text-[2rem] font-black leading-[0.96] tracking-[-0.04em] text-white sm:text-[2.7rem] md:text-5xl lg:text-[3.35rem]">
+              {t("landing.p1Title")}
+            </h1>
 
-                  <div className="px-4 pb-4 pt-3.5">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/35">New York · Manhattan</p>
-                        <p className="mt-0.5 text-sm font-bold text-white">Today&apos;s exclusive jobs</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="mono-data text-xl font-black leading-none text-[#34e0a1]">12</p>
-                        <p className="text-[8px] font-bold uppercase tracking-widest text-white/35">new</p>
-                      </div>
-                    </div>
+            <p className="fade-up mx-auto mt-2.5 max-w-2xl text-[13.5px] leading-relaxed text-[#9fb0c6] sm:text-base">
+              {t("landing.p1Sub")}{" "}
+              <span className="hidden text-white/45 sm:inline">{t("landing.heroSub")}</span>
+            </p>
 
-                    <div className="mt-3 status-bar"><span style={{ width: "76%" }} /></div>
-                    <div className="mt-1.5 flex justify-between text-[8px] font-bold uppercase tracking-widest text-white/30">
-                      <span>76%</span><span>{t("landing.updated")}</span>
-                    </div>
+            <div className="fade-up mt-4 flex flex-col items-stretch justify-center gap-2.5 sm:flex-row sm:items-center">
+              <button onClick={() => openModal()} data-track="hero_cta" className="btn-mint group flex items-center justify-center gap-2 px-7 py-3 text-[14px]">
+                {t("landing.ctaPanel")}
+                <svg className="h-5 w-5 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" /></svg>
+              </button>
+              <button onClick={() => scrollTo("simulador")} data-track="sample_cta" className="hidden items-center justify-center gap-2 rounded-xl border border-white/14 bg-white/[0.05] px-6 py-3 text-[13px] font-bold text-white backdrop-blur-md transition hover:border-[#34e0a1]/40 hover:bg-white/[0.09] sm:inline-flex">
+                {t("landing.ctaSample")}
+              </button>
+            </div>
 
-                    <div className="mt-3.5 space-y-2">
-                      {leadsByCity["New York"].slice(0, 3).map((lead) => (
-                        <div key={`hero-${lead.id}`} className="lead-row flex items-center gap-3 px-3 py-2.5">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2">
-                              <span className={`priority-pill ${BADGE_STYLE[lead.badge]}`}>{lead.badgeLabel}</span>
-                              <span className="mono-data truncate text-[9px] text-white/30">{lead.id.toUpperCase()} · {lead.timeAgo}</span>
-                            </div>
-                            <p className="mt-1 truncate text-[12px] font-bold text-white">{lead.category}</p>
-                            <p className="truncate text-[10px] text-[#34e0a1]">{lead.neighborhood}</p>
-                          </div>
-                          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-white/40">
-                            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="mt-3 flex items-center justify-between rounded-xl border border-[#34e0a1]/15 bg-[#34e0a1]/[0.06] px-3 py-2.5">
-                      <span className="inline-flex items-center gap-1.5 text-[9px] font-black uppercase tracking-wider text-[#34e0a1]">
-                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
-                        {t("landing.reserveHour")}
-                      </span>
-                      <span className="mono-data text-[9px] font-bold text-white/40">$120/wk</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="glass-panel-strong absolute -bottom-6 -left-4 hidden items-center gap-3 rounded-2xl px-4 py-3 sm:flex">
-                <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#34e0a1]/15 text-[#34e0a1]">
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z" /></svg>
+            <div className="fade-up mt-3 hidden flex-wrap items-center justify-center gap-x-5 gap-y-2 text-[10px] font-black uppercase tracking-[0.08em] text-[#8ff5c8] sm:flex">
+              {L.trust.map((item) => (
+                <span key={item} className="inline-flex items-center gap-1.5">
+                  <svg className="h-3.5 w-3.5 shrink-0 text-[#34e0a1]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
+                  {item}
                 </span>
-                <div>
-                  <p className="text-[9px] font-black uppercase tracking-widest text-white/40">{t("landing.owner")}</p>
-                  <p className="mono-data text-xs font-bold text-white">(347) 555-0192</p>
-                </div>
-              </div>
+              ))}
             </div>
           </div>
 
-          {/* Glass metric tiles */}
-          <div className="mt-14 grid gap-3 sm:grid-cols-3">
-            <div className="metric-tile px-5 py-4">
+          <div className="mt-4 sm:mt-6">
+            <LiveTradeGrid categories={L.categories} onCta={openModal} variant="hero" />
+          </div>
+
+          <div className="mt-6 grid gap-3 sm:grid-cols-3">
+            <div className="metric-tile px-4 py-3">
               <div className="flex items-center justify-between">
-                <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/35">{t("landing.statBank")}</p>
+                <p className="text-[8.5px] font-black uppercase tracking-[0.18em] text-white/35">{t("landing.statBank")}</p>
                 <span className="h-1.5 w-1.5 rounded-full bg-[#34e0a1] shadow-[0_0_10px_#34e0a1]" />
               </div>
-              <p className="mono-data mt-2 text-2xl font-black text-white sm:text-3xl">{hasMetrics ? `${leadsBank.toLocaleString("en-US")}+` : "—"}</p>
+              <p className="mono-data mt-1.5 text-xl font-black text-white sm:text-2xl">{hasMetrics ? `${leadsBank.toLocaleString("en-US")}+` : "-"}</p>
             </div>
-            <div className="metric-tile px-5 py-4">
+            <div className="metric-tile px-4 py-3">
               <div className="flex items-center justify-between">
-                <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/35">{t("landing.statOwner")}</p>
+                <p className="text-[8.5px] font-black uppercase tracking-[0.18em] text-white/35">{t("landing.statOwner")}</p>
                 <span className="h-1.5 w-1.5 rounded-full bg-[#a78bfa] shadow-[0_0_10px_#a78bfa]" />
               </div>
-              <p className="mono-data mt-2 text-2xl font-black text-white sm:text-3xl">{hasMetrics ? `${withOwner.toLocaleString("en-US")}+` : "—"}</p>
+              <p className="mono-data mt-1.5 text-xl font-black text-white sm:text-2xl">{hasMetrics ? `${withOwner.toLocaleString("en-US")}+` : "-"}</p>
             </div>
-            <div className="metric-tile px-5 py-4">
+            <div className="metric-tile px-4 py-3">
               <div className="flex items-center justify-between">
-                <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/35">{t("landing.statCities")}</p>
+                <p className="text-[8.5px] font-black uppercase tracking-[0.18em] text-white/35">{t("landing.statCities")}</p>
                 <span className="h-1.5 w-1.5 rounded-full bg-[#34e0a1] shadow-[0_0_10px_#34e0a1]" />
               </div>
-              <p className="mono-data mt-2 text-2xl font-black text-white sm:text-3xl">{citiesCount}+</p>
+              <p className="mono-data mt-1.5 text-xl font-black text-white sm:text-2xl">{citiesCount}+</p>
             </div>
           </div>
 
-          <p className="mt-5 flex flex-wrap items-center justify-center gap-2 text-[10px] font-bold uppercase tracking-[0.14em] text-white/30">
+          <p className="mt-4 text-center text-xs font-medium text-white/40">{t("landing.priceLine")}</p>
+          <p className="mt-2 flex flex-wrap items-center justify-center gap-2 text-[10px] font-bold uppercase tracking-[0.14em] text-white/30">
             <span className="blink-dot" /><span className="blink-dot blink-dot-delay" /><span className="blink-dot blink-dot-delay-2" />
             {t("landing.updated")} {t("landing.agoLittle")}
             {hasMetrics && newThisRun > 0 && <span className="text-[#34e0a1]">· {newThisRun.toLocaleString("en-US")} {t("landing.updatedNew")}</span>}
           </p>
         </div>
 
-        <div className="relative overflow-hidden border-t border-white/[0.07] bg-[#060911]/80 py-4">
+        <div className="relative overflow-hidden border-t border-white/[0.07] bg-[#060911]/80 py-3">
           <div className="animate-marquee items-center gap-8 text-[10px] font-bold uppercase tracking-[0.22em] text-white/25">
             {[...L.categories, ...L.categories].map((c, i) => (
               <span key={`${c}-${i}`} className="flex shrink-0 items-center gap-8">{c}<span className="h-1 w-1 rounded-full bg-[#34e0a1]/70" /></span>
@@ -395,8 +307,6 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
-
-      <LiveTradeGrid categories={L.categories} onCta={openModal} />
 
       {/* COBERTURA COMPLETA */}
       <section className="surface-light relative py-20 md:py-28">

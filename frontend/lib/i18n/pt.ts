@@ -931,7 +931,7 @@ const PT: Dict = {
   "landing.p1Title": "Estes são os clientes reais agora aguardando o seu contato.",
   "landing.p1Sub": "Obras qualificadas atualizadas agora há pouco!",
   "landing.p1AllCities": "Todas as cidades",
-  "landing.p1ZipPlaceholder": "Informe seu código ZIP",
+  "landing.p1ZipPlaceholder": "Código ZIP",
   "landing.p1Update": "Atualizar",
   "landing.p1Active": "ativas",
   "landing.p1Last7": "últimos 7 dias",
