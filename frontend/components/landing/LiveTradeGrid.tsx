@@ -99,6 +99,7 @@ export function LiveTradeGrid({
   showTicker = true,
   featuredLimit,
   preview = false,
+  onTotalChange,
 }: {
   categories: string[];
   onCta: (trade?: string) => void;
@@ -108,6 +109,7 @@ export function LiveTradeGrid({
   showTicker?: boolean;
   featuredLimit?: number;
   preview?: boolean;
+  onTotalChange?: (total: number) => void;
 }) {
   const { t } = useI18n();
   const [cityState, setCityState] = useState<string>("New York");
@@ -132,6 +134,7 @@ export function LiveTradeGrid({
       .then((res) => {
         if (cancelled || id !== requestRef.current) return;
         setData(res);
+        onTotalChange?.(res.total);
         setLoading(false);
       })
       .catch(() => {
@@ -231,6 +234,23 @@ export function LiveTradeGrid({
       )}
 
       <div className={preview ? "relative w-full" : "relative mx-auto max-w-7xl px-4 sm:px-6"}>
+        {preview ? (
+          <div className="flex items-center justify-between gap-3 px-1 pb-4">
+            <div className="flex items-center gap-2.5">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#10b981] opacity-50" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-[#10b981]" />
+              </span>
+              <div>
+                <p className="text-[8px] font-black uppercase tracking-[0.16em] text-[#94a3b8]">{t("landing.p1Kicker")}</p>
+                <p className="mt-0.5 text-base font-black text-[#0b1220]">{regionLabel}</p>
+              </div>
+            </div>
+            <span className="rounded-full border border-[#d9f3e8] bg-[#effbf5] px-2.5 py-1 text-[8px] font-black uppercase tracking-[0.08em] text-[#0a8f65]">
+              {loading ? "…" : `${displayedRows.length} ${t("landing.p1Active")}`}
+            </span>
+          </div>
+        ) : (
         <div className="mx-auto max-w-4xl text-center">
           <span className="eyebrow eyebrow-light mx-auto"><span className="dot" />{t("landing.p1Kicker")}</span>
           <h2 className={`font-display mx-auto max-w-3xl font-black leading-[1.02] tracking-[-0.03em] text-[#0b1220] ${
@@ -255,6 +275,8 @@ export function LiveTradeGrid({
             </span>
           </div>
         </div>
+
+        )}
 
         {showControls && (
           <>
@@ -325,6 +347,8 @@ export function LiveTradeGrid({
 
         {showTicker && <ActivityTicker labelsByKey={tradeLabels} />}
 
+        {!preview && (
+        <>
         <div className={`flex flex-wrap items-center justify-center gap-x-2 gap-y-1 font-bold uppercase tracking-[0.13em] ${
           preview ? "mt-2.5 text-[8px]" : "mt-6 text-[10.5px]"
         }`}>
@@ -351,6 +375,9 @@ export function LiveTradeGrid({
           </p>
         )}
 
+        </>
+        )}
+
         {error && (
           <div className="mx-auto mt-4 flex max-w-2xl flex-wrap items-center justify-between gap-2 rounded-xl border border-[#f59e0b]/25 bg-[#fffbeb] px-4 py-2.5 text-[11px] text-[#92702a]">
             <span>{t("landing.p1Error")}</span>
@@ -361,7 +388,7 @@ export function LiveTradeGrid({
         )}
 
         {loading ? (
-          <div className={preview ? "mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-2.5" : "mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4"}>
+          <div className={preview ? "mt-0 grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-2.5" : "mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4"}>
             {Array.from({ length: 8 }).map((_, index) => (
               <div key={`p1-skeleton-${index}`} className="rounded-2xl border border-[#e8eef6] bg-white p-4">
                 <div className="h-10 w-10 animate-pulse rounded-xl bg-[#eef2f7]" />
@@ -383,7 +410,7 @@ export function LiveTradeGrid({
             </button>
           </div>
         ) : (
-          <div className={preview ? "mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-2.5" : "mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4"}>
+          <div className={preview ? "mt-0 grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-2.5" : "mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4"}>
             {displayedRows.map((row, index) => {
               const Icon = ICONS[row.key] ?? Wrench;
               const palette = ICON_STYLE[row.key] ?? ICON_STYLE.Structure;

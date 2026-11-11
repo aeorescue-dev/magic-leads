@@ -6,7 +6,7 @@ import { fetchPublicMetrics } from "@/lib/api-client";
 import type { PublicMetrics } from "@/lib/api-client";
 import { FoldWave, useLandingShell } from "@/components/landing/LandingShell";
 import { LiveTradeGrid } from "@/components/landing/LiveTradeGrid";
-import { Building2, Phone, ShieldCheck, Megaphone, Search, Users, Mail, MessageCircle, MessageSquare, MapPin } from "lucide-react";
+import { Building2, Phone, ShieldCheck, Megaphone, Search, Users, Mail, MessageCircle, MessageSquare, MapPin, Clock } from "lucide-react";
 
 // ------------------------------------------------------------------
 // Tipos e dados ilustrativos do "painel amostra"
@@ -102,6 +102,7 @@ export default function LandingPage() {
   const [heroZip, setHeroZip] = useState("");
   const [heroZipInput, setHeroZipInput] = useState("");
   const [heroZipError, setHeroZipError] = useState("");
+  const [heroTotal, setHeroTotal] = useState(0);
   const [reservedLeadId, setReservedLeadId] = useState<string | null>(null);
   const [timerSeconds, setTimerSeconds] = useState(3600);
   const [demoContact, setDemoContact] = useState<{ channel: string; phone: string } | null>(null);
@@ -234,6 +235,7 @@ export default function LandingPage() {
     setHeroZip(digits);
     setHeroCity("");
     setHeroZipInput("");
+    setHeroTotal(0);
     window.setTimeout(() => scrollTo("p1-grid"), 40);
   };
 
@@ -242,6 +244,7 @@ export default function LandingPage() {
     setHeroZip("");
     setHeroZipInput("");
     setHeroZipError("");
+    setHeroTotal(0);
   };
 
   return (
@@ -268,6 +271,17 @@ export default function LandingPage() {
               <p className="mt-5 max-w-xl text-[15px] leading-relaxed text-[#5b6576] sm:text-lg">
                 {t("landing.heroSub")}
               </p>
+
+              <div className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#10b981] opacity-50" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-[#10b981]" />
+                </span>
+                <span className="text-[10px] font-black uppercase tracking-[0.08em] text-[#0a8f65]">{t("landing.p1Sub")}</span>
+                <span className="text-[11px] font-semibold text-[#64748b]">
+                  {heroTotal > 0 ? `${heroTotal.toLocaleString("en-US")} ${t("landing.p1Opportunities")}` : t("landing.p1Loading")}
+                </span>
+              </div>
 
               <form onSubmit={submitHeroZip} className="mt-6 flex w-full max-w-xl items-center gap-2 rounded-2xl border border-[#e7e3d9] bg-white p-2 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.35)] transition focus-within:border-[#10b981]/60 focus-within:shadow-[0_24px_70px_-36px_rgba(16,185,129,0.35)]">
                 <MapPin className="ml-3 h-5 w-5 shrink-0 text-[#10b981]" />
@@ -313,7 +327,16 @@ export default function LandingPage() {
                 })}
               </div>
 
-              <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-[10px] font-black uppercase tracking-[0.08em] text-[#0a8f65]">
+              <div className="mt-5 flex flex-wrap gap-2">
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-[#10b981]/25 bg-[#effbf5] px-3 py-1.5 text-[9.5px] font-black uppercase tracking-[0.08em] text-[#0a8f65]">
+                  <Clock className="h-3.5 w-3.5" /> {t("landing.p1Exclusive")}
+                </span>
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-[#e7e3d9] bg-white/70 px-3 py-1.5 text-[9.5px] font-bold uppercase tracking-[0.08em] text-[#64748b]">
+                  <ShieldCheck className="h-3.5 w-3.5" /> {t("landing.p1NoAuction")}
+                </span>
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-[10px] font-black uppercase tracking-[0.08em] text-[#0a8f65]">
                 {L.trust.map((item) => (
                   <span key={item} className="inline-flex items-center gap-1.5">
                     <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
@@ -335,7 +358,8 @@ export default function LandingPage() {
                     showControls={false}
                     showTicker={false}
                     preview
-                    featuredLimit={8}
+                    featuredLimit={12}
+                    onTotalChange={setHeroTotal}
                   />
                 </div>
               </div>
