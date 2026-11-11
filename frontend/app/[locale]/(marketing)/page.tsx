@@ -135,9 +135,6 @@ export default function LandingPage() {
     const signals = blocks(t("landing.signals")).map((f) => ({
       label: f[0], hint: f[1], body: f[2],
     }));
-    const problems = blocks(t("landing.problems")).map((f) => ({
-      kicker: f[0], title: f[1], body: f[2], cost: f[3],
-    }));
     const comparisons = blocks(t("landing.comparisons")).map((f) => ({
       channel: f[0], sub: f[1], cost: f[2], costLabel: f[3],
       exclusivity: f[4], intent: f[5], phone: f[6], winner: f[7] === "true",
@@ -173,7 +170,7 @@ export default function LandingPage() {
     const aboutJobs = (n: number, ticket: string) =>
       t("landing.aboutJobs").replace("{n}", String(n)).replace("{ticket}", ticket);
 
-    return { categories, tradesLabel, signals, problems, comparisons, quotes, planFeatures, neverItems, faqs, templates, trust, waMsg, aboutJobs, coverageItems, sampleMeta };
+    return { categories, tradesLabel, signals, comparisons, quotes, planFeatures, neverItems, faqs, templates, trust, waMsg, aboutJobs, coverageItems, sampleMeta };
   }, [t]);
 
   const leadsByCity = useMemo(() => {
@@ -446,43 +443,6 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* PROBLEMA */}
-      <section className="relative bg-white py-20 md:py-28">
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[#e6ebf2] to-transparent" />
-        <div className="mx-auto max-w-7xl px-4 sm:px-6">
-          <div className="max-w-3xl">
-            <span className="eyebrow eyebrow-light"><span className="dot" style={{ background: "#f43f5e", boxShadow: "0 0 10px #f43f5e" }} />{t("landing.problemKicker")}</span>
-            <h2 className="font-display mt-5 text-[2.5rem] font-black leading-[0.98] tracking-[-0.035em] text-[#0b1220] sm:text-5xl md:text-[3.4rem]">
-              {t("landing.problemTitle")} <span className="hl">{t("landing.problemHl")}</span>
-            </h2>
-            <p className="mt-6 text-base leading-relaxed text-[#54617a] sm:text-lg">{t("landing.problemSub")}</p>
-          </div>
-          <div className="mt-14 grid gap-5 md:grid-cols-3">
-            {L.problems.map((p) => (
-              <article key={p.kicker} className="bento-light flex flex-col p-8">
-                <div className="flex items-center justify-between">
-                  <p className="kicker text-[#e11d48]">{p.kicker}</p>
-                  <span className="grid h-8 w-8 place-items-center rounded-full bg-[#f43f5e]/10 text-[#e11d48]">
-                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0 3.75h.008v.008H12v-.008ZM21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
-                  </span>
-                </div>
-                <h3 className="font-display mt-4 text-2xl font-black tracking-[-0.02em] text-[#0b1220]">{p.title}</h3>
-                <p className="mt-3 flex-1 text-[15px] leading-relaxed text-[#54617a]">{p.body}</p>
-                <span className="mono-data mt-6 inline-flex w-fit rounded-lg bg-[#fef2f4] px-3.5 py-2 text-[11px] font-bold uppercase tracking-wider text-[#be123c] ring-1 ring-[#fecdd3]">{t("landing.costWord")} {p.cost}</span>
-              </article>
-            ))}
-          </div>
-          <div className="landing-dark relative mt-6 overflow-hidden rounded-[1.6rem] bg-[#070a12] p-8 ring-1 ring-white/10 md:p-10">
-            <div className="pointer-events-none absolute -left-16 -top-20 h-64 w-64 rounded-full bg-[#7c5cff]/[0.14] blur-3xl" />
-            <div className="relative flex flex-col items-start gap-6 md:flex-row md:items-center">
-              <span className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-[#34e0a1] to-[#0a8f65] text-[#04120d] shadow-lg shadow-[#10b981]/25"><svg className="h-7 w-7" viewBox="0 0 24 24" fill="currentColor"><path d="m13 2-9 12h7l-1 8 10-13h-7V2Z" /></svg></span>
-              <p className="flex-1 text-xl font-bold leading-snug tracking-[-0.01em] text-white sm:text-2xl">{t("landing.flip")}</p>
-              <button onClick={() => openModal()} data-track="how_cta" className="btn-mint shrink-0 px-6 py-3.5 text-sm">{t("landing.seeHow")}</button>
-            </div>
-          </div>
-        </div>
-      </section>
-
       {/* OFÍCIOS */}
       <section id="oficios" className="surface-white relative scroll-mt-20 py-20 md:py-28">
         <div className="mx-auto max-w-7xl px-4 sm:px-6">
@@ -684,7 +644,7 @@ export default function LandingPage() {
             <h2 className="font-display mt-5 text-[2.4rem] font-black leading-[0.98] tracking-[-0.035em] text-white sm:text-5xl md:text-[3.2rem]">
               {t("landing.compareTitle")} <span className="hl">{t("landing.compareHl")}</span>
             </h2>
-            <p className="mt-6 text-base leading-relaxed text-[#9fb0c6] sm:text-lg">{t("landing.compareSub")}</p>
+            <p className="mt-6 text-base leading-relaxed text-[#9fb0c6] sm:text-lg">{t("landing.problemSub")}</p>
           </div>
 
           <div className="mt-14 grid gap-4 lg:grid-cols-12">
@@ -761,6 +721,9 @@ export default function LandingPage() {
               ))}
             </div>
           </div>
+          <p className="mt-8 border-t border-white/[0.07] pt-5 text-center text-[11px] font-medium text-white/35">
+            {t("landing.compareReferralNote")}
+          </p>
         </div>
       </section>
 

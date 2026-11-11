@@ -835,6 +835,7 @@ const EN: Dict = {
   "landing.compareTitle": "Stop overpaying for a lead that is",
   "landing.compareHl": "cold and shared.",
   "landing.compareSub": "The same money that disappears in clicks and auctions could be buying exclusive jobs with the owner's phone in your hand.",
+  "landing.compareReferralNote": "Referrals are a bonus, not a plan.",
   "landing.best": "BEST",
   "landing.excl": "Exclusivity",
   "landing.intentL": "Buyer intent",

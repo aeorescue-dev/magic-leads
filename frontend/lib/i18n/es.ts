@@ -834,6 +834,7 @@ const ES: Dict = {
   "landing.compareTitle": "Deja de pagar caro por un lead",
   "landing.compareHl": "frío y compartido.",
   "landing.compareSub": "El mismo dinero que se va en clics y subastas podría estar comprando obras exclusivas con el teléfono del dueño en la mano.",
+  "landing.compareReferralNote": "Las referencias son un bonus, no un plan.",
   "landing.best": "MEJOR",
   "landing.excl": "Exclusividad",
   "landing.intentL": "Intención del cliente",
