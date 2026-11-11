@@ -743,12 +743,17 @@ export interface CheckoutResponse {
   plan: CheckoutPlan;
 }
 
-export async function createCheckoutSession(locale?: string): Promise<CheckoutResponse> {
+export async function createCheckoutSession(locale?: string, trade?: string): Promise<CheckoutResponse> {
+  const headers: Record<string, string> = { "Accept-Language": locale || "" };
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (trade) headers["Content-Type"] = "application/json";
   return handle<CheckoutResponse>(
     await fetch(`${API_URL}/api/billing/checkout`, {
       method: "POST",
       credentials: "include",
-      headers: { ...authHeaders(), "Accept-Language": locale || "" },
+      headers,
+      ...(trade ? { body: JSON.stringify({ trade }) } : {}),
     })
   );
 }

@@ -246,7 +246,7 @@ export default function LandingPage() {
               </p>
 
               <div className="fade-up mt-9 flex flex-col items-stretch justify-center gap-3 sm:flex-row lg:justify-start">
-                <button onClick={openModal} data-track="hero_cta" className="btn-mint group flex items-center justify-center gap-2.5 px-8 py-4 text-[15px]">
+                <button onClick={() => openModal()} data-track="hero_cta" className="btn-mint group flex items-center justify-center gap-2.5 px-8 py-4 text-[15px]">
                   {t("landing.ctaPanel")}
                   <svg className="h-5 w-5 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" /></svg>
                 </button>
@@ -472,7 +472,7 @@ export default function LandingPage() {
             <div className="relative flex flex-col items-start gap-6 md:flex-row md:items-center">
               <span className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-[#34e0a1] to-[#0a8f65] text-[#04120d] shadow-lg shadow-[#10b981]/25"><svg className="h-7 w-7" viewBox="0 0 24 24" fill="currentColor"><path d="m13 2-9 12h7l-1 8 10-13h-7V2Z" /></svg></span>
               <p className="flex-1 text-xl font-bold leading-snug tracking-[-0.01em] text-white sm:text-2xl">{t("landing.flip")}</p>
-              <button onClick={openModal} data-track="how_cta" className="btn-mint shrink-0 px-6 py-3.5 text-sm">{t("landing.seeHow")}</button>
+              <button onClick={() => openModal()} data-track="how_cta" className="btn-mint shrink-0 px-6 py-3.5 text-sm">{t("landing.seeHow")}</button>
             </div>
           </div>
         </div>
@@ -644,7 +644,7 @@ export default function LandingPage() {
                     <svg className="h-3.5 w-3.5 text-[#34e0a1]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
                     {t("landing.payOk")}
                   </span>
-                  <button onClick={openModal} data-track="unlock_cta" className="inline-flex items-center gap-1.5 font-bold text-[#34e0a1] hover:text-white">{t("landing.unlock4")}<svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" /></svg></button>
+                  <button onClick={() => openModal()} data-track="unlock_cta" className="inline-flex items-center gap-1.5 font-bold text-[#34e0a1] hover:text-white">{t("landing.unlock4")}<svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" /></svg></button>
                 </div>
               </div>
             </div>
@@ -703,7 +703,7 @@ export default function LandingPage() {
                   </div>
 
                   <div className="mt-auto pt-8">
-                    <button onClick={openModal} data-track="compare_cta" className="btn-mint w-full py-3.5 text-sm">{t("landing.ctaPanel")}</button>
+                    <button onClick={() => openModal()} data-track="compare_cta" className="btn-mint w-full py-3.5 text-sm">{t("landing.ctaPanel")}</button>
                     <p className="mt-3 text-center text-[10px] font-bold uppercase tracking-[0.14em] text-[#8ff5c8]">✓ {t("landing.trust2")} · ✓ {t("landing.trust3")}</p>
                   </div>
                 </div>
@@ -886,7 +886,7 @@ export default function LandingPage() {
               </div>
 
               <div className="relative">
-                <button onClick={openModal} data-track="calc_cta" className="w-full rounded-xl bg-white py-4 text-sm font-black uppercase tracking-[0.08em] text-[#0a8f65] shadow-lg shadow-black/20 transition hover:-translate-y-0.5 hover:bg-[#f0fdf8]">{t("landing.calcCta")}</button>
+                <button onClick={() => openModal()} data-track="calc_cta" className="w-full rounded-xl bg-white py-4 text-sm font-black uppercase tracking-[0.08em] text-[#0a8f65] shadow-lg shadow-black/20 transition hover:-translate-y-0.5 hover:bg-[#f0fdf8]">{t("landing.calcCta")}</button>
                 <p className="mt-3 text-center text-[10px] font-black uppercase tracking-[0.12em] text-white/80">✓ {t("landing.trust2")} · ✓ {t("landing.trust3")}</p>
               </div>
             </div>
@@ -964,7 +964,7 @@ export default function LandingPage() {
                   ))}
                 </ul>
 
-                <button onClick={openModal} data-track="plan_cta" className="btn-mint mt-8 w-full py-4 text-sm uppercase tracking-[0.1em]">{t("landing.planCta")}</button>
+                <button onClick={() => openModal()} data-track="plan_cta" className="btn-mint mt-8 w-full py-4 text-sm uppercase tracking-[0.1em]">{t("landing.planCta")}</button>
 
                 <div className="mt-4 rounded-xl border border-[#34e0a1]/25 bg-[#34e0a1]/[0.08] px-4 py-3 text-center">
                   <p className="text-[11px] font-black uppercase tracking-[0.1em] text-[#8ff5c8]">✓ {t("landing.trust2")} · ✓ {t("landing.trust3")}</p>
@@ -1019,7 +1019,7 @@ export default function LandingPage() {
             <span className="eyebrow eyebrow-light"><span className="dot" style={{ background: "#f43f5e", boxShadow: "0 0 10px #f43f5e" }} />{t("landing.faqKicker")}</span>
             <h2 className="font-display mt-5 text-[2.3rem] font-black leading-[0.98] tracking-[-0.03em] text-[#0b1220] sm:text-5xl">{t("landing.faqTitle")}</h2>
             <p className="mt-6 text-[15px] leading-relaxed text-[#54617a]">{t("landing.faqSub")}</p>
-            <button onClick={openModal} data-track="faq_cta" className="btn-dark mt-7 px-6 py-3.5 text-sm">{t("landing.faqCta")}</button>
+            <button onClick={() => openModal()} data-track="faq_cta" className="btn-dark mt-7 px-6 py-3.5 text-sm">{t("landing.faqCta")}</button>
             <div className="mt-8 rounded-2xl border border-[#10b981]/15 bg-white/70 p-5">
               <p className="text-[10px] font-black uppercase tracking-[0.14em] text-[#0a8f65]">{t("landing.trust2")}</p>
               <p className="mt-1 text-sm font-semibold text-[#0b1220]">✓ {t("landing.trust2")} · ✓ {t("landing.trust3")}</p>
@@ -1055,7 +1055,7 @@ export default function LandingPage() {
             <span className="hl">{t("landing.finalHl")}</span>
           </h2>
           <p className="mx-auto mt-6 max-w-xl text-base text-[#9fb0c6] sm:text-lg">{t("landing.finalSub")}</p>
-          <button onClick={openModal} data-track="final_cta" className="btn-mint mx-auto mt-9 inline-flex items-center gap-2.5 px-9 py-4 text-sm uppercase tracking-[0.1em]">{t("landing.finalCta")}</button>
+          <button onClick={() => openModal()} data-track="final_cta" className="btn-mint mx-auto mt-9 inline-flex items-center gap-2.5 px-9 py-4 text-sm uppercase tracking-[0.1em]">{t("landing.finalCta")}</button>
           <div className="glass-panel mx-auto mt-6 flex max-w-xl flex-col items-center gap-2 rounded-2xl px-5 py-4">
             <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-[11px] font-black uppercase tracking-[0.12em] text-[#8ff5c8]">
               <span>✓ {t("landing.trust2")}</span>
@@ -1076,7 +1076,7 @@ export default function LandingPage() {
             <p className="text-[11px] font-bold text-[#34e0a1]">{t("landing.stickyArea")}</p>
             <p className="text-[10px] font-bold text-[#8ff5c8]">✓ {t("landing.trust2")} · ✓ {t("landing.trust3")}</p>
           </div>
-          <button onClick={openModal} data-track="sticky_cta" className="btn-mint flex-1 py-3 text-sm">{t("landing.stickyNow")}</button>
+          <button onClick={() => openModal()} data-track="sticky_cta" className="btn-mint flex-1 py-3 text-sm">{t("landing.stickyNow")}</button>
         </div>
       </div>
 

@@ -87,7 +87,7 @@ function LangSwitch({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void 
 // Shell context
 // ------------------------------------------------------------------
 interface LandingShellCtx {
-  openModal: () => void;
+  openModal: (trade?: string) => void;
   scrollTo: (id: string) => void;
 }
 
@@ -123,6 +123,7 @@ export default function LandingShell({ children }: { children: React.ReactNode }
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [modalTrade, setModalTrade] = useState<string | null>(null);
 
   useEffect(() => {
     document.documentElement.lang = lang;
@@ -147,7 +148,10 @@ export default function LandingShell({ children }: { children: React.ReactNode }
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
   };
 
-  const openModal = () => setModalOpen(true);
+  const openModal = (trade?: string) => {
+    setModalTrade(trade ?? null);
+    setModalOpen(true);
+  };
 
   return (
     <Ctx.Provider value={{ openModal, scrollTo }}>
@@ -163,7 +167,7 @@ export default function LandingShell({ children }: { children: React.ReactNode }
               </button>
               <div className="flex shrink-0 items-center gap-3">
                 <LangSwitch lang={lang} setLang={changeLang} />
-                <button onClick={openModal} data-track="header_cta" className="btn-mint hidden px-5 py-2.5 text-[13px] sm:block">{t("landing.start")}</button>
+                <button onClick={() => openModal()} data-track="header_cta" className="btn-mint hidden px-5 py-2.5 text-[13px] sm:block">{t("landing.start")}</button>
                 <button onClick={() => setMenuOpen(!menuOpen)} className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 text-white lg:hidden" aria-label="Menu">
                   <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     {menuOpen ? <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" /> : <path d="M4 7h16M4 12h16M4 17h16" strokeLinecap="round" />}
@@ -183,7 +187,7 @@ export default function LandingShell({ children }: { children: React.ReactNode }
                 {navPairs.map(([label, id]) => (
                   <button key={id} onClick={() => scrollTo(id)} className="rounded-lg px-3 py-2.5 text-left text-sm font-semibold text-[#9aa7ba] hover:bg-white/5 hover:text-white">{label}</button>
                 ))}
-                <button onClick={openModal} data-track="mobile_menu_cta" className="btn-mint mt-2 py-3 text-sm">{t("landing.start")}</button>
+                <button onClick={() => openModal()} data-track="mobile_menu_cta" className="btn-mint mt-2 py-3 text-sm">{t("landing.start")}</button>
               </div>
             </div>
           )}
@@ -212,7 +216,7 @@ export default function LandingShell({ children }: { children: React.ReactNode }
                 <div className="mt-4 flex flex-col gap-2.5">
                   {navPairs.slice(4).map(([label, id]) => <button key={id} onClick={() => scrollTo(id)} className="text-left hover:text-white">{label}</button>)}
                   <a href="mailto:contato@magicleads.app" className="hover:text-white">{t("landing.talk")}</a>
-                  <button onClick={openModal} data-track="footer_start_week" className="text-left font-semibold text-[#34e0a1]">{t("landing.startWeek")}</button>
+                  <button onClick={() => openModal()} data-track="footer_start_week" className="text-left font-semibold text-[#34e0a1]">{t("landing.startWeek")}</button>
                 </div>
               </div>
             </div>
@@ -234,7 +238,7 @@ export default function LandingShell({ children }: { children: React.ReactNode }
               <h3 className="font-display mt-3 text-2xl font-black">{t("landing.modalTitle")}</h3>
               <p className="mt-1 text-sm text-[#54617a]">{t("landing.modalSub")}</p>
               <div className="mt-5">
-                <AuthForm />
+                <AuthForm preselectedTrade={modalTrade ?? undefined} />
               </div>
               <button onClick={() => { setModalOpen(false); router.push(localePath("/auth")); }} className="mt-6 w-full rounded-xl border border-[#e2e8f0] py-3 text-sm font-bold text-[#54617a] hover:border-[#0b1220]">
                 {t("landing.enter")}

@@ -73,7 +73,7 @@ export function LiveTradeGrid({
   onCta,
 }: {
   categories: string[];
-  onCta: () => void;
+  onCta: (trade?: string) => void;
 }) {
   const { t } = useI18n();
   const [city, setCity] = useState<string>("New York");
@@ -118,12 +118,18 @@ export function LiveTradeGrid({
     [categories, data]
   );
 
+  const visibleRows = useMemo(() => {
+    if (!activeZip || !data) return rows;
+    return rows.filter((row) => row.count > 0);
+  }, [activeZip, data, rows]);
+
   const topKey = useMemo(
-    () => rows.reduce((best, row) => (row.count > best.count ? row : best), rows[0])?.key,
-    [rows]
+    () => visibleRows.reduce((best, row) => (row.count > best.count ? row : best), visibleRows[0])?.key,
+    [visibleRows]
   );
-  const activeKey = selected ?? topKey;
-  const activeRow = rows.find((row) => row.key === activeKey) ?? rows[0];
+  const activeKey =
+    selected && visibleRows.some((row) => row.key === selected) ? selected : topKey;
+  const activeRow = visibleRows.find((row) => row.key === activeKey) ?? visibleRows[0] ?? rows[0];
   const regionLabel = activeZip ? `ZIP ${activeZip}` : city || t("landing.p1AllCities");
   const cityCount = (label: string) => data?.cities?.find((c) => c.label === label)?.count ?? 0;
 
@@ -284,7 +290,7 @@ export function LiveTradeGrid({
                   <div className="mt-2 h-3 w-24 animate-pulse rounded bg-[#f1f5f9]" />
                 </div>
               ))
-            : rows.map((row) => {
+            : visibleRows.map((row) => {
                 const Icon = ICONS[row.key] ?? Wrench;
                 const active = activeKey === row.key;
                 const countLabel = data ? row.count.toLocaleString("en-US") : "—";
@@ -334,7 +340,7 @@ export function LiveTradeGrid({
                 <span className="inline-flex items-center gap-1.5"><ShieldCheck className="h-3.5 w-3.5 text-[#34e0a1]" /> {t("landing.p1NoAuction")}</span>
               </div>
             </div>
-            <button type="button" onClick={onCta} data-track="p1_trade_cta" className="btn-mint shrink-0 px-6 py-3 text-[12px] uppercase tracking-[0.06em]">
+            <button type="button" onClick={() => onCta(activeRow.label)} data-track="p1_trade_cta" className="btn-mint shrink-0 px-6 py-3 text-[12px] uppercase tracking-[0.06em]">
               {t("landing.p1Cta")}
               <ArrowRight className="h-4 w-4" />
             </button>

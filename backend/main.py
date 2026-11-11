@@ -7964,7 +7964,7 @@ def _stripe_configured() -> bool:
 
 
 async def _create_stripe_checkout_session(
-    user_id: int, locale: str = "auto", email: "str | None" = None
+    user_id: int, locale: str = "auto", email: "str | None" = None, trade: "str | None" = None
 ) -> tuple:
     """Cria sessão Stripe de PAGAMENTO AVULSO (sem recorrência) de 7 dias.
 
@@ -8061,6 +8061,7 @@ async def _create_stripe_checkout_session(
             "user_id": str(user_id),
             "access": "7_days",
             "plan": settings.PLAN_NAME.lower(),
+            **({"trade": trade} if trade else {}),
         },
     )
     try:
@@ -8094,6 +8095,14 @@ async def create_checkout(request: Request, user: dict = Depends(_get_current_us
     if not full:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
 
+    # Optional P1 context: the trade the visitor selected in the live grid.
+    trade = ""
+    try:
+        payload = await request.json()
+        trade = str((payload or {}).get("trade") or "").strip()[:80]
+    except Exception:
+        trade = ""
+
     # Extract locale from Accept-Language header (sent by frontend)
     accept_language = request.headers.get("accept-language", "").lower()
     locale = "auto"
@@ -8106,7 +8115,7 @@ async def create_checkout(request: Request, user: dict = Depends(_get_current_us
 
     try:
         mock, checkout_url = await _create_stripe_checkout_session(
-            user["id"], locale, full.get("email")
+            user["id"], locale, full.get("email"), trade
         )
     except Exception as e:
         logger.error(f"Erro ao criar checkout Stripe: {type(e).__name__}: {e}")

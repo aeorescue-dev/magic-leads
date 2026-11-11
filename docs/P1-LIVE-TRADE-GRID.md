@@ -80,11 +80,23 @@ localized labels already used on the landing.
 New keys under `landing.p1*` in EN/PT/ES: kicker, title, subtitle, city/ZIP
 labels, active/last-7-days, exclusivity, CTA, loading, error, empty, note.
 
+## Final decisions (approved)
+
+1. **Position:** keep the grid directly below the hero.
+2. **ZIP filter:** hide trades with count `0` when a ZIP is active, so only
+   "hot" categories remain.
+3. **Geography:** city and ZIP only for now; no neighborhood selector.
+4. **Checkout:** the clicked trade is shown in auth and sent as optional
+   `trade` metadata on new Stripe checkout sessions.
+5. **A/B:** evolve the below-hero version first; test a hero-embedded variant
+   later.
+
 ## Performance and safety
 
 - One aggregate query per request; cached 60s; no lead-level data.
 - Endpoint is public but rate-limited and input-validated.
-- No change to any existing P0 route or checkout behavior.
+- The checkout endpoint accepts an optional `trade` field; calls without it are
+  unchanged.
 - The section is client-side only; the hero remains server-rendered.
 
 ## Rollout
@@ -97,8 +109,6 @@ labels, active/last-7-days, exclusivity, CTA, loading, error, empty, note.
 
 ## Open questions for the next iteration
 
-- Should 0-count trades be hidden on ZIP filters? (Currently shown muted.)
-- Do we want neighborhood-level counts in addition to city/ZIP?
-- Should the selected trade prefill the checkout/trade filter?
 - A/B test: grid below hero vs. grid inside the hero panel.
+- Should the dashboard auto-apply the selected trade after checkout?
 - Public preview URL (Vercel preview + staging backend) for outside reviewers.
