@@ -5,8 +5,8 @@ import { useI18n } from "@/lib/i18n";
 import { fetchPublicMetrics } from "@/lib/api-client";
 import type { PublicMetrics } from "@/lib/api-client";
 import { FoldWave, useLandingShell } from "@/components/landing/LandingShell";
-import { LiveTradeGrid, DB_KEYS } from "@/components/landing/LiveTradeGrid";
-import { HeroSignalRadar } from "@/components/landing/HeroSignalRadar";
+import { LiveTradeGrid } from "@/components/landing/LiveTradeGrid";
+import { HeroLeadPanel } from "@/components/landing/HeroLeadPanel";
 import { Building2, Phone, ShieldCheck, Megaphone, Search, Users, Mail, MessageCircle, MessageSquare, MapPin } from "lucide-react";
 
 // ------------------------------------------------------------------
@@ -224,14 +224,6 @@ export default function LandingPage() {
     return /^\(\d{3}\) 555-01\d{2}$/.test(normalized) ? normalized : "(555) 555-0100";
   };
 
-  const heroTradeLabels = useMemo(() => {
-    const map: Record<string, string> = {};
-    DB_KEYS.forEach((key, index) => {
-      map[key] = L.categories[index] || key;
-    });
-    return map;
-  }, [L.categories]);
-
   const submitHeroZip = (event: FormEvent) => {
     event.preventDefault();
     const digits = heroZipInput.replace(/\D/g, "").slice(0, 5);
@@ -257,8 +249,7 @@ export default function LandingPage() {
     <>
       {/* HERO - private intelligence */}
       <section id="topo" className="relative overflow-hidden bg-[#f7f6f2]">
-        <div className="pointer-events-none absolute inset-0 opacity-[0.28]" style={{ backgroundImage: "linear-gradient(#ded9cc 1px, transparent 1px), linear-gradient(90deg, #ded9cc 1px, transparent 1px)", backgroundSize: "76px 76px" }} />
-        <div className="pointer-events-none absolute -right-48 -top-48 h-[620px] w-[620px] rounded-full bg-[#10b981]/[0.12] blur-[150px]" />
+        <div className="pointer-events-none absolute -right-48 -top-48 h-[620px] w-[620px] rounded-full bg-[#10b981]/[0.10] blur-[150px]" />
         <div className="pointer-events-none absolute -left-48 top-40 h-[460px] w-[460px] rounded-full bg-[#7c5cff]/[0.08] blur-[150px]" />
 
         <div className="relative mx-auto max-w-7xl px-4 pb-14 pt-12 sm:px-6 lg:pb-20 lg:pt-16">
@@ -334,7 +325,7 @@ export default function LandingPage() {
             </div>
 
             <div className="min-w-0">
-              <HeroSignalRadar labelsByKey={heroTradeLabels} onOpen={() => scrollTo("p1-grid")} />
+              <HeroLeadPanel onOpen={() => scrollTo("p1-grid")} />
             </div>
           </div>
         </div>
