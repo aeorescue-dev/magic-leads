@@ -324,7 +324,7 @@ export default function LandingPage() {
             </div>
 
             <div className="min-w-0 w-full lg:mt-1 lg:justify-self-end">
-              <div className="w-full max-w-[560px] rounded-[1.6rem] border border-[#e8e4da] bg-white p-3 shadow-[0_34px_90px_-62px_rgba(15,23,42,0.45)]">
+              <div className="w-full max-w-[620px] rounded-[1.8rem] border border-[#e4dfd2] bg-[#f6f4ee] p-3 shadow-[0_40px_100px_-60px_rgba(15,23,42,0.5)] sm:p-4">
                 <LiveTradeGrid
                   categories={L.categories}
                   onCta={openModal}
