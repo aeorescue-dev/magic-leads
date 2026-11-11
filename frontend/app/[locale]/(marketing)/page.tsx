@@ -6,7 +6,6 @@ import { fetchPublicMetrics } from "@/lib/api-client";
 import type { PublicMetrics } from "@/lib/api-client";
 import { FoldWave, useLandingShell } from "@/components/landing/LandingShell";
 import { LiveTradeGrid } from "@/components/landing/LiveTradeGrid";
-import { HeroLeadPanel } from "@/components/landing/HeroLeadPanel";
 import { Building2, Phone, ShieldCheck, Megaphone, Search, Users, Mail, MessageCircle, MessageSquare, MapPin } from "lucide-react";
 
 // ------------------------------------------------------------------
@@ -253,7 +252,7 @@ export default function LandingPage() {
         <div className="pointer-events-none absolute -left-48 top-40 h-[460px] w-[460px] rounded-full bg-[#7c5cff]/[0.08] blur-[150px]" />
 
         <div className="relative mx-auto max-w-7xl px-4 pb-14 pt-12 sm:px-6 lg:pb-20 lg:pt-16">
-          <div className="grid items-center gap-10 lg:grid-cols-[1.02fr_0.98fr] lg:gap-14">
+          <div className="grid items-start gap-10 lg:grid-cols-[1.02fr_0.98fr] lg:gap-14">
             <div className="min-w-0">
               <span className="eyebrow eyebrow-light">
                 <span className="dot" style={{ background: "#10b981", boxShadow: "0 0 10px #10b981" }} />
@@ -324,22 +323,22 @@ export default function LandingPage() {
               </div>
             </div>
 
-            <div className="min-w-0">
-              <HeroLeadPanel onOpen={() => scrollTo("p1-grid")} />
+            <div className="min-w-0 w-full lg:mt-1 lg:justify-self-end">
+              <div className="w-full max-w-[560px] rounded-[1.6rem] border border-[#e8e4da] bg-white p-3 shadow-[0_34px_90px_-62px_rgba(15,23,42,0.45)]">
+                <LiveTradeGrid
+                  categories={L.categories}
+                  onCta={openModal}
+                  city={heroCity}
+                  activeZip={heroZip}
+                  showControls={false}
+                  showTicker={false}
+                  preview
+                />
+              </div>
             </div>
           </div>
         </div>
       </section>
-
-      <LiveTradeGrid
-        categories={L.categories}
-        onCta={openModal}
-        city={heroCity}
-        activeZip={heroZip}
-        showControls={false}
-        showTicker={false}
-        featuredLimit={4}
-      />
 
       {/* COBERTURA COMPLETA */}
       <section className="surface-light relative py-20 md:py-28">
