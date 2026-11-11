@@ -86,7 +86,7 @@ function ForgotPasswordForm({ onClose }: { onClose: () => void }) {
   );
 }
 
-function AuthFormInner() {
+function AuthFormInner({ preselectedTrade }: { preselectedTrade?: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const reason = searchParams.get('reason');
@@ -217,7 +217,7 @@ function AuthFormInner() {
         // NUNCA cai em fallback para /dashboard: sem URL real é erro.
         let checkoutUrl: string | null = null;
         try {
-          const res = await startCheckout();
+          const res = await startCheckout(preselectedTrade);
           checkoutUrl = res.checkout_url;
         } catch (err: any) {
           const msg = err?.response?.data?.detail || err?.message || t('dashboard.auth.error_generic') || 'Erro ao iniciar pagamento';
@@ -238,7 +238,7 @@ function AuthFormInner() {
       } else if (checkoutIntent) {
         setSuccess(true);
         try {
-          const res = await startCheckout();
+          const res = await startCheckout(preselectedTrade);
           if (!res.checkout_url) throw new Error("checkout_unavailable");
           trackEvent("checkout_started", "login");
           setTimeout(() => {
@@ -313,6 +313,11 @@ function AuthFormInner() {
   // Render the actual form
   return (
     <form onSubmit={handleSubmit} data-track-form="auth_main" className="w-full max-w-md mx-auto space-y-4">
+      {preselectedTrade ? (
+        <div className="rounded-lg border border-primary/25 bg-primary/5 px-3 py-2 text-[11.5px] font-semibold text-primary">
+          {t('landing.p1Selected')}: {preselectedTrade}
+        </div>
+      ) : null}
       <div className="flex justify-center gap-2 mb-2">
         <button
           type="button"
@@ -482,10 +487,10 @@ function AuthFormInner() {
   );
 }
 
-export function AuthForm() {
+export function AuthForm({ preselectedTrade }: { preselectedTrade?: string } = {}) {
   return (
     <Suspense fallback={null}>
-      <AuthFormInner />
+      <AuthFormInner preselectedTrade={preselectedTrade} />
     </Suspense>
   );
 }

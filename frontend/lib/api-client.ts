@@ -380,6 +380,56 @@ export async function fetchPublicMetrics(): Promise<PublicMetrics> {
   }
 }
 
+export interface TradeGridCity {
+  key: string;
+  label: string;
+  count: number;
+}
+
+export interface TradeGridResponse {
+  region: { city: string | null; zip: string | null };
+  window_days: number;
+  total: number;
+  trades: Record<string, number>;
+  cities: TradeGridCity[];
+  updated_at: string;
+}
+
+export async function fetchTradeGrid(params: { city?: string; zip?: string } = {}): Promise<TradeGridResponse> {
+  const q = new URLSearchParams();
+  if (params.city) q.set("city", params.city);
+  if (params.zip) q.set("zip", params.zip);
+  const qs = q.toString();
+  return handle<TradeGridResponse>(
+    await fetch(`${API_URL}/api/public/trade-grid${qs ? `?${qs}` : ""}`)
+  );
+}
+
+export interface ActivityEvent {
+  trade: string;
+  city: string;
+  place: string;
+  zip: string | null;
+  action: "captured" | "updated";
+  minutes_ago: number;
+  occurred_at: string;
+}
+
+export interface ActivityResponse {
+  city: string | null;
+  events: ActivityEvent[];
+  generated_at: string;
+}
+
+export async function fetchActivity(city?: string): Promise<ActivityResponse> {
+  const q = new URLSearchParams();
+  if (city) q.set("city", city);
+  const qs = q.toString();
+  return handle<ActivityResponse>(
+    await fetch(`${API_URL}/api/public/activity${qs ? `?${qs}` : ""}`)
+  );
+}
+
 export async function fetchStats(): Promise<LeadStats> {
   return handle<LeadStats>(await fetch(`${API_URL}/api/leads/stats`));
 }
@@ -718,12 +768,17 @@ export interface CheckoutResponse {
   plan: CheckoutPlan;
 }
 
-export async function createCheckoutSession(locale?: string): Promise<CheckoutResponse> {
+export async function createCheckoutSession(locale?: string, trade?: string): Promise<CheckoutResponse> {
+  const headers: Record<string, string> = { "Accept-Language": locale || "" };
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (trade) headers["Content-Type"] = "application/json";
   return handle<CheckoutResponse>(
     await fetch(`${API_URL}/api/billing/checkout`, {
       method: "POST",
       credentials: "include",
-      headers: { ...authHeaders(), "Accept-Language": locale || "" },
+      headers,
+      ...(trade ? { body: JSON.stringify({ trade }) } : {}),
     })
   );
 }

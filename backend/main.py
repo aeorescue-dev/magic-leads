@@ -1233,6 +1233,44 @@ async def public_metrics():
         raise HTTPException(status_code=500, detail="Erro ao buscar métricas públicas")
 
 
+@app.get("/api/public/trade-grid")
+@limiter.limit("60/minute")
+async def public_trade_grid(request: Request, city: str = "", zip: str = ""):
+    """Aggregated live counts for the P1 landing trade grid.
+
+    Public by design and privacy-safe: only counts grouped by trade/city/ZIP,
+    never lead ids, addresses or owner data.
+    """
+    try:
+        from backend.services.trade_grid import get_trade_grid
+
+        return await anyio.to_thread.run_sync(get_trade_grid, city or None, zip or None)
+    except ValueError as exc:
+        detail = str(exc) or "invalid_filter"
+        raise HTTPException(status_code=400, detail=detail)
+    except Exception as e:
+        logger.error(f"Erro ao buscar trade grid público: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="trade_grid_unavailable")
+
+
+@app.get("/api/public/activity")
+@limiter.limit("60/minute")
+async def public_activity(request: Request, city: str = "", limit: int = 8):
+    """Recent opportunity activity for the landing ticker.
+
+    Privacy-safe: trade, city, neighborhood/place, ZIP and relative time only.
+    """
+    try:
+        from backend.services.activity_feed import get_activity
+
+        return await anyio.to_thread.run_sync(get_activity, city or None, limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc) or "invalid_filter")
+    except Exception as e:
+        logger.error(f"Erro ao buscar atividade pública: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="activity_unavailable")
+
+
 # Detalhe de um lead
 @app.get("/api/leads/{lead_id}", response_model=LeadResponse)
 @limiter.limit("120/minute")
@@ -7944,7 +7982,7 @@ def _stripe_configured() -> bool:
 
 
 async def _create_stripe_checkout_session(
-    user_id: int, locale: str = "auto", email: "str | None" = None
+    user_id: int, locale: str = "auto", email: "str | None" = None, trade: "str | None" = None
 ) -> tuple:
     """Cria sessão Stripe de PAGAMENTO AVULSO (sem recorrência) de 7 dias.
 
@@ -8041,6 +8079,7 @@ async def _create_stripe_checkout_session(
             "user_id": str(user_id),
             "access": "7_days",
             "plan": settings.PLAN_NAME.lower(),
+            **({"trade": trade} if trade else {}),
         },
     )
     try:
@@ -8074,6 +8113,14 @@ async def create_checkout(request: Request, user: dict = Depends(_get_current_us
     if not full:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
 
+    # Optional P1 context: the trade the visitor selected in the live grid.
+    trade = ""
+    try:
+        payload = await request.json()
+        trade = str((payload or {}).get("trade") or "").strip()[:80]
+    except Exception:
+        trade = ""
+
     # Extract locale from Accept-Language header (sent by frontend)
     accept_language = request.headers.get("accept-language", "").lower()
     locale = "auto"
@@ -8086,7 +8133,7 @@ async def create_checkout(request: Request, user: dict = Depends(_get_current_us
 
     try:
         mock, checkout_url = await _create_stripe_checkout_session(
-            user["id"], locale, full.get("email")
+            user["id"], locale, full.get("email"), trade
         )
     except Exception as e:
         logger.error(f"Erro ao criar checkout Stripe: {type(e).__name__}: {e}")

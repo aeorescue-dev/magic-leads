@@ -1156,3 +1156,22 @@
 @media (max-width: 640px) {
   .grid-fade { background-size: 40px 40px; }
 }
+
+/* P1 live grid card entrance */
+@keyframes p1-card-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+.p1-card-in { animation: p1-card-in 0.45s cubic-bezier(0.16, 1, 0.3, 1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .p1-card-in { animation: none; }
+}
+
+@keyframes p1-ticker-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+.p1-ticker-in { animation: p1-ticker-in 0.35s ease both; }
+@media (prefers-reduced-motion: reduce) {
+  .p1-ticker-in { animation: none; }
+}

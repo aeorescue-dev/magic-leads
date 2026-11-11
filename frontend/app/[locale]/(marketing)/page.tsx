@@ -5,7 +5,8 @@ import { useI18n } from "@/lib/i18n";
 import { fetchPublicMetrics } from "@/lib/api-client";
 import type { PublicMetrics } from "@/lib/api-client";
 import { FoldWave, useLandingShell } from "@/components/landing/LandingShell";
-import { Building2, Phone, ShieldCheck, Megaphone, Search, Users } from "lucide-react";
+import { LiveTradeGrid } from "@/components/landing/LiveTradeGrid";
+import { Building2, Phone, ShieldCheck, Megaphone, Search, Users, Mail, MessageCircle, MessageSquare } from "lucide-react";
 
 // ------------------------------------------------------------------
 // Tipos e dados ilustrativos do "painel amostra"
@@ -99,7 +100,7 @@ export default function LandingPage() {
   const [activeCity, setActiveCity] = useState<City>("New York");
   const [reservedLeadId, setReservedLeadId] = useState<string | null>(null);
   const [timerSeconds, setTimerSeconds] = useState(3600);
-  const [whatsappLead, setWhatsappLead] = useState<SampleLead | null>(null);
+  const [demoContact, setDemoContact] = useState<{ channel: string; phone: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const [tplTrade, setTplTrade] = useState<TradeKey>("Telhado");
   const [tplChannel, setTplChannel] = useState<Channel>("whatsapp");
@@ -133,9 +134,6 @@ export default function LandingPage() {
     const tradesLabel = listOf(t("landing.tplTrades"));
     const signals = blocks(t("landing.signals")).map((f) => ({
       label: f[0], hint: f[1], body: f[2],
-    }));
-    const problems = blocks(t("landing.problems")).map((f) => ({
-      kicker: f[0], title: f[1], body: f[2], cost: f[3],
     }));
     const comparisons = blocks(t("landing.comparisons")).map((f) => ({
       channel: f[0], sub: f[1], cost: f[2], costLabel: f[3],
@@ -172,7 +170,7 @@ export default function LandingPage() {
     const aboutJobs = (n: number, ticket: string) =>
       t("landing.aboutJobs").replace("{n}", String(n)).replace("{ticket}", ticket);
 
-    return { categories, tradesLabel, signals, problems, comparisons, quotes, planFeatures, neverItems, faqs, templates, trust, waMsg, aboutJobs, coverageItems, sampleMeta };
+    return { categories, tradesLabel, signals, comparisons, quotes, planFeatures, neverItems, faqs, templates, trust, waMsg, aboutJobs, coverageItems, sampleMeta };
   }, [t]);
 
   const leadsByCity = useMemo(() => {
@@ -216,6 +214,11 @@ export default function LandingPage() {
     setTimeout(() => setCopied(false), 2500);
   };
 
+  const safeDemoPhone = (phone: string) => {
+    const normalized = phone.replace(/\s+/g, " ").trim();
+    return /^\(\d{3}\) 555-01\d{2}$/.test(normalized) ? normalized : "(555) 555-0100";
+  };
+
   return (
     <>
       {/* HERO */}
@@ -245,7 +248,7 @@ export default function LandingPage() {
               </p>
 
               <div className="fade-up mt-9 flex flex-col items-stretch justify-center gap-3 sm:flex-row lg:justify-start">
-                <button onClick={openModal} data-track="hero_cta" className="btn-mint group flex items-center justify-center gap-2.5 px-8 py-4 text-[15px]">
+                <button onClick={() => openModal()} data-track="hero_cta" className="btn-mint group flex items-center justify-center gap-2.5 px-8 py-4 text-[15px]">
                   {t("landing.ctaPanel")}
                   <svg className="h-5 w-5 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" /></svg>
                 </button>
@@ -393,6 +396,8 @@ export default function LandingPage() {
         </div>
       </section>
 
+      <LiveTradeGrid categories={L.categories} onCta={openModal} />
+
       {/* COBERTURA COMPLETA */}
       <section className="surface-light relative py-20 md:py-28">
         <div className="mx-auto max-w-7xl px-4 sm:px-6">
@@ -433,43 +438,6 @@ export default function LandingPage() {
                 {t("landing.coverageTrust")}
               </p>
               <span className="ai-chip shrink-0">Owner verified</span>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* PROBLEMA */}
-      <section className="relative bg-white py-20 md:py-28">
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[#e6ebf2] to-transparent" />
-        <div className="mx-auto max-w-7xl px-4 sm:px-6">
-          <div className="max-w-3xl">
-            <span className="eyebrow eyebrow-light"><span className="dot" style={{ background: "#f43f5e", boxShadow: "0 0 10px #f43f5e" }} />{t("landing.problemKicker")}</span>
-            <h2 className="font-display mt-5 text-[2.5rem] font-black leading-[0.98] tracking-[-0.035em] text-[#0b1220] sm:text-5xl md:text-[3.4rem]">
-              {t("landing.problemTitle")} <span className="hl">{t("landing.problemHl")}</span>
-            </h2>
-            <p className="mt-6 text-base leading-relaxed text-[#54617a] sm:text-lg">{t("landing.problemSub")}</p>
-          </div>
-          <div className="mt-14 grid gap-5 md:grid-cols-3">
-            {L.problems.map((p) => (
-              <article key={p.kicker} className="bento-light flex flex-col p-8">
-                <div className="flex items-center justify-between">
-                  <p className="kicker text-[#e11d48]">{p.kicker}</p>
-                  <span className="grid h-8 w-8 place-items-center rounded-full bg-[#f43f5e]/10 text-[#e11d48]">
-                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0 3.75h.008v.008H12v-.008ZM21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
-                  </span>
-                </div>
-                <h3 className="font-display mt-4 text-2xl font-black tracking-[-0.02em] text-[#0b1220]">{p.title}</h3>
-                <p className="mt-3 flex-1 text-[15px] leading-relaxed text-[#54617a]">{p.body}</p>
-                <span className="mono-data mt-6 inline-flex w-fit rounded-lg bg-[#fef2f4] px-3.5 py-2 text-[11px] font-bold uppercase tracking-wider text-[#be123c] ring-1 ring-[#fecdd3]">{t("landing.costWord")} {p.cost}</span>
-              </article>
-            ))}
-          </div>
-          <div className="landing-dark relative mt-6 overflow-hidden rounded-[1.6rem] bg-[#070a12] p-8 ring-1 ring-white/10 md:p-10">
-            <div className="pointer-events-none absolute -left-16 -top-20 h-64 w-64 rounded-full bg-[#7c5cff]/[0.14] blur-3xl" />
-            <div className="relative flex flex-col items-start gap-6 md:flex-row md:items-center">
-              <span className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-[#34e0a1] to-[#0a8f65] text-[#04120d] shadow-lg shadow-[#10b981]/25"><svg className="h-7 w-7" viewBox="0 0 24 24" fill="currentColor"><path d="m13 2-9 12h7l-1 8 10-13h-7V2Z" /></svg></span>
-              <p className="flex-1 text-xl font-bold leading-snug tracking-[-0.01em] text-white sm:text-2xl">{t("landing.flip")}</p>
-              <button onClick={openModal} data-track="how_cta" className="btn-mint shrink-0 px-6 py-3.5 text-sm">{t("landing.seeHow")}</button>
             </div>
           </div>
         </div>
@@ -609,13 +577,30 @@ export default function LandingPage() {
                               <div className="rounded-lg border border-[#34e0a1]/20 bg-black/45 p-2.5">
                                 <div className="flex items-center justify-between">
                                   <p className="text-[10px] font-bold uppercase tracking-wider text-white/35">{t("landing.owner")}</p>
-                                  <span className="mono-data text-[9px] text-white/25">✓</span>
+                                  <span className="rounded bg-[#f59e0b]/15 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider text-[#fbbf24]">{t("landing.demoBadge")}</span>
                                 </div>
                                 <p className="mt-0.5 text-[11px] font-bold text-white">{lead.ownerName}</p>
-                                <p className="mono-data mt-0.5 text-[15px] font-black tracking-tight text-[#34e0a1]">{lead.ownerPhone}</p>
+                                <p className="mono-data mt-0.5 text-[15px] font-black tracking-tight text-[#34e0a1]">{safeDemoPhone(lead.ownerPhone)}</p>
                                 <p className="mono-data mt-1 text-[9px] text-white/30">{lead.address}</p>
                               </div>
-                              <button onClick={() => setWhatsappLead(lead)} data-track="open_whatsapp" className="btn-mint flex w-full items-center justify-center gap-1.5 py-2.5 text-[11px] uppercase tracking-wider">{t("landing.openWa")}</button>
+                              <div className="space-y-2">
+                                <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-white/35">{t("landing.contactOwner")}</p>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <button type="button" onClick={() => setDemoContact({ channel: t("landing.actionCall"), phone: safeDemoPhone(lead.ownerPhone) })} data-track="demo_contact_call" className="flex items-center justify-center gap-1.5 rounded-lg bg-[#34e0a1] py-2.5 text-[10.5px] font-black uppercase tracking-wider text-[#04120d] transition hover:bg-[#5af0b8]">
+                                    <Phone className="h-3.5 w-3.5" />{t("landing.actionCall")}
+                                  </button>
+                                  <button type="button" onClick={() => setDemoContact({ channel: t("landing.actionText"), phone: safeDemoPhone(lead.ownerPhone) })} data-track="demo_contact_sms" className="flex items-center justify-center gap-1.5 rounded-lg border border-white/12 bg-white/[0.05] py-2.5 text-[10.5px] font-bold uppercase tracking-wider text-white/70 transition hover:border-white/25 hover:text-white">
+                                    <MessageSquare className="h-3.5 w-3.5" />{t("landing.actionText")}
+                                  </button>
+                                  <button type="button" onClick={() => setDemoContact({ channel: t("landing.actionEmail"), phone: safeDemoPhone(lead.ownerPhone) })} data-track="demo_contact_email" className="flex items-center justify-center gap-1.5 rounded-lg border border-white/12 bg-white/[0.05] py-2.5 text-[10.5px] font-bold uppercase tracking-wider text-white/70 transition hover:border-white/25 hover:text-white">
+                                    <Mail className="h-3.5 w-3.5" />{t("landing.actionEmail")}
+                                  </button>
+                                  <button type="button" onClick={() => setDemoContact({ channel: t("landing.actionWhatsApp"), phone: safeDemoPhone(lead.ownerPhone) })} data-track="demo_contact_whatsapp" className="flex items-center justify-center gap-1.5 rounded-lg border border-[#25D366]/30 bg-[#25D366]/[0.08] py-2.5 text-[10.5px] font-bold uppercase tracking-wider text-[#25D366] transition hover:bg-[#25D366]/15">
+                                    <MessageCircle className="h-3.5 w-3.5" />{t("landing.actionWhatsApp")}
+                                  </button>
+                                </div>
+                                <p className="text-[8.5px] leading-relaxed text-[#fbbf24]/70">{t("landing.demoNumber")}</p>
+                              </div>
                             </div>
                           ) : (
                             <div className="space-y-2.5">
@@ -641,7 +626,7 @@ export default function LandingPage() {
                     <svg className="h-3.5 w-3.5 text-[#34e0a1]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
                     {t("landing.payOk")}
                   </span>
-                  <button onClick={openModal} data-track="unlock_cta" className="inline-flex items-center gap-1.5 font-bold text-[#34e0a1] hover:text-white">{t("landing.unlock4")}<svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" /></svg></button>
+                  <button onClick={() => openModal()} data-track="unlock_cta" className="inline-flex items-center gap-1.5 font-bold text-[#34e0a1] hover:text-white">{t("landing.unlock4")}<svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" /></svg></button>
                 </div>
               </div>
             </div>
@@ -659,7 +644,7 @@ export default function LandingPage() {
             <h2 className="font-display mt-5 text-[2.4rem] font-black leading-[0.98] tracking-[-0.035em] text-white sm:text-5xl md:text-[3.2rem]">
               {t("landing.compareTitle")} <span className="hl">{t("landing.compareHl")}</span>
             </h2>
-            <p className="mt-6 text-base leading-relaxed text-[#9fb0c6] sm:text-lg">{t("landing.compareSub")}</p>
+            <p className="mt-6 text-base leading-relaxed text-[#9fb0c6] sm:text-lg">{t("landing.problemSub")}</p>
           </div>
 
           <div className="mt-14 grid gap-4 lg:grid-cols-12">
@@ -700,7 +685,7 @@ export default function LandingPage() {
                   </div>
 
                   <div className="mt-auto pt-8">
-                    <button onClick={openModal} data-track="compare_cta" className="btn-mint w-full py-3.5 text-sm">{t("landing.ctaPanel")}</button>
+                    <button onClick={() => openModal()} data-track="compare_cta" className="btn-mint w-full py-3.5 text-sm">{t("landing.ctaPanel")}</button>
                     <p className="mt-3 text-center text-[10px] font-bold uppercase tracking-[0.14em] text-[#8ff5c8]">✓ {t("landing.trust2")} · ✓ {t("landing.trust3")}</p>
                   </div>
                 </div>
@@ -736,6 +721,9 @@ export default function LandingPage() {
               ))}
             </div>
           </div>
+          <p className="mt-8 border-t border-white/[0.07] pt-5 text-center text-[11px] font-medium text-white/35">
+            {t("landing.compareReferralNote")}
+          </p>
         </div>
       </section>
 
@@ -883,7 +871,7 @@ export default function LandingPage() {
               </div>
 
               <div className="relative">
-                <button onClick={openModal} data-track="calc_cta" className="w-full rounded-xl bg-white py-4 text-sm font-black uppercase tracking-[0.08em] text-[#0a8f65] shadow-lg shadow-black/20 transition hover:-translate-y-0.5 hover:bg-[#f0fdf8]">{t("landing.calcCta")}</button>
+                <button onClick={() => openModal()} data-track="calc_cta" className="w-full rounded-xl bg-white py-4 text-sm font-black uppercase tracking-[0.08em] text-[#0a8f65] shadow-lg shadow-black/20 transition hover:-translate-y-0.5 hover:bg-[#f0fdf8]">{t("landing.calcCta")}</button>
                 <p className="mt-3 text-center text-[10px] font-black uppercase tracking-[0.12em] text-white/80">✓ {t("landing.trust2")} · ✓ {t("landing.trust3")}</p>
               </div>
             </div>
@@ -961,7 +949,7 @@ export default function LandingPage() {
                   ))}
                 </ul>
 
-                <button onClick={openModal} data-track="plan_cta" className="btn-mint mt-8 w-full py-4 text-sm uppercase tracking-[0.1em]">{t("landing.planCta")}</button>
+                <button onClick={() => openModal()} data-track="plan_cta" className="btn-mint mt-8 w-full py-4 text-sm uppercase tracking-[0.1em]">{t("landing.planCta")}</button>
 
                 <div className="mt-4 rounded-xl border border-[#34e0a1]/25 bg-[#34e0a1]/[0.08] px-4 py-3 text-center">
                   <p className="text-[11px] font-black uppercase tracking-[0.1em] text-[#8ff5c8]">✓ {t("landing.trust2")} · ✓ {t("landing.trust3")}</p>
@@ -1016,7 +1004,7 @@ export default function LandingPage() {
             <span className="eyebrow eyebrow-light"><span className="dot" style={{ background: "#f43f5e", boxShadow: "0 0 10px #f43f5e" }} />{t("landing.faqKicker")}</span>
             <h2 className="font-display mt-5 text-[2.3rem] font-black leading-[0.98] tracking-[-0.03em] text-[#0b1220] sm:text-5xl">{t("landing.faqTitle")}</h2>
             <p className="mt-6 text-[15px] leading-relaxed text-[#54617a]">{t("landing.faqSub")}</p>
-            <button onClick={openModal} data-track="faq_cta" className="btn-dark mt-7 px-6 py-3.5 text-sm">{t("landing.faqCta")}</button>
+            <button onClick={() => openModal()} data-track="faq_cta" className="btn-dark mt-7 px-6 py-3.5 text-sm">{t("landing.faqCta")}</button>
             <div className="mt-8 rounded-2xl border border-[#10b981]/15 bg-white/70 p-5">
               <p className="text-[10px] font-black uppercase tracking-[0.14em] text-[#0a8f65]">{t("landing.trust2")}</p>
               <p className="mt-1 text-sm font-semibold text-[#0b1220]">✓ {t("landing.trust2")} · ✓ {t("landing.trust3")}</p>
@@ -1052,7 +1040,7 @@ export default function LandingPage() {
             <span className="hl">{t("landing.finalHl")}</span>
           </h2>
           <p className="mx-auto mt-6 max-w-xl text-base text-[#9fb0c6] sm:text-lg">{t("landing.finalSub")}</p>
-          <button onClick={openModal} data-track="final_cta" className="btn-mint mx-auto mt-9 inline-flex items-center gap-2.5 px-9 py-4 text-sm uppercase tracking-[0.1em]">{t("landing.finalCta")}</button>
+          <button onClick={() => openModal()} data-track="final_cta" className="btn-mint mx-auto mt-9 inline-flex items-center gap-2.5 px-9 py-4 text-sm uppercase tracking-[0.1em]">{t("landing.finalCta")}</button>
           <div className="glass-panel mx-auto mt-6 flex max-w-xl flex-col items-center gap-2 rounded-2xl px-5 py-4">
             <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-[11px] font-black uppercase tracking-[0.12em] text-[#8ff5c8]">
               <span>✓ {t("landing.trust2")}</span>
@@ -1073,23 +1061,38 @@ export default function LandingPage() {
             <p className="text-[11px] font-bold text-[#34e0a1]">{t("landing.stickyArea")}</p>
             <p className="text-[10px] font-bold text-[#8ff5c8]">✓ {t("landing.trust2")} · ✓ {t("landing.trust3")}</p>
           </div>
-          <button onClick={openModal} data-track="sticky_cta" className="btn-mint flex-1 py-3 text-sm">{t("landing.stickyNow")}</button>
+          <button onClick={() => openModal()} data-track="sticky_cta" className="btn-mint flex-1 py-3 text-sm">{t("landing.stickyNow")}</button>
         </div>
       </div>
 
-      {/* MODAL WHATSAPP */}
-      {whatsappLead && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0b1220]/60 p-4 backdrop-blur-sm" onClick={() => setWhatsappLead(null)}>
-          <div className="relative w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <button onClick={() => setWhatsappLead(null)} className="absolute right-4 top-4 text-[#94a3b8]">✕</button>
-            <div className="flex items-center gap-3 border-b border-[#eef1f6] pb-4">
-              <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[#25D366] text-white font-black">W</div>
-              <div><p className="text-sm font-bold">{whatsappLead.ownerName}</p><p className="font-mono text-xs text-[#10b981]">{whatsappLead.ownerPhone}</p></div>
+      {demoContact && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[#0b1220]/70 p-4 backdrop-blur-sm"
+          onClick={() => setDemoContact(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("landing.demoTitle")}
+        >
+          <div
+            className="relative w-full max-w-sm rounded-2xl border border-white/10 bg-[#0b1220] p-6 text-white shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center gap-2">
+              <span className="rounded bg-[#f59e0b]/15 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-[#fbbf24]">
+                {t("landing.demoBadge")}
+              </span>
+              <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-white/35">{demoContact.channel}</span>
             </div>
-            <div className="my-4 rounded-2xl bg-[#dcf8c6] p-4 text-sm leading-relaxed">
-              {L.waMsg(whatsappLead.ownerName.split(" ")[0], whatsappLead.category.toLowerCase(), whatsappLead.address)}
+            <h3 className="font-display mt-3 text-xl font-black tracking-[-0.02em]">{t("landing.demoTitle")}</h3>
+            <p className="mt-2 text-sm leading-relaxed text-white/55">{t("landing.demoBody")}</p>
+            <div className="mt-4 flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5">
+              <ShieldCheck className="h-4 w-4 text-[#fbbf24]" />
+              <span className="mono-data text-base font-bold text-white/80">{demoContact.phone}</span>
             </div>
-            <button onClick={() => { setWhatsappLead(null); openModal(); }} data-track="activate_send" className="btn-mint w-full py-3.5 text-sm uppercase tracking-wider">{t("landing.activateSend")}</button>
+            <p className="mt-2 text-center text-[10px] font-semibold text-[#fbbf24]/80">{t("landing.demoNumber")}</p>
+            <button type="button" onClick={() => setDemoContact(null)} className="btn-mint mt-5 w-full py-3 text-sm">
+              {t("landing.demoClose")}
+            </button>
           </div>
         </div>
       )}

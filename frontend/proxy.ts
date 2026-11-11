@@ -64,6 +64,11 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // Internal geo endpoint: must not receive a locale prefix.
+  if (pathname === "/geolocation") {
+    return NextResponse.next();
+  }
+
 // Admin panel: rota interna PT-only, SEM prefixo de locale.
 // Tem de ser servida tal e qual: o bloco de locale abaixo redirecionaria
 // /admin -> /{locale}/admin e o painel deixaria de funcionar.
