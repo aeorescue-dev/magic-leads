@@ -181,12 +181,12 @@ export function LiveTradeGrid({
         {/* Location controls */}
         <div className="mt-8 rounded-2xl border border-[#e6ebf2] bg-white p-3 shadow-[0_18px_50px_-38px_rgba(15,23,42,0.35)]">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex flex-wrap gap-1.5">
+            <div className="grid grid-cols-2 gap-1.5 sm:flex sm:flex-wrap">
               <button
                 type="button"
                 onClick={() => pickCity("")}
                 data-track="p1_city_all"
-                className={`rounded-xl px-3.5 py-2 text-[11.5px] font-bold transition ${!city && !activeZip ? "bg-[#0b1220] text-white" : "text-[#54617a] hover:bg-[#f1f5f9]"}`}
+                className={`col-span-2 inline-flex items-center justify-center rounded-xl px-3.5 py-2 text-[11.5px] font-bold transition sm:col-span-1 ${!city && !activeZip ? "bg-[#0b1220] text-white" : "text-[#54617a] hover:bg-[#f1f5f9]"}`}
               >
                 {t("landing.p1AllCities")}
               </button>
@@ -199,7 +199,7 @@ export function LiveTradeGrid({
                     type="button"
                     onClick={() => pickCity(option)}
                     data-track={`p1_city_${option.toLowerCase().replace(/\s+/g, "_")}`}
-                    className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-[11.5px] font-bold transition ${active ? "bg-[#0b1220] text-white" : "text-[#54617a] hover:bg-[#f1f5f9]"}`}
+                    className={`inline-flex items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-[11.5px] font-bold transition ${active ? "bg-[#0b1220] text-white" : "text-[#54617a] hover:bg-[#f1f5f9]"}`}
                   >
                     {option}
                     {count > 0 && (

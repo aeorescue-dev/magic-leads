@@ -940,7 +940,7 @@ const ES: Dict = {
   "landing.p1Update": "Actualizar",
   "landing.p1Active": "activas",
   "landing.p1Last7": "últimos 7 días",
-  "landing.p1Exclusive": "Prioridad de 1 hora · teléfono del propietario",
+  "landing.p1Exclusive": "Exclusivo · prioridad de 1 hora · teléfono del propietario",
   "landing.p1NoAuction": "Sin subasta · un contratista por dirección",
   "landing.p1Cta": "Ver las oportunidades de esta semana",
   "landing.p1Loading": "Cargando recuentos en vivo...",

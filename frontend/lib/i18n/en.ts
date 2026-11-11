@@ -941,7 +941,7 @@ const EN: Dict = {
   "landing.p1Update": "Update",
   "landing.p1Active": "active",
   "landing.p1Last7": "last 7 days",
-  "landing.p1Exclusive": "1-hour priority · owner phone",
+  "landing.p1Exclusive": "Exclusive · 1-hour priority · owner phone",
   "landing.p1NoAuction": "No auction · one contractor per address",
   "landing.p1Cta": "See this week's openings",
   "landing.p1Loading": "Loading live counts...",
