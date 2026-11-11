@@ -270,7 +270,7 @@ export default function LandingPage() {
                 {t("landing.heroEyebrow")}
               </span>
 
-              <h1 className="font-display mt-6 text-[2.55rem] font-black leading-[0.97] tracking-[-0.045em] text-[#0b1220] sm:text-6xl lg:text-[4.05rem]">
+              <h1 className="font-display mt-6 text-[2.3rem] font-black leading-[0.97] tracking-[-0.045em] text-[#0b1220] sm:text-6xl lg:text-[4.05rem]">
                 {t("landing.heroTitle1")}
                 <br />
                 <span className="text-[#0a8f65]">{t("landing.heroTitle2")}</span>
@@ -336,7 +336,7 @@ export default function LandingPage() {
 
             <div className="relative">
               <div className="pointer-events-none absolute -inset-5 rounded-[2.4rem] bg-[#10b981]/[0.09] blur-2xl" />
-              <div className="relative overflow-hidden rounded-[1.8rem] bg-[#0b1220] p-6 text-white shadow-[0_45px_110px_-50px_rgba(15,23,42,0.8)] sm:p-8">
+              <div className="relative overflow-hidden rounded-[1.8rem] bg-[#0b1220] p-5 text-white shadow-[0_45px_110px_-50px_rgba(15,23,42,0.8)] sm:p-8">
                 <div className="flex items-center justify-between">
                   <span className="inline-flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.18em] text-[#34e0a1]">
                     <span className="relative flex h-2 w-2">
@@ -348,14 +348,14 @@ export default function LandingPage() {
                   <span className="text-[9px] font-bold uppercase tracking-[0.14em] text-white/30">{t("landing.updated")}</span>
                 </div>
 
-                <p className="mono-data mt-8 text-5xl font-black leading-none tracking-[-0.05em] tabular-nums text-white sm:text-6xl">
+                <p className="mono-data mt-5 text-4xl font-black leading-none tracking-[-0.05em] tabular-nums text-white sm:mt-8 sm:text-6xl">
                   {hasMetrics ? leadsBank.toLocaleString("en-US") : "\u2014"}
                 </p>
                 <p className="mt-2 text-[11px] font-bold uppercase tracking-[0.14em] text-white/40">{t("landing.heroKicker")}</p>
 
                 <div className="mt-6 h-px bg-white/10" />
 
-                <div className="mt-5 grid grid-cols-2 gap-5">
+                <div className="mt-4 hidden grid-cols-2 gap-5 sm:mt-5 sm:grid">
                   <div>
                     <p className="mono-data text-xl font-black text-white">{hasMetrics ? withOwner.toLocaleString("en-US") : "\u2014"}</p>
                     <p className="mt-1 text-[8px] font-bold uppercase tracking-[0.12em] text-white/35">{t("landing.statOwner")}</p>
@@ -372,12 +372,12 @@ export default function LandingPage() {
                   </p>
                 )}
 
-                <button type="button" onClick={() => scrollTo("p1-grid")} className="mt-6 inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.12em] text-[#34e0a1] transition hover:text-white">
+                <button type="button" onClick={() => scrollTo("p1-grid")} className="mt-5 inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.12em] text-[#34e0a1] transition hover:text-white sm:mt-6">
                   {t("landing.p1Cta")}
                   <span aria-hidden>&rarr;</span>
                 </button>
 
-                <svg aria-hidden viewBox="0 0 320 52" className="mt-6 h-12 w-full overflow-visible">
+                <svg aria-hidden viewBox="0 0 320 52" className="mt-5 hidden h-12 w-full overflow-visible sm:block">
                   <defs>
                     <linearGradient id="hero-spark" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor="#34e0a1" stopOpacity="0.28" />

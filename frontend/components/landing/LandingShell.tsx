@@ -156,7 +156,7 @@ export default function LandingShell({ children }: { children: React.ReactNode }
   return (
     <Ctx.Provider value={{ openModal, scrollTo }}>
       <div className="landing-light min-h-screen bg-white text-[#0b1220]">
-        <header className={`sticky top-0 z-40 transition-all duration-300 ${scrolled ? "border-b border-white/10 bg-[#070A12]/85 backdrop-blur-xl shadow-2xl shadow-black/40" : "bg-[#070A12]/65 backdrop-blur-md"}`}>
+        <header className={`sticky top-0 z-40 transition-all duration-300 ${scrolled ? "border-b border-white/10 bg-[#070A12] backdrop-blur-xl shadow-2xl shadow-black/40" : "bg-[#070A12]"}`}>
           <div className="mx-auto max-w-[1400px] px-4 sm:px-6">
             <div className="flex h-16 items-center justify-between gap-4">
               <button onClick={() => scrollTo("topo")} className="flex shrink-0 items-center gap-2.5">
