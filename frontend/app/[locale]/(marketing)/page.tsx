@@ -100,7 +100,7 @@ export default function LandingPage() {
   const [activeCity, setActiveCity] = useState<City>("New York");
   const [reservedLeadId, setReservedLeadId] = useState<string | null>(null);
   const [timerSeconds, setTimerSeconds] = useState(3600);
-  const [whatsappLead, setWhatsappLead] = useState<SampleLead | null>(null);
+  const [demoContact, setDemoContact] = useState<{ channel: string; phone: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const [tplTrade, setTplTrade] = useState<TradeKey>("Telhado");
   const [tplChannel, setTplChannel] = useState<Channel>("whatsapp");
@@ -217,16 +217,9 @@ export default function LandingPage() {
     setTimeout(() => setCopied(false), 2500);
   };
 
-  const contactMsg = (lead: SampleLead) =>
-    L.waMsg(lead.ownerName.split(" ")[0], lead.category.toLowerCase(), lead.address);
-  const phoneE164 = (phone: string) => {
-    const digits = phone.replace(/\D/g, "");
-    return digits.length === 10 ? `+1${digits}` : `+${digits}`;
-  };
-  const waNumber = (phone: string) => phone.replace(/\D/g, "");
-  const emailHref = (lead: SampleLead) => {
-    const subject = `${lead.category} — ${lead.neighborhood}`;
-    return `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(contactMsg(lead))}`;
+  const safeDemoPhone = (phone: string) => {
+    const normalized = phone.replace(/\s+/g, " ").trim();
+    return /^\(\d{3}\) 555-01\d{2}$/.test(normalized) ? normalized : "(555) 555-0100";
   };
 
   return (
@@ -624,28 +617,29 @@ export default function LandingPage() {
                               <div className="rounded-lg border border-[#34e0a1]/20 bg-black/45 p-2.5">
                                 <div className="flex items-center justify-between">
                                   <p className="text-[10px] font-bold uppercase tracking-wider text-white/35">{t("landing.owner")}</p>
-                                  <span className="mono-data text-[9px] text-white/25">✓</span>
+                                  <span className="rounded bg-[#f59e0b]/15 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider text-[#fbbf24]">{t("landing.demoBadge")}</span>
                                 </div>
                                 <p className="mt-0.5 text-[11px] font-bold text-white">{lead.ownerName}</p>
-                                <p className="mono-data mt-0.5 text-[15px] font-black tracking-tight text-[#34e0a1]">{lead.ownerPhone}</p>
+                                <p className="mono-data mt-0.5 text-[15px] font-black tracking-tight text-[#34e0a1]">{safeDemoPhone(lead.ownerPhone)}</p>
                                 <p className="mono-data mt-1 text-[9px] text-white/30">{lead.address}</p>
                               </div>
                               <div className="space-y-2">
                                 <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-white/35">{t("landing.contactOwner")}</p>
                                 <div className="grid grid-cols-2 gap-2">
-                                  <a href={`tel:${phoneE164(lead.ownerPhone)}`} data-track="contact_call" className="flex items-center justify-center gap-1.5 rounded-lg bg-[#34e0a1] py-2.5 text-[10.5px] font-black uppercase tracking-wider text-[#04120d] transition hover:bg-[#5af0b8]">
+                                  <button type="button" onClick={() => setDemoContact({ channel: t("landing.actionCall"), phone: safeDemoPhone(lead.ownerPhone) })} data-track="demo_contact_call" className="flex items-center justify-center gap-1.5 rounded-lg bg-[#34e0a1] py-2.5 text-[10.5px] font-black uppercase tracking-wider text-[#04120d] transition hover:bg-[#5af0b8]">
                                     <Phone className="h-3.5 w-3.5" />{t("landing.actionCall")}
-                                  </a>
-                                  <a href={`sms:${phoneE164(lead.ownerPhone)}?body=${encodeURIComponent(contactMsg(lead))}`} data-track="contact_sms" className="flex items-center justify-center gap-1.5 rounded-lg border border-white/12 bg-white/[0.05] py-2.5 text-[10.5px] font-bold uppercase tracking-wider text-white/70 transition hover:border-white/25 hover:text-white">
+                                  </button>
+                                  <button type="button" onClick={() => setDemoContact({ channel: t("landing.actionText"), phone: safeDemoPhone(lead.ownerPhone) })} data-track="demo_contact_sms" className="flex items-center justify-center gap-1.5 rounded-lg border border-white/12 bg-white/[0.05] py-2.5 text-[10.5px] font-bold uppercase tracking-wider text-white/70 transition hover:border-white/25 hover:text-white">
                                     <MessageSquare className="h-3.5 w-3.5" />{t("landing.actionText")}
-                                  </a>
-                                  <a href={emailHref(lead)} data-track="contact_email" className="flex items-center justify-center gap-1.5 rounded-lg border border-white/12 bg-white/[0.05] py-2.5 text-[10.5px] font-bold uppercase tracking-wider text-white/70 transition hover:border-white/25 hover:text-white">
+                                  </button>
+                                  <button type="button" onClick={() => setDemoContact({ channel: t("landing.actionEmail"), phone: safeDemoPhone(lead.ownerPhone) })} data-track="demo_contact_email" className="flex items-center justify-center gap-1.5 rounded-lg border border-white/12 bg-white/[0.05] py-2.5 text-[10.5px] font-bold uppercase tracking-wider text-white/70 transition hover:border-white/25 hover:text-white">
                                     <Mail className="h-3.5 w-3.5" />{t("landing.actionEmail")}
-                                  </a>
-                                  <a href={`https://wa.me/${waNumber(lead.ownerPhone)}?text=${encodeURIComponent(contactMsg(lead))}`} target="_blank" rel="noopener noreferrer" data-track="contact_whatsapp" className="flex items-center justify-center gap-1.5 rounded-lg border border-[#25D366]/30 bg-[#25D366]/[0.08] py-2.5 text-[10.5px] font-bold uppercase tracking-wider text-[#25D366] transition hover:bg-[#25D366]/15">
+                                  </button>
+                                  <button type="button" onClick={() => setDemoContact({ channel: t("landing.actionWhatsApp"), phone: safeDemoPhone(lead.ownerPhone) })} data-track="demo_contact_whatsapp" className="flex items-center justify-center gap-1.5 rounded-lg border border-[#25D366]/30 bg-[#25D366]/[0.08] py-2.5 text-[10.5px] font-bold uppercase tracking-wider text-[#25D366] transition hover:bg-[#25D366]/15">
                                     <MessageCircle className="h-3.5 w-3.5" />{t("landing.actionWhatsApp")}
-                                  </a>
+                                  </button>
                                 </div>
+                                <p className="text-[8.5px] leading-relaxed text-[#fbbf24]/70">{t("landing.demoNumber")}</p>
                               </div>
                             </div>
                           ) : (
@@ -1108,19 +1102,34 @@ export default function LandingPage() {
         </div>
       </div>
 
-      {/* MODAL WHATSAPP */}
-      {whatsappLead && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0b1220]/60 p-4 backdrop-blur-sm" onClick={() => setWhatsappLead(null)}>
-          <div className="relative w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <button onClick={() => setWhatsappLead(null)} className="absolute right-4 top-4 text-[#94a3b8]">✕</button>
-            <div className="flex items-center gap-3 border-b border-[#eef1f6] pb-4">
-              <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[#25D366] text-white font-black">W</div>
-              <div><p className="text-sm font-bold">{whatsappLead.ownerName}</p><p className="font-mono text-xs text-[#10b981]">{whatsappLead.ownerPhone}</p></div>
+      {demoContact && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[#0b1220]/70 p-4 backdrop-blur-sm"
+          onClick={() => setDemoContact(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("landing.demoTitle")}
+        >
+          <div
+            className="relative w-full max-w-sm rounded-2xl border border-white/10 bg-[#0b1220] p-6 text-white shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center gap-2">
+              <span className="rounded bg-[#f59e0b]/15 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-[#fbbf24]">
+                {t("landing.demoBadge")}
+              </span>
+              <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-white/35">{demoContact.channel}</span>
             </div>
-            <div className="my-4 rounded-2xl bg-[#dcf8c6] p-4 text-sm leading-relaxed">
-              {L.waMsg(whatsappLead.ownerName.split(" ")[0], whatsappLead.category.toLowerCase(), whatsappLead.address)}
+            <h3 className="font-display mt-3 text-xl font-black tracking-[-0.02em]">{t("landing.demoTitle")}</h3>
+            <p className="mt-2 text-sm leading-relaxed text-white/55">{t("landing.demoBody")}</p>
+            <div className="mt-4 flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5">
+              <ShieldCheck className="h-4 w-4 text-[#fbbf24]" />
+              <span className="mono-data text-base font-bold text-white/80">{demoContact.phone}</span>
             </div>
-            <button onClick={() => { setWhatsappLead(null); openModal(); }} data-track="activate_send" className="btn-mint w-full py-3.5 text-sm uppercase tracking-wider">{t("landing.activateSend")}</button>
+            <p className="mt-2 text-center text-[10px] font-semibold text-[#fbbf24]/80">{t("landing.demoNumber")}</p>
+            <button type="button" onClick={() => setDemoContact(null)} className="btn-mint mt-5 w-full py-3 text-sm">
+              {t("landing.demoClose")}
+            </button>
           </div>
         </div>
       )}

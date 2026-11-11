@@ -12,6 +12,7 @@ export function ActivityTicker({
   const { t } = useI18n();
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [index, setIndex] = useState(0);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -38,6 +39,8 @@ export function ActivityTicker({
         }
       } catch {
         if (!cancelled) setEvents([]);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     })();
     return () => {
@@ -75,11 +78,9 @@ export function ActivityTicker({
       .replace("{time}", time);
   }, [event, labelsByKey, t]);
 
-  if (!event) return null;
-
   return (
     <div
-      className="mx-auto mt-6 flex max-w-3xl items-center gap-3 rounded-full border border-[#0b1220]/10 bg-[#0b1220] px-4 py-2.5 text-white shadow-[0_18px_45px_-28px_rgba(15,23,42,0.65)]"
+      className="mx-auto mt-5 flex max-w-4xl items-center gap-3 rounded-2xl border border-[#34e0a1]/20 bg-[#0b1220] px-5 py-3 text-white shadow-[0_18px_45px_-28px_rgba(15,23,42,0.65)]"
       aria-live="polite"
     >
       <span className="relative flex h-2 w-2 shrink-0">
@@ -89,12 +90,14 @@ export function ActivityTicker({
       <span className="hidden shrink-0 text-[9px] font-bold uppercase tracking-[0.14em] text-[#34e0a1] sm:block">
         {t("landing.activityLive")}
       </span>
-      <span key={index} className="p1-ticker-in min-w-0 flex-1 text-[11px] leading-snug text-white/75">
-        {message}
+      <span key={index} className="p1-ticker-in min-w-0 flex-1 text-[12px] leading-snug text-white/75">
+        {event ? message : loading ? t("landing.activityLoading") : t("landing.activityEmpty")}
       </span>
-      <span className="hidden shrink-0 rounded-full border border-white/10 px-2 py-0.5 text-[8.5px] font-bold uppercase tracking-[0.1em] text-white/35 sm:block">
-        {event.city}
-      </span>
+      {event && (
+        <span className="hidden shrink-0 rounded-full border border-white/10 px-2 py-0.5 text-[8.5px] font-bold uppercase tracking-[0.1em] text-white/35 sm:block">
+          {event.city}
+        </span>
+      )}
     </div>
   );
 }

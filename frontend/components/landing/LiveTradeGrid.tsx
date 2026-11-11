@@ -221,8 +221,6 @@ export function LiveTradeGrid({
           </div>
         </div>
 
-        <ActivityTicker labelsByKey={tradeLabels} />
-
         {/* ZIP is the primary control: large, central, impossible to miss. */}
         <form onSubmit={submitZip} className="mx-auto mt-8 flex w-full max-w-2xl items-center gap-2 rounded-2xl border border-[#dfe6ef] bg-white p-2 shadow-[0_24px_60px_-34px_rgba(15,23,42,0.35)] transition focus-within:border-[#10b981]/55 focus-within:shadow-[0_24px_60px_-30px_rgba(16,185,129,0.35)]">
           <MapPin className="ml-3 h-5 w-5 shrink-0 text-[#10b981]" />
@@ -285,6 +283,8 @@ export function LiveTradeGrid({
             );
           })}
         </div>
+
+        <ActivityTicker labelsByKey={tradeLabels} />
 
         <div className="mt-6 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[10.5px] font-bold uppercase tracking-[0.13em]">
           <span className="relative flex h-2 w-2">

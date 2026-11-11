@@ -44,6 +44,24 @@ describe("landing — painel de amostra traduzido", () => {
     expect(new Set(ids).size).toBe(12);
   });
 
+  it("todos os telefones demo usam a faixa reservada 555-01xx", () => {
+    const phones = Array.from(LANDING.matchAll(/ownerPhone:\s*"([^"]+)"/g)).map(
+      (match) => match[1]
+    );
+    expect(phones).toHaveLength(12);
+    for (const phone of phones) {
+      expect(phone, `telefone demo inseguro: ${phone}`).toMatch(/^\(\d{3}\) 555-01\d{2}$/);
+    }
+  });
+
+  it("o cartão demo não abre links de contacto reais", () => {
+    expect(LANDING).not.toContain("wa.me/");
+    expect(LANDING).not.toContain("tel:+");
+    expect(LANDING).not.toContain("sms:+");
+    expect(LANDING).not.toContain("emailHref");
+    expect(LANDING).toContain("setDemoContact");
+  });
+
   it("cada idioma tem os 12 ids, com 4 campos e texto preenchido", () => {
     for (const lang of ["pt", "en", "es"] as const) {
       const rows = sampleLeads(blocks[lang]);
