@@ -1232,6 +1232,26 @@ async def public_metrics():
         raise HTTPException(status_code=500, detail="Erro ao buscar métricas públicas")
 
 
+@app.get("/api/public/trade-grid")
+@limiter.limit("60/minute")
+async def public_trade_grid(request: Request, city: str = "", zip: str = ""):
+    """Aggregated live counts for the P1 landing trade grid.
+
+    Public by design and privacy-safe: only counts grouped by trade/city/ZIP,
+    never lead ids, addresses or owner data.
+    """
+    try:
+        from backend.services.trade_grid import get_trade_grid
+
+        return await anyio.to_thread.run_sync(get_trade_grid, city or None, zip or None)
+    except ValueError as exc:
+        detail = str(exc) or "invalid_filter"
+        raise HTTPException(status_code=400, detail=detail)
+    except Exception as e:
+        logger.error(f"Erro ao buscar trade grid público: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="trade_grid_unavailable")
+
+
 # Detalhe de um lead
 @app.get("/api/leads/{lead_id}", response_model=LeadResponse)
 @limiter.limit("120/minute")

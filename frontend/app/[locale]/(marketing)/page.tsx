@@ -5,6 +5,7 @@ import { useI18n } from "@/lib/i18n";
 import { fetchPublicMetrics } from "@/lib/api-client";
 import type { PublicMetrics } from "@/lib/api-client";
 import { FoldWave, useLandingShell } from "@/components/landing/LandingShell";
+import { LiveTradeGrid } from "@/components/landing/LiveTradeGrid";
 import { Building2, Phone, ShieldCheck, Megaphone, Search, Users } from "lucide-react";
 
 // ------------------------------------------------------------------
@@ -392,6 +393,8 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
+
+      <LiveTradeGrid categories={L.categories} onCta={openModal} />
 
       {/* COBERTURA COMPLETA */}
       <section className="surface-light relative py-20 md:py-28">

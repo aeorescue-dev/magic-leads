@@ -380,6 +380,31 @@ export async function fetchPublicMetrics(): Promise<PublicMetrics> {
   }
 }
 
+export interface TradeGridCity {
+  key: string;
+  label: string;
+  count: number;
+}
+
+export interface TradeGridResponse {
+  region: { city: string | null; zip: string | null };
+  window_days: number;
+  total: number;
+  trades: Record<string, number>;
+  cities: TradeGridCity[];
+  updated_at: string;
+}
+
+export async function fetchTradeGrid(params: { city?: string; zip?: string } = {}): Promise<TradeGridResponse> {
+  const q = new URLSearchParams();
+  if (params.city) q.set("city", params.city);
+  if (params.zip) q.set("zip", params.zip);
+  const qs = q.toString();
+  return handle<TradeGridResponse>(
+    await fetch(`${API_URL}/api/public/trade-grid${qs ? `?${qs}` : ""}`)
+  );
+}
+
 export async function fetchStats(): Promise<LeadStats> {
   return handle<LeadStats>(await fetch(`${API_URL}/api/leads/stats`));
 }
