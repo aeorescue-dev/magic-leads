@@ -1175,3 +1175,21 @@
 @media (prefers-reduced-motion: reduce) {
   .p1-ticker-in { animation: none; }
 }
+
+/* Hero HUD / radar */
+@keyframes radar-sweep {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.radar-sweep {
+  animation: radar-sweep 7s linear infinite;
+  transform-origin: 50% 50%;
+}
+@keyframes radar-ping {
+  0% { transform: scale(0.8); opacity: 0.9; }
+  70% { transform: scale(2.2); opacity: 0; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+.radar-ping {
+  animation: radar-ping 2.8s ease-out infinite;
+}

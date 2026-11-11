@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
@@ -31,7 +31,7 @@ import { ActivityTicker } from "@/components/landing/ActivityTicker";
 
 const MIN_ACTIVE = 10;
 
-const DB_KEYS = [
+export const DB_KEYS = [
   "Roof",
   "Structure",
   "Plumbing",
@@ -93,14 +93,26 @@ const CITIES = ["New York", "Boston", "Dallas", "Chicago"] as const;
 export function LiveTradeGrid({
   categories,
   onCta,
+  city: controlledCity,
+  activeZip: controlledZip,
+  showControls = true,
+  showTicker = true,
+  featuredLimit,
 }: {
   categories: string[];
   onCta: (trade?: string) => void;
+  city?: string;
+  activeZip?: string;
+  showControls?: boolean;
+  showTicker?: boolean;
+  featuredLimit?: number;
 }) {
   const { t } = useI18n();
-  const [city, setCity] = useState<string>("New York");
+  const [cityState, setCityState] = useState<string>("New York");
   const [zipInput, setZipInput] = useState("");
-  const [activeZip, setActiveZip] = useState("");
+  const [zipState, setZipState] = useState("");
+  const city = controlledCity ?? cityState;
+  const activeZip = controlledZip ?? zipState;
   const [zipError, setZipError] = useState("");
   const [data, setData] = useState<TradeGridResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -151,24 +163,29 @@ export function LiveTradeGrid({
     [rows]
   );
 
+  const displayedRows = useMemo(
+    () => (featuredLimit ? visibleRows.slice(0, featuredLimit) : visibleRows),
+    [visibleRows, featuredLimit]
+  );
+
   const maxCount = useMemo(
     () => Math.max(1, ...visibleRows.map((row) => row.count)),
     [visibleRows]
   );
 
-  const topKey = visibleRows.length
-    ? visibleRows.reduce((best, row) => (row.count > best.count ? row : best), visibleRows[0]).key
+  const topKey = displayedRows.length
+    ? displayedRows.reduce((best, row) => (row.count > best.count ? row : best), displayedRows[0]).key
     : undefined;
   const activeKey =
-    selected && visibleRows.some((row) => row.key === selected) ? selected : topKey;
-  const activeRow = visibleRows.find((row) => row.key === activeKey);
+    selected && displayedRows.some((row) => row.key === selected) ? selected : topKey;
+  const activeRow = displayedRows.find((row) => row.key === activeKey);
 
   const regionLabel = activeZip ? `ZIP ${activeZip}` : city || t("landing.p1AllCities");
   const cityCount = (label: string) => data?.cities?.find((c) => c.label === label)?.count ?? 0;
 
   const pickCity = (next: string) => {
-    setCity(next);
-    setActiveZip("");
+    setCityState(next);
+    setZipState("");
     setZipInput("");
     setZipError("");
     setSelected(null);
@@ -182,26 +199,25 @@ export function LiveTradeGrid({
       return;
     }
     setZipError("");
-    setCity("");
-    setActiveZip(digits);
+    setCityState("");
+    setZipState(digits);
     setZipInput("");
     setSelected(null);
   };
 
   const clearZip = () => {
-    setActiveZip("");
+    setZipState("");
     setZipInput("");
     setZipError("");
-    setCity("New York");
+    setCityState("New York");
     setSelected(null);
   };
 
   const visibleTotal = visibleRows.reduce((sum, row) => sum + row.count, 0);
 
   return (
-    <section id="p1-grid" className="relative scroll-mt-24 overflow-hidden bg-[#f6f8fc] py-16 md:py-24">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(16,185,129,0.09),transparent_55%)]" />
-      <div className="pointer-events-none absolute inset-0 opacity-40" style={{ backgroundImage: "radial-gradient(#cbd5e1 1px, transparent 1px)", backgroundSize: "26px 26px" }} />
+    <section id="p1-grid" className="relative scroll-mt-24 overflow-hidden bg-[#fbfaf7] py-20 md:py-28">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-[420px] bg-[radial-gradient(ellipse_at_top,rgba(16,185,129,0.07),transparent_65%)]" />
 
       <div className="relative mx-auto max-w-7xl px-4 sm:px-6">
         <div className="mx-auto max-w-4xl text-center">
@@ -221,6 +237,8 @@ export function LiveTradeGrid({
           </div>
         </div>
 
+        {showControls && (
+          <>
         {/* ZIP is the primary control: large, central, impossible to miss. */}
         <form onSubmit={submitZip} className="mx-auto mt-8 flex w-full max-w-2xl items-center gap-2 rounded-2xl border border-[#dfe6ef] bg-white p-2 shadow-[0_24px_60px_-34px_rgba(15,23,42,0.35)] transition focus-within:border-[#10b981]/55 focus-within:shadow-[0_24px_60px_-30px_rgba(16,185,129,0.35)]">
           <MapPin className="ml-3 h-5 w-5 shrink-0 text-[#10b981]" />
@@ -283,8 +301,10 @@ export function LiveTradeGrid({
             );
           })}
         </div>
+          </>
+        )}
 
-        <ActivityTicker labelsByKey={tradeLabels} />
+        {showTicker && <ActivityTicker labelsByKey={tradeLabels} />}
 
         <div className="mt-6 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[10.5px] font-bold uppercase tracking-[0.13em]">
           <span className="relative flex h-2 w-2">
@@ -302,7 +322,11 @@ export function LiveTradeGrid({
         </div>
         {!loading && !error && visibleRows.length > 0 && (
           <p className="mt-1.5 text-center text-[10px] text-[#94a3b8]">
-            {t("landing.p1MinNotice").replace("{n}", String(visibleRows.length))}
+            {featuredLimit && visibleRows.length > featuredLimit
+              ? t("landing.p1MinNoticeLimited")
+                  .replace("{n}", String(displayedRows.length))
+                  .replace("{total}", String(visibleRows.length))
+              : t("landing.p1MinNotice").replace("{n}", String(displayedRows.length))}
           </p>
         )}
 
@@ -316,7 +340,7 @@ export function LiveTradeGrid({
         )}
 
         {loading ? (
-          <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+          <div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
             {Array.from({ length: 8 }).map((_, index) => (
               <div key={`p1-skeleton-${index}`} className="rounded-2xl border border-[#e8eef6] bg-white p-4">
                 <div className="h-10 w-10 animate-pulse rounded-xl bg-[#eef2f7]" />
@@ -338,8 +362,8 @@ export function LiveTradeGrid({
             </button>
           </div>
         ) : (
-          <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-            {visibleRows.map((row, index) => {
+          <div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+            {displayedRows.map((row, index) => {
               const Icon = ICONS[row.key] ?? Wrench;
               const palette = ICON_STYLE[row.key] ?? ICON_STYLE.Structure;
               const active = activeRow?.key === row.key;
@@ -351,25 +375,25 @@ export function LiveTradeGrid({
                   onClick={() => setSelected(row.key)}
                   data-track={`p1_trade_${row.key.toLowerCase()}`}
                   style={{ animationDelay: `${index * 35}ms` }}
-                  className={`p1-card-in group relative overflow-hidden rounded-2xl border p-4 text-left transition duration-300 hover:-translate-y-0.5 ${
+                  className={`p1-card-in group relative overflow-hidden rounded-2xl border p-5 text-left transition duration-300 hover:-translate-y-0.5 ${
                     active
-                      ? "border-[#0b1220] bg-[#0b1220] text-white shadow-[0_24px_60px_-28px_rgba(15,23,42,0.65)]"
-                      : "border-[#e2e8f0] bg-white hover:border-[#10b981]/45 hover:shadow-[0_20px_50px_-30px_rgba(15,23,42,0.4)]"
+                      ? "border-[#10b981] bg-[#10b981] text-[#04120d] shadow-[0_24px_60px_-30px_rgba(16,185,129,0.55)]"
+                      : "border-[#e7e3d9] bg-white shadow-[0_14px_40px_-32px_rgba(15,23,42,0.35)] hover:border-[#10b981]/45 hover:shadow-[0_22px_55px_-32px_rgba(15,23,42,0.3)]"
                   }`}
                 >
                   <div className="flex items-start justify-between">
-                    <span className={`grid h-10 w-10 place-items-center rounded-xl ring-1 transition ${active ? "bg-[#34e0a1]/15 text-[#34e0a1] ring-[#34e0a1]/25" : `${palette.bg} ${palette.text} ${palette.ring}`}`}>
+                    <span className={`grid h-10 w-10 place-items-center rounded-xl ring-1 transition ${active ? "bg-[#04120d]/10 text-[#04120d] ring-[#04120d]/15" : `${palette.bg} ${palette.text} ${palette.ring}`}`}>
                       <Icon className="h-[18px] w-[18px]" />
                     </span>
-                    <span className={`mt-1 h-1.5 w-1.5 rounded-full ${active ? "bg-[#34e0a1]" : "bg-[#10b981]/70"}`} />
+                    <span className={`mt-1 h-1.5 w-1.5 rounded-full ${active ? "bg-[#04120d]" : "bg-[#10b981]/70"}`} />
                   </div>
-                  <p className={`mono-data mt-4 text-[2rem] font-black leading-none tracking-[-0.04em] ${active ? "text-white" : "text-[#0b1220]"}`}>
+                  <p className={`mono-data mt-4 text-[2rem] font-black leading-none tracking-[-0.04em] tabular-nums ${active ? "text-[#04120d]" : "text-[#0b1220]"}`}>
                     {row.count.toLocaleString("en-US")}
                   </p>
-                  <p className={`mt-1.5 text-[11.5px] font-bold leading-tight ${active ? "text-white" : "text-[#0b1220]"}`}>{row.label}</p>
-                  <p className={`mt-0.5 text-[8.5px] font-bold uppercase tracking-[0.12em] ${active ? "text-white/40" : "text-[#94a3b8]"}`}>{t("landing.p1Active")}</p>
-                  <div className={`mt-3 h-1 overflow-hidden rounded-full ${active ? "bg-white/10" : "bg-[#f1f5f9]"}`}>
-                    <div className={`h-full rounded-full ${active ? "bg-[#34e0a1]" : "bg-[#10b981]"}`} style={{ width: `${barWidth}%` }} />
+                  <p className={`mt-1.5 text-[11.5px] font-bold leading-tight ${active ? "text-[#04120d]" : "text-[#0b1220]"}`}>{row.label}</p>
+                  <p className={`mt-0.5 text-[8.5px] font-bold uppercase tracking-[0.12em] ${active ? "text-[#04120d]/60" : "text-[#94a3b8]"}`}>{t("landing.p1Active")}</p>
+                  <div className={`mt-3 h-1 overflow-hidden rounded-full ${active ? "bg-[#04120d]/15" : "bg-[#f1f5f9]"}`}>
+                    <div className={`h-full rounded-full ${active ? "bg-[#04120d]" : "bg-[#10b981]"}`} style={{ width: `${barWidth}%` }} />
                   </div>
                 </button>
               );
