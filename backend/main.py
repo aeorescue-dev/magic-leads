@@ -1253,6 +1253,24 @@ async def public_trade_grid(request: Request, city: str = "", zip: str = ""):
         raise HTTPException(status_code=500, detail="trade_grid_unavailable")
 
 
+@app.get("/api/public/activity")
+@limiter.limit("60/minute")
+async def public_activity(request: Request, city: str = "", limit: int = 8):
+    """Recent opportunity activity for the landing ticker.
+
+    Privacy-safe: trade, city, neighborhood/place, ZIP and relative time only.
+    """
+    try:
+        from backend.services.activity_feed import get_activity
+
+        return await anyio.to_thread.run_sync(get_activity, city or None, limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc) or "invalid_filter")
+    except Exception as e:
+        logger.error(f"Erro ao buscar atividade pública: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="activity_unavailable")
+
+
 # Detalhe de um lead
 @app.get("/api/leads/{lead_id}", response_model=LeadResponse)
 @limiter.limit("120/minute")

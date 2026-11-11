@@ -405,6 +405,31 @@ export async function fetchTradeGrid(params: { city?: string; zip?: string } = {
   );
 }
 
+export interface ActivityEvent {
+  trade: string;
+  city: string;
+  place: string;
+  zip: string | null;
+  action: "captured" | "updated";
+  minutes_ago: number;
+  occurred_at: string;
+}
+
+export interface ActivityResponse {
+  city: string | null;
+  events: ActivityEvent[];
+  generated_at: string;
+}
+
+export async function fetchActivity(city?: string): Promise<ActivityResponse> {
+  const q = new URLSearchParams();
+  if (city) q.set("city", city);
+  const qs = q.toString();
+  return handle<ActivityResponse>(
+    await fetch(`${API_URL}/api/public/activity${qs ? `?${qs}` : ""}`)
+  );
+}
+
 export async function fetchStats(): Promise<LeadStats> {
   return handle<LeadStats>(await fetch(`${API_URL}/api/leads/stats`));
 }

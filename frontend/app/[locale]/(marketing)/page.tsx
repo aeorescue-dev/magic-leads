@@ -6,7 +6,7 @@ import { fetchPublicMetrics } from "@/lib/api-client";
 import type { PublicMetrics } from "@/lib/api-client";
 import { FoldWave, useLandingShell } from "@/components/landing/LandingShell";
 import { LiveTradeGrid } from "@/components/landing/LiveTradeGrid";
-import { Building2, Phone, ShieldCheck, Megaphone, Search, Users } from "lucide-react";
+import { Building2, Phone, ShieldCheck, Megaphone, Search, Users, Mail, MessageCircle, MessageSquare } from "lucide-react";
 
 // ------------------------------------------------------------------
 // Tipos e dados ilustrativos do "painel amostra"
@@ -215,6 +215,18 @@ export default function LandingPage() {
     navigator.clipboard?.writeText(text).catch(() => {});
     setCopied(true);
     setTimeout(() => setCopied(false), 2500);
+  };
+
+  const contactMsg = (lead: SampleLead) =>
+    L.waMsg(lead.ownerName.split(" ")[0], lead.category.toLowerCase(), lead.address);
+  const phoneE164 = (phone: string) => {
+    const digits = phone.replace(/\D/g, "");
+    return digits.length === 10 ? `+1${digits}` : `+${digits}`;
+  };
+  const waNumber = (phone: string) => phone.replace(/\D/g, "");
+  const emailHref = (lead: SampleLead) => {
+    const subject = `${lead.category} — ${lead.neighborhood}`;
+    return `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(contactMsg(lead))}`;
   };
 
   return (
@@ -618,7 +630,23 @@ export default function LandingPage() {
                                 <p className="mono-data mt-0.5 text-[15px] font-black tracking-tight text-[#34e0a1]">{lead.ownerPhone}</p>
                                 <p className="mono-data mt-1 text-[9px] text-white/30">{lead.address}</p>
                               </div>
-                              <button onClick={() => setWhatsappLead(lead)} data-track="open_whatsapp" className="btn-mint flex w-full items-center justify-center gap-1.5 py-2.5 text-[11px] uppercase tracking-wider">{t("landing.openWa")}</button>
+                              <div className="space-y-2">
+                                <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-white/35">{t("landing.contactOwner")}</p>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <a href={`tel:${phoneE164(lead.ownerPhone)}`} data-track="contact_call" className="flex items-center justify-center gap-1.5 rounded-lg bg-[#34e0a1] py-2.5 text-[10.5px] font-black uppercase tracking-wider text-[#04120d] transition hover:bg-[#5af0b8]">
+                                    <Phone className="h-3.5 w-3.5" />{t("landing.actionCall")}
+                                  </a>
+                                  <a href={`sms:${phoneE164(lead.ownerPhone)}?body=${encodeURIComponent(contactMsg(lead))}`} data-track="contact_sms" className="flex items-center justify-center gap-1.5 rounded-lg border border-white/12 bg-white/[0.05] py-2.5 text-[10.5px] font-bold uppercase tracking-wider text-white/70 transition hover:border-white/25 hover:text-white">
+                                    <MessageSquare className="h-3.5 w-3.5" />{t("landing.actionText")}
+                                  </a>
+                                  <a href={emailHref(lead)} data-track="contact_email" className="flex items-center justify-center gap-1.5 rounded-lg border border-white/12 bg-white/[0.05] py-2.5 text-[10.5px] font-bold uppercase tracking-wider text-white/70 transition hover:border-white/25 hover:text-white">
+                                    <Mail className="h-3.5 w-3.5" />{t("landing.actionEmail")}
+                                  </a>
+                                  <a href={`https://wa.me/${waNumber(lead.ownerPhone)}?text=${encodeURIComponent(contactMsg(lead))}`} target="_blank" rel="noopener noreferrer" data-track="contact_whatsapp" className="flex items-center justify-center gap-1.5 rounded-lg border border-[#25D366]/30 bg-[#25D366]/[0.08] py-2.5 text-[10.5px] font-bold uppercase tracking-wider text-[#25D366] transition hover:bg-[#25D366]/15">
+                                    <MessageCircle className="h-3.5 w-3.5" />{t("landing.actionWhatsApp")}
+                                  </a>
+                                </div>
+                              </div>
                             </div>
                           ) : (
                             <div className="space-y-2.5">

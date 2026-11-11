@@ -119,3 +119,15 @@ atualizadas agora há pouco!”.
 - A/B test: grid below hero vs. grid inside the hero panel.
 - Should the dashboard auto-apply the selected trade after checkout?
 - Public preview URL (Vercel preview + staging backend) for outside reviewers.
+
+## Add-ons (current iteration)
+
+- **Recent activity ticker:** `/api/public/activity` reads recent qualified leads
+  from New York, Boston, Dallas and Chicago, masks owner/address data, and
+  exposes only trade, place, ZIP, action and relative time. Events are
+  interleaved across the four cities. `/geolocation` reads the Vercel edge city
+  header and prioritises the visitor's market; otherwise the ticker rotates all
+  four.
+- **Revealed-opportunity card:** quick actions for Call (`tel:`), Text (`sms:`),
+  Email (`mailto:`) and WhatsApp (`wa.me`). Call is primary; WhatsApp is
+  secondary.

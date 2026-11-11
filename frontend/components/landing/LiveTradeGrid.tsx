@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { fetchTradeGrid, type TradeGridResponse } from "@/lib/api-client";
+import { ActivityTicker } from "@/components/landing/ActivityTicker";
 
 const MIN_ACTIVE = 10;
 
@@ -139,6 +140,11 @@ export function LiveTradeGrid({
     [categories, data]
   );
 
+  const tradeLabels = useMemo(
+    () => Object.fromEntries(DB_KEYS.map((key, index) => [key, categories[index] || key])),
+    [categories]
+  );
+
   // Critical display rule: never show a trade below the 10-opportunity floor.
   const visibleRows = useMemo(
     () => rows.filter((row) => row.count >= MIN_ACTIVE),
@@ -214,6 +220,8 @@ export function LiveTradeGrid({
             </span>
           </div>
         </div>
+
+        <ActivityTicker labelsByKey={tradeLabels} />
 
         {/* ZIP is the primary control: large, central, impossible to miss. */}
         <form onSubmit={submitZip} className="mx-auto mt-8 flex w-full max-w-2xl items-center gap-2 rounded-2xl border border-[#dfe6ef] bg-white p-2 shadow-[0_24px_60px_-34px_rgba(15,23,42,0.35)] transition focus-within:border-[#10b981]/55 focus-within:shadow-[0_24px_60px_-30px_rgba(16,185,129,0.35)]">
