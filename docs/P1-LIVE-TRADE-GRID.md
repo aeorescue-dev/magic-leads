@@ -16,8 +16,10 @@ in their own market and can move directly into the week pass.
   marketplace and the page keeps its light/dark rhythm.
 - Location bar: `All cities` + New York / Boston / Dallas / Chicago, each with
   its live count, plus a 5-digit ZIP field.
-- 4×4 trade grid (2 columns on mobile) with a prominent count, trade label and
-  a live indicator.
+- Trade grid (2 columns on mobile) with a prominent count, trade label,
+  relative-volume bar and a live indicator.
+- **Hard floor: only trades with 10+ active opportunities are shown.** Trades
+  below 10 are hidden until they cross the threshold.
 - Selecting a trade updates a dark summary strip with:
   - selected trade + count + region;
   - `1-hour priority · owner phone`;
@@ -83,7 +85,12 @@ labels, active/last-7-days, exclusivity, CTA, loading, error, empty, note.
 ## Final decisions (approved)
 
 1. **Position:** keep the grid directly below the hero.
-2. **ZIP filter:** hide trades with count `0` when a ZIP is active, so only
+
+**Copy (approved direction):** title “These are real clients waiting for your
+call right now.” / “Estes são os clientes reais agora aguardando o seu
+contato.”; subtitle “Qualified jobs updated just now!” / “Obras qualificadas
+atualizadas agora há pouco!”.
+2. **ZIP filter:** hide trades below the `10`-opportunity floor always, so only
    "hot" categories remain.
 3. **Geography:** city and ZIP only for now; no neighborhood selector.
 4. **Checkout:** the clicked trade is shown in auth and sent as optional
