@@ -234,22 +234,22 @@ export function LiveTradeGrid({
         <div className="mx-auto max-w-4xl text-center">
           <span className="eyebrow eyebrow-light mx-auto"><span className="dot" />{t("landing.p1Kicker")}</span>
           <h2 className={`font-display mx-auto max-w-3xl font-black leading-[1.02] tracking-[-0.03em] text-[#0b1220] ${
-            preview ? "mt-2 text-[1.2rem] sm:text-[1.3rem]" : "mt-5 text-[1.95rem] sm:text-[2.7rem] lg:text-[3.05rem]"
+            preview ? "mt-2 text-[1.3rem] sm:text-[1.45rem]" : "mt-5 text-[1.95rem] sm:text-[2.7rem] lg:text-[3.05rem]"
           }`}>
             {t("landing.p1Title")}
           </h2>
           <p className={`mx-auto max-w-xl leading-relaxed text-[#54617a] ${
-            preview ? "mt-2 text-[9.5px]" : "mt-4 text-[14px] sm:text-[15px]"
+            preview ? "mt-2 text-[10.5px]" : "mt-4 text-[14px] sm:text-[15px]"
           }`}>{t("landing.p1Sub")}</p>
 
           <div className={`flex flex-wrap items-center justify-center ${preview ? "mt-2.5 gap-1.5" : "mt-5 gap-2"}`}>
             <span className={`inline-flex items-center gap-1 rounded-full border border-[#10b981]/25 bg-[#10b981]/[0.08] font-black uppercase tracking-[0.1em] text-[#0a8f65] ${
-              preview ? "px-2 py-1 text-[7px]" : "px-3.5 py-1.5 text-[10px]"
+              preview ? "px-2.5 py-1 text-[8px]" : "px-3.5 py-1.5 text-[10px]"
             }`}>
               <Clock className={preview ? "h-2.5 w-2.5" : "h-3.5 w-3.5"} /> {t("landing.p1Exclusive")}
             </span>
             <span className={`inline-flex items-center gap-1 rounded-full border border-[#dbe3ec] bg-white font-bold uppercase tracking-[0.1em] text-[#64748b] ${
-              preview ? "px-2 py-1 text-[7px]" : "px-3.5 py-1.5 text-[10px]"
+              preview ? "px-2.5 py-1 text-[8px]" : "px-3.5 py-1.5 text-[10px]"
             }`}>
               <ShieldCheck className={preview ? "h-2.5 w-2.5" : "h-3.5 w-3.5"} /> {t("landing.p1NoAuction")}
             </span>
@@ -326,7 +326,7 @@ export function LiveTradeGrid({
         {showTicker && <ActivityTicker labelsByKey={tradeLabels} />}
 
         <div className={`flex flex-wrap items-center justify-center gap-x-2 gap-y-1 font-bold uppercase tracking-[0.13em] ${
-          preview ? "mt-2.5 text-[7.5px]" : "mt-6 text-[10.5px]"
+          preview ? "mt-2.5 text-[8px]" : "mt-6 text-[10.5px]"
         }`}>
           <span className="relative flex h-2 w-2">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#10b981] opacity-50" />
@@ -342,7 +342,7 @@ export function LiveTradeGrid({
           <span className="text-[#94a3b8]">{t("landing.p1Last7")}</span>
         </div>
         {!loading && !error && visibleRows.length > 0 && (
-          <p className={`text-center text-[#94a3b8] ${preview ? "mt-1 text-[7.5px]" : "mt-1.5 text-[10px]"}`}>
+          <p className={`text-center text-[#94a3b8] ${preview ? "mt-1 text-[8px]" : "mt-1.5 text-[10px]"}`}>
             {featuredLimit && visibleRows.length > featuredLimit
               ? t("landing.p1MinNoticeLimited")
                   .replace("{n}", String(displayedRows.length))
@@ -361,7 +361,7 @@ export function LiveTradeGrid({
         )}
 
         {loading ? (
-          <div className={preview ? "mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-1.5" : "mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4"}>
+          <div className={preview ? "mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-2.5" : "mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4"}>
             {Array.from({ length: 8 }).map((_, index) => (
               <div key={`p1-skeleton-${index}`} className="rounded-2xl border border-[#e8eef6] bg-white p-4">
                 <div className="h-10 w-10 animate-pulse rounded-xl bg-[#eef2f7]" />
@@ -383,7 +383,7 @@ export function LiveTradeGrid({
             </button>
           </div>
         ) : (
-          <div className={preview ? "mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-1.5" : "mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4"}>
+          <div className={preview ? "mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-2.5" : "mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4"}>
             {displayedRows.map((row, index) => {
               const Icon = ICONS[row.key] ?? Wrench;
               const palette = ICON_STYLE[row.key] ?? ICON_STYLE.Structure;
@@ -397,7 +397,7 @@ export function LiveTradeGrid({
                   data-track={`p1_trade_${row.key.toLowerCase()}`}
                   style={{ animationDelay: `${index * 35}ms` }}
                   className={`p1-card-in group relative overflow-hidden border text-left transition duration-300 hover:-translate-y-0.5 ${
-                    preview ? "rounded-xl p-2.5" : "rounded-2xl p-5"
+                    preview ? "rounded-xl p-3.5" : "rounded-2xl p-5"
                   } ${
                     active
                       ? "border-[#10b981] bg-[#10b981] text-[#04120d] shadow-[0_24px_60px_-30px_rgba(16,185,129,0.55)]"
@@ -405,17 +405,17 @@ export function LiveTradeGrid({
                   } ${preview && index >= 4 ? "hidden sm:block" : ""}`}
                 >
                   <div className="flex items-start justify-between">
-                    <span className={`grid place-items-center ring-1 transition ${preview ? "h-7 w-7 rounded-lg" : "h-10 w-10 rounded-xl"} ${active ? "bg-[#04120d]/10 text-[#04120d] ring-[#04120d]/15" : `${palette.bg} ${palette.text} ${palette.ring}`}`}>
-                      <Icon className={preview ? "h-3 w-3" : "h-[18px] w-[18px]"} />
+                    <span className={`grid place-items-center ring-1 transition ${preview ? "h-8 w-8 rounded-lg" : "h-10 w-10 rounded-xl"} ${active ? "bg-[#04120d]/10 text-[#04120d] ring-[#04120d]/15" : `${palette.bg} ${palette.text} ${palette.ring}`}`}>
+                      <Icon className={preview ? "h-3.5 w-3.5" : "h-[18px] w-[18px]"} />
                     </span>
                     <span className={`mt-1 rounded-full ${preview ? "h-1 w-1" : "h-1.5 w-1.5"} ${active ? "bg-[#04120d]" : "bg-[#10b981]/70"}`} />
                   </div>
-                  <p className={`mono-data font-black leading-none tracking-[-0.04em] tabular-nums ${preview ? "mt-1.5 text-[1.2rem]" : "mt-4 text-[2rem]"} ${active ? "text-[#04120d]" : "text-[#0b1220]"}`}>
+                  <p className={`mono-data font-black leading-none tracking-[-0.04em] tabular-nums ${preview ? "mt-2 text-[1.45rem]" : "mt-4 text-[2rem]"} ${active ? "text-[#04120d]" : "text-[#0b1220]"}`}>
                     {row.count.toLocaleString("en-US")}
                   </p>
-                  <p className={`font-bold leading-tight ${preview ? "mt-1 text-[9px]" : "mt-1.5 text-[11.5px]"} ${active ? "text-[#04120d]" : "text-[#0b1220]"}`}>{row.label}</p>
-                  <p className={`mt-0.5 font-bold uppercase tracking-[0.12em] ${preview ? "hidden" : "text-[8.5px]"} ${active ? "text-[#04120d]/60" : "text-[#94a3b8]"}`}>{t("landing.p1Active")}</p>
-                  <div className={`overflow-hidden rounded-full ${preview ? "mt-1.5 h-0.5" : "mt-3 h-1"} ${active ? "bg-[#04120d]/15" : "bg-[#f1f5f9]"}`}>
+                  <p className={`font-bold leading-tight ${preview ? "mt-1.5 text-[10px]" : "mt-1.5 text-[11.5px]"} ${active ? "text-[#04120d]" : "text-[#0b1220]"}`}>{row.label}</p>
+                  <p className={`mt-0.5 font-bold uppercase tracking-[0.12em] ${preview ? "text-[6.5px]" : "text-[8.5px]"} ${active ? "text-[#04120d]/60" : "text-[#94a3b8]"}`}>{t("landing.p1Active")}</p>
+                  <div className={`overflow-hidden rounded-full ${preview ? "mt-2 h-1" : "mt-3 h-1"} ${active ? "bg-[#04120d]/15" : "bg-[#f1f5f9]"}`}>
                     <div className={`h-full rounded-full ${active ? "bg-[#04120d]" : "bg-[#10b981]"}`} style={{ width: `${barWidth}%` }} />
                   </div>
                 </button>
@@ -426,24 +426,24 @@ export function LiveTradeGrid({
 
         {!loading && !error && activeRow && (
           <div className={`relative overflow-hidden rounded-2xl bg-[#0b1220] text-white shadow-[0_30px_80px_-40px_rgba(15,23,42,0.8)] ${
-            preview ? "mt-3 p-2.5" : "mt-5 p-5 sm:p-6"
+            preview ? "mt-3 p-3.5" : "mt-5 p-5 sm:p-6"
           }`}>
             <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[#34e0a1]/60 to-transparent" />
             <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <p className={`font-bold uppercase tracking-[0.14em] text-[#34e0a1] ${preview ? "text-[7px]" : "text-[9px]"}`}>{t("landing.p1Selected")}</p>
-                <p className={`font-bold tracking-[-0.01em] ${preview ? "mt-0.5 text-[11.5px]" : "mt-1.5 text-lg"}`}>
+                <p className={`font-bold tracking-[-0.01em] ${preview ? "mt-1 text-[13px]" : "mt-1.5 text-lg"}`}>
                   {activeRow.label} <span className="text-white/30">·</span>{" "}
                   <span className="mono-data">{activeRow.count.toLocaleString("en-US")}</span>{" "}
                   <span className={`font-medium text-white/45 ${preview ? "text-[9px]" : "text-[12px]"}`}>{t("landing.p1Active")}</span>
                 </p>
-                <p className={`text-white/40 ${preview ? "mt-0.5 text-[7.5px]" : "mt-1 text-[10.5px]"}`}>{regionLabel} · {t("landing.p1Last7")} · {visibleTotal.toLocaleString("en-US")} {t("landing.p1Opportunities")}</p>
+                <p className={`text-white/40 ${preview ? "mt-1 text-[8.5px]" : "mt-1 text-[10.5px]"}`}>{regionLabel} · {t("landing.p1Last7")} · {visibleTotal.toLocaleString("en-US")} {t("landing.p1Opportunities")}</p>
                 <div className={`flex flex-wrap gap-x-5 gap-y-1.5 font-bold uppercase tracking-[0.1em] text-white/55 ${preview ? "hidden" : "mt-3 text-[10px]"}`}>
                   <span className="inline-flex items-center gap-1.5"><Clock className="h-3.5 w-3.5 text-[#34e0a1]" /> {t("landing.p1Exclusive")}</span>
                   <span className="inline-flex items-center gap-1.5"><ShieldCheck className="h-3.5 w-3.5 text-[#34e0a1]" /> {t("landing.p1NoAuction")}</span>
                 </div>
               </div>
-              <button type="button" onClick={() => onCta(activeRow.label)} data-track="p1_trade_cta" className={`btn-mint shrink-0 uppercase tracking-[0.06em] ${preview ? "px-3 py-2 text-[8px]" : "px-6 py-3 text-[12px]"}`}>
+              <button type="button" onClick={() => onCta(activeRow.label)} data-track="p1_trade_cta" className={`btn-mint shrink-0 uppercase tracking-[0.06em] ${preview ? "px-3 py-2.5 text-[9px]" : "px-6 py-3 text-[12px]"}`}>
                 {t("landing.p1Cta")}
                 <ArrowRight className="h-4 w-4" />
               </button>

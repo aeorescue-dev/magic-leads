@@ -323,18 +323,51 @@ export default function LandingPage() {
               </div>
             </div>
 
-            <div className="min-w-0 w-full lg:mt-1 lg:justify-self-end">
-              <div className="w-full max-w-[620px] rounded-[1.8rem] border border-[#e4dfd2] bg-[#f6f4ee] p-3 shadow-[0_40px_100px_-60px_rgba(15,23,42,0.5)] sm:p-4">
-                <LiveTradeGrid
-                  categories={L.categories}
-                  onCta={openModal}
-                  city={heroCity}
-                  activeZip={heroZip}
-                  showControls={false}
-                  showTicker={false}
-                  preview
-                />
+            <div className="relative min-w-0 w-full lg:mt-1 lg:justify-self-end">
+              <div className="pointer-events-none absolute -inset-6 rounded-[2.4rem] bg-[#10b981]/[0.10] blur-3xl" />
+              <div className="relative w-full max-w-[620px] rounded-[2rem] bg-gradient-to-b from-white/90 via-[#f6f4ee] to-[#eeeae0] p-[1px] shadow-[0_50px_130px_-45px_rgba(15,23,42,0.55),0_20px_60px_-30px_rgba(16,185,129,0.22)]">
+                <div className="rounded-[1.95rem] border border-white/60 bg-[#f7f5ef] p-4 sm:p-6">
+                  <LiveTradeGrid
+                    categories={L.categories}
+                    onCta={openModal}
+                    city={heroCity}
+                    activeZip={heroZip}
+                    showControls={false}
+                    showTicker={false}
+                    preview
+                    featuredLimit={8}
+                  />
+                </div>
               </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* GLOBAL AUTHORITY STRIP */}
+      <section className="relative z-10 bg-[#f8f7f3] pb-4">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6">
+          <div className="-mt-6 grid gap-3 rounded-2xl border border-[#e8e4da] bg-white/90 p-3 shadow-[0_30px_80px_-45px_rgba(15,23,42,0.35)] backdrop-blur-xl sm:grid-cols-3 sm:divide-x sm:divide-[#eee9de] lg:-mt-20">
+            <div className="flex items-center justify-between px-4 py-3">
+              <div>
+                <p className="text-[9px] font-black uppercase tracking-[0.14em] text-[#94a3b8]">{t("landing.statBank")}</p>
+                <p className="mono-data mt-1 text-2xl font-black tabular-nums text-[#0b1220]">{hasMetrics ? `${leadsBank.toLocaleString("en-US")}+` : "—"}</p>
+              </div>
+              <span className="h-2 w-2 rounded-full bg-[#10b981] shadow-[0_0_12px_#10b981]" />
+            </div>
+            <div className="flex items-center justify-between px-4 py-3">
+              <div>
+                <p className="text-[9px] font-black uppercase tracking-[0.14em] text-[#94a3b8]">{t("landing.statOwner")}</p>
+                <p className="mono-data mt-1 text-2xl font-black tabular-nums text-[#0b1220]">{hasMetrics ? `${withOwner.toLocaleString("en-US")}+` : "—"}</p>
+              </div>
+              <span className="h-2 w-2 rounded-full bg-[#a78bfa] shadow-[0_0_12px_#a78bfa]" />
+            </div>
+            <div className="flex items-center justify-between px-4 py-3">
+              <div>
+                <p className="text-[9px] font-black uppercase tracking-[0.14em] text-[#94a3b8]">{t("landing.statCities")}</p>
+                <p className="mono-data mt-1 text-2xl font-black tabular-nums text-[#0b1220]">{citiesCount}+</p>
+              </div>
+              <span className="h-2 w-2 rounded-full bg-[#10b981] shadow-[0_0_12px_#10b981]" />
             </div>
           </div>
         </div>
