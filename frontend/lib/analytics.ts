@@ -9,6 +9,7 @@ export type AnalyticsEventName =
   | "cta_click"
   | "form_start"
   | "form_submit"
+  | "checkout_started"
   | "scroll"
   | "outbound_click"
   | "language_switch"
@@ -38,6 +39,26 @@ interface QueuedEvent {
 
 const STORAGE_KEY = "ml.analytics.session.v1";
 const SESSION_MAX_MS = 30 * 60 * 1000;
+
+type TrackFn = (
+  name: AnalyticsEventName,
+  label?: string,
+  value?: number
+) => void;
+let activeTrack: TrackFn | null = null;
+
+/** Enfileira um evento no beacon ativo (no-op se o beacon não estiver montado). */
+export function trackEvent(
+  name: AnalyticsEventName,
+  label?: string,
+  value?: number
+): void {
+  try {
+    activeTrack?.(name, label, value);
+  } catch {
+    /* analytics nunca deve quebrar a UI */
+  }
+}
 
 export function isTrackablePath(pathname: string): boolean {
   if (!pathname) return false;
@@ -153,6 +174,8 @@ export function startAnalytics(): () => void {
     });
     dirty = true;
   };
+
+  activeTrack = enqueue;
 
   const flush = () => {
     if (stopped) return;
@@ -285,6 +308,7 @@ export function startAnalytics(): () => void {
 
   return () => {
     stopped = true;
+    if (activeTrack === enqueue) activeTrack = null;
     window.clearInterval(timer);
     if (idle && typeof (window as any).cancelIdleCallback === "function") {
       (window as any).cancelIdleCallback(idleId);

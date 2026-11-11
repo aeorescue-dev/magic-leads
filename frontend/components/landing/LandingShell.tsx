@@ -152,36 +152,36 @@ export default function LandingShell({ children }: { children: React.ReactNode }
   return (
     <Ctx.Provider value={{ openModal, scrollTo }}>
       <div className="landing-light min-h-screen bg-white text-[#0b1220]">
-        <header className={`sticky top-0 z-40 transition-all duration-300 ${scrolled ? "border-b border-[#eef1f6] bg-white/90 backdrop-blur-xl shadow-sm" : "bg-white/80 backdrop-blur-md"}`}>
+        <header className={`sticky top-0 z-40 transition-all duration-300 ${scrolled ? "border-b border-white/10 bg-[#070A12]/85 backdrop-blur-xl shadow-2xl shadow-black/40" : "bg-[#070A12]/65 backdrop-blur-md"}`}>
           <div className="mx-auto max-w-[1400px] px-4 sm:px-6">
             <div className="flex h-16 items-center justify-between gap-4">
               <button onClick={() => scrollTo("topo")} className="flex shrink-0 items-center gap-2.5">
                 <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-[#7c5cff] to-[#10b981] shadow-md shadow-[#10b981]/20">
                   <svg className="h-4 w-4 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="m13 2-9 12h7l-1 8 10-13h-7V2Z" /></svg>
                 </div>
-                <span className="font-display text-lg font-black text-[#0b1220]">Magic<span className="text-[#10b981]">Leads</span></span>
+                <span className="font-display text-lg font-black text-white">Magic<span className="text-[#34e0a1]">Leads</span></span>
               </button>
               <div className="flex shrink-0 items-center gap-3">
                 <LangSwitch lang={lang} setLang={changeLang} />
                 <button onClick={openModal} data-track="header_cta" className="btn-mint hidden px-5 py-2.5 text-[13px] sm:block">{t("landing.start")}</button>
-                <button onClick={() => setMenuOpen(!menuOpen)} className="flex h-10 w-10 items-center justify-center rounded-lg border border-[#e2e8f0] text-[#0b1220] lg:hidden" aria-label="Menu">
+                <button onClick={() => setMenuOpen(!menuOpen)} className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 text-white lg:hidden" aria-label="Menu">
                   <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     {menuOpen ? <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" /> : <path d="M4 7h16M4 12h16M4 17h16" strokeLinecap="round" />}
                   </svg>
                 </button>
               </div>
             </div>
-            <nav className="hidden h-11 items-center justify-center gap-8 border-t border-[#eef1f6] text-[13px] font-semibold text-[#54617a] lg:flex">
+            <nav className="hidden h-11 items-center justify-center gap-8 border-t border-white/10 text-[13px] font-semibold text-[#9aa7ba] lg:flex">
               {navPairs.map(([label, id]) => (
-                <button key={id} onClick={() => scrollTo(id)} className="whitespace-nowrap transition hover:text-[#0b1220]">{label}</button>
+                <button key={id} onClick={() => scrollTo(id)} className="whitespace-nowrap transition hover:text-white">{label}</button>
               ))}
             </nav>
           </div>
           {menuOpen && (
-            <div className="border-t border-[#eef1f6] bg-white px-4 py-4 lg:hidden">
+            <div className="border-t border-white/10 bg-[#070A12] px-4 py-4 lg:hidden">
               <div className="flex flex-col gap-1">
                 {navPairs.map(([label, id]) => (
-                  <button key={id} onClick={() => scrollTo(id)} className="rounded-lg px-3 py-2.5 text-left text-sm font-semibold text-[#54617a] hover:bg-[#f1f4f9]">{label}</button>
+                  <button key={id} onClick={() => scrollTo(id)} className="rounded-lg px-3 py-2.5 text-left text-sm font-semibold text-[#9aa7ba] hover:bg-white/5 hover:text-white">{label}</button>
                 ))}
                 <button onClick={openModal} data-track="mobile_menu_cta" className="btn-mint mt-2 py-3 text-sm">{t("landing.start")}</button>
               </div>
@@ -191,7 +191,7 @@ export default function LandingShell({ children }: { children: React.ReactNode }
 
         {children}
 
-        <FoldWave from="#0b1220" to="#080d16" />
+        <FoldWave from="#070a12" to="#080d16" />
         <footer className="bg-[#080d16] pb-16 pt-8 text-sm text-[#64748b] sm:pb-12">
           <div className="mx-auto max-w-7xl px-4 sm:px-6">
             <div className="grid gap-10 border-b border-white/10 pb-10 md:grid-cols-4">

@@ -101,7 +101,7 @@ export default async function ShowcasePage({
   params: Promise<{ locale: string; city: string; trade: string }>;
   searchParams: Promise<{ vt?: string }>;
 }) {
-  const { city, trade } = await params;
+  const { locale, city, trade } = await params;
   const { vt = "" } = await searchParams;
   const data = await getShowcase(city, trade, vt);
   if (!data) notFound();
@@ -131,6 +131,7 @@ export default async function ShowcasePage({
             city={page.city_slug}
             trade={page.trade_code}
             priceUsd={price}
+            locale={locale}
           />
         </div>
 
@@ -293,6 +294,7 @@ export default async function ShowcasePage({
                 city={page.city_slug}
                 trade={page.trade_code}
                 priceUsd={price}
+            locale={locale}
               />
             </div>
             <p className="mt-3 text-center text-[9px] text-slate-600">
@@ -327,6 +329,7 @@ export default async function ShowcasePage({
               city={page.city_slug}
               trade={page.trade_code}
               priceUsd={price}
+            locale={locale}
               compact
             />
           </div>

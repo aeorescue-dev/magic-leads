@@ -10,19 +10,8 @@ import path from "node:path";
  */
 
 const ROOT = process.cwd();
-const I18N = fs.readFileSync(path.join(ROOT, "lib", "i18n.tsx"), "utf8");
-
-function localeBlocks(text: string): Record<"pt" | "en" | "es", string> {
-  const pt = text.indexOf("const PT: Dict = {");
-  const en = text.indexOf("const EN: Dict = {");
-  const es = text.indexOf("const ES: Dict = {");
-  const end = text.indexOf("export const DICTS");
-  return {
-    pt: text.slice(pt, en),
-    en: text.slice(en, es),
-    es: text.slice(es, end),
-  };
-}
+const readLocale = (lang: "pt" | "en" | "es") =>
+  fs.readFileSync(path.join(ROOT, "lib", "i18n", `${lang}.ts`), "utf8");
 
 function collectUsedKeys(): string[] {
   const used = new Set<string>();
@@ -46,7 +35,11 @@ function collectUsedKeys(): string[] {
   return Array.from(used);
 }
 
-const blocks = localeBlocks(I18N);
+const blocks = {
+  pt: readLocale("pt"),
+  en: readLocale("en"),
+  es: readLocale("es"),
+};
 const keys = {
   pt: new Set(
     Array.from(blocks.pt.matchAll(/"([a-zA-Z0-9_.\-]+)"\s*:/g)).map((m) => m[1])

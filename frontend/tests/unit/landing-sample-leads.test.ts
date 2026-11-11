@@ -12,23 +12,12 @@ import path from "node:path";
  */
 
 const ROOT = process.cwd();
-const I18N = fs.readFileSync(path.join(ROOT, "lib", "i18n.tsx"), "utf8");
+const readLocale = (lang: "pt" | "en" | "es") =>
+  fs.readFileSync(path.join(ROOT, "lib", "i18n", `${lang}.ts`), "utf8");
 const LANDING = fs.readFileSync(
   path.join(ROOT, "app", "[locale]", "(marketing)", "page.tsx"),
   "utf8"
 );
-
-function localeBlocks(text: string): Record<"pt" | "en" | "es", string> {
-  const pt = text.indexOf("const PT: Dict = {");
-  const en = text.indexOf("const EN: Dict = {");
-  const es = text.indexOf("const ES: Dict = {");
-  const end = text.indexOf("export const DICTS");
-  return {
-    pt: text.slice(pt, en),
-    en: text.slice(en, es),
-    es: text.slice(es, end),
-  };
-}
 
 function sampleLeads(block: string): string[] {
   const m = block.match(/"landing\.sampleLeads":\s*"([^"]*)"/);
@@ -42,7 +31,11 @@ function baseIds(): string[] {
   return Array.from(block.matchAll(/\bid:\s*"([a-z]{2,3}-\d)"/g)).map((m) => m[1]);
 }
 
-const blocks = localeBlocks(I18N);
+const blocks = {
+  pt: readLocale("pt"),
+  en: readLocale("en"),
+  es: readLocale("es"),
+};
 const ids = baseIds();
 
 describe("landing — painel de amostra traduzido", () => {
