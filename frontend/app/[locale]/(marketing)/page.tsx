@@ -4,8 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/lib/i18n";
 import { fetchPublicMetrics } from "@/lib/api-client";
 import type { PublicMetrics } from "@/lib/api-client";
-import { useLandingShell } from "@/components/landing/LandingShell";
-import { Building2, Phone, ShieldCheck, Megaphone, Search, Users } from "lucide-react";
+import { FoldWave, useLandingShell } from "@/components/landing/LandingShell";
+import { Building2, Phone, ShieldCheck } from "lucide-react";
 
 // ------------------------------------------------------------------
 // Tipos e dados ilustrativos do "painel amostra"
@@ -24,9 +24,9 @@ const TRADE_KEYS: TradeKey[] = ["Telhado", "Encanamento", "Estrutura", "Pintura"
 const CHANNELS: Channel[] = ["whatsapp", "sms", "email"];
 
 const BADGE_STYLE: Record<BadgeKey, string> = {
-  urgent: "badge-urgent",
-  high: "badge-high",
-  medium: "badge-medium",
+  urgent: "bg-[#f43f5e]/15 text-[#ff7a8a]",
+  high: "bg-[#f59e0b]/15 text-[#f59e0b]",
+  medium: "bg-white/10 text-[#9aa7ba]",
 };
 
 interface SampleLeadBase {
@@ -74,12 +74,6 @@ const SIGNAL_STYLE = [
   { color: "#475569", bg: "#f1f5f9", ring: "#cbd5e1" },
 ];
 
-const AVATAR_GRAD = [
-  "linear-gradient(135deg,#10b981,#0a8f65)",
-  "linear-gradient(135deg,#7c5cff,#9d80ff)",
-  "linear-gradient(135deg,#b45309,#92400e)",
-];
-
 // ------------------------------------------------------------------
 // Helpers de parsing das chaves serializadas do i18n (landing.*)
 // ------------------------------------------------------------------
@@ -89,6 +83,10 @@ function blocks(s: string): string[][] {
 
 function listOf(s: string): string[] {
   return (s || "").split(",").map((x) => x.trim()).filter(Boolean);
+}
+
+function Kicker({ children, color }: { children: React.ReactNode; color: string }) {
+  return <p className="kicker" style={{ color }}>{children}</p>;
 }
 
 export default function LandingPage() {
@@ -207,8 +205,6 @@ export default function LandingPage() {
   const closedJobs = Math.max(0, Math.round(estimatedVisits / 20));
   const monthlyRevenue = closedJobs * ticketValue;
   const monthsPaid = (ticketValue / 520).toFixed(1);
-  const winner = L.comparisons.find((c) => c.winner);
-  const rivals = L.comparisons.filter((c) => !c.winner);
 
   const copyTpl = (text: string) => {
     navigator.clipboard?.writeText(text).catch(() => {});
@@ -219,364 +215,322 @@ export default function LandingPage() {
   return (
     <>
       {/* HERO */}
-      <section id="topo" className="relative overflow-hidden bg-[#06080b]">
-        <div className="dark-grid pointer-events-none absolute inset-0" />
-        <div className="pointer-events-none absolute -top-48 left-1/2 h-[620px] w-[1100px] -translate-x-1/2 rounded-full bg-[#19c37d]/[0.05] blur-[160px]" />
-        <div className="relative mx-auto max-w-7xl px-4 pb-16 pt-14 sm:px-6 md:pb-24 md:pt-20">
-          <div className="mx-auto max-w-4xl text-center">
-            <div className="eyebrow-dark">
-              <span className="dot" />
-              {hasMetrics ? `${leadsBank.toLocaleString("en-US")} ${t("landing.heroKicker")}` : t("landing.heroLoading")}
-            </div>
-
-            <h1 className="font-display mt-7 text-[2.65rem] font-black leading-[0.95] tracking-[-0.05em] text-white sm:text-6xl lg:text-[4.55rem]">
-              {t("landing.heroTitle1")}
-              <br />
-              <span className="text-white/38">{t("landing.heroTitle2")}</span>
-            </h1>
-
-            <p className="mx-auto mt-7 max-w-2xl text-base leading-relaxed text-white/50 sm:text-lg">
-              {t("landing.heroSub")}
-            </p>
-
-            <div className="mt-8 flex flex-col items-stretch justify-center gap-3 sm:flex-row">
-              <button onClick={openModal} data-track="hero_cta" className="btn-emerald px-7 py-3.5 text-[14px]">
-                {t("landing.ctaPanel")}
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.4}><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" /></svg>
-              </button>
-              <button onClick={() => scrollTo("simulador")} data-track="sample_cta" className="btn-ghost-dark px-6 py-3.5 text-[14px]">
-                {t("landing.ctaSample")}
-              </button>
-            </div>
-
-            <div className="mt-7 flex flex-col items-center gap-2 text-[10.5px] font-bold uppercase tracking-[0.13em] text-white/55 sm:flex-row sm:flex-wrap sm:justify-center sm:gap-x-5">
+      <section id="topo" className="bg-grid-soft relative overflow-hidden">
+        <div className="pointer-events-none absolute -top-32 left-1/2 h-[520px] w-[820px] -translate-x-1/2 rounded-full bg-[#10b981]/[0.09] blur-[150px]" />
+        <div className="relative mx-auto max-w-6xl px-4 pb-16 pt-16 text-center sm:px-6 md:pb-24 md:pt-24">
+          <div className="fade-up inline-flex items-center gap-2 text-[12px] font-bold tracking-wider text-[#0a8f65]">
+            <span className="blink-dot" /><span className="blink-dot blink-dot-delay" /><span className="blink-dot blink-dot-delay-2" />
+            {hasMetrics ? `${leadsBank.toLocaleString("en-US")} ${t("landing.heroKicker")}` : t("landing.heroLoading")}
+          </div>
+          <h1 className="fade-up font-display mx-auto mt-8 max-w-5xl text-[3.1rem] font-black leading-[0.9] sm:text-7xl lg:text-[6.2rem] lg:leading-[0.88]">
+            {t("landing.heroTitle1")}<br /><span className="hl">{t("landing.heroTitle2")}</span>
+          </h1>
+          <p className="fade-up mx-auto mt-8 max-w-2xl text-lg leading-relaxed text-[#54617a] sm:text-xl">{t("landing.heroSub")}</p>
+          <div className="fade-up mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
+            <button onClick={openModal} data-track="hero_cta" className="btn-mint flex w-full items-center justify-center gap-2.5 px-9 py-4 text-base sm:w-auto">
+              {t("landing.ctaPanel")}
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" /></svg>
+            </button>
+            <button onClick={() => scrollTo("simulador")} data-track="sample_cta" className="btn-outline flex w-full items-center justify-center px-7 py-4 text-sm sm:w-auto">{t("landing.ctaSample")}</button>
+          </div>
+          <div className="fade-up mx-auto mt-7 max-w-3xl rounded-2xl border border-[#10b981]/25 bg-[#10b981]/[0.06] px-4 py-3">
+            <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs font-black text-[#0a8f65]">
               {L.trust.map((item) => (
                 <span key={item} className="inline-flex items-center gap-1.5">
-                  <svg className="h-3.5 w-3.5 text-white/40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.6}><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
+                  <svg className="h-4 w-4 text-[#10b981]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
                   {item}
                 </span>
               ))}
             </div>
             {L.quotes[0] && (
-              <p className="mt-3 flex flex-wrap items-center justify-center gap-2 text-[12px] leading-relaxed text-white/40">
-                <span className="text-white/60">★★★★★</span>
-                <span>&ldquo;{L.quotes[0].badge}&rdquo; &mdash; {L.quotes[0].name}, {L.quotes[0].role}</span>
+              <p className="mt-2 text-center text-[11px] font-semibold text-[#54617a]">
+                “{L.quotes[0].badge}” — {L.quotes[0].name}, {L.quotes[0].role}
               </p>
             )}
-            <p className="mt-2.5 text-[10.5px] text-white/25">{t("landing.priceLine")}</p>
           </div>
+          <p className="mt-4 text-sm text-[#94a3b8]">{t("landing.priceLine")}</p>
+          <div className="pop-in mx-auto mt-14 max-w-4xl">
+            <div className="grid gap-8 sm:grid-cols-3">
+              <div className="text-center">
+                <p className="inline-flex items-center gap-2 font-display text-4xl font-black text-[#10b981] sm:text-5xl"><span className="blink-dot" />{hasMetrics ? `${leadsBank.toLocaleString("en-US")}+` : "—"}</p>
+                <p className="mt-2 text-[11px] font-bold uppercase tracking-wider text-[#94a3b8]">{t("landing.statBank")}</p>
+              </div>
+              <div className="text-center">
+                <p className="inline-flex items-center gap-2 font-display text-4xl font-black text-[#10b981] sm:text-5xl"><span className="blink-dot blink-dot-delay" />{hasMetrics ? `${withOwner.toLocaleString("en-US")}+` : "—"}</p>
+                <p className="mt-2 text-[11px] font-bold uppercase tracking-wider text-[#94a3b8]">{t("landing.statOwner")}</p>
+              </div>
+              <div className="text-center">
+                <p className="inline-flex items-center gap-2 font-display text-4xl font-black text-[#10b981] sm:text-5xl"><span className="blink-dot blink-dot-delay-2" />{citiesCount}+</p>
+                <p className="mt-2 text-[11px] font-bold uppercase tracking-wider text-[#94a3b8]">{t("landing.statCities")}</p>
+              </div>
+            </div>
+            <p className="mt-8 flex items-center justify-center gap-2 text-sm font-medium text-[#0a8f65]">
+              <span className="blink-dot" /><span className="blink-dot blink-dot-delay" /><span className="blink-dot blink-dot-delay-2" />
+              {t("landing.updated")} {t("landing.agoLittle")}
+              {hasMetrics && newThisRun > 0 && (
+                <>
+                  {" · "}
+                  {newThisRun.toLocaleString("en-US")} {t("landing.updatedNew")}
+                </>
+              )}
+            </p>
+          </div>
+        </div>
+        <div className="overflow-hidden border-t border-[#eef1f6] bg-white py-4">
+          <div className="animate-marquee items-center gap-8 text-xs font-bold uppercase tracking-widest text-[#94a3b8]">
+            {[...L.categories, ...L.categories].map((c, i) => (
+              <span key={`${c}-${i}`} className="flex shrink-0 items-center gap-8">{c}<span className="h-1.5 w-1.5 rounded-full bg-[#10b981]" /></span>
+            ))}
+          </div>
+        </div>
+      </section>
 
-          <div className="relative mx-auto mt-12 max-w-6xl">
-            <div className="app-window">
-              <div className="app-chrome">
-                <div className="flex gap-1.5">
-                  <span className="app-dot" /><span className="app-dot" /><span className="app-dot" />
-                </div>
-                <div className="ml-1 flex flex-1 items-center gap-2 rounded-md border border-white/[0.06] bg-black/25 px-2.5 py-1">
-                  <svg className="h-3 w-3 text-white/30" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 0h10.5a1.5 1.5 0 0 1 1.5 1.5v7.5a1.5 1.5 0 0 1-1.5 1.5H6.75a1.5 1.5 0 0 1-1.5-1.5v-7.5a1.5 1.5 0 0 1 1.5-1.5Z" /></svg>
-                  <span className="truncate text-[10px] tracking-tight text-white/35">app.magicleads.app/workspace</span>
-                </div>
-                <span className="inline-flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-white/40">
-                  <span style={{ width: 5, height: 5, borderRadius: 9999, background: "#8b95a5" }} />
-                  live
+      {/* COBERTURA COMPLETA */}
+      <section className="bg-white py-20 md:py-28">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6">
+          <Kicker color="#10b981">{t("landing.coverageKicker")}</Kicker>
+          <h2 className="font-display mt-5 max-w-4xl text-[2.4rem] font-black leading-[0.98] sm:text-5xl md:text-6xl">
+            {t("landing.coverageTitle")} <span className="hl">{t("landing.coverageHl")}</span>
+          </h2>
+          <p className="mt-6 max-w-2xl text-lg leading-relaxed text-[#54617a]">{t("landing.coverageSub")}</p>
+
+          <div className="mt-14 grid gap-6 md:grid-cols-3">
+            {L.coverageItems.map((item) => (
+              <article key={item.title} className="card card-hover flex flex-col p-8">
+                <span
+                  className="flex h-14 w-14 items-center justify-center rounded-2xl"
+                  style={{ background: `${item.color}1a`, color: item.color }}
+                >
+                  {item.icon === "phone" && <Phone className="h-7 w-7" />}
+                  {item.icon === "building" && <Building2 className="h-7 w-7" />}
+                  {item.icon === "shield" && <ShieldCheck className="h-7 w-7" />}
                 </span>
-              </div>
-              <div className="hidden sm:block">
-                <img src="/img/app-dashboard.png" alt="Magic Leads workspace dashboard with live opportunities, counters and trade filters" width={1920} height={1080} fetchPriority="high" />
-              </div>
-              <div className="sm:hidden">
-                <img src="/img/app-dashboard-mobile.png" alt="Magic Leads workspace on mobile with live opportunities and counters" width={780} height={1688} className="block w-full object-cover object-top" style={{ height: 560 }} />
-              </div>
-            </div>
-            <div className="mt-3 flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center">
-              <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-white/35">
-                Real workspace &middot; captured from the product, not a mockup
-              </p>
-              <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-white/25">Exclusive Clients &middot; New York</p>
-            </div>
-          </div>
-
-          <div className="mt-14 grid grid-cols-1 border-y border-white/[0.07] sm:grid-cols-3">
-            <div className="metric-cell px-1 py-6 sm:px-7">
-              <p className="mono-data text-3xl font-black tracking-[-0.03em] text-white">{hasMetrics ? `${leadsBank.toLocaleString("en-US")}+` : "—"}</p>
-              <p className="mt-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-white/35">{t("landing.statBank")}</p>
-            </div>
-            <div className="metric-cell px-1 py-6 sm:px-7">
-              <p className="mono-data text-3xl font-black tracking-[-0.03em] text-white">{hasMetrics ? `${withOwner.toLocaleString("en-US")}+` : "—"}</p>
-              <p className="mt-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-white/35">{t("landing.statOwner")}</p>
-            </div>
-            <div className="metric-cell px-1 py-6 sm:px-7">
-              <p className="mono-data text-3xl font-black tracking-[-0.03em] text-white">{citiesCount}+</p>
-              <p className="mt-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-white/35">{t("landing.statCities")}</p>
-            </div>
-          </div>
-          <p className="mt-5 text-[10px] font-medium uppercase tracking-[0.14em] text-white/25">
-            {t("landing.updated")} {t("landing.agoLittle")}
-            {hasMetrics && newThisRun > 0 && <span className="text-white/45"> &middot; {newThisRun.toLocaleString("en-US")} {t("landing.updatedNew")}</span>}
-          </p>
-        </div>
-      </section>
-
-      {/* FIELD / HOW IT WORKS */}
-      <section id="como-funciona" className="border-y border-white/[0.06] bg-[#080b0f] py-20 md:py-28">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6">
-          <div className="grid items-center gap-12 lg:grid-cols-2 lg:gap-16">
-            <div className="photo-mono aspect-[4/3]">
-              <img src="/img/contractor-on-phone.jpg" alt="Contractor taking a call on site" loading="lazy" />
-              <div className="absolute inset-x-0 bottom-0 z-10 p-6 sm:p-8">
-                <p className="max-w-sm text-lg font-semibold leading-snug text-white">{t("landing.step3t")}</p>
-              </div>
-            </div>
-
-            <div>
-              <span className="eyebrow-dark"><span className="dot" />{t("landing.howKicker")}</span>
-              <h2 className="font-display mt-5 text-[2.2rem] font-black leading-[0.98] tracking-[-0.04em] text-white sm:text-5xl">
-                {t("landing.howTitle")} <span className="text-white/38">{t("landing.howHl")}</span>
-              </h2>
-              <div className="mt-9 divide-y divide-white/[0.07] border-y border-white/[0.07]">
-                {[
-                  { n: "01", title: t("landing.step1t"), body: t("landing.step1b") },
-                  { n: "02", title: t("landing.step2t"), body: t("landing.step2b") },
-                  { n: "03", title: t("landing.step3t"), body: t("landing.step3b") },
-                ].map((step) => (
-                  <div key={step.n} className="grid grid-cols-[44px_1fr] gap-4 py-5">
-                    <span className="mono-data pt-0.5 text-[11px] font-bold text-white/25">{step.n}</span>
-                    <div>
-                      <h3 className="text-[15px] font-bold tracking-[-0.01em] text-white">{step.title}</h3>
-                      <p className="mt-1.5 text-[13.5px] leading-relaxed text-white/42">{step.body}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* COVERAGE */}
-      <section className="bg-[#06080b] py-20 md:py-28">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6">
-          <div className="max-w-3xl">
-            <span className="eyebrow-dark"><span className="dot" />{t("landing.coverageKicker")}</span>
-            <h2 className="font-display mt-5 text-[2.25rem] font-black leading-[0.98] tracking-[-0.04em] text-white sm:text-5xl">
-              {t("landing.coverageTitle")} <span className="text-white/38">{t("landing.coverageHl")}</span>
-            </h2>
-            <p className="mt-6 max-w-2xl text-[15px] leading-relaxed text-white/45 sm:text-base">{t("landing.coverageSub")}</p>
-          </div>
-
-          <div className="mt-12 grid gap-4 md:grid-cols-3">
-            {L.coverageItems.map((item, i) => (
-              <article key={item.title} className="dark-panel relative p-6 sm:p-7">
-                <div className="flex items-start justify-between">
-                  <span className="grid h-11 w-11 place-items-center rounded-xl border border-white/10 bg-white/[0.03] text-white/55">
-                    {item.icon === "phone" && <Phone className="h-5 w-5" />}
-                    {item.icon === "building" && <Building2 className="h-5 w-5" />}
-                    {item.icon === "shield" && <ShieldCheck className="h-5 w-5" />}
-                  </span>
-                  <span className="mono-data text-[10px] font-bold tracking-[0.12em] text-white/20">0{i + 1}</span>
-                </div>
-                <h3 className="mt-5 text-[17px] font-bold tracking-[-0.01em] text-white">{item.title}</h3>
-                <p className="mt-2 text-[13.5px] leading-relaxed text-white/42">{item.desc}</p>
+                <h3 className="font-display mt-6 text-xl font-black">{item.title}</h3>
+                <p className="mt-4 flex-1 text-[15px] leading-relaxed text-[#54617a]">{item.desc}</p>
               </article>
             ))}
           </div>
 
-          <div className="mt-10 border-t border-white/[0.07] pt-8">
-            <div className="grid grid-cols-2 gap-x-8 gap-y-3 sm:grid-cols-3 lg:grid-cols-4">
-              {L.categories.map((cat) => (
-                <div key={cat} className="flex items-center gap-2.5 border-b border-white/[0.05] py-2.5">
-                  <span className="h-1 w-1 shrink-0 rounded-full bg-white/25" />
-                  <span className="text-[13px] font-medium text-white/55">{cat}</span>
-                </div>
-              ))}
-            </div>
-            <div className="mt-8 flex flex-col items-start justify-between gap-4 rounded-xl border border-white/[0.07] bg-white/[0.02] px-5 py-4 sm:flex-row sm:items-center">
-              <p className="max-w-2xl text-[13.5px] leading-relaxed text-white/55">{t("landing.coverageTrust")}</p>
-              <span className="shrink-0 rounded-full border border-white/10 px-3 py-1 text-[9px] font-bold uppercase tracking-[0.14em] text-white/40">Owner verified</span>
+          <div className="mt-10 overflow-hidden rounded-[1.6rem] bg-[#0b1220] p-8 md:p-10">
+            <div className="flex flex-col items-start gap-6 md:flex-row md:items-center">
+              <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-[#10b981] text-white">
+                <ShieldCheck className="h-7 w-7" />
+              </span>
+              <p className="flex-1 text-xl font-bold leading-snug text-white sm:text-2xl">
+                {t("landing.coverageTrust")}
+              </p>
             </div>
           </div>
         </div>
       </section>
 
-      {/* PROBLEM */}
-      <section className="border-y border-white/[0.06] bg-[#080b0f] py-20 md:py-28">
+      {/* PROBLEMA */}
+      <section className="bg-dots py-20 md:py-28">
         <div className="mx-auto max-w-7xl px-4 sm:px-6">
-          <div className="grid gap-12 lg:grid-cols-12 lg:gap-16">
-            <div className="lg:col-span-5">
-              <span className="eyebrow-dark"><span className="dot" style={{ background: "#f87171", boxShadow: "0 0 8px rgba(248,113,113,.6)" }} />{t("landing.problemKicker")}</span>
-              <h2 className="font-display mt-5 text-[2.25rem] font-black leading-[0.98] tracking-[-0.04em] text-white sm:text-5xl">
-                {t("landing.problemTitle")} <span className="text-white/38">{t("landing.problemHl")}</span>
-              </h2>
-              <p className="mt-6 max-w-md text-[15px] leading-relaxed text-white/45">{t("landing.problemSub")}</p>
-              <button onClick={openModal} data-track="how_cta" className="btn-ghost-dark mt-8 px-5 py-3 text-[13px]">{t("landing.seeHow")}</button>
-            </div>
-
-            <div className="lg:col-span-7">
-              <div className="divide-y divide-white/[0.07] border-y border-white/[0.07]">
-                {L.problems.map((p) => (
-                  <article key={p.kicker} className="grid gap-3 py-6 sm:grid-cols-[150px_1fr] sm:gap-6">
-                    <p className="text-[10px] font-bold uppercase leading-relaxed tracking-[0.13em] text-[#f87171]/75">{p.kicker}</p>
-                    <div>
-                      <h3 className="text-lg font-bold tracking-[-0.01em] text-white">{p.title}</h3>
-                      <p className="mt-1.5 text-[13.5px] leading-relaxed text-white/42">{p.body}</p>
-                      <p className="mt-3 inline-flex rounded-md border border-white/[0.08] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-white/35">{t("landing.costWord")} {p.cost}</p>
-                    </div>
-                  </article>
-                ))}
-              </div>
+          <Kicker color="#7c5cff">{t("landing.problemKicker")}</Kicker>
+          <h2 className="font-display mt-5 max-w-4xl text-[2.5rem] font-black leading-[0.98] sm:text-6xl">{t("landing.problemTitle")} <span className="hl">{t("landing.problemHl")}</span></h2>
+          <p className="mt-6 max-w-2xl text-lg leading-relaxed text-[#54617a]">{t("landing.problemSub")}</p>
+          <div className="mt-14 grid gap-6 md:grid-cols-3">
+            {L.problems.map((p) => (
+              <article key={p.kicker} className="card card-hover flex flex-col p-8">
+                <p className="kicker text-[#f43f5e]">{p.kicker}</p>
+                <h3 className="font-display mt-4 text-2xl font-black">{p.title}</h3>
+                <p className="mt-4 flex-1 text-[15px] leading-relaxed text-[#54617a]">{p.body}</p>
+                <span className="mt-6 inline-flex w-fit rounded-lg bg-[#f1f4f9] px-3.5 py-2 text-xs font-bold text-[#54617a]">{t("landing.costWord")} {p.cost}</span>
+              </article>
+            ))}
+          </div>
+          <div className="mt-8 overflow-hidden rounded-[1.6rem] bg-[#0b1220] p-8 md:p-10">
+            <div className="flex flex-col items-start gap-6 md:flex-row md:items-center">
+              <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-[#10b981] text-white"><svg className="h-7 w-7" viewBox="0 0 24 24" fill="currentColor"><path d="m13 2-9 12h7l-1 8 10-13h-7V2Z" /></svg></span>
+              <p className="text-xl font-bold leading-snug text-white sm:text-2xl">{t("landing.flip")}</p>
+              <button onClick={openModal} data-track="how_cta" className="btn-mint shrink-0 px-6 py-3.5 text-sm">{t("landing.seeHow")}</button>
             </div>
           </div>
         </div>
       </section>
 
-      {/* WORKSPACE */}
-      <section id="simulador" className="scroll-mt-20 bg-[#06080b] py-20 md:py-28">
+      {/* OFÍCIOS */}
+      <section id="oficios" className="scroll-mt-20 bg-white py-20 md:py-28">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6">
+          <Kicker color="#7c5cff">{t("landing.oficiosKicker")}</Kicker>
+          <h2 className="font-display mt-5 max-w-4xl text-[2.4rem] font-black leading-[0.98] sm:text-5xl md:text-6xl">{t("landing.oficiosTitle")} <span className="hl">{t("landing.oficiosHl")}</span></h2>
+          <p className="mt-6 max-w-2xl text-lg leading-relaxed text-[#54617a]">{t("landing.oficiosSub")}</p>
+          <div className="mt-12 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            {L.categories.map((cat) => (
+              <div key={cat} className="card flex items-center gap-3 px-4 py-3.5">
+                <span className="h-2 w-2 shrink-0 rounded-full bg-[#10b981]" />
+                <span className="text-sm font-bold !text-slate-900">{cat}</span>
+              </div>
+            ))}
+          </div>
+          <p className="mt-14 text-center text-sm font-semibold text-[#54617a]">{t("landing.oficiosPaths")}</p>
+          <div className="mt-6 grid gap-5 md:grid-cols-3">
+            {L.signals.map((s, i) => (
+              <article key={s.label} className="rounded-3xl p-7" style={{ background: SIGNAL_STYLE[i].bg, boxShadow: `inset 0 0 0 1px ${SIGNAL_STYLE[i].ring}` }}>
+                <span className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-wider" style={{ color: SIGNAL_STYLE[i].color }}>
+                  <span className="h-2 w-2 rounded-full" style={{ background: SIGNAL_STYLE[i].color }} />{s.hint}
+                </span>
+                <h3 className="font-display mt-3 text-2xl font-black">{s.label}</h3>
+                <p className="mt-3 text-[15px] leading-relaxed text-[#54617a]">{s.body}</p>
+              </article>
+            ))}
+          </div>
+          <p className="mx-auto mt-6 max-w-2xl text-center text-sm text-[#94a3b8]">{t("landing.oficiosFoot")}</p>
+        </div>
+      </section>
+
+      <FoldWave from="#ffffff" to="#0b1220" />
+
+      {/* PAINEL AMOSTRA */}
+      <section id="simulador" className="scroll-mt-20 bg-[#0b1220] py-20 text-white md:py-24">
         <div className="mx-auto max-w-7xl px-4 sm:px-6">
           <div className="mx-auto max-w-3xl text-center">
-            <span className="eyebrow-dark mx-auto"><span className="dot" />{t("landing.sampleKicker")}</span>
-            <h2 className="font-display mt-5 text-[2.25rem] font-black leading-[0.98] tracking-[-0.04em] text-white sm:text-5xl">{t("landing.sampleTitle")}</h2>
-            <p className="mx-auto mt-5 max-w-2xl text-[15px] leading-relaxed text-white/45 sm:text-base">{t("landing.sampleSub")}</p>
+            <span className="kicker justify-center text-[#34e0a1]">{t("landing.sampleKicker")}</span>
+            <h2 className="font-display mt-5 text-4xl font-black leading-[0.98] sm:text-5xl">{t("landing.sampleTitle")}</h2>
+            <p className="mt-5 text-lg text-[#9aa7ba]">{t("landing.sampleSub")}</p>
           </div>
-
-          <div className="app-window mx-auto mt-12 max-w-6xl">
-            <div className="app-chrome">
-              <div className="flex gap-1.5"><span className="app-dot" /><span className="app-dot" /><span className="app-dot" /></div>
-              <div className="ml-1 flex flex-1 items-center gap-2 rounded-md border border-white/[0.06] bg-black/25 px-2.5 py-1">
-                <svg className="h-3 w-3 text-white/30" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 0h10.5a1.5 1.5 0 0 1 1.5 1.5v7.5a1.5 1.5 0 0 1-1.5 1.5H6.75a1.5 1.5 0 0 1-1.5-1.5v-7.5a1.5 1.5 0 0 1 1.5-1.5Z" /></svg>
-                <span className="truncate text-[10px] tracking-tight text-white/35">app.magicleads.app/workspace</span>
+          <div className="mt-14 overflow-hidden rounded-[1.8rem] border border-white/10 bg-gradient-to-b from-[#111a29] to-[#0a101b]">
+            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 bg-[#0a0f1a] p-4 sm:px-6">
+              <span className="text-xs font-semibold text-[#9aa7ba]">painel.magicleads.app</span>
+              <div className="flex flex-wrap gap-1 rounded-xl border border-white/10 bg-[#0c1220] p-1">
+                {CITIES.map((c) => (
+                  <button key={c} onClick={() => { setActiveCity(c); setReservedLeadId(null); }} className={`rounded-lg px-3 py-1.5 text-xs font-bold ${activeCity === c ? "bg-[#10b981] text-white" : "text-[#9aa7ba] hover:text-white"}`}>{c}</button>
+                ))}
               </div>
-              <span className="hidden text-[9px] font-bold uppercase tracking-[0.16em] text-white/35 sm:block">exclusive clients</span>
             </div>
-            <div className="hidden sm:block">
-              <img src="/img/app-dashboard-detail.png" alt="Live workspace with counters, trade filters and exclusive opportunity listings" width={1520} height={720} loading="lazy" />
+            <div className="grid gap-5 p-4 sm:p-6 lg:grid-cols-3">
+              {leadsByCity[activeCity].map((lead) => {
+                const reserved = reservedLeadId === lead.id;
+                return (
+                  <div key={lead.id} className={`flex flex-col justify-between rounded-2xl border p-5 ${reserved ? "border-[#10b981] bg-[#0b1e1c]" : "border-white/10 bg-[#0d1422]"}`}>
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <span className={`rounded-md px-2 py-0.5 text-[10px] font-black ${BADGE_STYLE[lead.badge]}`}>{lead.badgeLabel}</span>
+                        <span className="text-xs text-[#64748b]">{lead.timeAgo}</span>
+                      </div>
+                      <h4 className="font-display mt-3 text-lg font-bold">{lead.category}</h4>
+                      <p className="text-xs font-bold text-[#34e0a1]">{lead.neighborhood}</p>
+                      <p className="mt-2 text-xs leading-relaxed text-[#9aa7ba]">{lead.description}</p>
+                    </div>
+                    <div className="mt-5 border-t border-white/10 pt-4">
+                      {reserved ? (
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between rounded-lg border border-[#10b981]/30 bg-[#10b981]/10 p-2.5 text-xs font-bold text-[#34e0a1]">
+                            <span>{t("landing.reserved")}</span><span className="font-mono">{fmtTimer(timerSeconds)}</span>
+                          </div>
+                          <div className="rounded-lg border border-white/10 bg-black/60 p-3">
+                            <p className="text-[11px] text-[#9aa7ba]">{lead.ownerName} · {t("landing.owner")}</p>
+                            <p className="font-mono text-base font-black text-[#34e0a1]">{lead.ownerPhone}</p>
+                            <p className="mt-1 text-[10px] text-[#64748b]">{lead.address}</p>
+                          </div>
+                          <button onClick={() => setWhatsappLead(lead)} data-track="open_whatsapp" className="btn-mint w-full py-2.5 text-xs uppercase tracking-wider">{t("landing.openWa")}</button>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between text-[11px] text-[#9aa7ba]"><span>{t("landing.address")}</span><span className="font-mono text-white">{lead.address}</span></div>
+                          <button onClick={() => { setReservedLeadId(lead.id); setTimerSeconds(3600); }} data-track="reserve_hour" className="flex w-full items-center justify-center rounded-lg border border-[#10b981]/40 bg-[#10b981]/10 py-2.5 text-xs font-bold text-[#34e0a1] hover:bg-[#10b981] hover:text-white">{t("landing.reserveHour")}</button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-            <div className="sm:hidden">
-              <img src="/img/app-dashboard-mobile.png" alt="Live workspace on mobile with counters and trade filters" width={780} height={1688} loading="lazy" className="block w-full object-cover object-top" style={{ height: 620 }} />
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 bg-[#0a0f1a] p-4 text-xs sm:px-6">
+              <span className="text-[#9aa7ba]">{t("landing.payOk")}</span>
+              <button onClick={openModal} data-track="unlock_cta" className="font-bold text-[#34e0a1] hover:underline">{t("landing.unlock4")}</button>
             </div>
-          </div>
-
-          <div className="mx-auto mt-6 flex max-w-6xl flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
-            <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-white/25">Real interface &middot; live counters &middot; trade filters</p>
-            <button onClick={openModal} data-track="unlock_cta" className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-white/60 transition hover:text-white">
-              {t("landing.unlock4")}
-              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" /></svg>
-            </button>
           </div>
         </div>
       </section>
 
-      {/* COMPARISON */}
-      <section id="comparativo" className="scroll-mt-20 border-y border-white/[0.06] bg-[#080b0f] py-20 md:py-28">
+      <FoldWave from="#0b1220" to="#ffffff" />
+
+      {/* COMPARATIVO */}
+      <section id="comparativo" className="scroll-mt-20 bg-white py-20 md:py-28">
         <div className="mx-auto max-w-7xl px-4 sm:px-6">
-          <div className="max-w-3xl">
-            <span className="eyebrow-dark"><span className="dot" />{t("landing.compareKicker")}</span>
-            <h2 className="font-display mt-5 text-[2.25rem] font-black leading-[0.98] tracking-[-0.04em] text-white sm:text-5xl">
-              {t("landing.compareTitle")} <span className="text-white/38">{t("landing.compareHl")}</span>
-            </h2>
-            <p className="mt-6 text-[15px] leading-relaxed text-white/45 sm:text-base">{t("landing.compareSub")}</p>
-          </div>
-
-          <div className="mt-12 grid gap-4 lg:grid-cols-12">
-            {winner && (
-              <article className="relative overflow-hidden rounded-2xl border border-white/[0.10] bg-[#0a0d12] p-6 shadow-[0_30px_80px_-50px_rgba(0,0,0,0.9)] sm:p-8 lg:col-span-5">
+          <Kicker color="#7c5cff">{t("landing.compareKicker")}</Kicker>
+          <h2 className="font-display mt-5 max-w-4xl text-[2.4rem] font-black leading-[0.98] sm:text-5xl">{t("landing.compareTitle")} <span className="hl">{t("landing.compareHl")}</span></h2>
+          <p className="mt-6 max-w-2xl text-lg text-[#54617a]">{t("landing.compareSub")}</p>
+          <div className="mt-14 grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+            {L.comparisons.map((c) => (
+              <article key={c.channel} className={`flex flex-col rounded-3xl p-7 ${c.winner ? "bg-[#0b1220] text-white shadow-2xl md:-translate-y-3" : "card card-hover"}`}>
                 <div className="flex items-center justify-between">
-                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[9px] font-bold uppercase tracking-[0.14em] text-white/55">{t("landing.best")}</span>
-                  <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-white/30">{winner.exclusivity}</span>
+                  <div>
+                    <h3 className={`font-display text-xl font-black ${c.winner ? "text-[#34e0a1]" : "!text-slate-900"}`}>{c.channel}</h3>
+                    <p className="text-xs text-[#94a3b8]">{c.sub}</p>
+                  </div>
+                  {c.winner && <span className="rounded-full bg-[#10b981] px-2.5 py-1 text-[10px] font-black text-white">{t("landing.best")}</span>}
                 </div>
-                <h3 className="font-display mt-6 text-2xl font-black tracking-[-0.03em] text-white">{winner.channel}</h3>
-                <p className="mt-1 text-[12px] text-white/35">{winner.sub}</p>
-                <p className="mono-data mt-7 text-4xl font-black tracking-[-0.04em] text-white">{winner.cost}</p>
-                <p className="mt-1 text-[10px] font-bold uppercase tracking-[0.14em] text-white/30">{winner.costLabel}</p>
-                <div className="mt-7 space-y-3 border-t border-white/[0.08] pt-5">
-                  {[
-                    [t("landing.excl"), winner.exclusivity],
-                    [t("landing.intentL"), winner.intent],
-                    [t("landing.phoneL"), winner.phone],
-                  ].map(([label, value]) => (
-                    <div key={label} className="flex items-center justify-between gap-3 text-[13px]">
-                      <span className="text-white/35">{label}</span>
-                      <span className="inline-flex items-center gap-1.5 text-right font-semibold text-white/85">
-                        <svg className="h-3.5 w-3.5 text-white/45" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.6}><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
-                        {value}
-                      </span>
-                    </div>
-                  ))}
+                <div className="mt-6">
+                  <p className={`font-display text-3xl font-black ${c.winner ? "text-white" : "!text-slate-900"}`}>{c.cost}</p>
+                  <p className="text-xs text-[#94a3b8]">{c.costLabel}</p>
                 </div>
-                <button onClick={openModal} data-track="compare_cta" className="btn-emerald mt-8 w-full py-3 text-[13px]">{t("landing.ctaPanel")}</button>
-                <p className="mt-3 text-center text-[9px] font-bold uppercase tracking-[0.12em] text-white/35">{t("landing.trust2")} &middot; {t("landing.trust3")}</p>
+<div className={`mt-6 space-y-3 border-t pt-5 text-sm ${c.winner ? "border-white/10" : "border-[#eef1f6]"}`}>
+  <div className="flex justify-between gap-3"><span className={c.winner ? "text-[#94a3b8]" : "!text-slate-500"}>{t("landing.excl")}</span><span className={`text-right font-bold ${c.winner ? "text-[#34e0a1]" : "!text-slate-900"}`}>{c.exclusivity}</span></div>
+  <div className="flex justify-between gap-3"><span className={c.winner ? "text-[#94a3b8]" : "!text-slate-500"}>{t("landing.intentL")}</span><span className={`text-right font-bold ${c.winner ? "text-[#34e0a1]" : "!text-slate-900"}`}>{c.intent}</span></div>
+  <div className="flex justify-between gap-3"><span className={c.winner ? "text-[#94a3b8]" : "!text-slate-500"}>{t("landing.phoneL")}</span><span className={`text-right font-bold ${c.winner ? "text-[#34e0a1]" : "!text-slate-900"}`}>{c.phone}</span></div>
+</div>
               </article>
-            )}
+            ))}
+          </div>
+        </div>
+      </section>
 
-            <div className="lg:col-span-7">
-              <div className="divide-y divide-white/[0.07] border-y border-white/[0.07]">
-                {rivals.map((c, i) => (
-                  <article key={c.channel} className="grid gap-4 py-5 sm:grid-cols-[44px_1fr] sm:gap-5">
-                    <span className="grid h-10 w-10 place-items-center rounded-lg border border-white/[0.08] text-white/35">
-                      {i === 0 && <Megaphone className="h-4 w-4" />}
-                      {i === 1 && <Search className="h-4 w-4" />}
-                      {i === 2 && <Users className="h-4 w-4" />}
-                    </span>
-                    <div>
-                      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-                        <div>
-                          <h3 className="text-[15px] font-bold tracking-[-0.01em] text-white/80">{c.channel}</h3>
-                          <p className="text-[11px] text-white/30">{c.sub}</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="mono-data text-lg font-bold text-white/65">{c.cost}</p>
-                          <p className="text-[9px] uppercase tracking-[0.1em] text-white/25">{c.costLabel}</p>
-                        </div>
-                      </div>
-                      <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1.5 text-[11px] text-white/30">
-                        <span>{t("landing.excl")}: <span className="text-white/50">{c.exclusivity}</span></span>
-                        <span>{t("landing.intentL")}: <span className="text-white/50">{c.intent}</span></span>
-                        <span>{t("landing.phoneL")}: <span className="text-white/50">{c.phone}</span></span>
-                      </div>
-                    </div>
-                  </article>
-                ))}
-              </div>
-              <p className="mt-5 text-[10px] font-medium uppercase tracking-[0.14em] text-white/20">Public list prices &middot; shared or auctioned contacts</p>
-            </div>
+      {/* COMO FUNCIONA */}
+      <section id="como-funciona" className="bg-dots scroll-mt-20 py-20 md:py-28">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6">
+          <div className="mx-auto max-w-3xl text-center">
+            <span className="kicker justify-center text-[#10b981]">{t("landing.howKicker")}</span>
+            <h2 className="font-display mt-5 text-4xl font-black sm:text-5xl">{t("landing.howTitle")} <span className="hl">{t("landing.howHl")}</span></h2>
+          </div>
+          <div className="mt-16 grid gap-6 md:grid-cols-3">
+            {(
+              [
+                { n: "01", tint: "#10b981", bg: "#10b98115", title: t("landing.step1t"), body: t("landing.step1b") },
+                { n: "02", tint: "#7c5cff", bg: "#7c5cff15", title: t("landing.step2t"), body: t("landing.step2b"), featured: true },
+                { n: "03", tint: "#f59e0b", bg: "#f59e0b15", title: t("landing.step3t"), body: t("landing.step3b") },
+              ] as { n: string; tint: string; bg: string; title: string; body: string; featured?: boolean }[]
+            ).map((s) => (
+              <article key={s.n} className={`card card-hover p-8 ${s.featured ? "ring-2 ring-[#7c5cff]/25" : ""}`}>
+                <span className="flex h-14 w-14 items-center justify-center rounded-2xl font-display text-xl font-black" style={{ background: s.bg, color: s.tint }}>{s.n}</span>
+                <h3 className="font-display mt-6 text-xl font-bold !text-slate-900">{s.title}</h3>
+                <p className="mt-3 text-[15px] leading-relaxed text-[#54617a]">{s.body}</p>
+              </article>
+            ))}
           </div>
         </div>
       </section>
 
       {/* TEMPLATES */}
-      <section id="templates" className="scroll-mt-20 bg-[#06080b] py-20 md:py-28">
+      <section id="templates" className="scroll-mt-20 bg-white py-20 md:py-28">
         <div className="mx-auto max-w-7xl px-4 sm:px-6">
           <div className="grid gap-12 lg:grid-cols-12 lg:items-center">
             <div className="lg:col-span-5">
-              <span className="eyebrow-dark"><span className="dot" />{t("landing.tplKicker")}</span>
-              <h2 className="font-display mt-5 text-[2.2rem] font-black leading-[0.98] tracking-[-0.04em] text-white sm:text-5xl">
-                {t("landing.tplTitle")} <span className="text-white/38">{t("landing.tplHl")}</span>
-              </h2>
-              <p className="mt-6 text-[14px] leading-relaxed text-white/45">{t("landing.tplSub")}</p>
-              <div className="mt-7 flex flex-wrap gap-1.5">
+              <Kicker color="#f43f5e">{t("landing.tplKicker")}</Kicker>
+              <h2 className="font-display mt-5 text-4xl font-black sm:text-5xl">{t("landing.tplTitle")} <span className="hl">{t("landing.tplHl")}</span></h2>
+              <p className="mt-6 text-[15px] text-[#54617a]">{t("landing.tplSub")}</p>
+              <div className="mt-7 flex flex-wrap gap-2">
                 {L.tradesLabel.map((label, i) => (
-                  <button key={TRADE_KEYS[i]} onClick={() => setTplTrade(TRADE_KEYS[i])} className={`rounded-lg px-3 py-1.5 text-[11.5px] font-semibold transition ${tplTrade === TRADE_KEYS[i] ? "bg-white/[0.10] text-white" : "text-white/35 hover:bg-white/[0.04] hover:text-white/65"}`}>{label}</button>
+                  <button key={TRADE_KEYS[i]} onClick={() => setTplTrade(TRADE_KEYS[i])} className={`rounded-lg px-3.5 py-1.5 text-xs font-bold ${tplTrade === TRADE_KEYS[i] ? "bg-[#0b1220] text-white" : "bg-[#f1f4f9] text-[#54617a]"}`}>{label}</button>
                 ))}
               </div>
-              <div className="mt-2 flex gap-1.5">
+              <div className="mt-3 flex gap-2">
                 {CHANNELS.map((c) => (
-                  <button key={c} onClick={() => setTplChannel(c)} className={`rounded-md px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.08em] transition ${tplChannel === c ? "bg-white/[0.10] text-white" : "text-white/30 hover:text-white/60"}`}>{c}</button>
+                  <button key={c} onClick={() => setTplChannel(c)} className={`rounded-lg px-3.5 py-1.5 text-xs font-bold uppercase ${tplChannel === c ? "bg-[#10b981] text-white" : "border border-[#e2e8f0] text-[#54617a]"}`}>{c}</button>
                 ))}
               </div>
             </div>
             <div className="lg:col-span-7">
-              <div className="dark-panel overflow-hidden rounded-2xl">
-                <div className="flex items-center justify-between gap-3 border-b border-white/[0.07] px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <span className="flex gap-1.5"><span className="app-dot" /><span className="app-dot" /><span className="app-dot" /></span>
-                    <span className="ml-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-white/35">{L.tradesLabel[TRADE_KEYS.indexOf(tplTrade)]} &middot; {tplChannel}</span>
-                  </div>
-                  <button onClick={() => copyTpl(L.templates[tplTrade][tplChannel])} className="btn-emerald px-3 py-1.5 text-[10.5px]">{copied ? t("landing.copied") : t("landing.copy")}</button>
+              <div className="card overflow-hidden">
+                <div className="flex items-center justify-between border-b border-[#eef1f6] bg-[#f8fafc] p-4">
+                  <span className="text-xs font-bold text-[#54617a]">{L.tradesLabel[TRADE_KEYS.indexOf(tplTrade)]} · {tplChannel.toUpperCase()}</span>
+                  <button onClick={() => copyTpl(L.templates[tplTrade][tplChannel])} className="btn-dark px-3.5 py-1.5 text-xs">{copied ? t("landing.copied") : t("landing.copy")}</button>
                 </div>
-                <div className="p-5 sm:p-6">
-                  <div className="rounded-xl border border-white/[0.08] bg-white/[0.025] p-5">
-                    <pre className="whitespace-pre-wrap font-sans text-[13.5px] leading-relaxed text-white/70">{L.templates[tplTrade][tplChannel]}</pre>
-                  </div>
-                  <p className="mt-4 text-[11px] text-white/25">{t("landing.tplFields")}</p>
+                <div className="p-6">
+                  <div className="rounded-2xl bg-[#e8f9ef] p-5"><pre className="whitespace-pre-wrap font-sans text-[15px] leading-relaxed !text-slate-900">{L.templates[tplTrade][tplChannel]}</pre></div>
+                  <p className="mt-4 text-xs text-[#94a3b8]">{t("landing.tplFields")}</p>
                 </div>
               </div>
             </div>
@@ -584,158 +538,125 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* CALCULATOR */}
-      <section id="calculadora" className="scroll-mt-20 border-y border-white/[0.06] bg-[#080b0f] py-20 md:py-28">
+      <FoldWave from="#ffffff" to="#0b1220" />
+
+      {/* CALCULADORA */}
+      <section id="calculadora" className="scroll-mt-20 bg-[#0b1220] py-20 text-white md:py-24">
         <div className="mx-auto max-w-7xl px-4 sm:px-6">
           <div className="mx-auto max-w-3xl text-center">
-            <span className="eyebrow-dark mx-auto"><span className="dot" />{t("landing.calcKicker")}</span>
-            <h2 className="font-display mt-5 text-[2.25rem] font-black leading-[0.98] tracking-[-0.04em] text-white sm:text-5xl">
-              {t("landing.calcTitle")} <span className="text-white/38">{t("landing.calcHl")}</span>
-            </h2>
-            <p className="mx-auto mt-5 max-w-2xl text-[14px] leading-relaxed text-white/45">{t("landing.calcSub")}</p>
+            <span className="kicker justify-center text-[#34e0a1]">{t("landing.calcKicker")}</span>
+            <h2 className="font-display mt-5 text-4xl font-black sm:text-5xl">{t("landing.calcTitle")} <span className="text-[#34e0a1]">{t("landing.calcHl")}</span></h2>
+            <p className="mt-5 text-lg text-[#9aa7ba]">{t("landing.calcSub")}</p>
           </div>
-
-          <div className="mx-auto mt-12 grid max-w-5xl items-start gap-4 lg:grid-cols-2">
-            <div className="dark-panel p-6 sm:p-8">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/30">{t("landing.ticketAvg")}</p>
-                  <p className="mono-data mt-2 text-3xl font-black tracking-[-0.03em] text-white sm:text-4xl">${ticketValue.toLocaleString("en-US")}</p>
+          <div className="mt-14 grid gap-6 lg:grid-cols-12">
+            <div className="rounded-[1.5rem] border border-white/10 bg-[#111a29] p-7 lg:col-span-6">
+              <div className="flex items-center justify-between"><span className="text-sm font-bold text-[#cbd5e1]">{t("landing.ticketAvg")}</span><span className="font-display text-2xl font-black text-[#34e0a1]">${ticketValue.toLocaleString("en-US")}</span></div>
+              <input type="range" min={2000} max={15000} step={500} value={ticketValue} onChange={(e) => setTicketValue(Number(e.target.value))} className="range-dark mt-4 w-full" />
+              <div className="mt-8 border-t border-white/10 pt-6">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-bold text-[#cbd5e1]">{t("landing.closes20")}</span>
+                  <span className="font-display text-2xl font-black text-[#9d80ff]">5%</span>
                 </div>
-                <span className="grid h-9 w-9 place-items-center rounded-lg border border-white/[0.08] text-[13px] font-bold text-white/40">$</span>
+                <p className="mt-2 text-[11px] font-semibold text-[#64748b]">{t("landing.calcNote")}</p>
               </div>
-              <input type="range" min={2000} max={15000} step={500} value={ticketValue} onChange={(e) => setTicketValue(Number(e.target.value))} className="range-dark mt-5 w-full" />
-              <div className="mt-2 flex justify-between text-[9px] font-bold uppercase tracking-[0.12em] text-white/20"><span>$2,000</span><span>$15,000</span></div>
-
-              <div className="mt-6 flex items-center justify-between border-t border-white/[0.07] pt-5">
-                <div>
-                  <p className="text-[12px] font-semibold text-white/70">{t("landing.closes20")}</p>
-                  <p className="mt-0.5 text-[10px] leading-relaxed text-white/30">{t("landing.calcNote")}</p>
-                </div>
-                <span className="mono-data shrink-0 rounded-md border border-white/10 px-2.5 py-1 text-sm font-bold text-white/70">5%</span>
-              </div>
-
-              <div className="mt-5 grid grid-cols-3 divide-x divide-white/[0.06] border-y border-white/[0.06] py-4 text-center">
-                <div><p className="mono-data text-base font-bold text-white/80">300</p><p className="mt-0.5 text-[8px] font-bold uppercase tracking-[0.1em] text-white/25">{t("landing.leadsM")}</p></div>
-                <div><p className="mono-data text-base font-bold text-white/80">~{validatedPhones}</p><p className="mt-0.5 text-[8px] font-bold uppercase tracking-[0.1em] text-white/25">{t("landing.withPh")}</p></div>
-                <div><p className="mono-data text-base font-bold text-white/80">~{estimatedVisits}</p><p className="mt-0.5 text-[8px] font-bold uppercase tracking-[0.1em] text-white/25">{t("landing.visitsL")}</p></div>
+              <div className="mt-8 grid grid-cols-3 gap-3 border-t border-white/10 pt-6 text-center">
+                <div className="rounded-xl bg-white/5 p-3"><p className="font-display text-lg font-black">300</p><p className="text-[10px] text-[#9aa7ba]">{t("landing.leadsM")}</p></div>
+                <div className="rounded-xl bg-white/5 p-3"><p className="font-display text-lg font-black">~{validatedPhones}</p><p className="text-[10px] text-[#9aa7ba]">{t("landing.withPh")}</p></div>
+                <div className="rounded-xl bg-white/5 p-3"><p className="font-display text-lg font-black">~{estimatedVisits}</p><p className="text-[10px] text-[#9aa7ba]">{t("landing.visitsL")}</p></div>
               </div>
             </div>
-
-            <div className="dark-panel relative overflow-hidden p-6 sm:p-8">
-              <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/15 to-transparent" />
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/30">{t("landing.revEst")}</span>
-                <span className="mono-data text-[9px] text-white/20">5% &middot; 60m</span>
+            <div className="flex flex-col justify-between rounded-[1.5rem] bg-gradient-to-br from-[#10b981] to-[#0a8f65] p-8 lg:col-span-6">
+              <div>
+                <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-black">{t("landing.revEst")}</span>
+                <p className="font-display mt-4 text-6xl font-black">${monthlyRevenue.toLocaleString("en-US")}<span className="text-2xl font-bold text-white/60">{t("landing.perMo")}</span></p>
+                <p className="mt-3 text-sm font-bold">{L.aboutJobs(closedJobs, ticketValue.toLocaleString("en-US"))}</p>
               </div>
-              <p className="font-display mt-4 text-4xl font-black tracking-[-0.04em] text-white sm:text-5xl">
-                ${monthlyRevenue.toLocaleString("en-US")}
-                <span className="ml-1 text-base font-medium tracking-normal text-white/30">{t("landing.perMo")}</span>
-              </p>
-              <p className="mt-2 text-[12px] text-white/40">{L.aboutJobs(closedJobs, ticketValue.toLocaleString("en-US"))}</p>
-
-              <div className="my-6 space-y-3 border-y border-white/[0.07] py-5 text-[12.5px]">
-                <div className="flex justify-between"><span className="text-white/35">{t("landing.invest")}</span><span className="mono-data text-white/70">$520{t("landing.perMo")}</span></div>
-                <div className="flex justify-between"><span className="text-white/35">{t("landing.costDelivered")}</span><span className="mono-data text-white/70">~$2.48</span></div>
-                <div className="flex items-center justify-between"><span className="text-white/35">{t("landing.onePays")}</span><span className="mono-data rounded-md border border-white/10 px-2 py-0.5 text-white/80">{monthsPaid} {t("landing.months")}</span></div>
+              <div className="my-6 space-y-3 border-y border-white/20 py-5 text-sm font-semibold">
+                <div className="flex justify-between"><span className="text-white/80">{t("landing.invest")}</span><span>$520{t("landing.perMo")}</span></div>
+                <div className="flex justify-between"><span className="text-white/80">{t("landing.costDelivered")}</span><span>~$2.48</span></div>
+                <div className="flex justify-between text-base"><span>{t("landing.onePays")}</span><span className="rounded-lg bg-[#04231a] px-2.5 py-0.5 text-[#34e0a1]">{monthsPaid} {t("landing.months")}</span></div>
               </div>
-
-              <button onClick={openModal} data-track="calc_cta" className="btn-emerald w-full py-3.5 text-[12px] uppercase tracking-[0.06em]">{t("landing.calcCta")}</button>
-              <p className="mt-3 text-center text-[9px] font-bold uppercase tracking-[0.12em] text-white/30">{t("landing.trust2")} &middot; {t("landing.trust3")}</p>
+              <button onClick={openModal} data-track="calc_cta" className="w-full rounded-xl bg-white py-4 text-sm font-black uppercase tracking-wider text-[#0a8f65]">{t("landing.calcCta")}</button>
+              <p className="mt-3 text-center text-[11px] font-black text-white/90">✓ {t("landing.trust2")} · ✓ {t("landing.trust3")}</p>
             </div>
           </div>
         </div>
       </section>
 
-      {/* RESULTS */}
-      <section className="bg-[#06080b] py-20 md:py-28">
+      <FoldWave from="#0b1220" to="#f6f8fc" />
+
+      {/* RESULTADOS */}
+      <section className="bg-dots py-20 md:py-28">
         <div className="mx-auto max-w-7xl px-4 sm:px-6">
-          <div className="max-w-3xl">
-            <span className="eyebrow-dark"><span className="dot" />{t("landing.resultsKicker")}</span>
-            <h2 className="font-display mt-5 text-[2.25rem] font-black leading-[0.98] tracking-[-0.04em] text-white sm:text-5xl">
-              {t("landing.resultsTitle")} <span className="text-white/38">{t("landing.resultsHl")}</span>
-            </h2>
-          </div>
-          <div className="mt-12 grid gap-4 md:grid-cols-3">
-            {L.quotes.map((q, i) => (
-              <figure key={q.name} className="dark-panel flex flex-col p-6">
-                <div className="flex items-center justify-between">
-                  <div className="text-[12px] tracking-[0.12em] text-white/55">★★★★★</div>
-                  <span className="h-1 w-1 rounded-full bg-white/20" />
-                </div>
-                <blockquote className="mt-4 flex-1 text-[13.5px] leading-relaxed text-white/55">&ldquo;{q.text}&rdquo;</blockquote>
-                <figcaption className="mt-6 flex items-center gap-3 border-t border-white/[0.07] pt-5">
-                  <span className="grid h-9 w-9 place-items-center rounded-full border border-white/10 bg-white/[0.05] text-[11px] font-bold text-white/70">{q.init}</span>
-                  <div><p className="text-[13px] font-semibold text-white">{q.name}</p><p className="text-[10px] text-white/30">{q.role}</p></div>
+          <Kicker color="#7c5cff">{t("landing.resultsKicker")}</Kicker>
+          <h2 className="font-display mt-5 text-4xl font-black sm:text-5xl">{t("landing.resultsTitle")} <span className="hl">{t("landing.resultsHl")}</span></h2>
+          <div className="mt-14 grid gap-6 md:grid-cols-3">
+            {L.quotes.map((q) => (
+              <figure key={q.name} className="card card-hover flex flex-col p-7">
+                <div className="text-[#f59e0b]">★★★★★</div>
+                <blockquote className="mt-4 flex-1 text-[15px] leading-relaxed text-[#3f4a5e]">"{q.text}"</blockquote>
+                <figcaption className="mt-6 flex items-center gap-3 border-t border-[#eef1f6] pt-5">
+                  <span className={`flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br ${q.grad} text-sm font-black text-white`}>{q.init}</span>
+                  <div><p className="text-sm font-black">{q.name}</p><p className="text-xs text-[#94a3b8]">{q.role}</p></div>
                 </figcaption>
-                <span className="mt-4 inline-flex w-fit rounded-md border border-white/[0.08] px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.1em] text-white/40">{q.badge}</span>
+                <span className="mt-4 inline-flex w-fit rounded-lg bg-[#e8f9ef] px-3 py-1.5 text-[11px] font-black text-[#0a8f65]">{q.badge}</span>
               </figure>
             ))}
           </div>
         </div>
       </section>
 
-      {/* PRICING */}
-      <section id="preco" className="scroll-mt-20 border-y border-white/[0.06] bg-[#080b0f] py-20 md:py-28">
+      {/* PREÇO */}
+      <section id="preco" className="scroll-mt-20 bg-white py-20 md:py-28">
         <div className="mx-auto max-w-7xl px-4 sm:px-6">
           <div className="mx-auto max-w-3xl text-center">
-            <span className="eyebrow-dark mx-auto"><span className="dot" />{t("landing.priceKicker")}</span>
-            <h2 className="font-display mt-5 text-[2.25rem] font-black leading-[0.98] tracking-[-0.04em] text-white sm:text-5xl">
-              {t("landing.priceTitle")} <span className="text-white/38">{t("landing.priceHl")}</span>
-            </h2>
+            <span className="kicker justify-center text-[#10b981]">{t("landing.priceKicker")}</span>
+            <h2 className="font-display mt-5 text-4xl font-black sm:text-5xl">{t("landing.priceTitle")} <span className="hl">{t("landing.priceHl")}</span></h2>
           </div>
-
-          <div className="mx-auto mt-12 grid max-w-5xl items-start gap-4 lg:grid-cols-[1.05fr_0.95fr]">
-            <div className="relative overflow-hidden rounded-2xl border border-white/[0.10] bg-[#0a0d12] p-6 shadow-[0_30px_80px_-50px_rgba(0,0,0,0.9)] sm:p-8">
-              <div className="flex items-center justify-between">
-                <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[9px] font-bold uppercase tracking-[0.14em] text-white/55">{t("landing.planTag")}</span>
-                <span className="text-[9px] font-bold uppercase tracking-[0.14em] text-white/30">{t("landing.trust3")}</span>
+          <div className="mx-auto mt-14 grid max-w-5xl gap-6 lg:grid-cols-[1.15fr_0.85fr]">
+            <div className="rounded-[1.6rem] bg-[#0b1220] p-8 text-white sm:p-10">
+              <span className="rounded-full bg-[#10b981]/15 px-3 py-1 text-[11px] font-black text-[#34e0a1]">{t("landing.planTag")}</span>
+              <div className="mt-5 flex items-end gap-2">
+                <span className="font-display text-7xl font-black">$120</span>
+                <span className="mb-3 text-[#9aa7ba]">{t("landing.week")}<br /><span className="text-sm">{t("landing.month")}</span></span>
               </div>
-              <div className="mt-6 flex items-end gap-2.5">
-                <span className="font-display text-6xl font-black tracking-[-0.05em] text-white sm:text-7xl">$120</span>
-                <span className="mb-2 text-[12px] font-medium text-white/40">{t("landing.week")}<br /><span className="text-[10px] text-white/25">{t("landing.month")}</span></span>
-              </div>
-              <p className="mt-3 text-[12.5px] leading-relaxed text-white/40">{t("landing.planSub")}</p>
-
-              <div className="my-6 h-px bg-white/[0.08]" />
-              <ul className="grid gap-2.5 text-[13px] sm:grid-cols-2">
+              <p className="mt-3 text-sm text-[#9aa7ba]">{t("landing.planSub")}</p>
+              <div className="my-7 h-px bg-white/10" />
+              <ul className="space-y-3.5 text-[15px]">
                 {L.planFeatures.map((f) => (
-                  <li key={f} className="flex items-start gap-2">
-                    <svg className="mt-0.5 h-3.5 w-3.5 shrink-0 text-white/35" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.4}><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
-                    <span className="text-white/60">{f}</span>
+                  <li key={f} className="flex items-start gap-3">
+                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#10b981]/15 text-[#34e0a1]">✓</span>
+                    <span className="text-[#e2e8f0]">{f}</span>
                   </li>
                 ))}
               </ul>
-
-              <button onClick={openModal} data-track="plan_cta" className="btn-emerald mt-8 w-full py-3.5 text-[12px] uppercase tracking-[0.08em]">{t("landing.planCta")}</button>
-              <div className="mt-4 rounded-xl border border-white/[0.08] bg-white/[0.025] px-4 py-3 text-center">
-                <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-white/55">{t("landing.trust2")} &middot; {t("landing.trust3")}</p>
-                {L.quotes[0] && <p className="mt-1 text-[10px] text-white/35">&ldquo;{L.quotes[0].badge}&rdquo; &mdash; {L.quotes[0].name}, {L.quotes[0].role}</p>}
+              <button onClick={openModal} data-track="plan_cta" className="btn-mint mt-8 w-full py-4 text-base uppercase tracking-wider">{t("landing.planCta")}</button>
+              <div className="mt-4 rounded-xl border border-[#34e0a1]/25 bg-[#34e0a1]/10 px-3 py-2.5 text-center">
+                <p className="text-[11px] font-black text-[#34e0a1]">✓ {t("landing.trust2")} · ✓ {t("landing.trust3")}</p>
+                {L.quotes[0] && (
+                  <p className="mt-1 text-[11px] font-semibold text-white/80">“{L.quotes[0].badge}” — {L.quotes[0].name}, {L.quotes[0].role}</p>
+                )}
               </div>
-              <p className="mt-3 text-center text-[9px] font-medium uppercase tracking-[0.1em] text-white/20">{t("landing.planSafe")}</p>
+              <p className="mt-3 text-center text-xs text-[#64748b]">{t("landing.planSafe")}</p>
             </div>
-
-            <div className="space-y-4">
-              <div className="dark-panel p-6">
-                <p className="text-[14px] font-bold text-white">{t("landing.billing")}</p>
-                <ol className="mt-4 space-y-3 text-[12.5px] text-white/45">
-                  {[t("landing.bill1"), t("landing.bill2"), t("landing.bill3")].map((step, i) => (
-                    <li key={step} className="flex gap-3">
-                      <span className="mono-data grid h-5 w-5 shrink-0 place-items-center rounded border border-white/10 text-[10px] font-bold text-white/45">{i + 1}</span>
-                      <span className="pt-0.5">{step}</span>
-                    </li>
-                  ))}
+            <div className="flex flex-col gap-6">
+              <div className="card p-7">
+                <p className="font-display text-lg font-bold">{t("landing.billing")}</p>
+                <ol className="mt-4 space-y-3 text-sm text-[#54617a]">
+                  <li className="flex gap-3"><span className="font-black text-[#10b981]">1.</span>{t("landing.bill1")}</li>
+                  <li className="flex gap-3"><span className="font-black text-[#10b981]">2.</span>{t("landing.bill2")}</li>
+                  <li className="flex gap-3"><span className="font-black text-[#10b981]">3.</span>{t("landing.bill3")}</li>
                 </ol>
               </div>
-              <div className="dark-panel p-6">
-                <p className="text-[14px] font-bold text-white">{t("landing.never")}</p>
-                <ul className="mt-4 space-y-2.5 text-[12.5px] text-white/45">
-                  {L.neverItems.map((n) => <li key={n} className="flex gap-2.5"><span className="mt-0.5 text-white/25">✕</span>{n}</li>)}
+              <div className="card p-7">
+                <p className="font-display text-lg font-bold">{t("landing.never")}</p>
+                <ul className="mt-4 space-y-2.5 text-sm text-[#54617a]">
+                  {L.neverItems.map((n) => <li key={n} className="flex gap-2.5"><span className="text-[#f43f5e]">✕</span>{n}</li>)}
                 </ul>
               </div>
-              <div className="rounded-2xl border border-[#f59e0b]/18 bg-[#f59e0b]/[0.035] p-6">
-                <p className="text-[14px] font-bold text-[#fbbf24]/80">{t("landing.noRenew")}</p>
-                <p className="mt-1.5 text-[12.5px] leading-relaxed text-white/40">{t("landing.risk79")}</p>
+              <div className="rounded-[1.5rem] border border-[#f59e0b]/25 bg-[#fff7ed] p-7">
+                <p className="font-display text-lg font-black text-[#b45309]">{t("landing.noRenew")}</p>
+                <p className="mt-2 text-sm text-[#92702a]">{t("landing.risk79")}</p>
               </div>
             </div>
           </div>
@@ -743,30 +664,26 @@ export default function LandingPage() {
       </section>
 
       {/* FAQ */}
-      <section id="faq" className="scroll-mt-20 bg-[#06080b] py-20 md:py-28">
-        <div className="mx-auto grid max-w-7xl gap-12 px-4 sm:px-6 lg:grid-cols-[0.8fr_1.2fr]">
+      <section id="faq" className="bg-dots scroll-mt-20 py-20 md:py-28">
+        <div className="mx-auto grid max-w-7xl gap-12 px-4 sm:px-6 lg:grid-cols-[0.85fr_1.15fr]">
           <div>
-            <span className="eyebrow-dark"><span className="dot" />{t("landing.faqKicker")}</span>
-            <h2 className="font-display mt-5 text-[2.2rem] font-black leading-[0.98] tracking-[-0.04em] text-white sm:text-5xl">{t("landing.faqTitle")}</h2>
-            <p className="mt-6 text-[13.5px] text-white/40">{t("landing.faqSub")}</p>
-            <button onClick={openModal} data-track="faq_cta" className="btn-emerald mt-7 px-5 py-3 text-[12.5px]">{t("landing.faqCta")}</button>
-            <div className="mt-8 rounded-xl border border-white/[0.07] px-4 py-3.5">
-              <p className="text-[12px] font-semibold text-white/60">{t("landing.trust2")} &middot; {t("landing.trust3")}</p>
-              <p className="mt-1 text-[10px] text-white/25">{t("landing.finalFoot")}</p>
-            </div>
+            <Kicker color="#f43f5e">{t("landing.faqKicker")}</Kicker>
+            <h2 className="font-display mt-5 text-4xl font-black sm:text-5xl">{t("landing.faqTitle")}</h2>
+            <p className="mt-6 text-[15px] text-[#54617a]">{t("landing.faqSub")}</p>
+            <button onClick={openModal} data-track="faq_cta" className="btn-dark mt-7 px-6 py-3.5 text-sm">{t("landing.faqCta")}</button>
           </div>
-          <div className="divide-y divide-white/[0.07] border-y border-white/[0.07]">
+          <div className="space-y-3">
             {L.faqs.map((f, i) => {
               const open = openFaq === i;
               return (
-                <div key={f.q}>
-                  <button onClick={() => setOpenFaq(open ? null : i)} className="flex w-full items-center justify-between gap-4 py-5 text-left">
-                    <span className="text-[14px] font-semibold tracking-[-0.01em] text-white/80">{f.q}</span>
-                    <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-full border transition ${open ? "border-white/20 text-white" : "border-white/[0.08] text-white/30"}`}>
-                      <svg className={`h-3.5 w-3.5 transition-transform ${open ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" /></svg>
+                <div key={f.q} className={`card overflow-hidden ${open ? "shadow-lg" : ""}`}>
+                  <button onClick={() => setOpenFaq(open ? null : i)} className="flex w-full items-center justify-between gap-4 p-5 text-left">
+                    <span className="font-display text-[17px] font-bold !text-slate-900">{f.q}</span>
+                    <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${open ? "bg-[#0b1220] text-[#34e0a1]" : "bg-[#f1f4f9]"}`}>
+                      <svg className={`h-4 w-4 ${open ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" /></svg>
                     </span>
                   </button>
-                  {open && <p className="pb-5 pr-10 text-[13px] leading-relaxed text-white/40">{f.a}</p>}
+                  {open && <p className="px-5 pb-5 text-[15px] text-[#54617a]">{f.a}</p>}
                 </div>
               );
             })}
@@ -774,40 +691,52 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* FINAL CTA */}
-      <section className="relative overflow-hidden border-t border-white/[0.06] bg-[#05070a] py-24 text-center">
-        <img src="/img/contractor-site.jpg" alt="" aria-hidden className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-[0.14] grayscale" />
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(6,8,11,0.35)_0%,rgba(6,8,11,0.92)_70%)]" />
-        <div className="relative mx-auto max-w-3xl px-4">
-          <span className="eyebrow-dark mx-auto"><span className="dot" />{t("landing.finalKicker")}</span>
-          <h2 className="font-display mt-6 text-[2.5rem] font-black leading-[0.96] tracking-[-0.045em] text-white sm:text-6xl">
-            {t("landing.finalTitle")}
-            <br />
-            <span className="text-white/38">{t("landing.finalHl")}</span>
-          </h2>
-          <p className="mx-auto mt-6 max-w-lg text-[14px] leading-relaxed text-white/45">{t("landing.finalSub")}</p>
-          <button onClick={openModal} data-track="final_cta" className="btn-emerald mx-auto mt-8 px-8 py-3.5 text-[13px] uppercase tracking-[0.08em]">{t("landing.finalCta")}</button>
-          <div className="mx-auto mt-6 flex max-w-xl flex-wrap items-center justify-center gap-x-5 gap-y-2 text-[10px] font-bold uppercase tracking-[0.12em] text-white/40">
-            <span>{t("landing.trust2")}</span>
-            <span>{t("landing.trust3")}</span>
-            <span>{t("landing.trust1")}</span>
+      {/* CTA FINAL */}
+      <section className="relative overflow-hidden bg-[#0b1220] py-24 text-center text-white">
+        <div className="relative mx-auto max-w-4xl px-4">
+          <div className="inline-flex items-center gap-2 rounded-full border border-[#10b981]/30 bg-[#10b981]/10 px-4 py-1.5 text-[11px] font-bold tracking-wider text-[#34e0a1]">
+            <span className="blink-dot" />{t("landing.finalKicker")}
           </div>
-          {L.quotes[0] && <p className="mt-3 text-[11px] text-white/30">&ldquo;{L.quotes[0].badge}&rdquo; &mdash; {L.quotes[0].name}, {L.quotes[0].role}</p>}
-          <p className="mt-4 text-[9px] font-medium uppercase tracking-[0.12em] text-white/20">{t("landing.finalFoot")}</p>
+          <h2 className="font-display mt-6 text-4xl font-black sm:text-6xl">{t("landing.finalTitle")}<br /><span className="hl">{t("landing.finalHl")}</span></h2>
+          <p className="mx-auto mt-6 max-w-xl text-lg text-[#9aa7ba]">{t("landing.finalSub")}</p>
+          <button onClick={openModal} data-track="final_cta" className="btn-mint mx-auto mt-9 inline-flex items-center gap-2.5 px-9 py-4 text-base uppercase tracking-wider">{t("landing.finalCta")}</button>
+          <div className="mx-auto mt-5 flex max-w-xl flex-wrap items-center justify-center gap-x-5 gap-y-2 rounded-2xl border border-[#34e0a1]/20 bg-[#34e0a1]/10 px-4 py-3 text-xs font-black text-[#34e0a1]">
+            <span>✓ {t("landing.trust2")}</span>
+            <span>✓ {t("landing.trust3")}</span>
+            {L.quotes[0] && <span className="text-white/70">“{L.quotes[0].badge}” — {L.quotes[0].name}, NY</span>}
+          </div>
+          <p className="mt-4 text-xs text-[#64748b]">{t("landing.finalFoot")}</p>
         </div>
       </section>
 
       {/* STICKY MOBILE */}
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-white/[0.08] bg-[#06080b]/95 px-4 py-3 backdrop-blur-xl sm:hidden">
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[#eef1f6] bg-white/95 px-4 py-3 backdrop-blur-xl sm:hidden">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className="font-display text-base font-black leading-none text-white">$120<span className="text-[10px] font-medium text-white/35">{t("landing.week")}</span></p>
-            <p className="mt-1 text-[10px] font-medium text-white/40">{t("landing.stickyArea")}</p>
-            <p className="text-[9px] font-medium text-white/25">{t("landing.trust2")} &middot; {t("landing.trust3")}</p>
+            <p className="font-display text-lg font-black leading-none">$120<span className="text-xs font-bold text-[#94a3b8]">{t("landing.week")}</span></p>
+            <p className="text-[11px] font-bold text-[#10b981]">{t("landing.stickyArea")}</p>
+            <p className="text-[10px] font-bold text-[#0a8f65]">✓ {t("landing.trust2")} · ✓ {t("landing.trust3")}</p>
           </div>
-          <button onClick={openModal} data-track="sticky_cta" className="btn-emerald px-5 py-2.5 text-[12px]">{t("landing.stickyNow")}</button>
+          <button onClick={openModal} data-track="sticky_cta" className="btn-mint flex-1 py-3 text-sm">{t("landing.stickyNow")}</button>
         </div>
       </div>
+
+      {/* MODAL WHATSAPP */}
+      {whatsappLead && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0b1220]/60 p-4 backdrop-blur-sm" onClick={() => setWhatsappLead(null)}>
+          <div className="relative w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <button onClick={() => setWhatsappLead(null)} className="absolute right-4 top-4 text-[#94a3b8]">✕</button>
+            <div className="flex items-center gap-3 border-b border-[#eef1f6] pb-4">
+              <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[#25D366] text-white font-black">W</div>
+              <div><p className="text-sm font-bold">{whatsappLead.ownerName}</p><p className="font-mono text-xs text-[#10b981]">{whatsappLead.ownerPhone}</p></div>
+            </div>
+            <div className="my-4 rounded-2xl bg-[#dcf8c6] p-4 text-sm leading-relaxed">
+              {L.waMsg(whatsappLead.ownerName.split(" ")[0], whatsappLead.category.toLowerCase(), whatsappLead.address)}
+            </div>
+            <button onClick={() => { setWhatsappLead(null); openModal(); }} data-track="activate_send" className="btn-mint w-full py-3.5 text-sm uppercase tracking-wider">{t("landing.activateSend")}</button>
+          </div>
+        </div>
+      )}
     </>
   );
 }
