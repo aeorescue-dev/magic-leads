@@ -67,6 +67,10 @@ EXACT_TRADES: tuple[str, ...] = (
 # inventário exato; a soma é sempre de contagens reais.
 HOME_SERVICES_BUNDLE: tuple[str, ...] = EXACT_TRADES
 
+# Escopo estrito autorizado para enriquecimento (categorias operacionais).
+# Inclui `general_contractor` por causa de "Structure"; exclui signage.
+ENRICHMENT_TRADES: tuple[str, ...] = tuple(EXACT_TRADES) + ("general_contractor",)
+
 # Aliases observados no mercado e nos datasets públicos.
 TRADE_ALIASES: dict[str, str] = {
     # plumbing
@@ -513,10 +517,10 @@ def category_trade(category: object) -> Optional[str]:
         "grass and debris": "landscaping",
         "grass & debris": "landscaping",
         "painting": "painting",
-        "jobs and permits": None,
-        "jobs & permits": None,
-        "construction and permits": None,
-        "construction & permits": None,
+        "jobs and permits": "remodeling",
+        "jobs & permits": "remodeling",
+        "construction and permits": "remodeling",
+        "construction & permits": "remodeling",
         "heating and hot water": "hvac",
         "heating & hot water": "hvac",
         "electrical": "electrical",

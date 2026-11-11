@@ -385,3 +385,27 @@ def test_scrub_dnc_aplica_lista_a_toda_a_base():
 )
 def test_is_valid_us_phone(raw, expected):
     assert voice.is_valid_us_phone(raw) is expected
+
+
+def test_dnc_staging_bloqueia_em_producao(monkeypatch):
+    voice.import_licenses_csv(_csv(phone="+16175550999"))
+    company = _company("+16175550999")
+    voice.check_dnc(
+        "+16175550999",
+        listed=False,
+        source="staging",
+        provider="staging",
+    )
+    monkeypatch.setattr(voice.settings, "VOICE_STAGING_MODE", False, raising=False)
+    blocked = voice.can_call(company, now=NOW)
+    assert blocked["allowed"] is False
+    assert "dnc_unverified" in blocked["reasons"]
+
+    voice.check_dnc(
+        "+16175550999",
+        listed=False,
+        source="b2b_exempt",
+        provider="internal_b2b_policy",
+    )
+    allowed = voice.can_call(company, now=NOW)
+    assert "dnc_unverified" not in allowed["reasons"]

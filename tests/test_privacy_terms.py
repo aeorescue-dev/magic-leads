@@ -145,9 +145,18 @@ def test_lead_response_is_clean():
 # ---------------------------------------------------------------------------
 
 def _i18n_values() -> list[tuple[str, str]]:
-    text = (ROOT / "frontend" / "lib" / "i18n.tsx").read_text(encoding="utf-8")
+    # P0 split the dictionaries into frontend/lib/i18n/{en,pt,es}.ts; keep
+    # reading the provider file too so older keys are not missed.
+    paths = [ROOT / "frontend" / "lib" / "i18n.tsx"]
+    paths.extend(sorted((ROOT / "frontend" / "lib" / "i18n").glob("*.ts")))
     pattern = re.compile(r'"([^"\n]+)"\s*:\s*"((?:[^"\\]|\\.)*)"')
-    return [(m.group(1), m.group(2)) for m in pattern.finditer(text)]
+    values: list[tuple[str, str]] = []
+    for path in paths:
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        values.extend((m.group(1), m.group(2)) for m in pattern.finditer(text))
+    return values
 
 
 def test_frontend_i18n_has_no_banned_terms():

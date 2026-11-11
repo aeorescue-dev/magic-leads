@@ -89,6 +89,7 @@ REASON_LABELS = {
     "status_blocked": "Contacto bloqueado",
     "suppressed": "Supressão interna",
     "dnc_not_checked": "DNC não verificado",
+    "dnc_unverified": "DNC nao verificado (fonte staging)",
     "dnc_stale": "DNC expirado",
     "dnc_listed": "Listado no DNC",
     "attempt_cap": "Limite de tentativas",
@@ -1042,7 +1043,8 @@ def _eligibility(
         reasons.append("suppressed")
 
     dnc = conn.execute(
-        "SELECT listed, expires_at, source FROM dnc_checks WHERE phone=?", (phone,)
+        "SELECT listed, expires_at, source, provider FROM dnc_checks WHERE phone=?",
+        (phone,),
     ).fetchone()
     staging = staging_mode()
     if dnc is None:
@@ -1069,6 +1071,13 @@ def _eligibility(
                 reasons.append("dnc_stale")
         if not checks["dnc_clear"]:
             reasons.append("dnc_listed")
+        source = str(dnc["source"] or "").strip().lower()
+        provider = str(dnc["provider"] or "").strip().lower()
+        if not staging_mode() and (source == "staging" or provider == "staging"):
+            checks["dnc_verified"] = False
+            reasons.append("dnc_unverified")
+        else:
+            checks["dnc_verified"] = True
 
     since = (now - timedelta(days=7)).isoformat()
     attempts = int(
@@ -3155,7 +3164,11 @@ def company_trade_stats(
         conn.close()
 
 
-def bridge_contractor_entities(limit: int = 20000) -> dict:
+def bridge_contractor_entities(
+    limit: int = 20000,
+    state_filter: str = "",
+    allowed_trades: Optional[set[str]] = None,
+) -> dict:
     """Converte contractor_entities (licenças já ingeridas) em prospect_companies."""
     import csv as _csv
 
@@ -3163,15 +3176,24 @@ def bridge_contractor_entities(limit: int = 20000) -> dict:
     from .db import get_connection as get_leads_connection
     from .showcase import CITY_CANON
 
+    where = [
+        "COALESCE(TRIM(phone),'')<>''",
+        "state IN ('MA','NY','TX','IL')",
+        "COALESCE(quarantine_reason,'')=''",
+    ]
+    params: list[Any] = []
+    if state_filter:
+        where.append("UPPER(state)=UPPER(?)")
+        params.append(state_filter)
+    params.append(max(1, min(50000, int(limit))))
     leads = get_leads_connection()
     try:
         rows = leads.execute(
             "SELECT legal_name, city, state, phone, email, license, niche_key, "
             "site_snippet, status, quarantine_reason FROM contractor_entities "
-            "WHERE COALESCE(TRIM(phone),'')<>'' AND state IN ('MA','NY','TX','IL') "
-            "AND COALESCE(quarantine_reason,'')='' "
+            f"WHERE {' AND '.join(where)} "
             "ORDER BY id DESC LIMIT ?",
-            (max(1, min(50000, int(limit))),),
+            tuple(params),
         ).fetchall()
     finally:
         leads.close()
@@ -3211,6 +3233,10 @@ def bridge_contractor_entities(limit: int = 20000) -> dict:
         else:
             trade = _infer_trade(name, str(row["niche_key"] or ""))
             note = "contractor_entities:unclassified"
+        if allowed_trades is not None:
+            trade_key = str(trade or "").strip().lower()
+            if trade_key not in allowed_trades:
+                continue
         writer.writerow(
             [
                 name,

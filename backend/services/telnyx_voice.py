@@ -24,7 +24,7 @@ import httpx
 
 from ..config import settings
 from ..utils.logger import logger
-from . import b2b_voice, showcase, voice_taxonomy
+from . import b2b_voice, showcase, voice_audio_cache, voice_taxonomy
 
 API_BASE = "https://api.telnyx.com/v2"
 
@@ -225,6 +225,45 @@ def create_call(
             ),
         }
 
+    tts_url = ""
+    tts_hash = ""
+    tts_company = ""
+    if voice_audio_cache.enabled():
+        try:
+            if voice_audio_cache.mode() == "shared":
+                tts_company = str(
+                    getattr(settings, "VOICE_TTS_SHARED_NAME", "there") or "there"
+                )
+            else:
+                tts_company = str(company.get("company_name") or "")
+            rendered = voice_scripts.render(
+                call_trade,
+                tts_company,
+                city or company.get("city") or "",
+                int(company.get("permit_count") or 0),
+                company.get("state") or "",
+                str(company.get("email") or ""),
+            )
+            cached = voice_audio_cache.get_or_create(
+                str(rendered.get("greeting") or "")
+            )
+            if cached.get("ok"):
+                tts_url = str(cached.get("url") or "")
+                tts_hash = str(cached.get("hash") or "")
+                logger.info(
+                    "[TTS-CACHE] %s chars=%s",
+                    "hit" if cached.get("hit") else "synth",
+                    cached.get("chars"),
+                )
+            else:
+                logger.warning(
+                    "[TTS-CACHE] pre-render falhou: %s", cached.get("reason")
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[TTS-CACHE] pre-render erro: %s", type(exc).__name__
+            )
+
     state = _encode_state(
         {
             "voice_call_id": call["id"],
@@ -236,6 +275,9 @@ def create_call(
             "trade_code": call.get("trade_code"),
             "campaign_id": campaign_id,
             "assistant_id": assistant_id,
+            "tts_url": tts_url,
+            "tts_hash": tts_hash,
+            "tts_company": tts_company,
         }
     )
     amd_mode = (
@@ -520,7 +562,8 @@ def _render_for_call(current: dict, client_state: dict) -> dict:
     company = b2b_voice.get_company(company_id) if company_id else {}
     company = company or {}
     company_name = (
-        company.get("company_name")
+        client_state.get("tts_company")
+        or company.get("company_name")
         or client_state.get("company_name")
         or ""
     )
@@ -582,23 +625,54 @@ def _start_static_script_for_call(
             settings, "TELNYX_TEST_GATHER_TIMEOUT_MS", 120000
         )
     timeout_ms = max(1000, int(timeout_default or 10000))
-    result = _call_action(
-        call_control_id,
-        "gather_using_speak",
-        {
-            "payload": greeting[:3000],
-            "voice": voice,
-            "language": "en-US",
-            "minimum_digits": 1,
-            "maximum_digits": 1,
-            "maximum_tries": 1,
-            "timeout_millis": timeout_ms,
-            "valid_digits": "2",
-            "client_state": _encode_state(client_state),
-        },
-    )
+    tts_url = str(client_state.get("tts_url") or "").strip()
+    tts_hash = str(client_state.get("tts_hash") or "").strip()
+    audio_ready = False
+    if tts_url and tts_hash and voice_audio_cache.enabled():
+        try:
+            audio_ready = voice_audio_cache.path_for(tts_hash).exists()
+        except Exception:  # noqa: BLE001
+            audio_ready = False
+    speak_payload = {
+        "payload": greeting[:3000],
+        "voice": voice,
+        "language": "en-US",
+        "minimum_digits": 1,
+        "maximum_digits": 1,
+        "maximum_tries": 1,
+        "timeout_millis": timeout_ms,
+        "valid_digits": "2",
+        "client_state": _encode_state(client_state),
+    }
+    if audio_ready:
+        result = _call_action(
+            call_control_id,
+            "gather_using_audio",
+            {
+                "audio_url": tts_url,
+                "minimum_digits": 1,
+                "maximum_digits": 1,
+                "maximum_tries": 1,
+                "timeout_millis": timeout_ms,
+                "valid_digits": "2",
+                "client_state": _encode_state(client_state),
+            },
+        )
+        if not result.get("ok"):
+            logger.warning(
+                "[TTS-CACHE] gather_using_audio falhou; fallback para speak"
+            )
+            result = _call_action(
+                call_control_id, "gather_using_speak", speak_payload
+            )
+    else:
+        result = _call_action(
+            call_control_id, "gather_using_speak", speak_payload
+        )
     if result.get("ok"):
         b2b_voice.update_voice_call(voice_call_id, status="in_call")
+        if audio_ready:
+            logger.info("[TTS-CACHE] áudio pré-renderizado reproduzido")
     else:
         b2b_voice.update_voice_call(
             voice_call_id, status="ended", hangup_cause="static_tts_failed"
