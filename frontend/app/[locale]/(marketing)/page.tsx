@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useI18n } from "@/lib/i18n";
 import { fetchPublicMetrics } from "@/lib/api-client";
 import type { PublicMetrics } from "@/lib/api-client";
 import { FoldWave, useLandingShell } from "@/components/landing/LandingShell";
-import { LiveTradeGrid } from "@/components/landing/LiveTradeGrid";
-import { Building2, Phone, ShieldCheck, Megaphone, Search, Users, Mail, MessageCircle, MessageSquare } from "lucide-react";
+import { LiveTradeGrid, DB_KEYS } from "@/components/landing/LiveTradeGrid";
+import { ActivityTicker } from "@/components/landing/ActivityTicker";
+import { Building2, Phone, ShieldCheck, Megaphone, Search, Users, Mail, MessageCircle, MessageSquare, MapPin } from "lucide-react";
 
 // ------------------------------------------------------------------
 // Tipos e dados ilustrativos do "painel amostra"
@@ -98,6 +99,11 @@ export default function LandingPage() {
 
   // ------------------------------------------------ estado
   const [activeCity, setActiveCity] = useState<City>("New York");
+  // Hero search owns the city/ZIP; the live inventory section below is controlled by it.
+  const [heroCity, setHeroCity] = useState("New York");
+  const [heroZip, setHeroZip] = useState("");
+  const [heroZipInput, setHeroZipInput] = useState("");
+  const [heroZipError, setHeroZipError] = useState("");
   const [reservedLeadId, setReservedLeadId] = useState<string | null>(null);
   const [timerSeconds, setTimerSeconds] = useState(3600);
   const [demoContact, setDemoContact] = useState<{ channel: string; phone: string } | null>(null);
@@ -219,184 +225,186 @@ export default function LandingPage() {
     return /^\(\d{3}\) 555-01\d{2}$/.test(normalized) ? normalized : "(555) 555-0100";
   };
 
+  const heroTradeLabels = useMemo(() => {
+    const map: Record<string, string> = {};
+    DB_KEYS.forEach((key, index) => {
+      map[key] = L.categories[index] || key;
+    });
+    return map;
+  }, [L.categories]);
+
+  const submitHeroZip = (event: FormEvent) => {
+    event.preventDefault();
+    const digits = heroZipInput.replace(/\D/g, "").slice(0, 5);
+    if (digits.length !== 5) {
+      setHeroZipError(t("landing.p1ZipInvalid"));
+      return;
+    }
+    setHeroZipError("");
+    setHeroZip(digits);
+    setHeroCity("");
+    setHeroZipInput("");
+    window.setTimeout(() => scrollTo("p1-grid"), 40);
+  };
+
+  const pickHeroCity = (next: string) => {
+    setHeroCity(next);
+    setHeroZip("");
+    setHeroZipInput("");
+    setHeroZipError("");
+  };
+
   return (
     <>
-      {/* HERO */}
-      <section id="topo" className="landing-dark aurora-dark relative overflow-hidden">
-        <div className="pointer-events-none absolute inset-0 grid-fade" />
-        <div className="pointer-events-none absolute -top-48 left-1/2 h-[720px] w-[1150px] -translate-x-1/2 rounded-full bg-[#10b981]/[0.13] blur-[170px]" />
-        <div className="pointer-events-none absolute -right-24 top-24 h-[440px] w-[440px] rounded-full bg-[#7c5cff]/[0.16] blur-[150px]" />
+      {/* HERO - light, search-led */}
+      <section id="topo" className="relative overflow-hidden bg-[#f7f6f2]">
+        <div className="pointer-events-none absolute inset-0 opacity-[0.28]" style={{ backgroundImage: "linear-gradient(#ded9cc 1px, transparent 1px), linear-gradient(90deg, #ded9cc 1px, transparent 1px)", backgroundSize: "76px 76px" }} />
+        <div className="pointer-events-none absolute -right-48 -top-48 h-[620px] w-[620px] rounded-full bg-[#10b981]/[0.12] blur-[150px]" />
+        <div className="pointer-events-none absolute -left-48 top-40 h-[460px] w-[460px] rounded-full bg-[#7c5cff]/[0.08] blur-[150px]" />
 
-        <div className="relative mx-auto max-w-7xl px-4 pb-16 pt-14 sm:px-6 md:pb-20 md:pt-20">
-          <div className="grid items-center gap-14 lg:grid-cols-[1.04fr_0.96fr] lg:gap-10">
-            <div className="text-center lg:text-left">
-              <div className="fade-up eyebrow">
-                <span className="dot" />
-                {hasMetrics ? `${leadsBank.toLocaleString("en-US")} ${t("landing.heroKicker")}` : t("landing.heroLoading")}
-              </div>
+        <div className="relative mx-auto max-w-7xl px-4 pb-14 pt-14 sm:px-6 lg:pb-20 lg:pt-20">
+          <div className="grid items-center gap-12 lg:grid-cols-[1.08fr_0.92fr] lg:gap-16">
+            <div>
+              <span className="eyebrow eyebrow-light">
+                <span className="dot" style={{ background: "#10b981", boxShadow: "0 0 10px #10b981" }} />
+                {t("landing.heroEyebrow")}
+              </span>
 
-              <h1 className="fade-up font-display mt-7 text-[2.4rem] font-black leading-[0.95] tracking-[-0.04em] text-white sm:text-6xl lg:text-[4.35rem]">
+              <h1 className="font-display mt-6 text-[2.55rem] font-black leading-[0.97] tracking-[-0.045em] text-[#0b1220] sm:text-6xl lg:text-[4.05rem]">
                 {t("landing.heroTitle1")}
                 <br />
-                <span className="hl">
-                  {t("landing.heroTitle2")}
-                </span>
+                <span className="text-[#0a8f65]">{t("landing.heroTitle2")}</span>
               </h1>
 
-              <p className="fade-up mx-auto mt-7 max-w-xl text-base leading-relaxed text-[#9fb0c6] sm:text-lg lg:mx-0">
+              <p className="mt-6 max-w-xl text-[15px] leading-relaxed text-[#5b6576] sm:text-lg">
                 {t("landing.heroSub")}
               </p>
 
-              <div className="fade-up mt-9 flex flex-col items-stretch justify-center gap-3 sm:flex-row lg:justify-start">
-                <button onClick={() => openModal()} data-track="hero_cta" className="btn-mint group flex items-center justify-center gap-2.5 px-8 py-4 text-[15px]">
-                  {t("landing.ctaPanel")}
-                  <svg className="h-5 w-5 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" /></svg>
+              <form onSubmit={submitHeroZip} className="mt-8 flex w-full max-w-xl items-center gap-2 rounded-2xl border border-[#e7e3d9] bg-white p-2 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.35)] transition focus-within:border-[#10b981]/60 focus-within:shadow-[0_24px_70px_-36px_rgba(16,185,129,0.35)]">
+                <MapPin className="ml-3 h-5 w-5 shrink-0 text-[#10b981]" />
+                <input
+                  value={heroZipInput}
+                  onChange={(event) => {
+                    setHeroZipInput(event.target.value.replace(/\D/g, "").slice(0, 5));
+                    setHeroZipError("");
+                  }}
+                  inputMode="numeric"
+                  maxLength={5}
+                  placeholder={t("landing.p1ZipPlaceholder")}
+                  aria-label={t("landing.p1ZipPlaceholder")}
+                  className="h-12 min-w-0 flex-1 border-0 bg-transparent text-[15px] font-semibold text-[#0b1220] placeholder:font-medium placeholder:text-[#94a3b8] focus:outline-none"
+                />
+                <button type="submit" data-track="hero_zip_submit" className="btn-mint h-12 shrink-0 px-6 text-[12px] uppercase tracking-[0.06em]">
+                  {t("landing.p1Search")}
                 </button>
-                <button onClick={() => scrollTo("simulador")} data-track="sample_cta" className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/14 bg-white/[0.055] px-7 py-4 text-sm font-bold text-white backdrop-blur-md transition hover:border-[#34e0a1]/40 hover:bg-white/[0.09]">
-                  {t("landing.ctaSample")}
-                </button>
+              </form>
+              {heroZipError && <p className="mt-2 text-[11px] font-semibold text-[#b45309]">{heroZipError}</p>}
+              {heroZip && (
+                <div className="mt-3 flex">
+                  <button type="button" onClick={() => { setHeroZip(""); setHeroCity("New York"); setHeroZipInput(""); setHeroZipError(""); }} className="inline-flex items-center gap-1.5 rounded-full border border-[#e7e3d9] bg-white px-3 py-1.5 text-[10px] font-bold text-[#475569] shadow-sm hover:border-[#10b981]/40">
+                    ZIP {heroZip} <span aria-hidden>&times;</span>
+                  </button>
+                </div>
+              )}
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                {CITIES.map((cityName) => {
+                  const active = !heroZip && heroCity === cityName;
+                  return (
+                    <button
+                      key={cityName}
+                      type="button"
+                      onClick={() => pickHeroCity(cityName)}
+                      data-track={`hero_city_${cityName.toLowerCase().replace(/\s+/g, "_")}`}
+                      className={`rounded-full border px-3.5 py-1.5 text-[11.5px] font-bold transition ${active ? "border-[#0b1220] bg-[#0b1220] text-white shadow-sm" : "border-[#e7e3d9] bg-white/70 text-[#5b6576] hover:border-[#10b981]/45 hover:bg-white hover:text-[#0b1220]"}`}
+                    >
+                      {cityName}
+                    </button>
+                  );
+                })}
               </div>
 
-              <div className="fade-up mt-7 rounded-2xl border border-[#34e0a1]/20 bg-[#34e0a1]/[0.07] px-4 py-3.5 backdrop-blur-sm">
-                <div className="grid grid-cols-3 gap-x-1 gap-y-2 text-[8px] font-black uppercase tracking-[0.06em] text-[#8ff5c8] sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:gap-x-5 sm:text-[11px] sm:tracking-wider lg:justify-start">
-                  {L.trust.map((item) => (
-                    <span key={item} className="flex flex-col items-center justify-center gap-0.5 text-center sm:inline-flex sm:flex-row sm:gap-1.5 lg:justify-start">
-                      <svg className="h-3 w-3 shrink-0 text-[#34e0a1] sm:h-3.5 sm:w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
-                      {item}
+              <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-[10px] font-black uppercase tracking-[0.08em] text-[#0a8f65]">
+                {L.trust.map((item) => (
+                  <span key={item} className="inline-flex items-center gap-1.5">
+                    <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
+                    {item}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="relative">
+              <div className="pointer-events-none absolute -inset-5 rounded-[2.4rem] bg-[#10b981]/[0.09] blur-2xl" />
+              <div className="relative overflow-hidden rounded-[1.8rem] bg-[#0b1220] p-6 text-white shadow-[0_45px_110px_-50px_rgba(15,23,42,0.8)] sm:p-8">
+                <div className="flex items-center justify-between">
+                  <span className="inline-flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.18em] text-[#34e0a1]">
+                    <span className="relative flex h-2 w-2">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#34e0a1] opacity-50" />
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-[#34e0a1]" />
                     </span>
-                  ))}
+                    {t("landing.p1Kicker")}
+                  </span>
+                  <span className="text-[9px] font-bold uppercase tracking-[0.14em] text-white/30">{t("landing.updated")}</span>
                 </div>
-                {L.quotes[0] && (
-                  <p className="mt-2.5 flex items-start justify-center gap-2 text-[11px] font-semibold leading-snug text-white/65 lg:justify-start">
-                    <span className="mt-0.5 shrink-0 text-[#34e0a1]">★★★★★</span>
-                    <span>“{L.quotes[0].badge}” — {L.quotes[0].name}, {L.quotes[0].role}</span>
+
+                <p className="mono-data mt-8 text-5xl font-black leading-none tracking-[-0.05em] tabular-nums text-white sm:text-6xl">
+                  {hasMetrics ? leadsBank.toLocaleString("en-US") : "\u2014"}
+                </p>
+                <p className="mt-2 text-[11px] font-bold uppercase tracking-[0.14em] text-white/40">{t("landing.heroKicker")}</p>
+
+                <div className="mt-6 h-px bg-white/10" />
+
+                <div className="mt-5 grid grid-cols-2 gap-5">
+                  <div>
+                    <p className="mono-data text-xl font-black text-white">{hasMetrics ? withOwner.toLocaleString("en-US") : "\u2014"}</p>
+                    <p className="mt-1 text-[8px] font-bold uppercase tracking-[0.12em] text-white/35">{t("landing.statOwner")}</p>
+                  </div>
+                  <div>
+                    <p className="mono-data text-xl font-black text-white">{citiesCount}+</p>
+                    <p className="mt-1 text-[8px] font-bold uppercase tracking-[0.12em] text-white/35">{t("landing.statCities")}</p>
+                  </div>
+                </div>
+
+                {hasMetrics && newThisRun > 0 && (
+                  <p className="mt-5 text-[10px] font-bold uppercase tracking-[0.12em] text-[#8ff5c8]">
+                    +{newThisRun.toLocaleString("en-US")} {t("landing.updatedNew")}
                   </p>
                 )}
-              </div>
 
-              <p className="mt-4 text-xs font-medium text-white/40">{t("landing.priceLine")}</p>
-            </div>
+                <button type="button" onClick={() => scrollTo("p1-grid")} className="mt-6 inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.12em] text-[#34e0a1] transition hover:text-white">
+                  {t("landing.p1Cta")}
+                  <span aria-hidden>&rarr;</span>
+                </button>
 
-            {/* Glass product console */}
-            <div className="pop-in relative mx-auto w-full max-w-[540px]">
-              <div className="pointer-events-none absolute -inset-6 rounded-[2.4rem] bg-[#10b981]/[0.10] blur-3xl" />
-              <div className="glass-panel relative rounded-[1.7rem] p-2">
-                <div className="overflow-hidden rounded-[1.35rem] border border-white/[0.06] bg-[#070c15]/95">
-                  <div className="browser-chrome flex items-center gap-3 px-4 py-3">
-                    <div className="flex gap-1.5">
-                      <span className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]/80" />
-                      <span className="h-2.5 w-2.5 rounded-full bg-[#febc2e]/80" />
-                      <span className="h-2.5 w-2.5 rounded-full bg-[#28c840]/80" />
-                    </div>
-                    <div className="flex flex-1 items-center gap-2 rounded-md border border-white/[0.07] bg-black/30 px-2.5 py-1">
-                      <svg className="h-3 w-3 text-[#34e0a1]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 0h10.5a1.5 1.5 0 0 1 1.5 1.5v7.5a1.5 1.5 0 0 1-1.5 1.5H6.75a1.5 1.5 0 0 1-1.5-1.5v-7.5a1.5 1.5 0 0 1 1.5-1.5Z" /></svg>
-                      <span className="mono-data text-[10px] tracking-tight text-white/60">painel.magicleads.app</span>
-                    </div>
-                    <span className="inline-flex items-center gap-1.5 text-[9px] font-black uppercase tracking-[0.16em] text-[#34e0a1]">
-                      <span className="blink-dot" /> live
-                    </span>
-                  </div>
-
-                  <div className="px-4 pb-4 pt-3.5">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/35">New York · Manhattan</p>
-                        <p className="mt-0.5 text-sm font-bold text-white">Today&apos;s exclusive jobs</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="mono-data text-xl font-black leading-none text-[#34e0a1]">12</p>
-                        <p className="text-[8px] font-bold uppercase tracking-widest text-white/35">new</p>
-                      </div>
-                    </div>
-
-                    <div className="mt-3 status-bar"><span style={{ width: "76%" }} /></div>
-                    <div className="mt-1.5 flex justify-between text-[8px] font-bold uppercase tracking-widest text-white/30">
-                      <span>76%</span><span>{t("landing.updated")}</span>
-                    </div>
-
-                    <div className="mt-3.5 space-y-2">
-                      {leadsByCity["New York"].slice(0, 3).map((lead) => (
-                        <div key={`hero-${lead.id}`} className="lead-row flex items-center gap-3 px-3 py-2.5">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2">
-                              <span className={`priority-pill ${BADGE_STYLE[lead.badge]}`}>{lead.badgeLabel}</span>
-                              <span className="mono-data truncate text-[9px] text-white/30">{lead.id.toUpperCase()} · {lead.timeAgo}</span>
-                            </div>
-                            <p className="mt-1 truncate text-[12px] font-bold text-white">{lead.category}</p>
-                            <p className="truncate text-[10px] text-[#34e0a1]">{lead.neighborhood}</p>
-                          </div>
-                          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-white/40">
-                            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="mt-3 flex items-center justify-between rounded-xl border border-[#34e0a1]/15 bg-[#34e0a1]/[0.06] px-3 py-2.5">
-                      <span className="inline-flex items-center gap-1.5 text-[9px] font-black uppercase tracking-wider text-[#34e0a1]">
-                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
-                        {t("landing.reserveHour")}
-                      </span>
-                      <span className="mono-data text-[9px] font-bold text-white/40">$120/wk</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="glass-panel-strong absolute -bottom-6 -left-4 hidden items-center gap-3 rounded-2xl px-4 py-3 sm:flex">
-                <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#34e0a1]/15 text-[#34e0a1]">
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z" /></svg>
-                </span>
-                <div>
-                  <p className="text-[9px] font-black uppercase tracking-widest text-white/40">{t("landing.owner")}</p>
-                  <p className="mono-data text-xs font-bold text-white">(347) 555-0192</p>
-                </div>
+                <svg aria-hidden viewBox="0 0 320 52" className="mt-6 h-12 w-full overflow-visible">
+                  <defs>
+                    <linearGradient id="hero-spark" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#34e0a1" stopOpacity="0.28" />
+                      <stop offset="100%" stopColor="#34e0a1" stopOpacity="0" />
+                    </linearGradient>
+                  </defs>
+                  <path d="M0 40 C24 36 34 30 52 33 C76 37 84 22 108 25 C132 28 142 16 166 20 C190 24 202 13 226 17 C250 21 260 9 286 13 C302 15 312 11 320 10 L320 52 L0 52 Z" fill="url(#hero-spark)" />
+                  <path d="M0 40 C24 36 34 30 52 33 C76 37 84 22 108 25 C132 28 142 16 166 20 C190 24 202 13 226 17 C250 21 260 9 286 13 C302 15 312 11 320 10" fill="none" stroke="#34e0a1" strokeWidth="2" strokeLinecap="round" />
+                </svg>
               </div>
             </div>
           </div>
 
-          {/* Glass metric tiles */}
-          <div className="mt-14 grid gap-3 sm:grid-cols-3">
-            <div className="metric-tile px-5 py-4">
-              <div className="flex items-center justify-between">
-                <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/35">{t("landing.statBank")}</p>
-                <span className="h-1.5 w-1.5 rounded-full bg-[#34e0a1] shadow-[0_0_10px_#34e0a1]" />
-              </div>
-              <p className="mono-data mt-2 text-2xl font-black text-white sm:text-3xl">{hasMetrics ? `${leadsBank.toLocaleString("en-US")}+` : "—"}</p>
-            </div>
-            <div className="metric-tile px-5 py-4">
-              <div className="flex items-center justify-between">
-                <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/35">{t("landing.statOwner")}</p>
-                <span className="h-1.5 w-1.5 rounded-full bg-[#a78bfa] shadow-[0_0_10px_#a78bfa]" />
-              </div>
-              <p className="mono-data mt-2 text-2xl font-black text-white sm:text-3xl">{hasMetrics ? `${withOwner.toLocaleString("en-US")}+` : "—"}</p>
-            </div>
-            <div className="metric-tile px-5 py-4">
-              <div className="flex items-center justify-between">
-                <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/35">{t("landing.statCities")}</p>
-                <span className="h-1.5 w-1.5 rounded-full bg-[#34e0a1] shadow-[0_0_10px_#34e0a1]" />
-              </div>
-              <p className="mono-data mt-2 text-2xl font-black text-white sm:text-3xl">{citiesCount}+</p>
-            </div>
-          </div>
-
-          <p className="mt-5 flex flex-wrap items-center justify-center gap-2 text-[10px] font-bold uppercase tracking-[0.14em] text-white/30">
-            <span className="blink-dot" /><span className="blink-dot blink-dot-delay" /><span className="blink-dot blink-dot-delay-2" />
-            {t("landing.updated")} {t("landing.agoLittle")}
-            {hasMetrics && newThisRun > 0 && <span className="text-[#34e0a1]">· {newThisRun.toLocaleString("en-US")} {t("landing.updatedNew")}</span>}
-          </p>
-        </div>
-
-        <div className="relative overflow-hidden border-t border-white/[0.07] bg-[#060911]/80 py-4">
-          <div className="animate-marquee items-center gap-8 text-[10px] font-bold uppercase tracking-[0.22em] text-white/25">
-            {[...L.categories, ...L.categories].map((c, i) => (
-              <span key={`${c}-${i}`} className="flex shrink-0 items-center gap-8">{c}<span className="h-1 w-1 rounded-full bg-[#34e0a1]/70" /></span>
-            ))}
+          <div className="mt-10">
+            <ActivityTicker labelsByKey={heroTradeLabels} />
           </div>
         </div>
       </section>
 
-      <LiveTradeGrid categories={L.categories} onCta={openModal} />
+      <LiveTradeGrid
+        categories={L.categories}
+        onCta={openModal}
+        city={heroCity}
+        activeZip={heroZip}
+        showControls={false}
+        showTicker={false}
+      />
 
       {/* COBERTURA COMPLETA */}
       <section className="surface-light relative py-20 md:py-28">

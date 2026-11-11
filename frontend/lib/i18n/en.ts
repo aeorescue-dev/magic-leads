@@ -780,6 +780,7 @@ const EN: Dict = {
   "landing.enter": "Log in",
   "landing.start": "Start · $120/wk",
   "landing.heroKicker": "jobs in the bank right now",
+  "landing.heroEyebrow": "EXCLUSIVE 311 DEMAND · 4 CITIES",
   "landing.heroLoading": "live panel · loading today's numbers",
   "landing.heroTitle1": "The owner just asked for the repair.",
   "landing.heroTitle2": "You are the only one with the phone.",

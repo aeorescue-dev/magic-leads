@@ -779,6 +779,7 @@ const ES: Dict = {
   "landing.enter": "Entrar",
   "landing.start": "Empezar · $120/sem",
   "landing.heroKicker": "obras en el banco ahora",
+  "landing.heroEyebrow": "DEMANDA 311 EXCLUSIVA · 4 CIUDADES",
   "landing.heroLoading": "panel en vivo · cargando los números de hoy",
   "landing.heroTitle1": "El dueño acaba de pedir la reforma.",
   "landing.heroTitle2": "Tú eres el único con el teléfono.",
