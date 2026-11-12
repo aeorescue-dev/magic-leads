@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useI18n, type Lang } from "@/lib/i18n";
 import { AuthForm } from "@/components/AuthForm";
@@ -220,9 +221,18 @@ export default function LandingShell({ children }: { children: React.ReactNode }
                 </div>
               </div>
             </div>
-            <div className="mt-8 flex flex-col justify-between gap-3 text-xs text-[#475569] sm:flex-row">
-              <span>© {new Date().getFullYear()} Magic Leads. {t("landing.rights")}</span>
-              <span>{t("landing.vary")}</span>
+            <div className="mt-8 space-y-4">
+              <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs font-semibold text-[#9aa7ba]">
+                <Link href={localePath("/privacy")} className="hover:text-white">{t("landing.footerPrivacy")}</Link>
+                <Link href={localePath("/terms")} className="hover:text-white">{t("landing.footerTerms")}</Link>
+                <a href="mailto:contato@magicleads.app" className="hover:text-white">{t("landing.talk")}</a>
+              </div>
+              <p className="max-w-4xl text-[11px] leading-relaxed text-[#64748b]">{t("landing.footerLegal")}</p>
+              <p className="max-w-4xl text-[11px] leading-relaxed text-[#64748b]">{t("landing.footerSms")}</p>
+              <div className="flex flex-col justify-between gap-3 text-xs text-[#475569] sm:flex-row">
+                <span>© {new Date().getFullYear()} Magic Leads. {t("landing.rights")}</span>
+                <span>{t("landing.vary")}</span>
+              </div>
             </div>
           </div>
         </footer>

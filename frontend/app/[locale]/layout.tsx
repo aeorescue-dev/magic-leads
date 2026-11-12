@@ -9,7 +9,7 @@ import "../globals.css";
 export const metadata: Metadata = {
   title: "Magic Leads - Obras reais com dono identificado",
   description:
-    "Capturamos oportunidades de reforma e correção (telhado, estrutura, encanamento, pintura) direto de registros públicos atualizados continuamente, com dono identificado e reserva exclusiva de 60 minutos por $120/semana. Sistema disponível 24/7.",
+    "Oportunidades de reforma e correção com dono identificado, prioridade exclusiva e contato pronto para agir. Plano de $120 por semana, sem fidelidade. Sistema disponível 24/7.",
   manifest: "/manifest.json",
 };
 
