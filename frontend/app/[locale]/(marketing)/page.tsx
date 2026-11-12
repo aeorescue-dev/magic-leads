@@ -1057,7 +1057,7 @@ export default function LandingPage() {
                 <div className="mt-4 rounded-xl border border-[#34e0a1]/25 bg-[#34e0a1]/[0.08] px-4 py-3 text-center">
                   <p className="text-[11px] font-black uppercase tracking-[0.1em] text-[#8ff5c8]">✓ {t("landing.trust2")} · ✓ {t("landing.trust3")}</p>
                   {L.quotes[0] && (
-                    <p className="mt-1.5 text-[11px] font-semibold text-white/65">“{L.quotes[0].badge}” — {L.quotes[0].name}, {L.quotes[0].role}</p>
+                    <p className="mt-1.5 text-[11px] font-semibold text-white/65">“{L.quotes[0].badge}” · {L.quotes[0].name}, {L.quotes[0].role}</p>
                   )}
                 </div>
                 <p className="mt-3 text-center text-[10px] font-semibold uppercase tracking-[0.1em] text-white/30">{t("landing.planSafe")}</p>
@@ -1150,7 +1150,7 @@ export default function LandingPage() {
               <span>✓ {t("landing.trust3")}</span>
               <span>✓ {t("landing.trust1")}</span>
             </div>
-            {L.quotes[0] && <p className="text-[11px] font-semibold text-white/60">“{L.quotes[0].badge}” — {L.quotes[0].name}, {L.quotes[0].role}</p>}
+            {L.quotes[0] && <p className="text-[11px] font-semibold text-white/60">“{L.quotes[0].badge}” · {L.quotes[0].name}, {L.quotes[0].role}</p>}
           </div>
           <p className="mt-4 text-[10px] font-semibold uppercase tracking-[0.12em] text-white/30">{t("landing.finalFoot")}</p>
         </div>
