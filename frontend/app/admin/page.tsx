@@ -28,6 +28,7 @@ import {
 
 import DataPlaneStrip from "@/components/admin/DataPlaneStrip";
 import { TrafficCard } from "@/components/admin/TrafficCard";
+import { VoiceCampaignsCard } from "@/components/admin/VoiceCampaignsCard";
 import {
   MetricCard,
   StatusPill,
@@ -2803,6 +2804,8 @@ export default function AdminPage() {
       </div>
 
       <TrafficCard />
+
+      <VoiceCampaignsCard />
 
       <DataPlaneStrip />
 

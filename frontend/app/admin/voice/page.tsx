@@ -734,7 +734,7 @@ export default function VoiceB2BPage() {
   const [startHour, setStartHour] = useState(9);
   const [callInterval, setCallInterval] = useState(30);
   const [metricsDays, setMetricsDays] = useState(30);
-  const [tab, setTab] = useState<VoiceTab>("overview");
+  const [tab, setTab] = useState<VoiceTab>("campaigns");
   const [sourceName, setSourceName] = useState("");
   const [sourceUrl, setSourceUrl] = useState("");
   const [scriptTrade, setScriptTrade] = useState("remodeling");
