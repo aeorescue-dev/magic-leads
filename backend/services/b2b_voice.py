@@ -1012,7 +1012,9 @@ def _eligibility(
     checks: dict[str, bool] = {}
 
     phone = str(company.get("phone") or "")
-    checks["phone_valid"] = bool(re.match(r"^\+1\d{10}$", phone)) or (
+    # NPA 555 é reservado para ficção/teste. A Telnyx rejeita com D11 e a
+    # campanha inteira pausava por causa de um único registo.
+    checks["phone_valid"] = bool(re.match(r"^\+1(?!555)\d{10}$", phone)) or (
         allow_international and bool(re.match(r"^\+\d{8,15}$", phone))
     )
     if not checks["phone_valid"]:
@@ -1752,7 +1754,7 @@ def verified_candidate_count(city: str, trade: str) -> int:
         return 0
     where = [
         "status NOT IN ('do_not_call', 'invalid', 'meeting')",
-        "LENGTH(phone)=12 AND phone LIKE '+1%'",
+        "LENGTH(phone)=12 AND phone LIKE '+1%' AND phone NOT LIKE '+1555%'",
         "UPPER(TRIM(city))=UPPER(?)",
         _verified_trade_clause(),
     ]
@@ -1910,7 +1912,7 @@ def campaign_candidates(
     init()
     where = [
         "status NOT IN ('do_not_call', 'invalid', 'meeting')",
-        "LENGTH(phone)=12 AND phone LIKE '+1%'",
+        "LENGTH(phone)=12 AND phone LIKE '+1%' AND phone NOT LIKE '+1555%'",
     ]
     params: list[Any] = []
     if city.strip():
@@ -2071,7 +2073,8 @@ def _has_callable_inventory() -> bool:
         row = conn.execute(
             "SELECT 1 FROM prospect_companies "
             "WHERE status NOT IN ('do_not_call','invalid','meeting') "
-            "AND LENGTH(phone)=12 AND phone LIKE '+1%' LIMIT 1"
+            "AND LENGTH(phone)=12 AND phone LIKE '+1%' "
+        "AND phone NOT LIKE '+1555%' LIMIT 1"
         ).fetchone()
         return row is not None
     finally:
