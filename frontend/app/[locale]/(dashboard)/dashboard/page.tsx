@@ -2249,7 +2249,11 @@ function DashboardPageInner() {
               withContactPct={dashboardSummary.with_contact_pct ?? 0}
               activeZips={dashboardSummary.active_zips ?? 0}
               tradesCount={Object.keys(dashboardSummary.by_category ?? {}).length}
-              finishedAt={publicMetrics?.last_scrape?.finished_at ?? null}
+              finishedAt={
+                publicMetrics?.last_scrape?.finished_at ??
+                publicMetrics?.last_scrape?.started_at ??
+                null
+              }
             />
           )}
 

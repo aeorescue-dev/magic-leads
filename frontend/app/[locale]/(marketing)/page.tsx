@@ -231,7 +231,9 @@ export default function LandingPage() {
   const activeOwnerPct = metrics?.active_owner_pct ?? 0;
   const activeZips = metrics?.active_zips ?? 0;
   const freshness = formatAgo(
-    parseServerTime(metrics?.last_scrape?.finished_at),
+    parseServerTime(
+      metrics?.last_scrape?.finished_at ?? metrics?.last_scrape?.started_at,
+    ),
     nowTick,
   );
 
