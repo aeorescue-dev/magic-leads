@@ -305,9 +305,12 @@ export interface DashboardSummary {
   last_scrape: string;
   recent_count: number;
   with_contact: number;
+  with_contact_pct?: number;
+  active_zips?: number;
   urgent: number;
   by_category: Record<string, number>;
   by_city: Record<string, number>;
+  by_city_coverage?: Record<string, { active: number; owners: number; pct: number }>;
   by_urgency: Record<string, number>;
   // Contagem por tipo de proprietario (privado vs institucional/governamental).
   by_owner_type?: { institutional: number; private: number; unknown?: number };
@@ -320,6 +323,10 @@ export async function fetchDashboardSummary(): Promise<DashboardSummary> {
 export interface PublicMetrics {
   total_leads: number;
   leads_with_owner: number;
+  active_leads?: number;
+  active_leads_with_owner?: number;
+  active_owner_pct?: number;
+  active_zips?: number;
   cities: string[];
   cities_count: number;
   last_scrape: {
@@ -335,6 +342,10 @@ export interface PublicMetrics {
 export const EMPTY_PUBLIC_METRICS: PublicMetrics = {
   total_leads: 0,
   leads_with_owner: 0,
+  active_leads: 0,
+  active_leads_with_owner: 0,
+  active_owner_pct: 0,
+  active_zips: 0,
   cities: [],
   cities_count: 0,
   last_scrape: {
@@ -354,6 +365,10 @@ function toPublicMetrics(value: any): PublicMetrics {
   return {
     total_leads: Number.isFinite(safe.total_leads) ? safe.total_leads : 0,
     leads_with_owner: Number.isFinite(safe.leads_with_owner) ? safe.leads_with_owner : 0,
+    active_leads: Number.isFinite(safe.active_leads) ? safe.active_leads : 0,
+    active_leads_with_owner: Number.isFinite(safe.active_leads_with_owner) ? safe.active_leads_with_owner : 0,
+    active_owner_pct: Number.isFinite(safe.active_owner_pct) ? safe.active_owner_pct : 0,
+    active_zips: Number.isFinite(safe.active_zips) ? safe.active_zips : 0,
     cities,
     cities_count: Number.isFinite(safe.cities_count) ? safe.cities_count : cities.length,
     last_scrape: {

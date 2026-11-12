@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useI18n } from "@/lib/i18n";
-import { fetchPublicMetrics, fetchTradeGrid } from "@/lib/api-client";
+import { fetchPublicMetrics } from "@/lib/api-client";
 import type { PublicMetrics } from "@/lib/api-client";
 import { FoldWave, useLandingShell } from "@/components/landing/LandingShell";
 import { LiveTradeGrid } from "@/components/landing/LiveTradeGrid";
@@ -69,12 +69,6 @@ const SAMPLE_LEADS_BASE: Record<City, SampleLeadBase[]> = {
   ],
 };
 
-// Proposta de KPIs ativos (snapshot 2026-11-12 03:05Z).
-// Em produção estes valores passam a vir de `/api/metrics/public`.
-const PREVIEW_ACTIVE_OWNERS = 8503;
-const PREVIEW_ACTIVE_OWNER_PCT = 88;
-const PREVIEW_ACTIVE_ZIPS = 315;
-
 function parseServerTime(value?: string | null): number | null {
   if (!value) return null;
   const normalized = /Z$|[+-]\d{2}:?\d{2}$/.test(value) ? value : `${value}Z`;
@@ -126,7 +120,6 @@ export default function LandingPage() {
   const [heroZipInput, setHeroZipInput] = useState("");
   const [heroZipError, setHeroZipError] = useState("");
   const [heroTotal, setHeroTotal] = useState(0);
-  const [globalActive, setGlobalActive] = useState(0);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [reservedLeadId, setReservedLeadId] = useState<string | null>(null);
   const [timerSeconds, setTimerSeconds] = useState(3600);
@@ -147,18 +140,6 @@ export default function LandingPage() {
       const m = await fetchPublicMetrics();
       if (mounted) setMetrics(m);
     })();
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    let mounted = true;
-    fetchTradeGrid()
-      .then((res) => {
-        if (mounted) setGlobalActive(res.total);
-      })
-      .catch(() => {});
     return () => {
       mounted = false;
     };
@@ -245,6 +226,10 @@ export default function LandingPage() {
   const citiesCount = metrics?.cities_count ?? CITIES.length;
   const newThisRun = metrics?.last_scrape?.novas_oportunidades ?? 0;
   const new24 = metrics?.last_scrape?.captured_24h ?? 0;
+  const activeLeads = metrics?.active_leads ?? 0;
+  const activeOwners = metrics?.active_leads_with_owner ?? 0;
+  const activeOwnerPct = metrics?.active_owner_pct ?? 0;
+  const activeZips = metrics?.active_zips ?? 0;
   const freshness = formatAgo(
     parseServerTime(metrics?.last_scrape?.finished_at),
     nowTick,
@@ -442,7 +427,7 @@ export default function LandingPage() {
                 </div>
                 <div className="mt-3 flex items-baseline gap-2">
                   <p className="mono-data text-[2.15rem] font-black leading-none tracking-[-0.05em] text-[#0b1220] tabular-nums">
-                    {globalActive > 0 ? globalActive.toLocaleString("en-US") : "—"}
+                    {activeLeads > 0 ? activeLeads.toLocaleString("en-US") : "—"}
                   </p>
                   <span className="rounded-full border border-[#d9f3e8] bg-[#effbf5] px-2 py-0.5 text-[8px] font-black uppercase tracking-[0.08em] text-[#0a8f65]">
                     {t("landing.statActiveUnit")}
@@ -468,14 +453,14 @@ export default function LandingPage() {
                 </div>
                 <div className="mt-3 flex items-baseline gap-2">
                   <p className="mono-data text-[2.15rem] font-black leading-none tracking-[-0.05em] text-[#0b1220] tabular-nums">
-                    {PREVIEW_ACTIVE_OWNERS.toLocaleString("en-US")}
+                    {activeOwners > 0 ? activeOwners.toLocaleString("en-US") : "—"}
                   </p>
                   <span className="rounded-full border border-[#ede9fe] bg-[#f5f3ff] px-2 py-0.5 text-[8px] font-black uppercase tracking-[0.08em] text-[#6d28d9]">
-                    {PREVIEW_ACTIVE_OWNER_PCT}%
+                    {activeOwnerPct}%
                   </span>
                 </div>
                 <p className="mt-2 text-[10.5px] font-semibold leading-relaxed text-[#64748b]">
-                  {PREVIEW_ACTIVE_OWNER_PCT}% {t("landing.statOwnersUnit")}
+                  {activeOwnerPct}% {t("landing.statOwnersUnit")}
                   {" · "}
                   {hasMetrics ? withOwner.toLocaleString("en-US") : "—"} {t("landing.statOwnersBase")}
                 </p>
@@ -491,7 +476,7 @@ export default function LandingPage() {
                     {citiesCount}
                   </p>
                   <span className="rounded-full border border-[#e7e3d9] bg-[#f8f7f3] px-2 py-0.5 text-[8px] font-black normal-case tracking-[0.04em] text-[#64748b]">
-                    {PREVIEW_ACTIVE_ZIPS} ZIPs
+                    {activeZips > 0 ? `${activeZips} ZIPs` : "ZIPs"}
                   </span>
                 </div>
                 <p className="mt-2 text-[10.5px] font-semibold leading-relaxed text-[#64748b]">

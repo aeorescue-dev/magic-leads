@@ -9665,8 +9665,34 @@ class DatabaseService:
             captured_24h = conn.execute(
                 "SELECT COUNT(*) AS c FROM leads WHERE datetime(created_at) >= datetime('now', '-24 hours')"
             ).fetchone()["c"]
+            # Escopo ativo (7 dias) — mesma janela do inventário público.
+            # Alimenta os selos de dono ativo e ZIPs cobertos da landing.
+            active = conn.execute(
+                """
+                SELECT COUNT(*) AS c,
+                       SUM(CASE WHEN owner_name IS NOT NULL AND TRIM(owner_name) != ''
+                                THEN 1 ELSE 0 END) AS owners,
+                       COUNT(DISTINCT CASE
+                           WHEN LENGTH(TRIM(zip_code)) >= 5
+                           THEN SUBSTR(TRIM(zip_code), 1, 5) END) AS zips
+                FROM leads
+                WHERE date_reported IS NOT NULL
+                  AND datetime(date_reported) >= datetime('now', '-7 days')
+                  AND is_qualified = 1
+                  AND COALESCE(is_junk, 0) = 0
+                  AND LOWER(COALESCE(case_status, '')) NOT IN
+                      ('closed', 'resolved', 'solved', 'archived', 'duplicated')
+                """
+            ).fetchone()
         finally:
             conn.close()
+
+        active_leads = int(active["c"] or 0)
+        active_owners = int(active["owners"] or 0)
+        active_zips = int(active["zips"] or 0)
+        active_owner_pct = (
+            round(100 * active_owners / active_leads) if active_leads else 0
+        )
 
         last_run = self.get_last_scrape_run() or {}
         last_inserted = last_run.get("inserted") or 0
@@ -9680,6 +9706,10 @@ class DatabaseService:
         return {
             "total_leads": total,
             "leads_with_owner": with_owner,
+            "active_leads": active_leads,
+            "active_leads_with_owner": active_owners,
+            "active_owner_pct": active_owner_pct,
+            "active_zips": active_zips,
             "cities": cities,
             "cities_count": len(cities),
             "last_scrape": {
@@ -9741,7 +9771,7 @@ class DatabaseService:
             # Varredura ÚNICA: todas as métricas derivam destas colunas. Antes
             # o mesmo `base_where` era reexecutado ~11 vezes (≈290 ms cada).
             rows = conn.execute(
-                f"SELECT updated_at, city, issue_category, urgency_level, owner_name "
+                f"SELECT updated_at, city, issue_category, urgency_level, owner_name, zip_code "
                 f"FROM leads {base_where}",
                 params,
             ).fetchall()
@@ -9786,11 +9816,20 @@ class DatabaseService:
             unknown = 0
             by_category: dict = {}
             by_city: dict = {}
+            by_city_owner: dict = {}
             by_urgency: dict = {}
+            active_zips_set: set = set()
 
             for r in rows:
                 owner = r["owner_name"]
                 has_owner = owner is not None and owner != ""
+                city = r["city"]
+                by_city[city] = by_city.get(city, 0) + 1
+                if has_owner:
+                    by_city_owner[city] = by_city_owner.get(city, 0) + 1
+                zip_code = str(r["zip_code"] or "").strip()
+                if len(zip_code) >= 5:
+                    active_zips_set.add(zip_code[:5])
                 if not has_owner:
                     unknown += 1
                 else:
@@ -9810,8 +9849,6 @@ class DatabaseService:
 
                 cat = r["issue_category"]
                 by_category[cat] = by_category.get(cat, 0) + 1
-                city = r["city"]
-                by_city[city] = by_city.get(city, 0) + 1
                 urg = r["urgency_level"]
                 by_urgency[urg] = by_urgency.get(urg, 0) + 1
 
@@ -9853,6 +9890,23 @@ class DatabaseService:
             by_city = dict(
                 sorted(by_city.items(), key=lambda kv: kv[1], reverse=True)
             )
+            with_contact_pct = (
+                round(100 * with_contact / total_interested)
+                if total_interested
+                else 0
+            )
+            by_city_coverage = {
+                city: {
+                    "active": count,
+                    "owners": int(by_city_owner.get(city, 0)),
+                    "pct": (
+                        round(100 * by_city_owner.get(city, 0) / count)
+                        if count
+                        else 0
+                    ),
+                }
+                for city, count in by_city.items()
+            }
 
             result = {
                 "total_interested": total_interested,
@@ -9863,9 +9917,12 @@ class DatabaseService:
                 # em dente de serra entre os ciclos de 6h.
                 "recent_count": recent_count,
                 "with_contact": with_contact,
+                "with_contact_pct": with_contact_pct,
+                "active_zips": len(active_zips_set),
                 "urgent": urgent,
                 "by_category": by_category,
                 "by_city": by_city,
+                "by_city_coverage": by_city_coverage,
                 "by_urgency": by_urgency,
                 "by_owner_type": by_owner_type,
             }
