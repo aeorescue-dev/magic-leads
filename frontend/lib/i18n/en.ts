@@ -803,7 +803,7 @@ const EN: Dict = {
   "landing.statActive": "Active opportunities",
   "landing.statActiveUnit": "now",
   "landing.statBase": "signals in the base",
-  "landing.statNew24": "new in 24h",
+  "landing.statNew24": "new entries in 24h",
   "landing.statOwnersActive": "Owners identified",
   "landing.statOwnersUnit": "of active jobs",
   "landing.statOwnersBase": "in the historical base",

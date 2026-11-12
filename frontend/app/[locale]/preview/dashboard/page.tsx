@@ -65,7 +65,7 @@ const COPY = {
     updated: "Atualizado há {time}",
     changes: "O que esta proposta muda",
     change1Title: "Escopo ativo",
-    change1Text: "9.611 oportunidades em 7 dias no lugar de 127.792 históricos.",
+    change1Text: "{n} oportunidades em 7 dias no lugar de 127.792 históricos.",
     change2Title: "Dono no inventário",
     change2Text: "8.503 obras ativas com proprietário identificado (88%).",
     change3Title: "Frescura real",
@@ -100,7 +100,7 @@ const COPY = {
     updated: "Updated {time} ago",
     changes: "What this proposal changes",
     change1Title: "Active scope",
-    change1Text: "9,611 opportunities in 7 days instead of 127,792 historical.",
+    change1Text: "{n} opportunities in 7 days instead of 127,792 historical.",
     change2Title: "Owner coverage",
     change2Text: "8,503 active jobs with an identified owner (88%).",
     change3Title: "Real freshness",
@@ -135,7 +135,7 @@ const COPY = {
     updated: "Actualizado hace {time}",
     changes: "Qué cambia esta propuesta",
     change1Title: "Alcance activo",
-    change1Text: "9.611 oportunidades en 7 días en lugar de 127.792 históricas.",
+    change1Text: "{n} oportunidades en 7 días en lugar de 127.792 históricas.",
     change2Title: "Dueño en el inventario",
     change2Text: "8.503 obras activas con propietario identificado (88%).",
     change3Title: "Frescura real",
@@ -414,7 +414,7 @@ export default function DashboardProposalPage() {
             </div>
             <div className="mt-4 grid gap-3 md:grid-cols-3">
               {[
-                { title: c.change1Title, text: c.change1Text },
+                { title: c.change1Title, text: c.change1Text.replace("{n}", active.toLocaleString("en-US")) },
                 { title: c.change2Title, text: c.change2Text },
                 { title: c.change3Title, text: c.change3Text },
               ].map((item, i) => (

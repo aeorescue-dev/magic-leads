@@ -787,7 +787,7 @@ const PT: Dict = {
   "landing.statActive": "Oportunidades ativas",
   "landing.statActiveUnit": "agora",
   "landing.statBase": "sinais na base",
-  "landing.statNew24": "novas em 24h",
+  "landing.statNew24": "novas entradas em 24h",
   "landing.statOwnersActive": "Proprietários identificados",
   "landing.statOwnersUnit": "das obras ativas",
   "landing.statOwnersBase": "na base histórica",
