@@ -1789,7 +1789,8 @@ async def _voice_campaign_resume_loop() -> None:
         "Retoma de campanhas de voz ativa (a cada %ss)", interval
     )
     while True:
-        await asyncio.sleep(interval)
+        # Correr imediatamente no arranque: um deploy perto da hora agendada
+        # nao pode atrasar a campanha em 5 minutos (interval completo).
         try:
             resumed = await _resume_due_voice_campaigns()
             if resumed:
@@ -1798,6 +1799,7 @@ async def _voice_campaign_resume_loop() -> None:
                 )
         except Exception as e:  # noqa: BLE001
             logger.warning("Falha a retomar campanhas de voz: %s", e)
+        await asyncio.sleep(interval)
 
 
 def _remember_scrape_run(state: dict) -> None:
