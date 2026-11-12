@@ -7,10 +7,8 @@ import useSWR from "swr";
 import { fetchAdminAnalytics } from "@/lib/admin-api";
 import type { AdminAnalytics } from "@/lib/admin-api";
 
-function todayEt(): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/New_York",
-  }).format(new Date());
+function todayUtc(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 function fmt(value: number | undefined): string {
@@ -60,7 +58,7 @@ function Column({
 }
 
 export function TrafficCard() {
-  const today = todayEt();
+  const today = todayUtc();
   const { data, error, isLoading } = useSWR(
     ["admin-traffic-card", today],
     async () => {
@@ -105,7 +103,7 @@ export function TrafficCard() {
         </p>
       ) : (
         <div className="mt-3 grid gap-2 sm:grid-cols-3">
-          <Column label="Hoje (ET)" data={data?.todayData} hint={today} />
+          <Column label="Hoje (UTC)" data={data?.todayData} hint={today} />
           <Column label="7 dias" data={data?.week} />
           <Column label="30 dias" data={data?.month} />
           <div className="hidden items-end justify-between gap-3 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 sm:col-span-3 sm:flex">
