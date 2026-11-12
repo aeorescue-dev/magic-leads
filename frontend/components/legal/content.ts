@@ -33,7 +33,7 @@ const PT_PRIVACY: LegalDoc = {
     {
       title: "Quem somos",
       body: [
-        "A Magic Leads é um nome comercial (trade name) de FABIO HENRIQUE SOARES DE OLIVEIRA, titular do EIN 43-2940311, com endereço em 418 7th St Apt B, Harrison, NJ 07029, EUA.",
+        "A Magic Leads é operada por uma atividade empresarial individual registrada em New Jersey, EUA. Magic Leads e Magic Leads Technologies são nomes comerciais utilizados nesta plataforma. A identificação legal completa é fornecida às operadoras, processadores de pagamento e autoridades quando necessário.",
         "Para fins desta política, Magic Leads, nós e nosso se referem a esse titular.",
       ],
     },
@@ -129,7 +129,7 @@ const PT_TERMS: LegalDoc = {
     {
       title: "Quem somos",
       body: [
-        "A Magic Leads é um nome comercial (trade name) de FABIO HENRIQUE SOARES DE OLIVEIRA, titular do EIN 43-2940311, com endereço em 418 7th St Apt B, Harrison, NJ 07029, EUA.",
+        "A Magic Leads é operada por uma atividade empresarial individual registrada em New Jersey, EUA. Magic Leads e Magic Leads Technologies são nomes comerciais utilizados nesta plataforma. A identificação legal completa é fornecida às operadoras, processadores de pagamento e autoridades quando necessário.",
       ],
     },
     {
@@ -243,7 +243,7 @@ const EN_PRIVACY: LegalDoc = {
     {
       title: "Who we are",
       body: [
-        "Magic Leads is a trade name of FABIO HENRIQUE SOARES DE OLIVEIRA, holder of EIN 43-2940311, with an address at 418 7th St Apt B, Harrison, NJ 07029, USA.",
+        "Magic Leads is operated by a sole proprietorship registered in New Jersey, USA. Magic Leads and Magic Leads Technologies are trade names used on this platform. Full legal identification is provided to carriers, payment processors and authorities when required.",
         "For purposes of this policy, Magic Leads, we and us refer to that holder.",
       ],
     },
@@ -339,7 +339,7 @@ const EN_TERMS: LegalDoc = {
     {
       title: "Who we are",
       body: [
-        "Magic Leads is a trade name of FABIO HENRIQUE SOARES DE OLIVEIRA, holder of EIN 43-2940311, with an address at 418 7th St Apt B, Harrison, NJ 07029, USA.",
+        "Magic Leads is operated by a sole proprietorship registered in New Jersey, USA. Magic Leads and Magic Leads Technologies are trade names used on this platform. Full legal identification is provided to carriers, payment processors and authorities when required.",
       ],
     },
     {
@@ -453,7 +453,7 @@ const ES_PRIVACY: LegalDoc = {
     {
       title: "Quiénes somos",
       body: [
-        "Magic Leads es un nombre comercial (trade name) de FABIO HENRIQUE SOARES DE OLIVEIRA, titular del EIN 43-2940311, con dirección en 418 7th St Apt B, Harrison, NJ 07029, EE. UU.",
+        "Magic Leads es operada por una actividad empresarial individual registrada en New Jersey, EE. UU. Magic Leads y Magic Leads Technologies son nombres comerciales utilizados en esta plataforma. La identificación legal completa se proporciona a operadoras, procesadores de pago y autoridades cuando sea necesario.",
         "A los fines de esta política, Magic Leads, nosotros y nos referimos a ese titular.",
       ],
     },
@@ -549,7 +549,7 @@ const ES_TERMS: LegalDoc = {
     {
       title: "Quiénes somos",
       body: [
-        "Magic Leads es un nombre comercial (trade name) de FABIO HENRIQUE SOARES DE OLIVEIRA, titular del EIN 43-2940311, con dirección en 418 7th St Apt B, Harrison, NJ 07029, EE. UU.",
+        "Magic Leads es operada por una actividad empresarial individual registrada en New Jersey, EE. UU. Magic Leads y Magic Leads Technologies son nombres comerciales utilizados en esta plataforma. La identificación legal completa se proporciona a operadoras, procesadores de pago y autoridades cuando sea necesario.",
       ],
     },
     {

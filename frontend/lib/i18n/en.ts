@@ -945,7 +945,7 @@ const EN: Dict = {
   "landing.rights": "All rights reserved.",
   "landing.footerPrivacy": "Privacy Policy",
   "landing.footerTerms": "Terms of Service",
-  "landing.footerLegal": "Magic Leads is a trade name of FABIO HENRIQUE SOARES DE OLIVEIRA, holder of EIN 43-2940311.",
+  "landing.footerLegal": "Magic Leads and Magic Leads Technologies are trade names used on this platform.",
   "landing.footerSms": "By pressing 1 during a call, you consent to receive one transactional SMS with the requested link. Reply STOP to opt out. Message and data rates may apply.",
   "landing.vary": "Volume and contact vary by city and trade. No lock-in.",
   "landing.stickyArea": "Exclusive jobs in your area",
