@@ -235,20 +235,30 @@ export function LiveTradeGrid({
 
       <div className={preview ? "relative w-full" : "relative mx-auto max-w-7xl px-4 sm:px-6"}>
         {preview ? (
-          <div className="flex items-center justify-between gap-3 px-1 pb-4">
-            <div className="flex items-center gap-2.5">
+          <div className="px-1 pb-4">
+            <span className="inline-flex items-center gap-1.5 text-[8px] font-black uppercase tracking-[0.16em] text-[#94a3b8]">
               <span className="relative flex h-2 w-2">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#10b981] opacity-50" />
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-[#10b981]" />
               </span>
-              <div>
-                <p className="text-[8px] font-black uppercase tracking-[0.16em] text-[#94a3b8]">{t("landing.p1Kicker")}</p>
-                <p className="mt-0.5 text-base font-black text-[#0b1220]">{regionLabel}</p>
-              </div>
-            </div>
-            <span className="rounded-full border border-[#d9f3e8] bg-[#effbf5] px-2.5 py-1 text-[8px] font-black uppercase tracking-[0.08em] text-[#0a8f65]">
-              {loading ? "…" : `${displayedRows.length} ${t("landing.p1Active")}`}
+              {t("landing.p1Kicker")}
             </span>
+            <h3 className="font-display mt-2 text-[15px] font-black leading-[1.2] tracking-[-0.02em] text-[#0b1220] sm:text-[16.5px]">
+              {t("landing.p1Title")}
+            </h3>
+            <p className="mt-1.5 inline-flex items-center gap-1.5 text-[11px] font-semibold leading-relaxed text-[#54617a]">
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#10b981]" />
+              {t("landing.p1Sub")}
+            </p>
+            <div className="mt-3.5 flex flex-wrap items-center justify-between gap-2 border-t border-[#e6e4dc] pt-3">
+              <span className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.1em] text-[#0b1220]">
+                <MapPin className="h-3.5 w-3.5 text-[#10b981]" />
+                {regionLabel}
+              </span>
+              <span className="rounded-full border border-[#d9f3e8] bg-[#effbf5] px-2.5 py-1 text-[8px] font-black uppercase tracking-[0.08em] text-[#0a8f65]">
+                {loading ? "…" : `${displayedRows.length} ${t("landing.p1Active")}`}
+              </span>
+            </div>
           </div>
         ) : (
         <div className="mx-auto max-w-4xl text-center">
