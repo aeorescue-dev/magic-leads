@@ -252,7 +252,7 @@ export function LiveTradeGrid({
                 {regionLabel}
               </span>
               <span className="rounded-full border border-[#d9f3e8] bg-[#effbf5] px-2.5 py-1 text-[8px] font-black uppercase tracking-[0.08em] text-[#0a8f65]">
-                {loading ? "…" : `${displayedRows.length} ${t("landing.p1Active")}`}
+                {loading ? "…" : `${displayedRows.length} ${t("landing.p1ActiveTrades")}`}
               </span>
             </div>
           </div>
@@ -470,7 +470,7 @@ export function LiveTradeGrid({
                   <span className="mono-data">{activeRow.count.toLocaleString("en-US")}</span>{" "}
                   <span className={`font-medium text-white/45 ${preview ? "text-[9px]" : "text-[12px]"}`}>{t("landing.p1Active")}</span>
                 </p>
-                <p className={`text-white/40 ${preview ? "mt-1 text-[8.5px]" : "mt-1 text-[10.5px]"}`}>{regionLabel} · {t("landing.p1Last7")} · {visibleTotal.toLocaleString("en-US")} {t("landing.p1Opportunities")}</p>
+                <p className={`text-white/40 ${preview ? "mt-1 text-[8.5px]" : "mt-1 text-[10.5px]"}`}>{regionLabel} · {t("landing.p1Last7")} · {(data?.total ?? visibleTotal).toLocaleString("en-US")} {t("landing.p1Opportunities")}</p>
                 <div className={`flex flex-wrap gap-x-5 gap-y-1.5 font-bold uppercase tracking-[0.1em] text-white/55 ${preview ? "hidden" : "mt-3 text-[10px]"}`}>
                   <span className="inline-flex items-center gap-1.5"><Clock className="h-3.5 w-3.5 text-[#34e0a1]" /> {t("landing.p1Exclusive")}</span>
                   <span className="inline-flex items-center gap-1.5"><ShieldCheck className="h-3.5 w-3.5 text-[#34e0a1]" /> {t("landing.p1NoAuction")}</span>
