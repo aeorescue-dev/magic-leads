@@ -2,14 +2,14 @@ import asyncio
 import html
 import random
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 import httpx
 
 from ..config import settings
 from ..models.schemas import IssueCategory, RawLead311, UrgencyLevel
-from ..services.category_taxonomy import classify
+from ..services.category_taxonomy import classify, classify_permit
 from ..services.lead_rules import normalize_street
 from ..utils.logger import logger
 
@@ -441,6 +441,172 @@ class Socrata311Scraper:
             return None
 
     # ---------- Framework nacional: scraper genérico multi-cidade ----------
+
+    # ---------- Permisos de obra (Dallas, Boston) ----------
+    #
+    # O 311 destas cidades nao descreve o oficio (Dallas: "Code Concern",
+    # "Missed Garbage", "Animal Loose") — 91% ficava Unclassified. O dataset
+    # de Building Permits e' a fonte real de obra: tipo explicito + descricao
+    # do trabalho + endereco.
+
+    _PERMIT_DATE_FORMATS = (
+        "%m/%d/%y", "%m/%d/%Y", "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%m/%d/%Y %H:%M:%S",
+    )
+
+    @classmethod
+    def _parse_permit_date(cls, value) -> Optional[datetime]:
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        if raw.endswith("Z"):
+            raw = raw[:-1] + "+00:00"
+        for fmt in cls._PERMIT_DATE_FORMATS:
+            try:
+                parsed = datetime.strptime(raw, fmt)
+            except ValueError:
+                continue
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed
+        # "11/5/26" (sem zero a esquerda) tambem aparece em exports antigos.
+        match = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{2}|\d{4})$", raw)
+        if match:
+            month, day, year = (int(part) for part in match.groups())
+            if year < 100:
+                year += 2000
+            try:
+                return datetime(year, month, day, tzinfo=timezone.utc)
+            except ValueError:
+                return None
+        try:
+            parsed = datetime.fromisoformat(raw)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _clean_permit_street(value, city: str, state: str) -> str:
+        street = str(value or "").strip()
+        if not street:
+            return ""
+        # "1902 N CARROLL AVE, Dallas, TX" -> "1902 N CARROLL AVE"
+        street = re.sub(
+            rf",\s*{re.escape(city)}\s*,?\s*{re.escape(state)}.*$", "",
+            street, flags=re.IGNORECASE,
+        ).strip()
+        street = re.sub(r",\s*\d{5}(?:-\d{4})?\s*$", "", street).strip()
+        street = re.sub(r"\s+", " ", street)
+        return street
+
+    def parse_permit_rows(
+        self,
+        rows: list,
+        *,
+        city: str,
+        state: str,
+        min_date: Optional[datetime] = None,
+        external_prefix: str = "",
+    ) -> list:
+        """Converte permisos em RawLead311 ja classificados.
+
+        Deduplica por numero de permiso (o mesmo registo pode aparecer em
+        paginas diferentes) e descarta o que nao nomeia um dos 16 oficios.
+        """
+        by_id: dict[str, RawLead311] = {}
+        for row in rows or []:
+            lead = self._permit_row_to_lead(
+                row, city=city, state=state, min_date=min_date,
+                external_prefix=external_prefix,
+            )
+            if lead is not None:
+                by_id[lead.external_id] = lead
+        return list(by_id.values())
+
+    def _permit_row_to_lead(
+        self,
+        row: dict,
+        *,
+        city: str,
+        state: str,
+        min_date: Optional[datetime] = None,
+        external_prefix: str = "",
+    ) -> Optional[RawLead311]:
+        try:
+            ext = str(
+                row.get("permit_number")
+                or row.get("permitnumber")
+                or row.get("permit_nbr")
+                or row.get("id")
+                or ""
+            ).strip()
+            if not ext:
+                return None
+
+            issued = self._parse_permit_date(
+                row.get("issued_date")
+                or row.get("issue_date")
+                or row.get("issued")
+                or row.get("application_start_date")
+            )
+            if min_date is not None and issued is not None and issued < min_date:
+                return None
+
+            street = self._clean_permit_street(
+                row.get("street_address") or row.get("address")
+                or row.get("location") or row.get("primary_address"),
+                city, state,
+            )
+            if not street and row.get("street_number"):
+                street = f"{row.get('street_number')} {row.get('street_name') or ''}".strip()
+            # Um endereco sem numero de porta nao tem proprietario resolvivel
+            # ("Dallas, TX" sobra depois de remover cidade/estado).
+            if not street or len(street) <= 8 or not re.match(r"^\d", street):
+                return None
+
+            zip_raw = row.get("zip_code") or row.get("zip") or row.get("zipcode")
+            zip_digits = re.sub(r"\D", "", str(zip_raw or ""))
+            zip_code = zip_digits[:5] if len(zip_digits) >= 5 else None
+            if not zip_code:
+                maybe = re.search(r"\b(\d{5})(?:-\d{4})?\b", str(row.get("address") or ""))
+                zip_code = maybe.group(1) if maybe else None
+
+            permit_type = " ".join(
+                str(row.get(key) or "").strip()
+                for key in ("permit_type", "permittypedescr", "worktype",
+                            "permit_sub_type", "permit_class")
+                if str(row.get(key) or "").strip()
+            )
+            description = str(
+                row.get("work_description") or row.get("comments")
+                or row.get("description") or row.get("work_desc") or ""
+            ).strip()
+
+            classification = classify_permit(permit_type, description)
+            if not classification.matched:
+                return None
+
+            return RawLead311(
+                external_id=f"{external_prefix}{ext}",
+                address=html.unescape(normalize_street(
+                    street, city=city, state=state, zip_code=zip_code
+                )),
+                city=city,
+                state=state,
+                zip_code=zip_code,
+                source_type="permit",
+                issue_description=html.unescape(description or permit_type),
+                created_at=issued or datetime.now(timezone.utc),
+                issue_category=classification.category,
+                case_title=permit_type or None,
+                descriptor=permit_type or None,
+                case_status="Issued",
+                type=permit_type or None,
+            )
+        except (KeyError, ValueError, TypeError):
+            return None
 
     def _guess_columns(self, field_names: List[str]) -> dict:
         """Detecta heuristicamente as colunas relevantes em um dataset 311 de qualquer cidade."""

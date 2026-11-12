@@ -488,3 +488,89 @@ def classify(
     return Classification(
         IssueCategory.UNCLASSIFIED, False, "no_trade_match", "sem sinal de oficio"
     )
+
+
+# ---------------------------------------------------------------------------
+# Permisos de obra
+#
+# `permit_type` e' o sinal mais forte de um dataset de permisos: diz
+# explicitamente o oficio ("Residential Plumbing Permit", "Commercial
+# Electrical Permit", "Residential Roofing Permit"). Classificar so' pela
+# descricao do trabalho perde esses registos e ainda cria falsos positivos
+# ("Elevator Lobby" -> Elevator, "Paint Booth" -> Paint).
+#
+# Regra: o tipo manda; a descricao so' decide quando o tipo e' generico
+# ("Alteration/Addition", "New Construction", "Other").
+# ---------------------------------------------------------------------------
+
+_PERMIT_GAS_WORK = _rx(r"\bgas\b")
+_PERMIT_GENERIC_ARTIFACT = _rx(
+    r"\b(?:paint\s+booths?|elevator\s+(?:lobby|corridor|shaft))\b"
+)
+
+
+def _permit_category(permit_type: str) -> Optional[IssueCategory]:
+    """Oficio implicito no tipo de permiso, se houver um inequivoco."""
+    ptype = _normalize_text(permit_type)
+    if not ptype:
+        return None
+    if re.search(r"\bplumbing\b", ptype):
+        return IssueCategory.PLUMBING
+    if re.search(r"\b(?:electrical|solar)\b", ptype):
+        return IssueCategory.ELECTRICAL
+    if re.search(r"\bmechanical\b", ptype):
+        return IssueCategory.HEATING
+    if re.search(r"\broof(?:ing)?\b", ptype):
+        return IssueCategory.ROOF
+    if re.search(r"\bgas\b", ptype):
+        return IssueCategory.GAS
+    if re.search(
+        r"\b(?:foundation\s+repair|new\s+construction|accessory\s+structure|"
+        r"demolition|remodel\w*|renovation\w*)\b",
+        ptype,
+    ):
+        return IssueCategory.STRUCTURE
+    return None
+
+
+def classify_permit(
+    permit_type: object,
+    description: object = "",
+    *,
+    case_status: Optional[str] = None,
+) -> Classification:
+    """Classifica um permit de obra num dos 16 oficios.
+
+    Nunca inventa categoria: um tipo generico cuja descricao nao nomeia um
+    oficio fica `Unclassified` e o chamador descarta o registo.
+    """
+    ptype = _normalize_text(permit_type)
+    desc = _normalize_text(description)
+    category = _permit_category(ptype)
+
+    if category is IssueCategory.PLUMBING and _PERMIT_GAS_WORK.search(desc):
+        return Classification(
+            IssueCategory.GAS, True, "permit.gas_under_plumbing", "trabalho de gas"
+        )
+    if category is not None:
+        return Classification(
+            category, True, f"permit.type:{category.value}", f"tipo: {ptype}"
+        )
+
+    # Tipo generico: a descricao decide, mas nunca por artefacto de obra.
+    if _PERMIT_GENERIC_ARTIFACT.search(desc):
+        return Classification(
+            IssueCategory.UNCLASSIFIED,
+            False,
+            "permit.generic_artifact",
+            "equipamento/area citada, nao oficio",
+        )
+    result = classify(desc, "permit", case_title=str(permit_type or ""))
+    if result.matched:
+        return result
+    return Classification(
+        IssueCategory.UNCLASSIFIED,
+        False,
+        "permit.no_trade_match",
+        "tipo generico sem oficio na descricao",
+    )
