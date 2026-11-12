@@ -197,7 +197,7 @@ export default function LandingShell({ children }: { children: React.ReactNode }
         {children}
 
         <FoldWave from="#070a12" to="#080d16" />
-        <footer className="bg-[#080d16] pb-16 pt-8 text-sm text-[#64748b] sm:pb-12">
+        <footer className="bg-[#080d16] pb-32 pt-8 text-sm text-[#64748b] sm:pb-12">
           <div className="mx-auto max-w-7xl px-4 sm:px-6">
             <div className="grid gap-10 border-b border-white/10 pb-10 md:grid-cols-4">
               <div className="md:col-span-2">
