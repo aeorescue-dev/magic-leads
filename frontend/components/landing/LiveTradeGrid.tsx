@@ -246,10 +246,6 @@ export function LiveTradeGrid({
             <h3 className="font-display mt-2 text-[15px] font-black leading-[1.2] tracking-[-0.02em] text-[#0b1220] sm:text-[16.5px]">
               {t("landing.p1Title")}
             </h3>
-            <p className="mt-1.5 inline-flex items-center gap-1.5 text-[11px] font-semibold leading-relaxed text-[#54617a]">
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#10b981]" />
-              {t("landing.p1Sub")}
-            </p>
             <div className="mt-3.5 flex flex-wrap items-center justify-between gap-2 border-t border-[#e6e4dc] pt-3">
               <span className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.1em] text-[#0b1220]">
                 <MapPin className="h-3.5 w-3.5 text-[#10b981]" />
@@ -439,7 +435,7 @@ export function LiveTradeGrid({
                     active
                       ? "border-[#10b981] bg-[#10b981] text-[#04120d] shadow-[0_24px_60px_-30px_rgba(16,185,129,0.55)]"
                       : "border-[#e7e3d9] bg-white shadow-[0_14px_40px_-32px_rgba(15,23,42,0.35)] hover:border-[#10b981]/45 hover:shadow-[0_22px_55px_-32px_rgba(15,23,42,0.3)]"
-                  } ${preview && index >= 4 ? "hidden sm:block" : ""}`}
+                  }`}
                 >
                   <div className="flex items-start justify-between">
                     <span className={`grid place-items-center ring-1 transition ${preview ? "h-8 w-8 rounded-lg" : "h-10 w-10 rounded-xl"} ${active ? "bg-[#04120d]/10 text-[#04120d] ring-[#04120d]/15" : `${palette.bg} ${palette.text} ${palette.ring}`}`}>
