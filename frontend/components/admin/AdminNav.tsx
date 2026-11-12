@@ -62,7 +62,7 @@ export default function AdminNav() {
           </span>
         </Link>
 
-        <nav className="order-3 flex w-full items-center gap-1 overflow-x-auto pb-1 md:order-none md:w-auto md:pb-0">
+        <nav className="order-3 flex w-full flex-wrap items-center gap-1 pb-1 md:order-none md:w-auto md:pb-0">
           {LINKS.map((link) => {
             const active =
               link.href === "/admin"

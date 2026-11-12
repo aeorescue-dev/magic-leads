@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 
 import DataPlaneStrip from "@/components/admin/DataPlaneStrip";
+import { TrafficCard } from "@/components/admin/TrafficCard";
 import {
   MetricCard,
   StatusPill,
@@ -2800,6 +2801,8 @@ export default function AdminPage() {
           tone="amber"
         />
       </div>
+
+      <TrafficCard />
 
       <DataPlaneStrip />
 

@@ -304,3 +304,69 @@ def test_ingest_endpoint_aceita_chave_e_grava(clean_db, monkeypatch):
         assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 1
     finally:
         conn.close()
+
+def test_ingest_ignora_trafego_qa_e_infra(clean_db):
+    payload = _payload("sess-qa-geo-12345")
+    payload["context"]["city"] = "Kearny"
+    payload["context"]["region"] = "NJ"
+    out = analytics.ingest(payload, "203.0.113.50")
+    assert out["status"] == "ignored"
+    assert out["reason"] == "infra_geo"
+
+    payload = _payload("sess-qa-host-12345")
+    payload["context"]["host"] = "frontend-abc123-fabio-dev2.vercel.app"
+    out = analytics.ingest(payload, "203.0.113.51")
+    assert out["status"] == "ignored"
+    assert out["reason"] == "internal_host"
+
+    payload = _payload("sess-qa-flag-12345")
+    payload["session"]["internal"] = True
+    out = analytics.ingest(payload, "203.0.113.52")
+    assert out["status"] == "ignored"
+    assert out["reason"] == "qa_flag"
+
+    conn = analytics.get_connection()
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_summary_series_conta_visitantes_unicos_por_dia(clean_db):
+    for index, ip in enumerate(("203.0.113.61", "203.0.113.62")):
+        payload = _payload(f"sess-series-{index}-12345")
+        assert analytics.ingest(payload, ip)["status"] == "ok"
+    analytics.clear_cache()
+    summary = analytics.summary("7d")
+    point = summary["series"][-1]
+    assert point["visits"] == 2
+    assert point["visitors"] == 2
+
+def test_purge_internal_sessions_remove_kearny_e_eventos(clean_db):
+    conn = analytics.get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO sessions (session_key, started_at, last_seen_at, city, region) "
+            "VALUES ('qa-kearny-12345', ?, ?, 'Kearny', 'NJ')",
+            (NOW.isoformat(), NOW.isoformat()),
+        )
+        sid = conn.execute(
+            "SELECT id FROM sessions WHERE session_key='qa-kearny-12345'"
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO events (event_uid, session_id, ts, name) "
+            "VALUES ('qa-kearny-event', ?, ?, 'pageview')",
+            (sid, NOW.isoformat()),
+        )
+        conn.commit()
+        removed = analytics._purge_internal_sessions(conn)
+        conn.commit()
+        assert removed == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM sessions WHERE session_key='qa-kearny-12345'"
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM events WHERE event_uid='qa-kearny-event'"
+        ).fetchone()[0] == 0
+    finally:
+        conn.close()

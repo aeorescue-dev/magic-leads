@@ -308,7 +308,8 @@ export default function AnalyticsPage() {
           </h1>
           <p className="text-[11px] text-slate-500">
             First-party, sem cookies · gerado em {fmtWhen(data.generated_at)} · período{" "}
-            {data.start} → {data.end} (UTC){custom ? " · personalizado" : ""} · atualiza a cada 30 s
+            {data.start} → {data.end} (UTC){custom ? " · personalizado" : ""}
+            {data.internal_filter ? " · QA/infra excluído" : ""} · atualiza a cada 30 s
             {isValidating ? " · a atualizar…" : ""}
           </p>
         </div>
@@ -619,12 +620,13 @@ export default function AnalyticsPage() {
           </div>
         </Section>
 
-        <Section title="Geografia" icon={<Globe2 className="h-4 w-4 text-indigo-400" />} hint="País/região/cidade (cidade-level, sem coordenadas)">
+        <Section title="Geografia" icon={<Globe2 className="h-4 w-4 text-indigo-400" />} hint="País/estado/cidade (sem coordenadas). QA/infra já excluído.">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-[11px]">
               <thead className="text-slate-500">
                 <tr>
                   <th className="pb-1">País</th>
+                  <th className="pb-1">Estado</th>
                   <th className="pb-1">Cidade</th>
                   <th className="pb-1 text-right">Visitas</th>
                   <th className="pb-1 text-right">Únicos</th>
@@ -636,9 +638,8 @@ export default function AnalyticsPage() {
                 {data.geo.map((row) => (
                   <tr key={`${row.country}-${row.region}-${row.city}`} className="border-t border-white/5">
                     <td className="py-1.5 font-semibold text-slate-300">{row.country || "—"}</td>
-                    <td className="py-1.5 text-slate-400">
-                      {row.city || row.region || "—"}
-                    </td>
+                    <td className="py-1.5 font-mono text-[10px] text-slate-400">{row.region || "—"}</td>
+                    <td className="py-1.5 text-slate-400">{row.city || "—"}</td>
                     <td className="py-1.5 text-right text-slate-300">{row.visits}</td>
                     <td className="py-1.5 text-right text-slate-400">{row.visitors}</td>
                     <td className="py-1.5 text-right text-slate-300">{row.cta_clicks}</td>
@@ -647,7 +648,7 @@ export default function AnalyticsPage() {
                 ))}
                 {!data.geo.length ? (
                   <tr>
-                    <td colSpan={6} className="py-6 text-center text-slate-500">
+                    <td colSpan={7} className="py-6 text-center text-slate-500">
                       Sem dados geográficos.
                     </td>
                   </tr>

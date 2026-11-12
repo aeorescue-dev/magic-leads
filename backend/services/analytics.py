@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import re
@@ -96,6 +97,25 @@ _INTERNAL_HOSTS = {
     "localhost",
     "127.0.0.1",
 }
+# Hosts públicos legítimos. Qualquer outro *.vercel.app é preview de QA e
+# não entra no analytics de mercado.
+_PUBLIC_HOSTS = {
+    "magicleads.app",
+    "www.magicleads.app",
+    "magic-leads-frontend-final.vercel.app",
+    "magicleads-oficial.vercel.app",
+}
+# Cidades de datacenter/cloud que aparecem quando o IP pertence a um proxy,
+# runner de QA ou scanner. Podem ser estendidas por env.
+_DEFAULT_INFRA_GEO = {
+    ("kearny", "NJ"),
+    ("moses lake", "WA"),
+    ("council bluffs", "IA"),
+    ("ashburn", "VA"),
+    ("beauharnois", "QC"),
+    ("falkenstein", "SN"),
+    ("prineville", "OR"),
+}
 _ORGANIC_HOSTS = (
     "google.",
     "bing.com",
@@ -164,6 +184,7 @@ def init_db() -> None:
         conn = get_connection()
         try:
             conn.executescript(_SCHEMA)
+            _purge_internal_sessions(conn)
             conn.commit()
         finally:
             conn.close()
@@ -327,6 +348,86 @@ def _clean_path(value: Optional[str]) -> str:
     return text.split("?", 1)[0]
 
 
+def _infra_geo_pairs() -> set[tuple[str, str]]:
+    pairs = set(_DEFAULT_INFRA_GEO)
+    raw = str(os.getenv("ANALYTICS_INFRA_GEO") or "").strip()
+    for part in raw.split(","):
+        city, sep, region = part.partition("|")
+        if sep and city.strip():
+            pairs.add((city.strip().lower(), region.strip().upper()))
+    return pairs
+
+
+def _ip_internal(ip: str) -> bool:
+    value = str(ip or "").strip()
+    if not value:
+        return False
+    exact = {
+        item.strip()
+        for item in str(os.getenv("ANALYTICS_INTERNAL_IPS") or "").split(",")
+        if item.strip()
+    }
+    if value in exact:
+        return True
+    try:
+        addr = ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    for part in str(os.getenv("ANALYTICS_INTERNAL_CIDRS") or "").split(","):
+        cidr = part.strip()
+        if not cidr:
+            continue
+        try:
+            if addr in ipaddress.ip_network(cidr, strict=False):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _internal_reason(context: dict, session: dict, client_ip: str) -> str:
+    if bool(session.get("internal")):
+        return "qa_flag"
+    host = str(context.get("host") or "").strip().lower()
+    if host:
+        host = host.split(",")[0].split(":")[0].strip(".")
+        if host in {"localhost", "127.0.0.1"} or host.endswith(".local"):
+            return "internal_host"
+        if host.endswith(".vercel.app") and host not in _PUBLIC_HOSTS:
+            return "internal_host"
+    if _ip_internal(client_ip):
+        return "internal_ip"
+    city = str(context.get("city") or "").strip().lower()
+    region = str(context.get("region") or "").strip().upper()
+    if city and (city, region) in _infra_geo_pairs():
+        return "infra_geo"
+    return ""
+
+
+def _purge_internal_sessions(conn: sqlite3.Connection) -> int:
+    """Remove QA/infra já gravado (sem IP histórico, usa cidade/região)."""
+    pairs = _infra_geo_pairs()
+    if not pairs:
+        return 0
+    rows = conn.execute(
+        "SELECT id, LOWER(TRIM(city)) AS city, UPPER(TRIM(region)) AS region "
+        "FROM sessions WHERE city IS NOT NULL AND TRIM(city) != '' "
+        "AND started_at >= datetime('now', '-190 days')"
+    ).fetchall()
+    ids = [
+        int(row["id"])
+        for row in rows
+        if (str(row["city"]), str(row["region"])) in pairs
+    ]
+    if not ids:
+        return 0
+    placeholders = ",".join("?" for _ in ids)
+    conn.execute(f"DELETE FROM events WHERE session_id IN ({placeholders})", ids)
+    conn.execute(f"DELETE FROM sessions WHERE id IN ({placeholders})", ids)
+    logger.info("[ANALYTICS] %s sessões QA/infra removidas", len(ids))
+    return len(ids)
+
+
 def ingest(payload: dict, client_ip: str = "") -> dict:
     init_db()
     session = (payload or {}).get("session") or {}
@@ -338,6 +439,13 @@ def ingest(payload: dict, client_ip: str = "") -> dict:
     user_agent = str(context.get("ua") or "")
     if is_bot(user_agent):
         return {"status": "ignored", "reason": "bot", "inserted": 0}
+    internal_reason = _internal_reason(context, session, client_ip)
+    if internal_reason:
+        return {
+            "status": "ignored",
+            "reason": internal_reason,
+            "inserted": 0,
+        }
 
     now = datetime.now(timezone.utc)
     session_key = str(session.get("id") or "").strip()
@@ -689,19 +797,22 @@ def summary(
 
         # Série temporal
         rows = conn.execute(
-            "SELECT started_at, COUNT(*) c FROM sessions "
-            "WHERE started_at>=? AND started_at<? GROUP BY 1",
+            "SELECT started_at, visitor_hash, session_key FROM sessions "
+            "WHERE started_at>=? AND started_at<?",
             (start_s, now_s),
         ).fetchall()
         buckets: dict[str, dict] = {}
         for row in rows:
             key = _bucket(str(row["started_at"]), mode)
-            buckets.setdefault(
+            bucket = buckets.setdefault(
                 key,
                 {"t": key, "visits": 0, "visitors": 0, "pageviews": 0,
                  "cta": 0, "forms": 0},
             )
-            buckets[key]["visits"] += int(row["c"])
+            bucket["visits"] += 1
+            bucket.setdefault("_visitors", set()).add(
+                row["visitor_hash"] or row["session_key"]
+            )
         ev_rows = conn.execute(
             "SELECT ts, name, COUNT(*) c FROM events "
             "WHERE ts>=? AND ts<? AND name IN ('pageview','cta_click','form_submit') "
@@ -721,6 +832,8 @@ def summary(
                 buckets[key]["cta"] += int(row["c"])
             elif row["name"] == "form_submit":
                 buckets[key]["forms"] += int(row["c"])
+        for bucket in buckets.values():
+            bucket["visitors"] = len(bucket.pop("_visitors", set()))
         series = [buckets[k] for k in sorted(buckets)]
 
         sources = _grouped(conn, ["source", "medium"], start_s, now_s, 12)
@@ -885,6 +998,7 @@ def summary(
             "campaigns": campaigns,
             "email_attribution": email_attribution,
             "geo": geo,
+            "internal_filter": True,
             "funnel": funnel,
             "events": events,
             "devices": devices,

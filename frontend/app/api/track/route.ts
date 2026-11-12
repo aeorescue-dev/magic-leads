@@ -48,6 +48,10 @@ export async function POST(request: NextRequest) {
       context: {
         ...(body?.context || {}),
         ua: headers.get("user-agent") || "",
+        host:
+          headers.get("x-forwarded-host") ||
+          headers.get("host") ||
+          "",
         referrer: body?.context?.referrer || headers.get("referer") || "",
         country: headers.get("x-vercel-ip-country") || "",
         region: headers.get("x-vercel-ip-country-region") || "",

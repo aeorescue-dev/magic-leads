@@ -26,6 +26,7 @@ interface SessionState {
   pageviews: number;
   engagement_ms: number;
   scroll_pct: number;
+  internal?: boolean;
 }
 
 interface QueuedEvent {
@@ -139,6 +140,7 @@ function newSession(): SessionState {
     pageviews: 0,
     engagement_ms: 0,
     scroll_pct: 0,
+    internal: new URLSearchParams(location.search).get("internal") === "1",
   };
 }
 

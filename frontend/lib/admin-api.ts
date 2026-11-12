@@ -8,11 +8,14 @@ import type { SystemHealth } from "./system-health";
 
 export type { SystemHealth } from "./system-health";
 
-const API_URL = (
-  (typeof window !== "undefined" && (window as any).__NEXT_PUBLIC_API_URL) ||
-  process.env.NEXT_PUBLIC_API_URL ||
-  "https://magic-leads-production.up.railway.app"
-).replace(/\/$/, "");
+const API_PROXY_MODE = process.env.NEXT_PUBLIC_API_PROXY === "true";
+const API_URL = API_PROXY_MODE
+  ? ""
+  : (
+      (typeof window !== "undefined" && (window as any).__NEXT_PUBLIC_API_URL) ||
+      process.env.NEXT_PUBLIC_API_URL ||
+      "https://magic-leads-production.up.railway.app"
+    ).replace(/\/$/, "");
 
 export type AdminAccess = "ok" | "unauthenticated" | "forbidden" | "error";
 
@@ -1573,6 +1576,7 @@ export interface AdminAnalytics {
   campaigns: AdminAnalyticsCampaign[];
   email_attribution: AdminAnalyticsAttribution;
   geo: AdminAnalyticsGeo[];
+  internal_filter?: boolean;
   funnel: Array<{ step: string; count: number; rate: number }>;
   events: Array<{ name: string; count: number; sessions: number }>;
   devices: Array<{ device: string; visits: number }>;
