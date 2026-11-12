@@ -5257,7 +5257,9 @@ async def _fetch_boston_311(entry: dict) -> dict:
         if legacy_max and not legacy_truncated and first_migration:
             watermarks[legacy_key] = legacy_max.date().isoformat()
 
-        # Permits: nao bloqueia o 311; serve o grafo de contractors.
+        # Permits: nao bloqueia o 311; serve o grafo de contractors e, a partir
+        # de agora, tambem e' fonte de LEADS de obra (o 311 so cobre queixas).
+        permit_rows: list = []
         try:
             permit_result = await _ckan_get(
                 client,
@@ -5268,13 +5270,26 @@ async def _fetch_boston_311(entry: dict) -> dict:
                     "sort": "issued_date DESC",
                 },
             )
+            permit_rows = permit_result.get("records") or []
             await _record_contractor_entities(
-                contractor_ingest.extract_boston_permits(
-                    permit_result.get("records") or []
-                )
+                contractor_ingest.extract_boston_permits(permit_rows)
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("[ENTITIES] Boston extracao falhou: %s", exc)
+
+        permit_leads = socrata_scraper.parse_permit_rows(
+            permit_rows,
+            city="Boston",
+            state="MA",
+            min_date=now - timedelta(days=7),
+            external_prefix="bos-permit:",
+        )
+        if permit_leads:
+            leads.extend(permit_leads)
+            logger.info(
+                "[P0-A] Boston permits: %s leads de obra (7 dias)",
+                len(permit_leads),
+            )
 
         logger.info(
             "[P0-A] Boston: %s leads, recurso=%s (%s), novos=%s legado=%s, "
@@ -5294,6 +5309,58 @@ async def _fetch_boston_311(entry: dict) -> dict:
             "resource": new_res,
             "source_max": new_max,
         }
+
+
+async def _fetch_dallas_permits(entry: dict) -> list:
+    """Le Building Permits de Dallas e devolve leads de obra ja classificados.
+
+    O dataset usa datas em MM/DD/YY (texto), logo o filtro generico por ISO do
+    Socrata nao funciona. Pedimos os meses que cobrem a janela e filtramos em
+    Python pela data de emissao.
+    """
+    hours = max(24, int(entry.get("hours") or 168))
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(hours=hours)
+
+    months: list[str] = []
+    cursor = since.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    while cursor <= now:
+        months.append(f"{cursor.month:02d}/%/{cursor.year % 100:02d}")
+        cursor = (cursor.replace(day=28) + timedelta(days=4)).replace(day=1)
+    where = " OR ".join(dict.fromkeys(f"issued_date like '{m}'" for m in months))
+
+    rows = await socrata_scraper._fetch_all_pages(
+        domain="www.dallasopendata.com",
+        dataset="e7gq-4sah",
+        select=(
+            "permit_number,issued_date,work_description,permit_type,"
+            "street_address,zip_code,contractor"
+        ),
+        where=where,
+        order="issued_date DESC",
+        page_size=5000,
+        max_pages=4,
+        date_col="issued_date",
+    )
+    if not rows:
+        # Fonte viva que devolve zero linhas é falha de contrato/schema, não
+        # "sem dados". Sem isto a cidade ficava verde com o conector morto.
+        raise RuntimeError(
+            "Dallas permits: 0 linhas na janela de "
+            f"{hours}h (dataset vazio ou schema alterado)"
+        )
+    leads = socrata_scraper.parse_permit_rows(
+        rows,
+        city="Dallas",
+        state="TX",
+        min_date=since,
+        external_prefix="dal-permit:",
+    )
+    logger.info(
+        "[P0-A] Dallas permits: %s linhas, %s leads de obra (janela %sh, desde %s)",
+        len(rows), len(leads), hours, since.date().isoformat(),
+    )
+    return leads
 
 
 async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int = None):
@@ -5324,6 +5391,11 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
             # consegue fechar.
             {"domain": "data.cityofchicago.org", "dataset": "ydr8-5enu", "city": "Chicago", "state": "IL", "hours": 720, "type": "chi_permits", "limit": 5000, "fields": ["id", "issue_date", "work_description", "permit_type", "permit_status", "street_number", "street_name", "latitude", "longitude", "community_area", "ward", "application_start_date"]},
             {"domain": "www.dallasopendata.com", "dataset": "d7e7-envw", "city": "Dallas", "state": "TX", "hours": 48, "fields": ["service_request_number", "created_date", "service_request_type", "address", "lat_location", "status"]},
+            # Dallas Building Permits: o 311 de Dallas e' quase todo ruido
+            # municipal ("Code Concern", "Missed Garbage", "Animal Loose") e
+            # 91% ficava Unclassified. O dataset de permisos tem o oficio no
+            # proprio tipo + descricao da obra (medido: ~1.600/7 dias).
+            {"city": "Dallas", "state": "TX", "type": "dal_permits", "hours": 168},
         ]
 
         # Aplica hours_override se fornecido (ex: cron noturno com hours=120)
@@ -5622,6 +5694,9 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                         )
                     except Exception as e:  # noqa: BLE001
                         logger.warning("[ENTITIES] NYC extração falhou: %s", e)
+
+                elif entry.get("type") == "dal_permits":
+                    leads = await _fetch_dallas_permits(entry)
 
                 elif city != "Boston":
                     # Socrata 311 genérico (NYC, Chicago, Dallas, etc.)
@@ -5964,7 +6039,19 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
             if r["error"] and not r["error"].startswith("PARCIAL")
         ]
         cities_skipped = [c for c, r in city_results.items() if r["skipped"]]
+        # Cidade que respondeu mas devolveu 0 leads nao e' falha de rede; e'
+        # ausencia de dados. Antes isto passava em silencio (run "success" com
+        # 3/4 cidades). Passa a ficar explicito no log e na nota do run.
+        cities_silent = [
+            c for c, r in city_results.items()
+            if not r["error"] and not r["skipped"] and len(r["leads"]) == 0
+        ]
         cities_bad = sorted(set(cities_degraded) | set(cities_skipped))
+        if cities_silent:
+            logger.warning(
+                "Scraper [run %s]: cidade(s) sem leads neste run: %s",
+                run_id, ", ".join(sorted(cities_silent)),
+            )
 
         if cities_bad:
             logger.error(
@@ -5980,6 +6067,8 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
         else:
             run_status = "success"
             _nota = "311 multi-cidade com Circuit Breaker + DLQ + City Health + Webhook"
+            if cities_silent:
+                _nota += f" | SEM LEADS: {', '.join(sorted(cities_silent))}"
 
         logger.info(
             f"Scraper completo [run {run_id}]: {inserted} leads inseridos "
