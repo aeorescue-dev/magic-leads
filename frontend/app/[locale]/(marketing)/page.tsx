@@ -1109,8 +1109,7 @@ export default function LandingPage() {
             <p className="mt-6 text-[15px] leading-relaxed text-[#54617a]">{t("landing.faqSub")}</p>
             <button onClick={() => openModal()} data-track="faq_cta" className="btn-dark mt-7 px-6 py-3.5 text-sm">{t("landing.faqCta")}</button>
             <div className="mt-8 rounded-2xl border border-[#10b981]/15 bg-white/70 p-5">
-              <p className="text-[10px] font-black uppercase tracking-[0.14em] text-[#0a8f65]">{t("landing.trust2")}</p>
-              <p className="mt-1 text-sm font-semibold text-[#0b1220]">✓ {t("landing.trust2")} · ✓ {t("landing.trust3")}</p>
+              <p className="text-sm font-semibold text-[#0b1220]">✓ {t("landing.trust2")} · ✓ {t("landing.trust3")}</p>
             </div>
           </div>
           <div className="space-y-3">
