@@ -308,7 +308,8 @@ export default function AnalyticsPage() {
           </h1>
           <p className="text-[11px] text-slate-500">
             First-party, sem cookies · gerado em {fmtWhen(data.generated_at)} · período{" "}
-            {data.start} → {data.end} (UTC){custom ? " · personalizado" : ""} · QA/infra excluído · atualiza a cada 30 s
+            {data.start} → {data.end} (UTC){custom ? " · personalizado" : ""}
+            {data.internal_filter ? " · QA/infra excluído" : ""} · atualiza a cada 30 s
             {isValidating ? " · a atualizar…" : ""}
           </p>
         </div>

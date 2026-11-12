@@ -85,7 +85,9 @@ export function TrafficCard() {
             Tráfego
           </h2>
           <p className="mt-0.5 text-[10px] text-slate-500">
-            Visitas reais de mercado · QA/infra e datacenters excluídos
+            {data?.week.internal_filter
+              ? "Visitas reais de mercado · QA/infra e datacenters excluídos"
+              : "Visitas de mercado · pré-visualização sobre o backend atual"}
           </p>
         </div>
         <Link

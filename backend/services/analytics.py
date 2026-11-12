@@ -998,6 +998,7 @@ def summary(
             "campaigns": campaigns,
             "email_attribution": email_attribution,
             "geo": geo,
+            "internal_filter": True,
             "funnel": funnel,
             "events": events,
             "devices": devices,

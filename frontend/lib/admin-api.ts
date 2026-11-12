@@ -1576,6 +1576,7 @@ export interface AdminAnalytics {
   campaigns: AdminAnalyticsCampaign[];
   email_attribution: AdminAnalyticsAttribution;
   geo: AdminAnalyticsGeo[];
+  internal_filter?: boolean;
   funnel: Array<{ step: string; count: number; rate: number }>;
   events: Array<{ name: string; count: number; sessions: number }>;
   devices: Array<{ device: string; visits: number }>;
