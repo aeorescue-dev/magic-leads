@@ -324,7 +324,15 @@ def create_call(
 
     if resp.status_code >= 300:
         b2b_voice.update_voice_call(call["id"], status="failed")
-        logger.warning("[TELNYX] HTTP %s ao criar chamada", resp.status_code)
+        detail = resp.text[:500] if resp.content else ""
+        logger.warning(
+            "[TELNYX] HTTP %s ao criar chamada to=%s from=%s campaign=%s: %s",
+            resp.status_code,
+            company.get("phone"),
+            from_number or settings.TELNYX_FROM_NUMBER,
+            campaign_id,
+            detail,
+        )
         return {
             "ok": False,
             "reason": f"http_{resp.status_code}",
