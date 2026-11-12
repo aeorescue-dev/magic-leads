@@ -48,6 +48,7 @@ import { playAlertChime, primeAlertChime } from "@/lib/alert-chime";
 import { CityPicker, type CityOption } from "@/components/dashboard/CityPicker";
 import { CommandPalette, type PaletteAction } from "@/components/dashboard/CommandPalette";
 import { KpiPulse } from "@/components/dashboard/KpiPulse";
+import { CoveragePanel } from "@/components/dashboard/CoveragePanel";
 import {
   OpportunityCard,
   type OpportunityCardContext,
@@ -1674,7 +1675,7 @@ function DashboardPageInner() {
       },
       ...["NYC", "Chicago", "Dallas", "Boston"].map((city) => ({
         value: city,
-        label: city,
+        label: city === "NYC" ? "New York" : city,
         count: counts[city.toUpperCase()] ?? 0,
       })),
     ];
@@ -1712,7 +1713,7 @@ function DashboardPageInner() {
     ...["all", "NYC", "Chicago", "Dallas", "Boston"].map((city) => ({
       id: `city-${city}`,
       group: "Cidades",
-      label: city === "all" ? (t("dashboard.filter.all_cities") || "Todas") : city,
+      label: city === "all" ? (t("dashboard.filter.all_cities") || "Todas") : city === "NYC" ? "New York" : city,
       icon: MapPin,
       run: () => setSelectedCity(city),
     })),
@@ -1771,9 +1772,10 @@ function DashboardPageInner() {
     {
       label: t("dashboard.kpi.with_contact_short") || "Com dono",
       value: dashboardSummary?.with_contact ?? 0,
-      delta: t("dashboard.kpi.owner_identified") || "com proprietário identificado",
+      delta: `${dashboardSummary?.with_contact_pct ?? 0}% ${t("dashboard.kpi.owner_identified") || "com proprietário identificado"}`,
       icon: Phone,
       tone: "info" as const,
+      progress: dashboardSummary?.with_contact_pct ?? 0,
     },
     {
       label: t("dashboard.kpi.new_short") || "Novas",
@@ -2233,12 +2235,23 @@ function DashboardPageInner() {
             hero={{
               label: t("dashboard.kpi.interested") || "No seu interesse",
               value: realTotalLeads,
-              delta: t("dashboard.kpi.opportunities") || "oportunidades reais",
+              delta: t("dashboard.kpi.active_delta") || "qualificadas nos últimos 7 dias",
               icon: Building2,
             }}
             satellites={kpiSatellites}
             onHero={() => setActiveTab("opportunities")}
           />
+
+          {activeTab === "overview" && dashboardSummary && (
+            <CoveragePanel
+              byCity={dashboardSummary.by_city ?? {}}
+              coverage={dashboardSummary.by_city_coverage}
+              withContactPct={dashboardSummary.with_contact_pct ?? 0}
+              activeZips={dashboardSummary.active_zips ?? 0}
+              tradesCount={Object.keys(dashboardSummary.by_category ?? {}).length}
+              finishedAt={publicMetrics?.last_scrape?.finished_at ?? null}
+            />
+          )}
 
 {/* FILTER BAR — inline em desktop, gaveta (sheet) em mobile */}
           <div className="hidden rounded-2xl border border-[var(--sd-border)] bg-[var(--sd-surface)] p-4 lg:block">

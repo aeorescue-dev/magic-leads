@@ -69,6 +69,23 @@ const SAMPLE_LEADS_BASE: Record<City, SampleLeadBase[]> = {
   ],
 };
 
+function parseServerTime(value?: string | null): number | null {
+  if (!value) return null;
+  const normalized = /Z$|[+-]\d{2}:?\d{2}$/.test(value) ? value : `${value}Z`;
+  const ms = Date.parse(normalized);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function formatAgo(ms: number | null, now: number): string {
+  if (ms === null) return "—";
+  const minutes = Math.max(0, Math.round((now - ms) / 60000));
+  if (minutes < 1) return "0 min";
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours}h ${rest}m` : `${hours}h`;
+}
+
 const SIGNAL_STYLE = [
   { color: "#f59e0b", bg: "#fff7ed", ring: "#fde68a" },
   { color: "#2563eb", bg: "#eff6ff", ring: "#bfdbfe" },
@@ -103,6 +120,7 @@ export default function LandingPage() {
   const [heroZipInput, setHeroZipInput] = useState("");
   const [heroZipError, setHeroZipError] = useState("");
   const [heroTotal, setHeroTotal] = useState(0);
+  const [nowTick, setNowTick] = useState(() => Date.now());
   const [reservedLeadId, setReservedLeadId] = useState<string | null>(null);
   const [timerSeconds, setTimerSeconds] = useState(3600);
   const [demoContact, setDemoContact] = useState<{ channel: string; phone: string } | null>(null);
@@ -125,6 +143,11 @@ export default function LandingPage() {
     return () => {
       mounted = false;
     };
+  }, []);
+
+  useEffect(() => {
+    const i = setInterval(() => setNowTick(Date.now()), 60000);
+    return () => clearInterval(i);
   }, []);
 
   useEffect(() => {
@@ -202,6 +225,15 @@ export default function LandingPage() {
   const withOwner = metrics?.leads_with_owner ?? 0;
   const citiesCount = metrics?.cities_count ?? CITIES.length;
   const newThisRun = metrics?.last_scrape?.novas_oportunidades ?? 0;
+  const new24 = metrics?.last_scrape?.captured_24h ?? 0;
+  const activeLeads = metrics?.active_leads ?? 0;
+  const activeOwners = metrics?.active_leads_with_owner ?? 0;
+  const activeOwnerPct = metrics?.active_owner_pct ?? 0;
+  const activeZips = metrics?.active_zips ?? 0;
+  const freshness = formatAgo(
+    parseServerTime(metrics?.last_scrape?.finished_at),
+    nowTick,
+  );
 
   const fmtTimer = (s: number) =>
     `${Math.floor(s / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;
@@ -272,15 +304,30 @@ export default function LandingPage() {
                 {t("landing.heroSub")}
               </p>
 
-              <div className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1">
-                <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#10b981] opacity-50" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-[#10b981]" />
-                </span>
-                <span className="text-[10px] font-black uppercase tracking-[0.08em] text-[#0a8f65]">{t("landing.p1Sub")}</span>
-                <span className="text-[11px] font-semibold text-[#64748b]">
-                  {heroTotal > 0 ? `${heroTotal.toLocaleString("en-US")} ${t("landing.p1Opportunities")}` : t("landing.p1Loading")}
-                </span>
+              <div className="mt-4 flex flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-2.5">
+                <div className="flex items-center gap-2">
+                  <span className="relative flex h-2 w-2">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#10b981] opacity-50" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-[#10b981]" />
+                  </span>
+                  <span className="text-[11px] font-bold text-[#0b1220]">
+                    {heroTotal > 0 ? `${heroTotal.toLocaleString("en-US")} ${t("landing.p1Opportunities")}` : t("landing.p1Loading")}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-4 text-[10px] sm:pl-0">
+                  <span className="hidden h-1 w-1 rounded-full bg-[#cbd5e1] sm:inline-block" />
+                  <span className="font-semibold text-[#64748b]">
+                    {t("landing.updatedAgo").replace("{time}", freshness)}
+                  </span>
+                  {new24 > 0 && (
+                    <>
+                      <span className="h-1 w-1 rounded-full bg-[#cbd5e1]" />
+                      <span className="font-bold text-[#0a8f65]">
+                        +{new24.toLocaleString("en-US")} {t("landing.statNew24")}
+                      </span>
+                    </>
+                  )}
+                </div>
               </div>
 
               <form onSubmit={submitHeroZip} className="mt-6 flex w-full max-w-xl items-center gap-2 rounded-2xl border border-[#e7e3d9] bg-white p-2 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.35)] transition focus-within:border-[#10b981]/60 focus-within:shadow-[0_24px_70px_-36px_rgba(16,185,129,0.35)]">
@@ -371,27 +418,82 @@ export default function LandingPage() {
       {/* GLOBAL AUTHORITY STRIP */}
       <section className="relative z-10 bg-[#f8f7f3] pb-4">
         <div className="mx-auto max-w-7xl px-4 sm:px-6">
-          <div className="-mt-6 grid gap-3 rounded-2xl border border-[#e8e4da] bg-white/90 p-3 shadow-[0_30px_80px_-45px_rgba(15,23,42,0.35)] backdrop-blur-xl sm:grid-cols-3 sm:divide-x sm:divide-[#eee9de] lg:-mt-20">
-            <div className="flex items-center justify-between px-4 py-3">
-              <div>
-                <p className="text-[9px] font-black uppercase tracking-[0.14em] text-[#94a3b8]">{t("landing.statBank")}</p>
-                <p className="mono-data mt-1 text-2xl font-black tabular-nums text-[#0b1220]">{hasMetrics ? `${leadsBank.toLocaleString("en-US")}+` : "—"}</p>
+          <div className="relative -mt-6 overflow-hidden rounded-[1.75rem] border border-[#e8e4da] bg-white/90 shadow-[0_30px_80px_-45px_rgba(15,23,42,0.35)] backdrop-blur-xl lg:-mt-20">
+            <div className="grid gap-1.5 p-2 sm:grid-cols-3">
+              <div className="group rounded-[1.35rem] px-5 py-4 transition-colors duration-300 hover:bg-[#fbfaf7]">
+                <div className="flex items-center justify-between">
+                  <p className="text-[9px] font-black uppercase tracking-[0.16em] text-[#94a3b8]">{t("landing.statActive")}</p>
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#10b981] shadow-[0_0_10px_#10b981]" />
+                </div>
+                <div className="mt-3 flex items-baseline gap-2">
+                  <p className="mono-data text-[2.15rem] font-black leading-none tracking-[-0.05em] text-[#0b1220] tabular-nums">
+                    {activeLeads > 0 ? activeLeads.toLocaleString("en-US") : "—"}
+                  </p>
+                  <span className="rounded-full border border-[#d9f3e8] bg-[#effbf5] px-2 py-0.5 text-[8px] font-black uppercase tracking-[0.08em] text-[#0a8f65]">
+                    {t("landing.statActiveUnit")}
+                  </span>
+                </div>
+                <p className="mt-2 text-[10.5px] font-semibold leading-relaxed text-[#64748b]">
+                  {hasMetrics ? leadsBank.toLocaleString("en-US") : "—"} {t("landing.statBase")}
+                  {new24 > 0 && (
+                    <>
+                      {" · "}
+                      <span className="text-[#0a8f65]">
+                        {new24.toLocaleString("en-US")} {t("landing.statNew24")}
+                      </span>
+                    </>
+                  )}
+                </p>
               </div>
-              <span className="h-2 w-2 rounded-full bg-[#10b981] shadow-[0_0_12px_#10b981]" />
+
+              <div className="group rounded-[1.35rem] px-5 py-4 transition-colors duration-300 hover:bg-[#fbfaf7]">
+                <div className="flex items-center justify-between">
+                  <p className="text-[9px] font-black uppercase tracking-[0.16em] text-[#94a3b8]">{t("landing.statOwnersActive")}</p>
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#a78bfa] shadow-[0_0_10px_#a78bfa]" />
+                </div>
+                <div className="mt-3 flex items-baseline gap-2">
+                  <p className="mono-data text-[2.15rem] font-black leading-none tracking-[-0.05em] text-[#0b1220] tabular-nums">
+                    {activeOwners > 0 ? activeOwners.toLocaleString("en-US") : "—"}
+                  </p>
+                  <span className="rounded-full border border-[#ede9fe] bg-[#f5f3ff] px-2 py-0.5 text-[8px] font-black uppercase tracking-[0.08em] text-[#6d28d9]">
+                    {activeOwnerPct}%
+                  </span>
+                </div>
+                <p className="mt-2 text-[10.5px] font-semibold leading-relaxed text-[#64748b]">
+                  {activeOwnerPct}% {t("landing.statOwnersUnit")}
+                  {" · "}
+                  {hasMetrics ? withOwner.toLocaleString("en-US") : "—"} {t("landing.statOwnersBase")}
+                </p>
+              </div>
+
+              <div className="group rounded-[1.35rem] px-5 py-4 transition-colors duration-300 hover:bg-[#fbfaf7]">
+                <div className="flex items-center justify-between">
+                  <p className="text-[9px] font-black uppercase tracking-[0.16em] text-[#94a3b8]">{t("landing.statCities")}</p>
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#10b981] shadow-[0_0_10px_#10b981]" />
+                </div>
+                <div className="mt-3 flex items-baseline gap-2">
+                  <p className="mono-data text-[2.15rem] font-black leading-none tracking-[-0.05em] text-[#0b1220] tabular-nums">
+                    {citiesCount}
+                  </p>
+                  <span className="rounded-full border border-[#e7e3d9] bg-[#f8f7f3] px-2 py-0.5 text-[8px] font-black normal-case tracking-[0.04em] text-[#64748b]">
+                    {activeZips > 0 ? `${activeZips} ZIPs` : "ZIPs"}
+                  </span>
+                </div>
+                <p className="mt-2 text-[10.5px] font-semibold leading-relaxed text-[#64748b]">
+                  {t("landing.statZips")}. {t("landing.statCitiesList")}
+                </p>
+              </div>
             </div>
-            <div className="flex items-center justify-between px-4 py-3">
-              <div>
-                <p className="text-[9px] font-black uppercase tracking-[0.14em] text-[#94a3b8]">{t("landing.statOwner")}</p>
-                <p className="mono-data mt-1 text-2xl font-black tabular-nums text-[#0b1220]">{hasMetrics ? `${withOwner.toLocaleString("en-US")}+` : "—"}</p>
-              </div>
-              <span className="h-2 w-2 rounded-full bg-[#a78bfa] shadow-[0_0_12px_#a78bfa]" />
-            </div>
-            <div className="flex items-center justify-between px-4 py-3">
-              <div>
-                <p className="text-[9px] font-black uppercase tracking-[0.14em] text-[#94a3b8]">{t("landing.statCities")}</p>
-                <p className="mono-data mt-1 text-2xl font-black tabular-nums text-[#0b1220]">{citiesCount}+</p>
-              </div>
-              <span className="h-2 w-2 rounded-full bg-[#10b981] shadow-[0_0_12px_#10b981]" />
+
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#eee9de] px-5 py-3">
+              <span className="inline-flex items-center gap-1.5 text-[9px] font-black uppercase tracking-[0.14em] text-[#94a3b8]">
+                <ShieldCheck className="h-3.5 w-3.5 text-[#10b981]" />
+                {t("landing.statVerified")}
+              </span>
+              <span className="inline-flex items-center gap-1.5 text-[9.5px] font-bold text-[#64748b]">
+                <Clock className="h-3.5 w-3.5 text-[#10b981]" />
+                {t("landing.updatedAgo").replace("{time}", freshness)}
+              </span>
             </div>
           </div>
         </div>
