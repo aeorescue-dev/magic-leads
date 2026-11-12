@@ -833,6 +833,7 @@ const ES: Dict = {
   "landing.coverageSub": "Si el propietario existe en los señales privadas de mercado, lo encontramos. Entregamos nombre + dirección verificada para contacto por carta o visita. Solo pagas la semana cuando hay un teléfono contactable.",
   "landing.coverageItems": "phone|Teléfono Verificado|Buscamos en bases premium. Si existe, usted lo recibe.|#10b981||building|Corporativo & Institucional|Grandes propietarios sin teléfono disponible? Entregamos nombre + dirección verificada para carta/visita.|#7c5cff||shield|Valor Protegido|Solo paga cuando recibe teléfono. Los leads sin teléfono son una reserva gratis.|#f59e0b",
   "landing.coverageTrust": "La única plataforma que no descarta leads por limitaciones de datos externos.",
+  "landing.coverageChip": "Owner verified",
   "landing.problemKicker": "La verdad que nadie te cuenta",
   "landing.problemTitle": "El problema nunca fue falta de obra. Fue",
   "landing.problemHl": "llegar tarde.",

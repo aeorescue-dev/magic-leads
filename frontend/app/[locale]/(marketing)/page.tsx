@@ -540,7 +540,7 @@ export default function LandingPage() {
               <p className="flex-1 text-xl font-bold leading-snug tracking-[-0.01em] text-white sm:text-2xl">
                 {t("landing.coverageTrust")}
               </p>
-              <span className="ai-chip shrink-0">Owner verified</span>
+              <span className="ai-chip shrink-0">{t("landing.coverageChip")}</span>
             </div>
           </div>
         </div>

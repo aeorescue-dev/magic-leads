@@ -834,6 +834,7 @@ const EN: Dict = {
   "landing.coverageSub": "If the owner exists in private market signals, we find them. We deliver name + verified address for mail or visit contact. You only pay for the week when there is a reachable phone.",
   "landing.coverageItems": "phone|Verified Phone|We search premium databases. If it exists, you get it.|#10b981||building|Corporate & Institutional|Large owners with no public phone? We deliver name + verified address for mail/visit.|#7c5cff||shield|Protected Value|You only pay when you receive a phone. Leads without a phone are a free reservation.|#f59e0b",
   "landing.coverageTrust": "The only platform that does not discard leads because of external data limitations.",
+  "landing.coverageChip": "Owner verified",
   "landing.problemKicker": "The truth nobody tells you",
   "landing.problemTitle": "The problem was never a lack of work. It was",
   "landing.problemHl": "showing up late.",
