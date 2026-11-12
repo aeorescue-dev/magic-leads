@@ -30,12 +30,14 @@ export default function LegalDocument({ kind }: { kind: LegalKind }) {
       <div className="mx-auto max-w-4xl px-4 sm:px-6">
         <Link
           href={`/${lang}`}
-          className="text-xs font-black uppercase tracking-[0.14em] text-[#0a8f65] transition hover:text-[#0b1220]"
+          className="inline-flex w-fit text-xs font-black uppercase tracking-[0.14em] text-[#0a8f65] transition hover:text-[#0b1220]"
         >
           ← {doc.back}
         </Link>
 
-        <span className="eyebrow eyebrow-light mt-8">{doc.label}</span>
+        <div className="mt-8">
+          <span className="eyebrow eyebrow-light">{doc.label}</span>
+        </div>
         <h1 className="font-display mt-5 text-[2.35rem] font-black leading-[0.98] tracking-[-0.03em] text-[#0b1220] sm:text-5xl">
           {doc.title}
         </h1>

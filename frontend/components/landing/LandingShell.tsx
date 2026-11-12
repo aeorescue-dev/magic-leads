@@ -227,8 +227,8 @@ export default function LandingShell({ children }: { children: React.ReactNode }
                 <Link href={localePath("/terms")} className="hover:text-white">{t("landing.footerTerms")}</Link>
                 <a href="mailto:contato@magicleads.app" className="hover:text-white">{t("landing.talk")}</a>
               </div>
-              <p className="max-w-4xl text-[11px] leading-relaxed text-[#64748b]">{t("landing.footerLegal")}</p>
-              <p className="max-w-4xl text-[11px] leading-relaxed text-[#64748b]">{t("landing.footerSms")}</p>
+              <p className="max-w-4xl text-xs leading-relaxed text-[#94a3b8]">{t("landing.footerLegal")}</p>
+              <p className="max-w-4xl text-xs leading-relaxed text-[#94a3b8]">{t("landing.footerSms")}</p>
               <div className="flex flex-col justify-between gap-3 text-xs text-[#475569] sm:flex-row">
                 <span>© {new Date().getFullYear()} Magic Leads. {t("landing.rights")}</span>
                 <span>{t("landing.vary")}</span>
