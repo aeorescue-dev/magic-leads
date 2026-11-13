@@ -71,6 +71,22 @@ const TAG_KEYS: Record<string, string> = {
   deadline_soon: "dashboard.preinspection.deadline_soon",
 };
 
+const OWNER_TYPE_KEYS: Record<string, string> = {
+  company: "dashboard.preinspection.owner_company",
+  individual: "dashboard.preinspection.owner_individual",
+  institutional: "dashboard.preinspection.owner_institutional",
+  unknown: "dashboard.preinspection.owner_unknown",
+};
+
+export function ownerTypeLabel(
+  t: (key: string, values?: Record<string, string | number>) => string,
+  value?: string | null,
+): string {
+  if (!value) return "—";
+  const key = OWNER_TYPE_KEYS[String(value).trim().toLowerCase()];
+  return key ? t(key) : value;
+}
+
 export function tagLabel(
   t: (key: string, values?: Record<string, string | number>) => string,
   tag: string,

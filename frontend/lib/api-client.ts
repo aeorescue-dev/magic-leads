@@ -114,6 +114,13 @@ export interface LeadResponse {
   resolution_action_updated_date?: string;
   // Owner mailing address
   mailing_address?: string;
+  // Managing Agent (HPD), já limpo no backend e só após reveal.
+  managing_agent?: {
+    name?: string;
+    contact_type?: string;
+    contact_description?: string;
+    business_address?: string;
+  } | null;
   // Regra A resolvida no backend (backend/services/lead_rules.py). Lidos
   // diretamente pela UI, sem recalcular: a regra só existe num sítio.
   corporate?: boolean;

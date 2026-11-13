@@ -396,6 +396,7 @@ CREATE TABLE IF NOT EXISTS leads (
   converted_at TEXT,
   revealed_at TEXT,
   refund_blocked INTEGER DEFAULT 0,
+  managing_agent_json TEXT,
   -- Fase 22: qualificação materializada. O feed avaliava 20 LIKEs sobre 5
   -- colunas em cada linha (13 mil por pedido); estas colunas são calculadas
   -- na escrita e lidas como índice.
@@ -1769,6 +1770,8 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         )
     if "refund_blocked" not in cols:
         conn.execute("ALTER TABLE leads ADD COLUMN refund_blocked INTEGER DEFAULT 0")
+    if "managing_agent_json" not in cols:
+        conn.execute("ALTER TABLE leads ADD COLUMN managing_agent_json TEXT")
     extra_cols = {
         "address_unit": "TEXT",
         "address_type": "TEXT",
@@ -5554,6 +5557,20 @@ class DatabaseService:
             cur = conn.execute(
                 "UPDATE leads SET mailing_address = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (mailing_address, lead_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def update_managing_agent(self, lead_id: int, agent: Optional[dict]) -> bool:
+        """Grava o Managing Agent do HPD (JSON), sem tocar em `owner_name`."""
+        payload = json.dumps(agent, ensure_ascii=False) if agent else None
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE leads SET managing_agent_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (payload, lead_id),
             )
             conn.commit()
             return cur.rowcount > 0
@@ -12766,6 +12783,9 @@ class AsyncDatabaseService:
 
     async def update_mailing_address(self, lead_id: int, mailing_address: Optional[str]) -> bool:
         return await anyio.to_thread.run_sync(self._service.update_mailing_address, lead_id, mailing_address)
+
+    async def update_managing_agent(self, lead_id: int, agent: Optional[dict]) -> bool:
+        return await anyio.to_thread.run_sync(self._service.update_managing_agent, lead_id, agent)
 
     async def add_note(self, lead_id: int, note: str, user_id: Optional[int] = None) -> Optional[dict]:
         return await anyio.to_thread.run_sync(self._service.add_note, lead_id, note, user_id)

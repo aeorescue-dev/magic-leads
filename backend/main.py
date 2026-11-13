@@ -198,6 +198,17 @@ PHONE_STATS_TTL_S = 600
 _phone_stats_cache: dict[tuple[str, str], tuple[float, dict]] = {}
 
 
+async def _persist_managing_agent(lead_id: int, enrich_result: dict | None) -> None:
+    """Persiste o Managing Agent do HPD quando o enriquecimento o devolve."""
+    agent = (enrich_result or {}).get("managing_agent") if enrich_result else None
+    if not agent:
+        return
+    try:
+        await db_service.update_managing_agent(lead_id, agent)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Managing agent: falha a gravar lead %s: %s", lead_id, exc)
+
+
 def _phone_confidence_stats(city, owner_class) -> dict:
     """Percentagem real de sucesso do telefone, com >=30 amostras (P2).
 
@@ -360,6 +371,8 @@ def _to_lead_response(lead: dict) -> LeadResponse:
         resolution_action_updated_date=lead.get("resolution_action_updated_date"),
         # Owner mailing address (protegido até o reveal)
         mailing_address=lead.get("mailing_address") if show_owner else None,
+        # Managing Agent (HPD) só depois do reveal, tal como o resto do dono.
+        managing_agent=safe.get("managing_agent") if show_owner else None,
         # Visibility fields
         visibility_status=visibility_status,
         reserved_by_me=reserved_by_me,
@@ -4709,6 +4722,7 @@ async def _dlq_reprocess(run_id: str) -> int:
                         owner_name_val = (enrich_result or {}).get("owner_name")
                         if owner_name_val:
                             await db_service.update_owner(new_lead["id"], owner_name_val)
+                            await _persist_managing_agent(new_lead["id"], enrich_result)
                     except Exception:
                         pass
             if inserted > 0:
@@ -5937,6 +5951,7 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                     owner_name_val = (enrich_result or {}).get("owner_name")
                     if owner_name_val:
                         await db_service.update_owner(new_lead["id"], owner_name_val)
+                        await _persist_managing_agent(new_lead["id"], enrich_result)
                 except Exception as e:
                     logger.warning(
                         f"[INGEST] Falha ao enriquecer owner do lead {new_lead.get('id')} "
@@ -6987,6 +7002,7 @@ async def enrich_leads(
             if enrich_result and enrich_result.get("owner_name"):
                 await db_service.update_owner(row["id"], enrich_result["owner_name"])
                 found += 1
+            await _persist_managing_agent(row["id"], enrich_result)
             updated += 1
             await asyncio.sleep(0.15)  # throttling Socrata API
 
@@ -7313,6 +7329,7 @@ async def enrich_single_lead(
         owner_name = owner.get("owner_name") if owner else None
         if owner_name:
             await db_service.update_owner(lead_id, owner_name)
+        await _persist_managing_agent(lead_id, owner)
         return {"lead_id": lead_id, "owner_name": owner_name}
     except HTTPException:
         raise
@@ -8869,6 +8886,7 @@ async def reserve_lead(
                     if not mailing_address and enrich_result.get("mailing_address"):
                         mailing_address = enrich_result["mailing_address"]
                         await db_service.update_mailing_address(lead_id, mailing_address)
+                    await _persist_managing_agent(lead_id, enrich_result)
 
                 # Busca de telefone (Searchbug em prod, mock em dev)
                 if not owner_phone:
@@ -9196,6 +9214,7 @@ async def reveal_phone_endpoint(
                 if not owner_name and enrich_result.get("owner_name"):
                     owner_name = enrich_result["owner_name"]
                     await db_service.update_owner(lead_id, owner_name)
+                await _persist_managing_agent(lead_id, enrich_result)
                 if owner_name:
                     phone_result = await searchbug_service.lookup_phone(
                         pre_lead.get("address", ""),

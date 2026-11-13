@@ -17,6 +17,7 @@ Principios:
 """
 from __future__ import annotations
 
+import json
 import re
 from typing import Optional
 
@@ -82,6 +83,32 @@ _TEXT_FIELDS = (
     "case_status",
 )
 
+# Managing Agent do HPD: só estes campos vão para o cliente. O
+# `registration_id` fica interno.
+_AGENT_TEXT_FIELDS = ("name", "contact_type", "contact_description", "business_address")
+
+
+def public_managing_agent(raw) -> Optional[dict]:
+    """Normaliza/limpa o Managing Agent antes de chegar ao cliente."""
+    if not raw:
+        return None
+    data = raw
+    if isinstance(raw, str):
+        try:
+            data = json.loads(raw)
+        except (TypeError, ValueError):
+            return None
+    if not isinstance(data, dict):
+        return None
+    out: dict = {}
+    for field in _AGENT_TEXT_FIELDS:
+        value = data.get(field)
+        if value:
+            cleaned = scrub(str(value))
+            if cleaned:
+                out[field] = cleaned
+    return out or None
+
 
 def scrub(text: Optional[str]) -> Optional[str]:
     """Remove termos proibidos de um texto, preservando o resto do sentido."""
@@ -116,6 +143,11 @@ def sanitize_lead(lead: dict) -> dict:
         out["external_id"] = scrub(out.get("external_id"))
     if "source_type" in out:
         out["source_type"] = neutral_source_type(out.get("source_type"))
+    # Managing Agent (HPD): o JSON bruto não sai; expõe-se uma versão limpa.
+    if "managing_agent_json" in out:
+        out["managing_agent"] = public_managing_agent(out.pop("managing_agent_json"))
+    elif out.get("managing_agent"):
+        out["managing_agent"] = public_managing_agent(out.get("managing_agent"))
     # `neighborhood`/`ward`/`precinct` sao geografia real, nao fonte: mantem-se.
     return out
 

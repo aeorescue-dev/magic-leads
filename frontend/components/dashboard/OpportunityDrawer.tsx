@@ -9,6 +9,7 @@ import {
   categoryLabelKey,
   deadlineLabel,
   inspectionStatusLabel,
+  ownerTypeLabel,
   severityColor,
   severityKey,
   sourceLabel,
@@ -204,7 +205,10 @@ export function OpportunityDrawer({
             <Fact label={t("dashboard.preinspection.received")} value={opportunity.received_at ? opportunity.received_at.slice(0, 10) : "—"} />
             <Fact label={t("dashboard.preinspection.status")} value={statusLabel} />
             <Fact label={t("dashboard.preinspection.value")} value={money(opportunity.job_value)} />
-            <Fact label={t("dashboard.preinspection.owner_type")} value={opportunity.owner_type || "—"} />
+            <Fact
+              label={t("dashboard.preinspection.owner_type")}
+              value={ownerTypeLabel(t, opportunity.owner_type)}
+            />
           </section>
 
           <section className="mt-5">
@@ -235,7 +239,9 @@ export function OpportunityDrawer({
               <div className="min-w-0">
                 <p className="truncate text-xs font-bold text-[var(--sd-text)]">{opportunity.owner_name || "—"}</p>
                 <p className="text-[10px] text-[var(--sd-muted)]">
-                  {opportunity.owner_type || t("dashboard.preinspection.owner")}
+                  {ownerTypeLabel(t, opportunity.owner_type) !== "—"
+                    ? ownerTypeLabel(t, opportunity.owner_type)
+                    : t("dashboard.preinspection.owner")}
                 </p>
               </div>
             </div>

@@ -156,7 +156,7 @@ RICH_CONTEXT = {
     "staging-preventive-heat-1": {
         "description": "Sem aquecimento e água quente em todo o edifício desde a madrugada.",
         "owner_name": "Hamilton Heights Holdings",
-        "owner_type": "Empresa",
+        "owner_type": "company",
         "inspection_status": "possible",
         "received_at": "2026-11-12T08:10:00",
         "compliance_deadline": "2026-11-15",
@@ -165,7 +165,7 @@ RICH_CONTEXT = {
     "staging-preventive-mold-1": {
         "description": "Infiltração no teto do banheiro com mofo visível e odor forte.",
         "owner_name": "E 21st Realty",
-        "owner_type": "Empresa",
+        "owner_type": "company",
         "inspection_status": "possible",
         "received_at": "2026-11-12T07:40:00",
         "compliance_deadline": "2026-11-17",
@@ -174,7 +174,7 @@ RICH_CONTEXT = {
     "staging-preventive-plumbing-1": {
         "description": "Vazamento recorrente na coluna de água do banheiro; vizinho reportou.",
         "owner_name": "W 60th Property Group",
-        "owner_type": "Empresa",
+        "owner_type": "company",
         "inspection_status": "possible",
         "received_at": "2026-11-11T16:20:00",
         "compliance_deadline": "2026-11-19",
@@ -183,7 +183,7 @@ RICH_CONTEXT = {
     "staging-preventive-structure-1": {
         "description": "Fachada e calçada em mau estado; risco de notificação de conservação.",
         "owner_name": "Lakewood Holdings",
-        "owner_type": "Empresa",
+        "owner_type": "company",
         "inspection_status": "possible",
         "received_at": "2026-11-10T11:05:00",
         "compliance_deadline": "2026-11-25",
@@ -192,7 +192,7 @@ RICH_CONTEXT = {
     "staging-preventive-unsanitary-1": {
         "description": "Acúmulo de lixo e infiltração na área comum do edifício.",
         "owner_name": "South Boston Partners",
-        "owner_type": "Empresa",
+        "owner_type": "company",
         "inspection_status": "possible",
         "received_at": "2026-11-09T09:30:00",
         "compliance_deadline": "2026-11-16",
@@ -201,7 +201,7 @@ RICH_CONTEXT = {
     "staging-preventive-electric-1": {
         "description": "Fiação exposta e falta de energia em duas unidades do 2.º andar.",
         "owner_name": "Fordham 188 LLC",
-        "owner_type": "Empresa",
+        "owner_type": "company",
         "inspection_status": "possible",
         "received_at": "2026-11-12T06:15:00",
         "compliance_deadline": "2026-11-14",
@@ -210,7 +210,7 @@ RICH_CONTEXT = {
     "staging-preventive-roof-1": {
         "description": "Telhas soltas e infiltração ativa no teto do último andar.",
         "owner_name": "Fordham 188 LLC",
-        "owner_type": "Empresa",
+        "owner_type": "company",
         "inspection_status": "possible",
         "received_at": "2026-11-08T10:20:00",
         "compliance_deadline": "2026-11-18",
@@ -219,7 +219,7 @@ RICH_CONTEXT = {
     "staging-preventive-paint-1": {
         "description": "Pintura exterior a descascar com risco de auto de conservação.",
         "owner_name": "Hamilton Heights Holdings",
-        "owner_type": "Empresa",
+        "owner_type": "company",
         "inspection_status": "possible",
         "received_at": "2026-11-07T14:10:00",
         "compliance_deadline": "2026-11-22",
@@ -228,7 +228,7 @@ RICH_CONTEXT = {
     "staging-preventive-rodent-1": {
         "description": "Infestação de roedores em duas unidades; vistoria pedida com urgência.",
         "owner_name": "Fordham 188 LLC",
-        "owner_type": "Empresa",
+        "owner_type": "company",
         "inspection_status": "possible",
         "received_at": "2026-11-12T09:05:00",
         "compliance_deadline": "2026-11-15",
@@ -237,7 +237,7 @@ RICH_CONTEXT = {
     "staging-preventive-gas-1": {
         "description": "Cheiro de gás na cave; abastecimento cortado preventivamente.",
         "owner_name": "W 60th Property Group",
-        "owner_type": "Empresa",
+        "owner_type": "company",
         "inspection_status": "possible",
         "received_at": "2026-11-13T07:25:00",
         "compliance_deadline": "2026-11-14",
@@ -246,7 +246,7 @@ RICH_CONTEXT = {
     "staging-preventive-door-1": {
         "description": "Janela partida na fachada traseira; sem risco imediato.",
         "owner_name": "E 21st Realty",
-        "owner_type": "Empresa",
+        "owner_type": "company",
         "inspection_status": "possible",
         "received_at": "2026-11-06T12:00:00",
         "compliance_deadline": None,
@@ -255,7 +255,7 @@ RICH_CONTEXT = {
     "staging-preventive-debris-1": {
         "description": "Entulho de obra acumulado no passeio há mais de uma semana.",
         "owner_name": "South Boston Partners",
-        "owner_type": "Empresa",
+        "owner_type": "company",
         "inspection_status": "possible",
         "received_at": "2026-11-05T08:45:00",
         "compliance_deadline": "2026-11-23",

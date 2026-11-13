@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.main import _hash_token, _opportunity_error, app
+from backend.main import _hash_token, _opportunity_error, _to_lead_response, app
 from backend.models.schemas import (
     EnrichedLead,
     IssueCategory,
@@ -20,6 +20,8 @@ from backend.services.opportunity_workflow import (
     make_property_key,
     opportunity_workflow,
 )
+from backend.services.preventive_ingestion import preventive_ingestion
+from backend.services.privacy import sanitize_lead
 
 
 def _user(email: str):
@@ -246,3 +248,98 @@ async def test_hpd_agent_prefers_agent_over_corporate_owner(monkeypatch):
     assert agent["name"] == "SABREEN SPEARS"
     assert agent["contact_type"] == "Agent"
     assert agent["source"] == "hpd_registration_contacts"
+
+
+def test_managing_agent_is_persisted_and_sanitized_for_client():
+    lead = EnrichedLead(
+        external_id="pytest-managing-agent-lead",
+        source_type=SourceType.HPD_VIOLATION,
+        address="9 EAST 38TH STREET",
+        city="NYC",
+        state="NY",
+        zip_code="10016",
+        lat=None,
+        lng=None,
+        county="NEW YORK",
+        issue_category=IssueCategory.HEATING,
+        issue_description="Sem aquecimento",
+        urgency_level=UrgencyLevel.HIGH,
+        owner_name="RUPPERT HOUSING CO INC",
+        owner_phone=None,
+        owner_email=None,
+        date_reported=datetime(2026, 11, 12, 12, 0, 0),
+        image_url=None,
+        source_url=None,
+    )
+    row = db_service._service.insert_lead_new(lead)
+    assert row is not None
+
+    agent = {
+        "name": "SABREEN SPEARS",
+        "contact_type": "Agent",
+        "contact_description": "Agent for the building",
+        "business_address": "9 EAST 38TH STREET, NEW YORK, NY 10016",
+        "registration_id": "139143",
+        "source": "hpd_registration_contacts",
+    }
+    assert db_service._service.update_managing_agent(row["id"], agent) is True
+
+    stored = db_service._service.get_lead_by_id(row["id"])
+    assert "SABREEN SPEARS" in (stored.get("managing_agent_json") or "")
+
+    safe = sanitize_lead(stored)
+    assert safe["managing_agent"]["name"] == "SABREEN SPEARS"
+    assert safe["managing_agent"]["business_address"].startswith("9 EAST 38TH STREET")
+    # Identificadores internos da fonte nao saem para o cliente.
+    assert "registration_id" not in safe["managing_agent"]
+    assert "source" not in safe["managing_agent"]
+    assert "managing_agent_json" not in safe
+
+    hidden = _to_lead_response({**stored, "_revealed": False})
+    assert hidden.managing_agent is None, "sem reveal o agente nao pode sair"
+    shown = _to_lead_response({**stored, "_revealed": True})
+    assert shown.managing_agent is not None
+    assert shown.managing_agent["name"] == "SABREEN SPEARS"
+
+
+def test_preventive_ingestion_maps_lead_and_dedupes_by_property():
+    lead = EnrichedLead(
+        external_id="pytest-ingest-preventive-1",
+        source_type=SourceType.SERVICE_311,
+        address="77 INGEST STREET",
+        city="NYC",
+        state="NY",
+        zip_code="10002",
+        lat=None,
+        lng=None,
+        county="NEW YORK",
+        issue_category=IssueCategory.PLUMBING,
+        issue_description="Vazamento no encanamento do predio",
+        urgency_level=UrgencyLevel.HIGH,
+        owner_name="INGEST HOLDINGS LLC",
+        owner_phone=None,
+        owner_email=None,
+        date_reported=datetime(2026, 11, 10, 9, 0, 0),
+        image_url=None,
+        source_url=None,
+        sla_target_dt="2026-11-15",
+    )
+    row = db_service._service.insert_lead_new(lead)
+    assert row is not None
+
+    result = preventive_ingestion.ingest_lead(row)
+    assert result["status"] == "ingested"
+
+    opp = opportunity_workflow.get(result["id"])
+    assert opp["source_kind"] == "preventive"
+    assert opp["source_record_id"] == f"lead-{row['id']}"
+    assert opp["description"] == "Vazamento no encanamento do predio"
+    assert opp["owner_name"] == "INGEST HOLDINGS LLC"
+    assert opp["owner_type"] == "company"
+    assert opp["inspection_status"] == "possible"
+    assert "owner_identified" in opp["tags"]
+    assert opp["timeline"][0]["key"] == "complaint"
+    assert opp["timeline"][0]["date"] == "2026-11-10"
+
+    again = preventive_ingestion.ingest_lead(row)
+    assert again["status"] == "skipped_duplicate"

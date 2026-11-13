@@ -3361,6 +3361,24 @@ function DashboardPageInner() {
                     <span className="font-semibold">📬 {selectedLead.mailing_address}</span>
                   </div>
                 )}
+                {selectedLead.managing_agent?.name && (
+                  <div className="sm:col-span-2 rounded-lg border border-[var(--sd-border)] bg-[var(--sd-surface-2)] p-2.5">
+                    <span className="text-xs text-slate-400 block">
+                      {t("dashboard.field.managing_agent")}
+                    </span>
+                    <span className="font-semibold">{selectedLead.managing_agent.name}</span>
+                    {selectedLead.managing_agent.contact_description && (
+                      <span className="ml-2 text-[11px] text-slate-400">
+                        {selectedLead.managing_agent.contact_description}
+                      </span>
+                    )}
+                    {selectedLead.managing_agent.business_address && (
+                      <div className="mt-0.5 text-[11px] text-slate-400">
+                        {selectedLead.managing_agent.business_address}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Action Contact Links */}

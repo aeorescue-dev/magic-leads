@@ -211,6 +211,9 @@ class LeadResponse(BaseModel):
     # Owner mailing address
     mailing_address: Optional[str] = None
 
+    # Managing Agent (HPD) já limpo pelo privacy.sanitize_lead.
+    managing_agent: Optional[dict] = None
+
     # Visibility fields (Phase 4.2)
     visibility_status: Optional[str] = None  # "available" | "reserved_by_me" | "reserved_by_other"
     reserved_by_me: Optional[dict] = None  # {created_at, expires_at, hours_remaining}
