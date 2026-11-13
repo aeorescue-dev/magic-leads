@@ -33,7 +33,7 @@ import {
 import { buildOutreachMessage } from "@/lib/outreach";
 import { buildFullAddress } from "@/lib/address";
 import { toggleInterestKey } from "@/lib/interests";
-import { needsOnboarding } from "@/lib/categories";
+import { needsOnboarding, TRADE_CATEGORIES } from "@/lib/categories";
 import CheckoutModal from "@/components/CheckoutModal";
 import ReleaseModal from "@/components/ReleaseModal";
 import WelcomePopup from "@/components/WelcomePopup";
@@ -1091,6 +1091,26 @@ function DashboardPageInner() {
     setReleaseTarget(null);
   };
   const openOpportunityReveal = (opp: Opportunity) => {
+    const categoryKey = TRADE_CATEGORIES.find((c) => c.key === opp.category)?.labelKey;
+    const categoryLabel = categoryKey ? t(categoryKey) : opp.category || opp.address;
+    const severityKey = {
+      critical: "dashboard.severity.critical",
+      high: "dashboard.severity.high",
+      medium: "dashboard.severity.medium",
+      routine: "dashboard.severity.routine",
+      emergency: "dashboard.severity.emergency",
+      immediate: "dashboard.severity.immediate",
+      class_1: "dashboard.severity.class_1",
+      class_2: "dashboard.severity.class_2",
+      class_3: "dashboard.severity.class_3",
+      class_a: "dashboard.severity.class_a",
+      class_b: "dashboard.severity.class_b",
+      class_c: "dashboard.severity.class_c",
+    }[String(opp.severity || "").toLowerCase()] || "dashboard.severity.medium";
+    const statusLabel =
+      opp.status === "reserved" || opp.status === "contacted" || opp.status === "in_negotiation"
+        ? t("dashboard.status.selected")
+        : t("dashboard.status.awaiting_inspection");
     const target = {
       id: String(opp.id),
       external_id: opp.source_record_id,
@@ -1098,8 +1118,8 @@ function DashboardPageInner() {
       city: opp.city,
       state: opp.state,
       zip_code: opp.zip_code ?? null,
-      issue_category: opp.category || "Structure",
-      issue_description: opp.category || opp.address,
+      issue_category: categoryLabel,
+      issue_description: categoryLabel,
       urgency_level: opp.severity || "medium",
       owner_name: null,
       owner_phone: null,
@@ -1110,9 +1130,9 @@ function DashboardPageInner() {
       source_url: null,
       signal_type: opp.signal_type || "open_request",
       signal_status: opp.status,
-      case_status: opp.status,
-      descriptor: opp.severity,
-      case_title: opp.category,
+      case_status: statusLabel,
+      descriptor: t(severityKey),
+      case_title: categoryLabel,
       sla_target_dt: opp.compliance_deadline,
       bbl: opp.bbl ?? null,
       status: "new",

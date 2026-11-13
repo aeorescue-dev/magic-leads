@@ -23,6 +23,11 @@ if "garimpador-leads" in str(Path(os.environ["LEADS_DB_PATH"]).resolve()):
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from backend.services.opportunity_workflow import opportunity_workflow  # noqa: E402
+from backend.services import security  # noqa: E402
+from backend.services.db import db_service  # noqa: E402
+
+STAGING_EMAIL = os.getenv("STAGING_USER_EMAIL", "staging@magicleads.app")
+STAGING_PASSWORD = os.getenv("STAGING_USER_PASSWORD", "Staging123!")
 
 SAMPLES = [
     {
@@ -88,6 +93,28 @@ SAMPLES = [
 
 def main() -> None:
     print(f"Seeding {len(SAMPLES)} opportunities into {os.environ['LEADS_DB_PATH']}")
+    svc = db_service._service
+    user = svc.get_user_by_email(STAGING_EMAIL.lower())
+    if user is None:
+        user = svc.create_user(
+            STAGING_EMAIL.lower(),
+            security.hash_password(STAGING_PASSWORD),
+            "Staging Contractor",
+            plan="pro",
+            subscription_status="active",
+        )
+    if user:
+        svc.extend_access(user["id"], days=30)
+        svc.set_user_interests(
+            user["id"],
+            [
+                "Roof", "Structure", "Plumbing", "Grass", "Paint",
+                "Permit_Rejected", "Heating", "Electrical", "Elevator",
+                "Gas", "Rodent", "Mold", "Lead", "Unsanitary",
+                "Door_Window", "Debris",
+            ],
+        )
+        print(f"Staging login: {STAGING_EMAIL} / {STAGING_PASSWORD}")
     for sample in SAMPLES:
         row = opportunity_workflow.create_opportunity(
             source_kind="preventive",

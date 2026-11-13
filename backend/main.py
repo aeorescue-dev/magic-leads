@@ -9428,8 +9428,8 @@ async def reserve_opportunity(
         "id": opp.get("id"),
         "status": opp.get("status"),
         "stage": opp.get("status"),
-        "expires_at": opp.get("reserved_until"),
-        "stage_expires_at": opp.get("stage_expires_at"),
+        "expires_at": _to_iso_utc(opp.get("reserved_until")),
+        "stage_expires_at": _to_iso_utc(opp.get("stage_expires_at")),
         "counted_again": result.get("counted_again", True),
         "idempotent": result.get("idempotent", False),
         "quota": result.get("quota"),
@@ -9451,7 +9451,7 @@ async def contact_opportunity(
         "status": "ok",
         "channel": payload.channel,
         "stage": (result.get("opportunity") or {}).get("status"),
-        "stage_expires_at": (result.get("opportunity") or {}).get("stage_expires_at"),
+        "stage_expires_at": _to_iso_utc((result.get("opportunity") or {}).get("stage_expires_at")),
         "renewed": result.get("renewed", False),
     }
 
@@ -9467,7 +9467,7 @@ async def negotiate_opportunity(
     return {
         "status": "ok",
         "stage": (result.get("opportunity") or {}).get("status"),
-        "stage_expires_at": (result.get("opportunity") or {}).get("stage_expires_at"),
+        "stage_expires_at": _to_iso_utc((result.get("opportunity") or {}).get("stage_expires_at")),
         "renewed": result.get("renewed", False),
     }
 
