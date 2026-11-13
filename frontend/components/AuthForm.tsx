@@ -96,7 +96,7 @@ function AuthFormInner({ preselectedTrade }: { preselectedTrade?: string }) {
     : reason === 'session_expired' || searchParams.get('session_expired') === '1'
       ? 'session_expired'
       : null;
-  const { lang, setLang, t } = useI18n();
+  const { lang, t } = useI18n();
   const { signIn, loading: authLoading, updateUser, refreshSubscription } = useAuth();
   const startCheckout = useStartCheckout();
   const rawNext = searchParams.get('next');
@@ -106,11 +106,10 @@ function AuthFormInner({ preselectedTrade }: { preselectedTrade?: string }) {
       : null;
   const checkoutIntent = searchParams.get('checkout') === '1';
 
-  const destinationLocale = (u: { locale?: string } | null | undefined) => {
-    const next = normalizeLocale(u?.locale) || lang;
-    setLang(next);
-    return next;
-  };
+  // O locale da URL é a autoridade pós-login: quem entra em /pt/auth vai para
+  // /pt/dashboard, mesmo que o perfil ainda esteja noutro idioma. `next` (deep
+  // link) continua a vencer quando é um caminho interno seguro.
+  const postLoginDestination = () => nextPath || `/${lang}/dashboard`;
 
   // Mensagem direta sem depender de t() — evita chave crua mesmo se i18n falhar.
   const sessionMessage = sessionReason === 'fifo_evicted'
@@ -159,7 +158,7 @@ function AuthFormInner({ preselectedTrade }: { preselectedTrade?: string }) {
       setAuthCookie();
       updateUser(out.user);
       await refreshSubscription();
-      const destination = nextPath || (out.user.is_admin ? '/admin/lp-inbox' : `/${destinationLocale(out.user)}/dashboard`);
+      const destination = postLoginDestination();
       router.push(destination);
       router.refresh();
     } catch (e) {
@@ -214,7 +213,7 @@ function AuthFormInner({ preselectedTrade }: { preselectedTrade?: string }) {
     setErrors({});
 
     try {
-      const user = await signIn(email.trim(), password, isRegister ? companyName.trim() : undefined, lang);
+      await signIn(email.trim(), password, isRegister ? companyName.trim() : undefined, lang);
       if (isRegister) {
         // Cadastro concluído: o acesso só é liberado após o pagamento.
         // Cria a sessão do Stripe Checkout e redireciona imediatamente.
@@ -258,7 +257,7 @@ function AuthFormInner({ preselectedTrade }: { preselectedTrade?: string }) {
         }
       } else {
         setSuccess(true);
-        const destination = nextPath || (user.is_admin ? '/admin/lp-inbox' : `/${destinationLocale(user)}/dashboard`);
+        const destination = postLoginDestination();
         setTimeout(() => {
           router.push(destination);
           router.refresh();
