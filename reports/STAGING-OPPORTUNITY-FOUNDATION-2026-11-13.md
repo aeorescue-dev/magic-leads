@@ -46,6 +46,7 @@ Regras implementadas:
 - reserva **60 min** e consumo atómico de 1 unidade da cota;
 - “Ligou” → `contacted` + **48 h**;
 - “Negociando” → `in_negotiation` + **48 h**;
+- só avança quem tem reserva ativa (não se abre 48 h num lead `available`);
 - re-clique não estica prazo;
 - conversão terminal e libertação da trava;
 - bloqueio `property_locked` quando outro ciclo ativo detém o imóvel;
@@ -93,7 +94,7 @@ Integração:
 
 | Verificação | Resultado |
 |---|---|
-| `pytest tests/ -q` | **1673 passed, 1 skipped** |
+| `pytest tests/ -q` | **1674 passed, 1 skipped** |
 | `ruff check backend tests --select=E,F,W,I --ignore=E501` | **All checks passed** |
 | `npx tsc --noEmit` | **Sem erros** |
 | `npm run lint` | **0 erros**, 97 warnings pré-existentes |
