@@ -84,6 +84,7 @@ import {
 } from "@/lib/api-client";
 import { apiErrorKey } from "@/lib/api-errors";
 import { severityBucket, deadlineDaysLeft } from "@/lib/opportunity-format";
+import { requestOpportunitiesRefresh } from "@/lib/opportunity-events";
 
 // Tipo enriquecido para o modal de revelação (com histórico e ocorrências)
 type EnrichedLead = LeadResponse & {
@@ -1317,6 +1318,7 @@ function DashboardPageInner() {
       refreshHistory();
       if (isOpportunity) {
         mutatePreventiveInsights("/api/opportunities/insights?kind=preventive");
+        requestOpportunitiesRefresh();
       }
     } catch (e: any) {
       // Handle already-reserved case gracefully
@@ -1394,6 +1396,7 @@ function DashboardPageInner() {
             }
           : prev
       );
+      requestOpportunitiesRefresh();
     } catch (e: any) {
       const codeKey = apiErrorKey(e?.message || e?.error);
       showToast(codeKey ? t(codeKey) : t("dashboard.opportunity.not_found"), "error");

@@ -22,16 +22,17 @@ if "garimpador-leads" in str(Path(os.environ["LEADS_DB_PATH"]).resolve()):
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from backend.services.opportunity_workflow import opportunity_workflow  # noqa: E402
-from backend.services import security  # noqa: E402
-from backend.services.db import db_service  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
+
 from backend.models.schemas import (  # noqa: E402
     EnrichedLead,
     IssueCategory,
     SourceType,
     UrgencyLevel,
 )
-from datetime import datetime, timedelta, timezone  # noqa: E402
+from backend.services import security  # noqa: E402
+from backend.services.db import db_service  # noqa: E402
+from backend.services.opportunity_workflow import opportunity_workflow  # noqa: E402
 
 STAGING_EMAIL = os.getenv("STAGING_USER_EMAIL", "staging@magicleads.app")
 STAGING_PASSWORD = os.getenv("STAGING_USER_PASSWORD", "Staging123!")
@@ -262,8 +263,51 @@ RICH_CONTEXT = {
         "job_value": 4800,
     },
 }
+_RECEIVED_DAYS_AGO = {
+    "staging-preventive-heat-1": 1,
+    "staging-preventive-mold-1": 1,
+    "staging-preventive-plumbing-1": 2,
+    "staging-preventive-structure-1": 3,
+    "staging-preventive-unsanitary-1": 4,
+    "staging-preventive-electric-1": 1,
+    "staging-preventive-roof-1": 5,
+    "staging-preventive-paint-1": 6,
+    "staging-preventive-rodent-1": 1,
+    "staging-preventive-gas-1": 0,
+    "staging-preventive-door-1": 7,
+    "staging-preventive-debris-1": 8,
+}
+_DEADLINE_IN_DAYS = {
+    "staging-preventive-heat-1": 2,
+    "staging-preventive-mold-1": 4,
+    "staging-preventive-plumbing-1": 6,
+    "staging-preventive-structure-1": 12,
+    "staging-preventive-unsanitary-1": 3,
+    "staging-preventive-electric-1": 1,
+    "staging-preventive-roof-1": 5,
+    "staging-preventive-paint-1": 9,
+    "staging-preventive-rodent-1": 2,
+    "staging-preventive-gas-1": 1,
+    "staging-preventive-door-1": None,
+    "staging-preventive-debris-1": 10,
+}
+
+_NOW = datetime.now(timezone.utc)
 for _sample in SAMPLES:
     _sample.update(RICH_CONTEXT.get(_sample["source_record_id"], {}))
+    _sid = _sample["source_record_id"]
+    # Datas relativas: o demo mantém-se fresco em qualquer dia de beta.
+    if _sid in _RECEIVED_DAYS_AGO:
+        _sample["received_at"] = (
+            _NOW - timedelta(days=_RECEIVED_DAYS_AGO[_sid])
+        ).isoformat(timespec="seconds")
+    if _sid in _DEADLINE_IN_DAYS:
+        _offset = _DEADLINE_IN_DAYS[_sid]
+        _sample["compliance_deadline"] = (
+            (_NOW.date() + timedelta(days=_offset)).isoformat()
+            if _offset is not None
+            else None
+        )
     _tags = ["inspection_possible", "owner_identified", "no_fine"]
     if _sample.get("compliance_deadline"):
         try:

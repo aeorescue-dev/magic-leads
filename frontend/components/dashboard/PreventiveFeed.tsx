@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ShieldCheck } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import {
@@ -9,6 +9,7 @@ import {
   type OpportunityListResponse,
 } from "@/lib/api-client";
 import { severityBucket, deadlineDaysLeft } from "@/lib/opportunity-format";
+import { OPPORTUNITIES_REFRESH_EVENT } from "@/lib/opportunity-events";
 import { PreventiveCard } from "@/components/dashboard/PreventiveCard";
 import { OpportunityDrawer } from "@/components/dashboard/OpportunityDrawer";
 import { FeedRail } from "@/components/dashboard/FeedRail";
@@ -36,25 +37,44 @@ export function PreventiveFeed({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [selected, setSelected] = useState<Opportunity | null>(null);
+  const requestRef = useRef(0);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
-    let alive = true;
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const load = useCallback(() => {
+    const id = ++requestRef.current;
     setLoading(true);
     setError(false);
     fetchOpportunities({ kind: "preventive", limit: 100 })
       .then((res) => {
-        if (alive) setData(res);
+        if (mountedRef.current && id === requestRef.current) setData(res);
       })
       .catch(() => {
-        if (alive) setError(true);
+        if (mountedRef.current && id === requestRef.current) setError(true);
       })
       .finally(() => {
-        if (alive) setLoading(false);
+        if (mountedRef.current && id === requestRef.current) setLoading(false);
       });
-    return () => {
-      alive = false;
-    };
   }, []);
+
+  useEffect(() => {
+    load();
+    return () => {
+      requestRef.current += 1;
+    };
+  }, [load]);
+
+  useEffect(() => {
+    const handler = () => load();
+    window.addEventListener(OPPORTUNITIES_REFRESH_EVENT, handler);
+    return () => window.removeEventListener(OPPORTUNITIES_REFRESH_EVENT, handler);
+  }, [load]);
 
   const rows = useMemo(() => {
     const term = filters.search.trim().toLowerCase();

@@ -40,6 +40,19 @@ de código do dashboard.
 - Erros por código estável com tradução.
 - Landing congelada; produção isolada.
 
+## 2.1 Ajustes de estabilidade aplicados
+
+- **Feed atualiza sozinho** após reservar, contactar, negociar ou converter: um evento
+  interno (`magic:opportunities-refresh`) faz o `PreventiveFeed` recarregar, mantendo o
+  cartão e o rail coerentes sem refresh manual.
+- **Datas do seed relativas**: prazos e `received_at` passam a ser calculados a partir do
+  dia atual (ex.: +1/+2/+6 dias). O demo mantém-se fresco em qualquer dia de beta e a
+  série de 10 dias dos KPI continua preenchida.
+- **Script de contas beta**: `scripts/create_beta_tester.py` (guardado por
+  `ALLOW_STAGING_SEED` + `LEADS_DB_PATH`) cria/renova conta, concede acesso por N dias e
+  ativa os 16 ofícios. Suporta `--dry-run`.
+- Smoke test repetido após os ajustes: 14 cartões, drawer, consentimento e 0 erros.
+
 ## 3. Limitações aceites para o beta (não bloqueiam)
 
 - 1 worker uvicorn: suficiente para o volume inicial; otimização de 100+ fica para depois.
