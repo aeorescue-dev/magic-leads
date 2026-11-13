@@ -428,6 +428,14 @@ CREATE TABLE IF NOT EXISTS opportunity_workflow (
   severity TEXT,
   compliance_deadline TEXT,
   job_value REAL,
+  description TEXT,
+  owner_name TEXT,
+  owner_type TEXT,
+  inspection_status TEXT,
+  received_at TEXT,
+  tags_json TEXT,
+  timeline_json TEXT,
+  source_payload TEXT,
   status TEXT NOT NULL DEFAULT 'available',
   reserved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
   reserved_until TEXT,
@@ -1613,6 +1621,19 @@ def init_db() -> None:
 def _migrate_schema(conn: sqlite3.Connection) -> None:
     """Adiciona colunas novas que não existiam em bancos antigos (idempotente)."""
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(leads)").fetchall()}
+    opp_cols = {r["name"] for r in conn.execute("PRAGMA table_info(opportunity_workflow)").fetchall()}
+    for name, ctype in {
+        "description": "TEXT",
+        "owner_name": "TEXT",
+        "owner_type": "TEXT",
+        "inspection_status": "TEXT",
+        "received_at": "TEXT",
+        "tags_json": "TEXT",
+        "timeline_json": "TEXT",
+        "source_payload": "TEXT",
+    }.items():
+        if name not in opp_cols:
+            conn.execute(f"ALTER TABLE opportunity_workflow ADD COLUMN {name} {ctype}")
     if "status" not in cols:
         conn.execute("ALTER TABLE leads ADD COLUMN status TEXT DEFAULT 'new'")
     if "favorited" not in cols:

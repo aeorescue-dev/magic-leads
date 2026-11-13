@@ -1403,6 +1403,13 @@ export interface Opportunity {
   severity?: string | null;
   compliance_deadline?: string | null;
   job_value?: number | null;
+  description?: string | null;
+  owner_name?: string | null;
+  owner_type?: string | null;
+  inspection_status?: string | null;
+  received_at?: string | null;
+  tags?: string[];
+  timeline?: Array<{ key?: string; label?: string; state?: string; date?: string }>;
   status: string;
   reserved_until?: string | null;
   stage_expires_at?: string | null;

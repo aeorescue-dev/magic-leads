@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { MapPin, ShieldCheck, Clock, ArrowRight } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { TRADE_CATEGORIES } from "@/lib/categories";
 import {
@@ -9,37 +9,12 @@ import {
   type Opportunity,
   type OpportunityListResponse,
 } from "@/lib/api-client";
-
-const SEVERITY_KEYS: Record<string, string> = {
-  critical: "dashboard.severity.critical",
-  high: "dashboard.severity.high",
-  medium: "dashboard.severity.medium",
-  routine: "dashboard.severity.routine",
-  emergency: "dashboard.severity.emergency",
-  immediate: "dashboard.severity.immediate",
-  class_1: "dashboard.severity.class_1",
-  class_2: "dashboard.severity.class_2",
-  class_3: "dashboard.severity.class_3",
-  class_a: "dashboard.severity.class_a",
-  class_b: "dashboard.severity.class_b",
-  class_c: "dashboard.severity.class_c",
-};
-
-function severityKey(value?: string | null): string {
-  if (!value) return "dashboard.severity.medium";
-  return SEVERITY_KEYS[value.toLowerCase()] || "dashboard.severity.medium";
-}
+import { PreventiveCard } from "@/components/dashboard/PreventiveCard";
+import { OpportunityDrawer } from "@/components/dashboard/OpportunityDrawer";
 
 function categoryKey(value?: string | null): string | null {
   if (!value) return null;
   return TRADE_CATEGORIES.find((c) => c.key === value)?.labelKey || null;
-}
-
-function daysUntil(value?: string | null): number | null {
-  if (!value) return null;
-  const target = Date.parse(value.replace(" ", "T") + (value.includes("T") ? "" : "Z"));
-  if (!Number.isFinite(target)) return null;
-  return Math.max(0, Math.ceil((target - Date.now()) / 86400000));
 }
 
 export function PreventiveFeed({
@@ -49,18 +24,13 @@ export function PreventiveFeed({
   onOpenReveal: (opportunity: Opportunity) => void;
   onOpenReactive: () => void;
 }) {
-  const { t, lang } = useI18n();
-  const money = (value: number) =>
-    new Intl.NumberFormat(lang === "pt" ? "pt-BR" : lang === "es" ? "es-MX" : "en-US", {
-      style: "currency",
-      currency: "USD",
-      maximumFractionDigits: 0,
-    }).format(value);
+  const { t } = useI18n();
   const [data, setData] = useState<OpportunityListResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [city, setCity] = useState("all");
   const [category, setCategory] = useState("all");
+  const [selected, setSelected] = useState<Opportunity | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -181,61 +151,27 @@ export function PreventiveFeed({
             </p>
           </div>
         ) : (
-          <div className="space-y-3 p-3">
-            {rows.map((opp) => {
-              const days = daysUntil(opp.compliance_deadline);
-              return (
-                <article
-                  key={opp.id}
-                  className="rounded-xl border border-[var(--sd-border)] bg-[var(--sd-surface-2)] p-4 transition hover:border-[var(--sd-accent)]/40"
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="rounded-full bg-[var(--sd-accent-soft)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--sd-accent)]">
-                          {t("dashboard.preinspection.badge")}
-                        </span>
-                        <span className="rounded-full border border-[var(--sd-border)] px-2 py-0.5 text-[10px] font-semibold text-[var(--sd-muted)]">
-                          {t(severityKey(opp.severity))}
-                        </span>
-                      </div>
-                      <h3 className="mt-2 truncate text-sm font-bold text-[var(--sd-text)]">
-                        {categoryKey(opp.category) ? t(categoryKey(opp.category) as string) : opp.category || opp.address}
-                      </h3>
-                      <p className="mt-1 flex items-center gap-1 text-xs text-[var(--sd-muted)]">
-                        <MapPin className="h-3 w-3" />
-                        {opp.address}{opp.city ? ` · ${opp.city}` : ""}{opp.zip_code ? ` ${opp.zip_code}` : ""}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => onOpenReveal(opp)}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--sd-accent)] px-3 py-2 text-[11px] font-bold text-[var(--sd-accent-text)]"
-                    >
-                      {t("dashboard.reveal.title")}
-                      <ArrowRight className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-[var(--sd-border)] pt-3 text-[10px] font-semibold text-[var(--sd-muted)]">
-                    <span className="inline-flex items-center gap-1">
-                      <Clock className="h-3 w-3" />
-                      {opp.status === "reserved" && opp.stage_expires_at
-                        ? t("dashboard.status.selected")
-                        : days != null
-                          ? t("dashboard.deadline.in_days").replace("{days}", String(days))
-                          : t("dashboard.deadline.none")}
-                    </span>
-                    <span>{t("dashboard.preinspection.possible")}</span>
-                    {opp.job_value != null ? (
-                      <span>{money(opp.job_value)}</span>
-                    ) : null}
-                  </div>
-                </article>
-              );
-            })}
+          <div className="grid grid-cols-1 gap-3 p-3 md:grid-cols-2">
+            {rows.map((opp) => (
+              <PreventiveCard
+                key={opp.id}
+                opportunity={opp}
+                onOpen={() => setSelected(opp)}
+              />
+            ))}
           </div>
         )}
+        {selected ? (
+          <OpportunityDrawer
+            opportunity={selected}
+            onClose={() => setSelected(null)}
+            onReveal={() => {
+              const opp = selected;
+              setSelected(null);
+              onOpenReveal(opp);
+            }}
+          />
+        ) : null}
       </div>
     </section>
   );

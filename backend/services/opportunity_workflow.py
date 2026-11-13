@@ -14,6 +14,7 @@ por um adaptador na fase seguinte.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import sqlite3
 from datetime import datetime, timezone
@@ -68,6 +69,33 @@ def make_property_key(
 class OpportunityWorkflowService:
     """Ciclo 1h/48h/48h e outcomes, sem tocar em `leads`."""
 
+    @staticmethod
+    def _public(row: dict) -> dict:
+        out = dict(row)
+        for raw_key, key in (("tags_json", "tags"), ("timeline_json", "timeline")):
+            raw = out.pop(raw_key, None)
+            if raw:
+                try:
+                    out[key] = json.loads(raw)
+                except (TypeError, ValueError):
+                    out[key] = []
+            else:
+                out[key] = []
+        if out.get("source_payload"):
+            try:
+                out["source_payload"] = json.loads(out["source_payload"])
+            except (TypeError, ValueError):
+                pass
+        return out
+
+    @staticmethod
+    def _json(value) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value
+        return json.dumps(value, ensure_ascii=False)
+
     def create_opportunity(
         self,
         *,
@@ -85,6 +113,14 @@ class OpportunityWorkflowService:
         severity: Optional[str] = None,
         compliance_deadline: Optional[str] = None,
         job_value: Optional[float] = None,
+        description: Optional[str] = None,
+        owner_name: Optional[str] = None,
+        owner_type: Optional[str] = None,
+        inspection_status: Optional[str] = None,
+        received_at: Optional[str] = None,
+        tags: Optional[list] = None,
+        timeline: Optional[list] = None,
+        source_payload: Optional[dict] = None,
     ) -> dict:
         """Cria/atualiza o evento de origem; nao reserva nada."""
         if source_kind not in ("preventive", "reactive", "permit"):
@@ -98,8 +134,10 @@ class OpportunityWorkflowService:
                 """INSERT INTO opportunity_workflow
                    (property_key, source_kind, source_record_id, source_type,
                     address, city, state, zip_code, bbl, bin, category,
-                    signal_type, severity, compliance_deadline, job_value)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    signal_type, severity, compliance_deadline, job_value,
+                    description, owner_name, owner_type, inspection_status,
+                    received_at, tags_json, timeline_json, source_payload)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(source_kind, source_record_id) DO UPDATE SET
                      property_key=excluded.property_key,
                      source_type=excluded.source_type,
@@ -114,11 +152,22 @@ class OpportunityWorkflowService:
                      severity=excluded.severity,
                      compliance_deadline=excluded.compliance_deadline,
                      job_value=excluded.job_value,
+                     description=excluded.description,
+                     owner_name=excluded.owner_name,
+                     owner_type=excluded.owner_type,
+                     inspection_status=excluded.inspection_status,
+                     received_at=excluded.received_at,
+                     tags_json=excluded.tags_json,
+                     timeline_json=excluded.timeline_json,
+                     source_payload=excluded.source_payload,
                      updated_at=CURRENT_TIMESTAMP""",
                 (
                     property_key, source_kind, source_record_id, source_type,
                     address, city, state, zip_code, bbl, bin_value, category,
                     signal_type, severity, compliance_deadline, job_value,
+                    description, owner_name, owner_type, inspection_status,
+                    received_at, self._json(tags), self._json(timeline),
+                    self._json(source_payload),
                 ),
             )
             conn.commit()
@@ -127,7 +176,7 @@ class OpportunityWorkflowService:
                    WHERE source_kind = ? AND source_record_id = ?""",
                 (source_kind, source_record_id),
             ).fetchone()
-            return dict(row)
+            return self._public(dict(row))
         finally:
             conn.close()
 
@@ -137,7 +186,7 @@ class OpportunityWorkflowService:
             row = conn.execute(
                 "SELECT * FROM opportunity_workflow WHERE id = ?", (opportunity_id,)
             ).fetchone()
-            return dict(row) if row else None
+            return self._public(dict(row)) if row else None
         finally:
             conn.close()
 
@@ -192,7 +241,7 @@ class OpportunityWorkflowService:
                 counts["all"] += row["c"]
                 if row["source_kind"] in counts:
                     counts[row["source_kind"]] += row["c"]
-            return {"opportunities": [dict(r) for r in rows], "counts": counts}
+            return {"opportunities": [self._public(dict(r)) for r in rows], "counts": counts}
         finally:
             conn.close()
 
@@ -332,7 +381,7 @@ class OpportunityWorkflowService:
                 return {"error": "not_owner"}
             if row["status"] in ("contacted", "in_negotiation"):
                 conn.commit()
-                return {"opportunity": dict(row), "renewed": False}
+                return {"opportunity": self._public(dict(row)), "renewed": False}
             conn.execute(
                 """UPDATE opportunity_workflow
                    SET status='contacted', reserved_by=?,
@@ -375,7 +424,7 @@ class OpportunityWorkflowService:
                 return {"error": "not_owner"}
             if row["status"] == "in_negotiation":
                 conn.commit()
-                return {"opportunity": dict(row), "renewed": False}
+                return {"opportunity": self._public(dict(row)), "renewed": False}
             conn.execute(
                 """UPDATE opportunity_workflow
                    SET status='in_negotiation', reserved_by=?,
