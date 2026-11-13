@@ -76,6 +76,7 @@ import {
   revealPhone, PhoneRevealResult,
   PAYMENT_REQUIRED_EVENT,
 } from "@/lib/api-client";
+import { apiErrorKey } from "@/lib/api-errors";
 
 // Tipo enriquecido para o modal de revelação (com histórico e ocorrências)
 type EnrichedLead = LeadResponse & {
@@ -1258,7 +1259,8 @@ function DashboardPageInner() {
           "warning"
         );
       } else {
-        showToast(e?.message || "Erro ao revelar lead", "error");
+        const codeKey = apiErrorKey(e?.message || e?.error);
+        showToast(codeKey ? t(codeKey) : t("dashboard.toast.phone_reveal_error"), "error");
       }
     } finally {
       setBusyAction(false);

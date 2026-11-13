@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
 import { Loader2, Eye, EyeOff, Mail, Lock, Building2, ArrowRight, CheckCircle, AlertTriangle, X, Fingerprint } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
-import { useI18n } from '@/lib/i18n';
+import { useI18n, normalizeLocale } from '@/lib/i18n';
 import { useStartCheckout } from '@/lib/billing';
 import { trackEvent } from '@/lib/analytics';
 import { requestPasswordReset, setAuthCookie, setToken } from '@/lib/api-client';
@@ -96,7 +96,7 @@ function AuthFormInner({ preselectedTrade }: { preselectedTrade?: string }) {
     : reason === 'session_expired' || searchParams.get('session_expired') === '1'
       ? 'session_expired'
       : null;
-  const { lang, t } = useI18n();
+  const { lang, setLang, t } = useI18n();
   const { signIn, loading: authLoading, updateUser, refreshSubscription } = useAuth();
   const startCheckout = useStartCheckout();
   const rawNext = searchParams.get('next');
@@ -106,7 +106,11 @@ function AuthFormInner({ preselectedTrade }: { preselectedTrade?: string }) {
       : null;
   const checkoutIntent = searchParams.get('checkout') === '1';
 
-  const localePath = (href: string) => `/${lang}${href}`;
+  const destinationLocale = (u: { locale?: string } | null | undefined) => {
+    const next = normalizeLocale(u?.locale) || lang;
+    setLang(next);
+    return next;
+  };
 
   // Mensagem direta sem depender de t() — evita chave crua mesmo se i18n falhar.
   const sessionMessage = sessionReason === 'fifo_evicted'
@@ -155,7 +159,7 @@ function AuthFormInner({ preselectedTrade }: { preselectedTrade?: string }) {
       setAuthCookie();
       updateUser(out.user);
       await refreshSubscription();
-      const destination = nextPath || (out.user.is_admin ? '/admin/lp-inbox' : localePath('/dashboard'));
+      const destination = nextPath || (out.user.is_admin ? '/admin/lp-inbox' : `/${destinationLocale(out.user)}/dashboard`);
       router.push(destination);
       router.refresh();
     } catch (e) {
@@ -254,7 +258,7 @@ function AuthFormInner({ preselectedTrade }: { preselectedTrade?: string }) {
         }
       } else {
         setSuccess(true);
-        const destination = nextPath || (user.is_admin ? '/admin/lp-inbox' : localePath('/dashboard'));
+        const destination = nextPath || (user.is_admin ? '/admin/lp-inbox' : `/${destinationLocale(user)}/dashboard`);
         setTimeout(() => {
           router.push(destination);
           router.refresh();

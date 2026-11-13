@@ -251,7 +251,7 @@ def test_no_consent_never_calls_provider(user, client, monkeypatch):
     )
 
     assert r.status_code == 400, r.text
-    assert "consent_required" in r.text
+    assert "CONSENT_REQUIRED" in r.text
     assert fake.calls == 0, "fluxo sem consentimento chamou a Searchbug"
     assert _used(user) == 0
 

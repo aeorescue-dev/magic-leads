@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { LayoutDashboard, LogOut, Menu, Sparkles, X, Plus } from "lucide-react";
 import { getToken, logoutUser, demoLogin, updateUserLocale } from "@/lib/api-client";
 import { readStoredUser, useAuth } from "@/lib/auth";
-import { useI18n, LANGS } from "@/lib/i18n";
+import { useI18n, LANGS, pathWithLocale, normalizeLocale } from "@/lib/i18n";
 
 const FLAGS: Record<string, string> = {
   pt: "\uD83C\uDDE7\uDDE7",
@@ -33,12 +33,13 @@ export function NavbarNew() {
   const handleDemoLogin = async () => {
     const user = await demoLogin();
     updateUser(user);
-    router.push("/dashboard");
+    const next = normalizeLocale(user.locale) || lang;
+    router.push(`/${next}/dashboard`);
   };
 
   const handleLogout = () => {
     logoutUser();
-    router.push("/");
+    router.push(`/${lang}`);
   };
 
   const tryLink = (label: string, active: boolean, href: string) => (
@@ -69,7 +70,7 @@ export function NavbarNew() {
             {t("nav.pricing")}
           </Link>
           {isLogged && (
-            <Link href="/dashboard" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+            <Link href={`/${lang}/dashboard`} className="text-sm text-muted-foreground hover:text-foreground transition-colors">
               {t("nav.dashboard")}
             </Link>
           )}
@@ -82,6 +83,8 @@ export function NavbarNew() {
                 key={l.code}
                 onClick={() => {
                   setLang(l.code);
+                  const search = typeof window !== "undefined" ? window.location.search : "";
+                  router.replace(`${pathWithLocale(pathname, l.code)}${search}`);
                   const stored = readStoredUser();
                   if (isLogged && stored?.id) {
                     updateUserLocale(stored.id, l.code)
@@ -106,7 +109,7 @@ export function NavbarNew() {
           {isLogged ? (
             <div className="hidden md:flex items-center gap-3">
               <button
-                onClick={() => router.push("/dashboard")}
+                onClick={() => router.push(`/${lang}/dashboard`)}
                 className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
               >
                 <LayoutDashboard className="h-4 w-4" />

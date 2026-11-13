@@ -20,6 +20,19 @@ export const LANGS: { code: Lang; label: string; native: string }[] = [
 
 export const LANGS_VALID: Lang[] = ["pt", "en", "es"];
 
+/** Normaliza um valor de locale vindo do perfil/URL. */
+export function normalizeLocale(value?: string | null): Lang | null {
+  const v = String(value || "").trim().toLowerCase().slice(0, 2);
+  return LANGS_VALID.includes(v as Lang) ? (v as Lang) : null;
+}
+
+/** Troca o segmento de locale de um pathname, preservando o resto. */
+export function pathWithLocale(pathname: string, next: Lang): string {
+  const clean = String(pathname || "/").replace(/^\/(pt|en|es)(?=\/|$)/, "");
+  if (!clean || clean === "/") return `/${next}`;
+  return `/${next}${clean.startsWith("/") ? clean : `/${clean}`}`;
+}
+
 const STORAGE_KEY = "NEXT_LOCALE";
 const COOKIE_KEY = "NEXT_LOCALE";
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // 1 ano

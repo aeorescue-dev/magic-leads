@@ -368,7 +368,7 @@ def test_reserve_without_consent_is_rejected(user_and_client, no_external_data):
     )
 
     assert r.status_code == 400, r.text
-    assert "consent_required" in r.text
+    assert "CONSENT_REQUIRED" in r.text
     assert _used(user_id) == before, "rejeicao de consentimento consumiu cota"
 
 

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.main import _hash_token, app
+from backend.main import _hash_token, _opportunity_error, app
 from backend.models.schemas import (
     EnrichedLead,
     IssueCategory,
@@ -70,6 +70,14 @@ def _reset_quota(user_id: int) -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+def test_opportunity_errors_are_stable_codes_not_portuguese_sentences():
+    assert _opportunity_error({"error": "property_locked"}).detail == "PROPERTY_LOCKED"
+    assert _opportunity_error({"error": "daily_limit_reached"}).detail == "DAILY_LIMIT_REACHED"
+    assert _opportunity_error({"error": "not_owner"}).detail == "NOT_OWNER"
+    assert _opportunity_error({"error": "not_reserved"}).detail == "NOT_RESERVED"
+    assert _opportunity_error({"error": "consent_required"}).detail == "CONSENT_REQUIRED"
 
 
 def test_property_key_prefers_bbl_then_bin_then_address():

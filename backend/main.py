@@ -8757,7 +8757,7 @@ async def reserve_lead(
     # 1.0 CONSENTIMENTO OBRIGATORIO (staging): sem aceite explicito nao ha
     # reserva/reveal. O fluxo antigo de "reserva simples" fica desativado.
     if not payload.consent:
-        raise HTTPException(status_code=400, detail="consent_required")
+        raise HTTPException(status_code=400, detail="CONSENT_REQUIRED")
 
     # 1.1 Sinaliza contato nos reveals em aberto (watchdog para de notificar)
     await db_service.flag_reveal_contact(user_id, lead_id)
@@ -9359,21 +9359,22 @@ async def convert_lead(lead_id: int, user: dict = Depends(_get_current_user)):
 # que a fase seguinte vai ligar ao modal.
 # ---------------------------------------------------------------------------
 def _opportunity_error(exc: dict) -> HTTPException:
-    code = exc.get("error")
-    if code == "not_found":
-        return HTTPException(status_code=404, detail="Oportunidade não encontrada")
-    if code in ("already_reserved", "property_locked"):
-        return HTTPException(status_code=409, detail="Imóvel já reservado por outro utilizador")
-    if code == "already_converted":
-        return HTTPException(status_code=409, detail="Oportunidade já convertida")
-    if code == "not_owner":
-        return HTTPException(status_code=403, detail="Oportunidade reservada por outro utilizador")
-    if code == "daily_limit_reached":
-        return HTTPException(
-            status_code=429,
-            detail="Limite de 10 leads/dia atingido. Volte amanhã e abra seus 10+ potenciais clientes.",
-        )
-    return HTTPException(status_code=400, detail=code or "opportunity_error")
+    code = str(exc.get("error") or "").upper()
+    if code == "NOT_FOUND":
+        return HTTPException(status_code=404, detail="NOT_FOUND")
+    if code in ("ALREADY_RESERVED", "PROPERTY_LOCKED"):
+        return HTTPException(status_code=409, detail="PROPERTY_LOCKED")
+    if code == "ALREADY_CONVERTED":
+        return HTTPException(status_code=409, detail="ALREADY_CONVERTED")
+    if code == "NOT_OWNER":
+        return HTTPException(status_code=403, detail="NOT_OWNER")
+    if code == "DAILY_LIMIT_REACHED":
+        return HTTPException(status_code=429, detail="DAILY_LIMIT_REACHED")
+    if code == "NOT_RESERVED":
+        return HTTPException(status_code=400, detail="NOT_RESERVED")
+    if code == "CONSENT_REQUIRED":
+        return HTTPException(status_code=400, detail="CONSENT_REQUIRED")
+    return HTTPException(status_code=400, detail="OPPORTUNITY_ERROR")
 
 
 @app.post("/api/opportunities/{opportunity_id}/reserve")
@@ -9384,7 +9385,7 @@ async def reserve_opportunity(
 ):
     await _require_active_access(user)
     if not payload.consent:
-        raise HTTPException(status_code=400, detail="consent_required")
+        raise HTTPException(status_code=400, detail="CONSENT_REQUIRED")
     result = opportunity_workflow.reserve(
         opportunity_id, user["id"], minutes=payload.minutes or 60
     )

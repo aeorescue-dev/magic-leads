@@ -2,8 +2,8 @@
 
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useI18n, type Lang } from "@/lib/i18n";
+import { usePathname, useRouter } from "next/navigation";
+import { useI18n, pathWithLocale, type Lang } from "@/lib/i18n";
 import { AuthForm } from "@/components/AuthForm";
 import AnalyticsBeacon from "@/components/AnalyticsBeacon";
 import LpWidgetMount from "@/components/landing/LpWidget/LpWidgetMount";
@@ -105,6 +105,7 @@ export function useLandingShell() {
 // ------------------------------------------------------------------
 export default function LandingShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const { lang, setLang, t } = useI18n();
   const { updateUser } = useAuth();
 
@@ -113,6 +114,8 @@ export default function LandingShell({ children }: { children: React.ReactNode }
   // idioma aqui continuaria a receber no idioma antigo.
   const changeLang = (next: Lang) => {
     setLang(next);
+    const search = typeof window !== "undefined" ? window.location.search : "";
+    router.replace(`${pathWithLocale(pathname || "/", next)}${search}`);
     const stored = readStoredUser();
     if (stored?.id) {
       updateUserLocale(stored.id, next).then(updateUser).catch(() => {});
