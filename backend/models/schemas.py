@@ -408,6 +408,13 @@ class ReserverLeadRequest(BaseModel):
     idempotency: Optional[str] = None
 
 
+class OpportunityOutcomeRequest(BaseModel):
+    outcome: str = Field(pattern="^(won|lost|no_decision)$")
+    contract_value: Optional[float] = Field(default=None, ge=0)
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+    lost_reason: Optional[str] = Field(default=None, max_length=500)
+
+
 ALLOWED_RELEASE_REASONS = ["no_answer", "declined", "out_of_area", "personal_emergency", "changed_mind", "lazy", "other"]
 SUSPICIOUS_RELEASE_REASONS = ["changed_mind", "lazy"]
 

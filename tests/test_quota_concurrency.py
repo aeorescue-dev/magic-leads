@@ -237,7 +237,7 @@ def test_attempt_budget_blocks_endpoint_before_provider(user, client, monkeypatc
 
 
 def test_no_consent_never_calls_provider(user, client, monkeypatch):
-    """consent=False: reserva simples, 0 chamadas, cota +1."""
+    """consent=False: o backend rejeita; 0 chamadas, 0 cota."""
     _reset_quota(user, 0)
     fake = _CountingPhone()
     monkeypatch.setattr(main_module, "searchbug_service", fake)
@@ -250,9 +250,10 @@ def test_no_consent_never_calls_provider(user, client, monkeypatch):
         json={"minutes": 60, "consent": False},
     )
 
-    assert r.status_code == 200, r.text
+    assert r.status_code == 400, r.text
+    assert "consent_required" in r.text
     assert fake.calls == 0, "fluxo sem consentimento chamou a Searchbug"
-    assert _used(user) == 1
+    assert _used(user) == 0
 
 
 def test_load_ten_users_ten_reveals_without_global_cap():

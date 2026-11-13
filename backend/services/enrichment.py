@@ -324,7 +324,21 @@ class OwnerEnrichment:
         if not isinstance(data, list) or not data:
             logger.warning(f"BBL {bbl} sem proprietario em {dset}")
             return None
-        return self._build_result(data[0], cfg, f"BBL {bbl}")
+        result = self._build_result(data[0], cfg, f"BBL {bbl}")
+        if (
+            result
+            and cfg.get("domain") == "data.cityofnewyork.us"
+            and getattr(settings, "HPD_AGENT_ENRICHMENT_ENABLED", False)
+        ):
+            try:
+                from .hpd_agent import resolve_managing_agent
+
+                agent = await resolve_managing_agent(bbl=bbl)
+                if agent:
+                    result["managing_agent"] = agent
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("HPD agent enrichment falhou para BBL %s: %s", bbl, exc)
+        return result
 
     async def _lookup_socrata(self, original_address: str, num: str, street_norm: str, cfg: Dict) -> Optional[Dict[str, Any]]:
         domain = cfg["domain"]

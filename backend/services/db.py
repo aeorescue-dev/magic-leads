@@ -408,6 +408,74 @@ CREATE TABLE IF NOT EXISTS leads (
   UNIQUE(address, city)
 );
 
+-- Staging: camada de oportunidades preventivas/reativas sem tocar em `leads`.
+-- `property_key` e' BBL/BIN/hash normalizado do endereco; o indice parcial
+-- garante UM ciclo ativo por imovel, independentemente da camada.
+CREATE TABLE IF NOT EXISTS opportunity_workflow (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  property_key TEXT NOT NULL,
+  source_kind TEXT NOT NULL,
+  source_record_id TEXT NOT NULL,
+  source_type TEXT,
+  address TEXT,
+  city TEXT,
+  state TEXT,
+  zip_code TEXT,
+  bbl TEXT,
+  bin TEXT,
+  category TEXT,
+  signal_type TEXT,
+  severity TEXT,
+  compliance_deadline TEXT,
+  job_value REAL,
+  status TEXT NOT NULL DEFAULT 'available',
+  reserved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  reserved_until TEXT,
+  stage_expires_at TEXT,
+  contacted_at TEXT,
+  negotiated_at TEXT,
+  converted_at TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(source_kind, source_record_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_opportunity_active_property
+  ON opportunity_workflow(property_key)
+  WHERE status IN ('reserved', 'contacted', 'in_negotiation');
+
+CREATE INDEX IF NOT EXISTS idx_opportunity_status
+  ON opportunity_workflow(status, stage_expires_at);
+
+-- Trava transversal: impede que a mesma propriedade seja reservada em `leads`
+-- e em `opportunity_workflow` ao mesmo tempo.
+CREATE TABLE IF NOT EXISTS property_locks (
+  property_key TEXT PRIMARY KEY,
+  owner_kind TEXT NOT NULL,
+  owner_id INTEGER NOT NULL,
+  reserved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  expires_at TEXT,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS opportunity_outcomes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  opportunity_id INTEGER REFERENCES opportunity_workflow(id) ON DELETE CASCADE,
+  lead_id INTEGER REFERENCES leads(id) ON DELETE SET NULL,
+  outcome TEXT NOT NULL CHECK(outcome IN ('won', 'lost', 'no_decision')),
+  won_at TEXT,
+  lost_at TEXT,
+  contract_value REAL,
+  currency TEXT DEFAULT 'USD',
+  lost_reason TEXT,
+  recorded_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  recorded_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(opportunity_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_opportunity_outcomes_lead
+  ON opportunity_outcomes(lead_id, recorded_at DESC);
+
 -- B3: cache BBL -> coordenadas (PLUTO). Hit e miss ficam registados para nao
 -- repetir consultas; miss expira em 30 dias.
 CREATE TABLE IF NOT EXISTS bbl_coords (

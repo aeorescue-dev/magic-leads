@@ -222,6 +222,9 @@ class Settings(BaseSettings):
     # 0 = ILIMITADO (Lookups de owner sem teto diário).
     # Para reativar um limite, define ENRICHMENT_DAILY_BUDGET=<n> na env var.
     ENRICHMENT_DAILY_BUDGET: int = 0  # Máximo de lookups de owner por dia
+    # Staging: anexa o Managing Agent do HPD ao resultado de enriquecimento de
+    # NYC quando o owner for uma LLC. Nao substitui owner_name por defeito.
+    HPD_AGENT_ENRICHMENT_ENABLED: bool = False
 
     # Scheduler interno (independente do GH Actions — redundância no Railway)
     SCRAPER_SELF_SCHEDULED: bool = True   # True = scheduler interno roda a cada N horas

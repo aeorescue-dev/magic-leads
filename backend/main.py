@@ -74,6 +74,7 @@ from .models.schemas import (
     NoteResponse,
     NotificationResponse,
     OnboardingUpdate,
+    OpportunityOutcomeRequest,
     PushEnabledUpdate,
     PushPreferencesUpdate,
     PushSubscribeRequest,
@@ -146,6 +147,7 @@ from .services.lead_rules import (
     is_corporate as is_corporate_lead,
 )
 from .services.metrics import push_metrics, searchbug_metrics
+from .services.opportunity_workflow import opportunity_workflow
 from .services.outbound_engine import effective_mailbox_cap, outbound_engine
 from .services.privacy import sanitize_lead, scrub
 from .services.push_click import verify_click
@@ -8752,6 +8754,11 @@ async def reserve_lead(
     # 1. GATE DE ASSINATURA (A5): 402 + REDIRECT_TO_CHECKOUT.
     await _require_active_access(user)
 
+    # 1.0 CONSENTIMENTO OBRIGATORIO (staging): sem aceite explicito nao ha
+    # reserva/reveal. O fluxo antigo de "reserva simples" fica desativado.
+    if not payload.consent:
+        raise HTTPException(status_code=400, detail="consent_required")
+
     # 1.1 Sinaliza contato nos reveals em aberto (watchdog para de notificar)
     await db_service.flag_reveal_contact(user_id, lead_id)
 
@@ -9051,41 +9058,6 @@ async def reserve_lead(
         },
         )
 
-    # 3. SEM CONSENTIMENTO: reserva simples, SEM dados do proprietario e SEM
-    # chamada paga. O fluxo antigo chamava a Searchbug e consumia cota antes de
-    # saber se havia telefone; a chamada paga foi removida. A reserva simples
-    # continua a consumir 1 unidade de cota (anti-abuso de holds), de forma
-    # atomica.
-    if not await db_service.increment_daily_leads(user_id):
-        raise HTTPException(
-            status_code=429,
-            detail="Limite de 10 leads/dia atingido. Volte amanhã e abra seus 10+ potenciais clientes.",
-        )
-    result = await db_service.reserve_lead_only(lead_id, user["id"], minutes=minutes)
-    if not result:
-        raise HTTPException(status_code=404, detail="Lead não encontrado")
-    if result.get("error") == "already_reserved":
-        raise HTTPException(status_code=409, detail="Lead já reservado por outro usuário")
-    if result.get("error") == "suspended":
-        raise HTTPException(
-            status_code=403,
-            detail=f"Conta suspensa por penalidades até {result.get('penalty_until', '')}",
-        )
-    if result.get("error") == "reduced_delay":
-        raise HTTPException(
-            status_code=429,
-            detail=result.get("message", "Prioridade reduzida: aguarde 5min entre reservas"),
-        )
-
-    # Registra interação
-    await db_service.record_event(lead_id, "reserve")
-
-    return LeadHoldResponse(
-        reserved=True,
-        status=result.get("lead_status", "reserved"),
-        expires_at=result.get("reserved_until"),
-        message="Lead reservado com exclusividade por 1 hora",
-    )
 
 
 @app.post("/api/leads/{lead_id}/release", response_model=LeadHoldResponse)
@@ -9379,6 +9351,149 @@ async def convert_lead(lead_id: int, user: dict = Depends(_get_current_user)):
     # Regra C: bloqueia estorno quando lead é convertido
     await db_service.block_lead_refund(lead_id, reason="converted")
     return {"status": "ok", "lead_status": result.get("lead_status")}
+
+
+# ---------------------------------------------------------------------------
+# STAGING: oportunidades preventivas/reativas sem tocar no fluxo de `leads`.
+# O modal atual continua a ser a unica UI; estes endpoints sao o adaptador
+# que a fase seguinte vai ligar ao modal.
+# ---------------------------------------------------------------------------
+def _opportunity_error(exc: dict) -> HTTPException:
+    code = exc.get("error")
+    if code == "not_found":
+        return HTTPException(status_code=404, detail="Oportunidade não encontrada")
+    if code in ("already_reserved", "property_locked"):
+        return HTTPException(status_code=409, detail="Imóvel já reservado por outro utilizador")
+    if code == "already_converted":
+        return HTTPException(status_code=409, detail="Oportunidade já convertida")
+    if code == "not_owner":
+        return HTTPException(status_code=403, detail="Oportunidade reservada por outro utilizador")
+    if code == "daily_limit_reached":
+        return HTTPException(
+            status_code=429,
+            detail="Limite de 10 leads/dia atingido. Volte amanhã e abra seus 10+ potenciais clientes.",
+        )
+    return HTTPException(status_code=400, detail=code or "opportunity_error")
+
+
+@app.post("/api/opportunities/{opportunity_id}/reserve")
+async def reserve_opportunity(
+    opportunity_id: int,
+    payload: ReserverLeadRequest,
+    user: dict = Depends(_get_current_user),
+):
+    await _require_active_access(user)
+    if not payload.consent:
+        raise HTTPException(status_code=400, detail="consent_required")
+    result = opportunity_workflow.reserve(
+        opportunity_id, user["id"], minutes=payload.minutes or 60
+    )
+    if result.get("error"):
+        raise _opportunity_error(result)
+    opp = result.get("opportunity") or {}
+    return {
+        "reserved": True,
+        "revealed": False,
+        "id": opp.get("id"),
+        "status": opp.get("status"),
+        "stage": opp.get("status"),
+        "expires_at": opp.get("reserved_until"),
+        "stage_expires_at": opp.get("stage_expires_at"),
+        "counted_again": result.get("counted_again", True),
+        "idempotent": result.get("idempotent", False),
+        "quota": result.get("quota"),
+        "opportunity": opp,
+    }
+
+
+@app.post("/api/opportunities/{opportunity_id}/contact")
+async def contact_opportunity(
+    opportunity_id: int,
+    payload: ContactLeadRequest,
+    user: dict = Depends(_get_current_user),
+):
+    await _require_active_access(user)
+    result = opportunity_workflow.mark_contacted(opportunity_id, user["id"])
+    if result.get("error"):
+        raise _opportunity_error(result)
+    return {
+        "status": "ok",
+        "channel": payload.channel,
+        "stage": (result.get("opportunity") or {}).get("status"),
+        "renewed": result.get("renewed", False),
+    }
+
+
+@app.post("/api/opportunities/{opportunity_id}/negotiate")
+async def negotiate_opportunity(
+    opportunity_id: int, user: dict = Depends(_get_current_user)
+):
+    await _require_active_access(user)
+    result = opportunity_workflow.mark_negotiation(opportunity_id, user["id"])
+    if result.get("error"):
+        raise _opportunity_error(result)
+    return {
+        "status": "ok",
+        "stage": (result.get("opportunity") or {}).get("status"),
+        "renewed": result.get("renewed", False),
+    }
+
+
+@app.post("/api/opportunities/{opportunity_id}/convert")
+async def convert_opportunity(
+    opportunity_id: int, user: dict = Depends(_get_current_user)
+):
+    await _require_active_access(user)
+    result = opportunity_workflow.convert(opportunity_id, user["id"])
+    if result.get("error"):
+        raise _opportunity_error(result)
+    return {
+        "status": "ok",
+        "stage": (result.get("opportunity") or {}).get("status"),
+    }
+
+
+@app.post("/api/opportunities/{opportunity_id}/outcome")
+async def opportunity_outcome(
+    opportunity_id: int,
+    payload: OpportunityOutcomeRequest,
+    user: dict = Depends(_get_current_user),
+):
+    await _require_active_access(user)
+    row = opportunity_workflow.record_outcome(
+        opportunity_id=opportunity_id,
+        lead_id=None,
+        outcome=payload.outcome,
+        contract_value=payload.contract_value,
+        currency=payload.currency,
+        lost_reason=payload.lost_reason,
+        recorded_by=user["id"],
+    )
+    return {"status": "ok", "outcome": row}
+
+
+@app.post("/api/leads/{lead_id}/outcome")
+async def lead_outcome(
+    lead_id: int,
+    payload: OpportunityOutcomeRequest,
+    user: dict = Depends(_get_current_user),
+):
+    """Outcome aditivo para o feed atual; NAO altera `/convert` nem `converted_at`."""
+    await _require_active_access(user)
+    lead = await db_service.get_lead_by_id(lead_id)
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead não encontrado")
+    row = opportunity_workflow.record_outcome(
+        opportunity_id=None,
+        lead_id=lead_id,
+        outcome=payload.outcome,
+        contract_value=payload.contract_value,
+        currency=payload.currency,
+        lost_reason=payload.lost_reason,
+        recorded_by=user["id"],
+    )
+    return {"status": "ok", "outcome": row}
+
 
 
 @app.post("/api/leads/{lead_id}/reject")

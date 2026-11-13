@@ -353,17 +353,10 @@ def test_free_lead_is_allowed_when_daily_quota_is_exhausted(user_and_client, no_
 
 
 # ---------------------------------------------------------------------------
-# Regra de separacao dos dois fluxos do endpoint
+# Consentimento obrigatorio (staging)
 # ---------------------------------------------------------------------------
-def test_reserve_without_consent_uses_the_hold_flow(user_and_client, no_external_data):
-    """consent=False tem de continuar a ser a reserva simples, sem reveal.
-
-    Este teste existe porque o endpoint tem DOIS fluxos num `if payload.consent`
-    e o resto da suite so exercita `consent=True`. Uma edicao de indentacao que
-    empurre o fluxo de reveal para fora desse `if` deixa o consent=False a correr
-    `reveal_lead()` com variaveis nao definidas (NameError -> 500) e torna o
-    fluxo de reserva simples codigo morto. Nao se detecta so com testes de reveal.
-    """
+def test_reserve_without_consent_is_rejected(user_and_client, no_external_data):
+    """consent=False e' rejeitado; nao reserva e nao consome cota."""
     client, headers, user_id = user_and_client
     before = _used(user_id)
     lead_id = _make_lead(owner_name="NO CONSENT", owner_phone="(718) 555-0400")
@@ -374,21 +367,13 @@ def test_reserve_without_consent_uses_the_hold_flow(user_and_client, no_external
         json={"minutes": 60, "consent": False},
     )
 
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["reserved"] is True
-    # Sem consentimento NAO se revelam dados do proprietario.
-    assert not body.get("revealed"), "revelou dados sem consentimento"
-    assert not body.get("owner"), "devolveu dados do dono sem consentimento"
-    # E nao e o payload do fluxo de reveal.
-    assert "charged" not in body, "reserva simples devolveu o payload do reveal"
-    assert "counted_again" not in body, "reserva simples devolveu o payload do reveal"
-    # A reserva simples continua a contar para a cota diaria.
-    assert _used(user_id) == before + 1, "reserva simples nao consumiu cota"
+    assert r.status_code == 400, r.text
+    assert "consent_required" in r.text
+    assert _used(user_id) == before, "rejeicao de consentimento consumiu cota"
 
 
 def test_reserve_without_consent_never_charges(user_and_client, no_external_data):
-    """Consentir e o que consome cota; sem consentir, so a reserva simples."""
+    """Sem consentimento nao ha reveal nem debito."""
     client, headers, user_id = user_and_client
     before = _used(user_id)
     lead_id = _make_lead(owner_name="NO CONSENT 2", owner_phone=None, mailing_address=None)
@@ -399,5 +384,5 @@ def test_reserve_without_consent_never_charges(user_and_client, no_external_data
         json={"minutes": 60, "consent": False},
     )
 
-    assert r.status_code == 200, r.text
-    assert _used(user_id) == before + 1
+    assert r.status_code == 400, r.text
+    assert _used(user_id) == before

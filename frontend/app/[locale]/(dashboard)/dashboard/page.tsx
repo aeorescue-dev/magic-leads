@@ -387,6 +387,7 @@ function DashboardPageInner() {
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [releaseTarget, setReleaseTarget] = useState<LeadResponse | null>(null);
   const [revealTarget, setRevealTarget] = useState<EnrichedLead | null>(null);
+  const [revealConsent, setRevealConsent] = useState(false);
   const [guideLead, setGuideLead] = useState<GuideLead | null>(null);
   const [contractorMetrics, setContractorMetrics] = useState<ContractorMetrics | null>(null);
   
@@ -1135,7 +1136,10 @@ function DashboardPageInner() {
     if (selectedLead) detailDialogRef.current?.focus();
   }, [selectedLead]);
   useEffect(() => {
-    if (revealTarget) revealDialogRef.current?.focus();
+    if (revealTarget) {
+      setRevealConsent(false);
+      revealDialogRef.current?.focus();
+    }
   }, [revealTarget]);
   useEffect(() => {
     if (!selectedLead && !revealTarget) return;
@@ -1152,7 +1156,7 @@ function DashboardPageInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedLead, revealTarget, busyAction]);
   const confirmReveal = async () => {
-    if (!revealTarget || busyAction) return;
+    if (!revealTarget || busyAction || !revealConsent) return;
     if (subscription && !subscription.can_access) {
       showToast(subscription.message || "Acesso negado", "error");
       return;
@@ -1164,7 +1168,7 @@ function DashboardPageInner() {
     setBusyAction(true);
     try {
       const idKey = `u${userId}:l${revealTarget.id}:${new Date().toISOString().slice(0, 10)}`;
-      const res = await reserveLead(revealTarget.id, 60, { consent: true, idempotency: idKey });
+      const res = await reserveLead(revealTarget.id, 60, { consent: revealConsent, idempotency: idKey });
       showToast(
         res?.incomplete_delivery
           ? t("dashboard.toast.free_reserved_incomplete")
@@ -3574,7 +3578,8 @@ function DashboardPageInner() {
                 <label className={`flex items-start gap-2.5 text-sm cursor-pointer ${isDark ? "text-slate-200" : "text-slate-700"}`}>
                   <input
                     type="checkbox"
-                    defaultChecked
+                    checked={revealConsent}
+                    onChange={(e) => setRevealConsent(e.target.checked)}
                     className="mt-0.5 h-4 w-4 accent-indigo-500"
                   />
 <span>
@@ -3592,7 +3597,7 @@ function DashboardPageInner() {
             <div className="mt-5 flex gap-2">
               <button
                 onClick={confirmReveal}
-                disabled={busyAction || (subscription && !subscription.can_access) || isBlockedByQuota(revealTarget, dailyStats?.remaining)}
+                disabled={busyAction || !revealConsent || (subscription && !subscription.can_access) || isBlockedByQuota(revealTarget, dailyStats?.remaining)}
                 className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-white text-sm font-bold transition disabled:opacity-50"
               >
                 {busyAction ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lock className="h-4 w-4" />}
