@@ -8105,13 +8105,19 @@ async def _create_stripe_checkout_session(
     stripe_locale = stripe_locale_map.get(locale, "auto")
 
     stripe.api_key = settings.STRIPE_API_KEY
-    # Build cancel_url with locale prefix to return user to dashboard (not landing page)
-    if locale and locale != "auto":
-        cancel_path = f"/{locale}/dashboard"
-    else:
-        cancel_path = "/dashboard"
+    # Build cancel/success URLs with the user's locale. If the caller sent
+    # "auto", fall back to the locale stored in the user profile (default EN).
+    checkout_locale = locale if locale in ("pt", "en", "es") else ""
+    if not checkout_locale:
+        try:
+            profile = await db_service.get_user_by_id(user_id)
+            profile_locale = str((profile or {}).get("locale") or "").strip().lower()
+            checkout_locale = profile_locale if profile_locale in ("pt", "en", "es") else "en"
+        except Exception:  # noqa: BLE001
+            checkout_locale = "en"
+    cancel_path = f"/{checkout_locale}/dashboard"
     cancel_url = f"{settings.FRONTEND_URL.rstrip('/')}{cancel_path}"
-    success_url = f"{settings.FRONTEND_URL.rstrip('/')}/dashboard?paid=1"
+    success_url = f"{settings.FRONTEND_URL.rstrip('/')}/{checkout_locale}/dashboard?paid=1"
 
     clean_email = (email or "").strip().lower() or None
 
