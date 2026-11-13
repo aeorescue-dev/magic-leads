@@ -84,7 +84,7 @@ export function PreventiveCard({
             <div key={key} className="flex min-w-0 flex-1 flex-col items-center gap-1">
               <div className="flex w-full items-center">
                 {index > 0 ? (
-                  <span className={`h-px flex-1 ${done || current ? "bg-[var(--sd-accent)]/50" : "bg-[var(--sd-border)]"}`} />
+                  <span className={`h-px flex-1 ${done || current ? "bg-[var(--sd-accent)] opacity-50" : "bg-[var(--sd-border)]"}`} />
                 ) : null}
                 <span
                   className={`h-2 w-2 shrink-0 rounded-full ${
@@ -96,7 +96,7 @@ export function PreventiveCard({
                   }`}
                 />
                 {index < TIMELINE_KEYS.length - 1 ? (
-                  <span className={`h-px flex-1 ${done ? "bg-[var(--sd-accent)]/50" : "bg-[var(--sd-border)]"}`} />
+                  <span className={`h-px flex-1 ${done ? "bg-[var(--sd-accent)] opacity-50" : "bg-[var(--sd-border)]"}`} />
                 ) : null}
               </div>
               <span className={`truncate text-[9px] font-semibold ${current ? "text-[var(--sd-accent)]" : "text-[var(--sd-faint)]"}`}>

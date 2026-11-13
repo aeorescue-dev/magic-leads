@@ -9398,6 +9398,15 @@ async def list_opportunities(
     )
 
 
+@app.get("/api/opportunities/insights")
+async def opportunity_insights(
+    kind: str = "preventive",
+    user: dict = Depends(_get_current_user),
+):
+    await _require_active_access(user)
+    return opportunity_workflow.insights(kind=kind)
+
+
 @app.get("/api/opportunities/{opportunity_id}")
 async def get_opportunity(opportunity_id: int, user: dict = Depends(_get_current_user)):
     await _require_active_access(user)

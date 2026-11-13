@@ -9997,6 +9997,30 @@ class DatabaseService:
                 for city, count in by_city.items()
             }
 
+            # Série diária de 10 dias para o sparkline dos KPI. Consulta própria
+            # porque a janela do resumo é de 7 dias.
+            series_where = """
+                WHERE date_reported IS NOT NULL
+                  AND datetime(date_reported) >= datetime('now', '-9 days')
+                  AND is_qualified = 1
+            """
+            series_params: list = []
+            if db_cats:
+                placeholders = ",".join("?" * len(db_cats))
+                series_where += f" AND issue_category IN ({placeholders})"
+                series_params.extend(db_cats)
+            series_rows = conn.execute(
+                f"SELECT substr(date_reported, 1, 10) AS day, COUNT(*) AS c "
+                f"FROM leads {series_where} GROUP BY day",
+                series_params,
+            ).fetchall()
+            by_day = {row["day"]: row["c"] for row in series_rows}
+            today_date = utcnow().date()
+            daily_series = []
+            for offset in range(9, -1, -1):
+                day = (today_date - timedelta(days=offset)).isoformat()
+                daily_series.append({"date": day, "count": int(by_day.get(day, 0))})
+
             result = {
                 "total_interested": total_interested,
                 "last_scrape": last_scrape_info,
@@ -10014,6 +10038,7 @@ class DatabaseService:
                 "by_city_coverage": by_city_coverage,
                 "by_urgency": by_urgency,
                 "by_owner_type": by_owner_type,
+                "daily_series": daily_series,
             }
 
             if _DASHBOARD_SUMMARY_CACHE_TTL > 0:

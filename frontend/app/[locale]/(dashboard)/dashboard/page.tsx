@@ -54,6 +54,7 @@ import {
   type OpportunityCardContext,
 } from "@/components/dashboard/OpportunityCard";
 import { PreventiveFeed } from "@/components/dashboard/PreventiveFeed";
+import { FeedRail } from "@/components/dashboard/FeedRail";
 import {
   SegmentedControl,
   SignalButton,
@@ -74,6 +75,7 @@ import {
   fetchMyLeadsHistory, MyLeadHistoryItem, MyLeadsHistoryKpis,
   LeadOccurrence, fetchLeadOccurrences,
   fetchDashboardSummary, DashboardSummary,
+  fetchOpportunityInsights, OpportunityInsights,
   fetchScraperStatus, ScraperRunState,
   fetchPublicMetrics, PublicMetrics, EMPTY_PUBLIC_METRICS, RELEASE_REASONS,
   revealPhone, PhoneRevealResult,
@@ -287,6 +289,7 @@ function DashboardPageInner() {
   const [commandOpen, setCommandOpen] = useState(false);
   const [interestsSheetOpen, setInterestsSheetOpen] = useState(false);
   const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
+  const [preventiveInsights, setPreventiveInsights] = useState<OpportunityInsights | null>(null);
   const [publicMetrics, setPublicMetrics] = useState<PublicMetrics>(EMPTY_PUBLIC_METRICS);
   const [scraperState, setScraperState] = useState<ScraperRunState | null>(null);
   const [shown, setShown] = useState<Set<string>>(new Set());
@@ -720,6 +723,17 @@ function DashboardPageInner() {
   useEffect(() => {
     if (publicMetricsData) setPublicMetrics(publicMetricsData);
   }, [publicMetricsData]);
+
+  // Agregados da pré-inspeção: alimentam os KPI e o painel lateral do feed.
+  const { mutate: mutatePreventiveInsights } = useSWRConfig();
+  const { data: preventiveInsightsData } = useSWR(
+    "/api/opportunities/insights?kind=preventive",
+    () => fetchOpportunityInsights("preventive"),
+    { refreshInterval: 60000, isPaused: swrPaused }
+  );
+  useEffect(() => {
+    if (preventiveInsightsData) setPreventiveInsights(preventiveInsightsData);
+  }, [preventiveInsightsData]);
 
   // ------------------------------------------------ quota diária
   const { data: dailyStatsData } = useSWR(
@@ -1286,6 +1300,9 @@ function DashboardPageInner() {
       } as GuideLead);
       if (userId) refreshNotifications();
       refreshHistory();
+      if (isOpportunity) {
+        mutatePreventiveInsights("/api/opportunities/insights?kind=preventive");
+      }
     } catch (e: any) {
       // Handle already-reserved case gracefully
       if (revealTarget.subject_type === "opportunity" && e?.status === 409) {
@@ -1865,35 +1882,150 @@ function DashboardPageInner() {
     },
   ];
 
-  const kpiSatellites = [
-    {
-      label: t("dashboard.kpi.urgent") || "Urgentes",
-      value: dashboardSummary?.urgent ?? 0,
-      delta: t("dashboard.kpi.need_action") || "precisam ação",
-      icon: AlertCircle,
-      tone: "urgent" as const,
-      onClick: () => {
-        setSelectedUrgency("high");
-        setActiveTab("opportunities");
-      },
-    },
-    {
-      label: t("dashboard.kpi.with_contact_short") || "Com dono",
-      value: dashboardSummary?.with_contact ?? 0,
-      delta: `${dashboardSummary?.with_contact_pct ?? 0}% ${t("dashboard.kpi.owner_identified") || "com proprietário identificado"}`,
-      icon: Phone,
-      tone: "info" as const,
-      progress: dashboardSummary?.with_contact_pct ?? 0,
-    },
-    {
-      label: t("dashboard.kpi.new_short") || "Novas",
-      value: publicMetrics?.last_scrape?.novas_oportunidades ?? dashboardSummary?.recent_count ?? scrapeCount,
-      delta: t("dashboard.kpi.updated_now") || "atualizado agora",
-      icon: TrendingUp,
-      tone: "accent" as const,
-      onClick: () => setActiveTab("opportunities"),
-    },
-  ];
+  // KPI: no separador de pré-inspeção usam-se os quatro indicadores do
+  // protótipo (ativos, preventivos, prazos ≤ 7 dias, multas em risco). Nos
+  // restantes mantém-se a leitura do feed reativo, agora com sparkline.
+  const isPreventionTab = activeTab === "prevention";
+  const leadSeries = (dashboardSummary?.daily_series ?? []).map((point) => point.count);
+  const preventiveSeries = (preventiveInsights?.series ?? []).map((point) => point.count);
+  const deadlineSeries = (preventiveInsights?.deadline_series ?? []).map((point) => point.count);
+  const deadlineValueSeries = (preventiveInsights?.deadline_series ?? []).map(
+    (point) => point.value,
+  );
+  const preventiveValue = preventiveInsights?.totals.value_at_risk ?? 0;
+  const finesInThousands = preventiveValue >= 10000;
+
+  const kpiHero = isPreventionTab
+    ? {
+        label: t("dashboard.kpi.active_opportunities"),
+        value: realTotalLeads,
+        delta: t("dashboard.kpi.active_delta"),
+        sub: `${dashboardSummary?.urgent ?? 0} ${t("dashboard.kpi.need_action")}`,
+        series: leadSeries,
+        icon: Building2,
+      }
+    : {
+        label: t("dashboard.kpi.interested") || "No seu interesse",
+        value: realTotalLeads,
+        delta: t("dashboard.kpi.active_delta") || "qualificadas nos últimos 7 dias",
+        sub: `${dashboardSummary?.recent_count ?? 0} ${t("dashboard.kpi.new_short")}`,
+        series: leadSeries,
+        icon: Building2,
+      };
+
+  const kpiSatellites = isPreventionTab
+    ? [
+        {
+          label: t("dashboard.kpi.preventive"),
+          value: preventiveInsights?.totals.count ?? 0,
+          delta: `${preventiveInsights?.totals.awaiting_inspection ?? 0} ${t("dashboard.kpi.awaiting_inspection")}`,
+          sub: t("dashboard.kpi.live_sample"),
+          series: preventiveSeries,
+          icon: ShieldCheck,
+          tone: "info" as const,
+          onClick: () => setActiveTab("prevention"),
+        },
+        {
+          label: t("dashboard.kpi.deadlines_7d"),
+          value: preventiveInsights?.totals.deadlines_7d ?? 0,
+          delta: `${preventiveInsights?.totals.deadlines_3d ?? 0} ${t("dashboard.kpi.within_3d")}`,
+          sub: t("dashboard.kpi.deadline_window"),
+          series: deadlineSeries,
+          icon: Clock,
+          tone: "warn" as const,
+          onClick: () => setActiveTab("prevention"),
+        },
+        {
+          label: t("dashboard.kpi.fines_at_risk"),
+          value: finesInThousands ? Math.round(preventiveValue / 1000) : preventiveValue,
+          prefix: "$",
+          suffix: finesInThousands ? "k" : "",
+          delta: t("dashboard.kpi.next_7_days"),
+          sub: t("dashboard.kpi.value_at_risk_sub"),
+          series: deadlineValueSeries,
+          icon: AlertTriangle,
+          tone: "urgent" as const,
+          dark: true,
+          onClick: () => setActiveTab("prevention"),
+        },
+      ]
+    : [
+        {
+          label: t("dashboard.kpi.urgent") || "Urgentes",
+          value: dashboardSummary?.urgent ?? 0,
+          delta: t("dashboard.kpi.need_action") || "precisam ação",
+          series: leadSeries,
+          icon: AlertCircle,
+          tone: "urgent" as const,
+          onClick: () => {
+            setSelectedUrgency("high");
+            setActiveTab("opportunities");
+          },
+        },
+        {
+          label: t("dashboard.kpi.with_contact_short") || "Com dono",
+          value: dashboardSummary?.with_contact ?? 0,
+          delta: `${dashboardSummary?.with_contact_pct ?? 0}% ${t("dashboard.kpi.owner_identified") || "com proprietário identificado"}`,
+          icon: Phone,
+          tone: "info" as const,
+          progress: dashboardSummary?.with_contact_pct ?? 0,
+        },
+        {
+          label: t("dashboard.kpi.new_short") || "Novas",
+          value: publicMetrics?.last_scrape?.novas_oportunidades ?? dashboardSummary?.recent_count ?? scrapeCount,
+          delta: t("dashboard.kpi.updated_now") || "atualizado agora",
+          series: leadSeries,
+          icon: TrendingUp,
+          tone: "accent" as const,
+          onClick: () => setActiveTab("opportunities"),
+        },
+      ];
+
+  // Data de referência estável para o cálculo de prazos no render.
+  const [renderNow] = useState(() => Date.now());
+
+  // Painel lateral do feed reativo (a Fase 2 aplica-lhe o novo cartão).
+  // Deriva tudo do feed já carregado.
+  const reactiveRail = useMemo(() => {
+    const zips = new Map<string, number>();
+    const severity = { critical: 0, high: 0, medium: 0, routine: 0 };
+    const deadlines: Array<{
+      id: number | string;
+      address: string;
+      city?: string | null;
+      severity?: string | null;
+      days_left: number;
+    }> = [];
+    for (const lead of leads) {
+      const zip = String(lead.zip_code || "").trim().slice(0, 5);
+      if (zip.length === 5) zips.set(zip, (zips.get(zip) ?? 0) + 1);
+      const urgency = String(lead.urgency_level || "").toLowerCase();
+      if (urgency === "high" || urgency === "emergency") severity.high += 1;
+      else if (urgency === "medium") severity.medium += 1;
+      else severity.routine += 1;
+      const raw = String(lead.sla_target_dt || "");
+      if (raw) {
+        const target = Date.parse(raw.includes("T") ? raw : `${raw}T00:00:00`);
+        if (Number.isFinite(target)) {
+          deadlines.push({
+            id: lead.id,
+            address: lead.address,
+            city: lead.city,
+            severity: lead.urgency_level,
+            days_left: Math.max(0, Math.ceil((target - renderNow) / 86400000)),
+          });
+        }
+      }
+    }
+    return {
+      severity,
+      zips: Array.from(zips.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([zip, count]) => ({ zip, count })),
+      deadlines: deadlines.sort((a, b) => a.days_left - b.days_left).slice(0, 4),
+    };
+  }, [leads, renderNow]);
 
   const opportunityCardCtx: OpportunityCardContext = {
     t,
@@ -2341,12 +2473,7 @@ function DashboardPageInner() {
 
           {/* KPI PULSE — 1 herói + 3 satélites acionáveis */}
           <KpiPulse
-            hero={{
-              label: t("dashboard.kpi.interested") || "No seu interesse",
-              value: realTotalLeads,
-              delta: t("dashboard.kpi.active_delta") || "qualificadas nos últimos 7 dias",
-              icon: Building2,
-            }}
+            hero={kpiHero}
             satellites={kpiSatellites}
             onHero={() => setActiveTab("opportunities")}
           />
@@ -2880,7 +3007,7 @@ function DashboardPageInner() {
               onOpenReactive={() => setActiveTab("opportunities")}
             />
           ) : (
-          <>
+          <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
           {/* GRID: INTERESTS CONFIG + OPPORTUNITIES FEED */}
           <div className="space-y-4">
             {/* INTERESTS SECTION */}
@@ -3094,7 +3221,27 @@ function DashboardPageInner() {
               </div>
             </section>
           </div>
-          </>
+          <FeedRail
+            deadlines={reactiveRail.deadlines}
+            severity={reactiveRail.severity}
+            zips={reactiveRail.zips}
+            onOpenDeadline={(id) => {
+              const lead = leads.find((item) => String(item.id) === String(id));
+              if (lead) setSelectedLead(lead);
+            }}
+            onSeeAll={() => setActiveTab("opportunities")}
+            onOpenMap={() => {
+              const zip = reactiveRail.zips[0]?.zip;
+              if (zip && typeof window !== "undefined") {
+                window.open(
+                  `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(zip)}`,
+                  "_blank",
+                  "noopener",
+                );
+              }
+            }}
+          />
+          </div>
           )}
         </main>
       </div>

@@ -98,7 +98,10 @@ export function OpportunityDrawer({
         </header>
 
         <div className="flex-1 overflow-y-auto px-5 py-4">
-          <div className="rounded-xl border border-[var(--sd-accent)]/25 bg-[var(--sd-accent-soft)] p-3">
+          <div
+            className="rounded-xl border bg-[var(--sd-accent-soft)] p-3"
+            style={{ borderColor: "color-mix(in srgb, var(--sd-accent) 25%, transparent)" }}
+          >
             <p className="text-xs font-bold text-[var(--sd-accent)]">{t("dashboard.preinspection.no_fine")}</p>
             <p className="mt-1 text-[11px] leading-relaxed text-[var(--sd-muted)]">
               {t("dashboard.preinspection.risk")}

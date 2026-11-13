@@ -17,7 +17,7 @@ import hashlib
 import json
 import re
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from ..utils.time import utcnow
@@ -241,9 +241,138 @@ class OpportunityWorkflowService:
                 counts["all"] += row["c"]
                 if row["source_kind"] in counts:
                     counts[row["source_kind"]] += row["c"]
-            return {"opportunities": [self._public(dict(r)) for r in rows], "counts": counts}
+            return {"opportunities": [self._public(dict(r)) for r in rows], "counts": counts,
+                    "insights": self.insights(kind=kind or "all")}
         finally:
             conn.close()
+
+    # Severidade -> quatro buckets do painel (Crítica/Alta/Média/Rotina).
+    _SEVERITY_BUCKETS = {
+        "critical": "critical",
+        "immediate": "critical",
+        "emergency": "critical",
+        "class_1": "critical",
+        "class_c": "critical",
+        "high": "high",
+        "class_2": "high",
+        "class_b": "high",
+        "medium": "medium",
+        "class_a": "medium",
+    }
+
+    def insights(self, kind: Optional[str] = "preventive", days: int = 10) -> dict:
+        """Agregados do painel lateral e dos KPI, sem expor dados sensíveis."""
+        days = max(1, min(int(days or 10), 30))
+        today = datetime.now(timezone.utc).date()
+        clause = "WHERE source_kind = ?" if kind and kind != "all" else ""
+        params: tuple = (kind,) if clause else ()
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                f"""SELECT id, address, city, state, zip_code, severity,
+                           compliance_deadline, job_value, status, received_at, created_at
+                    FROM opportunity_workflow {clause}""",
+                params,
+            ).fetchall()
+        finally:
+            conn.close()
+
+        buckets = {"critical": 0, "high": 0, "medium": 0, "routine": 0}
+        zips: dict = {}
+        deadlines: list = []
+        awaiting = 0
+        deadline_counts = {
+            (today + timedelta(days=offset)).isoformat(): 0 for offset in range(days)
+        }
+        deadline_values = {key: 0.0 for key in deadline_counts}
+        series_counts = {
+            (today - timedelta(days=offset)).isoformat(): 0
+            for offset in range(days - 1, -1, -1)
+        }
+
+        for row in rows:
+            severity = str(row["severity"] or "").strip().lower()
+            buckets[self._SEVERITY_BUCKETS.get(severity, "routine")] += 1
+            if row["status"] == "available":
+                awaiting += 1
+            zip_code = str(row["zip_code"] or "").strip()[:5]
+            if len(zip_code) == 5:
+                zips[zip_code] = zips.get(zip_code, 0) + 1
+
+            value = float(row["job_value"] or 0)
+            deadline = str(row["compliance_deadline"] or "").strip()
+            if deadline:
+                try:
+                    target = datetime.fromisoformat(
+                        deadline.replace("Z", "+00:00")
+                    ).date()
+                except ValueError:
+                    target = None
+                if target is not None:
+                    days_left = (target - today).days
+                    deadlines.append(
+                        {
+                            "id": row["id"],
+                            "address": row["address"],
+                            "city": row["city"],
+                            "state": row["state"],
+                            "severity": severity,
+                            "deadline": target.isoformat(),
+                            "days_left": days_left,
+                            "job_value": round(value),
+                        }
+                    )
+                    key = target.isoformat()
+                    if key in deadline_counts:
+                        deadline_counts[key] += 1
+                        deadline_values[key] += value
+
+            received = str(row["received_at"] or row["created_at"] or "")
+            if received:
+                try:
+                    day = datetime.fromisoformat(
+                        received.replace("Z", "+00:00")
+                    ).date().isoformat()
+                except ValueError:
+                    day = received[:10]
+                if day in series_counts:
+                    series_counts[day] += 1
+
+        deadlines.sort(key=lambda item: (item["days_left"], item["deadline"]))
+        value_at_risk = sum(item["job_value"] for item in deadlines if item["days_left"] <= 7)
+
+        return {
+            "kind": kind or "all",
+            "totals": {
+                "count": len(rows),
+                "awaiting_inspection": awaiting,
+                "deadlines_7d": sum(1 for item in deadlines if item["days_left"] <= 7),
+                "deadlines_3d": sum(1 for item in deadlines if item["days_left"] <= 3),
+                "value_at_risk": value_at_risk,
+            },
+            "by_severity": buckets,
+            "by_zip": [
+                {"zip": zip_code, "count": count}
+                for zip_code, count in sorted(
+                    zips.items(), key=lambda item: (-item[1], item[0])
+                )[:5]
+            ],
+            "deadlines": [
+                {**item, "days_left": max(0, item["days_left"])}
+                for item in deadlines[:5]
+            ],
+            "series": [
+                {"date": day, "count": count} for day, count in series_counts.items()
+            ],
+            "deadline_series": [
+                {
+                    "date": day,
+                    "count": deadline_counts[day],
+                    "value": round(deadline_values[day]),
+                }
+                for day in deadline_counts
+            ],
+        }
 
     def _release_property_lock(self, conn: sqlite3.Connection, opportunity_id: int) -> None:
         conn.execute(

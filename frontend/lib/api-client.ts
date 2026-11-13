@@ -314,6 +314,8 @@ export interface DashboardSummary {
   by_urgency: Record<string, number>;
   // Contagem por tipo de proprietario (privado vs institucional/governamental).
   by_owner_type?: { institutional: number; private: number; unknown?: number };
+  // Série diária (10 dias) para o sparkline dos KPI.
+  daily_series?: Array<{ date: string; count: number }>;
 }
 
 export async function fetchDashboardSummary(): Promise<DashboardSummary> {
@@ -1416,9 +1418,48 @@ export interface Opportunity {
   created_at?: string | null;
 }
 
+export interface OpportunityInsightDeadline {
+  id: number;
+  address: string;
+  city?: string | null;
+  state?: string | null;
+  severity?: string | null;
+  deadline: string;
+  days_left: number;
+  job_value?: number;
+}
+
+export interface OpportunityInsights {
+  kind: string;
+  totals: {
+    count: number;
+    awaiting_inspection: number;
+    deadlines_7d: number;
+    deadlines_3d: number;
+    value_at_risk: number;
+  };
+  by_severity: { critical: number; high: number; medium: number; routine: number };
+  by_zip: Array<{ zip: string; count: number }>;
+  deadlines: OpportunityInsightDeadline[];
+  series: Array<{ date: string; count: number }>;
+  deadline_series: Array<{ date: string; count: number; value: number }>;
+}
+
 export interface OpportunityListResponse {
   opportunities: Opportunity[];
   counts: { all: number; preventive: number; reactive: number; permit: number };
+  insights?: OpportunityInsights;
+}
+
+export async function fetchOpportunityInsights(
+  kind: string = "preventive",
+): Promise<OpportunityInsights> {
+  return handle<OpportunityInsights>(
+    await fetch(`${API_URL}/api/opportunities/insights?kind=${encodeURIComponent(kind)}`, {
+      credentials: "include",
+      headers: { ...authHeaders() },
+    })
+  );
 }
 
 export async function fetchOpportunities(params: {

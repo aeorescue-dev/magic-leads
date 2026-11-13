@@ -11,6 +11,7 @@ import {
 } from "@/lib/api-client";
 import { PreventiveCard } from "@/components/dashboard/PreventiveCard";
 import { OpportunityDrawer } from "@/components/dashboard/OpportunityDrawer";
+import { FeedRail } from "@/components/dashboard/FeedRail";
 
 function categoryKey(value?: string | null): string | null {
   if (!value) return null;
@@ -67,8 +68,20 @@ export function PreventiveFeed({
     [data]
   );
 
+  const insights = data?.insights;
+  const railSeverity = insights?.by_severity ?? { critical: 0, high: 0, medium: 0, routine: 0 };
+  const railDeadlines = (insights?.deadlines ?? []).map((item) => ({
+    id: item.id,
+    address: item.address,
+    city: item.city,
+    severity: item.severity,
+    days_left: item.days_left,
+  }));
+  const railZips = insights?.by_zip ?? [];
+
   return (
-    <section className="flex flex-col overflow-hidden rounded-2xl border border-[var(--sd-border)] bg-[var(--sd-surface)]">
+    <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+    <section className="flex w-full min-w-0 flex-col overflow-hidden rounded-2xl border border-[var(--sd-border)] bg-[var(--sd-surface)]">
       <div className={`border-b px-5 py-4 ${"border-[var(--sd-border)]"}`}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -174,5 +187,28 @@ export function PreventiveFeed({
         ) : null}
       </div>
     </section>
+    <FeedRail
+      deadlines={railDeadlines}
+      severity={railSeverity}
+      zips={railZips}
+      onOpenDeadline={(id) => {
+        const opp = data?.opportunities.find((item) => item.id === Number(id));
+        if (opp) setSelected(opp);
+      }}
+      onSeeAll={() => {
+        const first = railDeadlines[0];
+        const opp = first
+          ? data?.opportunities.find((item) => item.id === Number(first.id))
+          : null;
+        if (opp) setSelected(opp);
+      }}
+      onOpenMap={() => {
+        const zip = railZips[0]?.zip;
+        if (zip && typeof window !== "undefined") {
+          window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(zip)}`, "_blank", "noopener");
+        }
+      }}
+    />
+    </div>
   );
 }
