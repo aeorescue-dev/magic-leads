@@ -119,6 +119,14 @@ def test_opportunity_lifecycle_1h_48h_48h_and_outcome():
     assert outcome["contract_value"] == 18500
 
 
+def test_cannot_advance_available_opportunity():
+    user = _user("pytest-workflow-4@magicleads.app")
+    opp = _opp(source_record_id="not-reserved", bbl="1020710064")
+    assert opportunity_workflow.mark_contacted(opp["id"], user["id"]).get("error") == "not_reserved"
+    assert opportunity_workflow.mark_negotiation(opp["id"], user["id"]).get("error") == "not_reserved"
+    assert opportunity_workflow.convert(opp["id"], user["id"]).get("error") == "not_reserved"
+
+
 def test_property_lock_blocks_second_opportunity_same_property():
     u1 = _user("pytest-workflow-2a@magicleads.app")
     u2 = _user("pytest-workflow-2b@magicleads.app")

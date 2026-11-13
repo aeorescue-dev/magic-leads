@@ -266,10 +266,16 @@ class OpportunityWorkflowService:
             if not row:
                 conn.rollback()
                 return {"error": "not_found"}
+            if row["status"] == "converted":
+                conn.rollback()
+                return {"error": "already_converted"}
+            if row["status"] == "available":
+                conn.rollback()
+                return {"error": "not_reserved"}
             if row["reserved_by"] not in (None, user_id):
                 conn.rollback()
                 return {"error": "not_owner"}
-            if row["status"] in ("contacted", "in_negotiation", "converted"):
+            if row["status"] in ("contacted", "in_negotiation"):
                 conn.commit()
                 return {"opportunity": dict(row), "renewed": False}
             conn.execute(
@@ -303,10 +309,16 @@ class OpportunityWorkflowService:
             if not row:
                 conn.rollback()
                 return {"error": "not_found"}
+            if row["status"] == "converted":
+                conn.rollback()
+                return {"error": "already_converted"}
+            if row["status"] == "available":
+                conn.rollback()
+                return {"error": "not_reserved"}
             if row["reserved_by"] not in (None, user_id):
                 conn.rollback()
                 return {"error": "not_owner"}
-            if row["status"] in ("in_negotiation", "converted"):
+            if row["status"] == "in_negotiation":
                 conn.commit()
                 return {"opportunity": dict(row), "renewed": False}
             conn.execute(
@@ -340,6 +352,12 @@ class OpportunityWorkflowService:
             if not row:
                 conn.rollback()
                 return {"error": "not_found"}
+            if row["status"] == "converted":
+                conn.rollback()
+                return {"error": "already_converted"}
+            if row["status"] == "available":
+                conn.rollback()
+                return {"error": "not_reserved"}
             if row["reserved_by"] not in (None, user_id):
                 conn.rollback()
                 return {"error": "not_owner"}
