@@ -38,6 +38,14 @@ export function categoryLabelKey(value?: string | null): string | null {
 
 const POSSIBLE_VALUES = new Set(["possible", "possível", "posible"]);
 
+export function severityBucket(value?: string | null): "critical" | "high" | "medium" | "routine" {
+  const key = String(value || "").toLowerCase();
+  if (["critical", "immediate", "emergency", "class_1", "class_c"].includes(key)) return "critical";
+  if (["high", "class_2", "class_b"].includes(key)) return "high";
+  if (["medium", "class_a"].includes(key)) return "medium";
+  return "routine";
+}
+
 export function inspectionStatusLabel(
   t: (key: string, values?: Record<string, string | number>) => string,
   value?: string | null,

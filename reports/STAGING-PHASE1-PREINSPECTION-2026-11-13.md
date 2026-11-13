@@ -38,6 +38,22 @@ Produção (`master` em `3b53962`): intocada.
   - no separador de pré-inspeção os cartões passam a ser os do protótipo:
     `Oportunidades ativas`, `Preventivos`, `Prazos ≤ 7 dias`, `Multas em risco`.
 
+### Barra central de abas e filtros (3.ª iteração)
+- **`FeedToolbar`** restaura a barra do protótipo, partilhada pelos feeds:
+  - abas `Todos / Reativos / Preventivos / Obras` com contagens;
+  - chips rápidos de cidade (`Todas`, `NYC`, `Chicago`, `Boston`, `Dallas`);
+  - seletor de especialidade e seletor de gravidade (Crítica/Alta/Média/Rotina);
+  - interruptor `Somente com prazo` (janela de 7 dias);
+  - busca integrada com limpeza rápida e `Limpar`;
+  - botão `Filtros` para a gaveta avançada (proprietário, tipo de sinal, encerrados).
+- **Estado partilhado**: cidade, especialidade, gravidade, prazo e busca vivem na página e
+  alimentam tanto a fila de pré-inspeção como o feed reativo — trocar de aba não perde
+  contexto. Os rails passam a refletir o feed filtrado.
+- As abas mapeiam camadas reais: `Reativos` exclui obras, `Obras` mostra apenas
+  `authorized_work`, `Preventivos` abre a fila preventiva.
+- Removidos os controlos duplicados do feed (categorias/urgência em duplicado) e o botão
+  `Filtros` antigo; a gaveta avançada continua acessível pela barra.
+
 ### Dados e API
 - **Modelo aditivo** em `opportunity_workflow`:
   - `description`, `owner_name`, `owner_type`, `inspection_status`, `received_at`,
@@ -48,8 +64,8 @@ Produção (`master` em `3b53962`): intocada.
   - `by_severity`, `by_zip`, `deadlines`, `series` (10 dias) e `deadline_series`.
 - `GET /api/leads/dashboard-summary` passa a expor `daily_series` (10 dias) para o sparkline.
 - `GET /api/opportunities` inclui `insights` na resposta (o feed não faz pedido extra).
-- **i18n**: 1.346 chaves em EN/PT/ES, paridade garantida pelo teste.
-  - 20 chaves novas do painel lateral e dos KPI.
+- **i18n**: 1.353 chaves em EN/PT/ES, paridade garantida pelo teste.
+  - 27 chaves novas do painel lateral, KPI, toolbar e estado sem resultados.
   - Corrigidos 31 valores com acentos corrompidos (`?` no lugar de `ã/é/ç/…`) em PT/ES.
 - **Seed**: 12 preventivos ricos (severidade e ZIPs variados, prazos e valores) + 4 leads
   reativos (`hpd_violation`, `dob_violation`, `311`, `permit`).
@@ -58,6 +74,10 @@ Produção (`master` em `3b53962`): intocada.
 
 - Fluxo real: card → drawer → modal de consentimento → checkbox → reserva `59:58` →
   guia 1h/48h/48h. Confirmado em PT.
+- Barra central: `NYC` reduz 12 → 7; gravidade `Crítica` 7 → 2; busca `gas` → 1;
+  `Somente com prazo` → 8; `Limpar` repõe 12.
+- Abas: `Reativos` mostra 3 (exclui a obra), `Obras` mostra 1 (apenas Preston Rd) e o rail
+  acompanha o filtro; `Preventivos` volta à fila preventiva sem perder os filtros.
 - PT/EN/ES: KPI, filtros, severidades, timeline, drawer e painel lateral localizados.
 - Sem erros de consola no browser; `insights` pedido uma vez por carregamento (~80 ms).
 - `npx tsc --noEmit`: limpo.
@@ -65,6 +85,7 @@ Produção (`master` em `3b53962`): intocada.
 - `npm test`: 117 pass (inclui paridade i18n).
 - `pytest tests/ -q`: 1676 pass, 1 skip.
 - Capturas: `C:\Users\Fabio\AppData\Local\Temp\opencode\staging-opportunity\shots\`
+  - `pt-toolbar-prevention.png`, `pt-toolbar-opportunities.png`, `pt-toolbar-mobile.png`
   - `pt-prevention-desktop.png`, `pt-prevention-drawer.png`, `pt-prevention-bottom.png`
   - `rail-zoom.png`, `pt-opportunities-rail.png`
   - `en-prevention-desktop.png`, `es-prevention-desktop.png`

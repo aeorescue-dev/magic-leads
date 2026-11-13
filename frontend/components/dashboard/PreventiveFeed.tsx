@@ -3,34 +3,38 @@
 import { useEffect, useMemo, useState } from "react";
 import { ShieldCheck } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
-import { TRADE_CATEGORIES } from "@/lib/categories";
 import {
   fetchOpportunities,
   type Opportunity,
   type OpportunityListResponse,
 } from "@/lib/api-client";
+import { severityBucket } from "@/lib/opportunity-format";
 import { PreventiveCard } from "@/components/dashboard/PreventiveCard";
 import { OpportunityDrawer } from "@/components/dashboard/OpportunityDrawer";
 import { FeedRail } from "@/components/dashboard/FeedRail";
 
-function categoryKey(value?: string | null): string | null {
-  if (!value) return null;
-  return TRADE_CATEGORIES.find((c) => c.key === value)?.labelKey || null;
+export interface FeedFilters {
+  city: string;
+  category: string;
+  severity: string;
+  onlyDeadline: boolean;
+  search: string;
+  now: number;
 }
 
 export function PreventiveFeed({
   onOpenReveal,
-  onOpenReactive,
+  filters,
+  onCountChange,
 }: {
   onOpenReveal: (opportunity: Opportunity) => void;
-  onOpenReactive: () => void;
+  filters: FeedFilters;
+  onCountChange?: (count: number) => void;
 }) {
   const { t } = useI18n();
   const [data, setData] = useState<OpportunityListResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
-  const [city, setCity] = useState("all");
-  const [category, setCategory] = useState("all");
   const [selected, setSelected] = useState<Opportunity | null>(null);
 
   useEffect(() => {
@@ -53,20 +57,43 @@ export function PreventiveFeed({
   }, []);
 
   const rows = useMemo(() => {
-    let list = data?.opportunities || [];
-    if (city !== "all") list = list.filter((o) => o.city === city);
-    if (category !== "all") list = list.filter((o) => o.category === category);
-    return list;
-  }, [data, city, category]);
+    const term = filters.search.trim().toLowerCase();
+    return (data?.opportunities || []).filter((opp) => {
+      if (filters.city !== "all" && opp.city !== filters.city) return false;
+      if (filters.category !== "all" && opp.category !== filters.category) return false;
+      if (filters.severity !== "all" && severityBucket(opp.severity) !== filters.severity) {
+        return false;
+      }
+      if (filters.onlyDeadline) {
+        if (!opp.compliance_deadline) return false;
+        const target = Date.parse(
+          opp.compliance_deadline.includes("T")
+            ? opp.compliance_deadline
+            : `${opp.compliance_deadline}T00:00:00`
+        );
+        if (!Number.isFinite(target) || target - filters.now > 7 * 86400000) return false;
+      }
+      if (term) {
+        const haystack = [
+          opp.address,
+          opp.city,
+          opp.zip_code,
+          opp.category,
+          opp.description,
+          opp.owner_name,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        if (!haystack.includes(term)) return false;
+      }
+      return true;
+    });
+  }, [data, filters]);
 
-  const cities = useMemo(
-    () => Array.from(new Set((data?.opportunities || []).map((o) => o.city).filter((v): v is string => Boolean(v)))).sort(),
-    [data]
-  );
-  const categories = useMemo(
-    () => Array.from(new Set((data?.opportunities || []).map((o) => o.category).filter((v): v is string => Boolean(v)))).sort(),
-    [data]
-  );
+  useEffect(() => {
+    onCountChange?.(rows.length);
+  }, [rows.length, onCountChange]);
 
   const insights = data?.insights;
   const railSeverity = insights?.by_severity ?? { critical: 0, high: 0, medium: 0, routine: 0 };
@@ -82,8 +109,8 @@ export function PreventiveFeed({
   return (
     <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
     <section className="flex w-full min-w-0 flex-col overflow-hidden rounded-2xl border border-[var(--sd-border)] bg-[var(--sd-surface)]">
-      <div className={`border-b px-5 py-4 ${"border-[var(--sd-border)]"}`}>
-        <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="border-b border-[var(--sd-border)] px-5 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="flex items-center gap-2 text-base font-bold">
               <ShieldCheck className="h-4 w-4 text-[var(--sd-accent)]" />
@@ -96,47 +123,7 @@ export function PreventiveFeed({
               {t("dashboard.preinspection.subtitle")}
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="rounded-lg bg-[var(--sd-accent)] px-3 py-2 text-[11px] font-bold text-[var(--sd-accent-text)]"
-            >
-              {t("dashboard.feed.tab_preventive")}
-            </button>
-            <button
-              type="button"
-              onClick={onOpenReactive}
-              className="rounded-lg border border-[var(--sd-border)] px-3 py-2 text-[11px] font-bold text-[var(--sd-muted)]"
-            >
-              {t("dashboard.feed.tab_reactive")}
-            </button>
-          </div>
-        </div>
-
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <select
-            value={city}
-            onChange={(e) => setCity(e.target.value)}
-            className="rounded-lg border border-[var(--sd-border)] bg-[var(--sd-surface)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--sd-muted)]"
-            aria-label={t("dashboard.feed.all_cities")}
-          >
-            <option value="all">{t("dashboard.feed.all_cities")}</option>
-            {cities.map((c) => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
-          <select
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            className="rounded-lg border border-[var(--sd-border)] bg-[var(--sd-surface)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--sd-muted)]"
-            aria-label={t("dashboard.feed.tab_preventive")}
-          >
-            <option value="all">{t("dashboard.preinspection.badge")}</option>
-            {categories.map((c) => (
-              <option key={c} value={c}>{categoryKey(c) ? t(categoryKey(c) as string) : c}</option>
-            ))}
-          </select>
-          <span className="ml-auto text-[11px] text-[var(--sd-muted)]">
+          <span className="text-[11px] font-semibold text-[var(--sd-muted)]">
             {rows.length} {t("dashboard.feed.tab_preventive").toLowerCase()}
           </span>
         </div>
@@ -157,7 +144,9 @@ export function PreventiveFeed({
           <div className="p-12 text-center">
             <ShieldCheck className="mx-auto h-8 w-8 text-[var(--sd-faint)]" />
             <p className="mt-3 text-sm font-semibold text-[var(--sd-text)]">
-              {t("dashboard.preinspection.title")}
+              {(data?.opportunities.length ?? 0) > 0
+                ? t("dashboard.preinspection.no_results")
+                : t("dashboard.preinspection.title")}
             </p>
             <p className="mt-1 text-xs text-[var(--sd-muted)]">
               {t("dashboard.preinspection.subtitle")}

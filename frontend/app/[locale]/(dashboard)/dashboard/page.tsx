@@ -54,6 +54,7 @@ import {
   type OpportunityCardContext,
 } from "@/components/dashboard/OpportunityCard";
 import { PreventiveFeed } from "@/components/dashboard/PreventiveFeed";
+import { FeedToolbar } from "@/components/dashboard/FeedToolbar";
 import { FeedRail } from "@/components/dashboard/FeedRail";
 import {
   SegmentedControl,
@@ -82,6 +83,7 @@ import {
   PAYMENT_REQUIRED_EVENT,
 } from "@/lib/api-client";
 import { apiErrorKey } from "@/lib/api-errors";
+import { severityBucket } from "@/lib/opportunity-format";
 
 // Tipo enriquecido para o modal de revelação (com histórico e ocorrências)
 type EnrichedLead = LeadResponse & {
@@ -279,7 +281,12 @@ function DashboardPageInner() {
 
   // Filter states
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
-  const [selectedUrgency, setSelectedUrgency] = useState<string>("all");
+  const [selectedSeverity, setSelectedSeverity] = useState<string>("all");
+  const [onlyDeadline, setOnlyDeadline] = useState(false);
+  const [feedLayer, setFeedLayer] = useState<"all" | "reactive" | "permit">("all");
+  const [preventiveShown, setPreventiveShown] = useState(0);
+  // Data de referência estável para prazos calculados no render.
+  const [renderNow] = useState(() => Date.now());
   const [selectedType, setSelectedType] = useState<string>("all");
   const [selectedOwnerType, setSelectedOwnerType] = useState<string>("all");
   // Gaveta de filtros em mobile (<lg). Em desktop os filtros ficam inline.
@@ -647,6 +654,14 @@ function DashboardPageInner() {
 
   // ------------------------------------------------ onda 1: feed
   // Só esta chamada bloqueia a lista. O resto (KPIs) entra depois.
+  const severityToUrgency: Record<string, string> = {
+    critical: "high",
+    high: "high",
+    medium: "medium",
+    routine: "low",
+  };
+  const urgencyParam =
+    selectedSeverity === "all" ? undefined : severityToUrgency[selectedSeverity];
   const feedKey = userId
     ? [
         "leads-today",
@@ -654,7 +669,7 @@ function DashboardPageInner() {
         selectedCity,
         selectedType,
         selectedCategory,
-        selectedUrgency,
+        selectedSeverity,
         includeClosed,
       ]
     : null;
@@ -668,7 +683,7 @@ function DashboardPageInner() {
         1,
         selectedType === "all" ? undefined : selectedType,
         selectedCategory === "all" ? undefined : selectedCategory,
-        selectedUrgency === "all" ? undefined : selectedUrgency
+        urgencyParam
       ),
     { refreshInterval: 60000, isPaused: swrPaused }
   );
@@ -895,7 +910,7 @@ function DashboardPageInner() {
         nextPage,
         selectedType === "all" ? undefined : selectedType,
         selectedCategory === "all" ? undefined : selectedCategory,
-        selectedUrgency === "all" ? undefined : selectedUrgency
+        urgencyParam
       );
       if (data.leads && data.leads.length > 0) {
         setLeads((prev) => [...prev, ...data.leads]);
@@ -914,7 +929,7 @@ function DashboardPageInner() {
     }
     // includeClosed FALTOU: alternar o interruptor de historico nao recriava o
     // callback, por isso "carregar mais" continuava a pagina sem o parametro.
-  }, [currentPage, hasMoreLeads, loadingMore, selectedCity, selectedType, selectedCategory, selectedUrgency, includeClosed]);
+  }, [currentPage, hasMoreLeads, loadingMore, selectedCity, selectedType, selectedCategory, selectedSeverity, urgencyParam, includeClosed]);
 
   // O lead já está em "Meus Leads" (revelado por mim: reservado, em negociação,
   // convertido, liberado ou com hold expirado). Nesse estado o botão
@@ -1449,9 +1464,24 @@ function DashboardPageInner() {
           return false;
         }
       }
-      // Urgency filter
-      if (selectedUrgency !== "all") {
-        if (lead.urgency_level !== selectedUrgency) {
+      // Gravidade (buckets do protótipo) — mapeia a urgência dos leads.
+      if (selectedSeverity !== "all" && severityBucket(lead.urgency_level) !== selectedSeverity) {
+        return false;
+      }
+
+      // Camada do feed: Todos / Reativos / Obras.
+      if (feedLayer === "permit") {
+        if (lead.signal_type !== "authorized_work") return false;
+      } else if (feedLayer === "reactive") {
+        if (lead.signal_type === "authorized_work") return false;
+      }
+
+      // Somente com prazo: janela de 7 dias.
+      if (onlyDeadline) {
+        const rawSla = String(lead.sla_target_dt || "");
+        if (!rawSla) return false;
+        const slaTarget = Date.parse(rawSla.includes("T") ? rawSla : `${rawSla}T00:00:00`);
+        if (!Number.isFinite(slaTarget) || slaTarget - renderNow > 7 * 86400000) {
           return false;
         }
       }
@@ -1506,7 +1536,7 @@ function DashboardPageInner() {
 
       return true;
     });
-  }, [leads, activeTab, selectedCity, selectedCategory, selectedUrgency, selectedType, selectedOwnerType, interests, searchQuery]);
+  }, [leads, activeTab, selectedCity, selectedCategory, selectedSeverity, selectedType, selectedOwnerType, interests, searchQuery, feedLayer, onlyDeadline, renderNow]);
 
   // New alerts (not yet viewed)
   const newAlerts = useMemo(
@@ -1658,30 +1688,28 @@ function DashboardPageInner() {
 
   const modalActionButtons = selectedLead ? getModalActionButtons() : null;
 
-  // ---- Filtros: uma unica definicao usada inline (desktop) e na gaveta mobile.
+  // ---- Filtros: barra única (toolbar) + gaveta avançada no mobile.
   const activeFilterCount = [
     selectedCity !== "all",
     selectedCategory !== "all",
-    selectedUrgency !== "all",
+    selectedSeverity !== "all",
     selectedOwnerType !== "all",
     selectedType !== "all",
     includeClosed,
+    onlyDeadline,
+    searchQuery.trim() !== "",
   ].filter(Boolean).length;
   const clearFilters = () => {
     setSelectedCity("all");
     setSelectedCategory("all");
-    setSelectedUrgency("all");
+    setSelectedSeverity("all");
     setSelectedOwnerType("all");
     setSelectedType("all");
     setIncludeClosed(false);
+    setOnlyDeadline(false);
+    setSearchQuery("");
   };
 
-  const urgencyOptions = [
-    { value: "all", label: t("dashboard.filter.all_urgency") || "Todas", icon: Filter },
-    { value: "high", label: t("dashboard.feed.urgency.high") || "Alta", icon: Flame, tone: "urgent" as const },
-    { value: "medium", label: t("dashboard.feed.urgency.medium") || "Média", icon: AlertCircle, tone: "warn" as const },
-    { value: "low", label: t("dashboard.feed.urgency.low") || "Baixa", icon: Clock, tone: "muted" as const },
-  ];
   const ownerOptions = [
     { value: "all", label: t("dashboard.filter.all_owner_types") || "Todos", icon: Filter },
     { value: "private", label: t("dashboard.filter.owner_type_private") || "Privado", icon: UserRound },
@@ -1697,34 +1725,7 @@ function DashboardPageInner() {
 
   const filterControls = (
     <div className="space-y-3">
-      <div className="sd-scroll-x flex items-center gap-2 overflow-x-auto pb-1">
-        <SignalChip
-          active={selectedCategory === "all"}
-          icon={Sparkles}
-          onClick={() => setSelectedCategory("all")}
-        >
-          {t("dashboard.filter.all_categories") || "Todas"}
-        </SignalChip>
-        {CATEGORIES.map((cat) => (
-          <SignalChip
-            key={cat.key}
-            active={selectedCategory === cat.key}
-            icon={cat.icon}
-            onClick={() => setSelectedCategory(cat.key)}
-            title={t(cat.labelKey)}
-          >
-            {t(cat.labelKey)}
-          </SignalChip>
-        ))}
-      </div>
-
       <div className="flex flex-wrap items-center gap-2">
-        <SegmentedControl
-          options={urgencyOptions}
-          value={selectedUrgency}
-          onChange={setSelectedUrgency}
-          ariaLabel={t("dashboard.filter.urgency") || "Urgência"}
-        />
         <SegmentedControl
           options={ownerOptions}
           value={selectedOwnerType}
@@ -1754,9 +1755,19 @@ function DashboardPageInner() {
               {t(CATEGORIES.find((c) => c.key === selectedCategory)?.labelKey || selectedCategory)} ×
             </SignalChip>
           ) : null}
-          {selectedUrgency !== "all" ? (
-            <SignalChip active onClick={() => setSelectedUrgency("all")}>
-              {t(`dashboard.feed.urgency.${selectedUrgency}`) || selectedUrgency} ×
+          {selectedSeverity !== "all" ? (
+            <SignalChip active onClick={() => setSelectedSeverity("all")}>
+              {t(`dashboard.severity.${selectedSeverity}`) || selectedSeverity} ×
+            </SignalChip>
+          ) : null}
+          {onlyDeadline ? (
+            <SignalChip active onClick={() => setOnlyDeadline(false)}>
+              {t("dashboard.filter.only_deadline")} ×
+            </SignalChip>
+          ) : null}
+          {searchQuery.trim() ? (
+            <SignalChip active onClick={() => setSearchQuery("")}>
+              “{searchQuery.trim()}” ×
             </SignalChip>
           ) : null}
           {selectedOwnerType !== "all" ? (
@@ -1958,8 +1969,9 @@ function DashboardPageInner() {
           icon: AlertCircle,
           tone: "urgent" as const,
           onClick: () => {
-            setSelectedUrgency("high");
+            setSelectedSeverity("high");
             setActiveTab("opportunities");
+            setFeedLayer("all");
           },
         },
         {
@@ -1981,8 +1993,43 @@ function DashboardPageInner() {
         },
       ];
 
-  // Data de referência estável para o cálculo de prazos no render.
-  const [renderNow] = useState(() => Date.now());
+  // Barra central de abas/filtros (protótipo) — partilhada pelos feeds.
+  const permitCount = leads.filter((lead) => lead.signal_type === "authorized_work").length;
+  const preventiveCount = preventiveInsights?.totals.count ?? 0;
+  const feedTabs = [
+    { key: "all", label: t("dashboard.feed.tab_all"), count: realTotalLeads },
+    {
+      key: "reactive",
+      label: t("dashboard.feed.tab_reactive"),
+      count: Math.max(0, realTotalLeads - permitCount),
+    },
+    { key: "preventive", label: t("dashboard.feed.tab_preventive"), count: preventiveCount },
+    { key: "permit", label: t("dashboard.feed.tab_works"), count: permitCount },
+  ];
+  const activeFeedTab =
+    activeTab === "prevention"
+      ? "preventive"
+      : feedLayer === "reactive"
+        ? "reactive"
+        : feedLayer === "permit"
+          ? "permit"
+          : "all";
+  const handleFeedTab = (key: string) => {
+    if (key === "preventive") {
+      setActiveTab("prevention");
+      return;
+    }
+    setActiveTab("opportunities");
+    setFeedLayer(key === "reactive" ? "reactive" : key === "permit" ? "permit" : "all");
+  };
+  const feedFilters = {
+    city: selectedCity,
+    category: selectedCategory,
+    severity: selectedSeverity,
+    onlyDeadline,
+    search: searchQuery,
+    now: renderNow,
+  };
 
   // Painel lateral do feed reativo (a Fase 2 aplica-lhe o novo cartão).
   // Deriva tudo do feed já carregado.
@@ -1996,7 +2043,7 @@ function DashboardPageInner() {
       severity?: string | null;
       days_left: number;
     }> = [];
-    for (const lead of leads) {
+    for (const lead of filteredLeads) {
       const zip = String(lead.zip_code || "").trim().slice(0, 5);
       if (zip.length === 5) zips.set(zip, (zips.get(zip) ?? 0) + 1);
       const urgency = String(lead.urgency_level || "").toLowerCase();
@@ -2025,7 +2072,7 @@ function DashboardPageInner() {
         .map(([zip, count]) => ({ zip, count })),
       deadlines: deadlines.sort((a, b) => a.days_left - b.days_left).slice(0, 4),
     };
-  }, [leads, renderNow]);
+  }, [filteredLeads, renderNow]);
 
   const opportunityCardCtx: OpportunityCardContext = {
     t,
@@ -2493,54 +2540,33 @@ function DashboardPageInner() {
             />
           )}
 
-{/* FILTER BAR — inline em desktop, gaveta (sheet) em mobile */}
-          <div className="hidden rounded-2xl border border-[var(--sd-border)] bg-[var(--sd-surface)] p-4 lg:block" style={{ display: activeTab === "prevention" ? "none" : undefined }}>
-            {filterControls}
-            <div className={`mt-2 flex items-center justify-between gap-2 text-xs ${T.text2}`}>
-              <SignalButton
-                type="button"
-                variant="secondary"
-                size="sm"
-                icon={SlidersHorizontal}
-                onClick={() => setFiltersOpen(true)}
-              >
-                {t("dashboard.filter.open") || "Filtros"}
-                {activeFilterCount > 0 ? (
-                  <span className="ml-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--sd-accent)] px-1 text-[9px] font-bold text-[var(--sd-accent-text)]">
-                    {activeFilterCount}
-                  </span>
-                ) : null}
-              </SignalButton>
-              <div className="flex items-center gap-2">
-                <span>{filteredLeads.length} {t("dashboard.filter.showing") || "oportunidades"}</span>
-                <span>·</span>
-                <span>{newAlerts.length} {t("dashboard.filter.new") || "novas"}</span>
-              </div>
-            </div>
-          </div>
+          {["overview", "opportunities", "prevention"].includes(activeTab) ? (
+            <FeedToolbar
+              tabs={feedTabs}
+              activeTab={activeFeedTab}
+              onTabChange={handleFeedTab}
+              cities={["NYC", "Chicago", "Boston", "Dallas"]}
+              city={selectedCity}
+              onCityChange={setSelectedCity}
+              category={selectedCategory}
+              onCategoryChange={setSelectedCategory}
+              severity={selectedSeverity}
+              onSeverityChange={setSelectedSeverity}
+              onlyDeadline={onlyDeadline}
+              onToggleDeadline={() => setOnlyDeadline((value) => !value)}
+              search={searchQuery}
+              onSearchChange={setSearchQuery}
+              resultCount={activeFeedTab === "preventive" ? preventiveShown : filteredLeads.length}
+              resultLabel={
+                activeFeedTab === "preventive"
+                  ? t("dashboard.feed.tab_preventive").toLowerCase()
+                  : t("dashboard.filter.showing") || "oportunidades"
+              }
+              onOpenAdvanced={() => setFiltersOpen(true)}
+              onClear={clearFilters}
+            />
+          ) : null}
 
-          <div className="lg:hidden flex items-center gap-2" style={{ display: activeTab === "prevention" ? "none" : undefined }}>
-            <button
-              ref={filtersTriggerRef}
-              type="button"
-              onClick={() => setFiltersOpen(true)}
-              aria-haspopup="dialog"
-              aria-controls="filters-sheet"
-              aria-expanded={filtersOpen}
-              className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border text-sm font-semibold transition ${T.panel} ${T.text}`}
-            >
-              <SlidersHorizontal className="h-4 w-4" />
-              {t("dashboard.filter.open") || "Filtros"}
-              {activeFilterCount > 0 && (
-                <span className="inline-flex items-center justify-center h-5 min-w-5 px-1.5 rounded-full bg-indigo-500 text-white text-[10px] font-bold">
-                  {activeFilterCount}
-                </span>
-              )}
-            </button>
-            <span className={`ml-auto text-xs ${T.text2}`}>
-              {filteredLeads.length} {t("dashboard.filter.showing") || "oportunidades"}
-            </span>
-          </div>
 
           {filtersOpen && (
             <div
@@ -3004,7 +3030,8 @@ function DashboardPageInner() {
           ) : activeTab === "prevention" ? (
             <PreventiveFeed
               onOpenReveal={openOpportunityReveal}
-              onOpenReactive={() => setActiveTab("opportunities")}
+              filters={feedFilters}
+              onCountChange={setPreventiveShown}
             />
           ) : (
           <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
