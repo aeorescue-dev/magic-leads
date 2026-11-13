@@ -12,6 +12,7 @@ import {
   severityColor,
   severityKey,
   sourceLabel,
+  tagLabel,
 } from "@/lib/opportunity-format";
 
 export function OpportunityDrawer({
@@ -23,7 +24,7 @@ export function OpportunityDrawer({
   onClose: () => void;
   onReveal: () => void;
 }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const accent = severityColor(opportunity.severity);
   const labelKey = categoryLabelKey(opportunity.category);
   const category = labelKey ? t(labelKey) : opportunity.category || opportunity.address;
@@ -33,6 +34,14 @@ export function OpportunityDrawer({
       : opportunity.status === "reserved"
         ? 2
         : 1;
+  const money = (value?: number | null) =>
+    value == null
+      ? "—"
+      : new Intl.NumberFormat(lang === "pt" ? "pt-BR" : lang === "es" ? "es-MX" : "en-US", {
+          style: "currency",
+          currency: "USD",
+          maximumFractionDigits: 0,
+        }).format(value);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -42,17 +51,37 @@ export function OpportunityDrawer({
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const steps = [
-    { key: "dashboard.preinspection.timeline.complaint", state: "done" },
+  const baseSteps = [
+    { id: "complaint", key: "dashboard.preinspection.timeline.complaint", state: "done" },
     {
+      id: "inspection",
       key: "dashboard.preinspection.timeline.inspection",
       state: currentStep === 2 ? "current" : currentStep > 2 ? "done" : "future",
     },
     {
+      id: "violation",
       key: "dashboard.preinspection.timeline.violation",
       state: currentStep >= 3 ? "done" : "future",
     },
   ];
+  const timelineMeta = new Map(
+    (opportunity.timeline ?? []).map((entry) => [String(entry.key || ""), entry]),
+  );
+  const steps = baseSteps.map((step) => {
+    const meta = timelineMeta.get(step.id);
+    return {
+      ...step,
+      label: typeof meta?.label === "string" && meta.label ? meta.label : null,
+      date: typeof meta?.date === "string" && meta.date ? meta.date.slice(0, 10) : null,
+    };
+  });
+  const statusLabel =
+    opportunity.status === "reserved" ||
+    opportunity.status === "contacted" ||
+    opportunity.status === "in_negotiation"
+      ? t("dashboard.status.selected")
+      : t("dashboard.status.awaiting_inspection");
+  const tags = opportunity.tags ?? [];
 
   return (
     <div className="fixed inset-0 z-[85] bg-black/50 backdrop-blur-sm" onClick={onClose}>
@@ -133,22 +162,24 @@ export function OpportunityDrawer({
                         step.state === "future" ? "text-[var(--sd-faint)]" : "text-[var(--sd-text)]"
                       }`}
                     >
-                      {t(step.key)}
+                      {step.label || t(step.key)}
                     </p>
                     <p className="mt-0.5 text-[10px] text-[var(--sd-muted)]">
-                      {index === 0
-                        ? opportunity.received_at
-                          ? opportunity.received_at.slice(0, 10)
-                          : t("dashboard.preinspection.received")
-                        : step.state === "current"
-                          ? inspectionStatusLabel(t, opportunity.inspection_status)
-                          : step.state === "done"
-                            ? t("dashboard.preinspection.possible")
-                            : t(
-                                index === steps.length - 1
-                                  ? "dashboard.preinspection.no_fine"
-                                  : "dashboard.preinspection.awaiting",
-                              )}
+                      {step.date
+                        ? step.date
+                        : index === 0
+                          ? opportunity.received_at
+                            ? opportunity.received_at.slice(0, 10)
+                            : t("dashboard.preinspection.received")
+                          : step.state === "current"
+                            ? inspectionStatusLabel(t, opportunity.inspection_status)
+                            : step.state === "done"
+                              ? t("dashboard.preinspection.possible")
+                              : t(
+                                  index === steps.length - 1
+                                    ? "dashboard.preinspection.no_fine"
+                                    : "dashboard.preinspection.awaiting",
+                                )}
                     </p>
                   </div>
                 </div>
@@ -171,7 +202,9 @@ export function OpportunityDrawer({
               value={sourceLabel(t, opportunity.source_type)}
             />
             <Fact label={t("dashboard.preinspection.received")} value={opportunity.received_at ? opportunity.received_at.slice(0, 10) : "—"} />
-            <Fact label={t("dashboard.preinspection.status")} value={t("dashboard.status.awaiting_inspection")} />
+            <Fact label={t("dashboard.preinspection.status")} value={statusLabel} />
+            <Fact label={t("dashboard.preinspection.value")} value={money(opportunity.job_value)} />
+            <Fact label={t("dashboard.preinspection.owner_type")} value={opportunity.owner_type || "—"} />
           </section>
 
           <section className="mt-5">
@@ -182,9 +215,15 @@ export function OpportunityDrawer({
               {opportunity.description || "—"}
             </p>
             <div className="mt-2 flex flex-wrap gap-1.5">
-              <Tag>{t(severityKey(opportunity.severity))}</Tag>
-              <Tag>{deadlineLabel(t, opportunity.compliance_deadline)}</Tag>
-              <Tag>{t("dashboard.preinspection.possible")}</Tag>
+              {tags.length > 0 ? (
+                tags.map((tag) => <Tag key={tag}>{tagLabel(t, tag)}</Tag>)
+              ) : (
+                <>
+                  <Tag>{t(severityKey(opportunity.severity))}</Tag>
+                  <Tag>{deadlineLabel(t, opportunity.compliance_deadline)}</Tag>
+                  <Tag>{t("dashboard.preinspection.possible")}</Tag>
+                </>
+              )}
             </div>
           </section>
 
@@ -195,7 +234,9 @@ export function OpportunityDrawer({
               </span>
               <div className="min-w-0">
                 <p className="truncate text-xs font-bold text-[var(--sd-text)]">{opportunity.owner_name || "—"}</p>
-                <p className="text-[10px] text-[var(--sd-muted)]">{t("dashboard.preinspection.owner")}</p>
+                <p className="text-[10px] text-[var(--sd-muted)]">
+                  {opportunity.owner_type || t("dashboard.preinspection.owner")}
+                </p>
               </div>
             </div>
             <div className="mt-3 flex items-center justify-between gap-2 border-t border-[var(--sd-border)] pt-3">

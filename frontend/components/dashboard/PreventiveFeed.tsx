@@ -8,7 +8,7 @@ import {
   type Opportunity,
   type OpportunityListResponse,
 } from "@/lib/api-client";
-import { severityBucket } from "@/lib/opportunity-format";
+import { severityBucket, deadlineDaysLeft } from "@/lib/opportunity-format";
 import { PreventiveCard } from "@/components/dashboard/PreventiveCard";
 import { OpportunityDrawer } from "@/components/dashboard/OpportunityDrawer";
 import { FeedRail } from "@/components/dashboard/FeedRail";
@@ -95,16 +95,43 @@ export function PreventiveFeed({
     onCountChange?.(rows.length);
   }, [rows.length, onCountChange]);
 
-  const insights = data?.insights;
-  const railSeverity = insights?.by_severity ?? { critical: 0, high: 0, medium: 0, routine: 0 };
-  const railDeadlines = (insights?.deadlines ?? []).map((item) => ({
-    id: item.id,
-    address: item.address,
-    city: item.city,
-    severity: item.severity,
-    days_left: item.days_left,
-  }));
-  const railZips = insights?.by_zip ?? [];
+  const rail = useMemo(() => {
+    const severity = { critical: 0, high: 0, medium: 0, routine: 0 };
+    const zipCounts = new Map<string, number>();
+    const deadlines: Array<{
+      id: number;
+      address: string;
+      city?: string | null;
+      severity?: string | null;
+      days_left: number;
+    }> = [];
+    for (const opp of rows) {
+      severity[severityBucket(opp.severity)] += 1;
+      const zip = String(opp.zip_code || "").trim().slice(0, 5);
+      if (zip.length === 5) zipCounts.set(zip, (zipCounts.get(zip) ?? 0) + 1);
+      const days = deadlineDaysLeft(opp.compliance_deadline, filters.now);
+      if (days != null) {
+        deadlines.push({
+          id: opp.id,
+          address: opp.address,
+          city: opp.city,
+          severity: opp.severity,
+          days_left: days,
+        });
+      }
+    }
+    return {
+      severity,
+      zips: Array.from(zipCounts.entries())
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .slice(0, 5)
+        .map(([zip, count]) => ({ zip, count })),
+      deadlines: deadlines.sort((a, b) => a.days_left - b.days_left).slice(0, 5),
+    };
+  }, [rows, filters.now]);
+  const railSeverity = rail.severity;
+  const railDeadlines = rail.deadlines;
+  const railZips = rail.zips;
 
   return (
     <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">

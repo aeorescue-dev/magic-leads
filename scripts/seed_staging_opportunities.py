@@ -264,6 +264,29 @@ RICH_CONTEXT = {
 }
 for _sample in SAMPLES:
     _sample.update(RICH_CONTEXT.get(_sample["source_record_id"], {}))
+    _tags = ["inspection_possible", "owner_identified", "no_fine"]
+    if _sample.get("compliance_deadline"):
+        try:
+            _target = datetime.fromisoformat(
+                str(_sample["compliance_deadline"])[:10]
+            ).date()
+            if (_target - datetime.now(timezone.utc).date()).days <= 7:
+                _tags.append("deadline_soon")
+        except ValueError:
+            pass
+    _sample.setdefault("tags", _tags)
+    _sample.setdefault(
+        "timeline",
+        [
+            {
+                "key": "complaint",
+                "state": "done",
+                "date": str(_sample.get("received_at") or "")[:10] or None,
+            },
+            {"key": "inspection", "state": "current"},
+            {"key": "violation", "state": "future"},
+        ],
+    )
 
 
 def seed_reactive_leads() -> None:

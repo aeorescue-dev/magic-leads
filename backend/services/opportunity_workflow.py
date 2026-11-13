@@ -81,11 +81,9 @@ class OpportunityWorkflowService:
                     out[key] = []
             else:
                 out[key] = []
-        if out.get("source_payload"):
-            try:
-                out["source_payload"] = json.loads(out["source_payload"])
-            except (TypeError, ValueError):
-                pass
+        # O payload bruto da fonte fica só na BD: devolvê-lo ao cliente violaria
+        # a regra de não expor termos/datasets da origem (invariante 27).
+        out.pop("source_payload", None)
         return out
 
     @staticmethod

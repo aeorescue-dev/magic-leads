@@ -83,7 +83,7 @@ import {
   PAYMENT_REQUIRED_EVENT,
 } from "@/lib/api-client";
 import { apiErrorKey } from "@/lib/api-errors";
-import { severityBucket } from "@/lib/opportunity-format";
+import { severityBucket, deadlineDaysLeft } from "@/lib/opportunity-format";
 
 // Tipo enriquecido para o modal de revelação (com histórico e ocorrências)
 type EnrichedLead = LeadResponse & {
@@ -2046,20 +2046,17 @@ function DashboardPageInner() {
     for (const lead of filteredLeads) {
       const zip = String(lead.zip_code || "").trim().slice(0, 5);
       if (zip.length === 5) zips.set(zip, (zips.get(zip) ?? 0) + 1);
-      const urgency = String(lead.urgency_level || "").toLowerCase();
-      if (urgency === "high" || urgency === "emergency") severity.high += 1;
-      else if (urgency === "medium") severity.medium += 1;
-      else severity.routine += 1;
+      severity[severityBucket(lead.urgency_level)] += 1;
       const raw = String(lead.sla_target_dt || "");
       if (raw) {
-        const target = Date.parse(raw.includes("T") ? raw : `${raw}T00:00:00`);
-        if (Number.isFinite(target)) {
+        const days = deadlineDaysLeft(raw, renderNow);
+        if (days != null) {
           deadlines.push({
             id: lead.id,
             address: lead.address,
             city: lead.city,
             severity: lead.urgency_level,
-            days_left: Math.max(0, Math.ceil((target - renderNow) / 86400000)),
+            days_left: days,
           });
         }
       }
@@ -2564,6 +2561,7 @@ function DashboardPageInner() {
               }
               onOpenAdvanced={() => setFiltersOpen(true)}
               onClear={clearFilters}
+              advancedButtonRef={filtersTriggerRef}
             />
           ) : null}
 
@@ -3885,6 +3883,15 @@ function DashboardPageInner() {
                 </label>
               </div>
             </div>
+
+            {isBlockedByQuota(revealTarget, dailyStats?.remaining) ? (
+              <div
+                role="alert"
+                className="mt-4 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs font-semibold text-amber-400"
+              >
+                {t("dashboard.toast.daily_limit")}
+              </div>
+            ) : null}
 
             <div className="mt-5 flex gap-2">
               <button

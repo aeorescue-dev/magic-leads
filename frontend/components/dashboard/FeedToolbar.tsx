@@ -1,6 +1,7 @@
 "use client";
 
 import { Search, SlidersHorizontal, X } from "lucide-react";
+import type { Ref } from "react";
 import { useI18n } from "@/lib/i18n";
 import { TRADE_CATEGORIES } from "@/lib/categories";
 
@@ -31,6 +32,7 @@ export function FeedToolbar({
   resultLabel,
   onOpenAdvanced,
   onClear,
+  advancedButtonRef,
 }: {
   tabs: FeedTab[];
   activeTab: string;
@@ -50,6 +52,7 @@ export function FeedToolbar({
   resultLabel: string;
   onOpenAdvanced?: () => void;
   onClear: () => void;
+  advancedButtonRef?: Ref<HTMLButtonElement>;
 }) {
   const { t } = useI18n();
 
@@ -91,6 +94,7 @@ export function FeedToolbar({
           </span>
           {onOpenAdvanced ? (
             <button
+              ref={advancedButtonRef}
               type="button"
               onClick={onOpenAdvanced}
               className="sd-focus inline-flex items-center gap-1.5 rounded-lg border border-[var(--sd-border)] px-2.5 py-1.5 text-[10px] font-bold text-[var(--sd-muted)] transition hover:text-[var(--sd-text)]"
