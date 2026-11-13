@@ -1386,6 +1386,114 @@ export interface PhoneRevealResult {
   billed?: boolean;
 }
 
+export interface Opportunity {
+  id: number;
+  property_key: string;
+  source_kind: "preventive" | "reactive" | "permit";
+  source_record_id: string;
+  source_type?: string | null;
+  address: string;
+  city: string;
+  state: string;
+  zip_code?: string | null;
+  bbl?: string | null;
+  bin?: string | null;
+  category?: string | null;
+  signal_type?: string | null;
+  severity?: string | null;
+  compliance_deadline?: string | null;
+  job_value?: number | null;
+  status: string;
+  reserved_until?: string | null;
+  stage_expires_at?: string | null;
+  created_at?: string | null;
+}
+
+export interface OpportunityListResponse {
+  opportunities: Opportunity[];
+  counts: { all: number; preventive: number; reactive: number; permit: number };
+}
+
+export async function fetchOpportunities(params: {
+  kind?: string;
+  status?: string;
+  city?: string;
+  category?: string;
+  limit?: number;
+} = {}): Promise<OpportunityListResponse> {
+  const qs = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== "") qs.set(key, String(value));
+  }
+  return handle<OpportunityListResponse>(
+    await fetch(`${API_URL}/api/opportunities${qs.toString() ? `?${qs}` : ""}`, {
+      credentials: "include",
+      headers: { ...authHeaders() },
+    })
+  );
+}
+
+export async function reserveOpportunity(
+  opportunityId: string | number,
+  minutes = 60,
+  opts: { consent?: boolean; idempotency?: string } = {}
+): Promise<{
+  reserved: boolean;
+  id: number;
+  status: string;
+  stage_expires_at?: string;
+  counted_again: boolean;
+  quota?: { used: number; limit: number; remaining: number };
+  opportunity: Opportunity;
+}> {
+  return handle(
+    await fetch(`${API_URL}/api/opportunities/${opportunityId}/reserve`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ minutes, consent: opts.consent ?? false, idempotency: opts.idempotency }),
+    })
+  );
+}
+
+export async function contactOpportunity(
+  opportunityId: string | number,
+  channel = "phone"
+): Promise<{ status: string; stage: string; stage_expires_at?: string; renewed: boolean }> {
+  return handle(
+    await fetch(`${API_URL}/api/opportunities/${opportunityId}/contact`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ channel }),
+    })
+  );
+}
+
+export async function negotiateOpportunity(
+  opportunityId: string | number
+): Promise<{ status: string; stage: string; stage_expires_at?: string; renewed: boolean }> {
+  return handle(
+    await fetch(`${API_URL}/api/opportunities/${opportunityId}/negotiate`, {
+      method: "POST",
+      credentials: "include",
+      headers: { ...authHeaders() },
+    })
+  );
+}
+
+export async function convertOpportunity(
+  opportunityId: string | number
+): Promise<{ status: string; stage: string }> {
+  return handle(
+    await fetch(`${API_URL}/api/opportunities/${opportunityId}/convert`, {
+      method: "POST",
+      credentials: "include",
+      headers: { ...authHeaders() },
+    })
+  );
+}
+
 export async function revealPhone(leadId: string | number): Promise<PhoneRevealResult> {
   return handle<PhoneRevealResult>(
     await fetch(`${API_URL}/api/leads/${leadId}/reveal-phone`, {

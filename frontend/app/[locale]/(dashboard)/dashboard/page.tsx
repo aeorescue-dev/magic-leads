@@ -53,6 +53,7 @@ import {
   OpportunityCard,
   type OpportunityCardContext,
 } from "@/components/dashboard/OpportunityCard";
+import { PreventiveFeed } from "@/components/dashboard/PreventiveFeed";
 import {
   SegmentedControl,
   SignalButton,
@@ -66,6 +67,8 @@ import {
   fetchLeadById, toggleFavorite, recordContact, recordPushClick, fetchNotes, addNote, deleteNote,
   fetchUserNotifications, fetchUserUnreadCount, markUserNotificationRead, markAllUserNotificationsRead,
   fetchLeadStatus, reserveLead, releaseLead, contactLead, negotiateLead, convertLead,
+  reserveOpportunity, contactOpportunity, negotiateOpportunity, convertOpportunity,
+  type Opportunity,
   fetchLeadHistory, fetchUserInterests, updateUserInterests,
   fetchUserDailyStats, fetchUserSubscriptionStatus, fetchContractorMetrics,
   fetchMyLeadsHistory, MyLeadHistoryItem, MyLeadsHistoryKpis,
@@ -82,6 +85,8 @@ import { apiErrorKey } from "@/lib/api-errors";
 type EnrichedLead = LeadResponse & {
   _history?: HistoryEvent[];
   _occurrences?: LeadOccurrence[];
+  subject_type?: "lead" | "opportunity";
+  opportunity_id?: number;
 };
 
 // Modal automático do ciclo de vida (abre logo após reservar)
@@ -254,7 +259,7 @@ function DashboardPageInner() {
   const [stats, setStats] = useState<LeadStats | null>(null);
   const [selectedCity, setSelectedCity] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeTab, setActiveTab] = useState<"overview" | "opportunities" | "favorites" | "interests" | "alerts" | "history">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "opportunities" | "prevention" | "favorites" | "interests" | "alerts" | "history">("overview");
   const [interests, setInterests] = useState<Set<string>>(new Set(ALL_CATEGORY_KEYS));
   const [interestsConfigured, setInterestsConfigured] = useState<boolean | null>(null);
   // O utilizador ja' interagiu com as especialidades? Distingue "nunca
@@ -1085,6 +1090,42 @@ function DashboardPageInner() {
     if (busyAction) return;
     setReleaseTarget(null);
   };
+  const openOpportunityReveal = (opp: Opportunity) => {
+    const target = {
+      id: String(opp.id),
+      external_id: opp.source_record_id,
+      address: opp.address,
+      city: opp.city,
+      state: opp.state,
+      zip_code: opp.zip_code ?? null,
+      issue_category: opp.category || "Structure",
+      issue_description: opp.category || opp.address,
+      urgency_level: opp.severity || "medium",
+      owner_name: null,
+      owner_phone: null,
+      owner_email: null,
+      owner_status: null,
+      date_reported: opp.created_at || new Date().toISOString(),
+      image_url: null,
+      source_url: null,
+      signal_type: opp.signal_type || "open_request",
+      signal_status: opp.status,
+      case_status: opp.status,
+      descriptor: opp.severity,
+      case_title: opp.category,
+      sla_target_dt: opp.compliance_deadline,
+      bbl: opp.bbl ?? null,
+      status: "new",
+      favorited: false,
+      _history: [],
+      _occurrences: [],
+      subject_type: "opportunity" as const,
+      opportunity_id: opp.id,
+    } as unknown as EnrichedLead;
+    setSelectedLead(null);
+    setRevealTarget(target);
+  };
+
   const handleQuickReserve = async (lead: LeadResponse) => {
     if (busyAction || (subscription && !subscription.can_access)) return;
     if (isBlockedByQuota(lead, dailyStats?.remaining)) {
@@ -1168,14 +1209,24 @@ function DashboardPageInner() {
     }
     setBusyAction(true);
     try {
-      const idKey = `u${userId}:l${revealTarget.id}:${new Date().toISOString().slice(0, 10)}`;
-      const res = await reserveLead(revealTarget.id, 60, { consent: revealConsent, idempotency: idKey });
+      const isOpportunity = revealTarget.subject_type === "opportunity";
+      const subjectId = isOpportunity ? revealTarget.opportunity_id : revealTarget.id;
+      const idKey = `u${userId}:${isOpportunity ? "o" : "l"}${subjectId}:${new Date().toISOString().slice(0, 10)}`;
+      let res: any;
+      if (isOpportunity) {
+        res = await reserveOpportunity(subjectId as number, 60, {
+          consent: revealConsent,
+          idempotency: idKey,
+        });
+      } else {
+        res = await reserveLead(revealTarget.id, 60, { consent: revealConsent, idempotency: idKey });
+      }
       showToast(
         res?.incomplete_delivery
           ? t("dashboard.toast.free_reserved_incomplete")
           : res?.corporate
             ? t("dashboard.toast.corporate_reserved")
-            : res?.message || "Dados revelados — reserva de 1 hora ativa",
+            : res?.message || (isOpportunity ? t("dashboard.opportunity.reserved") : t("dashboard.toast.reveal_reserved")),
         "success"
       );
       if (dailyStats) {
@@ -1217,7 +1268,10 @@ function DashboardPageInner() {
       refreshHistory();
     } catch (e: any) {
       // Handle already-reserved case gracefully
-      if (e?.error === "already_reserved" || e?.status === 409) {
+      if (revealTarget.subject_type === "opportunity" && e?.status === 409) {
+        const codeKey = apiErrorKey(e?.message || e?.error || "PROPERTY_LOCKED");
+        showToast(t(codeKey || "dashboard.opportunity.property_locked"), "warning");
+      } else if (e?.error === "already_reserved" || e?.status === 409) {
         // Use lead data from the 409 response body if available
         const leadData = e?.responseBody?.lead;
         if (leadData) {
@@ -1265,6 +1319,34 @@ function DashboardPageInner() {
     } finally {
       setBusyAction(false);
       setRevealTarget(null);
+    }
+  };
+  const advanceOpportunity = async (action: "contact" | "negotiate" | "convert") => {
+    const opportunityId = guideLead?.opportunity_id;
+    if (!opportunityId || busyAction) return;
+    setBusyAction(true);
+    try {
+      const res =
+        action === "contact"
+          ? await contactOpportunity(opportunityId)
+          : action === "negotiate"
+            ? await negotiateOpportunity(opportunityId)
+            : await convertOpportunity(opportunityId);
+      setGuideLead((prev) =>
+        prev
+          ? {
+              ...prev,
+              stage: (res?.stage as GuideLead["stage"]) ?? prev.stage,
+              stage_expires_at:
+                (res as { stage_expires_at?: string }).stage_expires_at ?? prev.stage_expires_at,
+            }
+          : prev
+      );
+    } catch (e: any) {
+      const codeKey = apiErrorKey(e?.message || e?.error);
+      showToast(codeKey ? t(codeKey) : t("dashboard.opportunity.not_found"), "error");
+    } finally {
+      setBusyAction(false);
     }
   };
   const confirmRelease = async (reason: string, note?: string) => {
@@ -1864,6 +1946,7 @@ function DashboardPageInner() {
           {[
             { id: "overview", icon: LayoutDashboard, label: t("dashboard.nav.overview") },
             { id: "opportunities", icon: FolderKanban, label: t("dashboard.nav.opportunities"),               badge: realTotalLeads.toLocaleString() },
+            { id: "prevention", icon: ShieldCheck, label: t("dashboard.nav.prevention") },
             { id: "favorites", icon: Star, label: t("dashboard.nav.favorites"), badge: String(leads.filter((l) => l.favorited).length || "") },
             { id: "interests", icon: SlidersHorizontal, label: t("dashboard.nav.interests"), badge: String(interests.size) },
             { id: "alerts", icon: Bell, label: t("dashboard.nav.alerts"), badge: unreadCount > 0 ? String(unreadCount) : undefined },
@@ -2264,7 +2347,7 @@ function DashboardPageInner() {
           )}
 
 {/* FILTER BAR — inline em desktop, gaveta (sheet) em mobile */}
-          <div className="hidden rounded-2xl border border-[var(--sd-border)] bg-[var(--sd-surface)] p-4 lg:block">
+          <div className="hidden rounded-2xl border border-[var(--sd-border)] bg-[var(--sd-surface)] p-4 lg:block" style={{ display: activeTab === "prevention" ? "none" : undefined }}>
             {filterControls}
             <div className={`mt-2 flex items-center justify-between gap-2 text-xs ${T.text2}`}>
               <SignalButton
@@ -2289,7 +2372,7 @@ function DashboardPageInner() {
             </div>
           </div>
 
-          <div className="lg:hidden flex items-center gap-2">
+          <div className="lg:hidden flex items-center gap-2" style={{ display: activeTab === "prevention" ? "none" : undefined }}>
             <button
               ref={filtersTriggerRef}
               type="button"
@@ -2771,6 +2854,11 @@ function DashboardPageInner() {
                 </div>
               )}
             </section>
+          ) : activeTab === "prevention" ? (
+            <PreventiveFeed
+              onOpenReveal={openOpportunityReveal}
+              onOpenReactive={() => setActiveTab("opportunities")}
+            />
           ) : (
           <>
           {/* GRID: INTERESTS CONFIG + OPPORTUNITIES FEED */}
@@ -3361,7 +3449,15 @@ function DashboardPageInner() {
 
        {/* CICLO DE VIDA — guia automático após reservar (fases 1h/48h/48h) */}
        {guideLead && (
-         <ReserveGuideModal lead={guideLead} isDark={isDark} onClose={closeGuide} />
+         <ReserveGuideModal
+           lead={guideLead}
+           isDark={isDark}
+           onClose={closeGuide}
+           busy={busyAction}
+           onContact={guideLead.subject_type === "opportunity" ? () => advanceOpportunity("contact") : undefined}
+           onNegotiate={guideLead.subject_type === "opportunity" ? () => advanceOpportunity("negotiate") : undefined}
+           onConvert={guideLead.subject_type === "opportunity" ? () => advanceOpportunity("convert") : undefined}
+         />
        )}
 
       {/* REVEAL CONSENT MODAL (dados do proprietário protegidos) */}

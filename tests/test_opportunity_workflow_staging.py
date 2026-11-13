@@ -151,6 +151,22 @@ def test_property_lock_blocks_second_opportunity_same_property():
     assert _used(u2["id"]) == 0, "cota devia ser estornada no bloqueio"
 
 
+def test_list_opportunities_endpoint_returns_preventive_counts():
+    user = _user("pytest-workflow-list@magicleads.app")
+    token = "pytest-workflow-list-token"
+    db_service._service.create_user_session(user["id"], _hash_token(token), "Pytest", None)
+    opp = _opp(source_record_id="list-preventive", bbl="1020710065")
+    client = TestClient(app)
+    r = client.get(
+        "/api/opportunities?kind=preventive",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["counts"]["preventive"] >= 1
+    assert any(row["id"] == opp["id"] for row in body["opportunities"])
+
+
 def test_outcome_endpoint_is_additive_and_does_not_touch_converted_at(monkeypatch):
     user = _user("pytest-workflow-3@magicleads.app")
     lead = EnrichedLead(

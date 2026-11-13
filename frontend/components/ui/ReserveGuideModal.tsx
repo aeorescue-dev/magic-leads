@@ -24,10 +24,18 @@ export function ReserveGuideModal({
   lead,
   isDark,
   onClose,
+  onContact,
+  onNegotiate,
+  onConvert,
+  busy = false,
 }: {
   lead: LeadResponse & { stage_expires_at?: string; server_now?: string };
   isDark?: boolean;
   onClose: (openAnalytic: boolean) => void;
+  onContact?: () => void;
+  onNegotiate?: () => void;
+  onConvert?: () => void;
+  busy?: boolean;
 }) {
   const { t } = useI18n();
   const cast = lead.stage as StageKey | undefined;
@@ -151,6 +159,38 @@ export function ReserveGuideModal({
             );
           })}
         </ol>
+
+        {(onContact || onNegotiate || onConvert) && (
+          <div className="flex flex-wrap gap-2">
+            {onContact && cast === "reserved" && (
+              <button
+                onClick={onContact}
+                disabled={busy}
+                className="flex-1 min-w-[120px] px-4 py-2.5 rounded-xl text-sm font-semibold bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition disabled:opacity-50"
+              >
+                {t("dashboard.reserve.step2.title")}
+              </button>
+            )}
+            {onNegotiate && cast === "contacted" && (
+              <button
+                onClick={onNegotiate}
+                disabled={busy}
+                className="flex-1 min-w-[120px] px-4 py-2.5 rounded-xl text-sm font-semibold bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition disabled:opacity-50"
+              >
+                {t("dashboard.reserve.step3.title")}
+              </button>
+            )}
+            {onConvert && (cast === "contacted" || cast === "in_negotiation") && (
+              <button
+                onClick={onConvert}
+                disabled={busy}
+                className="flex-1 min-w-[120px] px-4 py-2.5 rounded-xl text-sm font-semibold bg-indigo-500 hover:bg-indigo-600 text-white transition disabled:opacity-50"
+              >
+                {t("dashboard.reserve.step4.title")}
+              </button>
+            )}
+          </div>
+        )}
 
         <div className="flex flex-col sm:flex-row gap-2 pt-1">
           <button

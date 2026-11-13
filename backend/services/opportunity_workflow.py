@@ -141,6 +141,61 @@ class OpportunityWorkflowService:
         finally:
             conn.close()
 
+    def list(
+        self,
+        *,
+        kind: Optional[str] = None,
+        status: Optional[str] = None,
+        city: Optional[str] = None,
+        category: Optional[str] = None,
+        limit: int = 100,
+    ) -> dict:
+        """Lista oportunidades e devolve contagens por camada/estado."""
+        limit = max(1, min(int(limit or 100), 300))
+        clauses = []
+        params: list = []
+        if kind:
+            clauses.append("source_kind = ?")
+            params.append(kind)
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        if city:
+            clauses.append("UPPER(TRIM(city)) = UPPER(TRIM(?))")
+            params.append(city)
+        if category:
+            clauses.append("category = ?")
+            params.append(category)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                f"""SELECT * FROM opportunity_workflow
+                    {where}
+                    ORDER BY
+                      CASE status
+                        WHEN 'reserved' THEN 0
+                        WHEN 'contacted' THEN 1
+                        WHEN 'in_negotiation' THEN 2
+                        WHEN 'available' THEN 3
+                        ELSE 4
+                      END,
+                      created_at DESC
+                    LIMIT ?""",
+                (*params, limit),
+            ).fetchall()
+            counts_rows = conn.execute(
+                "SELECT source_kind, status, COUNT(*) AS c FROM opportunity_workflow GROUP BY source_kind, status"
+            ).fetchall()
+            counts = {"all": 0, "preventive": 0, "reactive": 0, "permit": 0}
+            for row in counts_rows:
+                counts["all"] += row["c"]
+                if row["source_kind"] in counts:
+                    counts[row["source_kind"]] += row["c"]
+            return {"opportunities": [dict(r) for r in rows], "counts": counts}
+        finally:
+            conn.close()
+
     def _release_property_lock(self, conn: sqlite3.Connection, opportunity_id: int) -> None:
         conn.execute(
             "DELETE FROM property_locks WHERE owner_kind='opportunity' AND owner_id=?",

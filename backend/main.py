@@ -9383,6 +9383,30 @@ def _opportunity_error(exc: dict) -> HTTPException:
     return HTTPException(status_code=400, detail="OPPORTUNITY_ERROR")
 
 
+@app.get("/api/opportunities")
+async def list_opportunities(
+    kind: Optional[str] = None,
+    status: Optional[str] = None,
+    city: Optional[str] = None,
+    category: Optional[str] = None,
+    limit: int = 100,
+    user: dict = Depends(_get_current_user),
+):
+    await _require_active_access(user)
+    return opportunity_workflow.list(
+        kind=kind, status=status, city=city, category=category, limit=limit
+    )
+
+
+@app.get("/api/opportunities/{opportunity_id}")
+async def get_opportunity(opportunity_id: int, user: dict = Depends(_get_current_user)):
+    await _require_active_access(user)
+    row = opportunity_workflow.get(opportunity_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="NOT_FOUND")
+    return {"opportunity": row}
+
+
 @app.post("/api/opportunities/{opportunity_id}/reserve")
 async def reserve_opportunity(
     opportunity_id: int,
@@ -9427,6 +9451,7 @@ async def contact_opportunity(
         "status": "ok",
         "channel": payload.channel,
         "stage": (result.get("opportunity") or {}).get("status"),
+        "stage_expires_at": (result.get("opportunity") or {}).get("stage_expires_at"),
         "renewed": result.get("renewed", False),
     }
 
@@ -9442,6 +9467,7 @@ async def negotiate_opportunity(
     return {
         "status": "ok",
         "stage": (result.get("opportunity") or {}).get("status"),
+        "stage_expires_at": (result.get("opportunity") or {}).get("stage_expires_at"),
         "renewed": result.get("renewed", False),
     }
 

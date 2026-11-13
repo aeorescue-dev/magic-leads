@@ -317,6 +317,7 @@ const ES: Dict = {
   // Dashboard
   "dashboard.nav.overview": "Resumen general",
   "dashboard.nav.opportunities": "Oportunidades",
+  "dashboard.nav.prevention": "Preinspección",
   "dashboard.nav.favorites": "Favoritos",
   "dashboard.nav.interests": "Mis intereses",
   "dashboard.nav.alerts": "Alertas",
@@ -1382,6 +1383,8 @@ const ES: Dict = {
   "dashboard.opportunity.daily_limit": "L?mite diario de revelaciones alcanzado. Vuelve ma?ana.",
   "dashboard.opportunity.consent_required": "Debes aceptar la verificaci?n de datos para continuar.",
   "dashboard.opportunity.not_reserved": "Reserva esta oportunidad antes de avanzar la fase.",
+  "dashboard.toast.reveal_reserved": "Datos del propietario revelados — 1 hora de exclusividad activa.",
+  "dashboard.opportunity.reserved": "Oportunidad reservada — 1 hora de exclusividad activa.",
 
 };
 

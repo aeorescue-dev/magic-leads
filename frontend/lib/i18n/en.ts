@@ -318,6 +318,7 @@ const EN: Dict = {
   // Dashboard
   "dashboard.nav.overview": "Overview",
   "dashboard.nav.opportunities": "Opportunities",
+  "dashboard.nav.prevention": "Pre-inspection",
   "dashboard.nav.favorites": "Favorites",
   "dashboard.nav.interests": "My interests",
   "dashboard.nav.alerts": "Alerts",
@@ -1388,6 +1389,8 @@ const EN: Dict = {
   "dashboard.opportunity.daily_limit": "Daily reveal limit reached. Come back tomorrow.",
   "dashboard.opportunity.consent_required": "You must accept the data verification to continue.",
   "dashboard.opportunity.not_reserved": "Reserve this opportunity before advancing the stage.",
+  "dashboard.opportunity.reserved": "Opportunity reserved — 1-hour hold active.",
+  "dashboard.toast.reveal_reserved": "Owner data revealed — 1-hour hold active.",
 
 };
 
