@@ -106,4 +106,17 @@ incorreta, crash no drawer/guia.
 - Credenciais de demonstração: `staging@magicleads.app` / `Staging123!`.
 - Rollback: restaurar a base de staging a partir do seed; produção nunca é tocada.
 
+## 8. Lote piloto criado (2026-11-13)
+
+| Conta | Papel | Acesso | Ofícios | Quota |
+|---|---|---|---|---|
+| `beta1@magicleads.app` | Testador 1 | 10 dias | 16 | 0/10 |
+| `beta2@magicleads.app` | Testador 2 | 10 dias | 16 | 0/10 |
+| `fabio@magicleads.app` | Fábio (Admin) | 10 dias | 16 | 0/10 |
+
+- Logins verificados: **200** nas três contas.
+- `fabio@` com `is_admin=true` e `/api/admin/overview` a **200**.
+- `beta1@` abriu `/en/dashboard` com **14 cartões** e **0 erros**.
+- Passwords geradas no momento da criação (não ficam no repositório).
+
 Produção continua em `master` `3b53962`, intocada e isolada.
