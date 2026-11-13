@@ -2,7 +2,7 @@
 
 Data: 2026-11-13
 Branch: `staging/opportunity-foundation`
-Commits: `fe6b5dd` (base) + iteração de fecho visual (KPI + painel lateral)
+Commits: `fe6b5dd` (base) · `dac1a08` (relatório) · `0221535` (KPI + painel lateral)
 Produção (`master` em `3b53962`): intocada.
 
 ## O que foi entregue
