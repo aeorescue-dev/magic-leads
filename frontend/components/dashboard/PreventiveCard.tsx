@@ -1,13 +1,15 @@
 "use client";
 
-import { ArrowRight, Clock, MapPin, ShieldCheck, UserRound } from "lucide-react";
+import { ArrowRight, Clock, Eye, MapPin, ShieldCheck, UserRound } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import type { Opportunity } from "@/lib/api-client";
 import {
   categoryLabelKey,
   deadlineLabel,
+  parseServerDate,
   severityColor,
   severityKey,
+  viewedState,
 } from "@/lib/opportunity-format";
 
 const TIMELINE_KEYS = [
@@ -19,14 +21,33 @@ const TIMELINE_KEYS = [
 export function PreventiveCard({
   opportunity,
   onOpen,
+  now,
 }: {
   opportunity: Opportunity;
   onOpen: () => void;
+  now: number;
 }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const accent = severityColor(opportunity.severity);
   const labelKey = categoryLabelKey(opportunity.category);
   const category = labelKey ? t(labelKey) : opportunity.category || opportunity.address;
+  const viewed = viewedState(opportunity.viewed_at, now);
+  const viewedDate = parseServerDate(opportunity.viewed_at);
+  const viewedDateLabel = viewedDate
+    ? new Intl.DateTimeFormat(
+        lang === "pt" ? "pt-BR" : lang === "es" ? "es-MX" : "en-US",
+        { day: "2-digit", month: "2-digit" },
+      ).format(viewedDate)
+    : "";
+  const viewedText = viewed
+    ? viewed.days === 0
+      ? t("dashboard.preinspection.viewed_today")
+      : viewed.days === 1
+        ? t("dashboard.preinspection.viewed_yesterday")
+        : viewed.days <= 2
+          ? t("dashboard.preinspection.viewed_days", { days: viewed.days })
+          : t("dashboard.preinspection.viewed_on", { date: viewedDateLabel })
+    : null;
   const currentStep =
     opportunity.status === "contacted" || opportunity.status === "in_negotiation"
       ? 3
@@ -45,7 +66,9 @@ export function PreventiveCard({
           onOpen();
         }
       }}
-      className="group relative cursor-pointer overflow-hidden rounded-2xl border border-[var(--sd-border)] bg-[var(--sd-surface)] p-4 text-left transition hover:-translate-y-0.5 hover:shadow-[0_20px_50px_-35px_rgba(15,23,42,0.55)]"
+      className={`group relative cursor-pointer overflow-hidden rounded-2xl border border-[var(--sd-border)] bg-[var(--sd-surface)] p-4 text-left transition hover:-translate-y-0.5 hover:shadow-[0_20px_50px_-35px_rgba(15,23,42,0.55)] ${
+        viewed?.stale ? "opacity-70 hover:opacity-100" : ""
+      }`}
       style={{ borderLeft: `3px solid ${accent}` }}
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -53,12 +76,26 @@ export function PreventiveCard({
           <ShieldCheck className="h-3 w-3" />
           {t("dashboard.preinspection.badge")}
         </span>
-        <span
-          className="rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-wide"
-          style={{ color: accent, background: `${accent}14`, border: `1px solid ${accent}40` }}
-        >
-          {t(severityKey(opportunity.severity))}
-        </span>
+        <div className="flex flex-wrap items-center justify-end gap-1.5">
+          {viewedText ? (
+            <span
+              className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[9px] font-bold ${
+                viewed?.stale
+                  ? "border-[var(--sd-border)] bg-[var(--sd-surface-2)] text-[var(--sd-faint)]"
+                  : "border-[var(--sd-border)] bg-[var(--sd-surface)] text-[var(--sd-muted)]"
+              }`}
+            >
+              <Eye className="h-3 w-3" />
+              {viewedText}
+            </span>
+          ) : null}
+          <span
+            className="rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-wide"
+            style={{ color: accent, background: `${accent}14`, border: `1px solid ${accent}40` }}
+          >
+            {t(severityKey(opportunity.severity))}
+          </span>
+        </div>
       </div>
 
       <h3 className="mt-3 truncate text-[15px] font-bold tracking-[-0.02em] text-[var(--sd-text)]">

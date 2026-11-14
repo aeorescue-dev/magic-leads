@@ -9445,6 +9445,7 @@ async def list_opportunities(
         deadline_within=deadline_within,
         with_fines=with_fines,
         search=search,
+        viewer_id=user["id"],
     )
 
 
@@ -9486,10 +9487,21 @@ async def admin_phase1_reclassify(
     )
 
 
+@app.post("/api/opportunities/{opportunity_id}/view")
+async def record_opportunity_view(
+    opportunity_id: int, user: dict = Depends(_get_current_user)
+):
+    await _require_active_access(user)
+    if not opportunity_workflow.get(opportunity_id):
+        raise HTTPException(status_code=404, detail="NOT_FOUND")
+    viewed_at = opportunity_workflow.record_view(opportunity_id, user["id"])
+    return {"status": "ok", "viewed_at": viewed_at}
+
+
 @app.get("/api/opportunities/{opportunity_id}")
 async def get_opportunity(opportunity_id: int, user: dict = Depends(_get_current_user)):
     await _require_active_access(user)
-    row = opportunity_workflow.get(opportunity_id)
+    row = opportunity_workflow.get(opportunity_id, viewer_id=user["id"])
     if not row:
         raise HTTPException(status_code=404, detail="NOT_FOUND")
     return {"opportunity": row}

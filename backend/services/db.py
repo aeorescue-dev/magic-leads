@@ -467,6 +467,20 @@ CREATE INDEX IF NOT EXISTS idx_opportunity_status
 CREATE INDEX IF NOT EXISTS idx_opportunity_received
   ON opportunity_workflow(received_at, created_at);
 
+-- Marcação de visualização por utilizador. Uma linha por (user, oportunidade);
+-- preserva a primeira e a última abertura para o indicador temporal.
+CREATE TABLE IF NOT EXISTS opportunity_views (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  opportunity_id INTEGER NOT NULL REFERENCES opportunity_workflow(id) ON DELETE CASCADE,
+  first_viewed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  last_viewed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  view_count INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (user_id, opportunity_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_opportunity_views_opportunity
+  ON opportunity_views(opportunity_id);
+
 -- Trava transversal: impede que a mesma propriedade seja reservada em `leads`
 -- e em `opportunity_workflow` ao mesmo tempo.
 CREATE TABLE IF NOT EXISTS property_locks (

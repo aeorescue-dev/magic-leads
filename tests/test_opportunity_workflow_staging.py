@@ -456,3 +456,59 @@ def test_prune_old_keeps_active_cycles_and_recent_rows():
     assert opportunity_workflow.get(old["id"]) is None
     assert opportunity_workflow.get(recent["id"]) is not None
     assert opportunity_workflow.get(active["id"]) is not None
+
+
+def test_view_is_persisted_per_user_and_unseen_sort_first():
+    category = "PytestViews"
+    first = _opp(source_record_id="view-first", bbl="9000000401", category=category)
+    second = _opp(source_record_id="view-second", bbl="9000000402", category=category)
+    viewer = _user("pytest-workflow-view-a@magicleads.app")
+    other = _user("pytest-workflow-view-b@magicleads.app")
+
+    viewed_at = opportunity_workflow.record_view(second["id"], viewer["id"])
+    assert viewed_at
+
+    result = opportunity_workflow.list(
+        kind="preventive",
+        category=category,
+        days=7,
+        limit=10,
+        viewer_id=viewer["id"],
+    )
+    ids = [row["id"] for row in result["opportunities"]]
+    assert ids.index(first["id"]) < ids.index(second["id"]), "nunca vistos primeiro"
+    by_id = {row["id"]: row for row in result["opportunities"]}
+    assert by_id[second["id"]]["viewed_at"] is not None
+    assert by_id[first["id"]]["viewed_at"] is None
+
+    other_result = opportunity_workflow.list(
+        kind="preventive",
+        category=category,
+        days=7,
+        limit=10,
+        viewer_id=other["id"],
+    )
+    assert all(row["viewed_at"] is None for row in other_result["opportunities"])
+
+
+def test_view_endpoint_marks_current_user_only():
+    user = _user("pytest-workflow-view-api@magicleads.app")
+    token = "pytest-workflow-view-api-token"
+    db_service._service.create_user_session(user["id"], _hash_token(token), "Pytest", None)
+    opp = _opp(source_record_id="view-api", bbl="9000000403", category="PytestViewApi")
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/opportunities/{opp['id']}/view",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["viewed_at"]
+
+    listing = client.get(
+        "/api/opportunities?kind=preventive&category=PytestViewApi&days=7",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert listing.status_code == 200, listing.text
+    row = next(item for item in listing.json()["opportunities"] if item["id"] == opp["id"])
+    assert row["viewed_at"] is not None

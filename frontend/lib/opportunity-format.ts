@@ -67,6 +67,38 @@ export function deadlineDaysLeft(deadline?: string | null, now: number = Date.no
   return Math.max(0, Math.round((target - today) / 86400000));
 }
 
+/** Converte um timestamp da BD (UTC, `YYYY-MM-DD HH:MM:SS`) em Date local. */
+export function parseServerDate(value?: string | null): Date | null {
+  if (!value) return null;
+  const text = String(value).trim().replace(" ", "T");
+  const withZone = /[Zz]|[+-]\d{2}:?\d{2}$/.test(text) ? text : `${text}Z`;
+  const parsed = new Date(withZone);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+/**
+ * Dias de calendário desde a última visualização. `0` = hoje, `1` = ontem.
+ * Datas futuras/ inválidas devolvem `null` ou `0` para não mostrar rótulos falsos.
+ */
+export function viewedDaysAgo(value?: string | null, now: number = Date.now()): number | null {
+  const viewed = parseServerDate(value);
+  if (!viewed) return null;
+  const current = new Date(now);
+  const viewedDay = new Date(viewed.getFullYear(), viewed.getMonth(), viewed.getDate()).getTime();
+  const today = new Date(current.getFullYear(), current.getMonth(), current.getDate()).getTime();
+  return Math.max(0, Math.round((today - viewedDay) / 86400000));
+}
+
+/** `stale` é true a partir de 3 dias, quando o cartão fica mais apagado. */
+export function viewedState(
+  value?: string | null,
+  now: number = Date.now(),
+): { days: number; stale: boolean } | null {
+  const days = viewedDaysAgo(value, now);
+  if (days == null) return null;
+  return { days, stale: days > 2 };
+}
+
 const TAG_KEYS: Record<string, string> = {
   inspection_possible: "dashboard.preinspection.possible",
   no_fine: "dashboard.preinspection.no_fine",

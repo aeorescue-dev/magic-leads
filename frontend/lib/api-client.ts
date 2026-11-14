@@ -1423,6 +1423,7 @@ export interface Opportunity {
   owner_type?: string | null;
   inspection_status?: string | null;
   received_at?: string | null;
+  viewed_at?: string | null;
   tags?: string[];
   timeline?: Array<{ key?: string; label?: string; state?: string; date?: string }>;
   history?: OpportunityHistoryEntry[];
@@ -1532,6 +1533,18 @@ export async function fetchOpportunities(params: {
   }
   return handle<OpportunityListResponse>(
     await fetch(`${API_URL}/api/opportunities${qs.toString() ? `?${qs}` : ""}`, {
+      credentials: "include",
+      headers: { ...authHeaders() },
+    })
+  );
+}
+
+export async function recordOpportunityView(
+  opportunityId: string | number
+): Promise<{ status: string; viewed_at?: string | null }> {
+  return handle(
+    await fetch(`${API_URL}/api/opportunities/${opportunityId}/view`, {
+      method: "POST",
       credentials: "include",
       headers: { ...authHeaders() },
     })

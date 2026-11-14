@@ -257,12 +257,48 @@ class OpportunityWorkflowService:
         finally:
             conn.close()
 
-    def get(self, opportunity_id: int) -> Optional[dict]:
+    def record_view(self, opportunity_id: int, user_id: int) -> Optional[str]:
+        """Marca/atualiza a visualização de uma oportunidade por um utilizador."""
         conn = get_connection()
         try:
+            conn.execute(
+                """INSERT INTO opportunity_views
+                   (user_id, opportunity_id, first_viewed_at, last_viewed_at, view_count)
+                   VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)
+                   ON CONFLICT(user_id, opportunity_id) DO UPDATE SET
+                     last_viewed_at = CURRENT_TIMESTAMP,
+                     view_count = opportunity_views.view_count + 1""",
+                (user_id, opportunity_id),
+            )
+            conn.commit()
             row = conn.execute(
-                "SELECT * FROM opportunity_workflow WHERE id = ?", (opportunity_id,)
+                "SELECT last_viewed_at FROM opportunity_views "
+                "WHERE user_id = ? AND opportunity_id = ?",
+                (user_id, opportunity_id),
             ).fetchone()
+            return row["last_viewed_at"] if row else None
+        finally:
+            conn.close()
+
+    def get(
+        self, opportunity_id: int, viewer_id: Optional[int] = None
+    ) -> Optional[dict]:
+        conn = get_connection()
+        try:
+            if viewer_id:
+                row = conn.execute(
+                    """SELECT o.*, v.last_viewed_at AS viewed_at
+                       FROM opportunity_workflow o
+                       LEFT JOIN opportunity_views v
+                         ON v.opportunity_id = o.id AND v.user_id = ?
+                       WHERE o.id = ?""",
+                    (viewer_id, opportunity_id),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT *, NULL AS viewed_at FROM opportunity_workflow WHERE id = ?",
+                    (opportunity_id,),
+                ).fetchone()
             return self._public(dict(row)) if row else None
         finally:
             conn.close()
@@ -280,6 +316,7 @@ class OpportunityWorkflowService:
         deadline_within: Optional[int] = None,
         with_fines: bool = False,
         search: Optional[str] = None,
+        viewer_id: Optional[int] = None,
     ) -> dict:
         """Lista oportunidades com janela/paginação e filtros no servidor."""
         limit = max(1, min(int(limit or 50), 300))
@@ -333,19 +370,23 @@ class OpportunityWorkflowService:
                 tuple(params),
             ).fetchone()["c"]
             rows = conn.execute(
-                f"""SELECT * FROM opportunity_workflow
+                f"""SELECT o.*, v.last_viewed_at AS viewed_at
+                    FROM opportunity_workflow o
+                    LEFT JOIN opportunity_views v
+                      ON v.opportunity_id = o.id AND v.user_id = ?
                     {where}
                     ORDER BY
-                      CASE status
+                      CASE o.status
                         WHEN 'reserved' THEN 0
                         WHEN 'contacted' THEN 1
                         WHEN 'in_negotiation' THEN 2
                         WHEN 'available' THEN 3
                         ELSE 4
                       END,
-                      created_at DESC
+                      CASE WHEN v.last_viewed_at IS NULL THEN 0 ELSE 1 END,
+                      o.created_at DESC
                     LIMIT ? OFFSET ?""",
-                (*params, limit, offset),
+                (int(viewer_id or -1), *params, limit, offset),
             ).fetchall()
             count_clauses = []
             count_params: list = []
@@ -565,6 +606,10 @@ class OpportunityWorkflowService:
             cursor = conn.execute(
                 f"DELETE FROM opportunity_workflow WHERE {where}",
                 (f"-{days} days",),
+            )
+            conn.execute(
+                "DELETE FROM opportunity_views WHERE opportunity_id NOT IN "
+                "(SELECT id FROM opportunity_workflow)"
             )
             conn.commit()
             return int(cursor.rowcount or 0)

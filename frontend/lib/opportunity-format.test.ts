@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   deadlineDaysLeft,
   deadlineLabel,
+  parseServerDate,
   severityBucket,
   tagLabel,
+  viewedDaysAgo,
+  viewedState,
 } from "./opportunity-format";
 
 const t = (key: string, values?: Record<string, string | number>) => {
@@ -68,5 +71,35 @@ describe("opportunity-format", () => {
   it("traduz tags conhecidas e preserva tokens desconhecidos", () => {
     expect(tagLabel((key) => key, "no_fine")).toBe("dashboard.preinspection.no_fine");
     expect(tagLabel((key) => key, "custom_token")).toBe("custom_token");
+  });
+
+  it("calcula a idade da visualização em dias de calendário", () => {
+    const now = new Date(2026, 10, 13, 12, 0).getTime();
+    const dbStamp = (daysAgo: number, hour = 12) => {
+      const d = new Date(2026, 10, 13 - daysAgo, hour, 0);
+      return d.toISOString().slice(0, 19).replace("T", " ");
+    };
+    expect(viewedDaysAgo(dbStamp(0), now)).toBe(0);
+    expect(viewedDaysAgo(dbStamp(1), now)).toBe(1);
+    expect(viewedDaysAgo(dbStamp(3), now)).toBe(3);
+    expect(viewedDaysAgo(null, now)).toBeNull();
+  });
+
+  it("só apaga o cartão depois de 3 dias", () => {
+    const now = new Date(2026, 10, 13, 12, 0).getTime();
+    const dbStamp = (daysAgo: number) => {
+      const d = new Date(2026, 10, 13 - daysAgo, 12, 0);
+      return d.toISOString().slice(0, 19).replace("T", " ");
+    };
+    expect(viewedState(dbStamp(0), now)).toEqual({ days: 0, stale: false });
+    expect(viewedState(dbStamp(2), now)).toEqual({ days: 2, stale: false });
+    expect(viewedState(dbStamp(3), now)).toEqual({ days: 3, stale: true });
+    expect(viewedState(null, now)).toBeNull();
+  });
+
+  it("aceita timestamp da BD com espaço e sem fuso", () => {
+    const parsed = parseServerDate("2026-11-13 02:00:00");
+    expect(parsed).not.toBeNull();
+    expect(parsed?.toISOString()).toBe("2026-11-13T02:00:00.000Z");
   });
 });

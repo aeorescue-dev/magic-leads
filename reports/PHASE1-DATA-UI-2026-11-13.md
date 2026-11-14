@@ -115,17 +115,34 @@ $env:PHASE1_ECB_LIMIT="600"
 $env:PHASE1_DAILY_PERMIT_ROWS="1000"
 ```
 
-## 6. Qualidade
+## 6. Marcação de visualização por utilizador
 
-- `pytest tests -q`: **1716 passed, 1 skipped** (35 testes novos do classificador,
-  além de janela, paginação, filtros e purga).
-- `npm test`: **123 passed** (inclui paridade i18n).
+- Nova tabela `opportunity_views` (`user_id`, `opportunity_id`, `first_viewed_at`,
+  `last_viewed_at`, `view_count`), com chave composta por utilizador e oportunidade.
+- Ao abrir o drawer, o frontend chama `POST /api/opportunities/{id}/view`; o
+  registo é persistido por utilizador e não consome cota.
+- A listagem devolve `viewed_at` apenas para o utilizador atual e ordena
+  **nunca vistos primeiro**; dentro do mesmo estado, mantém a ordem existente.
+- Indicador no cartão:
+  - visto hoje → selo discreto **“Visto hoje”** com ícone de olho;
+  - ontem / há 2 dias → **“Visto ontem”** / **“Visto há 2 dias”**;
+  - há 3+ dias → cartão com **opacidade 70%** (volta a 100% no hover) e
+    **“Visto a DD/MM”**.
+- O cartão não se reordena no momento da abertura (evita saltos); a prioridade
+  é aplicada no próximo carregamento/filtro.
+- A purga de 90 dias também remove as visualizações órfãs.
+
+## 7. Qualidade
+
+- `pytest tests -q`: **1718 passed, 1 skipped** (classificador, visualização,
+  janela, paginação, filtros e purga).
+- `npm test`: **126 passed** (inclui paridade i18n e idade da visualização).
 - `npx tsc --noEmit`: limpo.
 - `ruff check backend tests --select=E,F,W,I --ignore=E501`: limpo.
 - ESLint: 0 erros (avisos pré-existentes).
 - Landing: sem alterações; produção `master` em `3b53962`.
 
-## 7. Limitações conhecidas
+## 8. Limitações conhecidas
 
 - O valor de obra é o último valor declarado em alvará (janela de 3 anos),
   não uma estimativa do serviço específico; a UI identifica a base.

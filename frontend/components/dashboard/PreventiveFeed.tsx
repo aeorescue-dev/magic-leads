@@ -5,6 +5,7 @@ import { ShieldCheck } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import {
   fetchOpportunities,
+  recordOpportunityView,
   type Opportunity,
   type OpportunityListResponse,
 } from "@/lib/api-client";
@@ -134,6 +135,30 @@ export function PreventiveFeed({
   const total = data?.total ?? rows.length;
   const hasMore = Boolean(data?.has_more) && rows.length < MAX_CARDS;
 
+  const openOpportunity = useCallback((opp: Opportunity) => {
+    setSelected(opp);
+    recordOpportunityView(opp.id)
+      .then((res) => {
+        const viewedAt = res.viewed_at || new Date().toISOString();
+        setData((prev) =>
+          prev
+            ? {
+                ...prev,
+                opportunities: prev.opportunities.map((item) =>
+                  item.id === opp.id ? { ...item, viewed_at: viewedAt } : item
+                ),
+              }
+            : prev
+        );
+        setSelected((prev) =>
+          prev && prev.id === opp.id ? { ...prev, viewed_at: viewedAt } : prev
+        );
+      })
+      .catch(() => {
+        // A abertura do drawer nunca depende do registo de visualização.
+      });
+  }, []);
+
   useEffect(() => {
     onCountChange?.(total);
   }, [total, onCountChange]);
@@ -227,7 +252,8 @@ export function PreventiveFeed({
                 <PreventiveCard
                   key={opp.id}
                   opportunity={opp}
-                  onOpen={() => setSelected(opp)}
+                  now={filters.now}
+                  onOpen={() => openOpportunity(opp)}
                 />
               ))}
             </div>
@@ -266,12 +292,12 @@ export function PreventiveFeed({
       zips={railZips}
       onOpenDeadline={(id) => {
         const opp = rows.find((item) => item.id === Number(id));
-        if (opp) setSelected(opp);
+        if (opp) openOpportunity(opp);
       }}
       onSeeAll={() => {
         const first = railDeadlines[0];
         const opp = first ? rows.find((item) => item.id === Number(first.id)) : null;
-        if (opp) setSelected(opp);
+        if (opp) openOpportunity(opp);
       }}
       onOpenMap={() => {
         const zip = railZips[0]?.zip;
