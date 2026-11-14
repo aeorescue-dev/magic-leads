@@ -273,10 +273,16 @@ class OpportunityWorkflowService:
         status: Optional[str] = None,
         city: Optional[str] = None,
         category: Optional[str] = None,
-        limit: int = 100,
+        limit: int = 50,
+        offset: int = 0,
+        days: Optional[int] = None,
+        deadline_within: Optional[int] = None,
+        with_fines: bool = False,
+        search: Optional[str] = None,
     ) -> dict:
-        """Lista oportunidades e devolve contagens por camada/estado."""
-        limit = max(1, min(int(limit or 100), 300))
+        """Lista oportunidades com janela/paginação e filtros no servidor."""
+        limit = max(1, min(int(limit or 50), 300))
+        offset = max(0, int(offset or 0))
         clauses = []
         params: list = []
         if kind:
@@ -291,9 +297,40 @@ class OpportunityWorkflowService:
         if category:
             clauses.append("category = ?")
             params.append(category)
+        if days:
+            clauses.append(
+                "date(COALESCE(received_at, created_at)) >= date('now', ?)"
+            )
+            params.append(f"-{int(days)} days")
+        if deadline_within is not None:
+            clauses.append("compliance_deadline IS NOT NULL")
+            clauses.append(
+                "date(compliance_deadline) <= date('now', ?)"
+            )
+            params.append(f"+{int(deadline_within)} days")
+        if with_fines:
+            clauses.append(
+                "(COALESCE(fine_balance, 0) > 0 OR "
+                "(COALESCE(fine_imposed, 0) - COALESCE(fine_paid, 0)) > 0)"
+            )
+        term = str(search or "").strip().lower()
+        if term:
+            like = f"%{term}%"
+            clauses.append(
+                "(LOWER(address) LIKE ? OR LOWER(city) LIKE ? OR "
+                "LOWER(COALESCE(zip_code, '')) LIKE ? OR "
+                "LOWER(COALESCE(category, '')) LIKE ? OR "
+                "LOWER(COALESCE(description, '')) LIKE ? OR "
+                "LOWER(COALESCE(owner_name, '')) LIKE ?)"
+            )
+            params.extend([like] * 6)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         conn = get_connection()
         try:
+            total = conn.execute(
+                f"SELECT COUNT(*) AS c FROM opportunity_workflow {where}",
+                tuple(params),
+            ).fetchone()["c"]
             rows = conn.execute(
                 f"""SELECT * FROM opportunity_workflow
                     {where}
@@ -306,19 +343,39 @@ class OpportunityWorkflowService:
                         ELSE 4
                       END,
                       created_at DESC
-                    LIMIT ?""",
-                (*params, limit),
+                    LIMIT ? OFFSET ?""",
+                (*params, limit, offset),
             ).fetchall()
+            count_clauses = []
+            count_params: list = []
+            if days:
+                count_clauses.append(
+                    "date(COALESCE(received_at, created_at)) >= date('now', ?)"
+                )
+                count_params.append(f"-{int(days)} days")
+            count_where = (
+                f"WHERE {' AND '.join(count_clauses)}" if count_clauses else ""
+            )
             counts_rows = conn.execute(
-                "SELECT source_kind, status, COUNT(*) AS c FROM opportunity_workflow GROUP BY source_kind, status"
+                "SELECT source_kind, status, COUNT(*) AS c "
+                f"FROM opportunity_workflow {count_where} "
+                "GROUP BY source_kind, status",
+                tuple(count_params),
             ).fetchall()
             counts = {"all": 0, "preventive": 0, "reactive": 0, "permit": 0}
             for row in counts_rows:
                 counts["all"] += row["c"]
                 if row["source_kind"] in counts:
                     counts[row["source_kind"]] += row["c"]
-            return {"opportunities": [self._public(dict(r)) for r in rows], "counts": counts,
-                    "insights": self.insights(kind=kind or "all")}
+            return {
+                "opportunities": [self._public(dict(r)) for r in rows],
+                "counts": counts,
+                "total": int(total or 0),
+                "offset": offset,
+                "limit": limit,
+                "has_more": offset + len(rows) < int(total or 0),
+                "insights": self.insights(kind=kind or "all", window_days=days),
+            }
         finally:
             conn.close()
 
@@ -336,12 +393,26 @@ class OpportunityWorkflowService:
         "class_a": "medium",
     }
 
-    def insights(self, kind: Optional[str] = "preventive", days: int = 10) -> dict:
+    def insights(
+        self,
+        kind: Optional[str] = "preventive",
+        days: int = 10,
+        window_days: Optional[int] = None,
+    ) -> dict:
         """Agregados do painel lateral e dos KPI, sem expor dados sensíveis."""
         days = max(1, min(int(days or 10), 30))
         today = datetime.now(timezone.utc).date()
-        clause = "WHERE source_kind = ?" if kind and kind != "all" else ""
-        params: tuple = (kind,) if clause else ()
+        clause_parts = []
+        params: list = []
+        if kind and kind != "all":
+            clause_parts.append("source_kind = ?")
+            params.append(kind)
+        if window_days:
+            clause_parts.append(
+                "date(COALESCE(received_at, created_at)) >= date('now', ?)"
+            )
+            params.append(f"-{int(window_days)} days")
+        clause = f"WHERE {' AND '.join(clause_parts)}" if clause_parts else ""
         conn = get_connection()
         try:
             rows = conn.execute(
@@ -349,7 +420,7 @@ class OpportunityWorkflowService:
                            compliance_deadline, job_value, fine_balance,
                            fine_imposed, fine_paid, status, received_at, created_at
                     FROM opportunity_workflow {clause}""",
-                params,
+                tuple(params),
             ).fetchall()
         finally:
             conn.close()
@@ -469,6 +540,35 @@ class OpportunityWorkflowService:
                 for day in deadline_counts
             ],
         }
+
+    def prune_old(self, retention_days: int = 90, dry_run: bool = False) -> int:
+        """Purga oportunidades antigas, preservando ciclos ativos.
+
+        A fila mostra 7 dias; a BD guarda até `retention_days` para auditoria.
+        Linhas reservadas/contactadas/em negociação nunca são apagadas.
+        """
+        days = max(1, int(retention_days or 90))
+        active = "'reserved','contacted','in_negotiation'"
+        where = (
+            f"status NOT IN ({active}) AND "
+            "date(created_at) < date('now', ?)"
+        )
+        conn = get_connection()
+        try:
+            if dry_run:
+                row = conn.execute(
+                    f"SELECT COUNT(*) AS c FROM opportunity_workflow WHERE {where}",
+                    (f"-{days} days",),
+                ).fetchone()
+                return int(row["c"] or 0)
+            cursor = conn.execute(
+                f"DELETE FROM opportunity_workflow WHERE {where}",
+                (f"-{days} days",),
+            )
+            conn.commit()
+            return int(cursor.rowcount or 0)
+        finally:
+            conn.close()
 
     def _release_property_lock(self, conn: sqlite3.Connection, opportunity_id: int) -> None:
         conn.execute(

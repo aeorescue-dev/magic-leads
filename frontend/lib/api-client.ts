@@ -1492,17 +1492,25 @@ export interface OpportunityInsights {
 export interface OpportunityListResponse {
   opportunities: Opportunity[];
   counts: { all: number; preventive: number; reactive: number; permit: number };
+  total: number;
+  offset: number;
+  limit: number;
+  has_more: boolean;
   insights?: OpportunityInsights;
 }
 
 export async function fetchOpportunityInsights(
   kind: string = "preventive",
+  days: number = 7,
 ): Promise<OpportunityInsights> {
   return handle<OpportunityInsights>(
-    await fetch(`${API_URL}/api/opportunities/insights?kind=${encodeURIComponent(kind)}`, {
-      credentials: "include",
-      headers: { ...authHeaders() },
-    })
+    await fetch(
+      `${API_URL}/api/opportunities/insights?kind=${encodeURIComponent(kind)}&days=${days}`,
+      {
+        credentials: "include",
+        headers: { ...authHeaders() },
+      }
+    )
   );
 }
 
@@ -1512,6 +1520,11 @@ export async function fetchOpportunities(params: {
   city?: string;
   category?: string;
   limit?: number;
+  offset?: number;
+  days?: number;
+  deadline_within?: number;
+  with_fines?: boolean;
+  search?: string;
 } = {}): Promise<OpportunityListResponse> {
   const qs = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {

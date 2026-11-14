@@ -149,6 +149,7 @@ from .services.lead_rules import (
 from .services.metrics import push_metrics, searchbug_metrics
 from .services.opportunity_workflow import opportunity_workflow
 from .services.outbound_engine import effective_mailbox_cap, outbound_engine
+from .services.phase1_scheduler import phase1_scheduler
 from .services.privacy import sanitize_lead, scrub
 from .services.push_click import verify_click
 from .services.push_service import push_service
@@ -6402,6 +6403,7 @@ async def _lifespan(app):
     _outbound_task = None
     _freshness_task = None
     _voice_resume_task = None
+    _phase1_task = None
 
     # Fase 2: o writer de telemetria arranca com o processo. Sem isto o
     # buffer acumula em memoria ate limite e perde eventos sem nunca
@@ -6537,6 +6539,13 @@ async def _lifespan(app):
     else:
         logger.info("[ENRICH-SCHED] Desativado por ENRICH_SCHEDULER_ENABLED=0")
 
+    # Fase 1 (staging): fila preventiva real. Chamados/prazos/multas a cada 6h,
+    # alvarás/PLUTO 1x/dia e purga aos 90 dias. Desligado por omissão.
+    if getattr(settings, "PHASE1_SCHEDULER_ENABLED", False):
+        _phase1_task = asyncio.create_task(phase1_scheduler.scheduler_loop())
+    else:
+        logger.info("[PHASE1] Scheduler desativado por PHASE1_SCHEDULER_ENABLED=0")
+
     # P1 (auditoria 01/11/2026): owners que ficaram NULL por falha transitória
     # da API são recuperados em lote, com quota por cidade e cursor persistente.
     if getattr(settings, "OWNER_BACKFILL_ENABLED", True):
@@ -6617,6 +6626,7 @@ async def _lifespan(app):
         ("outbound", _outbound_task),
         ("freshness", _freshness_task),
         ("voice_resume", _voice_resume_task),
+        ("phase1", _phase1_task),
     ):
         if task:
             task.cancel()
@@ -9408,22 +9418,60 @@ async def list_opportunities(
     status: Optional[str] = None,
     city: Optional[str] = None,
     category: Optional[str] = None,
-    limit: int = 100,
+    limit: int = 50,
+    offset: int = 0,
+    days: Optional[int] = None,
+    deadline_within: Optional[int] = None,
+    with_fines: bool = False,
+    search: Optional[str] = None,
     user: dict = Depends(_get_current_user),
 ):
     await _require_active_access(user)
+    window_days = (
+        int(days)
+        if days is not None
+        else int(getattr(settings, "PREVENTIVE_FEED_WINDOW_DAYS", 7) or 7)
+    )
+    max_page = int(getattr(settings, "PREVENTIVE_MAX_PAGE_SIZE", 100) or 100)
     return opportunity_workflow.list(
-        kind=kind, status=status, city=city, category=category, limit=limit
+        kind=kind,
+        status=status,
+        city=city,
+        category=category,
+        limit=max(1, min(int(limit), max_page)),
+        offset=offset,
+        days=window_days,
+        deadline_within=deadline_within,
+        with_fines=with_fines,
+        search=search,
     )
 
 
 @app.get("/api/opportunities/insights")
 async def opportunity_insights(
     kind: str = "preventive",
+    days: Optional[int] = None,
     user: dict = Depends(_get_current_user),
 ):
     await _require_active_access(user)
-    return opportunity_workflow.insights(kind=kind)
+    window_days = (
+        int(days)
+        if days is not None
+        else int(getattr(settings, "PREVENTIVE_FEED_WINDOW_DAYS", 7) or 7)
+    )
+    return opportunity_workflow.insights(kind=kind, window_days=window_days)
+
+
+@app.post("/api/admin/phase1/run")
+async def admin_phase1_run(
+    include_permits: bool = True,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Gatilho manual da ingestão da Fase 1 (admin/staging)."""
+    result = await phase1_scheduler.run_once(
+        include_permits=include_permits, retention=True
+    )
+    return result
 
 
 @app.get("/api/opportunities/{opportunity_id}")

@@ -464,6 +464,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_opportunity_active_property
 CREATE INDEX IF NOT EXISTS idx_opportunity_status
   ON opportunity_workflow(status, stage_expires_at);
 
+CREATE INDEX IF NOT EXISTS idx_opportunity_received
+  ON opportunity_workflow(received_at, created_at);
+
 -- Trava transversal: impede que a mesma propriedade seja reservada em `leads`
 -- e em `opportunity_workflow` ao mesmo tempo.
 CREATE TABLE IF NOT EXISTS property_locks (

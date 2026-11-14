@@ -241,6 +241,21 @@ class Settings(BaseSettings):
     SCRAPER_STALE_HOURS: float = 36.0
     SCRAPER_WATCHDOG_FORCE_MIN_HOURS: float = 3.0
     SCRAPER_ALERT_DEDUPE_HOURS: int = 6
+    # Fase 1 — fila preventiva (dados reais de prazos/multas/imóvel).
+    # A fila mostra 7 dias (igual ao feed reativo); a BD guarda até 90 dias e
+    # o scheduler operacional corre a cada 6h; alvarás/PLUTO 1x/dia.
+    PREVENTIVE_FEED_WINDOW_DAYS: int = 7
+    PREVENTIVE_AUDIT_DAYS: int = 30
+    PREVENTIVE_RETENTION_DAYS: int = 90
+    PREVENTIVE_PAGE_SIZE: int = 50
+    PREVENTIVE_MAX_PAGE_SIZE: int = 100
+    PHASE1_SCHEDULER_ENABLED: bool = False
+    PHASE1_RUN_ON_START: bool = True
+    PHASE1_OPERATIONAL_INTERVAL_HOURS: float = 6.0
+    PHASE1_PERMITS_INTERVAL_HOURS: float = 24.0
+    PHASE1_OPERATIONAL_LIMIT: int = 500
+    PHASE1_ECB_LIMIT: int = 1000
+    PHASE1_DAILY_PERMIT_ROWS: int = 1500
     # Backfill de owners em lote (leads com owner_name NULL).
     OWNER_BACKFILL_ENABLED: bool = True
     OWNER_BACKFILL_PER_CITY_DAY: int = 200

@@ -1,7 +1,7 @@
 """Testes do workflow aditivo de oportunidades e do agente HPD (staging)."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -343,3 +343,116 @@ def test_preventive_ingestion_maps_lead_and_dedupes_by_property():
 
     again = preventive_ingestion.ingest_lead(row)
     assert again["status"] == "skipped_duplicate"
+
+
+def test_list_applies_seven_day_window_and_pagination():
+    category = "PytestWindow"
+    now = datetime.now(timezone.utc)
+    created = []
+    for index in range(3):
+        opp = _opp(
+            source_record_id=f"window-{index}",
+            bbl=f"90000000{index:02d}",
+            category=category,
+            received_at=(now - timedelta(days=1)).isoformat(timespec="seconds"),
+        )
+        created.append(opp["id"])
+    old = _opp(
+        source_record_id="window-old",
+        bbl="9000000099",
+        category=category,
+        received_at=(now - timedelta(days=10)).isoformat(timespec="seconds"),
+    )
+
+    first = opportunity_workflow.list(
+        kind="preventive", category=category, days=7, limit=2, offset=0
+    )
+    assert first["total"] == 3
+    assert len(first["opportunities"]) == 2
+    assert first["has_more"] is True
+
+    second = opportunity_workflow.list(
+        kind="preventive", category=category, days=7, limit=2, offset=2
+    )
+    assert len(second["opportunities"]) == 1
+    assert second["has_more"] is False
+    ids = {row["id"] for row in first["opportunities"] + second["opportunities"]}
+    assert set(created) == ids
+    assert old["id"] not in ids
+
+
+def test_list_filters_by_deadline_window_and_open_fines():
+    category = "PytestFilters"
+    today = datetime.now(timezone.utc).date()
+    match = _opp(
+        source_record_id="filter-match",
+        bbl="9000000101",
+        category=category,
+        compliance_deadline=(today + timedelta(days=2)).isoformat(),
+        fine_balance=1500,
+        fine_imposed=1500,
+        fine_paid=0,
+    )
+    _opp(
+        source_record_id="filter-no-fine",
+        bbl="9000000102",
+        category=category,
+        compliance_deadline=(today + timedelta(days=2)).isoformat(),
+    )
+    _opp(
+        source_record_id="filter-far-deadline",
+        bbl="9000000103",
+        category=category,
+        compliance_deadline=(today + timedelta(days=20)).isoformat(),
+        fine_balance=900,
+        fine_imposed=900,
+        fine_paid=0,
+    )
+
+    result = opportunity_workflow.list(
+        kind="preventive",
+        category=category,
+        days=7,
+        deadline_within=3,
+        with_fines=True,
+        limit=10,
+    )
+    assert result["total"] == 1
+    assert result["opportunities"][0]["id"] == match["id"]
+
+
+def test_prune_old_keeps_active_cycles_and_recent_rows():
+    user = _user("pytest-workflow-prune@magicleads.app")
+    _reset_quota(user["id"])
+    category = "PytestPrune"
+    now = datetime.now(timezone.utc)
+    old = _opp(
+        source_record_id="prune-old",
+        bbl="9000000201",
+        category=category,
+        received_at=(now - timedelta(days=100)).isoformat(timespec="seconds"),
+    )
+    recent = _opp(
+        source_record_id="prune-recent",
+        bbl="9000000202",
+        category=category,
+        received_at=(now - timedelta(days=1)).isoformat(timespec="seconds"),
+    )
+    active = _opp(source_record_id="prune-active", bbl="9000000203", category=category)
+    reserved = opportunity_workflow.reserve(active["id"], user["id"])
+    assert reserved["opportunity"]["status"] == "reserved"
+
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE opportunity_workflow SET created_at = ? WHERE id IN (?, ?)",
+            ((now - timedelta(days=100)).isoformat(timespec="seconds"), old["id"], active["id"]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    opportunity_workflow.prune_old(retention_days=90)
+    assert opportunity_workflow.get(old["id"]) is None
+    assert opportunity_workflow.get(recent["id"]) is not None
+    assert opportunity_workflow.get(active["id"]) is not None

@@ -199,6 +199,8 @@ class Phase1EnrichmentService:
 
     # ------------------------------------------------------------------ fonte
     def fetch_hpd_complaints(self, limit: int = 20) -> list:
+        if limit <= 0:
+            return []
         since = (self.today - timedelta(days=30)).isoformat()
         rows = socrata(
             "hpd_complaints",
@@ -246,6 +248,8 @@ class Phase1EnrichmentService:
         return list(grouped.values())
 
     def fetch_hpd_deadlines(self, limit: int = 20) -> list:
+        if limit <= 0:
+            return []
         rows = socrata(
             "hpd_violations",
             {
@@ -297,6 +301,8 @@ class Phase1EnrichmentService:
         return list(grouped.values())
 
     def fetch_ecb(self, limit: int = 40) -> list:
+        if limit <= 0:
+            return []
         rows = socrata(
             "ecb",
             {
@@ -439,6 +445,8 @@ class Phase1EnrichmentService:
         return out
 
     def fetch_chicago_violations(self, limit: int = 20) -> list:
+        if limit <= 0:
+            return []
         since = (self.today - timedelta(days=90)).isoformat()
         rows = socrata(
             "chi_violations",
@@ -485,6 +493,8 @@ class Phase1EnrichmentService:
         return list(grouped.values())
 
     def fetch_chicago_permit_values(self, limit: int = 500) -> dict:
+        if limit <= 0:
+            return {}
         rows = socrata(
             "chi_permits",
             {
@@ -594,19 +604,24 @@ class Phase1EnrichmentService:
             merge(item)
 
         # Valores de obra: alvarás NYC casados por BIN; Chicago por morada.
-        nyc_values = self.fetch_nyc_permit_values(
-            (item.get("bin") for item in merged.values() if item.get("city") == "NYC"),
-            limit=max(permit_rows // 2, 20),
-        )
-        chi_values = self.fetch_chicago_permit_values(limit=permit_rows)
-        for key, target in merged.items():
-            permit = nyc_values.get(str(target.get("bin") or "")) if target.get("city") == "NYC" else chi_values.get(key)
-            if not permit:
-                continue
-            target["job_value"] = permit["job_value"]
-            target["value_source"] = permit["value_source"]
-            target["owner_name"] = target.get("owner_name") or permit.get("owner_name")
-            target["history"] = (target.get("history") or []) + [permit["history"]]
+        if permit_rows > 0:
+            nyc_values = self.fetch_nyc_permit_values(
+                (item.get("bin") for item in merged.values() if item.get("city") == "NYC"),
+                limit=max(permit_rows // 2, 20),
+            )
+            chi_values = self.fetch_chicago_permit_values(limit=permit_rows)
+            for key, target in merged.items():
+                permit = (
+                    nyc_values.get(str(target.get("bin") or ""))
+                    if target.get("city") == "NYC"
+                    else chi_values.get(key)
+                )
+                if not permit:
+                    continue
+                target["job_value"] = permit["job_value"]
+                target["value_source"] = permit["value_source"]
+                target["owner_name"] = target.get("owner_name") or permit.get("owner_name")
+                target["history"] = (target.get("history") or []) + [permit["history"]]
 
         # Ficha do imóvel (PLUTO) só para quem tem BBL.
         profiles = self.fetch_pluto(item.get("bbl") for item in merged.values())

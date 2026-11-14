@@ -14,6 +14,9 @@ import { PreventiveCard } from "@/components/dashboard/PreventiveCard";
 import { OpportunityDrawer } from "@/components/dashboard/OpportunityDrawer";
 import { FeedRail } from "@/components/dashboard/FeedRail";
 
+const PAGE_SIZE = 50;
+const MAX_CARDS = 100;
+
 export interface FeedFilters {
   city: string;
   category: string;
@@ -39,8 +42,10 @@ export function PreventiveFeed({
   const { t } = useI18n();
   const [data, setData] = useState<OpportunityListResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(false);
   const [selected, setSelected] = useState<Opportunity | null>(null);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const requestRef = useRef(0);
   const mountedRef = useRef(true);
 
@@ -51,85 +56,87 @@ export function PreventiveFeed({
     };
   }, []);
 
-  const load = useCallback(() => {
-    const id = ++requestRef.current;
-    setLoading(true);
-    setError(false);
-    fetchOpportunities({ kind: "preventive", limit: 100 })
-      .then((res) => {
-        if (mountedRef.current && id === requestRef.current) setData(res);
-      })
-      .catch(() => {
-        if (mountedRef.current && id === requestRef.current) setError(true);
-      })
-      .finally(() => {
-        if (mountedRef.current && id === requestRef.current) setLoading(false);
-      });
-  }, []);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(filters.search.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [filters.search]);
+
+  const buildParams = useCallback(
+    (offset: number) => ({
+      kind: "preventive",
+      limit: PAGE_SIZE,
+      offset,
+      days: 7,
+      city: filters.city !== "all" ? filters.city : undefined,
+      category: filters.category !== "all" ? filters.category : undefined,
+      severity: filters.severity !== "all" ? filters.severity : undefined,
+      deadline_within:
+        filters.deadlineWindow ?? (filters.onlyDeadline ? 7 : undefined),
+      with_fines: filters.withFines || undefined,
+      search: debouncedSearch || undefined,
+    }),
+    [
+      filters.city,
+      filters.category,
+      filters.severity,
+      filters.deadlineWindow,
+      filters.onlyDeadline,
+      filters.withFines,
+      debouncedSearch,
+    ]
+  );
+
+  const load = useCallback(
+    (offset: number, append: boolean) => {
+      const id = ++requestRef.current;
+      if (append) {
+        setLoadingMore(true);
+      } else {
+        setLoading(true);
+        setError(false);
+      }
+      fetchOpportunities(buildParams(offset))
+        .then((res) => {
+          if (!mountedRef.current || id !== requestRef.current) return;
+          setData((prev) =>
+            append && prev
+              ? { ...res, opportunities: [...prev.opportunities, ...res.opportunities] }
+              : res
+          );
+        })
+        .catch(() => {
+          if (!mountedRef.current || id !== requestRef.current) return;
+          if (!append) setError(true);
+        })
+        .finally(() => {
+          if (!mountedRef.current || id !== requestRef.current) return;
+          if (append) setLoadingMore(false);
+          else setLoading(false);
+        });
+    },
+    [buildParams]
+  );
 
   useEffect(() => {
-    load();
+    load(0, false);
     return () => {
       requestRef.current += 1;
     };
   }, [load]);
 
   useEffect(() => {
-    const handler = () => load();
+    const handler = () => load(0, false);
     window.addEventListener(OPPORTUNITIES_REFRESH_EVENT, handler);
     return () => window.removeEventListener(OPPORTUNITIES_REFRESH_EVENT, handler);
   }, [load]);
 
-  const rows = useMemo(() => {
-    const term = filters.search.trim().toLowerCase();
-    return (data?.opportunities || []).filter((opp) => {
-      if (filters.city !== "all" && opp.city !== filters.city) return false;
-      if (filters.category !== "all" && opp.category !== filters.category) return false;
-      if (filters.severity !== "all" && severityBucket(opp.severity) !== filters.severity) {
-        return false;
-      }
-      if (filters.onlyDeadline) {
-        if (!opp.compliance_deadline) return false;
-        const target = Date.parse(
-          opp.compliance_deadline.includes("T")
-            ? opp.compliance_deadline
-            : `${opp.compliance_deadline}T00:00:00`
-        );
-        if (!Number.isFinite(target) || target - filters.now > 7 * 86400000) return false;
-      }
-      if (filters.deadlineWindow != null) {
-        const days = deadlineDaysLeft(opp.compliance_deadline, filters.now);
-        if (days == null || days > filters.deadlineWindow) return false;
-      }
-      if (filters.withFines) {
-        const balance = Math.max(
-          0,
-          Number(opp.fine_balance) ||
-            (Number(opp.fine_imposed) || 0) - (Number(opp.fine_paid) || 0)
-        );
-        if (balance <= 0) return false;
-      }
-      if (term) {
-        const haystack = [
-          opp.address,
-          opp.city,
-          opp.zip_code,
-          opp.category,
-          opp.description,
-          opp.owner_name,
-        ]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase();
-        if (!haystack.includes(term)) return false;
-      }
-      return true;
-    });
-  }, [data, filters]);
+  const rows = data?.opportunities ?? [];
+  const total = data?.total ?? rows.length;
+  const hasMore = Boolean(data?.has_more) && rows.length < MAX_CARDS;
 
   useEffect(() => {
-    onCountChange?.(rows.length);
-  }, [rows.length, onCountChange]);
+    onCountChange?.(total);
+  }, [total, onCountChange]);
 
   const rail = useMemo(() => {
     const severity = { critical: 0, high: 0, medium: 0, routine: 0 };
@@ -187,7 +194,7 @@ export function PreventiveFeed({
             </p>
           </div>
           <span className="text-[11px] font-semibold text-[var(--sd-muted)]">
-            {rows.length} {t("dashboard.feed.tab_preventive").toLowerCase()}
+            {t("dashboard.preinspection.showing_of", { shown: rows.length, total })}
           </span>
         </div>
       </div>
@@ -207,24 +214,38 @@ export function PreventiveFeed({
           <div className="p-12 text-center">
             <ShieldCheck className="mx-auto h-8 w-8 text-[var(--sd-faint)]" />
             <p className="mt-3 text-sm font-semibold text-[var(--sd-text)]">
-              {(data?.opportunities.length ?? 0) > 0
-                ? t("dashboard.preinspection.no_results")
-                : t("dashboard.preinspection.title")}
+              {t("dashboard.preinspection.no_results")}
             </p>
             <p className="mt-1 text-xs text-[var(--sd-muted)]">
               {t("dashboard.preinspection.subtitle")}
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-3 p-3 md:grid-cols-2">
-            {rows.map((opp) => (
-              <PreventiveCard
-                key={opp.id}
-                opportunity={opp}
-                onOpen={() => setSelected(opp)}
-              />
-            ))}
-          </div>
+          <>
+            <div className="grid grid-cols-1 gap-3 p-3 md:grid-cols-2">
+              {rows.map((opp) => (
+                <PreventiveCard
+                  key={opp.id}
+                  opportunity={opp}
+                  onOpen={() => setSelected(opp)}
+                />
+              ))}
+            </div>
+            {hasMore ? (
+              <div className="border-t border-[var(--sd-border)] p-4 text-center">
+                <button
+                  type="button"
+                  onClick={() => load(rows.length, true)}
+                  disabled={loadingMore}
+                  className="inline-flex items-center justify-center rounded-lg border border-[var(--sd-border)] px-4 py-2 text-xs font-bold text-[var(--sd-muted)] transition hover:text-[var(--sd-text)] disabled:opacity-50"
+                >
+                  {loadingMore
+                    ? t("dashboard.preinspection.loading_more")
+                    : t("dashboard.preinspection.load_more")}
+                </button>
+              </div>
+            ) : null}
+          </>
         )}
         {selected ? (
           <OpportunityDrawer
@@ -244,14 +265,12 @@ export function PreventiveFeed({
       severity={railSeverity}
       zips={railZips}
       onOpenDeadline={(id) => {
-        const opp = data?.opportunities.find((item) => item.id === Number(id));
+        const opp = rows.find((item) => item.id === Number(id));
         if (opp) setSelected(opp);
       }}
       onSeeAll={() => {
         const first = railDeadlines[0];
-        const opp = first
-          ? data?.opportunities.find((item) => item.id === Number(first.id))
-          : null;
+        const opp = first ? rows.find((item) => item.id === Number(first.id)) : null;
         if (opp) setSelected(opp);
       }}
       onOpenMap={() => {
