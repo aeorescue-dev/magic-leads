@@ -324,9 +324,12 @@ async def run_campaign(campaign_id: int) -> None:
                             str(item) for item in (gate.get("reasons") or [])
                         ]
                         if "outside_hours" in reasons:
-                            next_batch = (
-                                b2b_voice._utc_now() + timedelta(hours=1)
-                            ).isoformat()
+                            # Fora da janela: agendar a proxima abertura
+                            # (09:00 ET), nao tentar de hora a hora a noite.
+                            next_batch = next_or_today_hour_utc(
+                                _campaign_start_hour(current),
+                                now=b2b_voice._utc_now(),
+                            )
                             await _run_sync(
                                 lambda: b2b_voice.update_campaign(
                                     campaign_id,
@@ -417,15 +420,16 @@ async def run_campaign(campaign_id: int) -> None:
                         return
                     if reason == "outside_hours":
                         # Fora da janela local do estado: nao queimar o
-                        # contacto. Pausa e o loop de retoma tenta daqui a
-                        # uma hora (o candidato continua na fila).
+                        # contacto. Pausa ate a proxima abertura (09:00 ET),
+                        # em vez de retentar a cada hora durante a noite.
                         if from_number:
                             await _run_sync(
                                 b2b_voice.release_did, from_number, day_key()
                             )
-                        next_batch = (
-                            b2b_voice._utc_now() + timedelta(hours=1)
-                        ).isoformat()
+                        next_batch = next_or_today_hour_utc(
+                            _campaign_start_hour(current),
+                            now=b2b_voice._utc_now(),
+                        )
                         await _run_sync(
                             lambda: b2b_voice.update_campaign(
                                 campaign_id,
