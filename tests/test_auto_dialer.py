@@ -335,6 +335,12 @@ def test_auto_dialer_pausa_fora_da_janela_sem_saltar(monkeypatch):
     assert final["status"] == "paused"
     assert final["error"] == "outside_hours"
     assert final["next_batch_at"]
+    next_at = datetime.fromisoformat(final["next_batch_at"]).replace(
+        tzinfo=timezone.utc
+    )
+    local_next = next_at.astimezone(NY_TZ)
+    assert local_next.hour == 9
+    assert local_next.date() > NOW.astimezone(NY_TZ).date()
     assert final["skipped"] == 0
 
 
