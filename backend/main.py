@@ -149,6 +149,7 @@ from .services.lead_rules import (
 from .services.metrics import push_metrics, searchbug_metrics
 from .services.opportunity_workflow import opportunity_workflow
 from .services.outbound_engine import effective_mailbox_cap, outbound_engine
+from .services.phase1_enrichment import phase1_enrichment
 from .services.phase1_scheduler import phase1_scheduler
 from .services.privacy import sanitize_lead, scrub
 from .services.push_click import verify_click
@@ -9472,6 +9473,17 @@ async def admin_phase1_run(
         include_permits=include_permits, retention=True
     )
     return result
+
+
+@app.post("/api/admin/phase1/reclassify")
+async def admin_phase1_reclassify(
+    dry_run: bool = False,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Reclassifica a fila preventiva e remove genéricos não acionáveis."""
+    return await asyncio.to_thread(
+        phase1_enrichment.reclassify_existing, dry_run
+    )
 
 
 @app.get("/api/opportunities/{opportunity_id}")

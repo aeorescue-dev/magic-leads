@@ -48,23 +48,81 @@ DATASETS = {
 }
 
 # Palavra-chave -> categoria da plataforma. A ordem importa: as mais
-# específicas entram primeiro para "heat/hot water" não cair em "water".
+# específicas entram primeiro para "heat/hot water" não cair em "water" e
+# "elect eleva" cair em Elevator, não em Electrical.
 _CATEGORY_RULES = [
-    ("Heating", ("heat", "hot water", "boiler", "furnace", "steam")),
-    ("Elevator", ("elevator",)),
-    ("Gas", ("gas", "gas leak")),
-    ("Electrical", ("electric", "wiring", "power outage")),
-    ("Plumbing", ("plumb", "leak", "sewer", "drain", "water")),
-    ("Rodent", ("rodent", "rat", "roach", "mice", "mouse", "vermin")),
-    ("Mold", ("mold", "mould", "fungus")),
-    ("Lead", ("lead-based", "lead paint", "lead hazard")),
-    ("Paint", ("paint", "plaster", "wall")),
-    ("Door_Window", ("window", "door", "frame")),
-    ("Roof", ("roof", "ceiling", "waterproof")),
-    ("Debris", ("debris", "garbage", "trash", "rubbish", "dumpster")),
-    ("Unsanitary", ("unsanitary", "dirty", "sanitation", "odor", "pest")),
-    ("Structure", ("structur", "facade", "foundation", "wall", "stair", "porch")),
+    ("Heating", ("heat", "hot water", "boiler", "furnace", "steam", "radiator")),
+    ("Elevator", ("elevator", "eleva", "lift")),
+    ("Gas", ("gas leak", "gas piping", "gas")),
+    (
+        "Electrical",
+        (
+            "electric", "wiring", "wire", "smoke detector", "bell", "buzzer",
+            "intercom", "power outage", "power failure", "light fixture",
+            "lighting", "outlet", "circuit", "breaker panel",
+        ),
+    ),
+    (
+        "Roof",
+        (
+            "roof", "roofing", "waterproof", "chimney", "parapet", "skylight",
+            "flashing", "gutter",
+        ),
+    ),
+    (
+        "Plumbing",
+        (
+            "plumb", "leak", "sewer", "drain", "pipe", "faucet", "toilet",
+            "sink", "water",
+        ),
+    ),
+    ("Mold", ("mold", "mould", "fungus", "moisture", "damp")),
+    ("Lead", ("lead-based", "lead paint", "lead hazard", "lead")),
+    ("Rodent", ("rodent", "rat", "roach", "mice", "mouse", "vermin", "pest")),
+    ("Grass", ("grass", "weed", "overgrown", "vegetation", "blight", "lawn")),
+    ("Paint", ("paint", "plaster", "painting")),
+    (
+        "Structure",
+        (
+            "structur", "facade", "foundation", "sidewalk shed", "scaffold",
+            "pedestrian protection", "construction", "new building",
+            "demolition", "excavation", "retaining", "shoring", "underpinning",
+            "beam", "column", "concrete", "masonry", "brick", "wall", "floor",
+            "flooring", "ceiling", "stair", "porch", "fence", "fire escape",
+            "balcony", "canopy", "shed", "hoist", "crane", "jobsite",
+            "job site", "site safety", "netting", "curtain wall", "cornice",
+            "sidewalk",
+        ),
+    ),
+    ("Door_Window", ("window", "door", "frame", "glass")),
+    ("Debris", ("debris", "garbage", "trash", "rubbish", "dumpster", "loose material")),
+    ("Unsanitary", ("unsanitary", "dirty", "sanitation", "odor", "filth", "feces", "sewage")),
+    (
+        "Permit_Rejected",
+        (
+            "permit", "certificate of occupancy", "c of o", "resubmit",
+            "follow plans", "approved plans", "stop work", "job filing",
+            "certificate of correction",
+        ),
+    ),
 ]
+
+# Termos curtos que exigem fronteira de palavra ("rat" não pode casar com
+# "separate"; "gas" não pode casar com "gasket").
+_WORD_BOUNDARY = {"rat", "gas", "mold", "mould", "lead", "pest", "weed", "lift"}
+
+# Descrições administrativas/genéricas que não dão serviço a um prestador.
+# Só são descartadas quando não há multa nem prazo associado.
+_NON_ACTIONABLE = {
+    "open",
+    "closed",
+    "n/a",
+    "none",
+    "arrange premise inspection",
+    "owner or licensed contractor",
+    "safe working conditions",
+}
+
 
 _SEVERITY_ORDER = {"routine": 0, "medium": 1, "high": 2, "critical": 3}
 
@@ -92,12 +150,37 @@ def socrata(name: str, params: dict) -> list:
     return data if isinstance(data, list) else []
 
 
+def _normalize_text(value: Optional[str]) -> str:
+    return " ".join(str(value or "").lower().split())
+
+
+def _match_keyword(keyword: str, text: str) -> bool:
+    if keyword in _WORD_BOUNDARY:
+        return re.search(rf"\b{re.escape(keyword)}\b", text) is not None
+    return keyword in text
+
+
 def map_category(*parts: Optional[str]) -> str:
-    text = " ".join(str(part or "") for part in parts).lower()
+    text = _normalize_text(" ".join(str(part or "") for part in parts))
     for category, keywords in _CATEGORY_RULES:
-        if any(keyword in text for keyword in keywords):
+        if any(_match_keyword(keyword, text) for keyword in keywords):
             return category
-    return "Unclassified"
+    # Nunca devolver "Unclassified": o fallback é um ofício válido e
+    # traduzido. Sinais realmente vazios são descartados na ingestão.
+    return "Structure"
+
+
+def is_actionable(description: Optional[str], history: Optional[list] = None) -> bool:
+    texts = [description] + [
+        entry.get("label") for entry in (history or []) if isinstance(entry, dict)
+    ]
+    for value in texts:
+        normalized = _normalize_text(value)
+        if len(normalized) < 4:
+            continue
+        if normalized not in _NON_ACTIONABLE:
+            return True
+    return False
 
 
 def map_hpd_severity(value: Optional[str]) -> str:
@@ -640,6 +723,12 @@ class Phase1EnrichmentService:
         for target in merged.values():
             if not target.get("address"):
                 continue
+            if (
+                not is_actionable(target.get("description"), target.get("history"))
+                and not target.get("fine_balance")
+                and not target.get("compliance_deadline")
+            ):
+                continue
             target["source_kind"] = "preventive"
             target["source_type"] = "pre_inspection"
             target["inspection_status"] = "possible"
@@ -687,6 +776,69 @@ class Phase1EnrichmentService:
             if key and key not in out:
                 out[key] = opportunity_workflow._public(dict(row))
         return out
+
+    def reclassify_existing(self, dry_run: bool = False) -> dict:
+        """Limpa a fila: reclassifica 'Unclassified' e descarta genéricos.
+
+        Só mexe em linhas sem classificação; categorias já válidas (incluindo
+        as do seed) ficam intactas.
+        """
+        from .db import get_connection
+
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT id, category, description, history_json, fine_balance, "
+                "compliance_deadline FROM opportunity_workflow "
+                "WHERE source_kind = 'preventive'"
+            ).fetchall()
+            updates: list = []
+            drops: list = []
+            by_category: dict = {}
+            for row in rows:
+                current = str(row["category"] or "").strip()
+                if current not in ("", "Unclassified", "None"):
+                    continue
+                try:
+                    history = json.loads(row["history_json"] or "[]")
+                except (TypeError, ValueError):
+                    history = []
+                if (
+                    not is_actionable(row["description"], history)
+                    and not row["fine_balance"]
+                    and not row["compliance_deadline"]
+                ):
+                    drops.append((row["id"],))
+                    continue
+                labels = " ".join(
+                    str(entry.get("label") or "")
+                    for entry in history
+                    if isinstance(entry, dict)
+                )
+                category = map_category(row["description"], labels)
+                updates.append((category, row["id"]))
+                by_category[category] = by_category.get(category, 0) + 1
+            if not dry_run:
+                if updates:
+                    conn.executemany(
+                        "UPDATE opportunity_workflow SET category = ?, "
+                        "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        updates,
+                    )
+                if drops:
+                    conn.executemany(
+                        "DELETE FROM opportunity_workflow WHERE id = ?", drops
+                    )
+                conn.commit()
+            return {
+                "scanned": len(rows),
+                "reclassified": len(updates),
+                "dropped": len(drops),
+                "by_category": by_category,
+                "dry_run": dry_run,
+            }
+        finally:
+            conn.close()
 
     def ingest(self, candidates: Optional[list] = None, **kwargs) -> dict:
         candidates = candidates if candidates is not None else self.build_candidates(**kwargs)

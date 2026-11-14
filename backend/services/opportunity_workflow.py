@@ -217,6 +217,7 @@ class OpportunityWorkflowService:
         "hearing_date": ("hearing_date", None),
         "hearing_status": ("hearing_status", None),
         "description": ("description", None),
+        "category": ("category", None),
         "owner_name": ("owner_name", None),
         "owner_type": ("owner_type", None),
         "inspection_status": ("inspection_status", None),

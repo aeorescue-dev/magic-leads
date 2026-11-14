@@ -33,6 +33,9 @@ export function severityColor(value?: string | null): string {
 
 export function categoryLabelKey(value?: string | null): string | null {
   if (!value) return null;
+  if (value === "Unclassified" || value === "General") {
+    return "dashboard.cat.general";
+  }
   return TRADE_CATEGORIES.find((c) => c.key === value)?.labelKey || null;
 }
 

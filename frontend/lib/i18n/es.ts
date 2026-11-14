@@ -525,6 +525,7 @@ const ES: Dict = {
   "dashboard.cat.door_window": "Puertas y Ventanas",
   "dashboard.cat.debris": "Escombros y Basura",
   "dashboard.cat.unclassified": "Sin clasificar",
+  "dashboard.cat.general": "General",
   "dashboard.interests.title": "Mis intereses",
   "dashboard.interests.active_count": "oficios activos",
   "dashboard.interests.done": "Listo",

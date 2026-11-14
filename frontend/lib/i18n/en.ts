@@ -526,6 +526,7 @@ const EN: Dict = {
   "dashboard.cat.door_window": "Doors & Windows",
   "dashboard.cat.debris": "Debris & Trash",
   "dashboard.cat.unclassified": "Unclassified",
+  "dashboard.cat.general": "General",
   "dashboard.interests.title": "My interests",
   "dashboard.interests.active_count": "active trades",
   "dashboard.interests.done": "Done",

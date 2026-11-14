@@ -509,6 +509,7 @@ const PT: Dict = {
   "dashboard.cat.door_window": "Portas & Janelas",
   "dashboard.cat.debris": "Entulho & Lixo",
   "dashboard.cat.unclassified": "Por classificar",
+  "dashboard.cat.general": "Geral",
   "dashboard.interests.title": "Meus interesses",
   "dashboard.interests.active_count": "ofícios ativos",
   "dashboard.interests.done": "Concluir",
