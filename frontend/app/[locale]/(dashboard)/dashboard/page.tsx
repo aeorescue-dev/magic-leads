@@ -284,6 +284,8 @@ function DashboardPageInner() {
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [selectedSeverity, setSelectedSeverity] = useState<string>("all");
   const [onlyDeadline, setOnlyDeadline] = useState(false);
+  const [deadlineWindow, setDeadlineWindow] = useState<"all" | "3" | "7">("all");
+  const [withFines, setWithFines] = useState(false);
   const [feedLayer, setFeedLayer] = useState<"all" | "reactive" | "permit">("all");
   const [preventiveShown, setPreventiveShown] = useState(0);
   // Data de referência estável para prazos calculados no render.
@@ -1700,6 +1702,8 @@ function DashboardPageInner() {
     selectedType !== "all",
     includeClosed,
     onlyDeadline,
+    deadlineWindow !== "all",
+    withFines,
     searchQuery.trim() !== "",
   ].filter(Boolean).length;
   const clearFilters = () => {
@@ -1710,6 +1714,8 @@ function DashboardPageInner() {
     setSelectedType("all");
     setIncludeClosed(false);
     setOnlyDeadline(false);
+    setDeadlineWindow("all");
+    setWithFines(false);
     setSearchQuery("");
   };
 
@@ -1903,11 +1909,12 @@ function DashboardPageInner() {
   const leadSeries = (dashboardSummary?.daily_series ?? []).map((point) => point.count);
   const preventiveSeries = (preventiveInsights?.series ?? []).map((point) => point.count);
   const deadlineSeries = (preventiveInsights?.deadline_series ?? []).map((point) => point.count);
-  const deadlineValueSeries = (preventiveInsights?.deadline_series ?? []).map(
-    (point) => point.value,
+  const finesSeries = (preventiveInsights?.deadline_series ?? []).map(
+    (point) => point.fines ?? 0,
   );
-  const preventiveValue = preventiveInsights?.totals.value_at_risk ?? 0;
-  const finesInThousands = preventiveValue >= 10000;
+  const finesAtRisk = preventiveInsights?.totals.fines_at_risk ?? 0;
+  const finesCount = preventiveInsights?.totals.fines_count ?? 0;
+  const finesInThousands = finesAtRisk >= 10000;
 
   const kpiHero = isPreventionTab
     ? {
@@ -1951,12 +1958,12 @@ function DashboardPageInner() {
         },
         {
           label: t("dashboard.kpi.fines_at_risk"),
-          value: finesInThousands ? Math.round(preventiveValue / 1000) : preventiveValue,
+          value: finesInThousands ? Math.round(finesAtRisk / 1000) : finesAtRisk,
           prefix: "$",
           suffix: finesInThousands ? "k" : "",
-          delta: t("dashboard.kpi.next_7_days"),
-          sub: t("dashboard.kpi.value_at_risk_sub"),
-          series: deadlineValueSeries,
+          delta: `${finesCount} ${t("dashboard.kpi.fines_open_count")}`,
+          sub: t("dashboard.kpi.fines_at_risk_sub"),
+          series: finesSeries,
           icon: AlertTriangle,
           tone: "urgent" as const,
           dark: true,
@@ -2030,6 +2037,8 @@ function DashboardPageInner() {
     category: selectedCategory,
     severity: selectedSeverity,
     onlyDeadline,
+    deadlineWindow: deadlineWindow === "all" ? null : Number(deadlineWindow),
+    withFines,
     search: searchQuery,
     now: renderNow,
   };
@@ -2554,6 +2563,13 @@ function DashboardPageInner() {
               onSeverityChange={setSelectedSeverity}
               onlyDeadline={onlyDeadline}
               onToggleDeadline={() => setOnlyDeadline((value) => !value)}
+              showPreventiveFilters={activeFeedTab === "preventive"}
+              deadlineWindow={deadlineWindow}
+              onDeadlineWindowChange={(value) =>
+                setDeadlineWindow(value === "3" || value === "7" ? value : "all")
+              }
+              withFines={withFines}
+              onToggleFines={() => setWithFines((value) => !value)}
               search={searchQuery}
               onSearchChange={setSearchQuery}
               resultCount={activeFeedTab === "preventive" ? preventiveShown : filteredLeads.length}

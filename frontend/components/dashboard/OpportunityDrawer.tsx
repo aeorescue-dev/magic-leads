@@ -29,12 +29,6 @@ export function OpportunityDrawer({
   const accent = severityColor(opportunity.severity);
   const labelKey = categoryLabelKey(opportunity.category);
   const category = labelKey ? t(labelKey) : opportunity.category || opportunity.address;
-  const currentStep =
-    opportunity.status === "contacted" || opportunity.status === "in_negotiation"
-      ? 3
-      : opportunity.status === "reserved"
-        ? 2
-        : 1;
   const money = (value?: number | null) =>
     value == null
       ? "—"
@@ -43,6 +37,39 @@ export function OpportunityDrawer({
           currency: "USD",
           maximumFractionDigits: 0,
         }).format(value);
+  const numberValue = (value?: string | number | null) => {
+    if (value == null || value === "") return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+  const property = opportunity.property ?? {};
+  const history = opportunity.history ?? [];
+  const fineBalance = Math.max(
+    0,
+    Number(opportunity.fine_balance) ||
+      (Number(opportunity.fine_imposed) || 0) - (Number(opportunity.fine_paid) || 0),
+  );
+  const hasFine = fineBalance > 0;
+  const currentStep =
+    hasFine
+      ? 3
+      : opportunity.status === "contacted" || opportunity.status === "in_negotiation"
+        ? 3
+        : opportunity.status === "reserved"
+          ? 2
+          : 1;
+  const valueSourceKey =
+    opportunity.value_source === "permit"
+      ? "dashboard.value_source.permit"
+      : opportunity.value_source === "estimate"
+        ? "dashboard.value_source.estimate"
+        : "dashboard.value_source.none";
+  const dossierRows = [
+    { key: "units", value: numberValue(property.units_total ?? property.units_residential) },
+    { key: "year_built", value: numberValue(property.year_built) },
+    { key: "floors", value: numberValue(property.floors) },
+    { key: "lot_area", value: numberValue(property.lot_area) },
+  ].filter((row) => row.value != null);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -61,8 +88,8 @@ export function OpportunityDrawer({
     },
     {
       id: "violation",
-      key: "dashboard.preinspection.timeline.violation",
-      state: currentStep >= 3 ? "done" : "future",
+      key: hasFine ? "dashboard.preinspection.fine_open" : "dashboard.preinspection.timeline.violation",
+      state: hasFine ? "done" : currentStep >= 3 ? "done" : "future",
     },
   ];
   const timelineMeta = new Map(
@@ -128,15 +155,64 @@ export function OpportunityDrawer({
         </header>
 
         <div className="flex-1 overflow-y-auto px-5 py-4">
-          <div
-            className="rounded-xl border bg-[var(--sd-accent-soft)] p-3"
-            style={{ borderColor: "color-mix(in srgb, var(--sd-accent) 25%, transparent)" }}
-          >
-            <p className="text-xs font-bold text-[var(--sd-accent)]">{t("dashboard.preinspection.no_fine")}</p>
-            <p className="mt-1 text-[11px] leading-relaxed text-[var(--sd-muted)]">
-              {t("dashboard.preinspection.risk")}
-            </p>
-          </div>
+          {hasFine ? (
+            <div className="rounded-xl border border-[color-mix(in_srgb,var(--sd-urgent)_35%,transparent)] bg-[var(--sd-urgent-soft)] p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold text-[var(--sd-urgent)]">
+                    {t("dashboard.preinspection.fine_open")}
+                  </p>
+                  <p className="mt-1 text-2xl font-black tracking-[-0.03em] text-[var(--sd-urgent)]">
+                    {money(fineBalance)}
+                  </p>
+                </div>
+                <span className="rounded-full border border-[color-mix(in_srgb,var(--sd-urgent)_35%,transparent)] px-2 py-1 text-[9px] font-bold uppercase tracking-wide text-[var(--sd-urgent)]">
+                  {t("dashboard.preinspection.fine_balance")}
+                </span>
+              </div>
+              <div className="mt-3 grid grid-cols-3 gap-2 border-t border-[color-mix(in_srgb,var(--sd-urgent)_22%,transparent)] pt-3 text-[10px]">
+                <div>
+                  <p className="font-bold uppercase tracking-[0.08em] text-[var(--sd-faint)]">
+                    {t("dashboard.preinspection.fine_imposed")}
+                  </p>
+                  <p className="mt-0.5 font-semibold text-[var(--sd-text)]">
+                    {money(opportunity.fine_imposed)}
+                  </p>
+                </div>
+                <div>
+                  <p className="font-bold uppercase tracking-[0.08em] text-[var(--sd-faint)]">
+                    {t("dashboard.preinspection.fine_paid")}
+                  </p>
+                  <p className="mt-0.5 font-semibold text-[var(--sd-text)]">
+                    {money(opportunity.fine_paid)}
+                  </p>
+                </div>
+                <div>
+                  <p className="font-bold uppercase tracking-[0.08em] text-[var(--sd-faint)]">
+                    {t("dashboard.preinspection.hearing_date")}
+                  </p>
+                  <p className="mt-0.5 font-semibold text-[var(--sd-text)]">
+                    {opportunity.hearing_date || "—"}
+                  </p>
+                </div>
+              </div>
+              {opportunity.hearing_status ? (
+                <p className="mt-2 text-[10px] text-[var(--sd-muted)]">
+                  {t("dashboard.preinspection.hearing_status")}: {opportunity.hearing_status}
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <div
+              className="rounded-xl border bg-[var(--sd-accent-soft)] p-3"
+              style={{ borderColor: "color-mix(in srgb, var(--sd-accent) 25%, transparent)" }}
+            >
+              <p className="text-xs font-bold text-[var(--sd-accent)]">{t("dashboard.preinspection.no_fine")}</p>
+              <p className="mt-1 text-[11px] leading-relaxed text-[var(--sd-muted)]">
+                {t("dashboard.preinspection.risk")}
+              </p>
+            </div>
+          )}
 
           <section className="mt-5">
             <h3 className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--sd-faint)]">
@@ -175,7 +251,9 @@ export function OpportunityDrawer({
                           : step.state === "current"
                             ? inspectionStatusLabel(t, opportunity.inspection_status)
                             : step.state === "done"
-                              ? t("dashboard.preinspection.possible")
+                              ? index === steps.length - 1
+                                ? opportunity.hearing_date || t("dashboard.preinspection.fine_open")
+                                : t("dashboard.preinspection.possible")
                               : t(
                                   index === steps.length - 1
                                     ? "dashboard.preinspection.no_fine"
@@ -204,12 +282,45 @@ export function OpportunityDrawer({
             />
             <Fact label={t("dashboard.preinspection.received")} value={opportunity.received_at ? opportunity.received_at.slice(0, 10) : "—"} />
             <Fact label={t("dashboard.preinspection.status")} value={statusLabel} />
-            <Fact label={t("dashboard.preinspection.value")} value={money(opportunity.job_value)} />
+            <Fact
+              label={t("dashboard.preinspection.value")}
+              value={money(opportunity.job_value)}
+              hint={t(valueSourceKey)}
+            />
             <Fact
               label={t("dashboard.preinspection.owner_type")}
               value={ownerTypeLabel(t, opportunity.owner_type)}
             />
           </section>
+
+          {dossierRows.length > 0 || property.building_class || property.assessed_total ? (
+            <section className="mt-5">
+              <h3 className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--sd-faint)]">
+                {t("dashboard.preinspection.property_dossier")}
+              </h3>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                {property.building_class ? (
+                  <Fact
+                    label={t("dashboard.preinspection.building_class")}
+                    value={String(property.building_class)}
+                  />
+                ) : null}
+                {numberValue(property.assessed_total) != null ? (
+                  <Fact
+                    label={t("dashboard.preinspection.assessed_value")}
+                    value={money(numberValue(property.assessed_total))}
+                  />
+                ) : null}
+                {dossierRows.map((row) => (
+                  <Fact
+                    key={row.key}
+                    label={t(`dashboard.preinspection.${row.key}`)}
+                    value={String(row.value)}
+                  />
+                ))}
+              </div>
+            </section>
+          ) : null}
 
           <section className="mt-5">
             <h3 className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--sd-faint)]">
@@ -230,6 +341,36 @@ export function OpportunityDrawer({
               )}
             </div>
           </section>
+
+          {history.length > 0 ? (
+            <section className="mt-5">
+              <h3 className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--sd-faint)]">
+                {t("dashboard.preinspection.history")}
+              </h3>
+              <div className="mt-2 space-y-2">
+                {history.slice(0, 8).map((entry, index) => (
+                  <article
+                    key={`${entry.kind || "event"}-${entry.date || ""}-${index}`}
+                    className="rounded-lg border border-[var(--sd-border)] bg-[var(--sd-surface-2)] p-2.5"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-[11px] font-semibold leading-snug text-[var(--sd-text)]">
+                        {entry.label || "—"}
+                      </p>
+                      {entry.amount ? (
+                        <span className="shrink-0 text-[11px] font-bold text-[var(--sd-urgent)]">
+                          {money(Number(entry.amount))}
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="mt-1 text-[9px] uppercase tracking-[0.08em] text-[var(--sd-faint)]">
+                      {[entry.date, entry.status].filter(Boolean).join(" · ") || "—"}
+                    </p>
+                  </article>
+                ))}
+              </div>
+            </section>
+          ) : null}
 
           <section className="mt-5 rounded-xl border border-[var(--sd-border)] p-3">
             <div className="flex items-center gap-2">
@@ -281,11 +422,12 @@ export function OpportunityDrawer({
   );
 }
 
-function Fact({ label, value }: { label: string; value: string }) {
+function Fact({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="rounded-lg border border-[var(--sd-border)] bg-[var(--sd-surface-2)] p-2">
       <p className="text-[8px] font-bold uppercase tracking-[0.08em] text-[var(--sd-faint)]">{label}</p>
       <p className="mt-1 truncate text-[11px] font-semibold text-[var(--sd-text)]">{value}</p>
+      {hint ? <p className="mt-0.5 truncate text-[9px] text-[var(--sd-faint)]">{hint}</p> : null}
     </div>
   );
 }

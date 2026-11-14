@@ -72,15 +72,20 @@ class OpportunityWorkflowService:
     @staticmethod
     def _public(row: dict) -> dict:
         out = dict(row)
-        for raw_key, key in (("tags_json", "tags"), ("timeline_json", "timeline")):
+        for raw_key, key in (
+            ("tags_json", "tags"),
+            ("timeline_json", "timeline"),
+            ("history_json", "history"),
+            ("property_json", "property"),
+        ):
             raw = out.pop(raw_key, None)
             if raw:
                 try:
                     out[key] = json.loads(raw)
                 except (TypeError, ValueError):
-                    out[key] = []
+                    out[key] = [] if key in ("tags", "timeline", "history") else {}
             else:
-                out[key] = []
+                out[key] = [] if key in ("tags", "timeline", "history") else {}
         # O payload bruto da fonte fica só na BD: devolvê-lo ao cliente violaria
         # a regra de não expor termos/datasets da origem (invariante 27).
         out.pop("source_payload", None)
@@ -111,6 +116,12 @@ class OpportunityWorkflowService:
         severity: Optional[str] = None,
         compliance_deadline: Optional[str] = None,
         job_value: Optional[float] = None,
+        fine_balance: Optional[float] = None,
+        fine_imposed: Optional[float] = None,
+        fine_paid: Optional[float] = None,
+        hearing_date: Optional[str] = None,
+        hearing_status: Optional[str] = None,
+        value_source: Optional[str] = None,
         description: Optional[str] = None,
         owner_name: Optional[str] = None,
         owner_type: Optional[str] = None,
@@ -118,6 +129,8 @@ class OpportunityWorkflowService:
         received_at: Optional[str] = None,
         tags: Optional[list] = None,
         timeline: Optional[list] = None,
+        history: Optional[list] = None,
+        property: Optional[dict] = None,
         source_payload: Optional[dict] = None,
     ) -> dict:
         """Cria/atualiza o evento de origem; nao reserva nada."""
@@ -133,9 +146,12 @@ class OpportunityWorkflowService:
                    (property_key, source_kind, source_record_id, source_type,
                     address, city, state, zip_code, bbl, bin, category,
                     signal_type, severity, compliance_deadline, job_value,
+                    value_source, fine_balance, fine_imposed, fine_paid,
+                    hearing_date, hearing_status,
                     description, owner_name, owner_type, inspection_status,
-                    received_at, tags_json, timeline_json, source_payload)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    received_at, tags_json, timeline_json, history_json,
+                    property_json, source_payload)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(source_kind, source_record_id) DO UPDATE SET
                      property_key=excluded.property_key,
                      source_type=excluded.source_type,
@@ -150,6 +166,12 @@ class OpportunityWorkflowService:
                      severity=excluded.severity,
                      compliance_deadline=excluded.compliance_deadline,
                      job_value=excluded.job_value,
+                     value_source=excluded.value_source,
+                     fine_balance=excluded.fine_balance,
+                     fine_imposed=excluded.fine_imposed,
+                     fine_paid=excluded.fine_paid,
+                     hearing_date=excluded.hearing_date,
+                     hearing_status=excluded.hearing_status,
                      description=excluded.description,
                      owner_name=excluded.owner_name,
                      owner_type=excluded.owner_type,
@@ -157,14 +179,19 @@ class OpportunityWorkflowService:
                      received_at=excluded.received_at,
                      tags_json=excluded.tags_json,
                      timeline_json=excluded.timeline_json,
+                     history_json=excluded.history_json,
+                     property_json=excluded.property_json,
                      source_payload=excluded.source_payload,
                      updated_at=CURRENT_TIMESTAMP""",
                 (
                     property_key, source_kind, source_record_id, source_type,
                     address, city, state, zip_code, bbl, bin_value, category,
                     signal_type, severity, compliance_deadline, job_value,
+                    value_source, fine_balance, fine_imposed, fine_paid,
+                    hearing_date, hearing_status,
                     description, owner_name, owner_type, inspection_status,
                     received_at, self._json(tags), self._json(timeline),
+                    self._json(history), self._json(property),
                     self._json(source_payload),
                 ),
             )
@@ -175,6 +202,57 @@ class OpportunityWorkflowService:
                 (source_kind, source_record_id),
             ).fetchone()
             return self._public(dict(row))
+        finally:
+            conn.close()
+
+    # Colunas que a camada de enriquecimento pode atualizar. `status`,
+    # `reserved_by` e companhia ficam de fora: o ciclo de vida é dono delas.
+    _ENRICHABLE = {
+        "compliance_deadline": ("compliance_deadline", None),
+        "job_value": ("job_value", None),
+        "value_source": ("value_source", None),
+        "fine_balance": ("fine_balance", None),
+        "fine_imposed": ("fine_imposed", None),
+        "fine_paid": ("fine_paid", None),
+        "hearing_date": ("hearing_date", None),
+        "hearing_status": ("hearing_status", None),
+        "description": ("description", None),
+        "owner_name": ("owner_name", None),
+        "owner_type": ("owner_type", None),
+        "inspection_status": ("inspection_status", None),
+        "tags": ("tags_json", "json"),
+        "timeline": ("timeline_json", "json"),
+        "history": ("history_json", "json"),
+        "property": ("property_json", "json"),
+    }
+
+    def update_enrichment(self, opportunity_id: int, **fields) -> Optional[dict]:
+        """Atualiza só campos de enriquecimento; nunca toca no ciclo de vida."""
+        sets = []
+        params: list = []
+        for key, value in fields.items():
+            spec = self._ENRICHABLE.get(key)
+            if not spec:
+                continue
+            column, kind = spec
+            sets.append(f"{column} = ?")
+            params.append(self._json(value) if kind == "json" else value)
+        if not sets:
+            return self.get(opportunity_id)
+        params.append(opportunity_id)
+        conn = get_connection()
+        try:
+            conn.execute(
+                f"""UPDATE opportunity_workflow
+                    SET {', '.join(sets)}, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?""",
+                tuple(params),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT * FROM opportunity_workflow WHERE id = ?", (opportunity_id,)
+            ).fetchone()
+            return self._public(dict(row)) if row else None
         finally:
             conn.close()
 
@@ -268,7 +346,8 @@ class OpportunityWorkflowService:
         try:
             rows = conn.execute(
                 f"""SELECT id, address, city, state, zip_code, severity,
-                           compliance_deadline, job_value, status, received_at, created_at
+                           compliance_deadline, job_value, fine_balance,
+                           fine_imposed, fine_paid, status, received_at, created_at
                     FROM opportunity_workflow {clause}""",
                 params,
             ).fetchall()
@@ -279,10 +358,13 @@ class OpportunityWorkflowService:
         zips: dict = {}
         deadlines: list = []
         awaiting = 0
+        fines_at_risk = 0.0
+        fines_count = 0
         deadline_counts = {
             (today + timedelta(days=offset)).isoformat(): 0 for offset in range(days)
         }
         deadline_values = {key: 0.0 for key in deadline_counts}
+        deadline_fines = {key: 0.0 for key in deadline_counts}
         series_counts = {
             (today - timedelta(days=offset)).isoformat(): 0
             for offset in range(days - 1, -1, -1)
@@ -296,6 +378,17 @@ class OpportunityWorkflowService:
             zip_code = str(row["zip_code"] or "").strip()[:5]
             if len(zip_code) == 5:
                 zips[zip_code] = zips.get(zip_code, 0) + 1
+
+            # Multa real: saldo em aberto; se a fonte só publica o valor
+            # imposto, usa imposed - paid. Nunca deriva da obra.
+            balance = float(row["fine_balance"] or 0)
+            if balance <= 0:
+                imposed = float(row["fine_imposed"] or 0)
+                paid = float(row["fine_paid"] or 0)
+                balance = max(0.0, imposed - paid)
+            if balance > 0:
+                fines_at_risk += balance
+                fines_count += 1
 
             value = float(row["job_value"] or 0)
             deadline = str(row["compliance_deadline"] or "").strip()
@@ -318,12 +411,14 @@ class OpportunityWorkflowService:
                             "deadline": target.isoformat(),
                             "days_left": days_left,
                             "job_value": round(value),
+                            "fine_balance": round(balance),
                         }
                     )
                     key = target.isoformat()
                     if key in deadline_counts:
                         deadline_counts[key] += 1
                         deadline_values[key] += value
+                        deadline_fines[key] += balance
 
             received = str(row["received_at"] or row["created_at"] or "")
             if received:
@@ -347,6 +442,8 @@ class OpportunityWorkflowService:
                 "deadlines_7d": sum(1 for item in deadlines if item["days_left"] <= 7),
                 "deadlines_3d": sum(1 for item in deadlines if item["days_left"] <= 3),
                 "value_at_risk": value_at_risk,
+                "fines_at_risk": round(fines_at_risk),
+                "fines_count": fines_count,
             },
             "by_severity": buckets,
             "by_zip": [
@@ -367,6 +464,7 @@ class OpportunityWorkflowService:
                     "date": day,
                     "count": deadline_counts[day],
                     "value": round(deadline_values[day]),
+                    "fines": round(deadline_fines[day]),
                 }
                 for day in deadline_counts
             ],

@@ -19,6 +19,10 @@ export interface FeedFilters {
   category: string;
   severity: string;
   onlyDeadline: boolean;
+  /** Máximo de dias até ao prazo; `null` = qualquer prazo. */
+  deadlineWindow: number | null;
+  /** Só imóveis com multa real em aberto. */
+  withFines: boolean;
   search: string;
   now: number;
 }
@@ -92,6 +96,18 @@ export function PreventiveFeed({
             : `${opp.compliance_deadline}T00:00:00`
         );
         if (!Number.isFinite(target) || target - filters.now > 7 * 86400000) return false;
+      }
+      if (filters.deadlineWindow != null) {
+        const days = deadlineDaysLeft(opp.compliance_deadline, filters.now);
+        if (days == null || days > filters.deadlineWindow) return false;
+      }
+      if (filters.withFines) {
+        const balance = Math.max(
+          0,
+          Number(opp.fine_balance) ||
+            (Number(opp.fine_imposed) || 0) - (Number(opp.fine_paid) || 0)
+        );
+        if (balance <= 0) return false;
       }
       if (term) {
         const haystack = [

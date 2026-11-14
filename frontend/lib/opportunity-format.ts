@@ -69,6 +69,7 @@ const TAG_KEYS: Record<string, string> = {
   no_fine: "dashboard.preinspection.no_fine",
   owner_identified: "dashboard.preinspection.owner_identified",
   deadline_soon: "dashboard.preinspection.deadline_soon",
+  fine_active: "dashboard.preinspection.fine_active",
 };
 
 const OWNER_TYPE_KEYS: Record<string, string> = {

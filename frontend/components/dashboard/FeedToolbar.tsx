@@ -26,6 +26,11 @@ export function FeedToolbar({
   onSeverityChange,
   onlyDeadline,
   onToggleDeadline,
+  showPreventiveFilters,
+  deadlineWindow,
+  onDeadlineWindowChange,
+  withFines,
+  onToggleFines,
   search,
   onSearchChange,
   resultCount,
@@ -46,6 +51,11 @@ export function FeedToolbar({
   onSeverityChange: (value: string) => void;
   onlyDeadline: boolean;
   onToggleDeadline: () => void;
+  showPreventiveFilters?: boolean;
+  deadlineWindow?: string;
+  onDeadlineWindowChange?: (value: string) => void;
+  withFines?: boolean;
+  onToggleFines?: () => void;
   search: string;
   onSearchChange: (value: string) => void;
   resultCount: number;
@@ -142,29 +152,68 @@ export function FeedToolbar({
           ))}
         </select>
 
-        <button
-          type="button"
-          onClick={onToggleDeadline}
-          aria-pressed={onlyDeadline}
-          className={`inline-flex h-8 shrink-0 items-center gap-2 rounded-lg border px-2.5 text-[11px] font-semibold transition ${
-            onlyDeadline
-              ? "border-[var(--sd-accent)] bg-[var(--sd-accent-soft)] text-[var(--sd-accent)]"
-              : "border-[var(--sd-border)] text-[var(--sd-muted)] hover:text-[var(--sd-text)]"
-          }`}
-        >
-          <span
-            className={`relative h-3.5 w-6 rounded-full transition ${
-              onlyDeadline ? "bg-[var(--sd-accent)]" : "bg-[var(--sd-border-strong)]"
+        {showPreventiveFilters ? (
+          <>
+            <select
+              value={deadlineWindow ?? "all"}
+              onChange={(event) => onDeadlineWindowChange?.(event.target.value)}
+              aria-label={t("dashboard.filter.deadline_window")}
+              className="h-8 rounded-lg border border-[var(--sd-border)] bg-[var(--sd-surface)] px-2 text-[11px] font-semibold text-[var(--sd-muted)]"
+            >
+              <option value="all">{t("dashboard.filter.deadline_all")}</option>
+              <option value="3">{t("dashboard.filter.deadline_3d")}</option>
+              <option value="7">{t("dashboard.filter.deadline_7d")}</option>
+            </select>
+
+            <button
+              type="button"
+              onClick={onToggleFines}
+              aria-pressed={withFines}
+              className={`inline-flex h-8 shrink-0 items-center gap-2 rounded-lg border px-2.5 text-[11px] font-semibold transition ${
+                withFines
+                  ? "border-[var(--sd-urgent)] bg-[var(--sd-urgent-soft)] text-[var(--sd-urgent)]"
+                  : "border-[var(--sd-border)] text-[var(--sd-muted)] hover:text-[var(--sd-text)]"
+              }`}
+            >
+              <span
+                className={`relative h-3.5 w-6 rounded-full transition ${
+                  withFines ? "bg-[var(--sd-urgent)]" : "bg-[var(--sd-border-strong)]"
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 h-2.5 w-2.5 rounded-full bg-white transition ${
+                    withFines ? "left-[13px]" : "left-0.5"
+                  }`}
+                />
+              </span>
+              {t("dashboard.filter.with_fines")}
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            onClick={onToggleDeadline}
+            aria-pressed={onlyDeadline}
+            className={`inline-flex h-8 shrink-0 items-center gap-2 rounded-lg border px-2.5 text-[11px] font-semibold transition ${
+              onlyDeadline
+                ? "border-[var(--sd-accent)] bg-[var(--sd-accent-soft)] text-[var(--sd-accent)]"
+                : "border-[var(--sd-border)] text-[var(--sd-muted)] hover:text-[var(--sd-text)]"
             }`}
           >
             <span
-              className={`absolute top-0.5 h-2.5 w-2.5 rounded-full bg-white transition ${
-                onlyDeadline ? "left-[13px]" : "left-0.5"
+              className={`relative h-3.5 w-6 rounded-full transition ${
+                onlyDeadline ? "bg-[var(--sd-accent)]" : "bg-[var(--sd-border-strong)]"
               }`}
-            />
-          </span>
-          {t("dashboard.filter.only_deadline")}
-        </button>
+            >
+              <span
+                className={`absolute top-0.5 h-2.5 w-2.5 rounded-full bg-white transition ${
+                  onlyDeadline ? "left-[13px]" : "left-0.5"
+                }`}
+              />
+            </span>
+            {t("dashboard.filter.only_deadline")}
+          </button>
+        )}
 
         <div className="relative min-w-[160px] flex-1 sm:max-w-[260px]">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--sd-faint)]" />

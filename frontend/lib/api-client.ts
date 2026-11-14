@@ -1412,6 +1412,12 @@ export interface Opportunity {
   severity?: string | null;
   compliance_deadline?: string | null;
   job_value?: number | null;
+  value_source?: string | null;
+  fine_balance?: number | null;
+  fine_imposed?: number | null;
+  fine_paid?: number | null;
+  hearing_date?: string | null;
+  hearing_status?: string | null;
   description?: string | null;
   owner_name?: string | null;
   owner_type?: string | null;
@@ -1419,10 +1425,38 @@ export interface Opportunity {
   received_at?: string | null;
   tags?: string[];
   timeline?: Array<{ key?: string; label?: string; state?: string; date?: string }>;
+  history?: OpportunityHistoryEntry[];
+  property?: OpportunityProperty | null;
   status: string;
   reserved_until?: string | null;
   stage_expires_at?: string | null;
   created_at?: string | null;
+}
+
+export interface OpportunityHistoryEntry {
+  kind?: string;
+  label?: string;
+  date?: string | null;
+  status?: string | null;
+  amount?: number | null;
+}
+
+export interface OpportunityProperty {
+  address?: string | null;
+  zip_code?: string | null;
+  owner_name?: string | null;
+  owner_type?: string | null;
+  building_class?: string | null;
+  units_residential?: string | number | null;
+  units_total?: string | number | null;
+  year_built?: string | number | null;
+  floors?: string | number | null;
+  lot_area?: string | number | null;
+  building_area?: string | number | null;
+  assessed_total?: string | number | null;
+  assessed_land?: string | number | null;
+  latitude?: string | number | null;
+  longitude?: string | number | null;
 }
 
 export interface OpportunityInsightDeadline {
@@ -1434,6 +1468,7 @@ export interface OpportunityInsightDeadline {
   deadline: string;
   days_left: number;
   job_value?: number;
+  fine_balance?: number;
 }
 
 export interface OpportunityInsights {
@@ -1444,12 +1479,14 @@ export interface OpportunityInsights {
     deadlines_7d: number;
     deadlines_3d: number;
     value_at_risk: number;
+    fines_at_risk: number;
+    fines_count: number;
   };
   by_severity: { critical: number; high: number; medium: number; routine: number };
   by_zip: Array<{ zip: string; count: number }>;
   deadlines: OpportunityInsightDeadline[];
   series: Array<{ date: string; count: number }>;
-  deadline_series: Array<{ date: string; count: number; value: number }>;
+  deadline_series: Array<{ date: string; count: number; value: number; fines?: number }>;
 }
 
 export interface OpportunityListResponse {
