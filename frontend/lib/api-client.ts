@@ -114,6 +114,13 @@ export interface LeadResponse {
   resolution_action_updated_date?: string;
   // Owner mailing address
   mailing_address?: string;
+  // Managing Agent (HPD), já limpo no backend e só após reveal.
+  managing_agent?: {
+    name?: string;
+    contact_type?: string;
+    contact_description?: string;
+    business_address?: string;
+  } | null;
   // Regra A resolvida no backend (backend/services/lead_rules.py). Lidos
   // diretamente pela UI, sem recalcular: a regra só existe num sítio.
   corporate?: boolean;
@@ -314,6 +321,8 @@ export interface DashboardSummary {
   by_urgency: Record<string, number>;
   // Contagem por tipo de proprietario (privado vs institucional/governamental).
   by_owner_type?: { institutional: number; private: number; unknown?: number };
+  // Série diária (10 dias) para o sparkline dos KPI.
+  daily_series?: Array<{ date: string; count: number }>;
 }
 
 export async function fetchDashboardSummary(): Promise<DashboardSummary> {
@@ -1384,6 +1393,223 @@ export interface PhoneRevealResult {
   error?: string;
   provider?: string;
   billed?: boolean;
+}
+
+export interface Opportunity {
+  id: number;
+  property_key: string;
+  source_kind: "preventive" | "reactive" | "permit";
+  source_record_id: string;
+  source_type?: string | null;
+  address: string;
+  city: string;
+  state: string;
+  zip_code?: string | null;
+  bbl?: string | null;
+  bin?: string | null;
+  category?: string | null;
+  signal_type?: string | null;
+  severity?: string | null;
+  compliance_deadline?: string | null;
+  job_value?: number | null;
+  value_source?: string | null;
+  fine_balance?: number | null;
+  fine_imposed?: number | null;
+  fine_paid?: number | null;
+  hearing_date?: string | null;
+  hearing_status?: string | null;
+  description?: string | null;
+  owner_name?: string | null;
+  owner_type?: string | null;
+  inspection_status?: string | null;
+  received_at?: string | null;
+  viewed_at?: string | null;
+  tags?: string[];
+  timeline?: Array<{ key?: string; label?: string; state?: string; date?: string }>;
+  history?: OpportunityHistoryEntry[];
+  property?: OpportunityProperty | null;
+  status: string;
+  reserved_until?: string | null;
+  stage_expires_at?: string | null;
+  created_at?: string | null;
+}
+
+export interface OpportunityHistoryEntry {
+  kind?: string;
+  label?: string;
+  date?: string | null;
+  status?: string | null;
+  amount?: number | null;
+}
+
+export interface OpportunityProperty {
+  address?: string | null;
+  zip_code?: string | null;
+  owner_name?: string | null;
+  owner_type?: string | null;
+  building_class?: string | null;
+  units_residential?: string | number | null;
+  units_total?: string | number | null;
+  year_built?: string | number | null;
+  floors?: string | number | null;
+  lot_area?: string | number | null;
+  building_area?: string | number | null;
+  assessed_total?: string | number | null;
+  assessed_land?: string | number | null;
+  latitude?: string | number | null;
+  longitude?: string | number | null;
+}
+
+export interface OpportunityInsightDeadline {
+  id: number;
+  address: string;
+  city?: string | null;
+  state?: string | null;
+  severity?: string | null;
+  deadline: string;
+  days_left: number;
+  job_value?: number;
+  fine_balance?: number;
+}
+
+export interface OpportunityInsights {
+  kind: string;
+  totals: {
+    count: number;
+    awaiting_inspection: number;
+    deadlines_7d: number;
+    deadlines_3d: number;
+    value_at_risk: number;
+    fines_at_risk: number;
+    fines_count: number;
+  };
+  by_severity: { critical: number; high: number; medium: number; routine: number };
+  by_zip: Array<{ zip: string; count: number }>;
+  deadlines: OpportunityInsightDeadline[];
+  series: Array<{ date: string; count: number }>;
+  deadline_series: Array<{ date: string; count: number; value: number; fines?: number }>;
+}
+
+export interface OpportunityListResponse {
+  opportunities: Opportunity[];
+  counts: { all: number; preventive: number; reactive: number; permit: number };
+  total: number;
+  offset: number;
+  limit: number;
+  has_more: boolean;
+  insights?: OpportunityInsights;
+}
+
+export async function fetchOpportunityInsights(
+  kind: string = "preventive",
+  days: number = 7,
+): Promise<OpportunityInsights> {
+  return handle<OpportunityInsights>(
+    await fetch(
+      `${API_URL}/api/opportunities/insights?kind=${encodeURIComponent(kind)}&days=${days}`,
+      {
+        credentials: "include",
+        headers: { ...authHeaders() },
+      }
+    )
+  );
+}
+
+export async function fetchOpportunities(params: {
+  kind?: string;
+  status?: string;
+  city?: string;
+  category?: string;
+  limit?: number;
+  offset?: number;
+  days?: number;
+  deadline_within?: number;
+  with_fines?: boolean;
+  search?: string;
+} = {}): Promise<OpportunityListResponse> {
+  const qs = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== "") qs.set(key, String(value));
+  }
+  return handle<OpportunityListResponse>(
+    await fetch(`${API_URL}/api/opportunities${qs.toString() ? `?${qs}` : ""}`, {
+      credentials: "include",
+      headers: { ...authHeaders() },
+    })
+  );
+}
+
+export async function recordOpportunityView(
+  opportunityId: string | number
+): Promise<{ status: string; viewed_at?: string | null }> {
+  return handle(
+    await fetch(`${API_URL}/api/opportunities/${opportunityId}/view`, {
+      method: "POST",
+      credentials: "include",
+      headers: { ...authHeaders() },
+    })
+  );
+}
+
+export async function reserveOpportunity(
+  opportunityId: string | number,
+  minutes = 60,
+  opts: { consent?: boolean; idempotency?: string } = {}
+): Promise<{
+  reserved: boolean;
+  id: number;
+  status: string;
+  stage_expires_at?: string;
+  counted_again: boolean;
+  quota?: { used: number; limit: number; remaining: number };
+  opportunity: Opportunity;
+}> {
+  return handle(
+    await fetch(`${API_URL}/api/opportunities/${opportunityId}/reserve`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ minutes, consent: opts.consent ?? false, idempotency: opts.idempotency }),
+    })
+  );
+}
+
+export async function contactOpportunity(
+  opportunityId: string | number,
+  channel = "phone"
+): Promise<{ status: string; stage: string; stage_expires_at?: string; renewed: boolean }> {
+  return handle(
+    await fetch(`${API_URL}/api/opportunities/${opportunityId}/contact`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ channel }),
+    })
+  );
+}
+
+export async function negotiateOpportunity(
+  opportunityId: string | number
+): Promise<{ status: string; stage: string; stage_expires_at?: string; renewed: boolean }> {
+  return handle(
+    await fetch(`${API_URL}/api/opportunities/${opportunityId}/negotiate`, {
+      method: "POST",
+      credentials: "include",
+      headers: { ...authHeaders() },
+    })
+  );
+}
+
+export async function convertOpportunity(
+  opportunityId: string | number
+): Promise<{ status: string; stage: string }> {
+  return handle(
+    await fetch(`${API_URL}/api/opportunities/${opportunityId}/convert`, {
+      method: "POST",
+      credentials: "include",
+      headers: { ...authHeaders() },
+    })
+  );
 }
 
 export async function revealPhone(leadId: string | number): Promise<PhoneRevealResult> {

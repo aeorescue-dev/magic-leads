@@ -211,6 +211,9 @@ class LeadResponse(BaseModel):
     # Owner mailing address
     mailing_address: Optional[str] = None
 
+    # Managing Agent (HPD) já limpo pelo privacy.sanitize_lead.
+    managing_agent: Optional[dict] = None
+
     # Visibility fields (Phase 4.2)
     visibility_status: Optional[str] = None  # "available" | "reserved_by_me" | "reserved_by_other"
     reserved_by_me: Optional[dict] = None  # {created_at, expires_at, hours_remaining}
@@ -406,6 +409,13 @@ class ReserverLeadRequest(BaseModel):
     minutes: int = 60
     consent: bool = False
     idempotency: Optional[str] = None
+
+
+class OpportunityOutcomeRequest(BaseModel):
+    outcome: str = Field(pattern="^(won|lost|no_decision)$")
+    contract_value: Optional[float] = Field(default=None, ge=0)
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+    lost_reason: Optional[str] = Field(default=None, max_length=500)
 
 
 ALLOWED_RELEASE_REASONS = ["no_answer", "declined", "out_of_area", "personal_emergency", "changed_mind", "lazy", "other"]

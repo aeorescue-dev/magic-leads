@@ -33,7 +33,7 @@ import {
 import { buildOutreachMessage } from "@/lib/outreach";
 import { buildFullAddress } from "@/lib/address";
 import { toggleInterestKey } from "@/lib/interests";
-import { needsOnboarding } from "@/lib/categories";
+import { needsOnboarding, TRADE_CATEGORIES } from "@/lib/categories";
 import CheckoutModal from "@/components/CheckoutModal";
 import ReleaseModal from "@/components/ReleaseModal";
 import WelcomePopup from "@/components/WelcomePopup";
@@ -53,6 +53,9 @@ import {
   OpportunityCard,
   type OpportunityCardContext,
 } from "@/components/dashboard/OpportunityCard";
+import { PreventiveFeed } from "@/components/dashboard/PreventiveFeed";
+import { FeedToolbar } from "@/components/dashboard/FeedToolbar";
+import { FeedRail } from "@/components/dashboard/FeedRail";
 import {
   SegmentedControl,
   SignalButton,
@@ -66,21 +69,29 @@ import {
   fetchLeadById, toggleFavorite, recordContact, recordPushClick, fetchNotes, addNote, deleteNote,
   fetchUserNotifications, fetchUserUnreadCount, markUserNotificationRead, markAllUserNotificationsRead,
   fetchLeadStatus, reserveLead, releaseLead, contactLead, negotiateLead, convertLead,
+  reserveOpportunity, contactOpportunity, negotiateOpportunity, convertOpportunity,
+  type Opportunity,
   fetchLeadHistory, fetchUserInterests, updateUserInterests,
   fetchUserDailyStats, fetchUserSubscriptionStatus, fetchContractorMetrics,
   fetchMyLeadsHistory, MyLeadHistoryItem, MyLeadsHistoryKpis,
   LeadOccurrence, fetchLeadOccurrences,
   fetchDashboardSummary, DashboardSummary,
+  fetchOpportunityInsights, OpportunityInsights,
   fetchScraperStatus, ScraperRunState,
   fetchPublicMetrics, PublicMetrics, EMPTY_PUBLIC_METRICS, RELEASE_REASONS,
   revealPhone, PhoneRevealResult,
   PAYMENT_REQUIRED_EVENT,
 } from "@/lib/api-client";
+import { apiErrorKey } from "@/lib/api-errors";
+import { severityBucket, deadlineDaysLeft } from "@/lib/opportunity-format";
+import { requestOpportunitiesRefresh } from "@/lib/opportunity-events";
 
 // Tipo enriquecido para o modal de revelação (com histórico e ocorrências)
 type EnrichedLead = LeadResponse & {
   _history?: HistoryEvent[];
   _occurrences?: LeadOccurrence[];
+  subject_type?: "lead" | "opportunity";
+  opportunity_id?: number;
 };
 
 // Modal automático do ciclo de vida (abre logo após reservar)
@@ -253,7 +264,7 @@ function DashboardPageInner() {
   const [stats, setStats] = useState<LeadStats | null>(null);
   const [selectedCity, setSelectedCity] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeTab, setActiveTab] = useState<"overview" | "opportunities" | "favorites" | "interests" | "alerts" | "history">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "opportunities" | "prevention" | "favorites" | "interests" | "alerts" | "history">("overview");
   const [interests, setInterests] = useState<Set<string>>(new Set(ALL_CATEGORY_KEYS));
   const [interestsConfigured, setInterestsConfigured] = useState<boolean | null>(null);
   // O utilizador ja' interagiu com as especialidades? Distingue "nunca
@@ -271,7 +282,14 @@ function DashboardPageInner() {
 
   // Filter states
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
-  const [selectedUrgency, setSelectedUrgency] = useState<string>("all");
+  const [selectedSeverity, setSelectedSeverity] = useState<string>("all");
+  const [onlyDeadline, setOnlyDeadline] = useState(false);
+  const [deadlineWindow, setDeadlineWindow] = useState<"all" | "3" | "7">("all");
+  const [withFines, setWithFines] = useState(false);
+  const [feedLayer, setFeedLayer] = useState<"all" | "reactive" | "permit">("all");
+  const [preventiveShown, setPreventiveShown] = useState(0);
+  // Data de referência estável para prazos calculados no render.
+  const [renderNow] = useState(() => Date.now());
   const [selectedType, setSelectedType] = useState<string>("all");
   const [selectedOwnerType, setSelectedOwnerType] = useState<string>("all");
   // Gaveta de filtros em mobile (<lg). Em desktop os filtros ficam inline.
@@ -281,6 +299,7 @@ function DashboardPageInner() {
   const [commandOpen, setCommandOpen] = useState(false);
   const [interestsSheetOpen, setInterestsSheetOpen] = useState(false);
   const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
+  const [preventiveInsights, setPreventiveInsights] = useState<OpportunityInsights | null>(null);
   const [publicMetrics, setPublicMetrics] = useState<PublicMetrics>(EMPTY_PUBLIC_METRICS);
   const [scraperState, setScraperState] = useState<ScraperRunState | null>(null);
   const [shown, setShown] = useState<Set<string>>(new Set());
@@ -387,6 +406,7 @@ function DashboardPageInner() {
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [releaseTarget, setReleaseTarget] = useState<LeadResponse | null>(null);
   const [revealTarget, setRevealTarget] = useState<EnrichedLead | null>(null);
+  const [revealConsent, setRevealConsent] = useState(false);
   const [guideLead, setGuideLead] = useState<GuideLead | null>(null);
   const [contractorMetrics, setContractorMetrics] = useState<ContractorMetrics | null>(null);
   
@@ -637,6 +657,14 @@ function DashboardPageInner() {
 
   // ------------------------------------------------ onda 1: feed
   // Só esta chamada bloqueia a lista. O resto (KPIs) entra depois.
+  const severityToUrgency: Record<string, string> = {
+    critical: "high",
+    high: "high",
+    medium: "medium",
+    routine: "low",
+  };
+  const urgencyParam =
+    selectedSeverity === "all" ? undefined : severityToUrgency[selectedSeverity];
   const feedKey = userId
     ? [
         "leads-today",
@@ -644,7 +672,7 @@ function DashboardPageInner() {
         selectedCity,
         selectedType,
         selectedCategory,
-        selectedUrgency,
+        selectedSeverity,
         includeClosed,
       ]
     : null;
@@ -658,7 +686,7 @@ function DashboardPageInner() {
         1,
         selectedType === "all" ? undefined : selectedType,
         selectedCategory === "all" ? undefined : selectedCategory,
-        selectedUrgency === "all" ? undefined : selectedUrgency
+        urgencyParam
       ),
     { refreshInterval: 60000, isPaused: swrPaused }
   );
@@ -713,6 +741,17 @@ function DashboardPageInner() {
   useEffect(() => {
     if (publicMetricsData) setPublicMetrics(publicMetricsData);
   }, [publicMetricsData]);
+
+  // Agregados da pré-inspeção: alimentam os KPI e o painel lateral do feed.
+  const { mutate: mutatePreventiveInsights } = useSWRConfig();
+  const { data: preventiveInsightsData } = useSWR(
+    "/api/opportunities/insights?kind=preventive",
+    () => fetchOpportunityInsights("preventive"),
+    { refreshInterval: 60000, isPaused: swrPaused }
+  );
+  useEffect(() => {
+    if (preventiveInsightsData) setPreventiveInsights(preventiveInsightsData);
+  }, [preventiveInsightsData]);
 
   // ------------------------------------------------ quota diária
   const { data: dailyStatsData } = useSWR(
@@ -874,7 +913,7 @@ function DashboardPageInner() {
         nextPage,
         selectedType === "all" ? undefined : selectedType,
         selectedCategory === "all" ? undefined : selectedCategory,
-        selectedUrgency === "all" ? undefined : selectedUrgency
+        urgencyParam
       );
       if (data.leads && data.leads.length > 0) {
         setLeads((prev) => [...prev, ...data.leads]);
@@ -893,7 +932,7 @@ function DashboardPageInner() {
     }
     // includeClosed FALTOU: alternar o interruptor de historico nao recriava o
     // callback, por isso "carregar mais" continuava a pagina sem o parametro.
-  }, [currentPage, hasMoreLeads, loadingMore, selectedCity, selectedType, selectedCategory, selectedUrgency, includeClosed]);
+  }, [currentPage, hasMoreLeads, loadingMore, selectedCity, selectedType, selectedCategory, selectedSeverity, urgencyParam, includeClosed]);
 
   // O lead já está em "Meus Leads" (revelado por mim: reservado, em negociação,
   // convertido, liberado ou com hold expirado). Nesse estado o botão
@@ -1083,6 +1122,62 @@ function DashboardPageInner() {
     if (busyAction) return;
     setReleaseTarget(null);
   };
+  const openOpportunityReveal = (opp: Opportunity) => {
+    const categoryKey = TRADE_CATEGORIES.find((c) => c.key === opp.category)?.labelKey;
+    const categoryLabel = categoryKey ? t(categoryKey) : opp.category || opp.address;
+    const severityKey = {
+      critical: "dashboard.severity.critical",
+      high: "dashboard.severity.high",
+      medium: "dashboard.severity.medium",
+      routine: "dashboard.severity.routine",
+      emergency: "dashboard.severity.emergency",
+      immediate: "dashboard.severity.immediate",
+      class_1: "dashboard.severity.class_1",
+      class_2: "dashboard.severity.class_2",
+      class_3: "dashboard.severity.class_3",
+      class_a: "dashboard.severity.class_a",
+      class_b: "dashboard.severity.class_b",
+      class_c: "dashboard.severity.class_c",
+    }[String(opp.severity || "").toLowerCase()] || "dashboard.severity.medium";
+    const statusLabel =
+      opp.status === "reserved" || opp.status === "contacted" || opp.status === "in_negotiation"
+        ? t("dashboard.status.selected")
+        : t("dashboard.status.awaiting_inspection");
+    const target = {
+      id: String(opp.id),
+      external_id: opp.source_record_id,
+      address: opp.address,
+      city: opp.city,
+      state: opp.state,
+      zip_code: opp.zip_code ?? null,
+      issue_category: categoryLabel,
+      issue_description: categoryLabel,
+      urgency_level: opp.severity || "medium",
+      owner_name: null,
+      owner_phone: null,
+      owner_email: null,
+      owner_status: null,
+      date_reported: opp.created_at || new Date().toISOString(),
+      image_url: null,
+      source_url: null,
+      signal_type: opp.signal_type || "open_request",
+      signal_status: opp.status,
+      case_status: statusLabel,
+      descriptor: t(severityKey),
+      case_title: categoryLabel,
+      sla_target_dt: opp.compliance_deadline,
+      bbl: opp.bbl ?? null,
+      status: "new",
+      favorited: false,
+      _history: [],
+      _occurrences: [],
+      subject_type: "opportunity" as const,
+      opportunity_id: opp.id,
+    } as unknown as EnrichedLead;
+    setSelectedLead(null);
+    setRevealTarget(target);
+  };
+
   const handleQuickReserve = async (lead: LeadResponse) => {
     if (busyAction || (subscription && !subscription.can_access)) return;
     if (isBlockedByQuota(lead, dailyStats?.remaining)) {
@@ -1135,7 +1230,10 @@ function DashboardPageInner() {
     if (selectedLead) detailDialogRef.current?.focus();
   }, [selectedLead]);
   useEffect(() => {
-    if (revealTarget) revealDialogRef.current?.focus();
+    if (revealTarget) {
+      setRevealConsent(false);
+      revealDialogRef.current?.focus();
+    }
   }, [revealTarget]);
   useEffect(() => {
     if (!selectedLead && !revealTarget) return;
@@ -1152,7 +1250,7 @@ function DashboardPageInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedLead, revealTarget, busyAction]);
   const confirmReveal = async () => {
-    if (!revealTarget || busyAction) return;
+    if (!revealTarget || busyAction || !revealConsent) return;
     if (subscription && !subscription.can_access) {
       showToast(subscription.message || "Acesso negado", "error");
       return;
@@ -1163,14 +1261,24 @@ function DashboardPageInner() {
     }
     setBusyAction(true);
     try {
-      const idKey = `u${userId}:l${revealTarget.id}:${new Date().toISOString().slice(0, 10)}`;
-      const res = await reserveLead(revealTarget.id, 60, { consent: true, idempotency: idKey });
+      const isOpportunity = revealTarget.subject_type === "opportunity";
+      const subjectId = isOpportunity ? revealTarget.opportunity_id : revealTarget.id;
+      const idKey = `u${userId}:${isOpportunity ? "o" : "l"}${subjectId}:${new Date().toISOString().slice(0, 10)}`;
+      let res: any;
+      if (isOpportunity) {
+        res = await reserveOpportunity(subjectId as number, 60, {
+          consent: revealConsent,
+          idempotency: idKey,
+        });
+      } else {
+        res = await reserveLead(revealTarget.id, 60, { consent: revealConsent, idempotency: idKey });
+      }
       showToast(
         res?.incomplete_delivery
           ? t("dashboard.toast.free_reserved_incomplete")
           : res?.corporate
             ? t("dashboard.toast.corporate_reserved")
-            : res?.message || "Dados revelados — reserva de 1 hora ativa",
+            : res?.message || (isOpportunity ? t("dashboard.opportunity.reserved") : t("dashboard.toast.reveal_reserved")),
         "success"
       );
       if (dailyStats) {
@@ -1210,9 +1318,16 @@ function DashboardPageInner() {
       } as GuideLead);
       if (userId) refreshNotifications();
       refreshHistory();
+      if (isOpportunity) {
+        mutatePreventiveInsights("/api/opportunities/insights?kind=preventive");
+        requestOpportunitiesRefresh();
+      }
     } catch (e: any) {
       // Handle already-reserved case gracefully
-      if (e?.error === "already_reserved" || e?.status === 409) {
+      if (revealTarget.subject_type === "opportunity" && e?.status === 409) {
+        const codeKey = apiErrorKey(e?.message || e?.error || "PROPERTY_LOCKED");
+        showToast(t(codeKey || "dashboard.opportunity.property_locked"), "warning");
+      } else if (e?.error === "already_reserved" || e?.status === 409) {
         // Use lead data from the 409 response body if available
         const leadData = e?.responseBody?.lead;
         if (leadData) {
@@ -1254,11 +1369,41 @@ function DashboardPageInner() {
           "warning"
         );
       } else {
-        showToast(e?.message || "Erro ao revelar lead", "error");
+        const codeKey = apiErrorKey(e?.message || e?.error);
+        showToast(codeKey ? t(codeKey) : t("dashboard.toast.phone_reveal_error"), "error");
       }
     } finally {
       setBusyAction(false);
       setRevealTarget(null);
+    }
+  };
+  const advanceOpportunity = async (action: "contact" | "negotiate" | "convert") => {
+    const opportunityId = guideLead?.opportunity_id;
+    if (!opportunityId || busyAction) return;
+    setBusyAction(true);
+    try {
+      const res =
+        action === "contact"
+          ? await contactOpportunity(opportunityId)
+          : action === "negotiate"
+            ? await negotiateOpportunity(opportunityId)
+            : await convertOpportunity(opportunityId);
+      setGuideLead((prev) =>
+        prev
+          ? {
+              ...prev,
+              stage: (res?.stage as GuideLead["stage"]) ?? prev.stage,
+              stage_expires_at:
+                (res as { stage_expires_at?: string }).stage_expires_at ?? prev.stage_expires_at,
+            }
+          : prev
+      );
+      requestOpportunitiesRefresh();
+    } catch (e: any) {
+      const codeKey = apiErrorKey(e?.message || e?.error);
+      showToast(codeKey ? t(codeKey) : t("dashboard.opportunity.not_found"), "error");
+    } finally {
+      setBusyAction(false);
     }
   };
   const confirmRelease = async (reason: string, note?: string) => {
@@ -1324,9 +1469,24 @@ function DashboardPageInner() {
           return false;
         }
       }
-      // Urgency filter
-      if (selectedUrgency !== "all") {
-        if (lead.urgency_level !== selectedUrgency) {
+      // Gravidade (buckets do protótipo) — mapeia a urgência dos leads.
+      if (selectedSeverity !== "all" && severityBucket(lead.urgency_level) !== selectedSeverity) {
+        return false;
+      }
+
+      // Camada do feed: Todos / Reativos / Obras.
+      if (feedLayer === "permit") {
+        if (lead.signal_type !== "authorized_work") return false;
+      } else if (feedLayer === "reactive") {
+        if (lead.signal_type === "authorized_work") return false;
+      }
+
+      // Somente com prazo: janela de 7 dias.
+      if (onlyDeadline) {
+        const rawSla = String(lead.sla_target_dt || "");
+        if (!rawSla) return false;
+        const slaTarget = Date.parse(rawSla.includes("T") ? rawSla : `${rawSla}T00:00:00`);
+        if (!Number.isFinite(slaTarget) || slaTarget - renderNow > 7 * 86400000) {
           return false;
         }
       }
@@ -1381,7 +1541,7 @@ function DashboardPageInner() {
 
       return true;
     });
-  }, [leads, activeTab, selectedCity, selectedCategory, selectedUrgency, selectedType, selectedOwnerType, interests, searchQuery]);
+  }, [leads, activeTab, selectedCity, selectedCategory, selectedSeverity, selectedType, selectedOwnerType, interests, searchQuery, feedLayer, onlyDeadline, renderNow]);
 
   // New alerts (not yet viewed)
   const newAlerts = useMemo(
@@ -1533,30 +1693,32 @@ function DashboardPageInner() {
 
   const modalActionButtons = selectedLead ? getModalActionButtons() : null;
 
-  // ---- Filtros: uma unica definicao usada inline (desktop) e na gaveta mobile.
+  // ---- Filtros: barra única (toolbar) + gaveta avançada no mobile.
   const activeFilterCount = [
     selectedCity !== "all",
     selectedCategory !== "all",
-    selectedUrgency !== "all",
+    selectedSeverity !== "all",
     selectedOwnerType !== "all",
     selectedType !== "all",
     includeClosed,
+    onlyDeadline,
+    deadlineWindow !== "all",
+    withFines,
+    searchQuery.trim() !== "",
   ].filter(Boolean).length;
   const clearFilters = () => {
     setSelectedCity("all");
     setSelectedCategory("all");
-    setSelectedUrgency("all");
+    setSelectedSeverity("all");
     setSelectedOwnerType("all");
     setSelectedType("all");
     setIncludeClosed(false);
+    setOnlyDeadline(false);
+    setDeadlineWindow("all");
+    setWithFines(false);
+    setSearchQuery("");
   };
 
-  const urgencyOptions = [
-    { value: "all", label: t("dashboard.filter.all_urgency") || "Todas", icon: Filter },
-    { value: "high", label: t("dashboard.feed.urgency.high") || "Alta", icon: Flame, tone: "urgent" as const },
-    { value: "medium", label: t("dashboard.feed.urgency.medium") || "Média", icon: AlertCircle, tone: "warn" as const },
-    { value: "low", label: t("dashboard.feed.urgency.low") || "Baixa", icon: Clock, tone: "muted" as const },
-  ];
   const ownerOptions = [
     { value: "all", label: t("dashboard.filter.all_owner_types") || "Todos", icon: Filter },
     { value: "private", label: t("dashboard.filter.owner_type_private") || "Privado", icon: UserRound },
@@ -1572,34 +1734,7 @@ function DashboardPageInner() {
 
   const filterControls = (
     <div className="space-y-3">
-      <div className="sd-scroll-x flex items-center gap-2 overflow-x-auto pb-1">
-        <SignalChip
-          active={selectedCategory === "all"}
-          icon={Sparkles}
-          onClick={() => setSelectedCategory("all")}
-        >
-          {t("dashboard.filter.all_categories") || "Todas"}
-        </SignalChip>
-        {CATEGORIES.map((cat) => (
-          <SignalChip
-            key={cat.key}
-            active={selectedCategory === cat.key}
-            icon={cat.icon}
-            onClick={() => setSelectedCategory(cat.key)}
-            title={t(cat.labelKey)}
-          >
-            {t(cat.labelKey)}
-          </SignalChip>
-        ))}
-      </div>
-
       <div className="flex flex-wrap items-center gap-2">
-        <SegmentedControl
-          options={urgencyOptions}
-          value={selectedUrgency}
-          onChange={setSelectedUrgency}
-          ariaLabel={t("dashboard.filter.urgency") || "Urgência"}
-        />
         <SegmentedControl
           options={ownerOptions}
           value={selectedOwnerType}
@@ -1629,9 +1764,19 @@ function DashboardPageInner() {
               {t(CATEGORIES.find((c) => c.key === selectedCategory)?.labelKey || selectedCategory)} ×
             </SignalChip>
           ) : null}
-          {selectedUrgency !== "all" ? (
-            <SignalChip active onClick={() => setSelectedUrgency("all")}>
-              {t(`dashboard.feed.urgency.${selectedUrgency}`) || selectedUrgency} ×
+          {selectedSeverity !== "all" ? (
+            <SignalChip active onClick={() => setSelectedSeverity("all")}>
+              {t(`dashboard.severity.${selectedSeverity}`) || selectedSeverity} ×
+            </SignalChip>
+          ) : null}
+          {onlyDeadline ? (
+            <SignalChip active onClick={() => setOnlyDeadline(false)}>
+              {t("dashboard.filter.only_deadline")} ×
+            </SignalChip>
+          ) : null}
+          {searchQuery.trim() ? (
+            <SignalChip active onClick={() => setSearchQuery("")}>
+              “{searchQuery.trim()}” ×
             </SignalChip>
           ) : null}
           {selectedOwnerType !== "all" ? (
@@ -1757,35 +1902,186 @@ function DashboardPageInner() {
     },
   ];
 
-  const kpiSatellites = [
+  // KPI: no separador de pré-inspeção usam-se os quatro indicadores do
+  // protótipo (ativos, preventivos, prazos ≤ 7 dias, multas em risco). Nos
+  // restantes mantém-se a leitura do feed reativo, agora com sparkline.
+  const isPreventionTab = activeTab === "prevention";
+  const leadSeries = (dashboardSummary?.daily_series ?? []).map((point) => point.count);
+  const preventiveSeries = (preventiveInsights?.series ?? []).map((point) => point.count);
+  const deadlineSeries = (preventiveInsights?.deadline_series ?? []).map((point) => point.count);
+  const finesSeries = (preventiveInsights?.deadline_series ?? []).map(
+    (point) => point.fines ?? 0,
+  );
+  const finesAtRisk = preventiveInsights?.totals.fines_at_risk ?? 0;
+  const finesCount = preventiveInsights?.totals.fines_count ?? 0;
+  const finesInThousands = finesAtRisk >= 10000;
+
+  const kpiHero = isPreventionTab
+    ? {
+        label: t("dashboard.kpi.active_opportunities"),
+        value: realTotalLeads,
+        delta: t("dashboard.kpi.active_delta"),
+        sub: `${dashboardSummary?.urgent ?? 0} ${t("dashboard.kpi.need_action")}`,
+        series: leadSeries,
+        icon: Building2,
+      }
+    : {
+        label: t("dashboard.kpi.interested") || "No seu interesse",
+        value: realTotalLeads,
+        delta: t("dashboard.kpi.active_delta") || "qualificadas nos últimos 7 dias",
+        sub: `${dashboardSummary?.recent_count ?? 0} ${t("dashboard.kpi.new_short")}`,
+        series: leadSeries,
+        icon: Building2,
+      };
+
+  const kpiSatellites = isPreventionTab
+    ? [
+        {
+          label: t("dashboard.kpi.preventive"),
+          value: preventiveInsights?.totals.count ?? 0,
+          delta: `${preventiveInsights?.totals.awaiting_inspection ?? 0} ${t("dashboard.kpi.awaiting_inspection")}`,
+          sub: t("dashboard.kpi.live_sample"),
+          series: preventiveSeries,
+          icon: ShieldCheck,
+          tone: "info" as const,
+          onClick: () => setActiveTab("prevention"),
+        },
+        {
+          label: t("dashboard.kpi.deadlines_7d"),
+          value: preventiveInsights?.totals.deadlines_7d ?? 0,
+          delta: `${preventiveInsights?.totals.deadlines_3d ?? 0} ${t("dashboard.kpi.within_3d")}`,
+          sub: t("dashboard.kpi.deadline_window"),
+          series: deadlineSeries,
+          icon: Clock,
+          tone: "warn" as const,
+          onClick: () => setActiveTab("prevention"),
+        },
+        {
+          label: t("dashboard.kpi.fines_at_risk"),
+          value: finesInThousands ? Math.round(finesAtRisk / 1000) : finesAtRisk,
+          prefix: "$",
+          suffix: finesInThousands ? "k" : "",
+          delta: `${finesCount} ${t("dashboard.kpi.fines_open_count")}`,
+          sub: t("dashboard.kpi.fines_at_risk_sub"),
+          series: finesSeries,
+          icon: AlertTriangle,
+          tone: "urgent" as const,
+          dark: true,
+          onClick: () => setActiveTab("prevention"),
+        },
+      ]
+    : [
+        {
+          label: t("dashboard.kpi.urgent") || "Urgentes",
+          value: dashboardSummary?.urgent ?? 0,
+          delta: t("dashboard.kpi.need_action") || "precisam ação",
+          series: leadSeries,
+          icon: AlertCircle,
+          tone: "urgent" as const,
+          onClick: () => {
+            setSelectedSeverity("high");
+            setActiveTab("opportunities");
+            setFeedLayer("all");
+          },
+        },
+        {
+          label: t("dashboard.kpi.with_contact_short") || "Com dono",
+          value: dashboardSummary?.with_contact ?? 0,
+          delta: `${dashboardSummary?.with_contact_pct ?? 0}% ${t("dashboard.kpi.owner_identified") || "com proprietário identificado"}`,
+          icon: Phone,
+          tone: "info" as const,
+          progress: dashboardSummary?.with_contact_pct ?? 0,
+        },
+        {
+          label: t("dashboard.kpi.new_short") || "Novas",
+          value: publicMetrics?.last_scrape?.novas_oportunidades ?? dashboardSummary?.recent_count ?? scrapeCount,
+          delta: t("dashboard.kpi.updated_now") || "atualizado agora",
+          series: leadSeries,
+          icon: TrendingUp,
+          tone: "accent" as const,
+          onClick: () => setActiveTab("opportunities"),
+        },
+      ];
+
+  // Barra central de abas/filtros (protótipo) — partilhada pelos feeds.
+  const permitCount = leads.filter((lead) => lead.signal_type === "authorized_work").length;
+  const preventiveCount = preventiveInsights?.totals.count ?? 0;
+  const feedTabs = [
+    { key: "all", label: t("dashboard.feed.tab_all"), count: realTotalLeads },
     {
-      label: t("dashboard.kpi.urgent") || "Urgentes",
-      value: dashboardSummary?.urgent ?? 0,
-      delta: t("dashboard.kpi.need_action") || "precisam ação",
-      icon: AlertCircle,
-      tone: "urgent" as const,
-      onClick: () => {
-        setSelectedUrgency("high");
-        setActiveTab("opportunities");
-      },
+      key: "reactive",
+      label: t("dashboard.feed.tab_reactive"),
+      count: Math.max(0, realTotalLeads - permitCount),
     },
-    {
-      label: t("dashboard.kpi.with_contact_short") || "Com dono",
-      value: dashboardSummary?.with_contact ?? 0,
-      delta: `${dashboardSummary?.with_contact_pct ?? 0}% ${t("dashboard.kpi.owner_identified") || "com proprietário identificado"}`,
-      icon: Phone,
-      tone: "info" as const,
-      progress: dashboardSummary?.with_contact_pct ?? 0,
-    },
-    {
-      label: t("dashboard.kpi.new_short") || "Novas",
-      value: publicMetrics?.last_scrape?.novas_oportunidades ?? dashboardSummary?.recent_count ?? scrapeCount,
-      delta: t("dashboard.kpi.updated_now") || "atualizado agora",
-      icon: TrendingUp,
-      tone: "accent" as const,
-      onClick: () => setActiveTab("opportunities"),
-    },
+    { key: "preventive", label: t("dashboard.feed.tab_preventive"), count: preventiveCount },
+    { key: "permit", label: t("dashboard.feed.tab_works"), count: permitCount },
   ];
+  const activeFeedTab =
+    activeTab === "prevention"
+      ? "preventive"
+      : feedLayer === "reactive"
+        ? "reactive"
+        : feedLayer === "permit"
+          ? "permit"
+          : "all";
+  const handleFeedTab = (key: string) => {
+    if (key === "preventive") {
+      setActiveTab("prevention");
+      return;
+    }
+    setActiveTab("opportunities");
+    setFeedLayer(key === "reactive" ? "reactive" : key === "permit" ? "permit" : "all");
+  };
+  const feedFilters = {
+    city: selectedCity,
+    category: selectedCategory,
+    severity: selectedSeverity,
+    onlyDeadline,
+    deadlineWindow: deadlineWindow === "all" ? null : Number(deadlineWindow),
+    withFines,
+    search: searchQuery,
+    now: renderNow,
+  };
+
+  // Painel lateral do feed reativo (a Fase 2 aplica-lhe o novo cartão).
+  // Deriva tudo do feed já carregado.
+  const reactiveRail = useMemo(() => {
+    const zips = new Map<string, number>();
+    const severity = { critical: 0, high: 0, medium: 0, routine: 0 };
+    const deadlines: Array<{
+      id: number | string;
+      address: string;
+      city?: string | null;
+      severity?: string | null;
+      days_left: number;
+    }> = [];
+    for (const lead of filteredLeads) {
+      const zip = String(lead.zip_code || "").trim().slice(0, 5);
+      if (zip.length === 5) zips.set(zip, (zips.get(zip) ?? 0) + 1);
+      severity[severityBucket(lead.urgency_level)] += 1;
+      const raw = String(lead.sla_target_dt || "");
+      if (raw) {
+        const days = deadlineDaysLeft(raw, renderNow);
+        if (days != null) {
+          deadlines.push({
+            id: lead.id,
+            address: lead.address,
+            city: lead.city,
+            severity: lead.urgency_level,
+            days_left: days,
+          });
+        }
+      }
+    }
+    return {
+      severity,
+      zips: Array.from(zips.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([zip, count]) => ({ zip, count })),
+      deadlines: deadlines.sort((a, b) => a.days_left - b.days_left).slice(0, 4),
+    };
+  }, [filteredLeads, renderNow]);
 
   const opportunityCardCtx: OpportunityCardContext = {
     t,
@@ -1858,6 +2154,7 @@ function DashboardPageInner() {
           {[
             { id: "overview", icon: LayoutDashboard, label: t("dashboard.nav.overview") },
             { id: "opportunities", icon: FolderKanban, label: t("dashboard.nav.opportunities"),               badge: realTotalLeads.toLocaleString() },
+            { id: "prevention", icon: ShieldCheck, label: t("dashboard.nav.prevention") },
             { id: "favorites", icon: Star, label: t("dashboard.nav.favorites"), badge: String(leads.filter((l) => l.favorited).length || "") },
             { id: "interests", icon: SlidersHorizontal, label: t("dashboard.nav.interests"), badge: String(interests.size) },
             { id: "alerts", icon: Bell, label: t("dashboard.nav.alerts"), badge: unreadCount > 0 ? String(unreadCount) : undefined },
@@ -2232,12 +2529,7 @@ function DashboardPageInner() {
 
           {/* KPI PULSE — 1 herói + 3 satélites acionáveis */}
           <KpiPulse
-            hero={{
-              label: t("dashboard.kpi.interested") || "No seu interesse",
-              value: realTotalLeads,
-              delta: t("dashboard.kpi.active_delta") || "qualificadas nos últimos 7 dias",
-              icon: Building2,
-            }}
+            hero={kpiHero}
             satellites={kpiSatellites}
             onHero={() => setActiveTab("opportunities")}
           />
@@ -2257,54 +2549,41 @@ function DashboardPageInner() {
             />
           )}
 
-{/* FILTER BAR — inline em desktop, gaveta (sheet) em mobile */}
-          <div className="hidden rounded-2xl border border-[var(--sd-border)] bg-[var(--sd-surface)] p-4 lg:block">
-            {filterControls}
-            <div className={`mt-2 flex items-center justify-between gap-2 text-xs ${T.text2}`}>
-              <SignalButton
-                type="button"
-                variant="secondary"
-                size="sm"
-                icon={SlidersHorizontal}
-                onClick={() => setFiltersOpen(true)}
-              >
-                {t("dashboard.filter.open") || "Filtros"}
-                {activeFilterCount > 0 ? (
-                  <span className="ml-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--sd-accent)] px-1 text-[9px] font-bold text-[var(--sd-accent-text)]">
-                    {activeFilterCount}
-                  </span>
-                ) : null}
-              </SignalButton>
-              <div className="flex items-center gap-2">
-                <span>{filteredLeads.length} {t("dashboard.filter.showing") || "oportunidades"}</span>
-                <span>·</span>
-                <span>{newAlerts.length} {t("dashboard.filter.new") || "novas"}</span>
-              </div>
-            </div>
-          </div>
+          {["overview", "opportunities", "prevention"].includes(activeTab) ? (
+            <FeedToolbar
+              tabs={feedTabs}
+              activeTab={activeFeedTab}
+              onTabChange={handleFeedTab}
+              cities={["NYC", "Chicago", "Boston", "Dallas"]}
+              city={selectedCity}
+              onCityChange={setSelectedCity}
+              category={selectedCategory}
+              onCategoryChange={setSelectedCategory}
+              severity={selectedSeverity}
+              onSeverityChange={setSelectedSeverity}
+              onlyDeadline={onlyDeadline}
+              onToggleDeadline={() => setOnlyDeadline((value) => !value)}
+              showPreventiveFilters={activeFeedTab === "preventive"}
+              deadlineWindow={deadlineWindow}
+              onDeadlineWindowChange={(value) =>
+                setDeadlineWindow(value === "3" || value === "7" ? value : "all")
+              }
+              withFines={withFines}
+              onToggleFines={() => setWithFines((value) => !value)}
+              search={searchQuery}
+              onSearchChange={setSearchQuery}
+              resultCount={activeFeedTab === "preventive" ? preventiveShown : filteredLeads.length}
+              resultLabel={
+                activeFeedTab === "preventive"
+                  ? t("dashboard.feed.tab_preventive").toLowerCase()
+                  : t("dashboard.filter.showing") || "oportunidades"
+              }
+              onOpenAdvanced={() => setFiltersOpen(true)}
+              onClear={clearFilters}
+              advancedButtonRef={filtersTriggerRef}
+            />
+          ) : null}
 
-          <div className="lg:hidden flex items-center gap-2">
-            <button
-              ref={filtersTriggerRef}
-              type="button"
-              onClick={() => setFiltersOpen(true)}
-              aria-haspopup="dialog"
-              aria-controls="filters-sheet"
-              aria-expanded={filtersOpen}
-              className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border text-sm font-semibold transition ${T.panel} ${T.text}`}
-            >
-              <SlidersHorizontal className="h-4 w-4" />
-              {t("dashboard.filter.open") || "Filtros"}
-              {activeFilterCount > 0 && (
-                <span className="inline-flex items-center justify-center h-5 min-w-5 px-1.5 rounded-full bg-indigo-500 text-white text-[10px] font-bold">
-                  {activeFilterCount}
-                </span>
-              )}
-            </button>
-            <span className={`ml-auto text-xs ${T.text2}`}>
-              {filteredLeads.length} {t("dashboard.filter.showing") || "oportunidades"}
-            </span>
-          </div>
 
           {filtersOpen && (
             <div
@@ -2765,8 +3044,14 @@ function DashboardPageInner() {
                 </div>
               )}
             </section>
+          ) : activeTab === "prevention" ? (
+            <PreventiveFeed
+              onOpenReveal={openOpportunityReveal}
+              filters={feedFilters}
+              onCountChange={setPreventiveShown}
+            />
           ) : (
-          <>
+          <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
           {/* GRID: INTERESTS CONFIG + OPPORTUNITIES FEED */}
           <div className="space-y-4">
             {/* INTERESTS SECTION */}
@@ -2980,7 +3265,27 @@ function DashboardPageInner() {
               </div>
             </section>
           </div>
-          </>
+          <FeedRail
+            deadlines={reactiveRail.deadlines}
+            severity={reactiveRail.severity}
+            zips={reactiveRail.zips}
+            onOpenDeadline={(id) => {
+              const lead = leads.find((item) => String(item.id) === String(id));
+              if (lead) setSelectedLead(lead);
+            }}
+            onSeeAll={() => setActiveTab("opportunities")}
+            onOpenMap={() => {
+              const zip = reactiveRail.zips[0]?.zip;
+              if (zip && typeof window !== "undefined") {
+                window.open(
+                  `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(zip)}`,
+                  "_blank",
+                  "noopener",
+                );
+              }
+            }}
+          />
+          </div>
           )}
         </main>
       </div>
@@ -3073,6 +3378,24 @@ function DashboardPageInner() {
                   <div className="sm:col-span-2">
                     <span className="text-xs text-slate-400 block">{t("dashboard.field.mailing_address")}</span>
                     <span className="font-semibold">📬 {selectedLead.mailing_address}</span>
+                  </div>
+                )}
+                {selectedLead.managing_agent?.name && (
+                  <div className="sm:col-span-2 rounded-lg border border-[var(--sd-border)] bg-[var(--sd-surface-2)] p-2.5">
+                    <span className="text-xs text-slate-400 block">
+                      {t("dashboard.field.managing_agent")}
+                    </span>
+                    <span className="font-semibold">{selectedLead.managing_agent.name}</span>
+                    {selectedLead.managing_agent.contact_description && (
+                      <span className="ml-2 text-[11px] text-slate-400">
+                        {selectedLead.managing_agent.contact_description}
+                      </span>
+                    )}
+                    {selectedLead.managing_agent.business_address && (
+                      <div className="mt-0.5 text-[11px] text-slate-400">
+                        {selectedLead.managing_agent.business_address}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -3355,7 +3678,15 @@ function DashboardPageInner() {
 
        {/* CICLO DE VIDA — guia automático após reservar (fases 1h/48h/48h) */}
        {guideLead && (
-         <ReserveGuideModal lead={guideLead} isDark={isDark} onClose={closeGuide} />
+         <ReserveGuideModal
+           lead={guideLead}
+           isDark={isDark}
+           onClose={closeGuide}
+           busy={busyAction}
+           onContact={guideLead.subject_type === "opportunity" ? () => advanceOpportunity("contact") : undefined}
+           onNegotiate={guideLead.subject_type === "opportunity" ? () => advanceOpportunity("negotiate") : undefined}
+           onConvert={guideLead.subject_type === "opportunity" ? () => advanceOpportunity("convert") : undefined}
+         />
        )}
 
       {/* REVEAL CONSENT MODAL (dados do proprietário protegidos) */}
@@ -3574,7 +3905,8 @@ function DashboardPageInner() {
                 <label className={`flex items-start gap-2.5 text-sm cursor-pointer ${isDark ? "text-slate-200" : "text-slate-700"}`}>
                   <input
                     type="checkbox"
-                    defaultChecked
+                    checked={revealConsent}
+                    onChange={(e) => setRevealConsent(e.target.checked)}
                     className="mt-0.5 h-4 w-4 accent-indigo-500"
                   />
 <span>
@@ -3589,10 +3921,19 @@ function DashboardPageInner() {
               </div>
             </div>
 
+            {isBlockedByQuota(revealTarget, dailyStats?.remaining) ? (
+              <div
+                role="alert"
+                className="mt-4 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs font-semibold text-amber-400"
+              >
+                {t("dashboard.toast.daily_limit")}
+              </div>
+            ) : null}
+
             <div className="mt-5 flex gap-2">
               <button
                 onClick={confirmReveal}
-                disabled={busyAction || (subscription && !subscription.can_access) || isBlockedByQuota(revealTarget, dailyStats?.remaining)}
+                disabled={busyAction || !revealConsent || (subscription && !subscription.can_access) || isBlockedByQuota(revealTarget, dailyStats?.remaining)}
                 className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-white text-sm font-bold transition disabled:opacity-50"
               >
                 {busyAction ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lock className="h-4 w-4" />}

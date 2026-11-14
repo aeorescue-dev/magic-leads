@@ -396,6 +396,7 @@ CREATE TABLE IF NOT EXISTS leads (
   converted_at TEXT,
   revealed_at TEXT,
   refund_blocked INTEGER DEFAULT 0,
+  managing_agent_json TEXT,
   -- Fase 22: qualificação materializada. O feed avaliava 20 LIKEs sobre 5
   -- colunas em cada linha (13 mil por pedido); estas colunas são calculadas
   -- na escrita e lidas como índice.
@@ -407,6 +408,107 @@ CREATE TABLE IF NOT EXISTS leads (
   UNIQUE(external_id, source_type),
   UNIQUE(address, city)
 );
+
+-- Staging: camada de oportunidades preventivas/reativas sem tocar em `leads`.
+-- `property_key` e' BBL/BIN/hash normalizado do endereco; o indice parcial
+-- garante UM ciclo ativo por imovel, independentemente da camada.
+CREATE TABLE IF NOT EXISTS opportunity_workflow (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  property_key TEXT NOT NULL,
+  source_kind TEXT NOT NULL,
+  source_record_id TEXT NOT NULL,
+  source_type TEXT,
+  address TEXT,
+  city TEXT,
+  state TEXT,
+  zip_code TEXT,
+  bbl TEXT,
+  bin TEXT,
+  category TEXT,
+  signal_type TEXT,
+  severity TEXT,
+  compliance_deadline TEXT,
+  job_value REAL,
+  value_source TEXT,
+  fine_balance REAL,
+  fine_imposed REAL,
+  fine_paid REAL,
+  hearing_date TEXT,
+  hearing_status TEXT,
+  description TEXT,
+  owner_name TEXT,
+  owner_type TEXT,
+  inspection_status TEXT,
+  received_at TEXT,
+  tags_json TEXT,
+  timeline_json TEXT,
+  history_json TEXT,
+  property_json TEXT,
+  source_payload TEXT,
+  status TEXT NOT NULL DEFAULT 'available',
+  reserved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  reserved_until TEXT,
+  stage_expires_at TEXT,
+  contacted_at TEXT,
+  negotiated_at TEXT,
+  converted_at TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(source_kind, source_record_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_opportunity_active_property
+  ON opportunity_workflow(property_key)
+  WHERE status IN ('reserved', 'contacted', 'in_negotiation');
+
+CREATE INDEX IF NOT EXISTS idx_opportunity_status
+  ON opportunity_workflow(status, stage_expires_at);
+
+CREATE INDEX IF NOT EXISTS idx_opportunity_received
+  ON opportunity_workflow(received_at, created_at);
+
+-- Marcação de visualização por utilizador. Uma linha por (user, oportunidade);
+-- preserva a primeira e a última abertura para o indicador temporal.
+CREATE TABLE IF NOT EXISTS opportunity_views (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  opportunity_id INTEGER NOT NULL REFERENCES opportunity_workflow(id) ON DELETE CASCADE,
+  first_viewed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  last_viewed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  view_count INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (user_id, opportunity_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_opportunity_views_opportunity
+  ON opportunity_views(opportunity_id);
+
+-- Trava transversal: impede que a mesma propriedade seja reservada em `leads`
+-- e em `opportunity_workflow` ao mesmo tempo.
+CREATE TABLE IF NOT EXISTS property_locks (
+  property_key TEXT PRIMARY KEY,
+  owner_kind TEXT NOT NULL,
+  owner_id INTEGER NOT NULL,
+  reserved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  expires_at TEXT,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS opportunity_outcomes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  opportunity_id INTEGER REFERENCES opportunity_workflow(id) ON DELETE CASCADE,
+  lead_id INTEGER REFERENCES leads(id) ON DELETE SET NULL,
+  outcome TEXT NOT NULL CHECK(outcome IN ('won', 'lost', 'no_decision')),
+  won_at TEXT,
+  lost_at TEXT,
+  contract_value REAL,
+  currency TEXT DEFAULT 'USD',
+  lost_reason TEXT,
+  recorded_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  recorded_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(opportunity_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_opportunity_outcomes_lead
+  ON opportunity_outcomes(lead_id, recorded_at DESC);
 
 -- B3: cache BBL -> coordenadas (PLUTO). Hit e miss ficam registados para nao
 -- repetir consultas; miss expira em 30 dias.
@@ -1545,6 +1647,27 @@ def init_db() -> None:
 def _migrate_schema(conn: sqlite3.Connection) -> None:
     """Adiciona colunas novas que não existiam em bancos antigos (idempotente)."""
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(leads)").fetchall()}
+    opp_cols = {r["name"] for r in conn.execute("PRAGMA table_info(opportunity_workflow)").fetchall()}
+    for name, ctype in {
+        "description": "TEXT",
+        "owner_name": "TEXT",
+        "owner_type": "TEXT",
+        "inspection_status": "TEXT",
+        "received_at": "TEXT",
+        "tags_json": "TEXT",
+        "timeline_json": "TEXT",
+        "history_json": "TEXT",
+        "property_json": "TEXT",
+        "source_payload": "TEXT",
+        "value_source": "TEXT",
+        "fine_balance": "REAL",
+        "fine_imposed": "REAL",
+        "fine_paid": "REAL",
+        "hearing_date": "TEXT",
+        "hearing_status": "TEXT",
+    }.items():
+        if name not in opp_cols:
+            conn.execute(f"ALTER TABLE opportunity_workflow ADD COLUMN {name} {ctype}")
     if "status" not in cols:
         conn.execute("ALTER TABLE leads ADD COLUMN status TEXT DEFAULT 'new'")
     if "favorited" not in cols:
@@ -1680,6 +1803,8 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         )
     if "refund_blocked" not in cols:
         conn.execute("ALTER TABLE leads ADD COLUMN refund_blocked INTEGER DEFAULT 0")
+    if "managing_agent_json" not in cols:
+        conn.execute("ALTER TABLE leads ADD COLUMN managing_agent_json TEXT")
     extra_cols = {
         "address_unit": "TEXT",
         "address_type": "TEXT",
@@ -5465,6 +5590,20 @@ class DatabaseService:
             cur = conn.execute(
                 "UPDATE leads SET mailing_address = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (mailing_address, lead_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def update_managing_agent(self, lead_id: int, agent: Optional[dict]) -> bool:
+        """Grava o Managing Agent do HPD (JSON), sem tocar em `owner_name`."""
+        payload = json.dumps(agent, ensure_ascii=False) if agent else None
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE leads SET managing_agent_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (payload, lead_id),
             )
             conn.commit()
             return cur.rowcount > 0
@@ -9908,6 +10047,30 @@ class DatabaseService:
                 for city, count in by_city.items()
             }
 
+            # Série diária de 10 dias para o sparkline dos KPI. Consulta própria
+            # porque a janela do resumo é de 7 dias.
+            series_where = """
+                WHERE date_reported IS NOT NULL
+                  AND datetime(date_reported) >= datetime('now', '-9 days')
+                  AND is_qualified = 1
+            """
+            series_params: list = []
+            if db_cats:
+                placeholders = ",".join("?" * len(db_cats))
+                series_where += f" AND issue_category IN ({placeholders})"
+                series_params.extend(db_cats)
+            series_rows = conn.execute(
+                f"SELECT substr(date_reported, 1, 10) AS day, COUNT(*) AS c "
+                f"FROM leads {series_where} GROUP BY day",
+                series_params,
+            ).fetchall()
+            by_day = {row["day"]: row["c"] for row in series_rows}
+            today_date = utcnow().date()
+            daily_series = []
+            for offset in range(9, -1, -1):
+                day = (today_date - timedelta(days=offset)).isoformat()
+                daily_series.append({"date": day, "count": int(by_day.get(day, 0))})
+
             result = {
                 "total_interested": total_interested,
                 "last_scrape": last_scrape_info,
@@ -9925,6 +10088,7 @@ class DatabaseService:
                 "by_city_coverage": by_city_coverage,
                 "by_urgency": by_urgency,
                 "by_owner_type": by_owner_type,
+                "daily_series": daily_series,
             }
 
             if _DASHBOARD_SUMMARY_CACHE_TTL > 0:
@@ -12652,6 +12816,9 @@ class AsyncDatabaseService:
 
     async def update_mailing_address(self, lead_id: int, mailing_address: Optional[str]) -> bool:
         return await anyio.to_thread.run_sync(self._service.update_mailing_address, lead_id, mailing_address)
+
+    async def update_managing_agent(self, lead_id: int, agent: Optional[dict]) -> bool:
+        return await anyio.to_thread.run_sync(self._service.update_managing_agent, lead_id, agent)
 
     async def add_note(self, lead_id: int, note: str, user_id: Optional[int] = None) -> Optional[dict]:
         return await anyio.to_thread.run_sync(self._service.add_note, lead_id, note, user_id)

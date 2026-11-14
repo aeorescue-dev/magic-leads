@@ -74,6 +74,7 @@ from .models.schemas import (
     NoteResponse,
     NotificationResponse,
     OnboardingUpdate,
+    OpportunityOutcomeRequest,
     PushEnabledUpdate,
     PushPreferencesUpdate,
     PushSubscribeRequest,
@@ -146,7 +147,10 @@ from .services.lead_rules import (
     is_corporate as is_corporate_lead,
 )
 from .services.metrics import push_metrics, searchbug_metrics
+from .services.opportunity_workflow import opportunity_workflow
 from .services.outbound_engine import effective_mailbox_cap, outbound_engine
+from .services.phase1_enrichment import phase1_enrichment
+from .services.phase1_scheduler import phase1_scheduler
 from .services.privacy import sanitize_lead, scrub
 from .services.push_click import verify_click
 from .services.push_service import push_service
@@ -229,6 +233,17 @@ def _phone_confidence_stats(city, owner_class) -> dict:
 
     _phone_stats_cache[key] = (now + PHONE_STATS_TTL_S, result)
     return result
+
+
+async def _persist_managing_agent(lead_id: int, enrich_result: dict | None) -> None:
+    """Persiste o Managing Agent do HPD quando o enriquecimento o devolve."""
+    agent = (enrich_result or {}).get("managing_agent") if enrich_result else None
+    if not agent:
+        return
+    try:
+        await db_service.update_managing_agent(lead_id, agent)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Managing agent: falha a gravar lead %s: %s", lead_id, exc)
 
 
 def _to_lead_response(lead: dict) -> LeadResponse:
@@ -358,6 +373,8 @@ def _to_lead_response(lead: dict) -> LeadResponse:
         resolution_action_updated_date=lead.get("resolution_action_updated_date"),
         # Owner mailing address (protegido até o reveal)
         mailing_address=lead.get("mailing_address") if show_owner else None,
+        # Managing Agent (HPD) só depois do reveal, tal como o resto do dono.
+        managing_agent=safe.get("managing_agent") if show_owner else None,
         # Visibility fields
         visibility_status=visibility_status,
         reserved_by_me=reserved_by_me,
@@ -4707,6 +4724,7 @@ async def _dlq_reprocess(run_id: str) -> int:
                         owner_name_val = (enrich_result or {}).get("owner_name")
                         if owner_name_val:
                             await db_service.update_owner(new_lead["id"], owner_name_val)
+                            await _persist_managing_agent(new_lead["id"], enrich_result)
                     except Exception:
                         pass
             if inserted > 0:
@@ -5935,6 +5953,7 @@ async def _scrape_worker(run_id: str, max_cities: int = 8, hours_override: int =
                     owner_name_val = (enrich_result or {}).get("owner_name")
                     if owner_name_val:
                         await db_service.update_owner(new_lead["id"], owner_name_val)
+                        await _persist_managing_agent(new_lead["id"], enrich_result)
                 except Exception as e:
                     logger.warning(
                         f"[INGEST] Falha ao enriquecer owner do lead {new_lead.get('id')} "
@@ -6385,6 +6404,7 @@ async def _lifespan(app):
     _outbound_task = None
     _freshness_task = None
     _voice_resume_task = None
+    _phase1_task = None
 
     # Fase 2: o writer de telemetria arranca com o processo. Sem isto o
     # buffer acumula em memoria ate limite e perde eventos sem nunca
@@ -6520,6 +6540,13 @@ async def _lifespan(app):
     else:
         logger.info("[ENRICH-SCHED] Desativado por ENRICH_SCHEDULER_ENABLED=0")
 
+    # Fase 1 (produção): fila preventiva real. Chamados/prazos/multas a cada 6h,
+    # alvarás/PLUTO 1x/dia e purga aos 90 dias. Desligado por omissão.
+    if getattr(settings, "PHASE1_SCHEDULER_ENABLED", False):
+        _phase1_task = asyncio.create_task(phase1_scheduler.scheduler_loop())
+    else:
+        logger.info("[PHASE1] Scheduler desativado por PHASE1_SCHEDULER_ENABLED=0")
+
     # P1 (auditoria 01/11/2026): owners que ficaram NULL por falha transitória
     # da API são recuperados em lote, com quota por cidade e cursor persistente.
     if getattr(settings, "OWNER_BACKFILL_ENABLED", True):
@@ -6600,6 +6627,7 @@ async def _lifespan(app):
         ("outbound", _outbound_task),
         ("freshness", _freshness_task),
         ("voice_resume", _voice_resume_task),
+        ("phase1", _phase1_task),
     ):
         if task:
             task.cancel()
@@ -6985,6 +7013,7 @@ async def enrich_leads(
             if enrich_result and enrich_result.get("owner_name"):
                 await db_service.update_owner(row["id"], enrich_result["owner_name"])
                 found += 1
+            await _persist_managing_agent(row["id"], enrich_result)
             updated += 1
             await asyncio.sleep(0.15)  # throttling Socrata API
 
@@ -7311,6 +7340,7 @@ async def enrich_single_lead(
         owner_name = owner.get("owner_name") if owner else None
         if owner_name:
             await db_service.update_owner(lead_id, owner_name)
+        await _persist_managing_agent(lead_id, owner)
         return {"lead_id": lead_id, "owner_name": owner_name}
     except HTTPException:
         raise
@@ -8853,6 +8883,7 @@ async def reserve_lead(
                     if not owner_name and enrich_result.get("owner_name"):
                         owner_name = enrich_result["owner_name"]
                         await db_service.update_owner(lead_id, owner_name)
+                        await _persist_managing_agent(lead_id, enrich_result)
                     if not mailing_address and enrich_result.get("mailing_address"):
                         mailing_address = enrich_result["mailing_address"]
                         await db_service.update_mailing_address(lead_id, mailing_address)
@@ -9218,6 +9249,7 @@ async def reveal_phone_endpoint(
                 if not owner_name and enrich_result.get("owner_name"):
                     owner_name = enrich_result["owner_name"]
                     await db_service.update_owner(lead_id, owner_name)
+                    await _persist_managing_agent(lead_id, enrich_result)
                 if owner_name:
                     phone_result = await searchbug_service.lookup_phone(
                         pre_lead.get("address", ""),
@@ -9379,6 +9411,245 @@ async def convert_lead(lead_id: int, user: dict = Depends(_get_current_user)):
     # Regra C: bloqueia estorno quando lead é convertido
     await db_service.block_lead_refund(lead_id, reason="converted")
     return {"status": "ok", "lead_status": result.get("lead_status")}
+
+
+# ---------------------------------------------------------------------------
+# STAGING: oportunidades preventivas/reativas sem tocar no fluxo de `leads`.
+# O modal atual continua a ser a unica UI; estes endpoints sao o adaptador
+# que a fase seguinte vai ligar ao modal.
+# ---------------------------------------------------------------------------
+def _opportunity_error(exc: dict) -> HTTPException:
+    code = str(exc.get("error") or "").upper()
+    if code == "NOT_FOUND":
+        return HTTPException(status_code=404, detail="NOT_FOUND")
+    if code in ("ALREADY_RESERVED", "PROPERTY_LOCKED"):
+        return HTTPException(status_code=409, detail="PROPERTY_LOCKED")
+    if code == "ALREADY_CONVERTED":
+        return HTTPException(status_code=409, detail="ALREADY_CONVERTED")
+    if code == "NOT_OWNER":
+        return HTTPException(status_code=403, detail="NOT_OWNER")
+    if code == "DAILY_LIMIT_REACHED":
+        return HTTPException(status_code=429, detail="DAILY_LIMIT_REACHED")
+    if code == "NOT_RESERVED":
+        return HTTPException(status_code=400, detail="NOT_RESERVED")
+    if code == "CONSENT_REQUIRED":
+        return HTTPException(status_code=400, detail="CONSENT_REQUIRED")
+    return HTTPException(status_code=400, detail="OPPORTUNITY_ERROR")
+
+
+@app.get("/api/opportunities")
+async def list_opportunities(
+    kind: Optional[str] = None,
+    status: Optional[str] = None,
+    city: Optional[str] = None,
+    category: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    days: Optional[int] = None,
+    deadline_within: Optional[int] = None,
+    with_fines: bool = False,
+    search: Optional[str] = None,
+    user: dict = Depends(_get_current_user),
+):
+    await _require_active_access(user)
+    window_days = (
+        int(days)
+        if days is not None
+        else int(getattr(settings, "PREVENTIVE_FEED_WINDOW_DAYS", 7) or 7)
+    )
+    max_page = int(getattr(settings, "PREVENTIVE_MAX_PAGE_SIZE", 100) or 100)
+    return opportunity_workflow.list(
+        kind=kind,
+        status=status,
+        city=city,
+        category=category,
+        limit=max(1, min(int(limit), max_page)),
+        offset=offset,
+        days=window_days,
+        deadline_within=deadline_within,
+        with_fines=with_fines,
+        search=search,
+        viewer_id=user["id"],
+    )
+
+
+@app.get("/api/opportunities/insights")
+async def opportunity_insights(
+    kind: str = "preventive",
+    days: Optional[int] = None,
+    user: dict = Depends(_get_current_user),
+):
+    await _require_active_access(user)
+    window_days = (
+        int(days)
+        if days is not None
+        else int(getattr(settings, "PREVENTIVE_FEED_WINDOW_DAYS", 7) or 7)
+    )
+    return opportunity_workflow.insights(kind=kind, window_days=window_days)
+
+
+@app.post("/api/admin/phase1/run")
+async def admin_phase1_run(
+    include_permits: bool = True,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Gatilho manual da ingestão da Fase 1 (admin/staging)."""
+    result = await phase1_scheduler.run_once(
+        include_permits=include_permits, retention=True
+    )
+    return result
+
+
+@app.post("/api/admin/phase1/reclassify")
+async def admin_phase1_reclassify(
+    dry_run: bool = False,
+    _admin: dict = Depends(_require_admin_user),
+):
+    """Reclassifica a fila preventiva e remove genéricos não acionáveis."""
+    return await asyncio.to_thread(
+        phase1_enrichment.reclassify_existing, dry_run
+    )
+
+
+@app.post("/api/opportunities/{opportunity_id}/view")
+async def record_opportunity_view(
+    opportunity_id: int, user: dict = Depends(_get_current_user)
+):
+    await _require_active_access(user)
+    if not opportunity_workflow.get(opportunity_id):
+        raise HTTPException(status_code=404, detail="NOT_FOUND")
+    viewed_at = opportunity_workflow.record_view(opportunity_id, user["id"])
+    return {"status": "ok", "viewed_at": viewed_at}
+
+
+@app.get("/api/opportunities/{opportunity_id}")
+async def get_opportunity(opportunity_id: int, user: dict = Depends(_get_current_user)):
+    await _require_active_access(user)
+    row = opportunity_workflow.get(opportunity_id, viewer_id=user["id"])
+    if not row:
+        raise HTTPException(status_code=404, detail="NOT_FOUND")
+    return {"opportunity": row}
+
+
+@app.post("/api/opportunities/{opportunity_id}/reserve")
+async def reserve_opportunity(
+    opportunity_id: int,
+    payload: ReserverLeadRequest,
+    user: dict = Depends(_get_current_user),
+):
+    await _require_active_access(user)
+    if not payload.consent:
+        raise HTTPException(status_code=400, detail="CONSENT_REQUIRED")
+    result = opportunity_workflow.reserve(
+        opportunity_id, user["id"], minutes=payload.minutes or 60
+    )
+    if result.get("error"):
+        raise _opportunity_error(result)
+    opp = result.get("opportunity") or {}
+    return {
+        "reserved": True,
+        "revealed": False,
+        "id": opp.get("id"),
+        "status": opp.get("status"),
+        "stage": opp.get("status"),
+        "expires_at": _to_iso_utc(opp.get("reserved_until")),
+        "stage_expires_at": _to_iso_utc(opp.get("stage_expires_at")),
+        "counted_again": result.get("counted_again", True),
+        "idempotent": result.get("idempotent", False),
+        "quota": result.get("quota"),
+        "opportunity": opp,
+    }
+
+
+@app.post("/api/opportunities/{opportunity_id}/contact")
+async def contact_opportunity(
+    opportunity_id: int,
+    payload: ContactLeadRequest,
+    user: dict = Depends(_get_current_user),
+):
+    await _require_active_access(user)
+    result = opportunity_workflow.mark_contacted(opportunity_id, user["id"])
+    if result.get("error"):
+        raise _opportunity_error(result)
+    return {
+        "status": "ok",
+        "channel": payload.channel,
+        "stage": (result.get("opportunity") or {}).get("status"),
+        "stage_expires_at": _to_iso_utc((result.get("opportunity") or {}).get("stage_expires_at")),
+        "renewed": result.get("renewed", False),
+    }
+
+
+@app.post("/api/opportunities/{opportunity_id}/negotiate")
+async def negotiate_opportunity(
+    opportunity_id: int, user: dict = Depends(_get_current_user)
+):
+    await _require_active_access(user)
+    result = opportunity_workflow.mark_negotiation(opportunity_id, user["id"])
+    if result.get("error"):
+        raise _opportunity_error(result)
+    return {
+        "status": "ok",
+        "stage": (result.get("opportunity") or {}).get("status"),
+        "stage_expires_at": _to_iso_utc((result.get("opportunity") or {}).get("stage_expires_at")),
+        "renewed": result.get("renewed", False),
+    }
+
+
+@app.post("/api/opportunities/{opportunity_id}/convert")
+async def convert_opportunity(
+    opportunity_id: int, user: dict = Depends(_get_current_user)
+):
+    await _require_active_access(user)
+    result = opportunity_workflow.convert(opportunity_id, user["id"])
+    if result.get("error"):
+        raise _opportunity_error(result)
+    return {
+        "status": "ok",
+        "stage": (result.get("opportunity") or {}).get("status"),
+    }
+
+
+@app.post("/api/opportunities/{opportunity_id}/outcome")
+async def opportunity_outcome(
+    opportunity_id: int,
+    payload: OpportunityOutcomeRequest,
+    user: dict = Depends(_get_current_user),
+):
+    await _require_active_access(user)
+    row = opportunity_workflow.record_outcome(
+        opportunity_id=opportunity_id,
+        lead_id=None,
+        outcome=payload.outcome,
+        contract_value=payload.contract_value,
+        currency=payload.currency,
+        lost_reason=payload.lost_reason,
+        recorded_by=user["id"],
+    )
+    return {"status": "ok", "outcome": row}
+
+
+@app.post("/api/leads/{lead_id}/outcome")
+async def lead_outcome(
+    lead_id: int,
+    payload: OpportunityOutcomeRequest,
+    user: dict = Depends(_get_current_user),
+):
+    """Outcome aditivo para o feed atual; NAO altera `/convert` nem `converted_at`."""
+    await _require_active_access(user)
+    lead = await db_service.get_lead_by_id(lead_id)
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead não encontrado")
+    row = opportunity_workflow.record_outcome(
+        opportunity_id=None,
+        lead_id=lead_id,
+        outcome=payload.outcome,
+        contract_value=payload.contract_value,
+        currency=payload.currency,
+        lost_reason=payload.lost_reason,
+        recorded_by=user["id"],
+    )
+    return {"status": "ok", "outcome": row}
 
 
 @app.post("/api/leads/{lead_id}/reject")
