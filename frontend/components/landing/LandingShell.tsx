@@ -164,7 +164,7 @@ export default function LandingShell({ children }: { children: React.ReactNode }
                 <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-[#7c5cff] to-[#10b981] shadow-md shadow-[#10b981]/20">
                   <svg className="h-4 w-4 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="m13 2-9 12h7l-1 8 10-13h-7V2Z" /></svg>
                 </div>
-                <span className="font-display text-lg font-black text-white">Magic<span className="text-[#34e0a1]">Leads</span></span>
+                <span className="hidden font-display text-lg font-black text-white min-[420px]:inline">Magic<span className="text-[#34e0a1]">Leads</span></span>
               </button>
               <div className="flex shrink-0 items-center gap-3">
                 <LangSwitch lang={lang} setLang={changeLang} />

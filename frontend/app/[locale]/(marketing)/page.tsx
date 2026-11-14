@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { useI18n } from "@/lib/i18n";
+import { useI18n, type Lang } from "@/lib/i18n";
 import { fetchPublicMetrics } from "@/lib/api-client";
 import type { PublicMetrics } from "@/lib/api-client";
 import { FoldWave, useLandingShell } from "@/components/landing/LandingShell";
 import { LiveTradeGrid } from "@/components/landing/LiveTradeGrid";
+import ForEveryoneSection from "@/components/landing/ForEveryoneSection";
 import { Building2, Phone, ShieldCheck, Megaphone, Search, Users, Mail, MessageCircle, MessageSquare, MapPin, Clock } from "lucide-react";
 
 // ------------------------------------------------------------------
@@ -28,6 +29,148 @@ const BADGE_STYLE: Record<BadgeKey, string> = {
   urgent: "badge-urgent",
   high: "badge-high",
   medium: "badge-medium",
+};
+
+type RoiProfile = "solo" | "team" | "company";
+type RoiSegment = {
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  ticket: number;
+  title: string;
+  hl: string;
+};
+type RoiText = {
+  breakEven: string;
+  jobsMonth: string;
+  months: string;
+  years: string;
+  ticketNote: string;
+  limit: string;
+};
+
+const ROI_SEGMENTS: Record<Lang, Record<RoiProfile, RoiSegment>> = {
+  pt: {
+    solo: {
+      label: "Autônomo",
+      min: 300,
+      max: 3000,
+      step: 50,
+      ticket: 800,
+      title: "Poucos serviços pagam a plataforma.",
+      hl: "O resto é lucro no seu bolso.",
+    },
+    team: {
+      label: "Pequena equipe",
+      min: 2000,
+      max: 20000,
+      step: 250,
+      ticket: 6500,
+      title: "1 job por mês paga o ano.",
+      hl: "O resto é lucro.",
+    },
+    company: {
+      label: "Empresa",
+      min: 15000,
+      max: 150000,
+      step: 1000,
+      ticket: 40000,
+      title: "Uma obra paga anos de plataforma.",
+      hl: "O resto é lucro.",
+    },
+  },
+  en: {
+    solo: {
+      label: "Solo",
+      min: 300,
+      max: 3000,
+      step: 50,
+      ticket: 800,
+      title: "A few jobs pay for the platform.",
+      hl: "The rest is profit in your pocket.",
+    },
+    team: {
+      label: "Small crew",
+      min: 2000,
+      max: 20000,
+      step: 250,
+      ticket: 6500,
+      title: "One job a month pays for the year.",
+      hl: "The rest is profit.",
+    },
+    company: {
+      label: "Company",
+      min: 15000,
+      max: 150000,
+      step: 1000,
+      ticket: 40000,
+      title: "One build pays for years of the platform.",
+      hl: "The rest is profit.",
+    },
+  },
+  es: {
+    solo: {
+      label: "Autónomo",
+      min: 300,
+      max: 3000,
+      step: 50,
+      ticket: 800,
+      title: "Pocos servicios pagan la plataforma.",
+      hl: "El resto es ganancia en tu bolsillo.",
+    },
+    team: {
+      label: "Equipo pequeño",
+      min: 2000,
+      max: 20000,
+      step: 250,
+      ticket: 6500,
+      title: "Un trabajo al mes paga el año.",
+      hl: "El resto es ganancia.",
+    },
+    company: {
+      label: "Empresa",
+      min: 15000,
+      max: 150000,
+      step: 1000,
+      ticket: 40000,
+      title: "Una obra paga años de plataforma.",
+      hl: "El resto es ganancia.",
+    },
+  },
+};
+
+const ROI_SHORT: Record<Lang, Record<RoiProfile, string>> = {
+  pt: { solo: "Autônomo", team: "Equipe", company: "Empresa" },
+  en: { solo: "Solo", team: "Crew", company: "Company" },
+  es: { solo: "Autónomo", team: "Equipo", company: "Empresa" },
+};
+
+const ROI_TEXT: Record<Lang, RoiText> = {
+  pt: {
+    breakEven: "Para pagar a plataforma",
+    jobsMonth: "jobs/mês",
+    months: "meses",
+    years: "anos",
+    ticketNote: "Ticket ilustrativo. Ajuste ao seu serviço.",
+    limit: "Inclui até 10 telefones/dia · endereços completos para visita",
+  },
+  en: {
+    breakEven: "To cover the platform",
+    jobsMonth: "jobs/mo",
+    months: "months",
+    years: "years",
+    ticketNote: "Illustrative ticket. Adjust it to your job.",
+    limit: "Includes up to 10 phones/day · complete addresses for visits",
+  },
+  es: {
+    breakEven: "Para cubrir la plataforma",
+    jobsMonth: "trabajos/mes",
+    months: "meses",
+    years: "años",
+    ticketNote: "Ticket ilustrativo. Ajusta a tu servicio.",
+    limit: "Incluye hasta 10 teléfonos/día · direcciones completas para visitas",
+  },
 };
 
 interface SampleLeadBase {
@@ -110,7 +253,7 @@ function listOf(s: string): string[] {
 }
 
 export default function LandingPage() {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const { openModal, scrollTo } = useLandingShell();
 
   // ------------------------------------------------ estado
@@ -128,6 +271,7 @@ export default function LandingPage() {
   const [tplTrade, setTplTrade] = useState<TradeKey>("Telhado");
   const [tplChannel, setTplChannel] = useState<Channel>("whatsapp");
   const [ticketValue, setTicketValue] = useState(6500);
+  const [roiProfile, setRoiProfile] = useState<RoiProfile>("team");
   const [openFaq, setOpenFaq] = useState<number | null>(0);
 
   // dados reais (métricas públicas — fonte única da verdade)
@@ -195,7 +339,7 @@ export default function LandingPage() {
 
     const waMsg = (name: string, cat: string, addr: string) =>
       t("landing.waMsg").replace("{name}", name).replace("{cat}", cat).replace("{addr}", addr);
-    const aboutJobs = (n: number, ticket: string) =>
+    const aboutJobs = (n: string | number, ticket: string) =>
       t("landing.aboutJobs").replace("{n}", String(n)).replace("{ticket}", ticket);
 
     return { categories, tradesLabel, signals, comparisons, quotes, planFeatures, neverItems, faqs, templates, trust, waMsg, aboutJobs, coverageItems, sampleMeta };
@@ -239,11 +383,31 @@ export default function LandingPage() {
 
   const fmtTimer = (s: number) =>
     `${Math.floor(s / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;
-  const validatedPhones = Math.round(300 * 0.7);
-  const estimatedVisits = Math.round(validatedPhones * 0.25);
-  const closedJobs = Math.max(0, Math.round(estimatedVisits / 20));
-  const monthlyRevenue = closedJobs * ticketValue;
-  const monthsPaid = (ticketValue / 520).toFixed(1);
+  const validatedPhones = Math.floor(300 * 0.3);
+  const estimatedVisits = Math.floor(validatedPhones * 0.25);
+  const closeRate = roiProfile === "solo" ? 0.08 : 0.05;
+  const closedJobs = Math.floor(estimatedVisits * closeRate * 10) / 10;
+  const monthlyRevenue = Math.floor(closedJobs * ticketValue);
+  const costPerLead = (520 / 300).toFixed(2);
+  const decimalLocale = lang === "pt" ? "pt-BR" : lang === "es" ? "es-ES" : "en-US";
+  const formatDecimal = (value: number) =>
+    value.toLocaleString(decimalLocale, {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1,
+    });
+  const jobCountLabel = formatDecimal(closedJobs);
+  const roiCopy = ROI_SEGMENTS[lang] ?? ROI_SEGMENTS.pt;
+  const roiShort = ROI_SHORT[lang] ?? ROI_SHORT.pt;
+  const roiText = ROI_TEXT[lang] ?? ROI_TEXT.pt;
+  const roiSegment = roiCopy[roiProfile];
+  const ticketMonths = ticketValue / 520;
+  const breakEvenJobs = formatDecimal(
+    Math.ceil((520 / Math.max(1, ticketValue)) * 10) / 10
+  );
+  const coverageLabel =
+    ticketMonths >= 24
+      ? `${formatDecimal(ticketMonths / 12)} ${roiText.years}`
+      : `${formatDecimal(ticketMonths)} ${roiText.months}`;
   const winner = L.comparisons.find((c) => c.winner);
   const rivals = L.comparisons.filter((c) => !c.winner);
 
@@ -288,7 +452,7 @@ export default function LandingPage() {
         <div className="pointer-events-none absolute -right-48 -top-48 h-[620px] w-[620px] rounded-full bg-[#10b981]/[0.10] blur-[150px]" />
         <div className="pointer-events-none absolute -left-48 top-40 h-[460px] w-[460px] rounded-full bg-[#7c5cff]/[0.08] blur-[150px]" />
 
-        <div className="relative mx-auto max-w-7xl px-4 pb-14 pt-12 sm:px-6 lg:pb-20 lg:pt-16">
+        <div className="relative mx-auto max-w-7xl px-4 pb-14 pt-12 sm:px-6 lg:pb-24 lg:pt-16">
           <div className="grid items-start gap-10 lg:grid-cols-[1.02fr_0.98fr] lg:gap-14">
             <div className="min-w-0">
               <span className="eyebrow eyebrow-light">
@@ -392,6 +556,25 @@ export default function LandingPage() {
                     {item}
                   </span>
                 ))}
+              </div>
+
+              {/* Breadth strip: from small jobs to full builds */}
+              <div className="mt-5 border-t border-[#e7e3d9] pt-4">
+                <p className="text-[9px] font-black uppercase tracking-[0.16em] text-[#7b8798]">
+                  Do serviço pequeno à obra completa
+                </p>
+                <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] font-semibold text-[#475569]">
+                  {["Pintura", "Mofo", "Elétrica", "Telhado", "Elevadores", "Entulho", "Portas"].map((item, index) => (
+                    <span key={item} className="inline-flex items-center gap-2">
+                      {index > 0 && <span className="h-1 w-1 rounded-full bg-[#cbd5e1]" />}
+                      {item}
+                    </span>
+                  ))}
+                  <span className="inline-flex items-center gap-2 font-black text-[#0a8f65]">
+                    <span className="h-1 w-1 rounded-full bg-[#cbd5e1]" />
+                    +10 especialidades
+                  </span>
+                </p>
               </div>
             </div>
 
@@ -500,6 +683,9 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
+
+      {/* Same platform for every size */}
+      <ForEveryoneSection />
 
       {/* COBERTURA COMPLETA */}
       <section className="surface-light relative py-20 md:py-28">
@@ -910,16 +1096,40 @@ export default function LandingPage() {
       <section id="calculadora" className="landing-dark aurora-dark relative scroll-mt-20 overflow-hidden py-20 text-white md:py-24">
         <div className="pointer-events-none absolute inset-0 grid-fade opacity-50" />
         <div className="relative mx-auto max-w-7xl px-4 sm:px-6">
-          <div className="mx-auto max-w-3xl text-center">
+          <div className="mx-auto max-w-4xl text-center">
             <span className="eyebrow mx-auto"><span className="dot" />{t("landing.calcKicker")}</span>
             <h2 className="font-display mt-5 text-[2.4rem] font-black leading-[0.98] tracking-[-0.035em] sm:text-5xl">
-              {t("landing.calcTitle")} <span className="hl">{t("landing.calcHl")}</span>
+              {roiSegment.title} <span className="hl block">{roiSegment.hl}</span>
             </h2>
             <p className="mx-auto mt-5 max-w-2xl text-base text-[#9fb0c6] sm:text-lg">{t("landing.calcSub")}</p>
           </div>
 
           <div className="mt-14 grid items-start gap-5 lg:grid-cols-12">
             <div className="glass-panel rounded-[1.6rem] p-6 sm:p-8 lg:col-span-6">
+              <div className="mb-6 grid grid-cols-1 gap-1 rounded-xl border border-white/[0.08] bg-white/[0.03] p-1 min-[480px]:grid-cols-3">
+                {(Object.keys(roiCopy) as RoiProfile[]).map((key) => {
+                  const active = key === roiProfile;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => {
+                        setRoiProfile(key);
+                        setTicketValue(roiCopy[key].ticket);
+                      }}
+                      className={`whitespace-nowrap rounded-lg px-2 py-2 text-[10.5px] font-black uppercase tracking-[0.06em] transition ${
+                        active
+                          ? "bg-white text-[#0b1220] shadow-sm"
+                          : "text-white/55 hover:text-white"
+                      }`}
+                    >
+                      <span className="inline min-[480px]:hidden min-[1150px]:inline">{roiCopy[key].label}</span>
+                      <span className="hidden min-[480px]:inline min-[1150px]:hidden">{roiShort[key]}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-[0.16em] text-white/35">{t("landing.ticketAvg")}</p>
@@ -927,17 +1137,18 @@ export default function LandingPage() {
                 </div>
                 <span className="mono-data grid h-10 w-10 place-items-center rounded-xl bg-[#34e0a1]/10 text-lg font-black text-[#34e0a1] ring-1 ring-[#34e0a1]/20">$</span>
               </div>
-              <input type="range" min={2000} max={15000} step={500} value={ticketValue} onChange={(e) => setTicketValue(Number(e.target.value))} className="range-dark mt-5 w-full" />
+              <input type="range" min={roiSegment.min} max={roiSegment.max} step={roiSegment.step} value={ticketValue} onChange={(e) => setTicketValue(Number(e.target.value))} className="range-dark mt-5 w-full" />
               <div className="mt-2 flex justify-between text-[10px] font-bold uppercase tracking-widest text-white/25">
-                <span>$2,000</span><span>$15,000</span>
+                <span>${roiSegment.min.toLocaleString("en-US")}</span><span>${roiSegment.max.toLocaleString("en-US")}</span>
               </div>
+              <p className="mt-2 text-[10px] text-white/30">{roiText.ticketNote}</p>
 
               <div className="mt-7 flex items-center justify-between rounded-xl border border-white/[0.08] bg-white/[0.035] px-4 py-3">
                 <div>
                   <p className="text-xs font-bold text-white/80">{t("landing.closes20")}</p>
                   <p className="mt-0.5 text-[10px] text-white/35">{t("landing.calcNote")}</p>
                 </div>
-                <span className="mono-data shrink-0 rounded-lg bg-white/[0.06] px-3 py-1.5 text-xl font-black text-white/70 ring-1 ring-white/10">5%</span>
+                <span className="mono-data shrink-0 rounded-lg bg-white/[0.06] px-3 py-1.5 text-xl font-black text-white/70 ring-1 ring-white/10">{Math.round(closeRate * 100)}%</span>
               </div>
 
               <div className="mt-5 grid grid-cols-3 gap-2.5 text-center">
@@ -961,16 +1172,29 @@ export default function LandingPage() {
               <div className="relative">
                 <div className="flex items-center justify-between">
                   <span className="rounded-full bg-white/20 px-3 py-1 text-[10px] font-black uppercase tracking-[0.12em] backdrop-blur">{t("landing.revEst")}</span>
-                  <span className="mono-data text-[10px] font-bold text-white/60">5% · 60m</span>
+                  <span className="mono-data text-[10px] font-bold text-white/60">{Math.round(closeRate * 100)}% · 60m</span>
                 </div>
                 <p className="font-display mt-5 text-5xl font-black tracking-[-0.04em] text-white sm:text-6xl">${monthlyRevenue.toLocaleString("en-US")}<span className="ml-1 text-xl font-bold tracking-normal text-white/55">{t("landing.perMo")}</span></p>
-                <p className="mt-2 text-sm font-bold text-white/85">{L.aboutJobs(closedJobs, ticketValue.toLocaleString("en-US"))}</p>
+                <p className="mt-2 text-sm font-bold text-white/85">{L.aboutJobs(jobCountLabel, ticketValue.toLocaleString("en-US"))}</p>
               </div>
 
               <div className="relative my-6 space-y-2.5 rounded-xl border border-white/15 bg-black/15 p-4 text-sm font-semibold backdrop-blur-sm">
                 <div className="flex justify-between"><span className="text-white/70">{t("landing.invest")}</span><span className="mono-data text-white">$520{t("landing.perMo")}</span></div>
-                <div className="flex justify-between"><span className="text-white/70">{t("landing.costDelivered")}</span><span className="mono-data text-white">~$2.48</span></div>
-                <div className="flex items-center justify-between border-t border-white/15 pt-2.5 text-base"><span>{t("landing.onePays")}</span><span className="mono-data rounded-lg bg-[#04231a] px-2.5 py-0.5 text-[#34e0a1]">{monthsPaid} {t("landing.months")}</span></div>
+                <div className="flex justify-between"><span className="text-white/70">{t("landing.costDelivered")}</span><span className="mono-data text-white">~${costPerLead}</span></div>
+                {ticketMonths >= 1 ? (
+                  <div className="flex items-center justify-between border-t border-white/15 pt-2.5 text-base">
+                    <span>{t("landing.onePays")}</span>
+                    <span className="mono-data rounded-lg bg-[#04231a] px-2.5 py-0.5 text-[#34e0a1]">{coverageLabel}</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between border-t border-white/15 pt-2.5 text-base">
+                    <span>{roiText.breakEven}</span>
+                    <span className="mono-data rounded-lg bg-[#04231a] px-2.5 py-0.5 text-[#34e0a1]">{breakEvenJobs} {roiText.jobsMonth}</span>
+                  </div>
+                )}
+                <p className="border-t border-white/15 pt-2.5 text-[10px] font-semibold leading-relaxed text-white/60">
+                  {roiText.limit}
+                </p>
               </div>
 
               <div className="relative">
