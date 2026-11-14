@@ -213,3 +213,39 @@ Riscos operacionais:
 - Dados: 0 Unclassified, 0 duplicados, 0 JSON/datas inválidas, 0 leaks de privacidade.
 - Scheduler: ativo, sem erros, run diário de 381 candidatos.
 - Produção `garimpador-leads`: `master` `3b53962`, intocada.
+
+## 13. Atualização — release branch limpo criado
+
+Branch de release: **`release/phase1-production`** (worktree separado, criado a partir da `master` `3b53962`).
+Commit: **`8047f25`** — 1 commit à frente da `master`, **25 ficheiros**, +5.484/−186.
+
+Incluído:
+- backend da Fase 1 (`opportunity_workflow`, `phase1_enrichment`, `phase1_scheduler`, `hpd_agent`);
+- schema/tabelas aditivas (`opportunity_workflow`, `property_locks`, `opportunity_outcomes`, `opportunity_views`);
+- endpoints `/api/opportunities` (lista, insights, view, reserve/contact/negotiate/convert/outcome);
+- dashboard, filtros, paginação, cartões, drawer/dossiê e KPI;
+- i18n apenas com chaves de dashboard/oportunidade.
+
+Excluído:
+- `LandingShell.tsx`, `frontend/components/landing/*`, `frontend/app/[locale]/(marketing)/*`;
+- `frontend/lib/i18n.tsx`;
+- scripts de staging (`seed`, `ingest`, `reclassify`, `beta tester`);
+- relatórios, `frontend/AGENTS.md` e testes de staging.
+
+Verificação de landing no release:
+- `frontend/components/landing` vs `master`: **0 ficheiros**;
+- `frontend/app/[locale]/(marketing)` vs `master`: **0 ficheiros**;
+- `frontend/lib/i18n.tsx` vs `master`: **0 alterações**;
+- chaves `landing.*` vs `master`: **235/235 idênticas** em EN/PT/ES.
+
+Testes no branch de release:
+- `pytest tests -q`: **1668 passed, 1 skipped** (suite da `master`);
+- `npm test`: **111 passed**;
+- `npx tsc --noEmit`: limpo;
+- `npm run build`: **sucesso**;
+- `ruff`: limpo; ESLint **0 erros**;
+- `npm audit --omit=dev`: **0 vulnerabilities**;
+- smoke test de runtime: list/view/filtros/insights OK; scheduler `run_once` OK.
+
+Estado: **branch pronto para revisão e deploy**. A `master` e o repositório de produção continuam em `3b53962`, intocados.
+
