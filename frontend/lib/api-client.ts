@@ -292,6 +292,13 @@ export interface LeadZoneFilter {
   noGeo?: boolean;
 }
 
+export interface LeadFeedExtraFilters {
+  deadlineOnly?: boolean;
+  layer?: string;
+  ownerType?: string;
+  search?: string;
+}
+
 export async function fetchTodayLeads(
   limit: number = 60,
   city?: string,
@@ -300,7 +307,8 @@ export async function fetchTodayLeads(
   type?: string,
   category?: string,
   urgency?: string,
-  zone?: LeadZoneFilter | null
+  zone?: LeadZoneFilter | null,
+  extra?: LeadFeedExtraFilters
 ): Promise<LeadsListResponse> {
   const q = new URLSearchParams({ limit: String(limit), page: String(page) });
   if (city && city !== "Todas") q.set("city", city);
@@ -316,6 +324,13 @@ export async function fetchTodayLeads(
   }
   if (zone?.zips?.length) q.set("zips", zone.zips.join(","));
   if (zone?.noGeo) q.set("no_geo", "true");
+  if (extra?.deadlineOnly) q.set("deadline_only", "true");
+  if (extra?.layer && extra.layer !== "all") q.set("layer", extra.layer);
+  if (extra?.ownerType && extra.ownerType !== "all") {
+    q.set("owner_type", extra.ownerType);
+  }
+  const term = extra?.search?.trim();
+  if (term) q.set("search", term);
   return handle<LeadsListResponse>(await fetch(`${API_URL}/api/leads/today?${q.toString()}`, { credentials: "include", headers: { ...authHeaders() } }));
 }
 
@@ -341,6 +356,10 @@ export async function fetchLeadNeighborhoods(
     urgency?: string;
     includeClosed?: boolean;
     days?: number;
+    deadlineOnly?: boolean;
+    layer?: string;
+    ownerType?: string;
+    search?: string;
   } = {}
 ): Promise<LeadGeoResponse> {
   const q = new URLSearchParams();
@@ -355,6 +374,13 @@ export async function fetchLeadNeighborhoods(
     q.set("urgency", params.urgency);
   }
   if (params.includeClosed) q.set("include_closed", "true");
+  if (params.deadlineOnly) q.set("deadline_only", "true");
+  if (params.layer && params.layer !== "all") q.set("layer", params.layer);
+  if (params.ownerType && params.ownerType !== "all") {
+    q.set("owner_type", params.ownerType);
+  }
+  const term = params.search?.trim();
+  if (term) q.set("search", term);
   q.set("days", String(params.days ?? 7));
   return handle<LeadGeoResponse>(
     await fetch(`${API_URL}/api/leads/neighborhoods?${q.toString()}`, {

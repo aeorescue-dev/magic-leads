@@ -108,14 +108,78 @@ def test_feed_filters_by_neighborhood_zips_and_no_geo():
     assert total_nb == 2
     assert {row["external_id"] for row in by_nb} == {"f1", "f2"}
 
+    # ZIP só entra na zona quando a linha NÃO tem bairro (espelha o GROUP BY).
     by_zip, total_zip = db_service._service.get_leads_feed(
         city="Boston", zips=["02119", "02128"], days=7, user_id=5
     )
-    assert total_zip == 2
-    assert {row["external_id"] for row in by_zip} == {"f3", "f4"}
+    assert total_zip == 1
+    assert {row["external_id"] for row in by_zip} == {"f4"}
+
+    # Zona agregada (bairro + ZIPs sem bairro) tem de bater com a soma exata.
+    union, total_union = db_service._service.get_leads_feed(
+        city="Boston",
+        neighborhoods=["Dorchester"],
+        zips=["02124", "02125"],
+        days=7,
+        user_id=5,
+    )
+    assert total_union == 2
+    assert {row["external_id"] for row in union} == {"f1", "f2"}
 
     no_geo, total_none = db_service._service.get_leads_feed(
         city="Boston", no_geo=True, days=7, user_id=5
     )
     assert total_none == 1
     assert no_geo[0]["external_id"] == "f5"
+
+
+def test_geo_summary_matches_feed_with_deadline_owner_layer_and_search():
+    _insert_lead(external_id="d1", city="Boston", neighborhood="Dorchester", zip_code="02124")
+    _insert_lead(external_id="d2", city="Boston", neighborhood="Dorchester", zip_code="02124")
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE leads SET sla_target_dt = datetime('now', '+2 days'), "
+            "owner_name = 'CITY OF BOSTON' WHERE external_id = 'd2'"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    summary = db_service._service.get_leads_geo_summary(
+        city="Boston", days=7, user_id=5, deadline_only=True
+    )
+    feed, total = db_service._service.get_leads_feed(
+        city="Boston", days=7, user_id=5, deadline_only=True
+    )
+    assert summary["total"] == total == 1
+    assert feed[0]["external_id"] == "d2"
+
+    private_summary = db_service._service.get_leads_geo_summary(
+        city="Boston", days=7, user_id=5, owner_type="private"
+    )
+    private_feed, private_total = db_service._service.get_leads_feed(
+        city="Boston", days=7, user_id=5, owner_type="private"
+    )
+    # d1 não tem proprietário: "private" exige nome e não-institucional.
+    assert private_summary["total"] == private_total == 0
+
+    unknown_summary = db_service._service.get_leads_geo_summary(
+        city="Boston", days=7, user_id=5, owner_type="unknown"
+    )
+    assert unknown_summary["total"] == 1
+
+    institutional_summary = db_service._service.get_leads_geo_summary(
+        city="Boston", days=7, user_id=5, owner_type="institutional"
+    )
+    assert institutional_summary["total"] == 1
+
+    search_summary = db_service._service.get_leads_geo_summary(
+        city="Boston", days=7, user_id=5, search="street"
+    )
+    assert search_summary["total"] == 2
+
+    layer_summary = db_service._service.get_leads_geo_summary(
+        city="Boston", days=7, user_id=5, layer="permit"
+    )
+    assert layer_summary["total"] == 0

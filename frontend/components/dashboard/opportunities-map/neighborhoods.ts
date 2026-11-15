@@ -1,4 +1,4 @@
-﻿/**
+/**
  * AgregaÃ§Ã£o por BAIRRO (nÃ£o por ZIP).
  *
  * O `opportunity_workflow` sÃ³ tem ZIP. Para o contractor nÃ£o faz sentido ver

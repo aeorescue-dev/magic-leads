@@ -998,6 +998,10 @@ async def leads_today(
     neighborhoods: str = None,
     zips: str = None,
     no_geo: bool = False,
+    deadline_only: bool = False,
+    layer: str = None,
+    owner_type: str = None,
+    search: str = None,
     user: dict = Depends(_get_current_user),
 ):
     """Feed dos últimos 7 dias — filtros, total e exclusão de fechados em SQL.
@@ -1035,6 +1039,10 @@ async def leads_today(
             neighborhoods=neighborhood_list or None,
             zips=zip_list or None,
             no_geo=bool(no_geo),
+            deadline_only=bool(deadline_only),
+            layer=layer,
+            owner_type=owner_type,
+            search=search,
         )
         await _annotate_visibility(leads, user)
 
@@ -1059,6 +1067,10 @@ async def leads_neighborhoods(
     urgency: str = None,
     include_closed: bool = False,
     days: int = 7,
+    deadline_only: bool = False,
+    layer: str = None,
+    owner_type: str = None,
+    search: str = None,
     user: dict = Depends(_get_current_user),
 ):
     """Agregado geográfico do feed de leads (bairro/ZIP) em SQL.
@@ -1077,6 +1089,10 @@ async def leads_neighborhoods(
             include_closed=include_closed,
             days=max(1, min(int(days), 90)),
             user_id=user["id"],
+            deadline_only=bool(deadline_only),
+            layer=layer,
+            owner_type=owner_type,
+            search=search,
         )
     except Exception as e:
         logger.error(f"Erro na agregação por bairro: {e}", exc_info=True)

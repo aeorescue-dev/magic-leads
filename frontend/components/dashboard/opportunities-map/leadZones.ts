@@ -176,11 +176,3 @@ export function buildLeadZones(
     }))
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 }
-
-export function zoneFilterPayload(zone: LeadZone) {
-  return {
-    neighborhoods: zone.neighborhoods,
-    zips: zone.zips,
-    noGeo: zone.noGeo,
-  };
-}

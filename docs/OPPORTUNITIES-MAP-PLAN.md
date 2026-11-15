@@ -119,6 +119,13 @@ fonte é a tabela `leads` (13,6 mil ativos nos últimos 7 dias), não o preventi
 - **Filtro do feed:** `neighborhoods=` / `zips=` / `no_geo=true` no
   `/api/leads/today`; o clique no mapa/lista aplica o filtro no servidor,
   mostra o chip do bairro e faz scroll suave até aos cartões.
+- **Semântica exata do bairro:** a linha entra na zona se `neighborhood` bate,
+  **ou** se não tem bairro e o ZIP pertence à zona (`neighborhood='' AND zip IN
+  (...)`). Sem esta regra, um ZIP partilhado por dois bairros inflacionava a
+  contagem (ex.: NYC 10462: 200 em vez de 47).
+- **Filtros do mapa iguais aos cartões:** deadline only, camada
+  (reactive/permit), tipo de proprietário e busca passam também para
+  `/api/leads/neighborhoods`; o mapa e o feed nunca divergem.
 - **Agrupamento por cidade:**
   - Boston → bairro (`leads.neighborhood`, 95% na janela);
   - New York → borough (96%);

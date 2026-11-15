@@ -28,6 +28,10 @@ export function LeadsNeighborhoodPanel({
   type,
   urgency,
   includeClosed,
+  deadlineOnly,
+  layer,
+  ownerType,
+  search,
   activeName,
   onSelect,
 }: {
@@ -36,6 +40,10 @@ export function LeadsNeighborhoodPanel({
   type: string;
   urgency?: string;
   includeClosed: boolean;
+  deadlineOnly: boolean;
+  layer: string;
+  ownerType: string;
+  search: string;
   activeName: string | null;
   onSelect: (zone: LeadZone) => void;
 }) {
@@ -48,7 +56,18 @@ export function LeadsNeighborhoodPanel({
   const enabled = city !== "all";
   const { data, isLoading } = useSWR(
     enabled
-      ? ["lead-zones", city, category, type, urgency ?? "", includeClosed]
+      ? [
+          "lead-zones",
+          city,
+          category,
+          type,
+          urgency ?? "",
+          includeClosed,
+          deadlineOnly,
+          layer,
+          ownerType,
+          search,
+        ]
       : null,
     () =>
       fetchLeadNeighborhoods({
@@ -57,6 +76,10 @@ export function LeadsNeighborhoodPanel({
         type,
         urgency,
         includeClosed,
+        deadlineOnly,
+        layer,
+        ownerType,
+        search,
       }),
     { revalidateOnFocus: false, keepPreviousData: true }
   );

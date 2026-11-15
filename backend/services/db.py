@@ -137,6 +137,19 @@ def _trigger_where(alias: str = "") -> str:
     )
 
 
+def canonical_city(value: Optional[str]) -> str:
+    """Normaliza variantes de cidade (ex.: CHICAGO -> Chicago)."""
+    text = str(value or "").strip()
+    return {
+        "NYC": "NYC",
+        "NEW YORK": "NYC",
+        "NEW YORK CITY": "NYC",
+        "CHICAGO": "Chicago",
+        "BOSTON": "Boston",
+        "DALLAS": "Dallas",
+    }.get(text.upper(), text)
+
+
 def _qualified_where(alias: str = "") -> str:
     """Lead qualificado: [Endereço + Categoria dos 16 Ofícios + Gatilho Preditivo],
     sem exigir department/descriptor/neighborhood."""
@@ -1852,6 +1865,35 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         "lat, lng)"
     )
 
+    # Normaliza variantes históricas de cidade (ex.: "CHICAGO"). Duplicados
+    # não envolvidos (mesma morada/cidade canónica) são removidos primeiro,
+    # senão o UPDATE viola o índice único (address, city); os envolvidos ficam
+    # intactos e não são renomeados.
+    for variant, canonical in (
+        ("NEW YORK", "NYC"),
+        ("NEW YORK CITY", "NYC"),
+        ("CHICAGO", "Chicago"),
+        ("BOSTON", "Boston"),
+        ("DALLAS", "Dallas"),
+    ):
+        duplicates = conn.execute(
+            "SELECT v.id FROM leads v "
+            "JOIN leads c ON c.address = v.address AND c.city = ? "
+            "WHERE UPPER(TRIM(v.city)) = ? "
+            "AND v.city <> ? AND v.id <> c.id "
+            "AND v.reserved_by IS NULL AND v.converted_by IS NULL "
+            "AND v.lead_status = 'available'",
+            (canonical, variant, canonical),
+        ).fetchall()
+        for row in duplicates:
+            conn.execute("DELETE FROM leads WHERE id = ?", (row["id"],))
+        conn.execute(
+            "UPDATE leads SET city = ? WHERE UPPER(TRIM(city)) = ? "
+            "AND city <> ? AND NOT EXISTS ("
+            "SELECT 1 FROM leads c WHERE c.city = ? AND c.address = leads.address)",
+            (canonical, variant, canonical, canonical),
+        )
+
     # Fase 22: calcula a qualificação uma única vez por linha nova/migrada e
     # cria os índices que o feed usa. O UPDATE só toca em linhas ainda por
     # calcular (NULL), pelo que reinícios normais não custam nada.
@@ -2506,7 +2548,7 @@ def _lead_insert_values(lead) -> dict:
         "external_id": lead.external_id,
         "source_type": src,
         "address": lead.address,
-        "city": lead.city,
+        "city": canonical_city(lead.city),
         "state": lead.state,
         "zip_code": lead.zip_code,
         "lat": lead.lat,
@@ -5329,12 +5371,20 @@ class DatabaseService:
         neighborhoods: Optional[list[str]] = None,
         zips: Optional[list[str]] = None,
         no_geo: bool = False,
+        deadline_only: bool = False,
+        layer: Optional[str] = None,
+        owner_type: Optional[str] = None,
+        search: Optional[str] = None,
     ) -> tuple[str, list]:
         """WHERE partilhado pelo feed e pela agregação geográfica.
 
-        `neighborhoods`/`zips`/`no_geo` são o filtro de bairro vindo do mapa;
-        combinam-se com OR para que um bairro possa ser definido por nome e/ou
-        pelos seus ZIPs (Boston/NYC por bairro, Dallas/Chicago por ZIP).
+        Todos os filtros que a UI aplica aos cartões entram aqui — incluindo
+        prazo, camada, tipo de proprietário e busca — para que os números do
+        mapa sejam exatamente os mesmos do feed.
+
+        `neighborhoods`/`zips`/`no_geo` são o filtro de bairro vindo do mapa.
+        A semântica espelha o agrupamento: a linha pertence ao bairro quando
+        `neighborhood` bate, ou quando NÃO tem bairro e o ZIP pertence à zona.
         """
         where = [
             "l.is_feed_ok = 1",
@@ -5372,6 +5422,39 @@ class DatabaseService:
         else:
             where.append("l.lead_status = 'available'")
 
+        # Filtros que a UI aplica aos cartões (antes só no cliente).
+        if layer == "permit":
+            where.append("l.signal_type = 'authorized_work'")
+        elif layer == "reactive":
+            where.append("l.signal_type <> 'authorized_work'")
+        if owner_type == "unknown":
+            where.append("TRIM(COALESCE(l.owner_name, '')) = ''")
+        elif owner_type == "institutional":
+            where.append(
+                "TRIM(COALESCE(l.owner_name, '')) <> '' "
+                "AND is_institutional_name(l.owner_name) = 1"
+            )
+        elif owner_type == "private":
+            where.append(
+                "TRIM(COALESCE(l.owner_name, '')) <> '' "
+                "AND is_institutional_name(l.owner_name) = 0"
+            )
+        if deadline_only:
+            where.append(
+                "TRIM(COALESCE(l.sla_target_dt, '')) <> '' "
+                "AND date(l.sla_target_dt) <= date('now', '+7 days')"
+            )
+        term = str(search or "").strip().lower()
+        if term:
+            like = f"%{term}%"
+            where.append(
+                "(LOWER(l.address) LIKE ? OR "
+                "LOWER(COALESCE(l.owner_name, '')) LIKE ? OR "
+                "LOWER(COALESCE(l.issue_description, '')) LIKE ? OR "
+                "LOWER(COALESCE(l.issue_category, '')) LIKE ?)"
+            )
+            params.extend([like] * 4)
+
         zone_clauses = []
         names = [str(n).strip() for n in (neighborhoods or []) if str(n).strip()]
         if names:
@@ -5386,7 +5469,8 @@ class DatabaseService:
                 zip_codes.append(code)
         if zip_codes:
             zone_clauses.append(
-                "SUBSTR(TRIM(l.zip_code), 1, 5) IN (%s)"
+                "(TRIM(COALESCE(l.neighborhood, '')) = '' AND "
+                "SUBSTR(TRIM(l.zip_code), 1, 5) IN (%s))"
                 % ",".join("?" * len(zip_codes))
             )
             params.extend(zip_codes)
@@ -5410,6 +5494,10 @@ class DatabaseService:
         include_closed: bool = False,
         days: Optional[int] = 7,
         user_id: Optional[int] = None,
+        deadline_only: bool = False,
+        layer: Optional[str] = None,
+        owner_type: Optional[str] = None,
+        search: Optional[str] = None,
     ) -> dict:
         """Agregado por bairro/ZIP diretamente no SQLite (GROUP BY).
 
@@ -5424,6 +5512,10 @@ class DatabaseService:
             include_closed=include_closed,
             days=days,
             user_id=user_id,
+            deadline_only=deadline_only,
+            layer=layer,
+            owner_type=owner_type,
+            search=search,
         )
         conn = get_connection()
         try:
@@ -5483,6 +5575,10 @@ class DatabaseService:
         neighborhoods: Optional[list[str]] = None,
         zips: Optional[list[str]] = None,
         no_geo: bool = False,
+        deadline_only: bool = False,
+        layer: Optional[str] = None,
+        owner_type: Optional[str] = None,
+        search: Optional[str] = None,
     ) -> tuple[List[dict], int]:
         """Feed qualificado com filtros/total em SQL (P0-B).
 
@@ -5502,6 +5598,10 @@ class DatabaseService:
             neighborhoods=neighborhoods,
             zips=zips,
             no_geo=no_geo,
+            deadline_only=deadline_only,
+            layer=layer,
+            owner_type=owner_type,
+            search=search,
         )
 
         conn = get_connection()
@@ -10144,12 +10244,29 @@ class DatabaseService:
                 cities = list(set([r["city"] for r in sample if r["city"]]))
                 cities_str = ", ".join(cities[:3]) + ("..." if len(cities) > 3 else "")
                 # Tempo desde a varredura mais recente
-                most_recent = datetime.fromisoformat(
-                    sample[0]["updated_at"].replace("T", " ")
-                ) if hasattr(sample[0]["updated_at"], "replace") else sample[0]["updated_at"]
-                if isinstance(most_recent, str):
-                    most_recent = datetime.strptime(most_recent, "%Y-%m-%d %H:%M:%S")
-                hours_ago = max(1, round((datetime.now() - most_recent).total_seconds() / 3600))
+                most_recent = None
+                try:
+                    most_recent = datetime.fromisoformat(
+                        str(sample[0]["updated_at"]).replace("T", " ")
+                    )
+                except (TypeError, ValueError):
+                    most_recent = None
+                if most_recent is not None and most_recent.tzinfo is not None:
+                    # `updated_at` pode vir com timezone (ISO do scraper);
+                    # sem normalizar, `datetime.now() - most_recent` rebenta.
+                    most_recent = most_recent.astimezone(timezone.utc).replace(
+                        tzinfo=None
+                    )
+                hours_ago = (
+                    max(
+                        1,
+                        round(
+                            (datetime.now() - most_recent).total_seconds() / 3600
+                        ),
+                    )
+                    if most_recent is not None
+                    else 1
+                )
                 last_scrape_info = (
                     f"{recent_count} novas oportunidades ({cities_str}) "
                     f"Atualizado há {hours_ago} horas"
@@ -12865,6 +12982,10 @@ class AsyncDatabaseService:
         neighborhoods: Optional[list[str]] = None,
         zips: Optional[list[str]] = None,
         no_geo: bool = False,
+        deadline_only: bool = False,
+        layer: Optional[str] = None,
+        owner_type: Optional[str] = None,
+        search: Optional[str] = None,
     ) -> tuple[List[dict], int]:
         return await anyio.to_thread.run_sync(
             lambda: self._service.get_leads_feed(
@@ -12880,6 +13001,10 @@ class AsyncDatabaseService:
                 neighborhoods=neighborhoods,
                 zips=zips,
                 no_geo=no_geo,
+                deadline_only=deadline_only,
+                layer=layer,
+                owner_type=owner_type,
+                search=search,
             )
         )
 
@@ -12893,6 +13018,10 @@ class AsyncDatabaseService:
         include_closed: bool = False,
         days: Optional[int] = 7,
         user_id: Optional[int] = None,
+        deadline_only: bool = False,
+        layer: Optional[str] = None,
+        owner_type: Optional[str] = None,
+        search: Optional[str] = None,
     ) -> dict:
         return await anyio.to_thread.run_sync(
             lambda: self._service.get_leads_geo_summary(
@@ -12903,6 +13032,10 @@ class AsyncDatabaseService:
                 include_closed=include_closed,
                 days=days,
                 user_id=user_id,
+                deadline_only=deadline_only,
+                layer=layer,
+                owner_type=owner_type,
+                search=search,
             )
         )
 

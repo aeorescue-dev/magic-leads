@@ -274,6 +274,7 @@ function DashboardPageInner() {
     zips: string[];
   } | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<"overview" | "opportunities" | "prevention" | "favorites" | "interests" | "alerts" | "history">("overview");
   const [interests, setInterests] = useState<Set<string>>(new Set(ALL_CATEGORY_KEYS));
   const [interestsConfigured, setInterestsConfigured] = useState<boolean | null>(null);
@@ -311,6 +312,14 @@ function DashboardPageInner() {
   useEffect(() => {
     setLeadZone(null);
   }, [selectedCity, selectedCategory, selectedType, selectedSeverity, includeClosed]);
+
+  useEffect(() => {
+    const timer = setTimeout(
+      () => setDebouncedSearchQuery(searchQuery.trim()),
+      300
+    );
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
   const [selectedOwnerType, setSelectedOwnerType] = useState<string>("all");
   // Gaveta de filtros em mobile (<lg). Em desktop os filtros ficam inline.
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -694,6 +703,10 @@ function DashboardPageInner() {
         selectedCategory,
         selectedSeverity,
         includeClosed,
+        onlyDeadline,
+        feedLayer,
+        selectedOwnerType,
+        debouncedSearchQuery,
         leadZone?.name ?? "all",
       ]
     : null;
@@ -714,7 +727,13 @@ function DashboardPageInner() {
               zips: leadZone.zips,
               noGeo: leadZone.noGeo,
             }
-          : null
+          : null,
+        {
+          deadlineOnly: onlyDeadline,
+          layer: feedLayer,
+          ownerType: selectedOwnerType,
+          search: debouncedSearchQuery,
+        }
       ),
     { refreshInterval: 60000, isPaused: swrPaused }
   );
@@ -948,7 +967,13 @@ function DashboardPageInner() {
               zips: leadZone.zips,
               noGeo: leadZone.noGeo,
             }
-          : null
+          : null,
+        {
+          deadlineOnly: onlyDeadline,
+          layer: feedLayer,
+          ownerType: selectedOwnerType,
+          search: debouncedSearchQuery,
+        }
       );
       if (data.leads && data.leads.length > 0) {
         setLeads((prev) => [...prev, ...data.leads]);
@@ -967,7 +992,7 @@ function DashboardPageInner() {
     }
     // includeClosed FALTOU: alternar o interruptor de historico nao recriava o
     // callback, por isso "carregar mais" continuava a pagina sem o parametro.
-  }, [currentPage, hasMoreLeads, loadingMore, selectedCity, selectedType, selectedCategory, selectedSeverity, urgencyParam, includeClosed, leadZone]);
+  }, [currentPage, hasMoreLeads, loadingMore, selectedCity, selectedType, selectedCategory, selectedSeverity, urgencyParam, includeClosed, leadZone, onlyDeadline, feedLayer, selectedOwnerType, debouncedSearchQuery]);
 
   // O lead já está em "Meus Leads" (revelado por mim: reservado, em negociação,
   // convertido, liberado ou com hold expirado). Nesse estado o botão
@@ -1542,9 +1567,10 @@ function DashboardPageInner() {
           if (selectedOwnerType !== oc) return false;
         } else {
           const isInstitutional = !!lead.institutional;
+          const hasOwner = !!lead.owner_name;
           if (selectedOwnerType === "institutional" && !isInstitutional) return false;
-          if (selectedOwnerType === "private" && isInstitutional) return false;
-          if (selectedOwnerType === "unknown" && lead.owner_name) return false;
+          if (selectedOwnerType === "private" && (!hasOwner || isInstitutional)) return false;
+          if (selectedOwnerType === "unknown" && hasOwner) return false;
         }
       }
 
@@ -2630,6 +2656,10 @@ function DashboardPageInner() {
                 type={selectedType}
                 urgency={urgencyParam}
                 includeClosed={includeClosed}
+                deadlineOnly={onlyDeadline}
+                layer={feedLayer}
+                ownerType={selectedOwnerType}
+                search={debouncedSearchQuery}
                 activeName={leadZone?.name ?? null}
                 onSelect={(zone) => {
                   setLeadZone(zone);
