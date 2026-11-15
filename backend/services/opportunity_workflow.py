@@ -310,6 +310,7 @@ class OpportunityWorkflowService:
         status: Optional[str] = None,
         city: Optional[str] = None,
         category: Optional[str] = None,
+        zips: Optional[list[str]] = None,
         limit: int = 50,
         offset: int = 0,
         days: Optional[int] = None,
@@ -335,6 +336,19 @@ class OpportunityWorkflowService:
         if category:
             clauses.append("category = ?")
             params.append(category)
+        if zips:
+            # Filtro por bairro: o cliente envia os ZIPs que compõem o bairro.
+            cleaned = []
+            for value in zips[:200]:
+                code = str(value or "").strip()[:5]
+                if len(code) == 5 and code.isdigit():
+                    cleaned.append(code)
+            if cleaned:
+                placeholders = ",".join("?" for _ in cleaned)
+                clauses.append(
+                    f"SUBSTR(TRIM(zip_code), 1, 5) IN ({placeholders})"
+                )
+                params.extend(cleaned)
         if days:
             clauses.append(
                 "date(COALESCE(received_at, created_at)) >= date('now', ?)"

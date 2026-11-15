@@ -1520,6 +1520,7 @@ export async function fetchOpportunities(params: {
   status?: string;
   city?: string;
   category?: string;
+  zips?: string;
   limit?: number;
   offset?: number;
   days?: number;

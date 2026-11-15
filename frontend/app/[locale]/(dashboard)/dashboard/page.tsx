@@ -54,6 +54,7 @@ import {
   type OpportunityCardContext,
 } from "@/components/dashboard/OpportunityCard";
 import { PreventiveFeed } from "@/components/dashboard/PreventiveFeed";
+import { NeighborhoodPanel } from "@/components/dashboard/opportunities-map/NeighborhoodPanel";
 import { FeedToolbar } from "@/components/dashboard/FeedToolbar";
 import { FeedRail } from "@/components/dashboard/FeedRail";
 import {
@@ -137,8 +138,7 @@ const ALL_CATEGORY_KEYS = CATEGORIES.map((cat) => cat.key);
 
 const CATEGORY_BY_KEY = new Map<string, Category>(
   CATEGORIES.map((cat) => [cat.key, cat] as const)
-);
-const UNCLASSIFIED_META: Category = {
+);const UNCLASSIFIED_META: Category = {
   key: "Unclassified",
   labelKey: "dashboard.cat.unclassified",
   icon: Tag,
@@ -235,6 +235,9 @@ function countdownLabel(expiresAt: string): string {
   return `${m}m`;
 }
 
+// Referência estável para o filtro "sem bairro" (evita novo array a cada render).
+const NO_ZIPS: string[] = [];
+
 function DashboardPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -263,6 +266,11 @@ function DashboardPageInner() {
   const [feedTotal, setFeedTotal] = useState(0);
   const [stats, setStats] = useState<LeadStats | null>(null);
   const [selectedCity, setSelectedCity] = useState<string>("all");
+  // Bairro escolhido no mapa: filtra o feed preventivo na mesma tela.
+  const [neighborhoodFilter, setNeighborhoodFilter] = useState<{
+    name: string;
+    zips: string[];
+  } | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<"overview" | "opportunities" | "prevention" | "favorites" | "interests" | "alerts" | "history">("overview");
   const [interests, setInterests] = useState<Set<string>>(new Set(ALL_CATEGORY_KEYS));
@@ -282,6 +290,10 @@ function DashboardPageInner() {
 
   // Filter states
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
+  // Mudar de cidade ou de ofício invalida o bairro selecionado no mapa.
+  useEffect(() => {
+    setNeighborhoodFilter(null);
+  }, [selectedCity, selectedCategory]);
   const [selectedSeverity, setSelectedSeverity] = useState<string>("all");
   const [onlyDeadline, setOnlyDeadline] = useState(false);
   const [deadlineWindow, setDeadlineWindow] = useState<"all" | "3" | "7">("all");
@@ -2040,6 +2052,7 @@ function DashboardPageInner() {
     deadlineWindow: deadlineWindow === "all" ? null : Number(deadlineWindow),
     withFines,
     search: searchQuery,
+    zips: neighborhoodFilter?.zips ?? NO_ZIPS,
     now: renderNow,
   };
 
@@ -3045,11 +3058,52 @@ function DashboardPageInner() {
               )}
             </section>
           ) : activeTab === "prevention" ? (
-            <PreventiveFeed
-              onOpenReveal={openOpportunityReveal}
-              filters={feedFilters}
-              onCountChange={setPreventiveShown}
-            />
+            <div className="space-y-3">
+              <NeighborhoodPanel
+                cities={cityOptions}
+                city={selectedCity}
+                onCityChange={setSelectedCity}
+                category={selectedCategory}
+                onCategoryChange={setSelectedCategory}
+                activeName={neighborhoodFilter?.name ?? null}
+                onSelect={(name, zips) => {
+                  setNeighborhoodFilter({ name, zips });
+                  requestAnimationFrame(() => {
+                    document
+                      .getElementById("opportunities-feed")
+                      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  });
+                }}
+              />
+
+              {neighborhoodFilter ? (
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--sd-accent)]/40 bg-[var(--sd-accent-soft)] px-2.5 py-1 text-[11px] font-bold text-[var(--sd-accent)]">
+                    <MapPin className="h-3 w-3" />
+                    {t("dashboard.oppmap.filtered_by").replace(
+                      "{name}",
+                      neighborhoodFilter.name
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setNeighborhoodFilter(null)}
+                      aria-label={t("dashboard.oppmap.clear")}
+                      className="ml-0.5 rounded-full p-0.5 transition hover:bg-black/10"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                </div>
+              ) : null}
+
+              <div id="opportunities-feed" className="scroll-mt-24">
+                <PreventiveFeed
+                  onOpenReveal={openOpportunityReveal}
+                  filters={feedFilters}
+                  onCountChange={setPreventiveShown}
+                />
+              </div>
+            </div>
           ) : (
           <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
           {/* GRID: INTERESTS CONFIG + OPPORTUNITIES FEED */}

@@ -9443,6 +9443,7 @@ async def list_opportunities(
     status: Optional[str] = None,
     city: Optional[str] = None,
     category: Optional[str] = None,
+    zips: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
     days: Optional[int] = None,
@@ -9458,11 +9459,17 @@ async def list_opportunities(
         else int(getattr(settings, "PREVENTIVE_FEED_WINDOW_DAYS", 7) or 7)
     )
     max_page = int(getattr(settings, "PREVENTIVE_MAX_PAGE_SIZE", 100) or 100)
+    zip_list = [
+        part.strip()
+        for part in str(zips or "").split(",")
+        if part.strip()
+    ][:200]
     return opportunity_workflow.list(
         kind=kind,
         status=status,
         city=city,
         category=category,
+        zips=zip_list or None,
         limit=max(1, min(int(limit), max_page)),
         offset=offset,
         days=window_days,

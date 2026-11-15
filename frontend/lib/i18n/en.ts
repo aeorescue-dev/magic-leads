@@ -1497,6 +1497,15 @@ const EN: Dict = {
   "dashboard.oppmap.list": "List",
   "dashboard.oppmap.map_aria": "Map of opportunities in {city}",
   "dashboard.oppmap.map_error": "Map unavailable right now.",
+  "dashboard.oppmap.panel_title": "Where the work is",
+  "dashboard.oppmap.choose_city": "Choose a city to see the map",
+  "dashboard.oppmap.no_map": "Map unavailable for this city",
+  "dashboard.oppmap.no_map_hint": "The leads below are still up to date.",
+  "dashboard.oppmap.show": "Show map",
+  "dashboard.oppmap.hide": "Hide map",
+  "dashboard.oppmap.hint": "Click a neighborhood to filter the leads below.",
+  "dashboard.oppmap.filtered_by": "Neighborhood: {name}",
+  "dashboard.oppmap.clear": "Clear",
 
 };
 

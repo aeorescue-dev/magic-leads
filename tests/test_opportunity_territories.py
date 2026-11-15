@@ -110,3 +110,19 @@ def test_territories_requires_city():
     except ValueError:
         return
     raise AssertionError("expected ValueError")
+
+
+def test_list_filters_by_neighborhood_zips():
+    _create(record="z1", address="1 Alpha St", zip_code="02124")
+    _create(record="z2", address="2 Beta Ave", zip_code="02125")
+    _create(record="z3", address="3 Gamma Rd", zip_code="02128")
+
+    result = opportunity_workflow.list(
+        kind="preventive", city="Boston", zips=["02124", "02125"]
+    )
+
+    assert result["total"] == 2
+    assert {row["zip_code"] for row in result["opportunities"]} == {
+        "02124",
+        "02125",
+    }

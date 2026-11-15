@@ -181,6 +181,9 @@ export function CityMap({
     const bounds: Array<[number, number]> = [];
 
     for (const item of neighborhoods) {
+      // "Other areas" fica na lista (e filtra o feed), mas não no mapa:
+      // o centroide do catch-all estica o enquadramento até aos subúrbios.
+      if (item.name === "Other areas" || item.name === "Other area") continue;
       const active = item.name === activeName;
       const icon = L.divIcon({
         className: "opp-pin-wrap",

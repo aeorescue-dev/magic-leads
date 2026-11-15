@@ -1515,6 +1515,15 @@ const PT: Dict = {
   "dashboard.oppmap.list": "Lista",
   "dashboard.oppmap.map_aria": "Mapa de oportunidades em {city}",
   "dashboard.oppmap.map_error": "Mapa indisponível neste momento.",
+  "dashboard.oppmap.panel_title": "Onde está o trabalho",
+  "dashboard.oppmap.choose_city": "Escolha uma cidade para ver o mapa",
+  "dashboard.oppmap.no_map": "Mapa indisponível para esta cidade",
+  "dashboard.oppmap.no_map_hint": "Os leads abaixo continuam disponíveis.",
+  "dashboard.oppmap.show": "Mostrar mapa",
+  "dashboard.oppmap.hide": "Ocultar mapa",
+  "dashboard.oppmap.hint": "Clique num bairro para filtrar os leads abaixo.",
+  "dashboard.oppmap.filtered_by": "Bairro: {name}",
+  "dashboard.oppmap.clear": "Limpar",
 
 };
 

@@ -59,21 +59,13 @@ export const CITY_META: Record<
 export const CITY_ORDER = ["Boston", "Dallas", "NYC"] as const;
 
 /**
- * Grupos fora do perímetro da cidade: continuam no feed, mas não entram no
- * mapa urbano (senão o enquadramento abre até ao metro inteiro).
+ * Fora do perímetro ou ZIP sem bairro reconhecido: agrupados em "Other areas"
+ * para não esconder leads nem inventar nomes.
  */
-const EXCLUDED_GROUPS = new Set([
-  "Coppell",
-  "Garland",
-  "Grand Prairie",
-  "Lancaster",
-  "Duncanville",
-  "Mesquite",
-  "Long Island",
-]);
+const OTHER_AREAS = "Other areas";
 
 const BOSTON: Record<string, string> = {
-  "02105": "Other Boston",
+  "02105": "Other areas",
   "02108": "Beacon Hill",
   "02109": "Downtown & Waterfront",
   "02110": "Downtown & Waterfront",
@@ -159,14 +151,6 @@ const DALLAS: Record<string, string> = {
   // Aeroporto
   "75235": "Love Field",
   "75247": "Love Field",
-  // Subúrbios vizinhos presentes na amostra
-  "75019": "Coppell",
-  "75042": "Garland",
-  "75051": "Grand Prairie",
-  "75134": "Lancaster",
-  "75137": "Duncanville",
-  "75149": "Mesquite",
-  "75150": "Mesquite",
 };
 
 function nycBorough(zip: string): string {
@@ -176,15 +160,14 @@ function nycBorough(zip: string): string {
   if (prefix === "104") return "Bronx";
   if (prefix === "112") return "Brooklyn";
   if (["110", "111", "113", "114", "116"].includes(prefix)) return "Queens";
-  if (["115", "117", "118", "119"].includes(prefix)) return "Long Island";
-  return "New York City";
+  return OTHER_AREAS;
 }
 
 function zoneName(city: string, zone: Zone): string {
   if (city === "NYC") return nycBorough(zone.zip);
-  if (city === "Boston") return BOSTON[zone.zip] ?? zone.label ?? "Other Boston";
-  if (city === "Dallas") return DALLAS[zone.zip] ?? "Other Dallas";
-  return zone.label ?? zone.zip;
+  if (city === "Boston") return BOSTON[zone.zip] ?? zone.label ?? OTHER_AREAS;
+  if (city === "Dallas") return DALLAS[zone.zip] ?? OTHER_AREAS;
+  return zone.label ?? OTHER_AREAS;
 }
 
 export function buildNeighborhoods(
@@ -207,7 +190,6 @@ export function buildNeighborhoods(
 
   for (const zone of zones) {
     const name = zoneName(city, zone);
-    if (name.startsWith("Other ") || EXCLUDED_GROUPS.has(name)) continue;
     const nicheCount =
       niche === "all"
         ? zone.total

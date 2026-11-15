@@ -28,6 +28,8 @@ export interface FeedFilters {
   /** Só imóveis com multa real em aberto. */
   withFines: boolean;
   search: string;
+  /** ZIPs do bairro selecionado no mapa (vazio = cidade inteira). */
+  zips: string[];
   now: number;
 }
 
@@ -70,6 +72,7 @@ export function PreventiveFeed({
       days: 7,
       city: filters.city !== "all" ? filters.city : undefined,
       category: filters.category !== "all" ? filters.category : undefined,
+      zips: filters.zips.length > 0 ? filters.zips.join(",") : undefined,
       severity: filters.severity !== "all" ? filters.severity : undefined,
       deadline_within:
         filters.deadlineWindow ?? (filters.onlyDeadline ? 7 : undefined),
@@ -79,6 +82,7 @@ export function PreventiveFeed({
     [
       filters.city,
       filters.category,
+      filters.zips,
       filters.severity,
       filters.deadlineWindow,
       filters.onlyDeadline,
