@@ -3,7 +3,12 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useI18n, formatNumber, numberLocale, type Lang } from "@/lib/i18n";
 import { fetchPublicMetrics } from "@/lib/api-client";
-import type { PublicMetrics } from "@/lib/api-client";
+import type {
+  PublicMetrics,
+  LiveMapCity,
+  LiveMapResponse,
+  LiveMapZone,
+} from "@/lib/api-client";
 import { FoldWave, useLandingShell } from "@/components/landing/LandingShell";
 import { LiveTradeGrid } from "@/components/landing/LiveTradeGrid";
 import { PublicLiveMap } from "@/components/landing/PublicLiveMap";
@@ -23,6 +28,46 @@ type Channel = "whatsapp" | "sms" | "email";
 type BadgeKey = "urgent" | "high" | "medium";
 
 const CITIES: City[] = ["New York", "Boston", "Dallas", "Chicago"];
+
+const CITY_SEARCH_ALIASES: Record<string, City> = {
+  "new york": "New York",
+  nyc: "New York",
+  "nova york": "New York",
+  "nova iorque": "New York",
+  "nueva york": "New York",
+  boston: "Boston",
+  dallas: "Dallas",
+  chicago: "Chicago",
+};
+
+function normalizeSearch(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function findLiveZone(
+  data: LiveMapResponse | null,
+  term: string
+): { city: LiveMapCity; zone: LiveMapZone } | null {
+  if (!data) return null;
+  const query = normalizeSearch(term);
+  if (!query) return null;
+  let partial: { city: LiveMapCity; zone: LiveMapZone } | null = null;
+  for (const city of data.cities) {
+    for (const zone of city.zones) {
+      const label = normalizeSearch(zone.label);
+      if (label === query) return { city, zone };
+      if (!partial && label.startsWith(query)) partial = { city, zone };
+      if (!partial && label.includes(query)) partial = { city, zone };
+    }
+  }
+  return partial;
+}
 const TRADE_KEYS: TradeKey[] = ["Telhado", "Encanamento", "Estrutura", "Pintura", "Elétrica", "Aquecimento"];
 const CHANNELS: Channel[] = ["whatsapp", "sms", "email"];
 
@@ -266,6 +311,7 @@ export default function LandingPage() {
   const [heroTotal, setHeroTotal] = useState(0);
   const [heroTab, setHeroTab] = useState<"map" | "trades">("map");
   const [mapEnabled, setMapEnabled] = useState(true);
+  const [liveMap, setLiveMap] = useState<LiveMapResponse | null>(null);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [reservedLeadId, setReservedLeadId] = useState<string | null>(null);
   const [timerSeconds, setTimerSeconds] = useState(3600);
@@ -376,7 +422,8 @@ export default function LandingPage() {
   const activeLeads = metrics?.active_leads ?? 0;
   const activeOwners = metrics?.active_leads_with_owner ?? 0;
   const activeOwnerPct = metrics?.active_owner_pct ?? 0;
-  const activeZips = metrics?.active_zips ?? 0;
+  const areasCount =
+    liveMap?.cities.reduce((sum, city) => sum + city.totals.zones, 0) ?? 0;
   const freshness = formatAgo(
     parseServerTime(
       metrics?.last_scrape?.finished_at ?? metrics?.last_scrape?.started_at,
@@ -428,17 +475,50 @@ export default function LandingPage() {
 
   const submitHeroZip = (event: FormEvent) => {
     event.preventDefault();
-    const digits = heroZipInput.replace(/\D/g, "").slice(0, 5);
-    if (digits.length !== 5) {
-      setHeroZipError(t("landing.p1ZipInvalid"));
+    const term = heroZipInput.trim();
+    if (!term) {
+      setHeroZipError(t("landing.heroSearchInvalid"));
       return;
     }
-    setHeroZipError("");
-    setHeroZip(digits);
-    setHeroCity("");
-    setHeroZipInput("");
-    setHeroTotal(0);
-    window.setTimeout(() => scrollTo("p1-grid"), 40);
+    if (/^\d{5}$/.test(term)) {
+      setHeroZipError("");
+      setHeroZip(term);
+      setHeroCity("");
+      setHeroZipInput("");
+      setHeroTotal(0);
+      window.setTimeout(() => scrollTo("p1-grid"), 40);
+      return;
+    }
+    const cityName = CITY_SEARCH_ALIASES[normalizeSearch(term)];
+    if (cityName) {
+      setHeroZipError("");
+      setHeroZipInput("");
+      pickHeroCity(cityName);
+      setHeroTab(mapEnabled ? "map" : "trades");
+      if (typeof window !== "undefined" && window.innerWidth < 1024) {
+        window.setTimeout(() => {
+          document
+            .getElementById("live-map-card")
+            ?.scrollIntoView({ behavior: "smooth", block: "center" });
+        }, 40);
+      }
+      return;
+    }
+    const match = findLiveZone(liveMap, term);
+    if (match) {
+      setHeroZipError("");
+      setHeroZipInput("");
+      pickHeroCity(match.city.label);
+      setHeroTab(mapEnabled ? "map" : "trades");
+      openModal({
+        zone: match.zone.label,
+        city: match.city.label,
+        count: match.zone.count,
+        fresh: match.zone.fresh,
+      });
+      return;
+    }
+    setHeroZipError(t("landing.heroSearchInvalid"));
   };
 
   const pickHeroCity = (next: string) => {
@@ -502,13 +582,13 @@ export default function LandingPage() {
                 <input
                   value={heroZipInput}
                   onChange={(event) => {
-                    setHeroZipInput(event.target.value.replace(/\D/g, "").slice(0, 5));
+                    setHeroZipInput(event.target.value.slice(0, 60));
                     setHeroZipError("");
                   }}
-                  inputMode="numeric"
-                  maxLength={5}
-                  placeholder={t("landing.p1ZipPlaceholder")}
-                  aria-label={t("landing.p1ZipPlaceholder")}
+                  inputMode="text"
+                  maxLength={60}
+                  placeholder={t("landing.heroSearchPlaceholder")}
+                  aria-label={t("landing.heroSearchPlaceholder")}
                   className="h-12 min-w-0 flex-1 border-0 bg-transparent text-[15px] font-semibold text-[#0b1220] placeholder:font-medium placeholder:text-[#94a3b8] focus:outline-none"
                 />
                 <button type="submit" data-track="hero_zip_submit" className="btn-mint h-12 shrink-0 px-6 text-[12px] uppercase tracking-[0.06em]">
@@ -589,7 +669,7 @@ export default function LandingPage() {
               </div>
             </div>
 
-            <div className="relative min-w-0 w-full lg:mt-1 lg:justify-self-end">
+            <div id="live-map-card" className="relative min-w-0 w-full lg:mt-1 lg:justify-self-end">
               <div className="pointer-events-none absolute -inset-6 rounded-[2.4rem] bg-[#10b981]/[0.10] blur-3xl" />
               <div className="relative w-full max-w-[620px] rounded-[2rem] bg-gradient-to-b from-white/90 via-[#f6f4ee] to-[#eeeae0] p-[1px] shadow-[0_50px_130px_-45px_rgba(15,23,42,0.55),0_20px_60px_-30px_rgba(16,185,129,0.22)]">
                 <div className="rounded-[1.95rem] border border-white/60 bg-[#f7f5ef] p-4 sm:p-6">
@@ -666,9 +746,10 @@ export default function LandingPage() {
                     {t("landing.liveMap.hint")}
                   </p>
 
-                  {heroTab === "map" ? (
+                  {heroTab === "map" && mapEnabled ? (
                     <PublicLiveMap
                       city={heroCity || "New York"}
+                      onData={setLiveMap}
                       onTotalChange={setHeroTotal}
                       onUnavailable={() => {
                         setMapEnabled(false);
@@ -771,11 +852,13 @@ export default function LandingPage() {
                     {citiesCount}
                   </p>
                   <span className="rounded-full border border-[#e7e3d9] bg-[#f8f7f3] px-2 py-0.5 text-[8px] font-black normal-case tracking-[0.04em] text-[#64748b]">
-                    {activeZips > 0 ? `${formatNumber(activeZips, lang)} ZIPs` : "ZIPs"}
+                    {areasCount > 0
+                      ? `${formatNumber(areasCount, lang)} ${t("landing.statAreasUnit")}`
+                      : "—"}
                   </span>
                 </div>
                 <p className="mt-2 text-[10.5px] font-semibold leading-relaxed text-[#64748b]">
-                  {t("landing.statZips")}. {t("landing.statCitiesList")}
+                  {t("landing.statAreas")}. {t("landing.statCitiesList")}
                 </p>
               </div>
             </div>

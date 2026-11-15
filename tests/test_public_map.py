@@ -242,7 +242,11 @@ def test_map_public_labels_per_city():
     }
     assert "East Boston" in labels["Boston"]
     assert "East Dallas" in labels["Dallas"]
-    assert "Area 60617" in labels["Chicago"]
+    assert "South Side" in labels["Chicago"]
+    for city_labels in labels.values():
+        for label in city_labels:
+            assert not label.lower().startswith("area ")
+            assert not label.strip().isdigit()
 
 
 def test_map_hides_other_areas_and_keeps_count_in_other():

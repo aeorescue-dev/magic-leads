@@ -250,13 +250,21 @@ desta auditoria verde; o deploy deve correr o índice e a migração de cidades
 - **Copy (P2):** “novas oportunidades”, “oportunidades registradas”,
   “Do serviço pequeno à obra completa” e “Todas as cidades”; removidos
   “novas entradas” e “sinais na base”.
+- **Busca e faixa (v5):** o herói aceita **cidade, bairro/setor ou ZIP**
+  (“Search by city, neighborhood or ZIP”); cidade muda o mapa, bairro abre o
+  teaser, ZIP mantém a grelha. A faixa mostra **39 áreas / 4 cidades** e
+  “Bairros e setores com trabalho ativo”, sem “ZIPs cobertos”.
+- **Chicago legível:** setores (North Side, South Side, Southwest Side,
+  Northwest Side, West Side, Far South Side, Downtown & Near North); o mapa
+  nunca mostra “Area 606xx”. O audit valida os rótulos das 4 cidades.
 - **i18n (v2):** o prefixo da URL manda (`/en` abre EN mesmo com cookie PT);
   trocar a bandeira **navega** para `/pt`/`/es` preservando query/hash;
   `<html lang>` = `en-US`/`pt-BR`/`es-ES`. Copy PT do mapa/teaser em **PT-BR**
   (“Isso está acontecendo perto de você”, “endereços”, “contatos”).
-- **Audit v2/v4:** valida instrução e seletor, top 3 + expansão, legenda,
-  formatação por locale, escopos, `/en` com cookie PT, navegação da bandeira,
-  `lang` e ausência de PT-PT no teaser, mobile e kill switch — **ALL PASS**.
+- **Audit v2/v5:** valida instrução e seletor, top 3 + expansão, legenda,
+  formatação por locale, escopos, busca cidade/bairro/ZIP, rótulos legíveis nas
+  4 cidades, `/en` com cookie PT, navegação da bandeira, `lang` e ausência de
+  PT-PT no teaser, mobile e kill switch — **ALL PASS**.
 - **Stacking (v3):** o mapa está isolado (`relative isolate z-0` +
   `isolation: isolate`); o header da landing passou a `z-[900]`, acima das
   camadas Leaflet e abaixo do modal (`z-[1000]`). O audit faz scroll e
@@ -267,5 +275,6 @@ desta auditoria verde; o deploy deve correr o índice e a migração de cidades
 - **Capturas:** `reports/landing-live-map-preview/01-hero-map.png`,
   `01b-hero-areas.png`, `02-hero-trades.png`, `03-teaser-modal.png`,
   `04-locale-en.png`, `05-locale-pt-teaser.png`, `06-scroll-navbar.png`,
-  `07-mobile-map.png`.
+  `07-mobile-map.png`, `08-search-boston.png`, `09-areas-strip.png`,
+  `10-chicago.png`.
 - **Plano completo:** `docs/LANDING-LIVE-MAP-PLAN.md`.

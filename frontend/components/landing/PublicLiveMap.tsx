@@ -74,12 +74,14 @@ export function PublicLiveMap({
   onZoneSelect,
   onTotalChange,
   onUnavailable,
+  onData,
   className = "h-[300px]",
 }: {
   city: string;
   onZoneSelect: (zone: LiveMapZone, cityLabel: string) => void;
   onTotalChange?: (total: number) => void;
   onUnavailable?: () => void;
+  onData?: (data: LiveMapResponse) => void;
   className?: string;
 }) {
   const { t, lang } = useI18n();
@@ -88,6 +90,7 @@ export function PublicLiveMap({
   const layerRef = useRef<any>(null);
   const selectRef = useRef(onZoneSelect);
   const unavailableRef = useRef(onUnavailable);
+  const onDataRef = useRef(onData);
   const [data, setData] = useState<LiveMapResponse | null>(null);
   const [failed, setFailed] = useState(false);
   const [ready, setReady] = useState(false);
@@ -102,10 +105,17 @@ export function PublicLiveMap({
   }, [onUnavailable]);
 
   useEffect(() => {
+    onDataRef.current = onData;
+  }, [onData]);
+
+  useEffect(() => {
     let alive = true;
     fetchLiveMap()
       .then((payload) => {
-        if (alive) setData(payload);
+        if (alive) {
+          setData(payload);
+          onDataRef.current?.(payload);
+        }
       })
       .catch(() => {
         if (alive) {

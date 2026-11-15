@@ -47,7 +47,7 @@ sem deploy.** Validado localmente com `audit-landing-map.mjs` (ALL PASS).
 | k-anonimato | Zonas com `<5` não aparecem; contam em `other` |
 | Frescos | `fresh` só é exposto quando `>=3` |
 | Geo | Centroide da zona arredondado a **3 casas** (~110 m) |
-| ZIP | Resolvido no servidor; NYC usa borough, Boston bairro, Dallas setor, Chicago área/ZIP (o ZIP já é público na pesquisa) |
+| ZIP | Resolvido no servidor; NYC borough, Boston bairro, Dallas setor, Chicago **setor legível** (nunca o código do ZIP no mapa) |
 | Fontes | Zero termos de fonte/arquitetura no payload ou UI |
 
 **População = trade grid** (`is_qualified=1`, `is_junk=0`, 7 dias, 16 ofícios):
@@ -105,6 +105,14 @@ cálculo corre no máximo **1×/min**, independentemente do tráfego.
   `isolation: isolate`), prendendo as camadas Leaflet; o header da landing
   sobe para `z-[900]`, acima do mapa e abaixo do modal (`z-[1000]`). A navbar
   fica sempre visível ao rolar.
+- **Busca por cidade, bairro ou ZIP** no herói: o placeholder diz “Search by
+  city, neighborhood or ZIP” (PT/ES equivalentes). Cidade muda o mapa;
+  bairro/setor abre o teaser com o contexto; ZIP mantém a grelha por ofício.
+- **Faixa inferior sem jargão:** **39 áreas / 4 cidades**, “Todas as cidades”
+  e “Bairros e setores com trabalho ativo”; removido “ZIPs cobertos”.
+- **Chicago:** setores legíveis (North Side, South Side, Southwest Side,
+  Northwest Side, West Side, Far South Side, Downtown & Near North); nunca
+  “Area 606xx”. Dallas mantém os setores e Boston/NYC os bairros/boroughs.
 
 ## 5.1 Idioma — a rota manda
 
@@ -142,25 +150,40 @@ node scripts/audit-landing-map.mjs
 ```
 
 Cobre: latência <50 ms, 4 cidades, igualdade com o trade grid, ausência de
-campos privados, piso de 5, frescos ≥3, coordenadas a 3 casas, ETag/304,
-instrução e seletor de cidade no cartão, sincronização cartão↔mapa, top 3
-bolhas + expansão `+N áreas`, legenda âmbar, formatação por locale
-(`7.788`/`7,788`), escopos “Todas as cidades”, copy PT-BR, aba By trade,
-teaser e modo de registo. Inclui ainda **scroll com hit-test da navbar**,
-**/en com cookie PT**, troca de bandeira para `/pt`, `lang=en-US`/`pt-BR`,
-regresso a `/en`, **mobile com seletor único do herói** e **kill switch**.
-**ALL PASS** (endpoint 0,5–1,8 ms).
+campos privados, piso de 5, frescos ≥3, coordenadas a 3 casas, **rótulos
+legíveis nas 4 cidades (sem ZIP numérico)**, ETag/304, instrução e seletor de
+cidade no cartão, sincronização cartão↔mapa, top 3 bolhas + expansão
+`+N áreas`, legenda âmbar, formatação por locale (`7.788`/`7,788`), escopos
+“Todas as cidades”, **busca por cidade/bairro/ZIP**, copy PT-BR, aba By
+trade, teaser e modo de registo. Inclui ainda **scroll com hit-test da
+navbar**, **/en com cookie PT**, troca de bandeira para `/pt`,
+`lang=en-US`/`pt-BR`, regresso a `/en`, **mobile com seletor único do herói**
+e **kill switch**. **ALL PASS** (endpoint 0,5–1,8 ms).
 
 Capturas: `reports/landing-live-map-preview/01-hero-map.png`,
 `01b-hero-areas.png`, `02-hero-trades.png`, `03-teaser-modal.png`,
 `04-locale-en.png`, `05-locale-pt-teaser.png`, `06-scroll-navbar.png`,
-`07-mobile-map.png`.
+`07-mobile-map.png`, `08-search-boston.png`, `09-areas-strip.png`,
+`10-chicago.png`.
 
 ## 8. Antes de produção
 
 1. `PUBLIC_LIVE_MAP_ENABLED=0` no Railway antes do deploy; ligar no canary.
 2. Confirmar no arranque `[DB] idx_leads_public_geo criado …` e
-   `[PUBLIC-MAP] warmup …`.
-3. `audit-landing-map.mjs` contra produção (sem token) com o gate de 50 ms.
-4. A/B 50/50 durante 2 semanas (CTR do teaser, início de registo, LCP).
-5. Só então tornar o mapa o default permanente.
+   `[PUBLIC-MAP] warmup …`; com a flag a 0, `/api/public/live-map` devolve
+   503 `live_map_disabled` e o cartão cai em “By trade”.
+3. Ligar `PUBLIC_LIVE_MAP_ENABLED=1` e correr o audit público (sem token):
+
+```bash
+cd frontend
+AUDIT_BASE_URL=https://www.magicleads.app \
+AUDIT_API_URL=https://magic-leads-production.up.railway.app \
+AUDIT_OUT=../reports/landing-live-map-prod \
+node scripts/audit-landing-map.mjs
+```
+
+4. Guardar as capturas de produção em `reports/landing-live-map-prod/` e
+   considerar **no-go** se o endpoint ≥50 ms, se houver labels numéricos, se a
+   busca/teaser falhar ou se a navbar não ficar acima do mapa no scroll.
+5. A/B 50/50 durante 2 semanas (CTR do teaser, início de registo, LCP).
+6. Só então tornar o mapa o default permanente.

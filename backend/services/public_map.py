@@ -148,6 +148,75 @@ DALLAS_ZIP_LABELS: dict[str, str] = {
     "75247": "Love Field",
 }
 
+# Chicago: setores legíveis para ZIPs sem community area. O landing nunca
+# mostra o código numérico do ZIP; o pormenor por ZIP continua disponível na
+# pesquisa por ZIP (grelha de ofícios), mas o mapa usa setores humanos.
+CHICAGO_ZIP_SECTORS: dict[str, str] = {
+    # Downtown / Near North
+    "60601": "Downtown & Near North",
+    "60602": "Downtown & Near North",
+    "60603": "Downtown & Near North",
+    "60604": "Downtown & Near North",
+    "60605": "Downtown & Near North",
+    "60606": "Downtown & Near North",
+    "60607": "Downtown & Near North",
+    "60610": "Downtown & Near North",
+    "60611": "Downtown & Near North",
+    "60654": "Downtown & Near North",
+    "60661": "Downtown & Near North",
+    # North Side
+    "60613": "North Side",
+    "60614": "North Side",
+    "60618": "North Side",
+    "60625": "North Side",
+    "60626": "North Side",
+    "60640": "North Side",
+    "60645": "North Side",
+    "60657": "North Side",
+    "60659": "North Side",
+    "60660": "North Side",
+    # Northwest Side
+    "60630": "Northwest Side",
+    "60631": "Northwest Side",
+    "60634": "Northwest Side",
+    "60641": "Northwest Side",
+    "60646": "Northwest Side",
+    "60656": "Northwest Side",
+    # West Side
+    "60612": "West Side",
+    "60622": "West Side",
+    "60624": "West Side",
+    "60639": "West Side",
+    "60644": "West Side",
+    "60647": "West Side",
+    "60651": "West Side",
+    # Southwest Side
+    "60608": "Southwest Side",
+    "60609": "Southwest Side",
+    "60623": "Southwest Side",
+    "60629": "Southwest Side",
+    "60632": "Southwest Side",
+    "60638": "Southwest Side",
+    "60652": "Southwest Side",
+    # South Side
+    "60615": "South Side",
+    "60616": "South Side",
+    "60617": "South Side",
+    "60619": "South Side",
+    "60620": "South Side",
+    "60621": "South Side",
+    "60628": "South Side",
+    "60636": "South Side",
+    "60637": "South Side",
+    "60649": "South Side",
+    "60653": "South Side",
+    # Far South Side
+    "60633": "Far South Side",
+    "60643": "Far South Side",
+    "60655": "Far South Side",
+    "60664": "Far South Side",
+}
+
 # Chicago: community areas oficiais (fonte usa o número 1-77).
 CHICAGO_COMMUNITY_AREAS: dict[str, str] = {
     "1": "Rogers Park", "2": "West Ridge", "3": "Uptown",
@@ -282,12 +351,10 @@ def _zone_label(city: str, kind: str, key: str) -> str:
         if kind == "nb":
             return key
         return DALLAS_ZIP_LABELS.get(key, _OTHER_AREAS)
-    # Chicago: community area quando existe; senão área por ZIP (ZIP é
-    # geografia pública e a landing já permite pesquisa por ZIP; nunca há
-    # morada nem coordenada de lead).
+    # Chicago: community area quando existe; senão setor legível (nunca o ZIP).
     if kind == "nb":
-        return CHICAGO_COMMUNITY_AREAS.get(key.strip(), key)
-    return f"Area {key}"
+        return CHICAGO_COMMUNITY_AREAS.get(key.strip(), "Chicago area")
+    return CHICAGO_ZIP_SECTORS.get(key, "Chicago area")
 
 
 def _load_chicago_centroids() -> dict[str, tuple[float, float]]:

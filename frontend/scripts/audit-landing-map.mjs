@@ -77,6 +77,10 @@ check(
 
 const boston = payload?.cities?.find((city) => city.label === "Boston");
 const newYork = payload?.cities?.find((city) => city.label === "New York");
+const areasTotal = (payload?.cities ?? []).reduce(
+  (sum, city) => sum + city.totals.zones,
+  0
+);
 let gridBoston = null;
 try {
   const res = await fetch(`${apiBase}/api/public/trade-grid?city=Boston`);
@@ -128,6 +132,19 @@ check(
   ),
   "ok"
 );
+check(
+  "Rótulos legíveis nas 4 cidades (sem ZIP numérico)",
+  (payload?.cities ?? []).every((city) => city.zones.length > 0) &&
+    zones.every(
+      (zone) =>
+        Boolean(zone.label) &&
+        !/^\s*area\s*\d{3,5}\s*$/i.test(zone.label) &&
+        !/^\d{5}$/.test(zone.label)
+    ),
+  payload?.cities
+    ?.map((city) => `${city.label}:${city.zones[0]?.label ?? "—"}`)
+    .join(" · ")
+);
 
 try {
   const first = await fetch(`${apiBase}/api/public/live-map`);
@@ -147,7 +164,8 @@ try {
 }
 
 // ---------------------------------------------------------------- UI
-const out = "../reports/landing-live-map-preview";
+const out =
+  process.env.AUDIT_OUT || "../reports/landing-live-map-preview";
 fs.mkdirSync(out, { recursive: true });
 const browser = await chromium.launch({ channel: "chrome" });
 const context = await browser.newContext({ viewport: { width: 1500, height: 1200 } });
@@ -190,6 +208,12 @@ try {
     cardCities === 4 && hintVisible,
     `cities=${cardCities} hint=${hintVisible}`
   );
+  await page
+    .waitForFunction(
+      () => /\d[\d.,]*\s+opportunities tracked/i.test(document.body.innerText),
+      { timeout: 15000 }
+    )
+    .catch(() => {});
   await page.mouse.move(10, 10);
   await page.locator("#topo").screenshot({ path: `${out}/01-hero-map.png` });
 
@@ -287,6 +311,21 @@ try {
     `${uiTotal} vs ${boston?.totals.count}`
   );
 
+  await page.locator('[data-track="card_city_chicago"]').click();
+  await page.waitForTimeout(1200);
+  const chicagoChip = (
+    await page.locator("[data-map-zone]").first().innerText()
+  ).trim();
+  check(
+    "Chicago mostra setor legível (sem ZIP)",
+    !/area\s*\d{4,5}/i.test(chicagoChip) && !/^\d{5}$/.test(chicagoChip),
+    chicagoChip.slice(0, 40)
+  );
+  await page.mouse.move(10, 10);
+  await page.locator("#topo").screenshot({ path: `${out}/10-chicago.png` });
+  await page.locator('[data-track="card_city_boston"]').click();
+  await page.waitForTimeout(900);
+
   await page.locator('[data-track="hero_tab_trades"]').click();
   await page.locator('[data-track^="p1_trade_"]').first().waitFor({ timeout: 20000 });
   check(
@@ -326,6 +365,85 @@ try {
 }
 
 await context.close();
+
+// Busca por cidade, bairro e ZIP no campo do herói.
+{
+  const searchContext = await browser.newContext({
+    viewport: { width: 1500, height: 1200 },
+  });
+  const searchPage = await searchContext.newPage();
+  try {
+    await searchPage.goto(`${base}/en`, {
+      waitUntil: "networkidle",
+      timeout: 60000,
+    });
+    const searchInput = searchPage.locator(
+      'input[placeholder="Search by city, neighborhood or ZIP"]'
+    );
+    await searchInput.waitFor({ timeout: 30000 });
+    check(
+      "Placeholder da busca por cidade/bairro/ZIP",
+      await searchInput.isVisible(),
+      "placeholder"
+    );
+    await searchPage.locator("[data-map-zone]").first().waitFor({
+      timeout: 30000,
+    });
+
+    await searchInput.fill("Boston");
+    await searchInput.press("Enter");
+    await searchPage.waitForTimeout(1200);
+    const cityTotal = Number(
+      await searchPage
+        .locator("[data-map-total]")
+        .first()
+        .getAttribute("data-map-total")
+    );
+    check(
+      "Busca por cidade (Boston)",
+      Number.isFinite(cityTotal) && cityTotal === boston?.totals.count,
+      `${cityTotal} vs ${boston?.totals.count}`
+    );
+    await searchPage.mouse.move(10, 10);
+    await searchPage
+      .locator("#topo")
+      .screenshot({ path: `${out}/08-search-boston.png` });
+
+    await searchInput.fill("Dorchester");
+    await searchInput.press("Enter");
+    await searchPage
+      .getByText("This is happening near you", { exact: true })
+      .waitFor({ timeout: 10000 });
+    const searchModal = searchPage
+      .locator("div.fixed.inset-0")
+      .filter({ hasText: "This is happening" })
+      .first();
+    check(
+      "Busca por bairro abre o teaser",
+      (await searchModal.innerText()).includes("Dorchester"),
+      "Dorchester"
+    );
+    await searchModal.click({ position: { x: 5, y: 5 } });
+    await searchPage.waitForTimeout(300);
+
+    await searchInput.fill("02124");
+    await searchInput.press("Enter");
+    await searchPage.waitForTimeout(1200);
+    check(
+      "Busca por ZIP mantém o fluxo",
+      (await searchPage.getByText("ZIP 02124", { exact: false }).count()) > 0,
+      "ZIP 02124"
+    );
+    const strip = searchPage
+      .locator("section")
+      .filter({ hasText: "Neighborhoods and sectors with active work" })
+      .first();
+    await strip.screenshot({ path: `${out}/09-areas-strip.png` });
+  } catch (exc) {
+    check("Busca cidade/bairro/ZIP", false, String(exc).slice(0, 160));
+  }
+  await searchContext.close();
+}
 
 // Mobile: o seletor visível é o do herói; o do cartão não duplica.
 {
@@ -450,6 +568,11 @@ await context.close();
         enState.pt === "false" &&
         enTotal > 0 &&
         enState.body.includes(enFormatted) &&
+        enState.body.includes(
+          `${new Intl.NumberFormat("en-US").format(areasTotal)} areas`
+        ) &&
+        enState.body.includes("Neighborhoods and sectors with active work") &&
+        !enState.body.includes("ZIPs covered") &&
         enState.body.includes("The owner just asked") &&
         enState.body.includes("From a small repair to a full build") &&
         enState.body.toLowerCase().includes("all cities") &&
@@ -475,6 +598,9 @@ await context.close();
         .getAttribute("data-map-total")
     );
     const ptFormatted = new Intl.NumberFormat("pt-BR").format(ptTotal);
+    const ptPlaceholder = await localePage
+      .locator('input[placeholder="Digite sua cidade, bairro ou ZIP"]')
+      .isVisible();
     const ptState = await localePage.evaluate(() => ({
       lang: document.documentElement.lang,
       href: location.pathname,
@@ -485,7 +611,13 @@ await context.close();
       ptState.href.startsWith("/pt") &&
         ptState.lang === "pt-BR" &&
         ptTotal > 0 &&
+        ptPlaceholder &&
         ptState.body.includes(ptFormatted) &&
+        ptState.body.includes(
+          `${new Intl.NumberFormat("pt-BR").format(areasTotal)} áreas`
+        ) &&
+        ptState.body.includes("Bairros e setores com trabalho ativo") &&
+        !ptState.body.includes("ZIPs cobertos") &&
         ptState.body.includes("Do serviço pequeno à obra completa") &&
         ptState.body.toLowerCase().includes("todas as cidades") &&
         ptState.body.includes("oportunidades registradas") &&
