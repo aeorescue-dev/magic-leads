@@ -192,3 +192,35 @@ frescos (<24 h) e a agregação ao vivo do separador Pre-inspection.
 Nenhuma sugestão de subida a produção foi feita. As correções só entram depois
 desta auditoria verde; o deploy deve correr o índice e a migração de cidades
 (idempotentes) e ser validado com os mesmos scripts de consistência.
+
+## 12. Deploy de produção — 2026-11-15 (`7b2a0fd`)
+
+- Merge **fast-forward** de `feat/territory-view-preview` em `master` e push
+  `d103aac..7b2a0fd`; Railway deployment **SUCCESS**.
+- **Arranque:** `[DB] idx_leads_geo criado em 789 ms` na primeira subida (base
+  de 135.951 linhas, volume `/data`), seguido de `[GEO] warmup` Boston 32 ms ·
+  NYC 25 ms · Dallas 2 ms · Chicago 5 ms. `idx_leads_geo` já existe
+  (idempotente) nos restarts seguintes.
+- **Runbook `--latency-only` (produção):**
+
+| Cidade | db min / mediana / max |
+|---|---|
+| Boston | 1,8 / 1,8 / 2,5 ms |
+| NYC | 23,3 / 24,7 / 26,6 ms |
+| Dallas | 1,6 / 1,8 / 2,0 ms |
+| Chicago | 4,4 / 6,5 / 7,6 ms |
+
+- **Audit completo em `www.magicleads.app` (`ALL PASS`):** Boston lista = painel
+  = feed **384**; Dorchester **58** no feed e na linha; deadline only **383**;
+  NYC **9.703**; frescos com **17 selos** e **5 pins âmbar**; toggle liga e
+  filtra; pedido `territories` do Pre-inspection presente.
+- **Base de produção (leitura direta em `/data/leads.db`):**
+  `idx_leads_geo` com `created_at` e plano **COVERING INDEX**; 135.951 leads;
+  Boston 0,4 ms · NYC 9,5 ms (máx. 14,4) · Dallas 0,9 ms · Chicago 2,4 ms;
+  `quick_check = ok`.
+- **Observação:** a conta de demonstração `demo@magicleads.app` está com o
+  plano expirado (“Access paused”). O gate `_require_active_access` devolve
+  **402** em `territories`, por isso o painel Pre-inspection cai no snapshot
+  (sem frescos) nessa conta. Clientes com acesso ativo recebem a agregação ao
+  vivo, como validado localmente e no benchmark de produção. Renovar o plano
+  demo (ou usar uma conta de validação dedicada) é uma decisão de produto.
