@@ -9488,6 +9488,30 @@ async def opportunity_insights(
     return opportunity_workflow.insights(kind=kind, window_days=window_days)
 
 
+@app.get("/api/opportunities/territories")
+async def opportunity_territories(
+    city: str,
+    response: Response,
+    kind: str = "preventive",
+    days: int = 30,
+    category: Optional[str] = None,
+    user: dict = Depends(_get_current_user),
+):
+    """Agregado territorial (ZIP x nicho) para a vista de mapa/zonas.
+
+    Uma única query `GROUP BY` devolve apenas `zonas x nichos` linhas; o
+    resultado é estável durante 60 s, pelo que pode ser cacheado no browser.
+    """
+    await _require_active_access(user)
+    if not str(city or "").strip():
+        raise HTTPException(status_code=400, detail="city_required")
+    result = opportunity_workflow.territories(
+        city=city, kind=kind, days=days, category=category
+    )
+    response.headers["Cache-Control"] = "private, max-age=60"
+    return result
+
+
 @app.post("/api/admin/phase1/run")
 async def admin_phase1_run(
     include_permits: bool = True,

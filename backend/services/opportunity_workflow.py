@@ -583,6 +583,120 @@ class OpportunityWorkflowService:
             ],
         }
 
+    def territories(
+        self,
+        *,
+        city: str,
+        kind: str = "preventive",
+        days: int = 30,
+        category: Optional[str] = None,
+        max_zones: int = 200,
+    ) -> dict:
+        """Agrega oportunidades por zona (ZIP) e nicho, em SQL.
+
+        Diferente de `insights()`, não carrega linhas para Python: o GROUP BY
+        devolve no máximo `zonas x nichos` linhas (tipicamente < 400), pelo que
+        o custo não cresce com o volume da cidade. A janela usa o mesmo campo
+        de `insights` (`received_at`, com fallback para `created_at`).
+        """
+        city = str(city or "").strip()
+        if not city:
+            raise ValueError("city é obrigatório")
+        kind = str(kind or "preventive").strip() or "preventive"
+        days = max(1, min(int(days or 30), 365))
+        category = str(category or "").strip() or None
+
+        clauses = [
+            "source_kind = ?",
+            "UPPER(TRIM(city)) = UPPER(TRIM(?))",
+            "LENGTH(TRIM(COALESCE(zip_code, ''))) >= 5",
+            "date(COALESCE(received_at, created_at)) >= date('now', ?)",
+        ]
+        params: list = [kind, city, f"-{days} days"]
+        if category:
+            clauses.append("category = ?")
+            params.append(category)
+        where = " AND ".join(clauses)
+
+        critical_sql = (
+            "LOWER(TRIM(COALESCE(severity, ''))) IN "
+            "('critical','immediate','emergency','class_1','class_c')"
+        )
+
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                f"""SELECT SUBSTR(TRIM(zip_code), 1, 5) AS zip,
+                           COALESCE(NULLIF(TRIM(category), ''), 'Unclassified') AS niche,
+                           COUNT(*) AS n,
+                           SUM(CASE WHEN status = 'available' THEN 1 ELSE 0 END) AS available,
+                           SUM(CASE WHEN {critical_sql} THEN 1 ELSE 0 END) AS critical,
+                           MIN(NULLIF(TRIM(COALESCE(compliance_deadline, '')), ''))
+                               AS next_deadline
+                    FROM opportunity_workflow
+                    WHERE {where}
+                    GROUP BY zip, niche
+                    ORDER BY zip""",
+                tuple(params),
+            ).fetchall()
+        finally:
+            conn.close()
+
+        zones: dict[str, dict] = {}
+        niches: dict[str, int] = {}
+        for row in rows:
+            zip_code = str(row["zip"] or "").strip()
+            if len(zip_code) < 5:
+                continue
+            zone = zones.setdefault(
+                zip_code,
+                {
+                    "zip": zip_code,
+                    "total": 0,
+                    "available": 0,
+                    "critical": 0,
+                    "next_deadline": None,
+                    "niches": [],
+                },
+            )
+            count = int(row["n"] or 0)
+            zone["total"] += count
+            zone["available"] += int(row["available"] or 0)
+            zone["critical"] += int(row["critical"] or 0)
+            deadline = row["next_deadline"]
+            if deadline and (
+                zone["next_deadline"] is None or deadline < zone["next_deadline"]
+            ):
+                zone["next_deadline"] = deadline
+            zone["niches"].append({"key": row["niche"], "n": count})
+            niches[row["niche"]] = niches.get(row["niche"], 0) + count
+
+        zone_list = sorted(
+            zones.values(), key=lambda item: (-item["total"], item["zip"])
+        )[: max(1, int(max_zones))]
+        for zone in zone_list:
+            zone["niches"].sort(key=lambda item: (-item["n"], item["key"]))
+
+        return {
+            "city": city,
+            "kind": kind,
+            "window_days": days,
+            "generated_at": _now_iso(),
+            "totals": {
+                "count": sum(int(zone["total"]) for zone in zone_list),
+                "available": sum(int(zone["available"]) for zone in zone_list),
+                "critical": sum(int(zone["critical"]) for zone in zone_list),
+                "zones": len(zone_list),
+            },
+            "zones": zone_list,
+            "niches": [
+                {"key": key, "n": count}
+                for key, count in sorted(
+                    niches.items(), key=lambda item: (-item[1], item[0])
+                )
+            ],
+        }
+
     def prune_old(self, retention_days: int = 90, dry_run: bool = False) -> int:
         """Purga oportunidades antigas, preservando ciclos ativos.
 
