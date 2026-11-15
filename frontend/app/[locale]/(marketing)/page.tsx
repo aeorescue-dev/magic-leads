@@ -1,14 +1,14 @@
 'use client';
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { useI18n, type Lang } from "@/lib/i18n";
+import { useI18n, formatNumber, numberLocale, type Lang } from "@/lib/i18n";
 import { fetchPublicMetrics } from "@/lib/api-client";
 import type { PublicMetrics } from "@/lib/api-client";
 import { FoldWave, useLandingShell } from "@/components/landing/LandingShell";
 import { LiveTradeGrid } from "@/components/landing/LiveTradeGrid";
 import { PublicLiveMap } from "@/components/landing/PublicLiveMap";
 import ForEveryoneSection from "@/components/landing/ForEveryoneSection";
-import { Building2, Phone, ShieldCheck, Megaphone, Search, Users, Mail, MessageCircle, MessageSquare, MapPin, Clock } from "lucide-react";
+import { Building2, Phone, ShieldCheck, Megaphone, Search, Users, Mail, MessageCircle, MessageSquare, MapPin, Clock, MousePointerClick } from "lucide-react";
 
 // ------------------------------------------------------------------
 // Tipos e dados ilustrativos do "painel amostra"
@@ -383,6 +383,7 @@ export default function LandingPage() {
     ),
     nowTick,
   );
+  const updatedLabel = t("landing.updatedAgo").replace("{time}", freshness);
 
   const fmtTimer = (s: number) =>
     `${Math.floor(s / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;
@@ -392,7 +393,7 @@ export default function LandingPage() {
   const closedJobs = Math.floor(estimatedVisits * closeRate * 10) / 10;
   const monthlyRevenue = Math.floor(closedJobs * ticketValue);
   const costPerLead = (520 / 300).toFixed(2);
-  const decimalLocale = lang === "pt" ? "pt-BR" : lang === "es" ? "es-ES" : "en-US";
+  const decimalLocale = numberLocale(lang);
   const formatDecimal = (value: number) =>
     value.toLocaleString(decimalLocale, {
       minimumFractionDigits: 1,
@@ -485,22 +486,14 @@ export default function LandingPage() {
                     <span className="relative inline-flex h-2 w-2 rounded-full bg-[#10b981]" />
                   </span>
                   <span className="text-[11px] font-bold text-[#0b1220]">
-                    {heroTotal > 0 ? `${heroTotal.toLocaleString("en-US")} ${t("landing.p1Opportunities")}` : t("landing.p1Loading")}
+                    {heroTotal > 0 ? `${formatNumber(heroTotal, lang)} ${t("landing.p1Opportunities")}` : t("landing.p1Loading")}
                   </span>
                 </div>
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-4 text-[10px] sm:pl-0">
                   <span className="hidden h-1 w-1 rounded-full bg-[#cbd5e1] sm:inline-block" />
                   <span className="font-semibold text-[#64748b]">
-                    {t("landing.updatedAgo").replace("{time}", freshness)}
+                    {updatedLabel}
                   </span>
-                  {new24 > 0 && (
-                    <>
-                      <span className="h-1 w-1 rounded-full bg-[#cbd5e1]" />
-                      <span className="font-bold text-[#0a8f65]">
-                        +{new24.toLocaleString("en-US")} {t("landing.statNew24")}
-                      </span>
-                    </>
-                  )}
                 </div>
               </div>
 
@@ -531,7 +524,7 @@ export default function LandingPage() {
                 </div>
               )}
 
-              <div className="mt-4 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+              <div className="mt-4 grid grid-cols-2 gap-2 lg:hidden">
                 {CITIES.map((cityName) => {
                   const active = !heroZip && heroCity === cityName;
                   return (
@@ -632,7 +625,7 @@ export default function LandingPage() {
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-1.5 pb-1.5">
+                  <div className="hidden flex-wrap items-center gap-1.5 pb-1.5 lg:flex">
                     <span className="mr-0.5 text-[8px] font-black uppercase tracking-[0.14em] text-[#94a3b8]">
                       {t("landing.liveMap.city_label")}
                     </span>
@@ -668,7 +661,8 @@ export default function LandingPage() {
                       </span>
                     ) : null}
                   </div>
-                  <p className="pb-2.5 text-[10px] font-medium leading-snug text-[#64748b]">
+                  <p className="mb-2.5 flex items-start gap-1.5 rounded-lg border border-[#d9f3e8] bg-[#f0fdf7] px-2.5 py-1.5 text-[11px] font-semibold leading-snug text-[#0f5132]">
+                    <MousePointerClick className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#0a8f65]" />
                     {t("landing.liveMap.hint")}
                   </p>
 
@@ -725,19 +719,22 @@ export default function LandingPage() {
                 </div>
                 <div className="mt-3 flex items-baseline gap-2">
                   <p className="mono-data text-[2.15rem] font-black leading-none tracking-[-0.05em] text-[#0b1220] tabular-nums">
-                    {activeLeads > 0 ? activeLeads.toLocaleString("en-US") : "—"}
+                    {activeLeads > 0 ? formatNumber(activeLeads, lang) : "—"}
                   </p>
                   <span className="rounded-full border border-[#d9f3e8] bg-[#effbf5] px-2 py-0.5 text-[8px] font-black uppercase tracking-[0.08em] text-[#0a8f65]">
                     {t("landing.statActiveUnit")}
                   </span>
                 </div>
+                <p className="mt-1 text-[8.5px] font-bold uppercase tracking-[0.12em] text-[#94a3b8]">
+                  {t("landing.p1AllCities")}
+                </p>
                 <p className="mt-2 text-[10.5px] font-semibold leading-relaxed text-[#64748b]">
-                  {hasMetrics ? leadsBank.toLocaleString("en-US") : "—"} {t("landing.statBase")}
+                  {hasMetrics ? formatNumber(leadsBank, lang) : "—"} {t("landing.statBase")}
                   {new24 > 0 && (
                     <>
                       {" · "}
                       <span className="text-[#0a8f65]">
-                        {new24.toLocaleString("en-US")} {t("landing.statNew24")}
+                        {formatNumber(new24, lang)} {t("landing.statNew24")}
                       </span>
                     </>
                   )}
@@ -751,7 +748,7 @@ export default function LandingPage() {
                 </div>
                 <div className="mt-3 flex items-baseline gap-2">
                   <p className="mono-data text-[2.15rem] font-black leading-none tracking-[-0.05em] text-[#0b1220] tabular-nums">
-                    {activeOwners > 0 ? activeOwners.toLocaleString("en-US") : "—"}
+                    {activeOwners > 0 ? formatNumber(activeOwners, lang) : "—"}
                   </p>
                   <span className="rounded-full border border-[#ede9fe] bg-[#f5f3ff] px-2 py-0.5 text-[8px] font-black uppercase tracking-[0.08em] text-[#6d28d9]">
                     {activeOwnerPct}%
@@ -760,7 +757,7 @@ export default function LandingPage() {
                 <p className="mt-2 text-[10.5px] font-semibold leading-relaxed text-[#64748b]">
                   {activeOwnerPct}% {t("landing.statOwnersUnit")}
                   {" · "}
-                  {hasMetrics ? withOwner.toLocaleString("en-US") : "—"} {t("landing.statOwnersBase")}
+                  {hasMetrics ? formatNumber(withOwner, lang) : "—"} {t("landing.statOwnersBase")}
                 </p>
               </div>
 
@@ -774,7 +771,7 @@ export default function LandingPage() {
                     {citiesCount}
                   </p>
                   <span className="rounded-full border border-[#e7e3d9] bg-[#f8f7f3] px-2 py-0.5 text-[8px] font-black normal-case tracking-[0.04em] text-[#64748b]">
-                    {activeZips > 0 ? `${activeZips} ZIPs` : "ZIPs"}
+                    {activeZips > 0 ? `${formatNumber(activeZips, lang)} ZIPs` : "ZIPs"}
                   </span>
                 </div>
                 <p className="mt-2 text-[10.5px] font-semibold leading-relaxed text-[#64748b]">
@@ -790,7 +787,7 @@ export default function LandingPage() {
               </span>
               <span className="inline-flex items-center gap-1.5 text-[9.5px] font-bold text-[#64748b]">
                 <Clock className="h-3.5 w-3.5 text-[#10b981]" />
-                {t("landing.updatedAgo").replace("{time}", freshness)}
+                {updatedLabel}
               </span>
             </div>
           </div>
@@ -1246,13 +1243,13 @@ export default function LandingPage() {
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-[0.16em] text-white/35">{t("landing.ticketAvg")}</p>
-                  <p className="mono-data mt-2 text-4xl font-black tracking-tight text-white sm:text-5xl">${ticketValue.toLocaleString("en-US")}</p>
+                  <p className="mono-data mt-2 text-4xl font-black tracking-tight text-white sm:text-5xl">${formatNumber(ticketValue, lang)}</p>
                 </div>
                 <span className="mono-data grid h-10 w-10 place-items-center rounded-xl bg-[#34e0a1]/10 text-lg font-black text-[#34e0a1] ring-1 ring-[#34e0a1]/20">$</span>
               </div>
               <input type="range" min={roiSegment.min} max={roiSegment.max} step={roiSegment.step} value={ticketValue} onChange={(e) => setTicketValue(Number(e.target.value))} className="range-dark mt-5 w-full" />
               <div className="mt-2 flex justify-between text-[10px] font-bold uppercase tracking-widest text-white/25">
-                <span>${roiSegment.min.toLocaleString("en-US")}</span><span>${roiSegment.max.toLocaleString("en-US")}</span>
+                <span>${formatNumber(roiSegment.min, lang)}</span><span>${formatNumber(roiSegment.max, lang)}</span>
               </div>
               <p className="mt-2 text-[10px] text-white/30">{roiText.ticketNote}</p>
 
@@ -1287,8 +1284,8 @@ export default function LandingPage() {
                   <span className="rounded-full bg-white/20 px-3 py-1 text-[10px] font-black uppercase tracking-[0.12em] backdrop-blur">{t("landing.revEst")}</span>
                   <span className="mono-data text-[10px] font-bold text-white/60">{Math.round(closeRate * 100)}% · 60m</span>
                 </div>
-                <p className="font-display mt-5 text-5xl font-black tracking-[-0.04em] text-white sm:text-6xl">${monthlyRevenue.toLocaleString("en-US")}<span className="ml-1 text-xl font-bold tracking-normal text-white/55">{t("landing.perMo")}</span></p>
-                <p className="mt-2 text-sm font-bold text-white/85">{L.aboutJobs(jobCountLabel, ticketValue.toLocaleString("en-US"))}</p>
+                <p className="font-display mt-5 text-5xl font-black tracking-[-0.04em] text-white sm:text-6xl">${formatNumber(monthlyRevenue, lang)}<span className="ml-1 text-xl font-bold tracking-normal text-white/55">{t("landing.perMo")}</span></p>
+                <p className="mt-2 text-sm font-bold text-white/85">{L.aboutJobs(jobCountLabel, formatNumber(ticketValue, lang))}</p>
               </div>
 
               <div className="relative my-6 space-y-2.5 rounded-xl border border-white/15 bg-black/15 p-4 text-sm font-semibold backdrop-blur-sm">

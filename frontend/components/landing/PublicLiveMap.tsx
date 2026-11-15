@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowRight, MapPin } from "lucide-react";
 
-import { useI18n } from "@/lib/i18n";
+import { useI18n, formatNumber } from "@/lib/i18n";
 import {
   fetchLiveMap,
   type LiveMapCity,
@@ -82,7 +82,7 @@ export function PublicLiveMap({
   onUnavailable?: () => void;
   className?: string;
 }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
   const layerRef = useRef<any>(null);
@@ -91,6 +91,7 @@ export function PublicLiveMap({
   const [data, setData] = useState<LiveMapResponse | null>(null);
   const [failed, setFailed] = useState(false);
   const [ready, setReady] = useState(false);
+  const [showAllZones, setShowAllZones] = useState(false);
 
   useEffect(() => {
     selectRef.current = onZoneSelect;
@@ -120,6 +121,10 @@ export function PublicLiveMap({
   const active: LiveMapCity | undefined = data?.cities.find(
     (item) => item.label === city
   );
+
+  useEffect(() => {
+    setShowAllZones(false);
+  }, [city]);
 
   useEffect(() => {
     if (active) onTotalChange?.(active.totals.count);
@@ -173,24 +178,25 @@ export function PublicLiveMap({
     if (!L || !map || !layer || !ready) return;
 
     layer.clearLayers();
-    const zones = (active?.zones ?? []).filter(
-      (zone) => zone.lat !== null && zone.lng !== null
-    );
+    const zones = (active?.zones ?? [])
+      .filter((zone) => zone.lat !== null && zone.lng !== null)
+      .slice(0, 3);
     const bounds: Array<[number, number]> = [];
 
     for (const zone of zones) {
+      const countLabel = formatNumber(zone.count, lang);
       const size = Math.min(54, 34 + Math.round(Math.log2(zone.count + 1) * 4));
       const icon = L.divIcon({
         className: "pub-bubble-wrap",
         html: `<div class="pub-bubble${zone.fresh > 0 ? " is-fresh" : ""}">${
-          zone.count
+          countLabel
         }${zone.fresh > 0 ? '<i class="pub-fresh-dot" aria-hidden="true"></i>' : ""}</div>`,
         iconSize: [size, size],
         iconAnchor: [size / 2, size / 2],
       });
       const marker = L.marker([zone.lat as number, zone.lng as number], {
         icon,
-        title: `${zone.label} · ${zone.count}`,
+        title: `${zone.label} · ${countLabel}`,
         riseOnHover: true,
       });
       marker.on("click", () => selectRef.current(zone, active?.label ?? city));
@@ -215,7 +221,10 @@ export function PublicLiveMap({
     );
   }
 
-  const topZones = (active?.zones ?? []).slice(0, 3);
+  const allZones = active?.zones ?? [];
+  const topZones = allZones.slice(0, 3);
+  const extraCount = Math.max(0, allZones.length - topZones.length);
+  const chipZones = showAllZones ? allZones : topZones;
   const fresh = active?.totals.fresh ?? 0;
 
   return (
@@ -238,22 +247,35 @@ export function PublicLiveMap({
               data-map-total={active.totals.count}
               className="rounded-full bg-white/95 px-2.5 py-1 text-[10px] font-black text-[#0b1220] shadow-sm"
             >
-              {active.totals.count.toLocaleString("en-US")}{" "}
+              {formatNumber(active.totals.count, lang)}{" "}
               {t("landing.p1Opportunities")}
             </span>
             {fresh > 0 ? (
               <span className="inline-flex items-center gap-1 rounded-full border border-[#f59e0b]/40 bg-[#fffbeb]/95 px-2 py-1 text-[9.5px] font-black uppercase tracking-[0.06em] text-[#b45309] shadow-sm">
                 <span className="h-1.5 w-1.5 rounded-full bg-[#f59e0b]" />
-                {fresh.toLocaleString("en-US")} {t("landing.statNew24")}
+                {formatNumber(fresh, lang)} {t("landing.statNew24")}
               </span>
             ) : null}
           </div>
         ) : null}
       </div>
 
+      {fresh > 0 ? (
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[9.5px] font-semibold text-[#64748b]">
+          <span className="inline-flex items-center gap-1">
+            <span className="h-2 w-2 rounded-full bg-[#f59e0b] shadow-[0_0_8px_rgba(245,158,11,0.65)]" />
+            {t("landing.liveMap.fresh_legend")}
+          </span>
+        </div>
+      ) : null}
+
       {topZones.length > 0 ? (
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {topZones.map((zone) => (
+        <div
+          className={`mt-2 flex flex-wrap gap-1.5 ${
+            showAllZones ? "max-h-28 overflow-y-auto pr-1" : ""
+          }`}
+        >
+          {chipZones.map((zone) => (
             <button
               key={zone.slug}
               type="button"
@@ -269,16 +291,30 @@ export function PublicLiveMap({
               <MapPin className="h-3 w-3 text-[#10b981] transition group-hover:text-white" />
               {zone.label}
               <span className="text-[#64748b] transition group-hover:text-white/80">
-                {zone.count}
+                {formatNumber(zone.count, lang)}
               </span>
               {zone.fresh > 0 ? (
                 <span className="rounded-full bg-[#fef3c7] px-1 text-[9px] font-black text-[#b45309] transition group-hover:bg-white/20 group-hover:text-white">
-                  +{zone.fresh}
+                  +{formatNumber(zone.fresh, lang)}
                 </span>
               ) : null}
               <ArrowRight className="h-3 w-3 opacity-50 transition group-hover:translate-x-0.5 group-hover:opacity-100" />
             </button>
           ))}
+          {extraCount > 0 && !showAllZones ? (
+            <button
+              type="button"
+              data-map-more
+              onClick={() => setShowAllZones(true)}
+              aria-expanded={showAllZones}
+              className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-dashed border-[#10b981]/50 bg-[#effbf5] px-2.5 py-1 text-[10.5px] font-black text-[#0a8f65] transition hover:border-[#10b981] hover:bg-[#e6f9f0] active:scale-95"
+            >
+              {t("landing.liveMap.more_areas").replace(
+                "{n}",
+                formatNumber(extraCount, lang)
+              )}
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>

@@ -27,6 +27,18 @@ const HTML_LANG: Record<Lang, string> = {
   es: "es-ES",
 };
 
+/** Locale para `Intl.NumberFormat` (números, não o código de tradução). */
+export function numberLocale(lang: Lang): string {
+  return HTML_LANG[lang] ?? "en-US";
+}
+
+/** Formata contagens com o separador do idioma (7.789 em PT-BR, 7,789 em EN). */
+export function formatNumber(value: number | null | undefined, lang: Lang): string {
+  const num =
+    typeof value === "number" && Number.isFinite(value) ? value : 0;
+  return new Intl.NumberFormat(numberLocale(lang)).format(num);
+}
+
 const STORAGE_KEY = "NEXT_LOCALE";
 const COOKIE_KEY = "NEXT_LOCALE";
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // 1 ano

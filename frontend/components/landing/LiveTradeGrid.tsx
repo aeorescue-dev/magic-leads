@@ -25,7 +25,7 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import { useI18n } from "@/lib/i18n";
+import { useI18n, formatNumber } from "@/lib/i18n";
 import { fetchTradeGrid, type TradeGridResponse } from "@/lib/api-client";
 import { ActivityTicker } from "@/components/landing/ActivityTicker";
 
@@ -111,7 +111,7 @@ export function LiveTradeGrid({
   preview?: boolean;
   onTotalChange?: (total: number) => void;
 }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [cityState, setCityState] = useState<string>("New York");
   const [zipInput, setZipInput] = useState("");
   const [zipState, setZipState] = useState("");
@@ -341,7 +341,7 @@ export function LiveTradeGrid({
                 {option}
                 {count > 0 && (
                   <span className={`rounded-full px-1.5 py-0.5 text-[9px] ${active ? "bg-white/15 text-white/70" : "bg-[#f1f5f9] text-[#94a3b8]"}`}>
-                    {count.toLocaleString("en-US")}
+                    {formatNumber(count, lang)}
                   </span>
                 )}
               </button>
@@ -367,7 +367,7 @@ export function LiveTradeGrid({
               ? t("landing.p1Loading")
               : error
                 ? t("landing.p1Error")
-                : `${(data?.total ?? 0).toLocaleString("en-US")} ${t("landing.p1Opportunities")} · ${regionLabel}`}
+                : `${formatNumber(data?.total ?? 0, lang)} ${t("landing.p1Opportunities")} · ${regionLabel}`}
           </span>
           <span className="text-[#94a3b8]">{t("landing.p1Last7")}</span>
         </div>
@@ -444,7 +444,7 @@ export function LiveTradeGrid({
                     <span className={`mt-1 rounded-full ${preview ? "h-1 w-1" : "h-1.5 w-1.5"} ${active ? "bg-[#04120d]" : "bg-[#10b981]/70"}`} />
                   </div>
                   <p className={`mono-data font-black leading-none tracking-[-0.04em] tabular-nums ${preview ? "mt-2 text-[1.45rem]" : "mt-4 text-[2rem]"} ${active ? "text-[#04120d]" : "text-[#0b1220]"}`}>
-                    {row.count.toLocaleString("en-US")}
+                    {formatNumber(row.count, lang)}
                   </p>
                   <p className={`font-bold leading-tight ${preview ? "mt-1.5 text-[10px]" : "mt-1.5 text-[11.5px]"} ${active ? "text-[#04120d]" : "text-[#0b1220]"}`}>{row.label}</p>
                   <p className={`mt-0.5 font-bold uppercase tracking-[0.12em] ${preview ? "text-[6.5px]" : "text-[8.5px]"} ${active ? "text-[#04120d]/60" : "text-[#94a3b8]"}`}>{t("landing.p1Active")}</p>
@@ -467,10 +467,10 @@ export function LiveTradeGrid({
                 <p className={`font-bold uppercase tracking-[0.14em] text-[#34e0a1] ${preview ? "text-[7px]" : "text-[9px]"}`}>{t("landing.p1Selected")}</p>
                 <p className={`font-bold tracking-[-0.01em] ${preview ? "mt-1 text-[13px]" : "mt-1.5 text-lg"}`}>
                   {activeRow.label} <span className="text-white/30">·</span>{" "}
-                  <span className="mono-data">{activeRow.count.toLocaleString("en-US")}</span>{" "}
+                  <span className="mono-data">{formatNumber(activeRow.count, lang)}</span>{" "}
                   <span className={`font-medium text-white/45 ${preview ? "text-[9px]" : "text-[12px]"}`}>{t("landing.p1Active")}</span>
                 </p>
-                <p className={`text-white/40 ${preview ? "mt-1 text-[8.5px]" : "mt-1 text-[10.5px]"}`}>{regionLabel} · {t("landing.p1Last7")} · {(data?.total ?? visibleTotal).toLocaleString("en-US")} {t("landing.p1Opportunities")}</p>
+                <p className={`text-white/40 ${preview ? "mt-1 text-[8.5px]" : "mt-1 text-[10.5px]"}`}>{regionLabel} · {t("landing.p1Last7")} · {formatNumber(data?.total ?? visibleTotal, lang)} {t("landing.p1Opportunities")}</p>
                 <div className={`flex flex-wrap gap-x-5 gap-y-1.5 font-bold uppercase tracking-[0.1em] text-white/55 ${preview ? "hidden" : "mt-3 text-[10px]"}`}>
                   <span className="inline-flex items-center gap-1.5"><Clock className="h-3.5 w-3.5 text-[#34e0a1]" /> {t("landing.p1Exclusive")}</span>
                   <span className="inline-flex items-center gap-1.5"><ShieldCheck className="h-3.5 w-3.5 text-[#34e0a1]" /> {t("landing.p1NoAuction")}</span>

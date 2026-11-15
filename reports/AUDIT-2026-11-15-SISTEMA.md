@@ -237,21 +237,26 @@ desta auditoria verde; o deploy deve correr o índice e a migração de cidades
   **6,5 MB**, plano `SEARCH … USING INDEX … (city=? AND date_reported>?)`.
 - **Produção (cópia de 135.951 linhas):** as 4 cidades numa query em
   **16,1 ms** (15,0–16,9 ms); cache in-process de 60 s → ≤1 cálculo/min.
-- **Audit local `audit-landing-map.mjs`: ALL PASS** — endpoint 0,6–1,8 ms,
-  mapa por defeito, 5 bolhas + 3 chips, troca de cidade (Boston 176),
-  separador By trade, teaser com “Dorchester · 26” e formulário em modo
-  **Create account**.
-- **UX guiada (v2):** instrução “Select your city or click a neighborhood to
-  explore.”, seletor de cidade dentro do cartão sincronizado com o herói,
-  ícones de mapa nos chips, setas `→` e hover/active nos bairros, abas com
-  borda e `aria-pressed`.
+- **Audit local `audit-landing-map.mjs`: ALL PASS** — endpoint 0,5–1,8 ms,
+  mapa por defeito, **3 bolhas + 3 chips + “+N áreas”**, troca de cidade
+  (Boston 176), separador By trade, teaser com “Dorchester · 26” e formulário
+  em modo **Create account**.
+- **Números e escopos (P0):** `Intl.NumberFormat` por locale — EN `7,788`,
+  PT-BR `7.788`; o herói/mapa são da cidade selecionada e a faixa inferior
+  identifica **“Todas as cidades”** (9.4xx global) para não parecer divergência.
+- **Mapa e descoberta (P1):** top 3 bolhas + botão **“+N áreas”** expansível,
+  legenda “New in the last 24h”, instrução em callout verde, e **um seletor
+  de cidade por breakpoint** (cartão em desktop, chips do herói em mobile).
+- **Copy (P2):** “novas oportunidades”, “oportunidades registradas”,
+  “Do serviço pequeno à obra completa” e “Todas as cidades”; removidos
+  “novas entradas” e “sinais na base”.
 - **i18n (v2):** o prefixo da URL manda (`/en` abre EN mesmo com cookie PT);
   trocar a bandeira **navega** para `/pt`/`/es` preservando query/hash;
   `<html lang>` = `en-US`/`pt-BR`/`es-ES`. Copy PT do mapa/teaser em **PT-BR**
   (“Isso está acontecendo perto de você”, “endereços”, “contatos”).
-- **Audit v2:** valida instrução, seletor do cartão, sincronização
-  cartão↔herói, `/en` com cookie PT, navegação da bandeira, `lang` e ausência
-  de PT-PT no teaser — **ALL PASS**.
+- **Audit v2/v4:** valida instrução e seletor, top 3 + expansão, legenda,
+  formatação por locale, escopos, `/en` com cookie PT, navegação da bandeira,
+  `lang` e ausência de PT-PT no teaser, mobile e kill switch — **ALL PASS**.
 - **Stacking (v3):** o mapa está isolado (`relative isolate z-0` +
   `isolation: isolate`); o header da landing passou a `z-[900]`, acima das
   camadas Leaflet e abaixo do modal (`z-[1000]`). O audit faz scroll e
@@ -260,6 +265,7 @@ desta auditoria verde; o deploy deve correr o índice e a migração de cidades
 - **Kill switch:** `PUBLIC_LIVE_MAP_ENABLED=0` → 503 `live_map_disabled`; o
   frontend esconde a aba Map e mantém “By trade”.
 - **Capturas:** `reports/landing-live-map-preview/01-hero-map.png`,
-  `02-hero-trades.png`, `03-teaser-modal.png`, `04-locale-en.png`,
-  `05-locale-pt-teaser.png`, `06-scroll-navbar.png`.
+  `01b-hero-areas.png`, `02-hero-trades.png`, `03-teaser-modal.png`,
+  `04-locale-en.png`, `05-locale-pt-teaser.png`, `06-scroll-navbar.png`,
+  `07-mobile-map.png`.
 - **Plano completo:** `docs/LANDING-LIVE-MAP-PLAN.md`.

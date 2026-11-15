@@ -81,14 +81,19 @@ cálculo corre no máximo **1×/min**, independentemente do tráfego.
 
 - O painel direito do herói ganhou as abas **Map** (defeito) e **By trade**
   (a grelha existente, sem regressões), com borda, hover e `aria-pressed`.
-- **Instrução explícita** no cartão: “Select your city or click a neighborhood
-  to explore.” (PT-BR/ES equivalentes).
-- **Seletor de cidade dentro do cartão** (New York/Boston/Dallas/Chicago) com
-  ícone de mapa, sincronizado com os chips do herói; os chips do herói também
-  têm ícone, `aria-pressed`, hover com elevação e estado `active`.
-- Mapa com bolhas de contagem, halo âmbar nos frescos, overlay
-  `N opportunities` + `N new in 24h`, e as 3 zonas mais quentes em chips com
-  seta `→`, hover verde e `aria-label` (“Explore {zone}”).
+- **Instrução explícita** num callout verde com ícone: “Select your city or
+  click a neighborhood to explore.” (PT-BR/ES equivalentes).
+- **Um seletor de cidade de cada vez:** pills no cartão em desktop; chips do
+  herói em mobile/tablet (`lg` breakpoint). Ambos com ícone de mapa,
+  `aria-pressed`, hover com elevação e `active`.
+- Mapa com **as 3 zonas principais** (sem sobreposição em NYC) e um botão
+  **`+N áreas`** que expande a lista de chips com scroll; halo âmbar nos
+  frescos, overlay `N opportunities` + `N new in 24h`, legenda
+  “New in the last 24h” e chips com seta `→`, hover verde e `aria-label`.
+- **Números por locale:** `Intl.NumberFormat` (`7.789` em PT-BR, `7,789` em
+  EN, `7.789` em ES) no herói, mapa, bolhas, chips, teaser, grelha e faixa.
+- **Escopos claros:** o herói/mapa mostram a cidade selecionada; a faixa
+  inferior diz **“Todas as cidades”** e mantém o total global + novas 24h.
 - ZIP muda automaticamente para “By trade” e mostra o chip `ZIP xxxxx`.
 - Clique numa zona abre o **teaser** no modal: `LIVE AREA · <cidade>`,
   `<zona>`, contagem + frescos, 3 benefícios e `AuthForm` já em modo
@@ -112,6 +117,9 @@ cálculo corre no máximo **1×/min**, independentemente do tráfego.
 - Copy PT do mapa/teaser revista para **PT-BR** (“Isso está acontecendo perto
   de você”, “endereços”, “contatos”), sem formas PT-PT (“moradas”,
   “contactos”, “perto de si”).
+- Copy de produto: **“novas oportunidades”** (não “novas entradas”),
+  **“oportunidades registradas”** (não “sinais na base”), “Do serviço pequeno
+  à obra completa” e a faixa identificada como **“Todas as cidades”**.
 
 ## 6. Ficheiros
 
@@ -135,15 +143,18 @@ node scripts/audit-landing-map.mjs
 
 Cobre: latência <50 ms, 4 cidades, igualdade com o trade grid, ausência de
 campos privados, piso de 5, frescos ≥3, coordenadas a 3 casas, ETag/304,
-instrução e seletor de cidade no cartão, sincronização cartão/herói, mapa por
-defeito, bolhas + chips, aba By trade, teaser e modo de registo. Inclui ainda
-**scroll com hit-test da navbar** (header, bandeira e CTA acima do mapa),
+instrução e seletor de cidade no cartão, sincronização cartão↔mapa, top 3
+bolhas + expansão `+N áreas`, legenda âmbar, formatação por locale
+(`7.788`/`7,788`), escopos “Todas as cidades”, copy PT-BR, aba By trade,
+teaser e modo de registo. Inclui ainda **scroll com hit-test da navbar**,
 **/en com cookie PT**, troca de bandeira para `/pt`, `lang=en-US`/`pt-BR`,
-copy PT-BR do teaser e regresso a `/en`. **ALL PASS** (endpoint 0,5–1,8 ms).
+regresso a `/en`, **mobile com seletor único do herói** e **kill switch**.
+**ALL PASS** (endpoint 0,5–1,8 ms).
 
 Capturas: `reports/landing-live-map-preview/01-hero-map.png`,
-`02-hero-trades.png`, `03-teaser-modal.png`, `04-locale-en.png`,
-`05-locale-pt-teaser.png`, `06-scroll-navbar.png`.
+`01b-hero-areas.png`, `02-hero-trades.png`, `03-teaser-modal.png`,
+`04-locale-en.png`, `05-locale-pt-teaser.png`, `06-scroll-navbar.png`,
+`07-mobile-map.png`.
 
 ## 8. Antes de produção
 

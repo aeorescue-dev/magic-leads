@@ -170,9 +170,14 @@ try {
   const bubbles = await page.locator(".pub-bubble").count();
   const chips = await page.locator("[data-map-zone]").count();
   check(
-    "Mapa renderiza bolhas e top zonas",
-    bubbles > 0 && chips > 0,
+    "Mapa renderiza as 3 zonas principais",
+    bubbles > 0 && bubbles <= 3 && chips === 3,
     `bubbles=${bubbles} chips=${chips}`
+  );
+  check(
+    "Legenda âmbar visível",
+    await page.getByText("New in the last 24h", { exact: true }).isVisible(),
+    "legend"
   );
   const cardCities = await page.locator('[data-track^="card_city_"]').count();
   const hintVisible = await page
@@ -185,7 +190,28 @@ try {
     cardCities === 4 && hintVisible,
     `cities=${cardCities} hint=${hintVisible}`
   );
+  await page.mouse.move(10, 10);
   await page.locator("#topo").screenshot({ path: `${out}/01-hero-map.png` });
+
+  const moreAreas = page.locator("[data-map-more]");
+  const hasMore = (await moreAreas.count()) > 0;
+  check(
+    "Chips mostram +áreas escondidas",
+    hasMore && (await moreAreas.first().innerText()).includes("+2"),
+    hasMore ? (await moreAreas.first().innerText()).trim() : "missing"
+  );
+  if (hasMore) {
+    await moreAreas.first().click();
+    await page.waitForTimeout(300);
+  }
+  const expandedChips = await page.locator("[data-map-zone]").count();
+  check(
+    "+áreas expande os chips",
+    expandedChips > chips,
+    `${chips} -> ${expandedChips}`
+  );
+  await page.mouse.move(10, 10);
+  await page.locator("#topo").screenshot({ path: `${out}/01b-hero-areas.png` });
 
   // A navbar tem de ficar sempre acima das camadas do Leaflet ao rolar.
   await page.evaluate(() => window.scrollTo(0, 340));
@@ -239,18 +265,18 @@ try {
     `${cardTotal} vs ${boston?.totals.count}`
   );
 
-  await page.locator('[data-track="hero_city_new_york"]').click();
+  await page.locator('[data-track="card_city_new_york"]').click();
   await page.waitForTimeout(900);
-  const heroNyTotal = Number(
+  const cardNyTotal = Number(
     await page.locator("[data-map-total]").first().getAttribute("data-map-total")
   );
   check(
-    "Chips do herói sincronizam o mapa (New York)",
-    Number.isFinite(heroNyTotal) && heroNyTotal === newYork?.totals.count,
-    `${heroNyTotal} vs ${newYork?.totals.count}`
+    "Seletor do cartão volta a New York",
+    Number.isFinite(cardNyTotal) && cardNyTotal === newYork?.totals.count,
+    `${cardNyTotal} vs ${newYork?.totals.count}`
   );
 
-  await page.locator('[data-track="hero_city_boston"]').click();
+  await page.locator('[data-track="card_city_boston"]').click();
   await page.waitForTimeout(900);
   const uiTotal = Number(
     await page.locator("[data-map-total]").first().getAttribute("data-map-total")
@@ -301,6 +327,79 @@ try {
 
 await context.close();
 
+// Mobile: o seletor visível é o do herói; o do cartão não duplica.
+{
+  const mobileContext = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  const mobilePage = await mobileContext.newPage();
+  try {
+    await mobilePage.goto(`${base}/en`, {
+      waitUntil: "networkidle",
+      timeout: 60000,
+    });
+    await mobilePage.locator('[data-track="hero_city_boston"]').waitFor({
+      timeout: 30000,
+    });
+    const heroVisible = await mobilePage
+      .locator('[data-track="hero_city_boston"]')
+      .isVisible();
+    const cardVisible = await mobilePage
+      .locator('[data-track="card_city_boston"]')
+      .isVisible();
+    check(
+      "Mobile: seletor do herói, sem duplicar no cartão",
+      heroVisible && !cardVisible,
+      `hero=${heroVisible} card=${cardVisible}`
+    );
+    await mobilePage.locator('[data-track="hero_city_boston"]').click();
+    await mobilePage.locator("[data-map-total]").first().waitFor({
+      timeout: 30000,
+    });
+    const bostonBubbleTexts = (boston?.zones ?? [])
+      .slice(0, 3)
+      .map((zone) => new Intl.NumberFormat("en-US").format(zone.count));
+    await mobilePage
+      .waitForFunction(
+        (counts) => {
+          const texts = [
+            ...document.querySelectorAll(".pub-bubble"),
+          ].map((el) => (el.textContent || "").trim());
+          return counts.some((count) => texts.includes(count));
+        },
+        bostonBubbleTexts,
+        { timeout: 30000 }
+      )
+      .catch(() => {});
+    await mobilePage.waitForTimeout(800);
+    const mobileBubbles = await mobilePage.locator(".pub-bubble").count();
+    check(
+      "Mobile: mapa mostra as bolhas da cidade",
+      mobileBubbles > 0,
+      `bubbles=${mobileBubbles}`
+    );
+    const mobileTotal = Number(
+      await mobilePage
+        .locator("[data-map-total]")
+        .first()
+        .getAttribute("data-map-total")
+    );
+    check(
+      "Mobile: chips do herói atualizam o mapa",
+      Number.isFinite(mobileTotal) && mobileTotal === boston?.totals.count,
+      `${mobileTotal} vs ${boston?.totals.count}`
+    );
+    await mobilePage.locator(".pub-map").scrollIntoViewIfNeeded();
+    await mobilePage.waitForTimeout(500);
+    await mobilePage.screenshot({ path: `${out}/07-mobile-map.png` });
+  } catch (exc) {
+    check("Mobile: seletores e mapa", false, String(exc).slice(0, 140));
+  }
+  await mobileContext.close();
+}
+
 // A rota manda no idioma: /en com cookie PT abre EN; trocar a bandeira navega.
 {
   const localeContext = await browser.newContext({
@@ -323,7 +422,17 @@ await context.close();
       waitUntil: "networkidle",
       timeout: 60000,
     });
-    await localePage.waitForTimeout(900);
+    await localePage.locator("[data-map-total]").first().waitFor({
+      timeout: 30000,
+    });
+    await localePage.waitForTimeout(500);
+    const enTotal = Number(
+      await localePage
+        .locator("[data-map-total]")
+        .first()
+        .getAttribute("data-map-total")
+    );
+    const enFormatted = new Intl.NumberFormat("en-US").format(enTotal);
     const enState = await localePage.evaluate(() => ({
       lang: document.documentElement.lang,
       en: document
@@ -339,16 +448,33 @@ await context.close();
       enState.lang === "en-US" &&
         enState.en === "true" &&
         enState.pt === "false" &&
+        enTotal > 0 &&
+        enState.body.includes(enFormatted) &&
         enState.body.includes("The owner just asked") &&
+        enState.body.includes("From a small repair to a full build") &&
+        enState.body.toLowerCase().includes("all cities") &&
+        enState.body.includes("opportunities tracked") &&
+        !enState.body.includes("new entries in 24h") &&
+        !enState.body.includes("signals in the base") &&
         enState.body.includes(
           "Select your city or click a neighborhood to explore."
         ),
-      `lang=${enState.lang} en=${enState.en} pt=${enState.pt}`
+      `lang=${enState.lang} en=${enState.en} pt=${enState.pt} n=${enFormatted}`
     );
 
     await localePage.locator('[data-track="language_pt"]').click();
     await localePage.waitForURL("**/pt**", { timeout: 30000 });
-    await localePage.waitForTimeout(1200);
+    await localePage.locator("[data-map-total]").first().waitFor({
+      timeout: 30000,
+    });
+    await localePage.waitForTimeout(700);
+    const ptTotal = Number(
+      await localePage
+        .locator("[data-map-total]")
+        .first()
+        .getAttribute("data-map-total")
+    );
+    const ptFormatted = new Intl.NumberFormat("pt-BR").format(ptTotal);
     const ptState = await localePage.evaluate(() => ({
       lang: document.documentElement.lang,
       href: location.pathname,
@@ -358,10 +484,17 @@ await context.close();
       "Bandeira PT navega para /pt e renderiza PT-BR",
       ptState.href.startsWith("/pt") &&
         ptState.lang === "pt-BR" &&
+        ptTotal > 0 &&
+        ptState.body.includes(ptFormatted) &&
+        ptState.body.includes("Do serviço pequeno à obra completa") &&
+        ptState.body.toLowerCase().includes("todas as cidades") &&
+        ptState.body.includes("oportunidades registradas") &&
+        !ptState.body.includes("novas entradas") &&
+        !ptState.body.includes("sinais na base") &&
         ptState.body.includes(
           "Escolha sua cidade ou clique em um bairro para explorar."
         ),
-      `href=${ptState.href} lang=${ptState.lang}`
+      `href=${ptState.href} lang=${ptState.lang} n=${ptFormatted}`
     );
 
     await localePage.locator("[data-map-zone]").first().waitFor({

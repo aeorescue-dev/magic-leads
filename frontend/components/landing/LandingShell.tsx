@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useI18n, type Lang } from "@/lib/i18n";
+import { useI18n, formatNumber, type Lang } from "@/lib/i18n";
 import { AuthForm } from "@/components/AuthForm";
 import AnalyticsBeacon from "@/components/AnalyticsBeacon";
 import LpWidgetMount from "@/components/landing/LpWidget/LpWidgetMount";
@@ -276,7 +276,7 @@ export default function LandingShell({ children }: { children: React.ReactNode }
                     </span>
                     {modalContext.fresh && modalContext.fresh > 0 ? (
                       <span className="rounded-full bg-[#fef3c7] px-2 py-0.5 text-[9.5px] font-black text-[#b45309]">
-                        +{modalContext.fresh} {t("landing.statNew24")}
+                        +{formatNumber(modalContext.fresh, lang)} {t("landing.statNew24")}
                       </span>
                     ) : null}
                   </div>
@@ -286,11 +286,17 @@ export default function LandingShell({ children }: { children: React.ReactNode }
                   <p className="mt-0.5 text-[12px] font-semibold text-[#54617a]">
                     {modalContext.fresh && modalContext.fresh > 0
                       ? t("landing.mapTeaserStats")
-                          .replace("{count}", String(modalContext.count ?? 0))
-                          .replace("{fresh}", String(modalContext.fresh))
+                          .replace(
+                            "{count}",
+                            formatNumber(modalContext.count ?? 0, lang)
+                          )
+                          .replace(
+                            "{fresh}",
+                            formatNumber(modalContext.fresh, lang)
+                          )
                       : t("landing.mapTeaserStatsNoFresh").replace(
                           "{count}",
-                          String(modalContext.count ?? 0)
+                          formatNumber(modalContext.count ?? 0, lang)
                         )}
                   </p>
                   <ul className="mt-3 space-y-1.5 text-[11.5px] font-semibold text-[#0b1220]">
