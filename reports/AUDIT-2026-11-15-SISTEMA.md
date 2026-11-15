@@ -224,3 +224,25 @@ desta auditoria verde; o deploy deve correr o índice e a migração de cidades
   (sem frescos) nessa conta. Clientes com acesso ativo recebem a agregação ao
   vivo, como validado localmente e no benchmark de produção. Renovar o plano
   demo (ou usar uma conta de validação dedicada) é uma decisão de produto.
+
+## 13. Landing live map (preview, ainda não deployado)
+
+- **Branch:** `feat/landing-live-map-preview` (sem push/deploy).
+- **Endpoint público:** `GET /api/public/live-map` — agregado por zona, sem
+  sessão, 60/min/IP, `Server-Timing`, `Cache-Control` e `ETag`/304.
+- **Privacidade:** só contagens; zonas `<5` em `other`; `fresh` só `>=3`;
+  centroides a 3 casas; sem ids/moradas/owners/telefones. O audit confirma a
+  ausência de campos proibidos e a igualdade com o trade grid (Boston 176=176).
+- **Índice parcial:** `idx_leads_public_geo` — **102,4 ms** de criação,
+  **6,5 MB**, plano `SEARCH … USING INDEX … (city=? AND date_reported>?)`.
+- **Produção (cópia de 135.951 linhas):** as 4 cidades numa query em
+  **16,1 ms** (15,0–16,9 ms); cache in-process de 60 s → ≤1 cálculo/min.
+- **Audit local `audit-landing-map.mjs`: ALL PASS** — endpoint 0,6–1,1 ms,
+  mapa por defeito, 5 bolhas + 3 chips, troca de cidade (Boston 176),
+  separador By trade, teaser com “Dorchester · 26” e formulário em modo
+  **Create account**.
+- **Kill switch:** `PUBLIC_LIVE_MAP_ENABLED=0` → 503 `live_map_disabled`; o
+  frontend esconde a aba Map e mantém “By trade”.
+- **Capturas:** `reports/landing-live-map-preview/01-hero-map.png`,
+  `02-hero-trades.png`, `03-teaser-modal.png`.
+- **Plano completo:** `docs/LANDING-LIVE-MAP-PLAN.md`.

@@ -87,8 +87,16 @@ function LangSwitch({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void 
 // ------------------------------------------------------------------
 // Shell context
 // ------------------------------------------------------------------
+export interface ModalContext {
+  trade?: string;
+  zone?: string;
+  city?: string;
+  count?: number;
+  fresh?: number;
+}
+
 interface LandingShellCtx {
-  openModal: (trade?: string) => void;
+  openModal: (context?: string | ModalContext) => void;
   scrollTo: (id: string) => void;
 }
 
@@ -124,7 +132,7 @@ export default function LandingShell({ children }: { children: React.ReactNode }
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
-  const [modalTrade, setModalTrade] = useState<string | null>(null);
+  const [modalContext, setModalContext] = useState<ModalContext | null>(null);
 
   useEffect(() => {
     document.documentElement.lang = lang;
@@ -149,9 +157,18 @@ export default function LandingShell({ children }: { children: React.ReactNode }
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
   };
 
-  const openModal = (trade?: string) => {
-    setModalTrade(trade ?? null);
+  const openModal = (context?: string | ModalContext) => {
+    if (typeof context === "string") {
+      setModalContext({ trade: context });
+    } else {
+      setModalContext(context ?? {});
+    }
     setModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setModalOpen(false);
+    setModalContext(null);
   };
 
   return (
@@ -238,19 +255,66 @@ export default function LandingShell({ children }: { children: React.ReactNode }
         </footer>
 
         {modalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0b1220]/60 p-4 backdrop-blur-md" onClick={() => setModalOpen(false)}>
-            <div className="relative w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl sm:p-8" onClick={(e) => e.stopPropagation()}>
-              <button onClick={() => setModalOpen(false)} className="absolute right-4 top-4 text-[#94a3b8]">✕</button>
+          <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-[#0b1220]/60 p-4 backdrop-blur-md" onClick={closeModal}>
+            <div className="relative max-h-[92vh] w-full max-w-md overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl sm:p-8" onClick={(e) => e.stopPropagation()}>
+              <button onClick={closeModal} className="absolute right-4 top-4 text-[#94a3b8]">✕</button>
               <div className="flex items-center gap-2">
-                <span className="rounded bg-[#e8f9ef] px-2.5 py-0.5 text-[10px] font-black text-[#0a8f65]">{t("landing.modalTag")}</span>
+                <span className="rounded bg-[#e8f9ef] px-2.5 py-0.5 text-[10px] font-black text-[#0a8f65]">
+                  {modalContext?.zone ? t("landing.mapTeaserTag") : t("landing.modalTag")}
+                </span>
                 <span className="text-xs text-[#94a3b8]">{t("landing.noLock")}</span>
               </div>
-              <h3 className="font-display mt-3 text-2xl font-black">{t("landing.modalTitle")}</h3>
-              <p className="mt-1 text-sm text-[#54617a]">{t("landing.modalSub")}</p>
+              <h3 className="font-display mt-3 text-2xl font-black">
+                {modalContext?.zone ? t("landing.mapTeaserTitle") : t("landing.modalTitle")}
+              </h3>
+              <p className="mt-1 text-sm text-[#54617a]">
+                {modalContext?.zone ? t("landing.mapTeaserSub") : t("landing.modalSub")}
+              </p>
+
+              {modalContext?.zone ? (
+                <div className="mt-4 rounded-2xl border border-[#d9f3e8] bg-[#f0fdf7] p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[10px] font-black uppercase tracking-[0.12em] text-[#0a8f65]">
+                      {t("landing.mapTeaserKicker")}
+                      {modalContext.city ? ` · ${modalContext.city}` : ""}
+                    </span>
+                    {modalContext.fresh && modalContext.fresh > 0 ? (
+                      <span className="rounded-full bg-[#fef3c7] px-2 py-0.5 text-[9.5px] font-black text-[#b45309]">
+                        +{modalContext.fresh} {t("landing.statNew24")}
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="mt-1 text-[18px] font-black leading-tight text-[#0b1220]">
+                    {modalContext.zone}
+                  </p>
+                  <p className="mt-0.5 text-[12px] font-semibold text-[#54617a]">
+                    {modalContext.fresh && modalContext.fresh > 0
+                      ? t("landing.mapTeaserStats")
+                          .replace("{count}", String(modalContext.count ?? 0))
+                          .replace("{fresh}", String(modalContext.fresh))
+                      : t("landing.mapTeaserStatsNoFresh").replace(
+                          "{count}",
+                          String(modalContext.count ?? 0)
+                        )}
+                  </p>
+                  <ul className="mt-3 space-y-1.5 text-[11.5px] font-semibold text-[#0b1220]">
+                    <li>✓ {t("landing.mapTeaserUnlock1")}</li>
+                    <li>✓ {t("landing.mapTeaserUnlock2")}</li>
+                    <li>✓ {t("landing.mapTeaserUnlock3")}</li>
+                  </ul>
+                  <p className="mt-2 text-[9.5px] leading-relaxed text-[#94a3b8]">
+                    {t("landing.mapTeaserNote")}
+                  </p>
+                </div>
+              ) : null}
+
               <div className="mt-5">
-                <AuthForm preselectedTrade={modalTrade ?? undefined} />
+                <AuthForm
+                  preselectedTrade={modalContext?.trade ?? undefined}
+                  initialRegister={Boolean(modalContext?.zone)}
+                />
               </div>
-              <button onClick={() => { setModalOpen(false); router.push(localePath("/auth")); }} className="mt-6 w-full rounded-xl border border-[#e2e8f0] py-3 text-sm font-bold text-[#54617a] hover:border-[#0b1220]">
+              <button onClick={() => { closeModal(); router.push(localePath("/auth")); }} className="mt-6 w-full rounded-xl border border-[#e2e8f0] py-3 text-sm font-bold text-[#54617a] hover:border-[#0b1220]">
                 {t("landing.enter")}
               </button>
               <p className="mt-4 text-center text-[11px] text-[#94a3b8]">{t("landing.seven")}</p>

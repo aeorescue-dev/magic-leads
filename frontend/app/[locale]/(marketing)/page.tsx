@@ -6,6 +6,7 @@ import { fetchPublicMetrics } from "@/lib/api-client";
 import type { PublicMetrics } from "@/lib/api-client";
 import { FoldWave, useLandingShell } from "@/components/landing/LandingShell";
 import { LiveTradeGrid } from "@/components/landing/LiveTradeGrid";
+import { PublicLiveMap } from "@/components/landing/PublicLiveMap";
 import ForEveryoneSection from "@/components/landing/ForEveryoneSection";
 import { Building2, Phone, ShieldCheck, Megaphone, Search, Users, Mail, MessageCircle, MessageSquare, MapPin, Clock } from "lucide-react";
 
@@ -263,6 +264,8 @@ export default function LandingPage() {
   const [heroZipInput, setHeroZipInput] = useState("");
   const [heroZipError, setHeroZipError] = useState("");
   const [heroTotal, setHeroTotal] = useState(0);
+  const [heroTab, setHeroTab] = useState<"map" | "trades">("map");
+  const [mapEnabled, setMapEnabled] = useState(true);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [reservedLeadId, setReservedLeadId] = useState<string | null>(null);
   const [timerSeconds, setTimerSeconds] = useState(3600);
@@ -445,6 +448,11 @@ export default function LandingPage() {
     setHeroTotal(0);
   };
 
+  // ZIP é uma pesquisa de inventário (grelha por ofício); o mapa é por cidade.
+  useEffect(() => {
+    if (heroZip) setHeroTab("trades");
+  }, [heroZip]);
+
   return (
     <>
       {/* HERO - private intelligence */}
@@ -582,17 +590,72 @@ export default function LandingPage() {
               <div className="pointer-events-none absolute -inset-6 rounded-[2.4rem] bg-[#10b981]/[0.10] blur-3xl" />
               <div className="relative w-full max-w-[620px] rounded-[2rem] bg-gradient-to-b from-white/90 via-[#f6f4ee] to-[#eeeae0] p-[1px] shadow-[0_50px_130px_-45px_rgba(15,23,42,0.55),0_20px_60px_-30px_rgba(16,185,129,0.22)]">
                 <div className="rounded-[1.95rem] border border-white/60 bg-[#f7f5ef] p-4 sm:p-6">
-                  <LiveTradeGrid
-                    categories={L.categories}
-                    onCta={openModal}
-                    city={heroCity}
-                    activeZip={heroZip}
-                    showControls={false}
-                    showTicker={false}
-                    preview
-                    featuredLimit={12}
-                    onTotalChange={setHeroTotal}
-                  />
+                  <div className="flex items-center justify-between gap-2 pb-3">
+                    <span className="inline-flex items-center gap-1.5 text-[8px] font-black uppercase tracking-[0.16em] text-[#94a3b8]">
+                      <span className="relative flex h-2 w-2">
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#10b981] opacity-50" />
+                        <span className="relative inline-flex h-2 w-2 rounded-full bg-[#10b981]" />
+                      </span>
+                      {t("landing.liveMap.kicker")}
+                    </span>
+                    <div className="flex items-center gap-0.5 rounded-full bg-white p-0.5 shadow-sm">
+                      {(["map", "trades"] as const)
+                        .filter((tab) => tab !== "map" || mapEnabled)
+                        .map((tab) => (
+                        <button
+                          key={tab}
+                          type="button"
+                          data-track={`hero_tab_${tab}`}
+                          onClick={() => setHeroTab(tab)}
+                          aria-pressed={heroTab === tab}
+                          className={`rounded-full px-2.5 py-1 text-[9.5px] font-black uppercase tracking-[0.06em] transition ${
+                            heroTab === tab
+                              ? "bg-[#0b1220] text-white"
+                              : "text-[#64748b] hover:text-[#0b1220]"
+                          }`}
+                        >
+                          {tab === "map"
+                            ? t("landing.liveMap.tab_map")
+                            : t("landing.liveMap.tab_trades")}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {heroTab === "map" ? (
+                    <PublicLiveMap
+                      city={heroCity || "New York"}
+                      onTotalChange={setHeroTotal}
+                      onUnavailable={() => {
+                        setMapEnabled(false);
+                        setHeroTab("trades");
+                      }}
+                      onZoneSelect={(zone, cityLabel) =>
+                        openModal({
+                          zone: zone.label,
+                          city: cityLabel,
+                          count: zone.count,
+                          fresh: zone.fresh,
+                        })
+                      }
+                    />
+                  ) : (
+                    <LiveTradeGrid
+                      categories={L.categories}
+                      onCta={openModal}
+                      city={heroCity}
+                      activeZip={heroZip}
+                      showControls={false}
+                      showTicker={false}
+                      preview
+                      featuredLimit={12}
+                      onTotalChange={setHeroTotal}
+                    />
+                  )}
+
+                  <p className="mt-2 text-center text-[9px] leading-relaxed text-[#94a3b8]">
+                    {t("landing.liveMap.footnote")}
+                  </p>
                 </div>
               </div>
             </div>

@@ -562,6 +562,34 @@ export async function fetchTradeGrid(params: { city?: string; zip?: string } = {
   );
 }
 
+export interface LiveMapZone {
+  slug: string;
+  label: string;
+  count: number;
+  fresh: number;
+  lat: number | null;
+  lng: number | null;
+}
+
+export interface LiveMapCity {
+  key: string;
+  label: string;
+  totals: { count: number; fresh: number; zones: number; other: number };
+  zones: LiveMapZone[];
+}
+
+export interface LiveMapResponse {
+  generated_at: string;
+  window_days: number;
+  cities: LiveMapCity[];
+}
+
+export async function fetchLiveMap(): Promise<LiveMapResponse> {
+  return handle<LiveMapResponse>(
+    await fetch(`${API_URL}/api/public/live-map`)
+  );
+}
+
 export interface ActivityEvent {
   trade: string;
   city: string;

@@ -1659,7 +1659,7 @@ def _ensure_demo_user() -> None:
 def init_db() -> None:
     """Cria o schema se não existir (tolerante a fs read-only em produção)."""
     force_reset = os.environ.get("LEADS_RESET_ON_BOOT") == "1"
-    for _ in range(2):
+    for attempt in range(6):
         try:
             conn = get_connection()
             try:
@@ -1667,7 +1667,7 @@ def init_db() -> None:
                     conn.execute("PRAGMA journal_mode=WAL;")
                 except sqlite3.OperationalError:
                     pass  # fs read-only: segue em modo normal
-                if _seed_from_bundle(conn, force=force_reset and _ == 0):
+                if _seed_from_bundle(conn, force=force_reset and attempt == 0):
                     conn = get_connection()
                 conn.executescript(DEFAULT_SCHEMA)
                 _migrate_schema(conn)
@@ -1682,6 +1682,16 @@ def init_db() -> None:
             # Pode ser um filesystem read-only OU um erro de esquema (ex.: uma
             # coluna que o schema assume mas a base ainda nao tem). A mensagem
             # anterior dizia sempre "read-only" e mascarava bugs de migracao.
+            # No deploy o container antigo pode ainda estar a escrever no
+            # volume partilhado: um lock transitório não pode saltar índices
+            # e migrações.
+            if "locked" in str(e).lower() and attempt < 5:
+                logger.warning(
+                    "init_db: base ocupada (tentativa %s/6) — retry em 1s",
+                    attempt + 1,
+                )
+                time.sleep(1.0)
+                continue
             logger.warning(
                 "init_db: falha ao aplicar o schema (%s) — %s. "
                 "A base pode estar em modo leitura ou desatualizada.",
@@ -1933,6 +1943,37 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
                 break
     else:
         logger.info("[DB] idx_leads_geo já existe (idempotente)")
+
+    # Índice parcial covering para o mapa público da landing. Cobre apenas as
+    # linhas qualificadas (o universo do trade grid), por isso é menor que o
+    # índice do dashboard. A query pública usa exatamente estes predicados.
+    public_index = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_leads_public_geo'"
+    ).fetchone()
+    if public_index is None:
+        started = time.perf_counter()
+        for attempt in range(3):
+            try:
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_leads_public_geo ON leads ("
+                    "city COLLATE NOCASE, date_reported, created_at, issue_category, "
+                    "case_status, neighborhood, zip_code, lat, lng) "
+                    "WHERE is_qualified = 1 AND COALESCE(is_junk, 0) = 0"
+                )
+                conn.commit()
+                logger.info(
+                    "[DB] idx_leads_public_geo criado em %.0f ms",
+                    (time.perf_counter() - started) * 1000,
+                )
+                break
+            except sqlite3.OperationalError as exc:
+                if "locked" in str(exc).lower() and attempt < 2:
+                    time.sleep(1.0)
+                    continue
+                logger.warning("[DB] idx_leads_public_geo indisponível: %s", exc)
+                break
+    else:
+        logger.info("[DB] idx_leads_public_geo já existe (idempotente)")
 
     # Normaliza variantes históricas de cidade (ex.: "CHICAGO"). Duplicados
     # não envolvidos (mesma morada/cidade canónica) são removidos primeiro,

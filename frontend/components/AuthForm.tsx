@@ -86,7 +86,13 @@ function ForgotPasswordForm({ onClose }: { onClose: () => void }) {
   );
 }
 
-function AuthFormInner({ preselectedTrade }: { preselectedTrade?: string }) {
+function AuthFormInner({
+  preselectedTrade,
+  initialRegister,
+}: {
+  preselectedTrade?: string;
+  initialRegister?: boolean;
+}) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const reason = searchParams.get('reason');
@@ -115,7 +121,7 @@ function AuthFormInner({ preselectedTrade }: { preselectedTrade?: string }) {
       ? t('dashboard.auth.session_expired')
       : null;
 
-  const [isRegister, setIsRegister] = useState(false);
+  const [isRegister, setIsRegister] = useState(Boolean(initialRegister));
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [companyName, setCompanyName] = useState('');
@@ -312,7 +318,7 @@ function AuthFormInner({ preselectedTrade }: { preselectedTrade?: string }) {
 
   // Render the actual form
   return (
-    <form onSubmit={handleSubmit} data-track-form="auth_main" className="w-full max-w-md mx-auto space-y-4">
+    <form onSubmit={handleSubmit} data-track-form="auth_main" data-auth-register={isRegister} className="w-full max-w-md mx-auto space-y-4">
       {preselectedTrade ? (
         <div className="rounded-lg border border-primary/25 bg-primary/5 px-3 py-2 text-[11.5px] font-semibold text-primary">
           {t('landing.p1Selected')}: {preselectedTrade}
@@ -487,10 +493,16 @@ function AuthFormInner({ preselectedTrade }: { preselectedTrade?: string }) {
   );
 }
 
-export function AuthForm({ preselectedTrade }: { preselectedTrade?: string } = {}) {
+export function AuthForm({
+  preselectedTrade,
+  initialRegister,
+}: { preselectedTrade?: string; initialRegister?: boolean } = {}) {
   return (
     <Suspense fallback={null}>
-      <AuthFormInner preselectedTrade={preselectedTrade} />
+      <AuthFormInner
+        preselectedTrade={preselectedTrade}
+        initialRegister={initialRegister}
+      />
     </Suspense>
   );
 }

@@ -1360,6 +1360,36 @@ async def public_activity(request: Request, city: str = "", limit: int = 8):
         raise HTTPException(status_code=500, detail="activity_unavailable")
 
 
+@app.get("/api/public/live-map")
+@limiter.limit("60/minute")
+async def public_live_map(request: Request, response: Response):
+    """Mapa vivo agregado e anonimizado para a landing (público).
+
+    Só contagens por zona (>=5), frescos >=3 e centroides arredondados. A
+    resposta é cacheada 60 s em processo e pode ser servida pelo CDN.
+    """
+    if os.environ.get("PUBLIC_LIVE_MAP_ENABLED", "1").strip() == "0":
+        raise HTTPException(status_code=503, detail="live_map_disabled")
+    try:
+        from backend.services.public_map import get_live_map
+
+        started = time.perf_counter()
+        payload = await anyio.to_thread.run_sync(get_live_map)
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        etag = f'W/"{payload.get("generated_at", "")}"'
+        response.headers["Server-Timing"] = f"db;dur={elapsed_ms:.1f}"
+        response.headers["Cache-Control"] = (
+            "public, max-age=30, s-maxage=60, stale-while-revalidate=300"
+        )
+        response.headers["ETag"] = etag
+        if request.headers.get("if-none-match") == etag:
+            return Response(status_code=304, headers=dict(response.headers))
+        return payload
+    except Exception as e:
+        logger.error(f"Erro ao buscar mapa público: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="live_map_unavailable")
+
+
 # Detalhe de um lead
 @app.get("/api/leads/{lead_id}", response_model=LeadResponse)
 @limiter.limit("120/minute")
@@ -6708,6 +6738,19 @@ async def _lifespan(app):
             )
     except Exception as exc:
         logger.warning("[GEO] warmup falhou: %s", exc)
+
+    # Warm-up do mapa público da landing (agregação + centroides Chicago).
+    try:
+        from backend.services.public_map import prewarm as prewarm_public_map
+
+        started = time.perf_counter()
+        await anyio.to_thread.run_sync(prewarm_public_map)
+        logger.info(
+            "[PUBLIC-MAP] warmup %.0f ms",
+            (time.perf_counter() - started) * 1000,
+        )
+    except Exception as exc:
+        logger.warning("[PUBLIC-MAP] warmup falhou: %s", exc)
 
     yield
     for name, task in (

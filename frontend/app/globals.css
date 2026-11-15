@@ -1298,6 +1298,84 @@
     0 0 24px rgba(245, 158, 11, 0.55),
     0 10px 24px rgba(0, 0, 0, 0.55);
 }
+
+/* ------------------------------------------------------------------ */
+/* Mapa vivo público da landing (light, sem clusters)                  */
+/* ------------------------------------------------------------------ */
+.pub-map {
+  background: #e9eef3;
+}
+.pub-map .leaflet-control-attribution {
+  font-size: 9px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #64748b;
+}
+.pub-map .leaflet-control-attribution a {
+  color: #475569;
+}
+.pub-bubble-wrap {
+  background: transparent;
+  border: 0;
+}
+.pub-bubble {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  border: 2px solid #ffffff;
+  background: #0b1220;
+  color: #ffffff;
+  font-size: 11.5px;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.28);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+.pub-bubble:hover {
+  transform: scale(1.08);
+}
+.pub-bubble.is-fresh {
+  background: #f59e0b;
+  color: #1c1917;
+  border-color: #fffbeb;
+  box-shadow:
+    0 0 0 5px rgba(245, 158, 11, 0.22),
+    0 0 20px rgba(245, 158, 11, 0.55),
+    0 8px 20px rgba(15, 23, 42, 0.25);
+  animation: pub-fresh-glow 2.2s ease-in-out infinite;
+}
+.pub-fresh-dot {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: #fde68a;
+  border: 1.5px solid #0b1220;
+}
+@keyframes pub-fresh-glow {
+  0%, 100% {
+    box-shadow:
+      0 0 0 4px rgba(245, 158, 11, 0.2),
+      0 0 16px rgba(245, 158, 11, 0.45),
+      0 8px 20px rgba(15, 23, 42, 0.25);
+  }
+  50% {
+    box-shadow:
+      0 0 0 7px rgba(245, 158, 11, 0.12),
+      0 0 26px rgba(245, 158, 11, 0.7),
+      0 8px 20px rgba(15, 23, 42, 0.25);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pub-bubble.is-fresh {
+    animation: none;
+  }
+}
 .opp-user-wrap {
   background: transparent;
   border: 0;
