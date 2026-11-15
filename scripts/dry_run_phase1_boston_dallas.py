@@ -26,7 +26,7 @@ def main() -> int:
         bos_311=500,
         bos_permits=500,
         dal_code=25000,
-        dal_311=500,
+        dal_311=25000,
         dal_permits=500,
         permit_window_days=30,
     )

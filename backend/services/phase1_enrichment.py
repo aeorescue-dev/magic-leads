@@ -43,6 +43,23 @@ BOSTON_VIOLATIONS_RESOURCE = "800a2663-1d6a-46e7-9356-bedb70f5332c"
 BOSTON_311_RESOURCE = "254adca6-64ab-4c5c-9fc0-a6da622be185"
 BOSTON_PERMITS_RESOURCE = "6ddcd912-32a0-43df-9908-63574f8c7e77"
 
+# Tipos de 311 de Dallas com ofício e imóvel privado identificáveis. Ficam
+# de fora o balde genérico "Code Concern - CCS" (20k+, sem descrição/ofício) e
+# as obras públicas (calçada, via, drenagem, água da cidade), que não são
+# oportunidades de dono.
+DALLAS_TRADE_LIKE = (
+    "construction site complaint",
+    "building permits violation",
+    "historic district violation",
+    "housing & neighborhood",
+    "substandard",
+    "high weeds",
+    "junk vehicle",
+    "rodent",
+    "unsanitary",
+    "sewer",
+)
+
 DATASETS = {
     "hpd_complaints": (NYC, "ygpa-z7cr"),
     "hpd_violations": (NYC, "wvxf-dwi5"),
@@ -99,18 +116,18 @@ _CATEGORY_RULES = [
             "flooring", "ceiling", "stair", "porch", "fence", "fire escape",
             "balcony", "canopy", "shed", "hoist", "crane", "jobsite",
             "job site", "site safety", "netting", "curtain wall", "cornice",
-            "sidewalk",
+            "sidewalk", "housing",
         ),
     ),
     ("Door_Window", ("window", "door", "frame", "glass")),
-    ("Debris", ("debris", "garbage", "trash", "rubbish", "dumpster", "loose material")),
+    ("Debris", ("debris", "garbage", "trash", "rubbish", "dumpster", "loose material", "junk", "dump")),
     ("Unsanitary", ("unsanitary", "dirty", "sanitation", "odor", "filth", "feces", "sewage")),
     (
         "Permit_Rejected",
         (
             "permit", "certificate of occupancy", "c of o", "resubmit",
             "follow plans", "approved plans", "stop work", "job filing",
-            "certificate of correction",
+            "certificate of correction", "historic",
         ),
     ),
 ]
@@ -286,6 +303,17 @@ def _split_dallas_address(raw) -> tuple[str, Optional[str]]:
     zip_code = zip_match.group(1) if zip_match else None
     address = re.sub(r",\s*DALLAS.*$", "", text, flags=re.IGNORECASE)
     return normalize_address(address), zip_code
+
+
+def _dallas_trade_where() -> str:
+    likes = " OR ".join(
+        f"lower(service_request_type) LIKE '%{pattern}%'"
+        for pattern in DALLAS_TRADE_LIKE
+    )
+    return (
+        "status NOT IN ('Closed','Completed','Cancelled') "
+        f"AND ({likes})"
+    )
 
 
 def _dallas_category(value: Optional[str]) -> str:
@@ -877,13 +905,13 @@ class Phase1EnrichmentService:
                 "$limit": max(1, int(limit)),
                 "$order": "created_date DESC",
                 "$where": "department = 'Code Compliance' AND "
-                "status NOT IN ('Closed','Completed','Cancelled')",
+                + _dallas_trade_where(),
             },
         )
-        return self._dallas_items(rows)
+        return self._dallas_items(rows, require_trade=True)
 
     def fetch_dallas_311(self, limit: int = 200) -> list:
-        """311 aberto fora de Code Compliance (Dallas, Socrata d7e7-envw)."""
+        """311 aberto com ofício identificável (Dallas, Socrata d7e7-envw)."""
         if limit <= 0:
             return []
         rows = socrata(
@@ -891,8 +919,7 @@ class Phase1EnrichmentService:
             {
                 "$limit": max(1, int(limit)),
                 "$order": "created_date DESC",
-                "$where": "department != 'Code Compliance' AND "
-                "status NOT IN ('Closed','Completed','Cancelled')",
+                "$where": _dallas_trade_where(),
             },
         )
         return self._dallas_items(rows, require_trade=True)

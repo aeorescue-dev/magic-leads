@@ -27,7 +27,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--bos-311", type=int, default=500)
     parser.add_argument("--bos-permits", type=int, default=500)
     parser.add_argument("--dal-code", type=int, default=25000)
-    parser.add_argument("--dal-311", type=int, default=500)
+    parser.add_argument("--dal-311", type=int, default=25000)
     parser.add_argument("--dal-permits", type=int, default=500)
     parser.add_argument("--window", type=int, default=30)
     return parser.parse_args()

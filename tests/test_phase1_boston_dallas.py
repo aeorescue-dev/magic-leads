@@ -106,7 +106,7 @@ def test_dallas_code_mapping(monkeypatch):
     rows = [
         {
             "service_request_number": "26-1",
-            "service_request_type": "Code Concern - CCS",
+            "service_request_type": "Substandard Structure - CCS",
             "department": "Code Compliance",
             "status": "New",
             "created_date": "2026-11-13T23:48:01.000",
