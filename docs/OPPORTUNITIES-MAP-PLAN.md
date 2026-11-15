@@ -107,7 +107,37 @@ npm run dev                    # com API_PROXY_TARGET no backend local
 node scripts/dashboard-map-shots.mjs
 ```
 
-## 8. Pendências antes do deploy
+## 10. Aba Opportunities (leads reativos) — integração final
+
+O mesmo painel foi replicado na aba **Opportunities**, logo abaixo dos 4 cartões
+(*In your interest / Urgent / With owner / New*) e da barra de filtros. Aí a
+fonte é a tabela `leads` (13,6 mil ativos nos últimos 7 dias), não o preventivo.
+
+- **Endpoint:** `GET /api/leads/neighborhoods?city=&type=&category=&urgency=&include_closed=&days=7`
+  — um `GROUP BY` no SQLite com **o mesmo WHERE do feed** (`is_feed_ok`,
+  `signal_type`, status, janela, gate de utilizador).
+- **Filtro do feed:** `neighborhoods=` / `zips=` / `no_geo=true` no
+  `/api/leads/today`; o clique no mapa/lista aplica o filtro no servidor,
+  mostra o chip do bairro e faz scroll suave até aos cartões.
+- **Agrupamento por cidade:**
+  - Boston → bairro (`leads.neighborhood`, 95% na janela);
+  - New York → borough (96%);
+  - Dallas → ZIP → setor (11 setores + Other areas); ZIPs têm 85% de cobertura;
+  - Chicago → community area oficial (1–77) + ZIP (bairro só em 10%).
+- **Coordenadas:** quando o grupo não traz `lat/lng` (Dallas), usamos os
+  centroides por ZIP já derivados no snapshot preventivo; “Other areas” fica na
+  lista, sem pin, para não esticar o enquadramento.
+- **Performance:** a agregação pura custava ~97 ms (lookup aleatório por linha).
+  O índice covering `idx_leads_geo(is_feed_ok, city COLLATE NOCASE, date_reported,
+  signal_type, lead_status, signal_status, reserved_by, neighborhood, zip_code,
+  lat, lng)` baixou para **13–19 ms** com 135k leads. A criação é
+  `CREATE INDEX IF NOT EXISTS` no arranque (~2 s numa base de 135k).
+
+Capturas: `reports/opportunities-tab-preview/` (Boston, filtro por Dorchester,
+Near me, Dallas, Chicago, mobile).
+
+## 11. Pendências antes do deploy
+
 
 - [ ] Feature flag `OPPORTUNITIES_MAP_ENABLED=0` e painel só com a flag ligada.
 - [ ] Substituir o snapshot pela API `territories` (P1) e cache de 60 s.

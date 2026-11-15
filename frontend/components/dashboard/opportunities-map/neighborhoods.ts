@@ -1,12 +1,12 @@
-/**
- * Agregação por BAIRRO (não por ZIP).
+﻿/**
+ * AgregaÃ§Ã£o por BAIRRO (nÃ£o por ZIP).
  *
- * O `opportunity_workflow` só tem ZIP. Para o contractor não faz sentido ver
- * "Dorchester" três vezes (02122/02124/02125): agrupamos os ZIPs no bairro.
+ * O `opportunity_workflow` sÃ³ tem ZIP. Para o contractor nÃ£o faz sentido ver
+ * "Dorchester" trÃªs vezes (02122/02124/02125): agrupamos os ZIPs no bairro.
  *
  * - Boston: mapa ZIP -> bairro oficial (nomes conhecidos).
- * - Dallas: setores/áreas reconhecíveis; os ZIPs da amostra que pertencem a
- *   subúrbios vizinhos ficam com o nome do subúrbio (não inventamos bairro).
+ * - Dallas: setores/Ã¡reas reconhecÃ­veis; os ZIPs da amostra que pertencem a
+ *   subÃºrbios vizinhos ficam com o nome do subÃºrbio (nÃ£o inventamos bairro).
  * - NYC: borough derivado do prefixo do ZIP (100/101/102 Manhattan, 112 Brooklyn,
  *   104 Bronx, 103 Staten Island, 110/111/113/114/116 Queens).
  */
@@ -59,12 +59,12 @@ export const CITY_META: Record<
 export const CITY_ORDER = ["Boston", "Dallas", "NYC"] as const;
 
 /**
- * Fora do perímetro ou ZIP sem bairro reconhecido: agrupados em "Other areas"
- * para não esconder leads nem inventar nomes.
+ * Fora do perÃ­metro ou ZIP sem bairro reconhecido: agrupados em "Other areas"
+ * para nÃ£o esconder leads nem inventar nomes.
  */
-const OTHER_AREAS = "Other areas";
+export const OTHER_AREAS = "Other areas";
 
-const BOSTON: Record<string, string> = {
+export const BOSTON_ZIP_LABELS: Record<string, string> = {
   "02105": "Other areas",
   "02108": "Beacon Hill",
   "02109": "Downtown & Waterfront",
@@ -98,7 +98,7 @@ const BOSTON: Record<string, string> = {
   "02467": "Chestnut Hill",
 };
 
-const DALLAS: Record<string, string> = {
+export const DALLAS_ZIP_LABELS: Record<string, string> = {
   // Centro
   "75201": "Downtown & Uptown",
   "75202": "Downtown & Uptown",
@@ -153,7 +153,7 @@ const DALLAS: Record<string, string> = {
   "75247": "Love Field",
 };
 
-function nycBorough(zip: string): string {
+export function nycBorough(zip: string): string {
   const prefix = zip.slice(0, 3);
   if (["100", "101", "102"].includes(prefix)) return "Manhattan";
   if (prefix === "103") return "Staten Island";
@@ -165,8 +165,8 @@ function nycBorough(zip: string): string {
 
 function zoneName(city: string, zone: Zone): string {
   if (city === "NYC") return nycBorough(zone.zip);
-  if (city === "Boston") return BOSTON[zone.zip] ?? zone.label ?? OTHER_AREAS;
-  if (city === "Dallas") return DALLAS[zone.zip] ?? OTHER_AREAS;
+  if (city === "Boston") return BOSTON_ZIP_LABELS[zone.zip] ?? zone.label ?? OTHER_AREAS;
+  if (city === "Dallas") return DALLAS_ZIP_LABELS[zone.zip] ?? OTHER_AREAS;
   return zone.label ?? OTHER_AREAS;
 }
 

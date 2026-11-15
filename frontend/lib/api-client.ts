@@ -286,6 +286,12 @@ export async function fetchLeads(params: {
   return handle<LeadsListResponse>(await fetch(`${API_URL}/api/leads?${q}`, { credentials: "include", headers: { ...authHeaders() } }));
 }
 
+export interface LeadZoneFilter {
+  neighborhoods?: string[];
+  zips?: string[];
+  noGeo?: boolean;
+}
+
 export async function fetchTodayLeads(
   limit: number = 60,
   city?: string,
@@ -293,7 +299,8 @@ export async function fetchTodayLeads(
   page: number = 1,
   type?: string,
   category?: string,
-  urgency?: string
+  urgency?: string,
+  zone?: LeadZoneFilter | null
 ): Promise<LeadsListResponse> {
   const q = new URLSearchParams({ limit: String(limit), page: String(page) });
   if (city && city !== "Todas") q.set("city", city);
@@ -304,7 +311,57 @@ export async function fetchTodayLeads(
   // numero de linhas visiveis divergiam a cada pagina/polling.
   if (category && category !== "all") q.set("category", category);
   if (urgency && urgency !== "all") q.set("urgency", urgency);
+  if (zone?.neighborhoods?.length) {
+    q.set("neighborhoods", zone.neighborhoods.join(","));
+  }
+  if (zone?.zips?.length) q.set("zips", zone.zips.join(","));
+  if (zone?.noGeo) q.set("no_geo", "true");
   return handle<LeadsListResponse>(await fetch(`${API_URL}/api/leads/today?${q.toString()}`, { credentials: "include", headers: { ...authHeaders() } }));
+}
+
+export interface LeadGeoGroup {
+  kind: "nb" | "zip" | "none";
+  key: string;
+  n: number;
+  lat: number | null;
+  lng: number | null;
+  geo_n: number;
+}
+
+export interface LeadGeoResponse {
+  total: number;
+  groups: LeadGeoGroup[];
+}
+
+export async function fetchLeadNeighborhoods(
+  params: {
+    city?: string;
+    type?: string;
+    category?: string;
+    urgency?: string;
+    includeClosed?: boolean;
+    days?: number;
+  } = {}
+): Promise<LeadGeoResponse> {
+  const q = new URLSearchParams();
+  if (params.city && params.city !== "all" && params.city !== "Todas") {
+    q.set("city", params.city);
+  }
+  if (params.type && params.type !== "all") q.set("type", params.type);
+  if (params.category && params.category !== "all") {
+    q.set("category", params.category);
+  }
+  if (params.urgency && params.urgency !== "all") {
+    q.set("urgency", params.urgency);
+  }
+  if (params.includeClosed) q.set("include_closed", "true");
+  q.set("days", String(params.days ?? 7));
+  return handle<LeadGeoResponse>(
+    await fetch(`${API_URL}/api/leads/neighborhoods?${q.toString()}`, {
+      credentials: "include",
+      headers: { ...authHeaders() },
+    })
+  );
 }
 
 export interface DashboardSummary {

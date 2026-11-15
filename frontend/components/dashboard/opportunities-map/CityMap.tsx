@@ -2,7 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import type { Neighborhood } from "./neighborhoods";
+export interface MapZone {
+  name: string;
+  count: number;
+  lat: number | null;
+  lng: number | null;
+}
 
 const LEAFLET_JS = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
 const LEAFLET_CSS = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
@@ -82,7 +87,7 @@ export function CityMap({
   city: string;
   center: [number, number];
   zoom: number;
-  neighborhoods: Neighborhood[];
+  neighborhoods: MapZone[];
   activeName: string | null;
   onSelect: (name: string) => void;
   user: { lat: number; lng: number } | null;
@@ -184,6 +189,7 @@ export function CityMap({
       // "Other areas" fica na lista (e filtra o feed), mas não no mapa:
       // o centroide do catch-all estica o enquadramento até aos subúrbios.
       if (item.name === "Other areas" || item.name === "Other area") continue;
+      if (item.lat === null || item.lng === null) continue;
       const active = item.name === activeName;
       const icon = L.divIcon({
         className: "opp-pin-wrap",

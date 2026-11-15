@@ -1842,6 +1842,16 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         if name not in cols:
             conn.execute(f"ALTER TABLE leads ADD COLUMN {name} {ctype}")
 
+    # Agregação geográfica do feed (mapa bairro/ZIP) e scans do feed. Criado
+    # depois das migrações de colunas; o covering evita lookups aleatórios
+    # (~97 ms -> ~13-19 ms com 135k leads).
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_leads_geo ON leads ("
+        "is_feed_ok, city COLLATE NOCASE, date_reported, signal_type, "
+        "lead_status, signal_status, reserved_by, neighborhood, zip_code, "
+        "lat, lng)"
+    )
+
     # Fase 22: calcula a qualificação uma única vez por linha nova/migrada e
     # cria os índices que o feed usa. O UPDATE só toca em linhas ainda por
     # calcular (NULL), pelo que reinícios normais não custam nada.
@@ -5306,8 +5316,9 @@ class DatabaseService:
         finally:
             conn.close()
 
-    def get_leads_feed(
+    def _leads_feed_where(
         self,
+        *,
         city: Optional[str] = None,
         signal_type: Optional[str] = None,
         category: Optional[str] = None,
@@ -5315,19 +5326,17 @@ class DatabaseService:
         include_closed: bool = False,
         days: Optional[int] = None,
         user_id: Optional[int] = None,
-        limit: int = 20,
-        offset: int = 0,
-    ) -> tuple[List[dict], int]:
-        """Feed qualificado com filtros/total em SQL (P0-B).
+        neighborhoods: Optional[list[str]] = None,
+        zips: Optional[list[str]] = None,
+        no_geo: bool = False,
+    ) -> tuple[str, list]:
+        """WHERE partilhado pelo feed e pela agregação geográfica.
 
-        O `total` e' o COUNT do MESMO WHERE — o cartao e a lista deixam de
-        divergir. `closed` fica fora por defeito; `include_closed=True` mostra-o.
+        `neighborhoods`/`zips`/`no_geo` são o filtro de bairro vindo do mapa;
+        combinam-se com OR para que um bairro possa ser definido por nome e/ou
+        pelos seus ZIPs (Boston/NYC por bairro, Dallas/Chicago por ZIP).
         """
-        limit = max(1, min(int(limit), 200))
-        offset = max(0, int(offset))
         where = [
-            # Fase 22: predicado materializado na escrita (antes eram 20 LIKEs
-            # por linha em cada pedido, ~300 ms por página).
             "l.is_feed_ok = 1",
             "l.signal_type IS NOT NULL",
             "l.lead_status != 'converted'",
@@ -5350,6 +5359,11 @@ class DatabaseService:
         if days:
             where.append("datetime(l.date_reported) >= datetime('now', ?)")
             params.append(f"-{int(days)} days")
+            # Prefiltro sargable (superset equivalente): permite usar o índice
+            # idx_leads_geo na agregação e no feed. A comparação exata acima
+            # continua a decidir o resultado.
+            where.append("l.date_reported >= date('now', ?)")
+            params.append(f"-{int(days)} days")
         if not include_closed:
             where.append("COALESCE(l.signal_status, 'unknown') != 'closed'")
         if user_id is not None:
@@ -5357,7 +5371,138 @@ class DatabaseService:
             params.append(user_id)
         else:
             where.append("l.lead_status = 'available'")
-        where_sql = " AND ".join(where)
+
+        zone_clauses = []
+        names = [str(n).strip() for n in (neighborhoods or []) if str(n).strip()]
+        if names:
+            zone_clauses.append(
+                "TRIM(l.neighborhood) IN (%s)" % ",".join("?" * len(names))
+            )
+            params.extend(names)
+        zip_codes = []
+        for value in (zips or [])[:200]:
+            code = str(value or "").strip()[:5]
+            if len(code) == 5 and code.isdigit():
+                zip_codes.append(code)
+        if zip_codes:
+            zone_clauses.append(
+                "SUBSTR(TRIM(l.zip_code), 1, 5) IN (%s)"
+                % ",".join("?" * len(zip_codes))
+            )
+            params.extend(zip_codes)
+        if no_geo:
+            zone_clauses.append(
+                "(TRIM(COALESCE(l.neighborhood, '')) = '' AND "
+                "TRIM(COALESCE(l.zip_code, '')) = '')"
+            )
+        if zone_clauses:
+            where.append("(" + " OR ".join(zone_clauses) + ")")
+
+        return " AND ".join(where), params
+
+    def get_leads_geo_summary(
+        self,
+        *,
+        city: Optional[str] = None,
+        signal_type: Optional[str] = None,
+        category: Optional[str] = None,
+        urgency: Optional[str] = None,
+        include_closed: bool = False,
+        days: Optional[int] = 7,
+        user_id: Optional[int] = None,
+    ) -> dict:
+        """Agregado por bairro/ZIP diretamente no SQLite (GROUP BY).
+
+        Devolve poucas linhas (bairros ou ZIPs da cidade), nunca o inventário.
+        Os grupos sem bairro caem para o ZIP; sem ambos ficam em `none`.
+        """
+        where_sql, params = self._leads_feed_where(
+            city=city,
+            signal_type=signal_type,
+            category=category,
+            urgency=urgency,
+            include_closed=include_closed,
+            days=days,
+            user_id=user_id,
+        )
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT CASE
+                         WHEN TRIM(COALESCE(l.neighborhood, '')) <> '' THEN 'nb'
+                         WHEN LENGTH(TRIM(COALESCE(l.zip_code, ''))) >= 5 THEN 'zip'
+                         ELSE 'none'
+                       END AS kind,
+                       CASE
+                         WHEN TRIM(COALESCE(l.neighborhood, '')) <> '' THEN TRIM(l.neighborhood)
+                         WHEN LENGTH(TRIM(COALESCE(l.zip_code, ''))) >= 5 THEN SUBSTR(TRIM(l.zip_code), 1, 5)
+                         ELSE ''
+                       END AS key,
+                       COUNT(*) AS n,
+                       AVG(l.lat) AS lat,
+                       AVG(l.lng) AS lng,
+                       SUM(CASE WHEN l.lat IS NOT NULL AND l.lng IS NOT NULL THEN 1 ELSE 0 END) AS geo_n
+                  FROM leads l
+                 WHERE {where_sql}
+                 GROUP BY kind, key
+                 ORDER BY n DESC
+                """,
+                params,
+            ).fetchall()
+        finally:
+            conn.close()
+
+        groups = [
+            {
+                "kind": row["kind"],
+                "key": row["key"],
+                "n": int(row["n"] or 0),
+                "lat": float(row["lat"]) if row["lat"] is not None else None,
+                "lng": float(row["lng"]) if row["lng"] is not None else None,
+                "geo_n": int(row["geo_n"] or 0),
+            }
+            for row in rows
+        ]
+        return {
+            "total": sum(group["n"] for group in groups),
+            "groups": groups,
+        }
+
+    def get_leads_feed(
+        self,
+        city: Optional[str] = None,
+        signal_type: Optional[str] = None,
+        category: Optional[str] = None,
+        urgency: Optional[str] = None,
+        include_closed: bool = False,
+        days: Optional[int] = None,
+        user_id: Optional[int] = None,
+        limit: int = 20,
+        offset: int = 0,
+        neighborhoods: Optional[list[str]] = None,
+        zips: Optional[list[str]] = None,
+        no_geo: bool = False,
+    ) -> tuple[List[dict], int]:
+        """Feed qualificado com filtros/total em SQL (P0-B).
+
+        O `total` e' o COUNT do MESMO WHERE — o cartao e a lista deixam de
+        divergir. `closed` fica fora por defeito; `include_closed=True` mostra-o.
+        """
+        limit = max(1, min(int(limit), 200))
+        offset = max(0, int(offset))
+        where_sql, params = self._leads_feed_where(
+            city=city,
+            signal_type=signal_type,
+            category=category,
+            urgency=urgency,
+            include_closed=include_closed,
+            days=days,
+            user_id=user_id,
+            neighborhoods=neighborhoods,
+            zips=zips,
+            no_geo=no_geo,
+        )
 
         conn = get_connection()
         try:
@@ -12717,11 +12862,48 @@ class AsyncDatabaseService:
         user_id: Optional[int] = None,
         limit: int = 20,
         offset: int = 0,
+        neighborhoods: Optional[list[str]] = None,
+        zips: Optional[list[str]] = None,
+        no_geo: bool = False,
     ) -> tuple[List[dict], int]:
         return await anyio.to_thread.run_sync(
-            self._service.get_leads_feed,
-            city, signal_type, category, urgency, include_closed, days,
-            user_id, limit, offset,
+            lambda: self._service.get_leads_feed(
+                city=city,
+                signal_type=signal_type,
+                category=category,
+                urgency=urgency,
+                include_closed=include_closed,
+                days=days,
+                user_id=user_id,
+                limit=limit,
+                offset=offset,
+                neighborhoods=neighborhoods,
+                zips=zips,
+                no_geo=no_geo,
+            )
+        )
+
+    async def get_leads_geo_summary(
+        self,
+        *,
+        city: Optional[str] = None,
+        signal_type: Optional[str] = None,
+        category: Optional[str] = None,
+        urgency: Optional[str] = None,
+        include_closed: bool = False,
+        days: Optional[int] = 7,
+        user_id: Optional[int] = None,
+    ) -> dict:
+        return await anyio.to_thread.run_sync(
+            lambda: self._service.get_leads_geo_summary(
+                city=city,
+                signal_type=signal_type,
+                category=category,
+                urgency=urgency,
+                include_closed=include_closed,
+                days=days,
+                user_id=user_id,
+            )
         )
 
     async def get_leads_by_city(self, city: str, limit: int = 100, source_type: Optional[str] = None, category: Optional[str] = None) -> List[dict]:

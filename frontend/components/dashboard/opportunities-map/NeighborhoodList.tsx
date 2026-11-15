@@ -4,10 +4,15 @@ import { MapPin } from "lucide-react";
 
 import { useI18n } from "@/lib/i18n";
 
-import { formatDistance, type Neighborhood } from "./neighborhoods";
+import { formatDistance } from "./neighborhoods";
+
+export interface ZoneListItem {
+  name: string;
+  count: number;
+}
 
 export interface NeighborhoodRow {
-  item: Neighborhood;
+  item: ZoneListItem;
   distance: number | null;
 }
 

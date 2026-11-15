@@ -1511,6 +1511,7 @@ const PT: Dict = {
   "dashboard.oppmap.sort.leads": "Mais leads",
   "dashboard.oppmap.opening": "A abrir {n} leads em {name}…",
   "dashboard.oppmap.empty": "Sem oportunidades deste ofício em {city}.",
+  "dashboard.oppmap.no_leads": "Sem oportunidades para estes filtros.",
   "dashboard.oppmap.map": "Mapa",
   "dashboard.oppmap.list": "Lista",
   "dashboard.oppmap.map_aria": "Mapa de oportunidades em {city}",

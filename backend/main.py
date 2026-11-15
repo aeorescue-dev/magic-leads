@@ -995,6 +995,9 @@ async def leads_today(
     category: str = None,
     urgency: str = None,
     include_closed: bool = False,
+    neighborhoods: str = None,
+    zips: str = None,
+    no_geo: bool = False,
     user: dict = Depends(_get_current_user),
 ):
     """Feed dos últimos 7 dias — filtros, total e exclusão de fechados em SQL.
@@ -1009,6 +1012,16 @@ async def leads_today(
         user_id = user["id"]
         limit = max(1, min(int(limit), 200))
         page = max(1, int(page))
+        neighborhood_list = [
+            part.strip()
+            for part in str(neighborhoods or "").split(",")
+            if part.strip()
+        ][:50]
+        zip_list = [
+            part.strip()
+            for part in str(zips or "").split(",")
+            if part.strip()
+        ][:200]
         leads, total = await db_service.get_leads_feed(
             city=city,
             signal_type=signal_type,
@@ -1019,6 +1032,9 @@ async def leads_today(
             user_id=user_id,
             limit=limit,
             offset=(max(1, page) - 1) * limit,
+            neighborhoods=neighborhood_list or None,
+            zips=zip_list or None,
+            no_geo=bool(no_geo),
         )
         await _annotate_visibility(leads, user)
 
@@ -1031,6 +1047,40 @@ async def leads_today(
     except Exception as e:
         logger.error(f"Erro ao buscar demandas do dia: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Erro ao buscar demandas do dia")
+
+
+@app.get("/api/leads/neighborhoods")
+@limiter.limit("120/minute")
+async def leads_neighborhoods(
+    request: Request,
+    city: str = None,
+    type: str = None,
+    category: str = None,
+    urgency: str = None,
+    include_closed: bool = False,
+    days: int = 7,
+    user: dict = Depends(_get_current_user),
+):
+    """Agregado geográfico do feed de leads (bairro/ZIP) em SQL.
+
+    Usa o MESMO predicado do `/api/leads/today`, para que o mapa e os cartões
+    abaixo mostrem sempre o mesmo conjunto. Devolve apenas os grupos
+    (bairros/ZIPs), nunca o inventário.
+    """
+    try:
+        signal_type = _signal_type_from_filter(type)
+        return await db_service.get_leads_geo_summary(
+            city=city,
+            signal_type=signal_type,
+            category=category,
+            urgency=urgency,
+            include_closed=include_closed,
+            days=max(1, min(int(days), 90)),
+            user_id=user["id"],
+        )
+    except Exception as e:
+        logger.error(f"Erro na agregação por bairro: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Erro na agregação por bairro")
 
 
 # KPIs / estatísticas do painel

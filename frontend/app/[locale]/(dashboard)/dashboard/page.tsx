@@ -55,6 +55,8 @@ import {
 } from "@/components/dashboard/OpportunityCard";
 import { PreventiveFeed } from "@/components/dashboard/PreventiveFeed";
 import { NeighborhoodPanel } from "@/components/dashboard/opportunities-map/NeighborhoodPanel";
+import { LeadsNeighborhoodPanel } from "@/components/dashboard/opportunities-map/LeadsNeighborhoodPanel";
+import type { LeadZone } from "@/components/dashboard/opportunities-map/leadZones";
 import { FeedToolbar } from "@/components/dashboard/FeedToolbar";
 import { FeedRail } from "@/components/dashboard/FeedRail";
 import {
@@ -303,6 +305,12 @@ function DashboardPageInner() {
   // Data de referência estável para prazos calculados no render.
   const [renderNow] = useState(() => Date.now());
   const [selectedType, setSelectedType] = useState<string>("all");
+  // Bairro escolhido no mapa da aba Opportunities (filtra o feed de leads).
+  const [leadZone, setLeadZone] = useState<LeadZone | null>(null);
+
+  useEffect(() => {
+    setLeadZone(null);
+  }, [selectedCity, selectedCategory, selectedType, selectedSeverity, includeClosed]);
   const [selectedOwnerType, setSelectedOwnerType] = useState<string>("all");
   // Gaveta de filtros em mobile (<lg). Em desktop os filtros ficam inline.
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -686,6 +694,7 @@ function DashboardPageInner() {
         selectedCategory,
         selectedSeverity,
         includeClosed,
+        leadZone?.name ?? "all",
       ]
     : null;
   const { data: feedData, isLoading: feedLoading } = useSWR(
@@ -698,7 +707,14 @@ function DashboardPageInner() {
         1,
         selectedType === "all" ? undefined : selectedType,
         selectedCategory === "all" ? undefined : selectedCategory,
-        urgencyParam
+        urgencyParam,
+        leadZone
+          ? {
+              neighborhoods: leadZone.neighborhoods,
+              zips: leadZone.zips,
+              noGeo: leadZone.noGeo,
+            }
+          : null
       ),
     { refreshInterval: 60000, isPaused: swrPaused }
   );
@@ -925,7 +941,14 @@ function DashboardPageInner() {
         nextPage,
         selectedType === "all" ? undefined : selectedType,
         selectedCategory === "all" ? undefined : selectedCategory,
-        urgencyParam
+        urgencyParam,
+        leadZone
+          ? {
+              neighborhoods: leadZone.neighborhoods,
+              zips: leadZone.zips,
+              noGeo: leadZone.noGeo,
+            }
+          : null
       );
       if (data.leads && data.leads.length > 0) {
         setLeads((prev) => [...prev, ...data.leads]);
@@ -944,7 +967,7 @@ function DashboardPageInner() {
     }
     // includeClosed FALTOU: alternar o interruptor de historico nao recriava o
     // callback, por isso "carregar mais" continuava a pagina sem o parametro.
-  }, [currentPage, hasMoreLeads, loadingMore, selectedCity, selectedType, selectedCategory, selectedSeverity, urgencyParam, includeClosed]);
+  }, [currentPage, hasMoreLeads, loadingMore, selectedCity, selectedType, selectedCategory, selectedSeverity, urgencyParam, includeClosed, leadZone]);
 
   // O lead já está em "Meus Leads" (revelado por mim: reservado, em negociação,
   // convertido, liberado ou com hold expirado). Nesse estado o botão
@@ -1729,6 +1752,7 @@ function DashboardPageInner() {
     setDeadlineWindow("all");
     setWithFines(false);
     setSearchQuery("");
+    setLeadZone(null);
   };
 
   const ownerOptions = [
@@ -2598,6 +2622,46 @@ function DashboardPageInner() {
           ) : null}
 
 
+          {activeTab === "opportunities" ? (
+            <div className="mt-3 space-y-3">
+              <LeadsNeighborhoodPanel
+                city={selectedCity}
+                category={selectedCategory}
+                type={selectedType}
+                urgency={urgencyParam}
+                includeClosed={includeClosed}
+                activeName={leadZone?.name ?? null}
+                onSelect={(zone) => {
+                  setLeadZone(zone);
+                  requestAnimationFrame(() => {
+                    document
+                      .getElementById("opportunities-feed")
+                      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  });
+                }}
+              />
+              {leadZone ? (
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--sd-accent)]/40 bg-[var(--sd-accent-soft)] px-2.5 py-1 text-[11px] font-bold text-[var(--sd-accent)]">
+                    <MapPin className="h-3 w-3" />
+                    {t("dashboard.oppmap.filtered_by").replace(
+                      "{name}",
+                      leadZone.name
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setLeadZone(null)}
+                      aria-label={t("dashboard.oppmap.clear")}
+                      className="ml-0.5 rounded-full p-0.5 transition hover:bg-black/10"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
           {filtersOpen && (
             <div
               className="fixed inset-0 z-[80]"
@@ -3219,7 +3283,7 @@ function DashboardPageInner() {
 
 
             {/* OPPORTUNITIES FEED */}
-            <section className="flex flex-col overflow-hidden rounded-2xl border border-[var(--sd-border)] bg-[var(--sd-surface)]">
+            <section id="opportunities-feed" className="scroll-mt-24 flex flex-col overflow-hidden rounded-2xl border border-[var(--sd-border)] bg-[var(--sd-surface)]">
               <div className={`px-5 py-4 border-b flex items-center justify-between ${T.border}`}>
                 <div>
                   <h2 className="font-bold text-base flex items-center gap-2">
