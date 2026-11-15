@@ -1,6 +1,6 @@
 "use client";
 
-import { MapPin } from "lucide-react";
+import { MapPin, Sparkles } from "lucide-react";
 
 import { useI18n } from "@/lib/i18n";
 
@@ -9,6 +9,8 @@ import { formatDistance } from "./neighborhoods";
 export interface ZoneListItem {
   name: string;
   count: number;
+  /** Oportunidades frescas (<24 h). */
+  fresh?: number;
 }
 
 export interface NeighborhoodRow {
@@ -25,6 +27,9 @@ export function NeighborhoodList({
   hasUser,
   sort,
   onSortChange,
+  freshOnly,
+  onFreshOnlyChange,
+  freshCount,
   city,
 }: {
   rows: NeighborhoodRow[];
@@ -35,6 +40,9 @@ export function NeighborhoodList({
   hasUser: boolean;
   sort: "leads" | "nearest";
   onSortChange: (value: "leads" | "nearest") => void;
+  freshOnly: boolean;
+  onFreshOnlyChange: (value: boolean) => void;
+  freshCount: number;
   city: string;
 }) {
   const { t } = useI18n();
@@ -69,6 +77,32 @@ export function NeighborhoodList({
             </div>
           ) : null}
         </div>
+        {freshCount > 0 ? (
+          <div className="mt-2 flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => onFreshOnlyChange(!freshOnly)}
+              aria-pressed={freshOnly}
+              className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold transition ${
+                freshOnly
+                  ? "border-amber-400 bg-amber-400/15 text-amber-300"
+                  : "border-[var(--sd-border)] text-[var(--sd-muted)] hover:text-[var(--sd-text)]"
+              }`}
+            >
+              <Sparkles className="h-2.5 w-2.5" />
+              {t("dashboard.oppmap.fresh_only")}
+              <span
+                className={`rounded-full px-1 text-[9.5px] ${
+                  freshOnly
+                    ? "bg-amber-400/25 text-amber-200"
+                    : "bg-[var(--sd-surface-3)] text-[var(--sd-text)]"
+                }`}
+              >
+                {freshCount.toLocaleString("en-US")}
+              </span>
+            </button>
+          </div>
+        ) : null}
       </div>
 
       {rows.length === 0 ? (
@@ -104,8 +138,23 @@ export function NeighborhoodList({
                     }`}
                   >
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-[15px] font-bold leading-tight text-[var(--sd-text)]">
-                        {item.name}
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <span className="truncate text-[15px] font-bold leading-tight text-[var(--sd-text)]">
+                          {item.name}
+                        </span>
+                        {(item.fresh ?? 0) > 0 ? (
+                          <span
+                            data-fresh="1"
+                            className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-amber-400/50 bg-amber-400/15 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-amber-300"
+                            title={t("dashboard.oppmap.fresh_tip")}
+                          >
+                            <Sparkles className="h-2.5 w-2.5" />
+                            {t("dashboard.oppmap.fresh_badge")}
+                            <span className="opacity-80">
+                              {(item.fresh ?? 0).toLocaleString("en-US")}
+                            </span>
+                          </span>
+                        ) : null}
                       </div>
                       <div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-[var(--sd-muted)]">
                         <span>

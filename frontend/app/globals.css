@@ -1202,6 +1202,7 @@
   border: 0;
 }
 .opp-pin {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1227,6 +1228,48 @@
   color: #0b1220;
   transform: scale(1.14);
 }
+/* Lead fresco (<24 h): pin âmbar com brilho pulsante para saltar à vista. */
+.opp-pin.is-fresh {
+  background: #f59e0b;
+  border-color: #fffbeb;
+  color: #1c1917;
+  box-shadow:
+    0 0 0 3px rgba(245, 158, 11, 0.35),
+    0 0 20px rgba(245, 158, 11, 0.7),
+    0 6px 16px rgba(0, 0, 0, 0.45);
+  animation: opp-fresh-glow 2.2s ease-in-out infinite;
+}
+.opp-pin.is-fresh:hover {
+  background: #fbbf24;
+}
+.opp-pin.is-fresh.is-active {
+  background: #fffbeb;
+  color: #7c2d12;
+}
+.opp-pin-fresh {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: #fde68a;
+  border: 1.5px solid #0b1220;
+}
+@keyframes opp-fresh-glow {
+  0%, 100% {
+    box-shadow:
+      0 0 0 3px rgba(245, 158, 11, 0.3),
+      0 0 16px rgba(245, 158, 11, 0.55),
+      0 6px 16px rgba(0, 0, 0, 0.45);
+  }
+  50% {
+    box-shadow:
+      0 0 0 5px rgba(245, 158, 11, 0.16),
+      0 0 26px rgba(245, 158, 11, 0.85),
+      0 6px 16px rgba(0, 0, 0, 0.45);
+  }
+}
 .opp-cluster-wrap {
   background: transparent;
   border: 0;
@@ -1244,6 +1287,16 @@
   font-size: 13px;
   font-weight: 800;
   box-shadow: 0 0 0 6px rgba(94, 234, 212, 0.1), 0 10px 24px rgba(0, 0, 0, 0.55);
+}
+/* Cluster com leads frescos: mantém o mesmo brilho âmbar dos pins. */
+.opp-cluster.is-fresh {
+  border-color: #fbbf24;
+  background: #1c1408;
+  color: #fbbf24;
+  box-shadow:
+    0 0 0 6px rgba(245, 158, 11, 0.14),
+    0 0 24px rgba(245, 158, 11, 0.55),
+    0 10px 24px rgba(0, 0, 0, 0.55);
 }
 .opp-user-wrap {
   background: transparent;
@@ -1265,4 +1318,5 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .opp-user-dot { animation: none; }
+  .opp-pin.is-fresh { animation: none; }
 }

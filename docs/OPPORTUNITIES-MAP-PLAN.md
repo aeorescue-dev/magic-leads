@@ -136,19 +136,57 @@ fonte é a tabela `leads` (13,6 mil ativos nos últimos 7 dias), não o preventi
   lista, sem pin, para não esticar o enquadramento.
 - **Performance:** a agregação pura custava ~97 ms (lookup aleatório por linha).
   O índice covering `idx_leads_geo(is_feed_ok, city COLLATE NOCASE, date_reported,
-  signal_type, lead_status, signal_status, reserved_by, neighborhood, zip_code,
-  lat, lng)` baixou para **13–19 ms** com 135k leads. A criação é
-  `CREATE INDEX IF NOT EXISTS` no arranque (~2 s numa base de 135k).
+  created_at, signal_type, lead_status, signal_status, reserved_by, neighborhood,
+  zip_code, lat, lng)` baixou para **0,4–7,1 ms** no tamanho de produção (135k),
+  já a contar os frescos. A criação é `CREATE INDEX IF NOT EXISTS` no arranque
+  (**234,5 ms** numa base de 135k; segunda execução 0,57 ms). Um índice antigo
+  sem `created_at` é recriado uma vez.
+- **Ligação de leitura:** a agregação reutiliza uma ligação SQLite persistente
+  (com lock); evita abrir/fechar uma ligação por pedido.
+
+## 11. Oportunidades frescas (<24 h)
+
+- **Definição:** `leads.created_at` nas últimas 24 h; no preventivo conta também
+  prazo de inspeção ≤3 dias.
+- **Backend:** `fresh` por grupo em `/api/leads/neighborhoods` e por zona/total
+  em `/api/opportunities/territories`.
+- **Mapa:** pin/cluster âmbar com halo pulsante e ponto no canto; animação
+  desligada em `prefers-reduced-motion`.
+- **Lista:** selo `NEW <n>`, chip `<n> NEW` no cabeçalho, toggle
+  **New (<24h)** e ordenação fresh-first.
+- **Pre-inspection:** passa a ler a API `territories` ao vivo (fallback ao
+  snapshot). Os centroides dos ZIPs continuam a vir do snapshot.
 
 Capturas: `reports/opportunities-tab-preview/` (Boston, filtro por Dorchester,
-Near me, Dallas, Chicago, mobile).
+Near me, Dallas, Chicago, mobile, `fresh-*-boston.png`).
 
-## 11. Pendências antes do deploy
+## 12. Pendências antes do deploy
 
 
 - [ ] Feature flag `OPPORTUNITIES_MAP_ENABLED=0` e painel só com a flag ligada.
-- [ ] Substituir o snapshot pela API `territories` (P1) e cache de 60 s.
+- [x] Substituir o snapshot pela API `territories` (P1) no painel preventivo.
 - [ ] Validar com ops os 11 setores de Dallas.
 - [ ] Traduzir “Other areas” (PT/ES) quando o mapeamento for para o backend.
 - [ ] Chicago: precisa de ZIP/geo na ingestão para ter pins.
-- [ ] Medir p95 do feed com filtro de ZIPs e, se necessário, criar o índice.
+- [x] Medir p95 do feed com filtro de ZIPs e criar o índice covering.
+
+## 13. Runbook pós-deploy (obrigatório)
+
+1. Confirmar `railway deployment list` = SUCCESS no commit esperado e `/health`
+   healthy. Procurar no log `[DB] idx_leads_geo ...` e `[GEO] warmup ...`.
+2. Correr a verificação de latência:
+
+```bash
+cd frontend
+AUDIT_API_URL=https://magic-leads-production.up.railway.app \
+AUDIT_TOKEN=<sessão com acesso ativo> \
+node scripts/audit-map-ui.mjs --latency-only
+```
+
+3. Critério **go/no-go**: `Server-Timing: db` < 50 ms nas 4 cidades (Boston,
+   NYC, Dallas, Chicago), HTTP 200 e payload com `total`/`groups`. Qualquer
+   falha bloqueia o deploy.
+4. O modo completo (sem `--latency-only`) valida também lista = painel = feed,
+   o clique no bairro, o destaque de frescos (selo + pin + toggle) e a
+   agregação ao vivo do separador Pre-inspection.
+

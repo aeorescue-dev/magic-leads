@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
-import { ChevronDown, Crosshair, MapPin, SlidersHorizontal } from "lucide-react";
+import { ChevronDown, Crosshair, MapPin, SlidersHorizontal, Sparkles } from "lucide-react";
 
 import { useI18n } from "@/lib/i18n";
 import { fetchLeadNeighborhoods } from "@/lib/api-client";
@@ -50,8 +50,14 @@ export function LeadsNeighborhoodPanel({
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(true);
   const [sort, setSort] = useState<"leads" | "nearest">("leads");
+  const [freshOnly, setFreshOnly] = useState(false);
   const [user, setUser] = useState<{ lat: number; lng: number } | null>(null);
   const [geoState, setGeoState] = useState<GeoState>("idle");
+
+  // Trocar de cidade não pode deixar o filtro "New" preso numa lista vazia.
+  useEffect(() => {
+    setFreshOnly(false);
+  }, [city]);
 
   const enabled = city !== "all";
   const { data, isLoading } = useSWR(
@@ -89,8 +95,25 @@ export function LeadsNeighborhoodPanel({
     [city, data]
   );
 
+  const freshTotal = useMemo(
+    () => zones.reduce((sum, zone) => sum + zone.fresh, 0),
+    [zones]
+  );
+
+  // Frescos primeiro (é o objetivo: atacar o que acabou de cair); a lista
+  // mantém o total da zona e o selo "New" com a contagem fresca.
+  const visibleZones = useMemo(() => {
+    const base = freshOnly ? zones.filter((zone) => zone.fresh > 0) : zones;
+    return [...base].sort(
+      (a, b) =>
+        b.fresh - a.fresh ||
+        b.count - a.count ||
+        a.name.localeCompare(b.name)
+    );
+  }, [zones, freshOnly]);
+
   const rows = useMemo<NeighborhoodRow[]>(() => {
-    const list = zones.map((zone) => ({
+    const list = visibleZones.map((zone) => ({
       item: zone,
       distance:
         user && zone.lat !== null && zone.lng !== null
@@ -101,7 +124,7 @@ export function LeadsNeighborhoodPanel({
       list.sort((a, b) => (a.distance ?? Infinity) - (b.distance ?? Infinity));
     }
     return list;
-  }, [zones, sort, user]);
+  }, [visibleZones, sort, user]);
 
   const requestLocation = () => {
     if (typeof navigator === "undefined" || !navigator.geolocation) {
@@ -143,7 +166,16 @@ export function LeadsNeighborhoodPanel({
             </p>
           </div>
         </div>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          {freshTotal > 0 ? (
+            <span
+              className="inline-flex items-center gap-1 rounded-full border border-amber-400/50 bg-amber-400/15 px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide text-amber-300"
+              title={t("dashboard.oppmap.fresh_tip")}
+            >
+              <Sparkles className="h-3 w-3" />
+              {freshTotal.toLocaleString("en-US")} {t("dashboard.oppmap.fresh_badge")}
+            </span>
+          ) : null}
           <button
             type="button"
             onClick={() => setExpanded((value) => !value)}
@@ -193,7 +225,7 @@ export function LeadsNeighborhoodPanel({
                   city={city}
                   center={meta?.center ?? [42.3601, -71.0589]}
                   zoom={meta?.zoom ?? 12}
-                  neighborhoods={zones}
+                  neighborhoods={visibleZones}
                   activeName={activeName}
                   onSelect={(name) => {
                     const zone = zones.find((item) => item.name === name);
@@ -247,6 +279,9 @@ export function LeadsNeighborhoodPanel({
                   hasUser={Boolean(user)}
                   sort={sort}
                   onSortChange={setSort}
+                  freshOnly={freshOnly}
+                  onFreshOnlyChange={setFreshOnly}
+                  freshCount={freshTotal}
                   city={cityLabel}
                 />
               </div>

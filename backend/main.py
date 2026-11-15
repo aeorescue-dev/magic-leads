@@ -1061,6 +1061,7 @@ async def leads_today(
 @limiter.limit("120/minute")
 async def leads_neighborhoods(
     request: Request,
+    response: Response,
     city: str = None,
     type: str = None,
     category: str = None,
@@ -1081,7 +1082,8 @@ async def leads_neighborhoods(
     """
     try:
         signal_type = _signal_type_from_filter(type)
-        return await db_service.get_leads_geo_summary(
+        started = time.perf_counter()
+        result = await db_service.get_leads_geo_summary(
             city=city,
             signal_type=signal_type,
             category=category,
@@ -1094,6 +1096,10 @@ async def leads_neighborhoods(
             owner_type=owner_type,
             search=search,
         )
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        response.headers["Server-Timing"] = f"db;dur={elapsed_ms:.1f}"
+        response.headers["Cache-Control"] = "private, max-age=30"
+        return result
     except Exception as e:
         logger.error(f"Erro na agregação por bairro: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Erro na agregação por bairro")
@@ -6684,6 +6690,25 @@ async def _lifespan(app):
         logger.info(f"[OK] Stripe PRICE_ID: {settings.STRIPE_PRICE_ID_PRO}")
     else:
         logger.warning("[AVISO]️ Stripe NÃO configurado completamente — checkout usará mock")
+
+    # Warm-up do mapa (leads): aquece índice/páginas para o primeiro pedido
+    # pós-deploy ficar abaixo do SLO de 50 ms mesmo com cache frio. Duas passagens
+    # com o mesmo gate de utilizador (user_id=0) para aquecer páginas e plano.
+    try:
+        for city in ("Boston", "NYC", "Dallas", "Chicago"):
+            started = time.perf_counter()
+            for _ in range(2):
+                await db_service.get_leads_geo_summary(
+                    city=city, days=7, user_id=0
+                )
+            logger.info(
+                "[GEO] warmup %s %.0f ms",
+                city,
+                (time.perf_counter() - started) * 1000,
+            )
+    except Exception as exc:
+        logger.warning("[GEO] warmup falhou: %s", exc)
+
     yield
     for name, task in (
         ("scheduler", _scheduler_task),
@@ -9578,9 +9603,12 @@ async def opportunity_territories(
     await _require_active_access(user)
     if not str(city or "").strip():
         raise HTTPException(status_code=400, detail="city_required")
+    started = time.perf_counter()
     result = opportunity_workflow.territories(
         city=city, kind=kind, days=days, category=category
     )
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    response.headers["Server-Timing"] = f"db;dur={elapsed_ms:.1f}"
     response.headers["Cache-Control"] = "private, max-age=60"
     return result
 

@@ -1,14 +1,17 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import useSWR from "swr";
 import {
   ChevronDown,
   Crosshair,
   MapPin,
   SlidersHorizontal,
+  Sparkles,
 } from "lucide-react";
 
 import { useI18n } from "@/lib/i18n";
+import { fetchOpportunityTerritories } from "@/lib/api-client";
 import type { CityOption } from "@/components/dashboard/CityPicker";
 
 import { CityMap } from "./CityMap";
@@ -17,6 +20,7 @@ import {
   CITY_META,
   buildNeighborhoods,
   distanceMiles,
+  type Zone,
 } from "./neighborhoods";
 import { SNAPSHOT, nicheLabel } from "./data";
 
@@ -47,33 +51,97 @@ export function NeighborhoodPanel({
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(true);
   const [sort, setSort] = useState<"leads" | "nearest">("leads");
+  const [freshOnly, setFreshOnly] = useState(false);
   const [user, setUser] = useState<{ lat: number; lng: number } | null>(null);
   const [geoState, setGeoState] = useState<GeoState>("idle");
 
-  const data = city !== "all" ? SNAPSHOT.cities[city] : undefined;
+  // Trocar de cidade não pode deixar o filtro "New" preso numa lista vazia.
+  useEffect(() => {
+    setFreshOnly(false);
+  }, [city]);
+
+  const snapshot = city !== "all" ? SNAPSHOT.cities[city] : undefined;
+
+  // Agregado ao vivo (mesma query do feed preventivo). O snapshot é o fallback
+  // offline: mantém o mapa útil se a API falhar, mas sem frescos.
+  const { data: live } = useSWR(
+    city !== "all"
+      ? ["territories", city, "preventive", 30, category]
+      : null,
+    () =>
+      fetchOpportunityTerritories({
+        city,
+        kind: "preventive",
+        days: 30,
+        category,
+      }),
+    { revalidateOnFocus: false, keepPreviousData: true }
+  );
+
+  const zones = useMemo<Zone[]>(() => {
+    if (!live) return snapshot?.zones ?? [];
+    const centroids = new Map(
+      (snapshot?.zones ?? []).map((zone) => [zone.zip, zone])
+    );
+    return live.zones.map((zone) => {
+      const geo = centroids.get(zone.zip);
+      return {
+        zip: zone.zip,
+        label: null,
+        total: zone.total,
+        fresh: zone.fresh,
+        niches: zone.niches,
+        lat: geo?.lat ?? null,
+        lng: geo?.lng ?? null,
+        geo_source: geo ? "snapshot" : "",
+      };
+    });
+  }, [live, snapshot]);
+
   const meta = CITY_META[city];
-  const mapAvailable = Boolean(data && data.zones.length > 0 && meta);
+  const mapAvailable = Boolean(zones.length > 0 && meta);
 
   const niches = useMemo(
-    () => (data ? data.niches.slice(0, 8) : []),
-    [data]
+    () => (snapshot ? snapshot.niches.slice(0, 8) : []),
+    [snapshot]
   );
 
   const neighborhoods = useMemo(
-    () => (data && mapAvailable ? buildNeighborhoods(city, data.zones, category) : []),
-    [city, data, category, mapAvailable]
+    () => (mapAvailable ? buildNeighborhoods(city, zones, category) : []),
+    [city, zones, category, mapAvailable]
   );
 
+  const freshTotal = useMemo(
+    () => neighborhoods.reduce((sum, item) => sum + item.fresh, 0),
+    [neighborhoods]
+  );
+
+  // Frescos primeiro; o toggle mostra só bairros com entradas/prazos novos.
+  const visibleNeighborhoods = useMemo(() => {
+    const base = freshOnly
+      ? neighborhoods.filter((item) => item.fresh > 0)
+      : neighborhoods;
+    return [...base].sort(
+      (a, b) =>
+        b.fresh - a.fresh ||
+        b.count - a.count ||
+        a.name.localeCompare(b.name)
+    );
+  }, [neighborhoods, freshOnly]);
+
   const rows = useMemo<NeighborhoodRow[]>(() => {
-    const list = neighborhoods.map((item) => ({
+    const list = visibleNeighborhoods.map((item) => ({
       item,
-      distance: user ? distanceMiles(user.lat, user.lng, item.lat, item.lng) : null,
+      distance:
+        user && item.lat !== null && item.lng !== null
+          ? distanceMiles(user.lat, user.lng, item.lat, item.lng)
+          : null,
     }));
     if (sort === "nearest" && user) {
       list.sort((a, b) => (a.distance ?? Infinity) - (b.distance ?? Infinity));
     }
     return list;
-  }, [neighborhoods, sort, user]);
+  }, [visibleNeighborhoods, sort, user]);
 
   const requestLocation = () => {
     if (typeof navigator === "undefined" || !navigator.geolocation) {
@@ -117,6 +185,15 @@ export function NeighborhoodPanel({
         </div>
 
         <div className="ml-auto flex items-center gap-2">
+          {freshTotal > 0 ? (
+            <span
+              className="inline-flex items-center gap-1 rounded-full border border-amber-400/50 bg-amber-400/15 px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide text-amber-300"
+              title={t("dashboard.oppmap.fresh_tip")}
+            >
+              <Sparkles className="h-3 w-3" />
+              {freshTotal.toLocaleString("en-US")} {t("dashboard.oppmap.fresh_badge")}
+            </span>
+          ) : null}
           <button
             type="button"
             onClick={() => setExpanded((value) => !value)}
@@ -220,7 +297,7 @@ export function NeighborhoodPanel({
                   city={city}
                   center={meta.center}
                   zoom={meta.zoom}
-                  neighborhoods={neighborhoods}
+                  neighborhoods={visibleNeighborhoods}
                   activeName={activeName}
                   onSelect={(name) => {
                     const item = neighborhoods.find((entry) => entry.name === name);
@@ -262,7 +339,11 @@ export function NeighborhoodPanel({
               <div className="max-h-[340px] overflow-hidden rounded-xl border border-[var(--sd-border)]">
                 <NeighborhoodList
                   rows={rows}
-                  total={rows.reduce((sum, row) => sum + row.item.count, 0)}
+                  total={
+                    freshOnly
+                      ? freshTotal
+                      : rows.reduce((sum, row) => sum + row.item.count, 0)
+                  }
                   activeName={activeName}
                   onSelect={(name) => {
                     const item = neighborhoods.find((entry) => entry.name === name);
@@ -275,6 +356,9 @@ export function NeighborhoodPanel({
                   hasUser={Boolean(user)}
                   sort={sort}
                   onSortChange={setSort}
+                  freshOnly={freshOnly}
+                  onFreshOnlyChange={setFreshOnly}
+                  freshCount={freshTotal}
                   city={cityLabel}
                 />
               </div>

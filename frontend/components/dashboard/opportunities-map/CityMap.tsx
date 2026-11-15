@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from "react";
 export interface MapZone {
   name: string;
   count: number;
+  /** Oportunidades frescas (<24 h). */
+  fresh?: number;
   lat: number | null;
   lng: number | null;
 }
@@ -135,15 +137,19 @@ export function CityMap({
           maxClusterRadius: 46,
           disableClusteringAtZoom: 14,
           iconCreateFunction: (group: any) => {
-            const count = group
-              .getAllChildMarkers()
-              .reduce(
-                (sum: number, marker: any) =>
-                  sum + Number(marker.options.opportunityCount ?? 0),
-                0
-              );
+            const markers = group.getAllChildMarkers();
+            const count = markers.reduce(
+              (sum: number, marker: any) =>
+                sum + Number(marker.options.opportunityCount ?? 0),
+              0
+            );
+            const fresh = markers.reduce(
+              (sum: number, marker: any) =>
+                sum + Number(marker.options.freshCount ?? 0),
+              0
+            );
             return L.divIcon({
-              html: `<div class="opp-cluster">${count}</div>`,
+              html: `<div class="opp-cluster${fresh > 0 ? " is-fresh" : ""}">${count}</div>`,
               className: "opp-cluster-wrap",
               iconSize: [52, 52],
               iconAnchor: [26, 26],
@@ -191,17 +197,23 @@ export function CityMap({
       if (item.name === "Other areas" || item.name === "Other area") continue;
       if (item.lat === null || item.lng === null) continue;
       const active = item.name === activeName;
+      const fresh = (item.fresh ?? 0) > 0;
       const icon = L.divIcon({
         className: "opp-pin-wrap",
-        html: `<div class="opp-pin${active ? " is-active" : ""}">${item.count}</div>`,
+        html: `<div class="opp-pin${active ? " is-active" : ""}${
+          fresh ? " is-fresh" : ""
+        }"${fresh ? ` title="${item.fresh} new in the last 24h"` : ""}>${
+          item.count
+        }${fresh ? '<span class="opp-pin-fresh" aria-hidden="true"></span>' : ""}</div>`,
         iconSize: [44, 28],
         iconAnchor: [22, 14],
       });
       const marker = L.marker([item.lat, item.lng], {
         icon,
-        title: `${item.name} · ${item.count}`,
+        title: `${item.name} · ${item.count}${fresh ? ` · ${item.fresh} new` : ""}`,
         riseOnHover: true,
         opportunityCount: item.count,
+        freshCount: item.fresh ?? 0,
       });
       marker.on("click", () => selectRef.current(item.name));
       marker.addTo(layer);

@@ -71,6 +71,29 @@ def test_geo_summary_groups_by_neighborhood_then_zip():
     assert groups[("none", "")] == 1
 
 
+def test_geo_summary_counts_fresh_under_24h():
+    _insert_lead(external_id="fr1", city="Boston", neighborhood="Dorchester", zip_code="02124")
+    _insert_lead(external_id="fr2", city="Boston", neighborhood="Dorchester", zip_code="02124")
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE leads SET created_at = datetime('now', '-48 hours') "
+            "WHERE external_id = 'fr2'"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = db_service._service.get_leads_geo_summary(
+        city="Boston", days=7, user_id=5
+    )
+
+    assert result["total"] == 2
+    group = next(g for g in result["groups"] if g["key"] == "Dorchester")
+    assert group["n"] == 2
+    assert group["fresh"] == 1
+
+
 def test_geo_summary_respects_city_and_filters():
     _insert_lead(external_id="h1", city="Boston", neighborhood="Roxbury", zip_code="02119")
     _insert_lead(

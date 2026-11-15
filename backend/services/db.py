@@ -1426,8 +1426,9 @@ def get_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, timeout=10.0)
     conn.row_factory = sqlite3.Row
     try:
-        conn.execute("PRAGMA journal_mode=WAL;")
-        # Evita "database is locked" sob concorrência (scraper + API + webhook).
+        # O modo WAL é persistente na base: define-se uma vez no arranque
+        # (init_db) e não em cada ligação. Repetir `journal_mode=WAL` por
+        # pedido custava ~6-10 ms de lock/latência em cada endpoint.
         conn.execute("PRAGMA busy_timeout=10000;")
         conn.execute("PRAGMA synchronous=NORMAL;")
         # O volume do Railway e' pequeno (434 MB). Sem este limite o WAL chegou
@@ -1439,6 +1440,35 @@ def get_connection() -> sqlite3.Connection:
         conn.create_function("is_institutional_name", 1, is_institutional_name)
     except Exception:
         pass
+    return conn
+
+
+# Ligação de leitura reutilizada pela agregação do mapa. Abrir/fechar SQLite a
+# cada pedido custa 20–60 ms no Windows e alguns ms em Linux; a agregação é
+# read-only e curta. Em WAL cada SELECT vê o último commit, sem snapshot preso.
+_geo_read_conn: Optional[sqlite3.Connection] = None
+_geo_read_conn_path: Optional[str] = None
+_geo_read_lock = threading.Lock()
+
+
+def get_geo_read_connection() -> sqlite3.Connection:
+    global _geo_read_conn, _geo_read_conn_path
+    if _geo_read_conn is not None and _geo_read_conn_path == DB_PATH:
+        return _geo_read_conn
+    if _geo_read_conn is not None:
+        try:
+            _geo_read_conn.close()
+        except Exception:
+            pass
+    conn = sqlite3.connect(DB_PATH, timeout=10.0, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=10000;")
+    try:
+        conn.create_function("is_institutional_name", 1, is_institutional_name)
+    except Exception:
+        pass
+    _geo_read_conn = conn
+    _geo_read_conn_path = DB_PATH
     return conn
 
 
@@ -1633,6 +1663,10 @@ def init_db() -> None:
         try:
             conn = get_connection()
             try:
+                try:
+                    conn.execute("PRAGMA journal_mode=WAL;")
+                except sqlite3.OperationalError:
+                    pass  # fs read-only: segue em modo normal
                 if _seed_from_bundle(conn, force=force_reset and _ == 0):
                     conn = get_connection()
                 conn.executescript(DEFAULT_SCHEMA)
@@ -1857,13 +1891,48 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
 
     # Agregação geográfica do feed (mapa bairro/ZIP) e scans do feed. Criado
     # depois das migrações de colunas; o covering evita lookups aleatórios
-    # (~97 ms -> ~13-19 ms com 135k leads).
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_leads_geo ON leads ("
-        "is_feed_ok, city COLLATE NOCASE, date_reported, signal_type, "
-        "lead_status, signal_status, reserved_by, neighborhood, zip_code, "
-        "lat, lng)"
-    )
+    # (~97 ms -> ~13-19 ms com 135k leads). `created_at` entra na última versão
+    # para o agregado de frescos (<24 h) continuar 100% coberto pelo índice.
+    #
+    # Idempotente: só tenta criar quando ainda não existe. No arranque o
+    # `init_db()` corre antes de o servidor aceitar pedidos, pelo que o lock de
+    # escrita do CREATE INDEX não colide com tráfego da API. Leitores em WAL
+    # continuam disponíveis durante a criação. Retry curto para o caso de outra
+    # conexão (ex.: backup) estar a escrever no momento.
+    index_row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_leads_geo'"
+    ).fetchone()
+    if index_row is not None and "created_at" not in (index_row["sql"] or ""):
+        # Índice de uma versão anterior (sem created_at): recria para manter o
+        # agregado de frescos coberto. É uma operação única, no arranque.
+        logger.info("[DB] idx_leads_geo antigo — a recriar com created_at")
+        conn.execute("DROP INDEX IF EXISTS idx_leads_geo")
+        conn.commit()
+        index_row = None
+    if index_row is None:
+        started = time.perf_counter()
+        for attempt in range(3):
+            try:
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_leads_geo ON leads ("
+                    "is_feed_ok, city COLLATE NOCASE, date_reported, created_at, "
+                    "signal_type, lead_status, signal_status, reserved_by, "
+                    "neighborhood, zip_code, lat, lng)"
+                )
+                conn.commit()
+                logger.info(
+                    "[DB] idx_leads_geo criado em %.0f ms",
+                    (time.perf_counter() - started) * 1000,
+                )
+                break
+            except sqlite3.OperationalError as exc:
+                if "locked" in str(exc).lower() and attempt < 2:
+                    time.sleep(1.0)
+                    continue
+                logger.warning("[DB] idx_leads_geo indisponível: %s", exc)
+                break
+    else:
+        logger.info("[DB] idx_leads_geo já existe (idempotente)")
 
     # Normaliza variantes históricas de cidade (ex.: "CHICAGO"). Duplicados
     # não envolvidos (mesma morada/cidade canónica) são removidos primeiro,
@@ -5517,39 +5586,55 @@ class DatabaseService:
             owner_type=owner_type,
             search=search,
         )
-        conn = get_connection()
+        conn = None
         try:
-            rows = conn.execute(
-                f"""
-                SELECT CASE
-                         WHEN TRIM(COALESCE(l.neighborhood, '')) <> '' THEN 'nb'
-                         WHEN LENGTH(TRIM(COALESCE(l.zip_code, ''))) >= 5 THEN 'zip'
-                         ELSE 'none'
-                       END AS kind,
-                       CASE
-                         WHEN TRIM(COALESCE(l.neighborhood, '')) <> '' THEN TRIM(l.neighborhood)
-                         WHEN LENGTH(TRIM(COALESCE(l.zip_code, ''))) >= 5 THEN SUBSTR(TRIM(l.zip_code), 1, 5)
-                         ELSE ''
-                       END AS key,
-                       COUNT(*) AS n,
-                       AVG(l.lat) AS lat,
-                       AVG(l.lng) AS lng,
-                       SUM(CASE WHEN l.lat IS NOT NULL AND l.lng IS NOT NULL THEN 1 ELSE 0 END) AS geo_n
-                  FROM leads l
-                 WHERE {where_sql}
-                 GROUP BY kind, key
-                 ORDER BY n DESC
-                """,
-                params,
-            ).fetchall()
-        finally:
-            conn.close()
+            with _geo_read_lock:
+                conn = get_geo_read_connection()
+                rows = conn.execute(
+                    f"""
+                    SELECT CASE
+                             WHEN TRIM(COALESCE(l.neighborhood, '')) <> '' THEN 'nb'
+                             WHEN LENGTH(TRIM(COALESCE(l.zip_code, ''))) >= 5 THEN 'zip'
+                             ELSE 'none'
+                           END AS kind,
+                           CASE
+                             WHEN TRIM(COALESCE(l.neighborhood, '')) <> '' THEN TRIM(l.neighborhood)
+                             WHEN LENGTH(TRIM(COALESCE(l.zip_code, ''))) >= 5 THEN SUBSTR(TRIM(l.zip_code), 1, 5)
+                             ELSE ''
+                           END AS key,
+                           COUNT(*) AS n,
+                           SUM(CASE WHEN datetime(l.created_at) >= datetime('now','-24 hours')
+                                    THEN 1 ELSE 0 END) AS fresh,
+                           AVG(l.lat) AS lat,
+                           AVG(l.lng) AS lng,
+                           SUM(CASE WHEN l.lat IS NOT NULL AND l.lng IS NOT NULL THEN 1 ELSE 0 END) AS geo_n
+                      FROM leads l
+                     WHERE {where_sql}
+                     GROUP BY kind, key
+                     ORDER BY n DESC
+                    """,
+                    params,
+                ).fetchall()
+        except Exception:
+            # Uma ligação persistente pode ficar inválida após um restore/rotação
+            # do ficheiro; descarta-a para o próximo pedido abrir de novo.
+            global _geo_read_conn
+            if conn is not None:
+                with _geo_read_lock:
+                    if _geo_read_conn is conn:
+                        try:
+                            conn.close()
+                        except Exception:
+                            pass
+                        _geo_read_conn = None
+            raise
 
         groups = [
             {
                 "kind": row["kind"],
                 "key": row["key"],
                 "n": int(row["n"] or 0),
+                "fresh": int(row["fresh"] or 0),
                 "lat": float(row["lat"]) if row["lat"] is not None else None,
                 "lng": float(row["lng"]) if row["lng"] is not None else None,
                 "geo_n": int(row["geo_n"] or 0),
@@ -7449,12 +7534,18 @@ class DatabaseService:
                 conn.commit()
                 return {"status": "expired", "user_id": row["user_id"]}
 
-            conn.execute(
-                "UPDATE user_sessions SET last_active_at = CURRENT_TIMESTAMP, "
-                "expires_at = ? WHERE token_hash = ?",
-                ((utcnow() + timedelta(days=ttl_days)).isoformat(), token_hash),
-            )
-            conn.commit()
+            try:
+                conn.execute(
+                    "UPDATE user_sessions SET last_active_at = CURRENT_TIMESTAMP, "
+                    "expires_at = ? WHERE token_hash = ?",
+                    ((utcnow() + timedelta(days=ttl_days)).isoformat(), token_hash),
+                )
+                conn.commit()
+            except sqlite3.OperationalError as exc:
+                # Renovação é best-effort: um lock transitório (ex.: checkpoint
+                # ou manutenção) não pode transformar um pedido autenticado num
+                # 500. A sessão continua válida pela linha já lida acima.
+                logger.warning("[AUTH] renovação de sessão adiada: %s", exc)
             return {"status": "valid", "user_id": row["user_id"]}
         finally:
             conn.close()

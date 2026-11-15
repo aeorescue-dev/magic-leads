@@ -636,6 +636,13 @@ class OpportunityWorkflowService:
             "LOWER(TRIM(COALESCE(severity, ''))) IN "
             "('critical','immediate','emergency','class_1','class_c')"
         )
+        # Fresco = entrou nas últimas 24 h OU tem prazo de inspeção a ≤3 dias
+        # (inclui prazos já vencidos, que continuam a exigir ação imediata).
+        fresh_sql = (
+            "datetime(COALESCE(received_at, created_at)) >= datetime('now','-24 hours')"
+            " OR (NULLIF(TRIM(COALESCE(compliance_deadline, '')), '') IS NOT NULL"
+            " AND date(compliance_deadline) <= date('now','+3 days'))"
+        )
 
         conn = get_connection()
         try:
@@ -645,6 +652,7 @@ class OpportunityWorkflowService:
                            COUNT(*) AS n,
                            SUM(CASE WHEN status = 'available' THEN 1 ELSE 0 END) AS available,
                            SUM(CASE WHEN {critical_sql} THEN 1 ELSE 0 END) AS critical,
+                           SUM(CASE WHEN {fresh_sql} THEN 1 ELSE 0 END) AS fresh,
                            MIN(NULLIF(TRIM(COALESCE(compliance_deadline, '')), ''))
                                AS next_deadline
                     FROM opportunity_workflow
@@ -669,6 +677,7 @@ class OpportunityWorkflowService:
                     "total": 0,
                     "available": 0,
                     "critical": 0,
+                    "fresh": 0,
                     "next_deadline": None,
                     "niches": [],
                 },
@@ -677,6 +686,7 @@ class OpportunityWorkflowService:
             zone["total"] += count
             zone["available"] += int(row["available"] or 0)
             zone["critical"] += int(row["critical"] or 0)
+            zone["fresh"] += int(row["fresh"] or 0)
             deadline = row["next_deadline"]
             if deadline and (
                 zone["next_deadline"] is None or deadline < zone["next_deadline"]
@@ -700,6 +710,7 @@ class OpportunityWorkflowService:
                 "count": sum(int(zone["total"]) for zone in zone_list),
                 "available": sum(int(zone["available"]) for zone in zone_list),
                 "critical": sum(int(zone["critical"]) for zone in zone_list),
+                "fresh": sum(int(zone["fresh"]) for zone in zone_list),
                 "zones": len(zone_list),
             },
             "zones": zone_list,

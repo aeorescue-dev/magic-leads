@@ -28,6 +28,7 @@ def _create(
     category: str = "Structure",
     severity: str = "high",
     received_at: str | None = None,
+    compliance_deadline: str | None = None,
 ) -> dict:
     return opportunity_workflow.create_opportunity(
         source_kind="preventive",
@@ -40,6 +41,7 @@ def _create(
         category=category,
         severity=severity,
         received_at=received_at,
+        compliance_deadline=compliance_deadline,
     )
 
 
@@ -102,6 +104,32 @@ def test_territories_filters_window_and_category():
     )
     assert only_roof["totals"]["count"] == 1
     assert only_roof["zones"][0]["niches"] == [{"key": "Roof", "n": 1}]
+
+
+def test_territories_flags_fresh_recent_or_near_deadline():
+    _create(record="fr1", address="1 Fresh St")
+    _create(
+        record="fr2",
+        address="2 Deadline Ave",
+        compliance_deadline="2020-01-01",  # data fixa antiga -> vencida, conta
+    )
+    _create(record="fr3", address="3 Stale Rd")
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE opportunity_workflow SET received_at = datetime('now', '-5 days') "
+            "WHERE source_record_id IN ('fr2', 'fr3')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = opportunity_workflow.territories(city="Boston", days=30)
+
+    zone = result["zones"][0]
+    assert zone["total"] == 3
+    assert zone["fresh"] == 2
+    assert result["totals"]["fresh"] == 2
 
 
 def test_territories_requires_city():

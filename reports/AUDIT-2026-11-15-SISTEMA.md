@@ -95,7 +95,87 @@ de 135k linhas.
 - Scripts de auditoria versionados: `frontend/scripts/audit-map-ui.mjs` e os
   relatórios em `reports/`.
 
-## 7. Pendências de dados (não são bugs de código)
+## 7. Índice de produção `idx_leads_geo` — validação
+
+- **Idempotente por construção:** `CREATE INDEX IF NOT EXISTS` + verificação em
+  `sqlite_master`; quando já existe, o caminho é um SELECT + log
+  (`[DB] idx_leads_geo já existe (idempotente)`). Segunda execução medida:
+  **0,3 ms**.
+- **Ordem segura no arranque:** `DatabaseService()` chama `init_db()` no import
+  do módulo, **antes** de o uvicorn aceitar pedidos. O índice é criado depois
+  das migrações de colunas; não corre com tráfego da API nem com o scheduler
+  (que só arranca no lifespan, depois).
+- **Custo real** (cópia com as 135.951 linhas de produção, versão final do
+  índice já com `created_at` para o agregado de frescos): **234,5 ms** de
+  criação; índice **15,9 MB**; `quick_check` = `ok`.
+- **Sem bloqueio de leitura:** leitor concorrente em WAL durante a criação —
+  11 amostras, latência máxima **21,7 ms**. Escritor concorrente esperou
+  **232,1 ms** e concluiu com sucesso (sem erro); no arranque não há escritores.
+- **Espaço:** `/data` com **242 MB livres**; o índice ocupa 15,9 MB.
+- **Retry:** até 3 tentativas com 1 s de intervalo se outra conexão estiver a
+  escrever; uma falha é registada como warning e não derruba o arranque.
+- **Migração de índice:** se existir um `idx_leads_geo` antigo (sem
+  `created_at`), é removido e recriado uma única vez no arranque, antes de o
+  servidor aceitar pedidos. `CREATE INDEX IF NOT EXISTS` mantém a segunda
+  execução em **0,57 ms**.
+- **Instância:** um único deployment Railway; com réplicas, `IF NOT EXISTS`
+  mantém a operação segura.
+
+## 8. SLO pós-deploy do mapa (<50 ms)
+
+- Ambos os endpoints de mapa devolvem **`Server-Timing: db;dur=<ms>`**, medido
+  em torno da agregação SQLite (sem rede/WAN).
+- **Warm-up no arranque:** 2 passagens por cidade (Boston, NYC, Dallas, Chicago)
+  com o gate de utilizador; log `[GEO] warmup <cidade> <ms>`.
+- **Ligação de leitura reutilizada:** a agregação usa uma ligação SQLite
+  persistente (protegida por lock) em vez de abrir/fechar uma por pedido. Isso
+  removeu 20–60 ms de overhead por pedido no Windows e vários ms em Linux; em
+  WAL cada `SELECT` vê o último commit.
+- **Plano COVERING:** `SEARCH l USING COVERING INDEX idx_leads_geo
+  (is_feed_ok=? AND city=? AND date_reported>?)`; o agregado de frescos não
+  força lookups na tabela.
+- **Query no tamanho de produção** (135.951 linhas, 7 dias): Boston 0,4 ms ·
+  NYC 7,1 ms · Dallas 0,9 ms · Chicago 2,3 ms (média de 7 execuções).
+- **Script:** `frontend/scripts/audit-map-ui.mjs --latency-only`
+  - `AUDIT_API_URL` (default `http://127.0.0.1:8011`)
+  - `AUDIT_TOKEN` (sessão com acesso ativo) · `AUDIT_MAX_MS` (default **50**)
+  - 1 chamada de aquecimento + **3 medições** por cidade; falha em HTTP ≠200,
+    payload inválido ou `db` ≥ 50 ms.
+- **Resultado local (4/4 PASS, gate 50 ms):**
+
+| Cidade | db min / mediana / max |
+|---|---|
+| Boston | 0,7 / 1,0 / 1,4 ms |
+| NYC | 21,9 / 22,8 / 24,7 ms |
+| Dallas | 0,8 / 0,9 / 1,4 ms |
+| Chicago | 0,8 / 1,2 / 4,0 ms |
+
+Produção tem mais folga ainda (a query é a mesma, com índice covering); correr
+logo após o deploy e considerar **no-go** se qualquer cidade falhar. O modo
+completo valida também lista = painel = feed, o clique no bairro, o destaque de
+frescos (<24 h) e a agregação ao vivo do separador Pre-inspection.
+
+## 9. Destaque de oportunidades frescas (<24 h)
+
+- **Definição:** lead com `created_at` nas últimas 24 h. No preventivo conta
+  também prazo de inspeção ≤3 dias (inclui vencidos).
+- **Backend:** `get_leads_geo_summary` devolve `fresh` por grupo e
+  `territories` devolve `fresh` por zona + `totals.fresh`.
+- **Mapa:** pin e cluster âmbar com anel pulsante (`is-fresh`), mais um ponto
+  no canto; `prefers-reduced-motion` desliga a animação.
+- **Lista:** selo `NEW <n>` em cada bairro, chip `N NEW` no cabeçalho e
+  toggle **New (<24h)** que mostra só zonas com frescos. Ordenação automática
+  fresh-first (e o toggle "Nearest" continua disponível).
+- **Pre-inspection ao vivo:** o painel deixou de usar o snapshot estático e
+  passou a ler `GET /api/opportunities/territories` (com fallback ao snapshot
+  se a API falhar). O snapshot continua a fornecer os centroides dos ZIPs.
+- **Testes:** `test_leads_geo.py` (frescos por grupo) e
+  `test_opportunity_territories.py` (frescos por zona/prazo). O
+  `audit-map-ui.mjs` valida selo + pin + toggle nas duas abas.
+- **Capturas:** `reports/opportunities-tab-preview/fresh-opportunities-boston.png`
+  e `fresh-prevention-boston.png`.
+
+## 10. Pendências de dados (não são bugs de código)
 
 1. `Unclassified` (~18% dos leads) — melhorar o classificador numa fase própria,
    com revisão de amostras.
@@ -107,7 +187,7 @@ de 135k linhas.
 5. Fornecedor de tiles (Esri) e CDN do Leaflet: dependência externa a documentar
    no runbook; CSP já permite os domínios.
 
-## 8. Regra de ouro
+## 11. Regra de ouro
 
 Nenhuma sugestão de subida a produção foi feita. As correções só entram depois
 desta auditoria verde; o deploy deve correr o índice e a migração de cidades

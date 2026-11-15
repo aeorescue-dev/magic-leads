@@ -15,9 +15,11 @@ export interface Zone {
   zip: string;
   label: string | null;
   total: number;
+  /** Oportunidades frescas (<24 h ou prazo ≤3 dias). Snapshot antigo pode não ter. */
+  fresh?: number;
   niches: Array<{ key: string; n: number }>;
-  lat: number;
-  lng: number;
+  lat: number | null;
+  lng: number | null;
   geo_source: string;
 }
 
@@ -30,6 +32,7 @@ export interface Snapshot {
       total: number;
       available: number;
       critical: number;
+      fresh?: number;
       zones: Zone[];
       niches: Array<{ key: string; n: number }>;
     }
@@ -43,8 +46,10 @@ export interface Neighborhood {
   count: number;
   /** Total no bairro, independentemente do nicho. */
   total: number;
-  lat: number;
-  lng: number;
+  /** Oportunidades frescas (<24 h ou prazo ≤3 dias). */
+  fresh: number;
+  lat: number | null;
+  lng: number | null;
 }
 
 export const CITY_META: Record<
@@ -182,6 +187,7 @@ export function buildNeighborhoods(
       zips: string[];
       count: number;
       total: number;
+      fresh: number;
       latWeighted: number;
       lngWeighted: number;
       weight: number;
@@ -201,6 +207,7 @@ export function buildNeighborhoods(
       zips: [],
       count: 0,
       total: 0,
+      fresh: 0,
       latWeighted: 0,
       lngWeighted: 0,
       weight: 0,
@@ -208,11 +215,14 @@ export function buildNeighborhoods(
     group.zips.push(zone.zip);
     group.count += nicheCount;
     group.total += zone.total;
-    // Centroide ponderado pelo volume de cada ZIP.
-    const weight = Math.max(zone.total, 1);
-    group.latWeighted += zone.lat * weight;
-    group.lngWeighted += zone.lng * weight;
-    group.weight += weight;
+    group.fresh += zone.fresh ?? 0;
+    // Centroide ponderado pelo volume de cada ZIP (só quando há coordenadas).
+    if (zone.lat !== null && zone.lng !== null) {
+      const weight = Math.max(zone.total, 1);
+      group.latWeighted += zone.lat * weight;
+      group.lngWeighted += zone.lng * weight;
+      group.weight += weight;
+    }
     groups.set(name, group);
   }
 
@@ -223,8 +233,9 @@ export function buildNeighborhoods(
       zips: group.zips.sort(),
       count: group.count,
       total: group.total,
-      lat: group.latWeighted / group.weight,
-      lng: group.lngWeighted / group.weight,
+      fresh: group.fresh,
+      lat: group.weight > 0 ? group.latWeighted / group.weight : null,
+      lng: group.weight > 0 ? group.lngWeighted / group.weight : null,
     }))
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 }

@@ -20,6 +20,8 @@ import { SNAPSHOT as PREVENTIVE_SNAPSHOT } from "./data";
 export interface LeadZone {
   name: string;
   count: number;
+  /** Leads ingeridos nas últimas 24 h nesta zona. */
+  fresh: number;
   lat: number | null;
   lng: number | null;
   neighborhoods: string[];
@@ -101,6 +103,7 @@ export function buildLeadZones(
       ({
         name,
         count: 0,
+        fresh: 0,
         lat: null,
         lng: null,
         neighborhoods: [],
@@ -112,6 +115,7 @@ export function buildLeadZones(
       } satisfies DraftZone);
 
     zone.count += group.n;
+    zone.fresh += group.fresh ?? 0;
     if (extra.neighborhood && !zone.neighborhoods.includes(extra.neighborhood)) {
       zone.neighborhoods.push(extra.neighborhood);
     }
@@ -168,6 +172,7 @@ export function buildLeadZones(
     .map((zone) => ({
       name: zone.name,
       count: zone.count,
+      fresh: zone.fresh,
       lat: zone.weight > 0 ? zone.latSum / zone.weight : null,
       lng: zone.weight > 0 ? zone.lngSum / zone.weight : null,
       neighborhoods: zone.neighborhoods,

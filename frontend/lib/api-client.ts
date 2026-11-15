@@ -338,9 +338,59 @@ export interface LeadGeoGroup {
   kind: "nb" | "zip" | "none";
   key: string;
   n: number;
+  /** Leads ingeridos nas últimas 24 h neste grupo. */
+  fresh: number;
   lat: number | null;
   lng: number | null;
   geo_n: number;
+}
+
+export interface TerritoryZone {
+  zip: string;
+  total: number;
+  available: number;
+  critical: number;
+  /** Frescos: entrada <24 h ou prazo de inspeção ≤3 dias. */
+  fresh: number;
+  next_deadline: string | null;
+  niches: Array<{ key: string; n: number }>;
+}
+
+export interface TerritoryResponse {
+  city: string;
+  kind: string;
+  window_days: number;
+  generated_at: string;
+  totals: {
+    count: number;
+    available: number;
+    critical: number;
+    fresh: number;
+    zones: number;
+  };
+  zones: TerritoryZone[];
+  niches: Array<{ key: string; n: number }>;
+}
+
+export async function fetchOpportunityTerritories(params: {
+  city: string;
+  kind?: string;
+  days?: number;
+  category?: string;
+}): Promise<TerritoryResponse> {
+  const q = new URLSearchParams();
+  q.set("city", params.city);
+  q.set("kind", params.kind ?? "preventive");
+  q.set("days", String(params.days ?? 30));
+  if (params.category && params.category !== "all") {
+    q.set("category", params.category);
+  }
+  return handle<TerritoryResponse>(
+    await fetch(`${API_URL}/api/opportunities/territories?${q.toString()}`, {
+      credentials: "include",
+      headers: { ...authHeaders() },
+    })
+  );
 }
 
 export interface LeadGeoResponse {
