@@ -256,6 +256,13 @@ class Settings(BaseSettings):
     PHASE1_OPERATIONAL_LIMIT: int = 500
     PHASE1_ECB_LIMIT: int = 1000
     PHASE1_DAILY_PERMIT_ROWS: int = 1500
+    PHASE1_BOSTON_LIMIT: int = 200
+    PHASE1_DALLAS_LIMIT: int = 300
+    PHASE1_BOSTON_PERMIT_ROWS: int = 300
+    PHASE1_DALLAS_PERMIT_ROWS: int = 300
+    PHASE1_PERMIT_WINDOW_DAYS: int = 30
+    PREVENTIVE_EMPTY_MIN_LEADS: int = 50
+    PREVENTIVE_EMPTY_ALERT_HOURS: int = 24
     # Backfill de owners em lote (leads com owner_name NULL).
     OWNER_BACKFILL_ENABLED: bool = True
     OWNER_BACKFILL_PER_CITY_DAY: int = 200

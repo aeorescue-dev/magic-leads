@@ -10208,6 +10208,56 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def get_preventive_city_counts(self, hours: int = 48) -> dict:
+        """Preventivos disponíveis criados nas últimas N horas (por cidade)."""
+        canonical = {
+            "NYC": "NYC",
+            "CHICAGO": "Chicago",
+            "BOSTON": "Boston",
+            "DALLAS": "Dallas",
+        }
+        window = max(1, int(hours))
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT city, COUNT(*) AS c FROM opportunity_workflow "
+                "WHERE source_kind='preventive' AND status='available' "
+                "AND datetime(created_at) >= datetime('now', ?) "
+                "GROUP BY city",
+                (f"-{window} hours",),
+            ).fetchall()
+            return {
+                canonical.get(str(row["city"] or "").strip().upper(), str(row["city"] or "").title()): int(row["c"])
+                for row in rows
+            }
+        finally:
+            conn.close()
+
+    def get_leads_today_by_city(self) -> dict:
+        """Leads criados hoje, por cidade (nomes canónicos)."""
+        canonical = {
+            "NYC": "NYC",
+            "CHICAGO": "Chicago",
+            "BOSTON": "Boston",
+            "DALLAS": "Dallas",
+        }
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT city, COUNT(*) AS c FROM leads "
+                "WHERE date(created_at)=date('now') GROUP BY city"
+            ).fetchall()
+            out: dict = {}
+            for row in rows:
+                key = canonical.get(
+                    str(row["city"] or "").strip().upper(),
+                    str(row["city"] or "").title(),
+                )
+                out[key] = out.get(key, 0) + int(row["c"])
+            return out
+        finally:
+            conn.close()
+
     def has_recent_system_alert(self, code: str, hours: int = 6) -> bool:
         conn = get_connection()
         try:

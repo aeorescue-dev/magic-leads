@@ -46,6 +46,25 @@ class Phase1Scheduler:
                 if include_permits
                 else 0
             )
+            bos_limit = max(
+                1, int(getattr(settings, "PHASE1_BOSTON_LIMIT", 200) or 200)
+            )
+            dal_limit = max(
+                1, int(getattr(settings, "PHASE1_DALLAS_LIMIT", 300) or 300)
+            )
+            bos_permits = (
+                max(1, int(getattr(settings, "PHASE1_BOSTON_PERMIT_ROWS", 300) or 300))
+                if include_permits
+                else 0
+            )
+            dal_permits = (
+                max(1, int(getattr(settings, "PHASE1_DALLAS_PERMIT_ROWS", 300) or 300))
+                if include_permits
+                else 0
+            )
+            permit_window = max(
+                1, int(getattr(settings, "PHASE1_PERMIT_WINDOW_DAYS", 30) or 30)
+            )
             try:
                 stats = await asyncio.to_thread(
                     phase1_enrichment.ingest,
@@ -54,16 +73,66 @@ class Phase1Scheduler:
                     ecb=ecb,
                     chi_violations=limit,
                     permit_rows=permit_rows,
+                    bos_violations=bos_limit,
+                    bos_311=bos_limit,
+                    bos_permits=bos_permits,
+                    dal_code=dal_limit,
+                    dal_311=dal_limit,
+                    dal_permits=dal_permits,
+                    permit_window_days=permit_window,
                 )
                 logger.info(
                     "[PHASE1] ingestão %s: %s",
                     "diária" if include_permits else "operacional",
                     stats,
                 )
-                return {"status": "ok", "stats": stats}
+                result = {"status": "ok", "stats": stats}
             except Exception as exc:  # nunca deixar o loop morrer
                 logger.error("[PHASE1] falha na ingestão: %s", exc, exc_info=True)
-                return {"status": "error", "error": str(exc)}
+                result = {"status": "error", "error": str(exc)}
+            try:
+                result["coverage"] = await asyncio.to_thread(
+                    self._check_city_coverage
+                )
+            except Exception as exc:
+                logger.error("[PHASE1] coverage check falhou: %s", exc)
+            return result
+
+    def _check_city_coverage(self) -> dict:
+        """Alerta quando uma cidade tem leads mas nenhum preventivo."""
+        from .db import db_service
+
+        service = getattr(db_service, "_service", db_service)
+        cities = ("NYC", "Chicago", "Boston", "Dallas")
+        preventive = service.get_preventive_city_counts()
+        leads_today = service.get_leads_today_by_city()
+        min_leads = max(
+            1, int(getattr(settings, "PREVENTIVE_EMPTY_MIN_LEADS", 50) or 50)
+        )
+        hours = max(
+            1, int(getattr(settings, "PREVENTIVE_EMPTY_ALERT_HOURS", 24) or 24)
+        )
+        alerts: list = []
+        for city in cities:
+            leads = int(leads_today.get(city, 0) or 0)
+            if leads < min_leads:
+                continue
+            code = f"PREVENTIVE_CITY_EMPTY:{city.upper()}"
+            if int(preventive.get(city, 0) or 0) > 0:
+                resolver = getattr(service, "resolve_system_alerts_by_code", None)
+                if resolver:
+                    resolver(code)
+                continue
+            if service.has_recent_system_alert(code, hours=hours):
+                continue
+            service.record_system_alert(
+                "warning",
+                code,
+                f"{city}: {leads} leads hoje e 0 preventivos disponíveis",
+                {"city": city, "leads_today": leads},
+            )
+            alerts.append(code)
+        return {"alerts": alerts, "preventive": preventive, "leads_today": leads_today}
 
     async def run_retention(self) -> int:
         days = int(getattr(settings, "PREVENTIVE_RETENTION_DAYS", 90) or 90)

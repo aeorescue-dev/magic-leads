@@ -36,6 +36,12 @@ _TIMEOUT = 60
 
 NYC = "data.cityofnewyork.us"
 CHI = "data.cityofchicago.org"
+DAL = "www.dallasopendata.com"
+BOS = "data.boston.gov"
+
+BOSTON_VIOLATIONS_RESOURCE = "800a2663-1d6a-46e7-9356-bedb70f5332c"
+BOSTON_311_RESOURCE = "254adca6-64ab-4c5c-9fc0-a6da622be185"
+BOSTON_PERMITS_RESOURCE = "6ddcd912-32a0-43df-9908-63574f8c7e77"
 
 DATASETS = {
     "hpd_complaints": (NYC, "ygpa-z7cr"),
@@ -45,6 +51,8 @@ DATASETS = {
     "nyc_permits": (NYC, "rbx6-tga4"),
     "chi_violations": (CHI, "22u3-xenr"),
     "chi_permits": (CHI, "ydr8-5enu"),
+    "dal_311": (DAL, "d7e7-envw"),
+    "dal_permits": (DAL, "e7gq-4sah"),
 }
 
 # Palavra-chave -> categoria da plataforma. A ordem importa: as mais
@@ -66,7 +74,7 @@ _CATEGORY_RULES = [
         "Roof",
         (
             "roof", "roofing", "waterproof", "chimney", "parapet", "skylight",
-            "flashing", "gutter",
+            "flashing", "gutter", "solar", "photovoltaic",
         ),
     ),
     (
@@ -79,7 +87,7 @@ _CATEGORY_RULES = [
     ("Mold", ("mold", "mould", "fungus", "moisture", "damp")),
     ("Lead", ("lead-based", "lead paint", "lead hazard", "lead")),
     ("Rodent", ("rodent", "rat", "roach", "mice", "mouse", "vermin", "pest")),
-    ("Grass", ("grass", "weed", "overgrown", "vegetation", "blight", "lawn")),
+    ("Grass", ("grass", "weed", "weeds", "overgrown", "vegetation", "blight", "lawn")),
     ("Paint", ("paint", "plaster", "painting")),
     (
         "Structure",
@@ -150,6 +158,18 @@ def socrata(name: str, params: dict) -> list:
     return data if isinstance(data, list) else []
 
 
+def ckan_datastore(resource_id: str, params: dict) -> list:
+    """Lê um recurso CKAN (Analyze Boston) com datastore ativo."""
+    query = dict(params)
+    query["resource_id"] = resource_id
+    url = f"https://{BOS}/api/3/action/datastore_search?" + urllib.parse.urlencode(query)
+    data = _get_json(url)
+    if isinstance(data, dict):
+        result = data.get("result") or {}
+        return list(result.get("records") or [])
+    return []
+
+
 def _normalize_text(value: Optional[str]) -> str:
     return " ".join(str(value or "").lower().split())
 
@@ -160,14 +180,19 @@ def _match_keyword(keyword: str, text: str) -> bool:
     return keyword in text
 
 
-def map_category(*parts: Optional[str]) -> str:
+def match_category(*parts: Optional[str]) -> Optional[str]:
+    """Categoria dos 16 ofícios, ou None quando o texto é genérico."""
     text = _normalize_text(" ".join(str(part or "") for part in parts))
     for category, keywords in _CATEGORY_RULES:
         if any(_match_keyword(keyword, text) for keyword in keywords):
             return category
-    # Nunca devolver "Unclassified": o fallback é um ofício válido e
-    # traduzido. Sinais realmente vazios são descartados na ingestão.
-    return "Structure"
+    return None
+
+
+def map_category(*parts: Optional[str]) -> str:
+    # Nunca devolver "Unclassified": o fallback é um ofício válido e traduzido.
+    # Sinais realmente vazios são descartados na ingestão.
+    return match_category(*parts) or "Structure"
 
 
 def is_actionable(description: Optional[str], history: Optional[list] = None) -> bool:
@@ -239,6 +264,50 @@ def to_iso_date(value) -> Optional[str]:
 def normalize_address(*parts: Optional[str]) -> str:
     raw = " ".join(str(part or "").upper() for part in parts)
     return re.sub(r"[^A-Z0-9 ]+", " ", raw).strip()
+
+
+def _parse_us_date(value) -> Optional[str]:
+    """Datas dos portais em MM/DD/YY (Dallas) ou ISO (Boston)."""
+    text = str(value or "").strip()
+    for fmt in ("%m/%d/%y", "%m/%d/%Y"):
+        try:
+            return datetime.strptime(text, fmt).date().isoformat()
+        except ValueError:
+            continue
+    return to_iso_date(text)
+
+
+def _split_dallas_address(raw) -> tuple[str, Optional[str]]:
+    text = " ".join(str(raw or "").split())
+    match = re.match(r"^(.*?),\s*DALLAS,\s*TX,?\s*(\d{5})", text, re.IGNORECASE)
+    if match:
+        return normalize_address(match.group(1)), match.group(2)
+    zip_match = re.search(r"\b(\d{5})\b", text)
+    zip_code = zip_match.group(1) if zip_match else None
+    address = re.sub(r",\s*DALLAS.*$", "", text, flags=re.IGNORECASE)
+    return normalize_address(address), zip_code
+
+
+def _dallas_category(value: Optional[str]) -> str:
+    text = _normalize_text(value)
+    if any(key in text for key in ("food", "restaurant", "smoking", "unsanitary", "pool")):
+        return "Unsanitary"
+    if any(key in text for key in ("weed", "grass")):
+        return "Grass"
+    if any(key in text for key in ("dump", "debris", "junk")):
+        return "Debris"
+    if any(key in text for key in ("rodent", "rat", "mosquito", "pest")):
+        return "Rodent"
+    return map_category(value)
+
+
+def _severity_from_text(value: Optional[str]) -> str:
+    text = _normalize_text(value)
+    if any(key in text for key in ("unsafe", "dangerous", "emergency", "collapse", "fire")):
+        return "critical"
+    if any(key in text for key in ("failure", "permit", "violation", "structur", "unsafe")):
+        return "high"
+    return "medium"
 
 
 def bbl_from_boro_block_lot(boro: Optional[str], block, lot) -> Optional[str]:
@@ -616,6 +685,323 @@ class Phase1EnrichmentService:
         return out
 
     # ------------------------------------------------------------- composição
+    # ------------------------------------------------- Boston / Dallas
+    def fetch_boston_violations(self, limit: int = 200) -> list:
+        """ISD Building & Property Violations (Analyze Boston CKAN)."""
+        if limit <= 0:
+            return []
+        rows = ckan_datastore(
+            BOSTON_VIOLATIONS_RESOURCE,
+            {
+                "limit": max(1, int(limit)),
+                "sort": "status_dttm DESC",
+                "filters": json.dumps({"status": "Open"}),
+            },
+        )
+        grouped: dict = {}
+        for row in rows:
+            address = normalize_address(
+                row.get("violation_stno"),
+                row.get("violation_street"),
+                row.get("violation_suffix"),
+            )
+            if len(address) < 8:
+                continue
+            zip_code = str(row.get("violation_zip") or "").strip()[:5] or None
+            key = make_property_key(address=address, city="Boston", zip_code=zip_code)
+            description = _clean(row.get("description")) or "Building violation"
+            status = row.get("status")
+            when = to_iso_date(row.get("status_dttm"))
+            item = grouped.setdefault(
+                key,
+                {
+                    "property_key": key,
+                    "address": address,
+                    "city": "Boston",
+                    "state": "MA",
+                    "zip_code": zip_code,
+                    "signal_type": "open_request",
+                    "severity": _severity_from_text(description),
+                    "category": map_category(description, row.get("code")),
+                    "description": description,
+                    "received_at": when,
+                    "compliance_deadline": None,
+                    "history": [],
+                    "tags": ["inspection_possible"],
+                    "source_record_id": "phase1-bos-violation-"
+                    + hashlib.sha1(address.encode("utf-8")).hexdigest()[:16],
+                },
+            )
+            item["history"].append(
+                _history_entry(
+                    "violation",
+                    description,
+                    when,
+                    status,
+                    None,
+                    f"bos-violation-{row.get('case_no')}",
+                )
+            )
+        return list(grouped.values())
+
+    def fetch_boston_311(self, limit: int = 200) -> list:
+        """311 Service Requests - NEW SYSTEM (Analyze Boston CKAN)."""
+        if limit <= 0:
+            return []
+        rows = ckan_datastore(
+            BOSTON_311_RESOURCE,
+            {"limit": max(1, int(limit)), "sort": "open_date DESC"},
+        )
+        closed = {"closed", "resolved", "completed", "cancelled", "canceled"}
+        grouped: dict = {}
+        for row in rows:
+            status = str(row.get("case_status") or "")
+            if status.strip().lower() in closed:
+                continue
+            description = _clean(row.get("case_topic") or row.get("service_name"))
+            if not description:
+                continue
+            category = match_category(description)
+            if not category:
+                continue
+            raw_address = str(row.get("full_address") or "")
+            street = raw_address.split(",")[0]
+            address = normalize_address(street)
+            if len(address) < 8:
+                continue
+            raw_zip = str(row.get("zip_code") or "").strip()
+            zip_code = raw_zip.zfill(5) if raw_zip.isdigit() else None
+            key = make_property_key(address=address, city="Boston", zip_code=zip_code)
+            when = to_iso_date(row.get("open_date"))
+            deadline = to_iso_date(row.get("target_close_date"))
+            item = grouped.setdefault(
+                key,
+                {
+                    "property_key": key,
+                    "address": address,
+                    "city": "Boston",
+                    "state": "MA",
+                    "zip_code": zip_code,
+                    "signal_type": "open_request",
+                    "severity": _severity_from_text(description),
+                    "category": category,
+                    "description": description,
+                    "received_at": when,
+                    "compliance_deadline": deadline,
+                    "history": [],
+                    "tags": ["inspection_possible"],
+                    "source_record_id": "phase1-bos-311-"
+                    + hashlib.sha1(address.encode("utf-8")).hexdigest()[:16],
+                },
+            )
+            item["history"].append(
+                _history_entry(
+                    "complaint",
+                    description,
+                    when,
+                    status,
+                    None,
+                    f"bos-311-{row.get('case_id')}",
+                )
+            )
+        return list(grouped.values())
+
+    def fetch_boston_permits(self, limit: int = 300, days: int = 30) -> list:
+        """Approved Building Permits dos últimos N dias (Analyze Boston CKAN)."""
+        if limit <= 0:
+            return []
+        rows = ckan_datastore(
+            BOSTON_PERMITS_RESOURCE,
+            {"limit": max(1, int(limit)), "sort": "issued_date DESC"},
+        )
+        cutoff = (datetime.now(timezone.utc).date() - timedelta(days=max(1, int(days)))).isoformat()
+        grouped: dict = {}
+        for row in rows:
+            issued = to_iso_date(row.get("issued_date"))
+            if not issued or issued < cutoff:
+                continue
+            address = normalize_address(row.get("address"))
+            if len(address) < 8:
+                continue
+            zip_code = str(row.get("zip") or "").strip()[:5] or None
+            key = make_property_key(address=address, city="Boston", zip_code=zip_code)
+            description = _clean(
+                row.get("description") or row.get("permittypedescr") or row.get("worktype")
+            ) or "Approved work"
+            value = to_float(row.get("declared_valuation"))
+            item = grouped.setdefault(
+                key,
+                {
+                    "property_key": key,
+                    "address": address,
+                    "city": "Boston",
+                    "state": "MA",
+                    "zip_code": zip_code,
+                    "signal_type": "authorized_work",
+                    "severity": "medium",
+                    "category": match_category(description)
+                    or match_category(row.get("worktype"), row.get("permittypedescr"))
+                    or "Structure",
+                    "description": description,
+                    "received_at": issued,
+                    "job_value": value,
+                    "value_source": "permit" if value else None,
+                    "history": [],
+                    "tags": ["inspection_possible"],
+                    "source_record_id": "phase1-bos-permit-"
+                    + hashlib.sha1(address.encode("utf-8")).hexdigest()[:16],
+                },
+            )
+            if value and (not item.get("job_value") or value > item["job_value"]):
+                item["job_value"] = value
+                item["value_source"] = "permit"
+            item["history"].append(
+                _history_entry(
+                    "permit",
+                    description,
+                    issued,
+                    row.get("status"),
+                    value,
+                    f"bos-permit-{row.get('permitnumber')}",
+                )
+            )
+        return list(grouped.values())
+
+    def fetch_dallas_code(self, limit: int = 300) -> list:
+        """Code Compliance aberto (Dallas 311, Socrata d7e7-envw)."""
+        if limit <= 0:
+            return []
+        rows = socrata(
+            "dal_311",
+            {
+                "$limit": max(1, int(limit)),
+                "$order": "created_date DESC",
+                "$where": "department = 'Code Compliance' AND "
+                "status NOT IN ('Closed','Completed','Cancelled')",
+            },
+        )
+        return self._dallas_items(rows)
+
+    def fetch_dallas_311(self, limit: int = 200) -> list:
+        """311 aberto fora de Code Compliance (Dallas, Socrata d7e7-envw)."""
+        if limit <= 0:
+            return []
+        rows = socrata(
+            "dal_311",
+            {
+                "$limit": max(1, int(limit)),
+                "$order": "created_date DESC",
+                "$where": "department != 'Code Compliance' AND "
+                "status NOT IN ('Closed','Completed','Cancelled')",
+            },
+        )
+        return self._dallas_items(rows, require_trade=True)
+
+    def _dallas_items(self, rows: Iterable[dict], require_trade: bool = False) -> list:
+        grouped: dict = {}
+        for row in rows:
+            address, zip_code = _split_dallas_address(row.get("address"))
+            if len(address) < 8:
+                continue
+            raw_type = str(row.get("service_request_type") or "").strip()
+            if require_trade and match_category(raw_type) is None:
+                continue
+            description = _clean(raw_type.replace(" - CCS", "")) or "Code concern"
+            key = make_property_key(address=address, city="Dallas", zip_code=zip_code)
+            when = to_iso_date(row.get("created_date"))
+            deadline = to_iso_date(row.get("overall_service_request_due_date"))
+            status = row.get("status")
+            item = grouped.setdefault(
+                key,
+                {
+                    "property_key": key,
+                    "address": address,
+                    "city": "Dallas",
+                    "state": "TX",
+                    "zip_code": zip_code,
+                    "signal_type": "open_request",
+                    "severity": _severity_from_text(description),
+                    "category": _dallas_category(raw_type),
+                    "description": description,
+                    "received_at": when,
+                    "compliance_deadline": deadline,
+                    "history": [],
+                    "tags": ["inspection_possible"],
+                    "source_record_id": "phase1-dal-311-"
+                    + hashlib.sha1(address.encode("utf-8")).hexdigest()[:16],
+                },
+            )
+            item["history"].append(
+                _history_entry(
+                    "complaint",
+                    description,
+                    when,
+                    status,
+                    None,
+                    f"dal-311-{row.get('service_request_number')}",
+                )
+            )
+        return list(grouped.values())
+
+    def fetch_dallas_permits(self, limit: int = 300, days: int = 30) -> list:
+        """Building Permits dos últimos N dias (Dallas, Socrata e7gq-4sah)."""
+        if limit <= 0:
+            return []
+        rows = socrata(
+            "dal_permits",
+            {"$limit": max(1, int(limit)), "$order": ":id DESC"},
+        )
+        cutoff = (datetime.now(timezone.utc).date() - timedelta(days=max(1, int(days)))).isoformat()
+        grouped: dict = {}
+        for row in rows:
+            issued = _parse_us_date(row.get("issued_date"))
+            if not issued or issued < cutoff:
+                continue
+            address = normalize_address(row.get("street_address"))
+            if len(address) < 8:
+                continue
+            zip_code = str(row.get("zip_code") or "").strip()[:5] or None
+            key = make_property_key(address=address, city="Dallas", zip_code=zip_code)
+            description = _clean(row.get("work_description") or row.get("permit_type")) or "Approved work"
+            value = to_float(row.get("value"))
+            item = grouped.setdefault(
+                key,
+                {
+                    "property_key": key,
+                    "address": address,
+                    "city": "Dallas",
+                    "state": "TX",
+                    "zip_code": zip_code,
+                    "signal_type": "authorized_work",
+                    "severity": "medium",
+                    "category": match_category(description)
+                    or match_category(row.get("permit_type"))
+                    or "Structure",
+                    "description": description,
+                    "received_at": issued,
+                    "job_value": value,
+                    "value_source": "permit" if value else None,
+                    "history": [],
+                    "tags": ["inspection_possible"],
+                    "source_record_id": "phase1-dal-permit-"
+                    + hashlib.sha1(address.encode("utf-8")).hexdigest()[:16],
+                },
+            )
+            if value and (not item.get("job_value") or value > item["job_value"]):
+                item["job_value"] = value
+                item["value_source"] = "permit"
+            item["history"].append(
+                _history_entry(
+                    "permit",
+                    description,
+                    issued,
+                    row.get("permit_type"),
+                    value,
+                    f"dal-permit-{row.get('permit_number')}",
+                )
+            )
+        return list(grouped.values())
+
     def build_candidates(
         self,
         *,
@@ -624,6 +1010,13 @@ class Phase1EnrichmentService:
         ecb: int = 40,
         chi_violations: int = 20,
         permit_rows: int = 400,
+        bos_violations: int = 0,
+        bos_311: int = 0,
+        bos_permits: int = 0,
+        dal_code: int = 0,
+        dal_311: int = 0,
+        dal_permits: int = 0,
+        permit_window_days: int = 30,
     ) -> list:
         """Constrói a lista final por imóvel, já com multas, prazos e valores."""
         merged: dict = {}
@@ -685,6 +1078,24 @@ class Phase1EnrichmentService:
             target["history"] = (target.get("history") or []) + (item.get("history") or [])
         for item in self.fetch_chicago_violations(chi_violations):
             merge(item)
+        for item in self.fetch_boston_violations(bos_violations):
+            merge(item)
+        for item in self.fetch_boston_311(bos_311):
+            merge(item)
+        for item in self.fetch_dallas_code(dal_code):
+            merge(item)
+        for item in self.fetch_dallas_311(dal_311):
+            merge(item)
+        if bos_permits > 0:
+            for item in self.fetch_boston_permits(
+                bos_permits, days=permit_window_days
+            ):
+                merge(item)
+        if dal_permits > 0:
+            for item in self.fetch_dallas_permits(
+                dal_permits, days=permit_window_days
+            ):
+                merge(item)
 
         # Valores de obra: alvarás NYC casados por BIN; Chicago por morada.
         if permit_rows > 0:
