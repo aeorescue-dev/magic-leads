@@ -80,17 +80,34 @@ cálculo corre no máximo **1×/min**, independentemente do tráfego.
 ## 5. UX
 
 - O painel direito do herói ganhou as abas **Map** (defeito) e **By trade**
-  (a grelha existente, sem regressões).
+  (a grelha existente, sem regressões), com borda, hover e `aria-pressed`.
+- **Instrução explícita** no cartão: “Select your city or click a neighborhood
+  to explore.” (PT-BR/ES equivalentes).
+- **Seletor de cidade dentro do cartão** (New York/Boston/Dallas/Chicago) com
+  ícone de mapa, sincronizado com os chips do herói; os chips do herói também
+  têm ícone, `aria-pressed`, hover com elevação e estado `active`.
 - Mapa com bolhas de contagem, halo âmbar nos frescos, overlay
-  `N opportunities` + `N new in 24h`, e as 3 zonas mais quentes em chips.
-- Cidade partilhada com os chips do herói; ZIP muda automaticamente para
-  “By trade”.
+  `N opportunities` + `N new in 24h`, e as 3 zonas mais quentes em chips com
+  seta `→`, hover verde e `aria-label` (“Explore {zone}”).
+- ZIP muda automaticamente para “By trade” e mostra o chip `ZIP xxxxx`.
 - Clique numa zona abre o **teaser** no modal: `LIVE AREA · <cidade>`,
   `<zona>`, contagem + frescos, 3 benefícios e `AuthForm` já em modo
   **Create account** (com empresa).
 - Mobile: cartão abaixo do ZIP, 300 px, `scrollWheelZoom` desligado, chips
   acessíveis por teclado.
 - `prefers-reduced-motion` desliga a pulsação.
+
+## 5.1 Idioma — a rota manda
+
+- O prefixo `/en`, `/pt` ou `/es` é a **única fonte de verdade** do idioma
+  renderizado: o layout passa `initialLocale` ao provider, que ignora
+  `localStorage`/cookie antigos.
+- Trocar a bandeira **navega** para o novo prefixo (`/en/dashboard` →
+  `/pt/dashboard`), preservando query/hash; já não há conteúdo PT com URL EN.
+- `<html lang>` é `en-US`, `pt-BR` ou `es-ES` no SSR e no cliente.
+- Copy PT do mapa/teaser revista para **PT-BR** (“Isso está acontecendo perto
+  de você”, “endereços”, “contatos”), sem formas PT-PT (“moradas”,
+  “contactos”, “perto de si”).
 
 ## 6. Ficheiros
 
@@ -99,7 +116,8 @@ cálculo corre no máximo **1×/min**, independentemente do tráfego.
 - `backend/data/zip_centroids.json` (centroides de Dallas/Boston/NYC).
 - `frontend/components/landing/PublicLiveMap.tsx` (novo),
   `LandingShell.tsx` (contexto do modal), `AuthForm.tsx` (`initialRegister`),
-  `(marketing)/page.tsx` (abas), `lib/api-client.ts`, i18n EN/PT/ES,
+  `(marketing)/page.tsx` (abas + seletor), `lib/i18n.tsx` (rota manda +
+  navegação da bandeira), `lib/api-client.ts`, i18n EN/PT/ES,
   `app/globals.css`.
 - `frontend/scripts/audit-landing-map.mjs` (novo).
 - `tests/test_public_map.py`, `tests/test_public_map_api.py`.
@@ -112,12 +130,15 @@ node scripts/audit-landing-map.mjs
 ```
 
 Cobre: latência <50 ms, 4 cidades, igualdade com o trade grid, ausência de
-campos privados, piso de 5, frescos ≥3, coordenadas a 3 casas, ETag/304, mapa
-por defeito, bolhas + chips, troca de cidade, aba By trade, teaser e modo de
-registo. **ALL PASS** (endpoint 0,5–1,8 ms).
+campos privados, piso de 5, frescos ≥3, coordenadas a 3 casas, ETag/304,
+instrução e seletor de cidade no cartão, sincronização cartão/herói, mapa por
+defeito, bolhas + chips, aba By trade, teaser e modo de registo. Inclui ainda
+**/en com cookie PT**, troca de bandeira para `/pt`, `lang=en-US`/`pt-BR`,
+copy PT-BR do teaser e regresso a `/en`. **ALL PASS** (endpoint 0,5–1,8 ms).
 
 Capturas: `reports/landing-live-map-preview/01-hero-map.png`,
-`02-hero-trades.png`, `03-teaser-modal.png`.
+`02-hero-trades.png`, `03-teaser-modal.png`, `04-locale-en.png`,
+`05-locale-pt-teaser.png`.
 
 ## 8. Antes de produção
 

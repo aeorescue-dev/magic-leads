@@ -539,9 +539,19 @@ export default function LandingPage() {
                       key={cityName}
                       type="button"
                       onClick={() => pickHeroCity(cityName)}
+                      aria-pressed={active}
                       data-track={`hero_city_${cityName.toLowerCase().replace(/\s+/g, "_")}`}
-                      className={`rounded-full border px-3.5 py-1.5 text-[11.5px] font-bold transition ${active ? "border-[#0b1220] bg-[#0b1220] text-white shadow-sm" : "border-[#e7e3d9] bg-white/70 text-[#5b6576] hover:border-[#10b981]/45 hover:bg-white hover:text-[#0b1220]"}`}
+                      className={`inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-full border px-3.5 py-1.5 text-[11.5px] font-bold transition active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#10b981]/50 ${
+                        active
+                          ? "border-[#0b1220] bg-[#0b1220] text-white shadow-sm"
+                          : "border-[#e7e3d9] bg-white/70 text-[#5b6576] hover:-translate-y-0.5 hover:border-[#10b981]/60 hover:bg-white hover:text-[#0b1220] hover:shadow-sm"
+                      }`}
                     >
+                      <MapPin
+                        className={`h-3 w-3 ${
+                          active ? "text-[#34e0a1]" : "text-[#10b981]"
+                        }`}
+                      />
                       {cityName}
                     </button>
                   );
@@ -590,7 +600,7 @@ export default function LandingPage() {
               <div className="pointer-events-none absolute -inset-6 rounded-[2.4rem] bg-[#10b981]/[0.10] blur-3xl" />
               <div className="relative w-full max-w-[620px] rounded-[2rem] bg-gradient-to-b from-white/90 via-[#f6f4ee] to-[#eeeae0] p-[1px] shadow-[0_50px_130px_-45px_rgba(15,23,42,0.55),0_20px_60px_-30px_rgba(16,185,129,0.22)]">
                 <div className="rounded-[1.95rem] border border-white/60 bg-[#f7f5ef] p-4 sm:p-6">
-                  <div className="flex items-center justify-between gap-2 pb-3">
+                  <div className="flex items-center justify-between gap-2 pb-2.5">
                     <span className="inline-flex items-center gap-1.5 text-[8px] font-black uppercase tracking-[0.16em] text-[#94a3b8]">
                       <span className="relative flex h-2 w-2">
                         <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#10b981] opacity-50" />
@@ -598,7 +608,7 @@ export default function LandingPage() {
                       </span>
                       {t("landing.liveMap.kicker")}
                     </span>
-                    <div className="flex items-center gap-0.5 rounded-full bg-white p-0.5 shadow-sm">
+                    <div className="flex items-center gap-0.5 rounded-full border border-[#e7e3d9] bg-white p-0.5 shadow-sm">
                       {(["map", "trades"] as const)
                         .filter((tab) => tab !== "map" || mapEnabled)
                         .map((tab) => (
@@ -608,10 +618,10 @@ export default function LandingPage() {
                           data-track={`hero_tab_${tab}`}
                           onClick={() => setHeroTab(tab)}
                           aria-pressed={heroTab === tab}
-                          className={`rounded-full px-2.5 py-1 text-[9.5px] font-black uppercase tracking-[0.06em] transition ${
+                          className={`cursor-pointer rounded-full border px-2.5 py-1 text-[9.5px] font-black uppercase tracking-[0.06em] transition active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#10b981]/50 ${
                             heroTab === tab
-                              ? "bg-[#0b1220] text-white"
-                              : "text-[#64748b] hover:text-[#0b1220]"
+                              ? "border-[#0b1220] bg-[#0b1220] text-white shadow-sm"
+                              : "border-transparent text-[#64748b] hover:border-[#e7e3d9] hover:bg-[#f7f5ef] hover:text-[#0b1220]"
                           }`}
                         >
                           {tab === "map"
@@ -621,6 +631,46 @@ export default function LandingPage() {
                       ))}
                     </div>
                   </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5 pb-1.5">
+                    <span className="mr-0.5 text-[8px] font-black uppercase tracking-[0.14em] text-[#94a3b8]">
+                      {t("landing.liveMap.city_label")}
+                    </span>
+                    {CITIES.map((cityName) => {
+                      const active = !heroZip && heroCity === cityName;
+                      return (
+                        <button
+                          key={`card-${cityName}`}
+                          type="button"
+                          onClick={() => pickHeroCity(cityName)}
+                          aria-pressed={active}
+                          data-track={`card_city_${cityName
+                            .toLowerCase()
+                            .replace(/\s+/g, "_")}`}
+                          className={`inline-flex cursor-pointer items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-bold transition active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#10b981]/50 ${
+                            active
+                              ? "border-[#0b1220] bg-[#0b1220] text-white shadow-sm"
+                              : "border-[#e7e3d9] bg-white/80 text-[#54617a] hover:-translate-y-0.5 hover:border-[#10b981]/60 hover:text-[#0b1220] hover:shadow-sm"
+                          }`}
+                        >
+                          <MapPin
+                            className={`h-2.5 w-2.5 ${
+                              active ? "text-[#34e0a1]" : "text-[#10b981]"
+                            }`}
+                          />
+                          {cityName}
+                        </button>
+                      );
+                    })}
+                    {heroZip ? (
+                      <span className="rounded-full border border-[#10b981]/30 bg-[#effbf5] px-2 py-1 text-[9.5px] font-black uppercase tracking-[0.06em] text-[#0a8f65]">
+                        ZIP {heroZip}
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="pb-2.5 text-[10px] font-medium leading-snug text-[#64748b]">
+                    {t("landing.liveMap.hint")}
+                  </p>
 
                   {heroTab === "map" ? (
                     <PublicLiveMap

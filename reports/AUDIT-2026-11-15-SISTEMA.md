@@ -237,12 +237,24 @@ desta auditoria verde; o deploy deve correr o índice e a migração de cidades
   **6,5 MB**, plano `SEARCH … USING INDEX … (city=? AND date_reported>?)`.
 - **Produção (cópia de 135.951 linhas):** as 4 cidades numa query em
   **16,1 ms** (15,0–16,9 ms); cache in-process de 60 s → ≤1 cálculo/min.
-- **Audit local `audit-landing-map.mjs`: ALL PASS** — endpoint 0,6–1,1 ms,
+- **Audit local `audit-landing-map.mjs`: ALL PASS** — endpoint 0,6–1,8 ms,
   mapa por defeito, 5 bolhas + 3 chips, troca de cidade (Boston 176),
   separador By trade, teaser com “Dorchester · 26” e formulário em modo
   **Create account**.
+- **UX guiada (v2):** instrução “Select your city or click a neighborhood to
+  explore.”, seletor de cidade dentro do cartão sincronizado com o herói,
+  ícones de mapa nos chips, setas `→` e hover/active nos bairros, abas com
+  borda e `aria-pressed`.
+- **i18n (v2):** o prefixo da URL manda (`/en` abre EN mesmo com cookie PT);
+  trocar a bandeira **navega** para `/pt`/`/es` preservando query/hash;
+  `<html lang>` = `en-US`/`pt-BR`/`es-ES`. Copy PT do mapa/teaser em **PT-BR**
+  (“Isso está acontecendo perto de você”, “endereços”, “contatos”).
+- **Audit v2:** valida instrução, seletor do cartão, sincronização
+  cartão↔herói, `/en` com cookie PT, navegação da bandeira, `lang` e ausência
+  de PT-PT no teaser — **ALL PASS**.
 - **Kill switch:** `PUBLIC_LIVE_MAP_ENABLED=0` → 503 `live_map_disabled`; o
   frontend esconde a aba Map e mantém “By trade”.
 - **Capturas:** `reports/landing-live-map-preview/01-hero-map.png`,
-  `02-hero-trades.png`, `03-teaser-modal.png`.
+  `02-hero-trades.png`, `03-teaser-modal.png`, `04-locale-en.png`,
+  `05-locale-pt-teaser.png`.
 - **Plano completo:** `docs/LANDING-LIVE-MAP-PLAN.md`.

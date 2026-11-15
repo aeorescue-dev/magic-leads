@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { MapPin } from "lucide-react";
+import { ArrowRight, MapPin } from "lucide-react";
 
 import { useI18n } from "@/lib/i18n";
 import {
@@ -259,16 +259,24 @@ export function PublicLiveMap({
               type="button"
               data-map-zone={zone.slug}
               onClick={() => onZoneSelect(zone, active?.label ?? city)}
-              className="group inline-flex items-center gap-1.5 rounded-full border border-[#e7e3d9] bg-white px-2.5 py-1 text-[10.5px] font-bold text-[#0b1220] transition hover:border-[#10b981]/50 hover:text-[#0a8f65]"
+              aria-label={t("landing.liveMap.explore").replace(
+                "{zone}",
+                zone.label
+              )}
+              title={t("landing.liveMap.explore").replace("{zone}", zone.label)}
+              className="group inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-[#e7e3d9] bg-white px-2.5 py-1 text-[10.5px] font-bold text-[#0b1220] shadow-sm transition active:scale-95 hover:border-[#0a8f65] hover:bg-[#0a8f65] hover:text-white hover:shadow"
             >
-              <MapPin className="h-3 w-3 text-[#10b981]" />
+              <MapPin className="h-3 w-3 text-[#10b981] transition group-hover:text-white" />
               {zone.label}
-              <span className="text-[#64748b]">{zone.count}</span>
+              <span className="text-[#64748b] transition group-hover:text-white/80">
+                {zone.count}
+              </span>
               {zone.fresh > 0 ? (
-                <span className="rounded-full bg-[#fef3c7] px-1 text-[9px] font-black text-[#b45309]">
+                <span className="rounded-full bg-[#fef3c7] px-1 text-[9px] font-black text-[#b45309] transition group-hover:bg-white/20 group-hover:text-white">
                   +{zone.fresh}
                 </span>
               ) : null}
+              <ArrowRight className="h-3 w-3 opacity-50 transition group-hover:translate-x-0.5 group-hover:opacity-100" />
             </button>
           ))}
         </div>

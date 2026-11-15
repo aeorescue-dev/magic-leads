@@ -76,6 +76,7 @@ check(
 );
 
 const boston = payload?.cities?.find((city) => city.label === "Boston");
+const newYork = payload?.cities?.find((city) => city.label === "New York");
 let gridBoston = null;
 try {
   const res = await fetch(`${apiBase}/api/public/trade-grid?city=Boston`);
@@ -173,7 +174,40 @@ try {
     bubbles > 0 && chips > 0,
     `bubbles=${bubbles} chips=${chips}`
   );
+  const cardCities = await page.locator('[data-track^="card_city_"]').count();
+  const hintVisible = await page
+    .getByText("Select your city or click a neighborhood to explore.", {
+      exact: true,
+    })
+    .isVisible();
+  check(
+    "Instrução e seletor de cidade no cartão",
+    cardCities === 4 && hintVisible,
+    `cities=${cardCities} hint=${hintVisible}`
+  );
   await page.locator("#topo").screenshot({ path: `${out}/01-hero-map.png` });
+
+  await page.locator('[data-track="card_city_boston"]').click();
+  await page.waitForTimeout(900);
+  const cardTotal = Number(
+    await page.locator("[data-map-total]").first().getAttribute("data-map-total")
+  );
+  check(
+    "Seletor do cartão sincroniza o mapa (Boston)",
+    Number.isFinite(cardTotal) && cardTotal === boston?.totals.count,
+    `${cardTotal} vs ${boston?.totals.count}`
+  );
+
+  await page.locator('[data-track="hero_city_new_york"]').click();
+  await page.waitForTimeout(900);
+  const heroNyTotal = Number(
+    await page.locator("[data-map-total]").first().getAttribute("data-map-total")
+  );
+  check(
+    "Chips do herói sincronizam o mapa (New York)",
+    Number.isFinite(heroNyTotal) && heroNyTotal === newYork?.totals.count,
+    `${heroNyTotal} vs ${newYork?.totals.count}`
+  );
 
   await page.locator('[data-track="hero_city_boston"]').click();
   await page.waitForTimeout(900);
@@ -226,6 +260,115 @@ try {
 
 await context.close();
 
+// A rota manda no idioma: /en com cookie PT abre EN; trocar a bandeira navega.
+{
+  const localeContext = await browser.newContext({
+    viewport: { width: 1400, height: 1000 },
+  });
+  await localeContext.addCookies([
+    {
+      name: "NEXT_LOCALE",
+      value: "pt",
+      domain: new URL(base).hostname,
+      path: "/",
+    },
+  ]);
+  await localeContext.addInitScript(() => {
+    localStorage.setItem("NEXT_LOCALE", "pt");
+  });
+  const localePage = await localeContext.newPage();
+  try {
+    await localePage.goto(`${base}/en`, {
+      waitUntil: "networkidle",
+      timeout: 60000,
+    });
+    await localePage.waitForTimeout(900);
+    const enState = await localePage.evaluate(() => ({
+      lang: document.documentElement.lang,
+      en: document
+        .querySelector('[data-track="language_en"]')
+        ?.getAttribute("aria-pressed"),
+      pt: document
+        .querySelector('[data-track="language_pt"]')
+        ?.getAttribute("aria-pressed"),
+      body: document.body.innerText,
+    }));
+    check(
+      "/en manda no idioma (cookie PT ignorado)",
+      enState.lang === "en-US" &&
+        enState.en === "true" &&
+        enState.pt === "false" &&
+        enState.body.includes("The owner just asked") &&
+        enState.body.includes(
+          "Select your city or click a neighborhood to explore."
+        ),
+      `lang=${enState.lang} en=${enState.en} pt=${enState.pt}`
+    );
+
+    await localePage.locator('[data-track="language_pt"]').click();
+    await localePage.waitForURL("**/pt**", { timeout: 30000 });
+    await localePage.waitForTimeout(1200);
+    const ptState = await localePage.evaluate(() => ({
+      lang: document.documentElement.lang,
+      href: location.pathname,
+      body: document.body.innerText,
+    }));
+    check(
+      "Bandeira PT navega para /pt e renderiza PT-BR",
+      ptState.href.startsWith("/pt") &&
+        ptState.lang === "pt-BR" &&
+        ptState.body.includes(
+          "Escolha sua cidade ou clique em um bairro para explorar."
+        ),
+      `href=${ptState.href} lang=${ptState.lang}`
+    );
+
+    await localePage.locator("[data-map-zone]").first().waitFor({
+      timeout: 30000,
+    });
+    await localePage.locator("[data-map-zone]").first().click();
+    await localePage
+      .getByText("Isso está acontecendo perto de você", { exact: true })
+      .waitFor({ timeout: 10000 });
+    const modalText = await localePage.evaluate(() => {
+      const modal = [...document.querySelectorAll("div.fixed.inset-0")].find(
+        (node) => node.textContent?.includes("Isso está acontecendo")
+      );
+      return modal?.innerText || "";
+    });
+    check(
+      "Copy PT-BR consistente no teaser",
+      modalText.includes("Isso está acontecendo perto de você") &&
+        !modalText.includes("perto de si") &&
+        !modalText.includes("moradas") &&
+        !modalText.includes("contactos"),
+      `len=${modalText.length}`
+    );
+    await localePage.screenshot({ path: `${out}/05-locale-pt-teaser.png` });
+
+    await localePage.goto(`${base}/en`, {
+      waitUntil: "networkidle",
+      timeout: 60000,
+    });
+    await localePage.waitForTimeout(700);
+    const backEn = await localePage.evaluate(() => ({
+      lang: document.documentElement.lang,
+      en: document
+        .querySelector('[data-track="language_en"]')
+        ?.getAttribute("aria-pressed"),
+    }));
+    check(
+      "/en volta a EN depois da troca",
+      backEn.lang === "en-US" && backEn.en === "true",
+      `lang=${backEn.lang} en=${backEn.en}`
+    );
+    await localePage.screenshot({ path: `${out}/04-locale-en.png` });
+  } catch (exc) {
+    check("Idioma por rota (en/pt)", false, String(exc).slice(0, 160));
+  }
+  await localeContext.close();
+}
+
 // Kill switch: se o endpoint devolver 503, a aba Map desaparece e a grelha fica.
 {
   const fallbackContext = await browser.newContext({
@@ -244,7 +387,12 @@ await context.close();
       waitUntil: "networkidle",
       timeout: 60000,
     });
-    await fallbackPage.waitForTimeout(1800);
+    await fallbackPage.waitForTimeout(1200);
+    await fallbackPage
+      .locator('[data-track^="p1_trade_"]')
+      .first()
+      .waitFor({ timeout: 25000 })
+      .catch(() => {});
     const mapTab = await fallbackPage
       .locator('[data-track="hero_tab_map"]')
       .count();

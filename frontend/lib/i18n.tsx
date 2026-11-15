@@ -7,6 +7,7 @@ import {
   useState,
   ReactNode,
 } from "react";
+import { usePathname, useRouter } from "next/navigation";
 
 import EN from "./i18n/en";
 
@@ -19,6 +20,12 @@ export const LANGS: { code: Lang; label: string; native: string }[] = [
 ];
 
 export const LANGS_VALID: Lang[] = ["pt", "en", "es"];
+
+const HTML_LANG: Record<Lang, string> = {
+  pt: "pt-BR",
+  en: "en-US",
+  es: "es-ES",
+};
 
 const STORAGE_KEY = "NEXT_LOCALE";
 const COOKIE_KEY = "NEXT_LOCALE";
@@ -96,6 +103,8 @@ function persistLocale(l: Lang) {
 }
 
 export function LanguageProvider({ children, initialLocale }: { children: ReactNode; initialLocale?: Lang }) {
+  const router = useRouter();
+  const pathname = usePathname();
   const [lang, setLangState] = useState<Lang>(initialLocale || "en");
   const [dict, setDict] = useState<Dict>(EN);
 
@@ -104,6 +113,12 @@ export function LanguageProvider({ children, initialLocale }: { children: ReactN
     setLangState(initial);
     persistLocale(initial);
   }, [initialLocale]);
+
+  useEffect(() => {
+    if (typeof document !== "undefined") {
+      document.documentElement.lang = HTML_LANG[lang] ?? "en-US";
+    }
+  }, [lang]);
 
   useEffect(() => {
     let active = true;
@@ -129,6 +144,18 @@ export function LanguageProvider({ children, initialLocale }: { children: ReactN
   const setLang = (l: Lang) => {
     setLangState(l);
     persistLocale(l);
+    if (typeof window === "undefined") return;
+    // O prefixo da URL manda no idioma. Trocar a bandeira tem de navegar
+    // (ex.: /en/dashboard -> /pt/dashboard), não apenas trocar o dicionário.
+    const segments = (pathname || "/").split("/");
+    const current = segments[1];
+    if (!LANGS_VALID.includes(current as Lang)) return;
+    if (current === l) return;
+    const rest = segments.slice(2).join("/");
+    const suffix = rest ? `/${rest.replace(/\/+$/, "")}` : "";
+    const search = window.location.search || "";
+    const hash = window.location.hash || "";
+    router.push(`/${l}${suffix}${search}${hash}`);
   };
 
   // ICU MessageFormat pluralization support

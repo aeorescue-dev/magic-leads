@@ -135,10 +135,6 @@ export default function LandingShell({ children }: { children: React.ReactNode }
   const [modalContext, setModalContext] = useState<ModalContext | null>(null);
 
   useEffect(() => {
-    document.documentElement.lang = lang;
-  }, [lang]);
-
-  useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
