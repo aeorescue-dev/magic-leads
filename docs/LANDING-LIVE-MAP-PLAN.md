@@ -96,6 +96,10 @@ cálculo corre no máximo **1×/min**, independentemente do tráfego.
 - Mobile: cartão abaixo do ZIP, 300 px, `scrollWheelZoom` desligado, chips
   acessíveis por teclado.
 - `prefers-reduced-motion` desliga a pulsação.
+- **Stacking:** o wrapper do mapa usa `relative isolate z-0` (e `.pub-map`
+  `isolation: isolate`), prendendo as camadas Leaflet; o header da landing
+  sobe para `z-[900]`, acima do mapa e abaixo do modal (`z-[1000]`). A navbar
+  fica sempre visível ao rolar.
 
 ## 5.1 Idioma — a rota manda
 
@@ -133,12 +137,13 @@ Cobre: latência <50 ms, 4 cidades, igualdade com o trade grid, ausência de
 campos privados, piso de 5, frescos ≥3, coordenadas a 3 casas, ETag/304,
 instrução e seletor de cidade no cartão, sincronização cartão/herói, mapa por
 defeito, bolhas + chips, aba By trade, teaser e modo de registo. Inclui ainda
+**scroll com hit-test da navbar** (header, bandeira e CTA acima do mapa),
 **/en com cookie PT**, troca de bandeira para `/pt`, `lang=en-US`/`pt-BR`,
 copy PT-BR do teaser e regresso a `/en`. **ALL PASS** (endpoint 0,5–1,8 ms).
 
 Capturas: `reports/landing-live-map-preview/01-hero-map.png`,
 `02-hero-trades.png`, `03-teaser-modal.png`, `04-locale-en.png`,
-`05-locale-pt-teaser.png`.
+`05-locale-pt-teaser.png`, `06-scroll-navbar.png`.
 
 ## 8. Antes de produção
 

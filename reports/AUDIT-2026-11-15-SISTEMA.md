@@ -252,9 +252,14 @@ desta auditoria verde; o deploy deve correr o índice e a migração de cidades
 - **Audit v2:** valida instrução, seletor do cartão, sincronização
   cartão↔herói, `/en` com cookie PT, navegação da bandeira, `lang` e ausência
   de PT-PT no teaser — **ALL PASS**.
+- **Stacking (v3):** o mapa está isolado (`relative isolate z-0` +
+  `isolation: isolate`); o header da landing passou a `z-[900]`, acima das
+  camadas Leaflet e abaixo do modal (`z-[1000]`). O audit faz scroll e
+  hit-test: navbar, bandeira e CTA ficam por cima (`header=true flag=true
+  cta=true`).
 - **Kill switch:** `PUBLIC_LIVE_MAP_ENABLED=0` → 503 `live_map_disabled`; o
   frontend esconde a aba Map e mantém “By trade”.
 - **Capturas:** `reports/landing-live-map-preview/01-hero-map.png`,
   `02-hero-trades.png`, `03-teaser-modal.png`, `04-locale-en.png`,
-  `05-locale-pt-teaser.png`.
+  `05-locale-pt-teaser.png`, `06-scroll-navbar.png`.
 - **Plano completo:** `docs/LANDING-LIVE-MAP-PLAN.md`.

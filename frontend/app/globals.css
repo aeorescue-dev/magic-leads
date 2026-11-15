@@ -1303,6 +1303,9 @@
 /* Mapa vivo público da landing (light, sem clusters)                  */
 /* ------------------------------------------------------------------ */
 .pub-map {
+  position: relative;
+  z-index: 0;
+  isolation: isolate;
   background: #e9eef3;
 }
 .pub-map .leaflet-control-attribution {

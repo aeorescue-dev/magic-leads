@@ -187,6 +187,47 @@ try {
   );
   await page.locator("#topo").screenshot({ path: `${out}/01-hero-map.png` });
 
+  // A navbar tem de ficar sempre acima das camadas do Leaflet ao rolar.
+  await page.evaluate(() => window.scrollTo(0, 340));
+  await page.waitForTimeout(600);
+  const scrollHit = await page.evaluate(() => {
+    const probe = (x, y) => {
+      const el = document.elementFromPoint(x, y);
+      return {
+        inHeader: Boolean(el?.closest("header")),
+        tag: el?.tagName ?? "",
+        cls: String(el?.className ?? "").slice(0, 50),
+      };
+    };
+    const flag = document.querySelector('[data-track="language_en"]');
+    const cta = document.querySelector('[data-track="header_cta"]');
+    const flagRect = flag?.getBoundingClientRect();
+    const ctaRect = cta?.getBoundingClientRect();
+    return {
+      scrollY: window.scrollY,
+      map: Boolean(document.querySelector(".pub-map")),
+      header: probe(Math.min(window.innerWidth - 120, 1100), 30),
+      flag: flagRect
+        ? probe(flagRect.x + flagRect.width / 2, flagRect.y + flagRect.height / 2)
+        : null,
+      cta: ctaRect
+        ? probe(ctaRect.x + ctaRect.width / 2, ctaRect.y + ctaRect.height / 2)
+        : null,
+    };
+  });
+  check(
+    "Navbar acima do mapa durante o scroll",
+    scrollHit.header.inHeader &&
+      scrollHit.flag?.inHeader === true &&
+      (!scrollHit.cta || scrollHit.cta.inHeader),
+    `scrollY=${scrollHit.scrollY} header=${scrollHit.header.inHeader} flag=${
+      scrollHit.flag?.inHeader
+    } cta=${scrollHit.cta?.inHeader}`
+  );
+  await page.screenshot({ path: `${out}/06-scroll-navbar.png` });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.waitForTimeout(400);
+
   await page.locator('[data-track="card_city_boston"]').click();
   await page.waitForTimeout(900);
   const cardTotal = Number(

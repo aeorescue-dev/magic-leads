@@ -219,7 +219,7 @@ export function PublicLiveMap({
   const fresh = active?.totals.fresh ?? 0;
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="relative isolate z-0 flex h-full min-h-0 flex-col">
       <div className="relative min-h-0 flex-1 overflow-hidden rounded-2xl border border-[#e7e3d9] bg-[#e9eef3]">
         <div
           ref={containerRef}
