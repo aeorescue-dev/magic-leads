@@ -51,6 +51,21 @@ RESULT ALL PASS (9/9)
 - Same user/trade duplicate does not charge
 - Insufficient credits blocked
 
+## Resultado do audit de staging
+
+```
+RESULT ALL PASS (6/6)
+```
+
+- Staging gate redirects
+- Staging token accepted
+- Free account login in staging
+- Staging webhook idempotency
+- Staging wallet +700
+- Staging signal reveal
+
+Capturas em `reports/marco-1a/staging/` (`01-gate.png` … `05-reveal.png`).
+
 ## Ledger observado
 
 | Evento | Créditos | Saldo |
@@ -86,10 +101,13 @@ O webhook duplicado não altera o saldo: `stripe_events` único + `credit_purcha
 
 ## Staging
 
-- Backend Railway: `magic-leads-staging` (`https://magic-leads-staging-staging.up.railway.app`), ambiente `staging`, volume próprio.
-- Frontend: preview Vercel da branch + `STAGING_GATE=1` + `STAGING_ACCESS_TOKEN`.
-- Seed: `backend/scripts/seed_staging_credits.py` (recusa correr fora de staging).
-- O link e o token serão partilhados fora de banda.
+- Backend Railway: `magic-leads-staging` (`https://magic-leads-staging-staging.up.railway.app`), ambiente `staging`, volume próprio; health `healthy`.
+- Frontend: preview Vercel `https://magic-leads-frontend-final-gv537n0ha-fabio-dev2.vercel.app` da branch.
+- Seed: `backend/scripts/seed_staging_credits.py` executado no staging; **50 leads sintéticos** e contas de teste.
+- Proteção: **Vercel Deployment Protection** + **token gate** da app (`STAGING_GATE=1`); credenciais partilhadas fora de banda.
+- **Audit de staging: ALL PASS (6/6)** — gate, token, conta grátis, webhook idempotente, carteira +700 e reveal de sinal.
+- `CREDITS_MOCK=1` enquanto a chave `sk_test_` não está configurada; o caminho Stripe real está implementado e pronto a ativar.
+- O link e os tokens não ficam no repositório; são partilhados no canal seguro.
 
 ## Limitações da 1A
 
