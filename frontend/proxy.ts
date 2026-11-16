@@ -69,6 +69,31 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // Staging gate: só ativo quando STAGING_GATE=1. Não afeta produção.
+  // O token é validado por /api/staging-login (rota isenta) e guardado num
+  // cookie httpOnly. Sem cookie correto, qualquer página vai para o login.
+  const stagingGate =
+    process.env.STAGING_GATE === "1" || process.env.STAGING_GATE === "true";
+  if (stagingGate) {
+    const expected = process.env.STAGING_ACCESS_TOKEN || "";
+    const gateCookie = request.cookies.get("staging_gate")?.value || "";
+    const isGatePage =
+      pathname === "/staging-login" || pathname.endsWith("/staging-login");
+    if (expected && !isGatePage && gateCookie !== expected) {
+      const parts = pathname.split("/").filter(Boolean);
+      const locale =
+        parts[0] && (LOCALES as readonly string[]).includes(parts[0])
+          ? parts[0]
+          : DEFAULT_LOCALE;
+      const loginUrl = new URL(`/${locale}/staging-login`, request.url);
+      loginUrl.searchParams.set(
+        "next",
+        pathname + (request.nextUrl.search || ""),
+      );
+      return NextResponse.redirect(loginUrl);
+    }
+  }
+
 // Admin panel: rota interna PT-only, SEM prefixo de locale.
 // Tem de ser servida tal e qual: o bloco de locale abaixo redirecionaria
 // /admin -> /{locale}/admin e o painel deixaria de funcionar.

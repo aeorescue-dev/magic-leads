@@ -101,6 +101,7 @@ from .services import (
     b2b_voice,
     contractor_ingest,
     control_tower,
+    credits,
     enrichment_queue,
     enrichment_scheduler,
     freshness,
@@ -6514,6 +6515,14 @@ async def _lifespan(app):
     await searchbug_metrics.start()
     await push_metrics.start()
 
+    # Marco 1A: tabelas da carteira de créditos. Idempotente; corre depois de
+    # db_service.init_db (users/leads já existem).
+    try:
+        credits.init()
+        logger.info("[CREDITS] tabelas da carteira prontas")
+    except Exception as e:
+        logger.warning("[CREDITS] falha ao inicializar tabelas: %s", e)
+
     # Alert Planner: semeia o orçamento de alertas de hoje a partir dos alertas
     # new_lead já enviados (idempotente por dia). Impede que um deploy a meio
     # do dia atribua um orçamento extra a quem já recebeu os seus 6 alertas.
@@ -10372,6 +10381,216 @@ async def admin_lp_thread_reply(
     if not result:
         raise HTTPException(status_code=404, detail="Thread not found")
     return result
+
+
+# ------------------------------------------------------------------
+# Marco 1A: carteira de créditos, pacotes e reveal de sinal ($1,50)
+# ------------------------------------------------------------------
+def _credits_http(exc: credits.CreditsError) -> None:
+    raise HTTPException(
+        status_code=exc.status_code,
+        detail={"error": exc.code, "message": exc.detail},
+    )
+
+
+@app.get("/api/credits/packs")
+async def credits_packs():
+    return {"packs": credits.list_packs(), "signal_price_cents": credits.SIGNAL_PRICE_CENTS,
+            "phone_price_cents": credits.PHONE_PRICE_CENTS, "phone_enabled": bool(settings.CREDITS_PHONE_ENABLED)}
+
+
+@app.get("/api/credits/wallet")
+async def credits_wallet(user: dict = Depends(_get_current_user)):
+    try:
+        return credits.get_wallet(user["id"])
+    except credits.CreditsError as exc:
+        _credits_http(exc)
+
+
+@app.get("/api/credits/ledger")
+async def credits_ledger(limit: int = 50, user: dict = Depends(_get_current_user)):
+    return {"entries": credits.list_ledger(user["id"], limit)}
+
+
+@app.get("/api/credits/leads")
+async def credits_leads(
+    trade_code: str | None = None,
+    city: str | None = None,
+    limit: int = 60,
+    user: dict = Depends(_get_current_user),
+):
+    return {"leads": credits.list_leads(user["id"], trade_code, city, limit)}
+
+
+@app.get("/api/credits/leads/{lead_id}")
+async def credits_lead_preview(
+    lead_id: int,
+    trade_code: str | None = None,
+    user: dict = Depends(_get_current_user),
+):
+    try:
+        return credits.preview(user["id"], lead_id, trade_code)
+    except credits.CreditsError as exc:
+        _credits_http(exc)
+
+
+@app.post("/api/credits/reveal")
+async def credits_reveal(request: Request, user: dict = Depends(_get_current_user)):
+    body = await request.json()
+    reveal_type = str(body.get("type") or "signal").lower()
+    lead_id = int(body.get("lead_id") or 0)
+    trade_code = body.get("trade_code")
+    idempotency_key = str(body.get("idempotency_key") or "")
+    try:
+        if reveal_type == "phone":
+            return credits.reveal_phone(user["id"], lead_id, trade_code, idempotency_key)
+        return credits.reveal_signal(user["id"], lead_id, trade_code, idempotency_key)
+    except credits.CreditsError as exc:
+        _credits_http(exc)
+
+
+@app.post("/api/credits/checkout")
+async def credits_checkout(request: Request, user: dict = Depends(_get_current_user)):
+    body = await request.json()
+    pack_code = str(body.get("pack_code") or "").strip()
+    try:
+        pack = credits.get_pack(pack_code)
+        purchase = credits.create_purchase(user["id"], pack_code)
+    except credits.CreditsError as exc:
+        _credits_http(exc)
+    base = (request.headers.get("origin") or settings.FRONTEND_URL or "http://localhost:3000").rstrip("/")
+    lang = str(body.get("locale") or "en").lower()
+    if lang not in ("pt", "en", "es"):
+        lang = "en"
+
+    # Staging sem chave: simulação explícita. Em produção CREDITS_MOCK=0.
+    if settings.CREDITS_MOCK or not settings.STRIPE_API_KEY:
+        session_id = f"mock:{purchase['id']}"
+        credits.attach_session(purchase["id"], session_id)
+        return {
+            "mock": True,
+            "purchase_id": purchase["id"],
+            "pack": pack,
+            "checkout_url": f"{base}/{lang}/credits?mock_purchase={purchase['id']}",
+            "message": "Staging: use o botão Simular pagamento para creditar a carteira.",
+        }
+
+    try:
+        stripe.api_key = settings.STRIPE_API_KEY
+        session = stripe.checkout.Session.create(
+            mode="payment",
+            customer_email=user.get("email"),
+            client_reference_id=str(user["id"]),
+            line_items=[{
+                "price_data": {
+                    "currency": "usd",
+                    "unit_amount": int(pack["price_cents"]),
+                    "product_data": {"name": f"Magic Leads Credits — {pack['label']}"},
+                },
+                "quantity": 1,
+            }],
+            metadata={
+                "purchase_id": str(purchase["id"]),
+                "pack_code": pack["code"],
+                "user_id": str(user["id"]),
+                "credits_cents": str(pack["credits_cents"]),
+            },
+            success_url=f"{base}/{lang}/credits?checkout=success&session_id={{CHECKOUT_SESSION_ID}}",
+            cancel_url=f"{base}/{lang}/credits?checkout=cancel",
+        )
+        credits.attach_session(purchase["id"], session.id)
+        return {"mock": False, "purchase_id": purchase["id"], "checkout_url": session.url}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[CREDITS] Stripe checkout falhou: %s", type(exc).__name__)
+        raise HTTPException(status_code=502, detail="stripe_error") from exc
+
+
+@app.post("/api/credits/mock-pay")
+async def credits_mock_pay(request: Request, user: dict = Depends(_get_current_user)):
+    if not settings.CREDITS_MOCK:
+        raise HTTPException(status_code=404, detail="mock_disabled")
+    body = await request.json()
+    purchase_id = int(body.get("purchase_id") or 0)
+    try:
+        purchase = credits.get_purchase(purchase_id, user["id"])
+        session_id = purchase.get("stripe_session_id") or f"mock:{purchase_id}"
+        if not purchase.get("stripe_session_id"):
+            credits.attach_session(purchase_id, session_id)
+        result = credits.mark_purchase_paid(
+            session_id,
+            event_id=f"evt_mock:{purchase_id}",
+            payment_intent_id=f"pi_mock:{purchase_id}",
+            stripe_event_type="mock.checkout.completed",
+        )
+        return {"ok": True, **result}
+    except credits.CreditsError as exc:
+        _credits_http(exc)
+
+
+@app.post("/api/credits/mock-webhook")
+async def credits_mock_webhook(request: Request):
+    """Teste de idempotência do webhook em staging (sem Stripe)."""
+    if not settings.CREDITS_MOCK:
+        raise HTTPException(status_code=404, detail="mock_disabled")
+    body = await request.json()
+    purchase_id = int(body.get("purchase_id") or 0)
+    event_id = str(body.get("event_id") or f"evt_mock:{purchase_id}")
+    try:
+        purchase = credits.get_purchase(purchase_id)
+        session_id = purchase.get("stripe_session_id") or f"mock:{purchase_id}"
+        if not purchase.get("stripe_session_id"):
+            credits.attach_session(purchase_id, session_id)
+        result = credits.mark_purchase_paid(
+            session_id, event_id=event_id, stripe_event_type="mock.checkout.completed"
+        )
+        return {"ok": True, **result}
+    except credits.CreditsError as exc:
+        _credits_http(exc)
+
+
+@app.post("/api/credits/mock-refund")
+async def credits_mock_refund(request: Request, user: dict = Depends(_get_current_user)):
+    if not settings.CREDITS_MOCK:
+        raise HTTPException(status_code=404, detail="mock_disabled")
+    body = await request.json()
+    purchase_id = int(body.get("purchase_id") or 0)
+    try:
+        purchase = credits.get_purchase(purchase_id, user["id"])
+        result = credits.refund_purchase(
+            purchase.get("stripe_session_id") or f"mock:{purchase_id}",
+            event_id=f"evt_mock_refund:{purchase_id}",
+        )
+        return {"ok": True, **result, "wallet": credits.get_wallet(user["id"])}
+    except credits.CreditsError as exc:
+        _credits_http(exc)
+
+
+@app.post("/api/credits/stripe/webhook")
+async def credits_stripe_webhook(request: Request):
+    payload = await request.body()
+    sig = request.headers.get("stripe-signature") or ""
+    if not settings.STRIPE_WEBHOOK_SECRET:
+        raise HTTPException(status_code=503, detail="stripe_webhook_not_configured")
+    try:
+        event = stripe.Webhook.construct_event(payload, sig, settings.STRIPE_WEBHOOK_SECRET)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="invalid_stripe_signature") from exc
+
+    event_type = str(event.get("type") or "")
+    event_id = str(event.get("id") or "")
+    obj = event.get("data", {}).get("object", {})
+    if event_type == "checkout.session.completed" and str(obj.get("payment_status") or "") == "paid":
+        try:
+            result = credits.mark_purchase_paid(
+                str(obj.get("id") or ""),
+                event_id=event_id,
+                payment_intent_id=str(obj.get("payment_intent") or ""),
+                stripe_event_type=event_type,
+            )
+            return {"received": True, "duplicate": bool(result.get("duplicate"))}
+        except credits.CreditsError as exc:
+            _credits_http(exc)
+    return {"received": True, "ignored": event_type}
 
 
 if __name__ == "__main__":

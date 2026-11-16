@@ -1,0 +1,47 @@
+[
+  {
+    "name": "Staging page loads",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "Free account login",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "Mock checkout created",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "Webhook idempotency visible",
+    "ok": true,
+    "detail": "Webhook 1: aplicado · Webhook 2: duplicado"
+  },
+  {
+    "name": "Wallet credited 700",
+    "ok": true,
+    "detail": "CARTEIRA\n$7.00\n700 créditos\n\n$1,50 = 150 créditos · $3,00 = 300 créditos · exclu"
+  },
+  {
+    "name": "Signal reveal returns full owner/mailing",
+    "ok": true,
+    "detail": "SINAL DESBLOQUEADO\n✕\nAlice Owner\n\nEndereço da obra: 100 Seed Street, NYC 10001\n\nProprietário oficial: Alice Owner\n\nMailing address: 200 Mail Avenue, NYC, NY 100"
+  },
+  {
+    "name": "Same lead can be revealed by another trade",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "Same user/trade duplicate does not charge",
+    "ok": true,
+    "detail": "Evento duplicado — saldo não mudou"
+  },
+  {
+    "name": "Insufficient credits blocked",
+    "ok": true,
+    "detail": "Saldo insuficiente. Compra um pacote."
+  }
+]

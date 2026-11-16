@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     STRIPE_WEBHOOK_SECRET: str = ""
     STRIPE_PRICE_ID_PRO: str = "price_..."  # Configurar após criar produto no Stripe
 
+    # Marco 1A: carteira de créditos. Em staging, CREDITS_MOCK=1 simula o
+    # Checkout sem chave live/test; em produção fica 0.
+    CREDITS_MOCK: bool = False
+    CREDITS_PHONE_ENABLED: bool = False
+
     # Vitrine pública (Fase 2A): inventário de leads, páginas e atribuição.
     SHOWCASE_BASE_URL: str = ""  # default: PUBLIC_API_URL
     SHOWCASE_MIN_ITEMS: int = 3
