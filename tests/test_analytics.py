@@ -13,6 +13,14 @@ from backend.services import analytics
 NOW = datetime.now(timezone.utc)
 
 
+@pytest.fixture(autouse=True)
+def _refresh_now():
+    """Evita o flake de meia-noite: o payload e o range usam o mesmo instante."""
+    global NOW
+    NOW = datetime.now(timezone.utc)
+    yield
+
+
 @pytest.fixture()
 def clean_db():
     analytics.init_db()
@@ -212,14 +220,14 @@ def test_summary_campanhas_geo_cta_e_atribuicao_email(clean_db):
 
 def test_custom_range_e_inclusivo_e_filtra_dias(clean_db):
     analytics.ingest(_payload("sess-custom-12345"), "203.0.113.60")
-    today = datetime.now(timezone.utc).date().isoformat()
+    today = NOW.date().isoformat()
     snap = analytics.summary("24h", today, today)
     assert snap["range"] == "custom"
     assert snap["start"] == today
     assert snap["end"] == today
     assert snap["cards"]["visits"]["value"] == 1
 
-    yesterday = (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
+    yesterday = (NOW.date() - timedelta(days=1)).isoformat()
     empty = analytics.summary("24h", yesterday, yesterday)
     assert empty["cards"]["visits"]["value"] == 0
 
