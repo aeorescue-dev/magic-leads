@@ -225,7 +225,7 @@ desta auditoria verde; o deploy deve correr o índice e a migração de cidades
   vivo, como validado localmente e no benchmark de produção. Renovar o plano
   demo (ou usar uma conta de validação dedicada) é uma decisão de produto.
 
-## 13. Landing live map (preview, ainda não deployado)
+## 13. Landing live map (produção desde 2026-11-16)
 
 - **Branch:** `feat/landing-live-map-preview` (sem push/deploy).
 - **Endpoint público:** `GET /api/public/live-map` — agregado por zona, sem
@@ -278,3 +278,22 @@ desta auditoria verde; o deploy deve correr o índice e a migração de cidades
   `07-mobile-map.png`, `08-search-boston.png`, `09-areas-strip.png`,
   `10-chicago.png`.
 - **Plano completo:** `docs/LANDING-LIVE-MAP-PLAN.md`.
+
+## 14. Deploy da landing live map — 2026-11-16 (`06eff55`)
+
+- **Railway SUCCESS** para `06eff55`; `idx_leads_public_geo` criado em
+  **281 ms** e `[PUBLIC-MAP] warmup` em **39 ms**. Flag subida a **0** e
+  endpoint a devolver **503 `live_map_disabled`** na primeira fase.
+- **Flag a 1** (redeploy `06eff55`): `/health` healthy, endpoint **200**;
+  4 cidades, **64 áreas**; NYC 9.515, Boston 379, Chicago 2.454 e setores
+  legíveis (South Side, Southwest Side, West Side, …).
+- **Audit público de produção contra `www.magicleads.app`: ALL PASS** —
+  labels sem ZIP, search cidade/bairro/ZIP, top 3 + `+26 áreas`, legenda,
+  navbar no scroll, `/en`↔`/pt`, PT-BR, mobile e kill switch. Capturas em
+  `reports/landing-live-map-prod/`.
+- **CI:** a primeira run falhou por um flake de meia-noite no teste de
+  analytics (`NOW` capturado no import antes das 00:00 UTC); corrigido em
+  `cf9ea07` com refresh do `NOW` por teste. A run seguinte ficou **verde** e
+  o Railway fez **skip** do commit de testes (código em execução `06eff55`).
+- **Janela A/B** de 2 semanas iniciada a 2026-11-16; kill switch disponível
+  para rollback.

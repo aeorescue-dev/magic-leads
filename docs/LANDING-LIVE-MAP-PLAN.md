@@ -1,7 +1,8 @@
-# Mapa Vivo de Amostra na Landing — plano e implementação (preview)
+# Mapa Vivo de Amostra na Landing — plano e produção
 
-**Estado:** implementado na branch `feat/landing-live-map-preview`. **Sem push e
-sem deploy.** Validado localmente com `audit-landing-map.mjs` (ALL PASS).
+**Estado:** **em produção desde 2026-11-16** (deploy `06eff55`, flag
+`PUBLIC_LIVE_MAP_ENABLED=1`). CI verde (`cf9ea07`), audit público de produção
+**ALL PASS** e capturas em `reports/landing-live-map-prod/`.
 
 ## 1. Decisões aprovadas
 
@@ -166,24 +167,24 @@ Capturas: `reports/landing-live-map-preview/01-hero-map.png`,
 `07-mobile-map.png`, `08-search-boston.png`, `09-areas-strip.png`,
 `10-chicago.png`.
 
-## 8. Antes de produção
+## 8. Produção — 2026-11-16
 
-1. `PUBLIC_LIVE_MAP_ENABLED=0` no Railway antes do deploy; ligar no canary.
-2. Confirmar no arranque `[DB] idx_leads_public_geo criado …` e
-   `[PUBLIC-MAP] warmup …`; com a flag a 0, `/api/public/live-map` devolve
-   503 `live_map_disabled` e o cartão cai em “By trade”.
-3. Ligar `PUBLIC_LIVE_MAP_ENABLED=1` e correr o audit público (sem token):
-
-```bash
-cd frontend
-AUDIT_BASE_URL=https://www.magicleads.app \
-AUDIT_API_URL=https://magic-leads-production.up.railway.app \
-AUDIT_OUT=../reports/landing-live-map-prod \
-node scripts/audit-landing-map.mjs
-```
-
-4. Guardar as capturas de produção em `reports/landing-live-map-prod/` e
-   considerar **no-go** se o endpoint ≥50 ms, se houver labels numéricos, se a
-   busca/teaser falhar ou se a navbar não ficar acima do mapa no scroll.
-5. A/B 50/50 durante 2 semanas (CTR do teaser, início de registo, LCP).
-6. Só então tornar o mapa o default permanente.
+- **Deploy `06eff55`:** Railway SUCCESS; `[DB] idx_leads_public_geo criado em
+  281 ms`; `[PUBLIC-MAP] warmup 39 ms`.
+- **Fase 0 (flag 0):** `/api/public/live-map` → **503 `live_map_disabled`**;
+  o cartão cai em “By trade”.
+- **Fase 1 (flag 1):** `/health` healthy, endpoint **200** com
+  `Server-Timing`; 64 áreas / 4 cidades; NYC 9.515, Boston 379, Chicago
+  2.454.
+- **Audit público de produção: ALL PASS** — labels legíveis nas 4 cidades
+  (Chicago “South Side”, sem ZIP numérico), busca cidade/bairro/ZIP, top 3 +
+  `+26 áreas`, legenda, navbar no scroll, `/en`↔`/pt`, PT-BR, mobile e kill
+  switch.
+- **Capturas:** `reports/landing-live-map-prod/` (01–10).
+- **CI:** a run inicial falhou por um flake de meia-noite no teste de
+  analytics (`NOW` capturado antes das 00:00 UTC); corrigido em `cf9ea07`
+  (refresh por teste) e a run seguinte ficou **verde**. Railway fez skip do
+  commit de testes; o código em execução é `06eff55`.
+- **Janela A/B:** iniciada a 2026-11-16 por 2 semanas; medir CTR do teaser,
+  início de registo e LCP contra o baseline, mantendo o kill switch para
+  rollback imediato.
