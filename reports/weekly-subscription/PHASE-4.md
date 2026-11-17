@@ -96,3 +96,19 @@
 - Verificado em staging: seleção do plano Growth, login, ativação mock e
   redirecionamento para o dashboard com `Growth · 1/6 +4`.
 
+## Fase 4.2 — Ajustes de lançamento
+
+**Commits:** `c3a5b77`, `54e9092`
+
+- Header: ações com gap real (`gap-2 sm:gap-3`), divisor entre **Entrar** e CTA,
+  bandeiras compactas e navegação completa só em `2xl` — sem sobreposição em
+  larguras intermédias.
+- Título de preços: **“Sete Planos, Destrave, ligue e fature!”**.
+- CTA principal: **“Desbloquear e falar com o contratante agora”**.
+- Modal: removida a frase “O checkout abre logo a seguir”.
+- Cartões: mais padding (`p-6`), `gap-4`, sombras subtis e seleção com glow
+  verde mais contido; conteúdo alinhado ao fundo do cartão.
+- Verificado no staging em PT/EN/ES: título, CTA, seleção de plano, modal com
+  plano fixo e ausência da frase de checkout.
+
+
