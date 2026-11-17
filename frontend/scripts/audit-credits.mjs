@@ -1,4 +1,4 @@
-﻿import { chromium } from "playwright";
+import { chromium } from "playwright";
 import fs from "node:fs";
 
 const BASE = process.env.AUDIT_BASE_URL || "http://localhost:3002";
@@ -8,7 +8,7 @@ fs.mkdirSync(OUT, { recursive: true });
 const results = [];
 function check(name, ok, detail = "") {
   results.push({ name, ok: Boolean(ok), detail });
-  console.log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? " · " + detail : ""}`);
+  console.log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? " � " + detail : ""}`);
 }
 
 const browser = await chromium.launch();
@@ -20,7 +20,11 @@ async function login(p, email) {
   await p.fill('input[type="email"]', email);
   await p.fill('input[type="password"]', "dev-demo-only");
   await p.locator('form button[type="submit"]').first().click();
-  await p.waitForURL(/\/pt\/dashboard/, { timeout: 60000 });
+  await p.waitForFunction(
+    () => window.location.pathname.includes("/dashboard"),
+    null,
+    { timeout: 60000 },
+  );
   await p.getByText("Oportunidades").first().waitFor({ timeout: 30000 });
   await p.waitForTimeout(800);
 }
@@ -28,7 +32,7 @@ async function login(p, email) {
 await login(page, "qa-buyer+staging@magicleads.app");
 check(
   "Free login lands in official dashboard",
-  await page.getByText("Visão Geral").first().isVisible(),
+  await page.getByText("Vis�o Geral").first().isVisible(),
 );
 await page.screenshot({ path: `${OUT}/01-dashboard-freemium.png`, fullPage: true });
 
@@ -42,10 +46,10 @@ check(
 await page.screenshot({ path: `${OUT}/02-map-masked-signals.png`, fullPage: true });
 
 // Packs via sidebar.
-await page.locator('button:has-text("Créditos / Planos")').first().click();
+await page.locator('button:has-text("Cr�ditos / Planos")').first().click();
 const panel = page.getByTestId("credits-panel").first();
 await panel.waitFor({ timeout: 30000 });
-const headerWallet = page.locator('button[title="Carteira de créditos"]');
+const headerWallet = page.locator('button[title="Carteira de cr�ditos"]');
 check("Sidebar opens credit packs", (await panel.locator('button:has-text("Starter")').count()) > 0);
 await page.screenshot({ path: `${OUT}/03-credits-packs.png`, fullPage: true });
 
@@ -73,7 +77,7 @@ check(
 await page.screenshot({ path: `${OUT}/06-wallet-700.png`, fullPage: true });
 
 // Reveal signal.
-await panel.locator('button:has-text("Revelar sinal")').first().click();
+await panel.locator('button:has-text("Revelar sinal"):not([disabled])').first().click();
 await page.getByText("Sinal desbloqueado").first().waitFor({ timeout: 15000 });
 const modalText = await page
   .locator("text=Sinal desbloqueado")
@@ -94,7 +98,7 @@ await page.waitForTimeout(700);
 // Same address, another trade: new exclusivity allowed.
 const tradeSelect = panel.locator("select").nth(1);
 await tradeSelect.selectOption("Electrical");
-await panel.locator('button:has-text("Revelar sinal")').first().click();
+await panel.locator('button:has-text("Revelar sinal"):not([disabled])').first().click();
 await page.waitForTimeout(1200);
 const crossTrade = await page
   .getByText("Sinal desbloqueado")
@@ -108,7 +112,7 @@ await page.waitForTimeout(500);
 
 // Same user/trade twice: duplicate, no charge.
 await tradeSelect.selectOption("Plumbing");
-await panel.locator('button:has-text("Revelar sinal")').first().click();
+await panel.locator('button:has-text("Revelar sinal"):not([disabled])').first().click();
 await page.waitForTimeout(1200);
 const dupMsg = await page.getByText(/duplicado|Duplicate/i).first().innerText().catch(() => "");
 check("Same user/trade duplicate does not charge", Boolean(dupMsg), dupMsg);
@@ -118,11 +122,11 @@ await page.screenshot({ path: `${OUT}/09-duplicate.png`, fullPage: true });
 const context2 = await browser.newContext({ viewport: { width: 1440, height: 1100 } });
 const page2 = await context2.newPage();
 await login(page2, "qa-free+staging@magicleads.app");
-await page2.locator('button:has-text("Créditos / Planos")').first().click();
+await page2.locator('button:has-text("Cr�ditos / Planos")').first().click();
 const panel2 = page2.getByTestId("credits-panel").first();
 await panel2.waitFor({ timeout: 30000 });
 await page2.waitForTimeout(800);
-await panel2.locator('button:has-text("Revelar sinal")').first().click();
+await panel2.locator('button:has-text("Revelar sinal"):not([disabled])').first().click();
 await page2.waitForTimeout(1200);
 const insufficient = await page2
   .getByText(/Saldo insuficiente/)

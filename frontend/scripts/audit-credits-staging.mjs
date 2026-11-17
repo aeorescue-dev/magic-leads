@@ -33,7 +33,14 @@ async function unlockGate(page) {
     await page.getByText("Acesso protegido").first().waitFor({ timeout: 30000 });
     await page.fill('input[type="password"]', TOKEN);
     await page.locator("form button").first().click();
-    await page.waitForURL(/\/pt\/dashboard/, { timeout: 30000 });
+    // O gate volta para /pt/dashboard; sem sessão, o proxy manda para /pt/auth.
+    await page.waitForFunction(
+      () =>
+        window.location.pathname.includes("/auth") ||
+        window.location.pathname.includes("/dashboard"),
+      null,
+      { timeout: 60000 },
+    );
   }
 }
 
@@ -45,7 +52,11 @@ async function login(page, email) {
   await page.fill('input[type="email"]', email);
   await page.fill('input[type="password"]', "dev-demo-only");
   await page.locator('form button[type="submit"]').first().click();
-  await page.waitForURL(/\/pt\/dashboard/, { timeout: 60000 });
+  await page.waitForFunction(
+    () => window.location.pathname.includes("/dashboard"),
+    null,
+    { timeout: 60000 },
+  );
   await page.getByText("Oportunidades").first().waitFor({ timeout: 30000 });
   await page.waitForTimeout(800);
 }
@@ -69,8 +80,17 @@ await page.screenshot({ path: `${OUT}/01-gate.png`, fullPage: true });
 
 await page.fill('input[type="password"]', TOKEN);
 await page.locator("form button").first().click();
-await page.waitForURL(/\/pt\/dashboard/, { timeout: 30000 });
-check("Staging token accepted", page.url().includes("/pt/dashboard"));
+await page.waitForFunction(
+  () =>
+    window.location.pathname.includes("/auth") ||
+    window.location.pathname.includes("/dashboard"),
+  null,
+  { timeout: 60000 },
+);
+check(
+  "Staging token accepted",
+  page.url().includes("/pt/auth") || page.url().includes("/pt/dashboard"),
+);
 
 await login(page, "qa-buyer+staging@magicleads.app");
 check(
@@ -101,6 +121,7 @@ await page.screenshot({ path: `${OUT}/03-map-masked-signals.png`, fullPage: true
 await page.locator('button:has-text("Créditos / Planos")').first().click();
 await page.getByTestId("credits-panel").first().waitFor({ timeout: 30000 });
 const panel = page.getByTestId("credits-panel").first();
+await panel.locator('button:has-text("Starter")').first().waitFor({ timeout: 30000 });
 const packs = await panel.locator('button:has-text("Starter")').count();
 check("Sidebar opens credit packs in dashboard", packs > 0);
 await page.screenshot({ path: `${OUT}/04-credits-packs.png`, fullPage: true });
@@ -145,7 +166,7 @@ await page.screenshot({ path: `${OUT}/06-wallet-700-dashboard.png`, fullPage: tr
 // ---------------------------------------------------------------------------
 // 4. Reveal a signal in the dashboard and debit the wallet
 // ---------------------------------------------------------------------------
-await panel.locator('button:has-text("Revelar sinal")').first().click();
+await panel.locator('button:has-text("Revelar sinal"):not([disabled])').first().click();
 await page.getByText("Sinal desbloqueado").first().waitFor({ timeout: 15000 });
 const modal = await page
   .locator("text=Sinal desbloqueado")
@@ -183,7 +204,7 @@ await freePage.locator('button:has-text("Créditos / Planos")').first().click();
 const freePanel = freePage.getByTestId("credits-panel").first();
 await freePanel.waitFor({ timeout: 30000 });
 await freePage.waitForTimeout(800);
-await freePanel.locator('button:has-text("Revelar sinal")').first().click();
+await freePanel.locator('button:has-text("Revelar sinal"):not([disabled])').first().click();
 await freePage.waitForTimeout(1200);
 const insufficient = await freePage
   .getByText(/Saldo insuficiente/)

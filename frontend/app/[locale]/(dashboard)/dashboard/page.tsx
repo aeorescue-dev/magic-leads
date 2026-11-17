@@ -2571,7 +2571,8 @@ function DashboardPageInner() {
             {/* Push Notification Button */}
               <PushNotificationButton />
 
-              {/* Trial CTA button */}
+              {/* Trial CTA button — escondido em freemium (usa créditos) */}
+            {!isFreemium && (
             <button
               onClick={() => setShowCheckout(true)}
               title={t("dashboard.trial.scribe")}
@@ -2580,6 +2581,7 @@ function DashboardPageInner() {
               <CreditCard className="h-4 w-4" />
               <span className="hidden sm:inline">{t("dashboard.trial.scribe")}</span>
             </button>
+            )}
           </div>
         </header>
 
@@ -2617,7 +2619,8 @@ function DashboardPageInner() {
             </div>
           </div>
 
-          {/* SUBSCRIPTION BANNER + DAILY LIMIT BAR */}
+          {/* SUBSCRIPTION BANNER + DAILY LIMIT BAR — legacy; freemium usa créditos */}
+          {!isFreemium && (
           <div className="rounded-2xl border border-emerald-500/30 bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-transparent p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <div className="h-10 w-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
@@ -2655,6 +2658,7 @@ function DashboardPageInner() {
               </div>
             </div>
           </div>
+          )}
 
           {/* KPI PULSE — 1 herói + 3 satélites acionáveis */}
           <KpiPulse
