@@ -2393,10 +2393,10 @@ function DashboardPageInner() {
                 {user?.company_name || "Contratante Pro"}
               </div>
               <div className="text-[11px] text-emerald-400 font-medium capitalize">
-                {user?.plan
-                  ? `Plano ${user.plan}`
-                  : isFreemium
-                    ? (lang === "en" ? "Free account" : "Conta gratuita")
+                {isFreemium
+                  ? (lang === "en" ? "Free account" : "Conta gratuita")
+                  : user?.plan
+                    ? `Plano ${user.plan}`
                     : "Teste Grátis (7d)"}
               </div>
             </div>
@@ -2703,7 +2703,7 @@ function DashboardPageInner() {
             />
           )}
 
-          {["overview", "opportunities", "prevention"].includes(activeTab) ? (
+          {!isFreemium && ["overview", "opportunities", "prevention"].includes(activeTab) ? (
             <FeedToolbar
               tabs={feedTabs}
               activeTab={activeFeedTab}

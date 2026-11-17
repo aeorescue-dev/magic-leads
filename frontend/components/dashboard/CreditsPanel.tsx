@@ -268,10 +268,6 @@ export default function CreditsPanel({
 
   return (
     <section data-testid="credits-panel" className="space-y-4">
-      <div className="rounded-2xl border border-[var(--sd-accent)]/25 bg-[var(--sd-accent-soft)] px-4 py-3 text-xs leading-relaxed text-[var(--sd-text)]">
-        <b>{c.freemium}</b>
-      </div>
-
       <div ref={packsRef} className="rounded-2xl border border-[var(--sd-border)] bg-[var(--sd-surface)] p-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
