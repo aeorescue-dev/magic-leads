@@ -60,13 +60,28 @@
     "detail": "$5.50"
   },
   {
-    "name": "Insufficient balance opens pack paywall",
+    "name": "Insufficient balance opens elegant paywall modal",
     "ok": true,
-    "detail": "Saldo insuficiente. Escolhe um pacote acima."
+    "detail": "CRÉDITOS INSUFICIENTES\nDesbloqueia este lead\n\nEste sinal custa $1,50. Escolhe um pacote — os créditos entram na carteira"
+  },
+  {
+    "name": "Paywall shows $6–$180 packs over the dashboard",
+    "ok": true,
+    "detail": ""
   },
   {
     "name": "Zero-balance wallet unchanged",
     "ok": true,
     "detail": ""
+  },
+  {
+    "name": "Payment in paywall unlocks lead without leaving dashboard",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "Header wallet after paywall purchase + reveal",
+    "ok": true,
+    "detail": "$5.50"
   }
 ]

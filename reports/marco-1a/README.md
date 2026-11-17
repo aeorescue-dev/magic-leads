@@ -16,7 +16,7 @@
 - Compras one-time Stripe (Checkout `mode=payment`, `price_data` inline) + webhook idempotente; modo **mock** em staging enquanto a chave `sk_test_` não está configurada.
 - Reveal de sinal **$1,50** com endereço exato, owner oficial e `mailing_address`; **sem Searchbug**.
 - Exclusividade **7 dias por ofício**; o mesmo endereço pode ser vendido a outros ofícios.
-- Paywall: “Revelar” com saldo insuficiente (402) rola para os pacotes e mostra “Saldo insuficiente. Escolhe um pacote acima.”.
+- Paywall: “Revelar” com saldo insuficiente (402) abre uma **modal elegante sobre o dashboard** (pack $6–$180, carteira atual e valor necessário). A compra dentro da modal credita a carteira e **desbloqueia o lead automaticamente**, sem sair do painel.
 - Telefone **$3** bloqueado na 1A (Marco 1B).
 - `/pt/credits` deixou de ser página autónoma: redireciona para `/{locale}/dashboard?tab=credits`.
 - Gate por token/password no staging (`STAGING_GATE=1` + `STAGING_ACCESS_TOKEN`), cookie httpOnly.
@@ -30,7 +30,8 @@
 3. Sidebar **Créditos / Planos** → carteira + 6 pacotes + sinais no dashboard.
 4. Pack Starter $6 → Checkout mock → webhook duplicado (idempotente) → **$7.00** no header.
 5. **Revelar sinal — $1,50** → modal com endereço/owner/mailing → header passa a **$5.50**.
-6. Conta sem saldo → “Revelar” devolve 402 e abre a secção de pacotes, sem debitar.
+6. Conta sem saldo → “Revelar” abre a **modal de créditos** sobre o dashboard; a compra dentro da modal (mock) credita a carteira e desbloqueia o lead no mesmo fluxo.
+7. `/pt/credits` redireciona para `/pt/dashboard?tab=credits` (sidebar e carteira visíveis).
 
 ## Provas visuais (staging)
 
@@ -46,12 +47,14 @@ Capturas em `reports/marco-1a/staging/`:
 | `06-wallet-700-dashboard.png` | Carteira do header a $7.00 após pagamento |
 | `07-reveal-dashboard.png` | Reveal $1,50: endereço + owner + mailing + exclusividade |
 | `08-wallet-after-reveal.png` | Carteira do header a $5.50 após reveal |
-| `09-insufficient-paywall.png` | Conta sem créditos: 402 e pedido de pacote |
+| `09-insufficient-paywall.png` | Conta sem créditos: modal de pacotes sobre o dashboard |
+| `10-paywall-purchase-unlock.png` | Compra na modal → créditos + lead desbloqueado sem sair do dashboard |
+| `11-credits-redirect.png` | `/pt/credits` → `/pt/dashboard?tab=credits` |
 
 ## Resultado do audit de staging
 
 ```
-RESULT ALL PASS (14/14)
+RESULT ALL PASS (17/17)
 ```
 
 - Staging gate redirects
@@ -66,8 +69,11 @@ RESULT ALL PASS (14/14)
 - Credits appear in header wallet ($7.00)
 - Signal unlocks full address + owner + mailing
 - Wallet debited $1.50 after reveal ($5.50)
-- Insufficient balance opens pack paywall
+- Insufficient balance opens elegant paywall modal
+- Paywall shows $6–$180 packs over the dashboard
 - Zero-balance wallet unchanged
+- Payment in paywall unlocks lead without leaving dashboard
+- Header wallet after paywall purchase + reveal ($5.50)
 
 ## Ledger observado
 
@@ -103,10 +109,10 @@ O webhook duplicado não altera o saldo: `stripe_events` único + `credit_purcha
 ## Staging
 
 - Backend Railway: `magic-leads-staging` (`https://magic-leads-staging-staging.up.railway.app`), ambiente `staging`, volume próprio; health `healthy`.
-- Frontend: preview Vercel da branch (`magic-leads-frontend-final-git-feat-credits-p-7904a9-fabio-dev2.vercel.app`) — alias estável que segue o último deploy da branch.
+- Frontend: **`https://magic-leads-staging-fabio-dev2.vercel.app`** (alias estável do preview aprovado). O preview antigo `magic-leads-frontend-final-gv537n0ha-fabio-dev2.vercel.app` está **obsoleto** e já não deve ser usado.
 - Seed: `backend/scripts/seed_staging_credits.py` executado no staging; **50 leads sintéticos** e contas de teste.
 - Proteção: **Vercel Deployment Protection** + **token gate** da app (`STAGING_GATE=1`); credenciais partilhadas fora de banda.
-- **Audit de staging: ALL PASS (14/14)** — dashboard oficial, mapa/sinais mascarados, pacotes, webhook idempotente, carteira $7.00, reveal $1,50, saldo $5.50 e paywall sem saldo.
+- **Audit de staging: ALL PASS (17/17)** — dashboard oficial, mapa/sinais mascarados, pacotes, webhook idempotente, carteira $7.00, reveal $1,50, saldo $5.50, modal de paywall e desbloqueio automático após compra na modal.
 - `CREDITS_MOCK=1` enquanto a chave `sk_test_` não está configurada; o caminho Stripe real está implementado e pronto a ativar.
 - O link e os tokens não ficam no repositório; são partilhados no canal seguro.
 

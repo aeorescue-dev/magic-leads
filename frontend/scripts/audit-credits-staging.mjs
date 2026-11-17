@@ -3,7 +3,7 @@ import fs from "node:fs";
 
 const BASE =
   process.env.AUDIT_BASE_URL ||
-  "https://magic-leads-frontend-final-git-feat-credits-p-7904a9-fabio-dev2.vercel.app";
+  "https://magic-leads-staging-fabio-dev2.vercel.app";
 const TOKEN = process.env.STAGING_ACCESS_TOKEN || "";
 const BYPASS = process.env.VERCEL_AUTOMATION_BYPASS_SECRET || "";
 const OUT = process.env.AUDIT_OUT || "../reports/marco-1a/staging";
