@@ -35,12 +35,37 @@
     "detail": ""
   },
   {
-    "name": "Phone tab locked for Milestone 1B",
+    "name": "Phone tab shows eligible leads (not zero)",
+    "ok": true,
+    "detail": "Com telefone\n8.114"
+  },
+  {
+    "name": "No internal phone jargon in UI",
     "ok": true,
     "detail": ""
   },
   {
-    "name": "Sidebar opens credit packs in dashboard",
+    "name": "Sidebar count matches Todos tab",
+    "ok": true,
+    "detail": "10616 vs 10616"
+  },
+  {
+    "name": "Card titles use UTF-8 (no Â·)",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "Sidebar opens wallet modal with packs",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "Wallet modal includes movements",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "Feed no longer shows packs/ledger",
     "ok": true,
     "detail": ""
   },
@@ -65,9 +90,14 @@
     "detail": "$7.00"
   },
   {
+    "name": "Wallet ledger shows pack purchase",
+    "ok": true,
+    "detail": ""
+  },
+  {
     "name": "Signal unlocks full address + owner + mailing",
     "ok": true,
-    "detail": "SINAL DESBLOQUEADO\n✕\nCarla Builder\n\nEndereço da obra: 142 Seed Street, Boston 02108\n\nProprietário oficial: Carla Builder\n\nMailing address: 242 Mail Avenue, Bost"
+    "detail": "SINAL DESBLOQUEADO\n✕\nIris Property\n\nEndereço da obra: 128 Seed Street, NYC 10001\n\nProprietário oficial: Iris Property\n\nMailing address: 228 Mail Avenue, NYC, NY"
   },
   {
     "name": "Wallet debited $1.50 after reveal",

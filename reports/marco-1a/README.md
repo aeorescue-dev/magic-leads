@@ -17,28 +17,28 @@
 - Reveal de sinal **$1,50** com endereço exato, owner oficial e `mailing_address`; **sem Searchbug**.
 - Exclusividade **7 dias por ofício**; o mesmo endereço pode ser vendido a outros ofícios.
 - Paywall: “Revelar” com saldo insuficiente (402) abre uma **modal elegante sobre o dashboard** (pack $6–$180, carteira atual e valor necessário). A compra dentro da modal credita a carteira e **desbloqueia o lead automaticamente**, sem sair do painel.
-- Telefone **$3** bloqueado na 1A (Marco 1B).
+- Telefone **$3** on-demand (Searchbug) implementado no fluxo de créditos: a aba lista elegíveis e a consulta só acontece após confirmação de saldo. Em staging, sem chave Searchbug, a consulta devolve “indisponível” sem cobrar.
 - `/pt/credits` deixou de ser página autónoma: redireciona para `/{locale}/dashboard?tab=credits`.
 - Gate por token/password no staging (`STAGING_GATE=1` + `STAGING_ACCESS_TOKEN`), cookie httpOnly.
 - Seed sintético: **50 leads** nas 4 praças + contas `qa-buyer+staging@magicleads.app` / `qa-free+staging@magicleads.app` (password `dev-demo-only`).
-- Nenhum dado de produção usado no seed; nenhuma chamada Searchbug/Telnyx.
+- Nenhum dado de produção usado no seed; nenhuma chamada Searchbug/Telnyx durante a auditoria.
 
 ## Segmentação por prontidão (implementada)
 
-- **Flags materializadas no núcleo** (`backend/services/db.py`): `signal_ready` (owner + mailing + sinal) e `phone_ready` (telefone verificado), com backfill único (`schema_meta.readiness_v1`), triggers de escrita e índices parciais (`idx_leads_letter_ready`, `idx_leads_phone_ready`, variantes cidade/ofício).
+- **Flags materializadas no núcleo** (`backend/services/db.py`): `signal_ready` (owner + mailing + sinal), `phone_eligible` (owner + endereço + sinal, para consulta on-demand) e `phone_ready` (telefone já verificado), com backfill único (`schema_meta.readiness_v2`), triggers de escrita e índices parciais (`idx_leads_letter_ready`, `idx_leads_phone_eligible`, `idx_leads_phone_ready`, variantes cidade/ofício).
 - **API**: `readiness=all|letter|phone` em `/api/leads/today`, `/api/leads`, `/api/leads/neighborhoods` e `/api/credits/leads`; `counts` calculado no mesmo filtro base.
 - **UI de dois níveis** no dashboard: linha primária **Todos / Carta-Visita / Com telefone**; linha secundária de origem (Reativos/Preventivos/Obras) + cidade/ofício/busca/filtros.
-- **Telefone visível mas bloqueado** no 1A (`1B`), apenas `phone_ready=1`; Carta e Telefone podem sobrepor-se no mesmo lead.
+- **Telefone on-demand**: a aba “Com telefone” lista `phone_eligible=1` (owner + endereço, mesmo sem telefone guardado) e/ou `phone_ready=1`; a consulta Searchbug só corre depois de confirmar saldo e nunca antes do clique. Carta e Telefone podem sobrepor-se no mesmo lead.
 - **Mapa segue a aba ativa** (`Mapa: Carta / Visita`) e os counts acompanham o filtro.
-- **Copy honesta**: “Pronto para carta” (sem afirmar mailing auditado) e nota de cobertura (“Cobertura em expansão: N prontos para carta · M com telefone”).
-- **Staging atual**: 68 prontos para carta, 0 com telefone; mapa NYC em Carta mostra 8 (janela de 7 dias).
+- **Copy limpa**: “Pronto para carta” e “Telefone sob consulta”; sem “Marco 1B”, “Sem Searchbug” ou “cobertura 0 com telefone”.
+- **Staging atual (NYC, 7 dias)**: 8 prontos para carta e 8.114 elegíveis para telefone; mapa e aba Carta mostram os mesmos 8.
 - **Seed** passa a preencher `signal_type`/`signal_status` e timestamps completos, para os triggers de prontidão e a serialização da API.
 
 ## Fluxo validado (dashboard)
 
 1. Login gratuito → `/pt/dashboard` com o layout oficial e sidebar completo.
 2. Aba **Oportunidades** → mapa + sinais mascarados (`*** Seed Street`, owner mascarado).
-3. Sidebar **Créditos / Planos** → carteira + 6 pacotes + sinais no dashboard.
+3. Sidebar **Créditos / Planos** → **modal de carteira** com pacotes e movimentos (o feed não mostra packs/ledger).
 4. Pack Starter $6 → Checkout mock → webhook duplicado (idempotente) → **$7.00** no header.
 5. **Revelar sinal — $1,50** → modal com endereço/owner/mailing → header passa a **$5.50**.
 6. Conta sem saldo → “Revelar” abre a **modal de créditos** sobre o dashboard; a compra dentro da modal (mock) credita a carteira e desbloqueia o lead no mesmo fluxo.
@@ -53,7 +53,7 @@ Capturas em `reports/marco-1a/staging/`:
 | `01-gate.png` | Staging protegido: redirect para token |
 | `02-dashboard-freemium.png` | Login gratuito dentro do dashboard oficial |
 | `03-map-masked-signals.png` | Aba Oportunidades: mapa + sinais mascarados |
-| `04-credits-packs.png` | “Créditos / Planos” aberto no dashboard, pacotes $6–$180 |
+| `04-wallet-modal.png` | Carteira / Planos em modal: pacotes $6–$180 e movimentos |
 | `05-webhook-idempotent.png` | Webhook 1 aplicado + Webhook 2 duplicado |
 | `06-wallet-700-dashboard.png` | Carteira do header a $7.00 após pagamento |
 | `07-reveal-dashboard.png` | Reveal $1,50: endereço + owner + mailing + exclusividade |
@@ -65,7 +65,7 @@ Capturas em `reports/marco-1a/staging/`:
 ## Resultado do audit de staging
 
 ```
-RESULT ALL PASS (20/20)
+RESULT ALL PASS (26/26)
 ```
 
 - Staging gate redirects
@@ -75,12 +75,18 @@ RESULT ALL PASS (20/20)
 - Freemium keeps dashboard + masked signals
 - Map follows active readiness
 - Readiness tabs visible (Todos / Carta / Telefone)
-- Phone tab locked for Milestone 1B
-- Sidebar opens credit packs in dashboard
+- Phone tab shows eligible leads (not zero)
+- No internal phone jargon in UI
+- Sidebar count matches Todos tab
+- Card titles use UTF-8 (no Â·)
+- Sidebar opens wallet modal with packs
+- Wallet modal includes movements
+- Feed no longer shows packs/ledger
 - Header wallet visible
 - Mock checkout created
 - Webhook idempotency
 - Credits appear in header wallet ($7.00)
+- Wallet ledger shows pack purchase
 - Signal unlocks full address + owner + mailing
 - Wallet debited $1.50 after reveal ($5.50)
 - Insufficient balance opens elegant paywall modal
@@ -107,7 +113,7 @@ O webhook duplicado não altera o saldo: `stripe_events` único + `credit_purcha
 
 ## Testes e qualidade
 
-- Backend: **1708 passed, 1 skipped** (4 novos testes em `tests/test_credits.py`).
+- Backend: **1709 passed, 1 skipped** (5 testes em `tests/test_credits.py`, incluindo telefone on-demand).
 - Ruff: **All checks passed**.
 - Frontend: `tsc --noEmit` limpo; **111 testes / 14 ficheiros**; ESLint **0 erros**.
 - `next build`: concluído com sucesso, incluindo `/[locale]/dashboard`, `/[locale]/credits` (redirect), `/[locale]/staging-login` e `/api/staging-login`.
@@ -126,7 +132,7 @@ O webhook duplicado não altera o saldo: `stripe_events` único + `credit_purcha
 - Frontend: **`https://magic-leads-staging-fabio-dev2.vercel.app`** (alias estável do preview aprovado). O preview antigo `magic-leads-frontend-final-gv537n0ha-fabio-dev2.vercel.app` está **obsoleto** e já não deve ser usado.
 - Seed: `backend/scripts/seed_staging_credits.py` executado no staging; **50 leads sintéticos** e contas de teste.
 - Proteção: **Vercel Deployment Protection** + **token gate** da app (`STAGING_GATE=1`); credenciais partilhadas fora de banda.
-- **Audit de staging: ALL PASS (20/20)** — dashboard oficial, mapa/sinais mascarados, abas de prontidão, telefone bloqueado 1B, pacotes, webhook idempotente, carteira $7.00, reveal $1,50, saldo $5.50, modal de paywall e desbloqueio automático após compra na modal.
+- **Audit de staging: ALL PASS (26/26)** — dashboard oficial, mapa/sinais mascarados, abas de prontidão, telefone elegível (8.114), contadores sincronizados, carteira modal com packs/movimentos, webhook idempotente, carteira $7.00, reveal $1,50, saldo $5.50 e desbloqueio automático após compra na modal.
 - `CREDITS_MOCK=1` enquanto a chave `sk_test_` não está configurada; o caminho Stripe real está implementado e pronto a ativar.
 - O link e os tokens não ficam no repositório; são partilhados no canal seguro.
 
