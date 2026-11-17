@@ -1487,7 +1487,7 @@ export default function LandingPage() {
                             </span>
                           ) : null}
                         </div>
-                        <span className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border transition ${selected ? "border-[#34e0a1] bg-[#34e0a1] text-[#06251c]" : "border-white/15 text-transparent group-hover:border-[#34e0a1]/45"}`}>
+                        <span className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border ${selected ? "border-[#34e0a1] bg-[#34e0a1] text-[#06251c]" : "border-white/15 text-transparent group-hover:border-[#34e0a1]/45"}`}>
                           <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
                         </span>
                       </div>
