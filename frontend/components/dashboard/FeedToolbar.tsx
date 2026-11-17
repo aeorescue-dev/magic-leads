@@ -111,7 +111,7 @@ export function FeedToolbar({
                         : "bg-[var(--sd-surface)] text-[var(--sd-faint)]"
                     }`}
                   >
-                    {tab.count}
+                    {tab.count.toLocaleString()}
                   </span>
                 </button>
               );

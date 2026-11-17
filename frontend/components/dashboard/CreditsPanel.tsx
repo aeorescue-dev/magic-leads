@@ -461,7 +461,7 @@ export default function CreditsPanel({
                     : "bg-[var(--sd-surface)] text-[var(--sd-faint)]"
                 }`}
               >
-                {tab.count}
+                {tab.count.toLocaleString()}
               </span>
             </button>
           );
@@ -484,8 +484,8 @@ export default function CreditsPanel({
             <div className="text-[11px] text-[var(--sd-muted)]">{c.signalsSub}</div>
             <div className="mt-1 text-[10px] text-[var(--sd-faint)]">
               {c.coverage
-                .replace("{letter}", String(counts.letter))
-                .replace("{phone}", String(counts.phone))}
+                .replace("{letter}", counts.letter.toLocaleString())
+                .replace("{phone}", counts.phone.toLocaleString())}
             </div>
           </div>
           <div className="flex flex-wrap gap-2">

@@ -3486,8 +3486,8 @@ function DashboardPageInner() {
                   {readiness === "letter" ? (
                     <p className="mt-1 text-[10px] font-medium text-[var(--sd-faint)]">
                       {t("dashboard.readiness.coverage_note")
-                        .replace("{letter}", String(readinessCounts.letter))
-                        .replace("{phone}", String(readinessCounts.phone))}
+                        .replace("{letter}", readinessCounts.letter.toLocaleString())
+                        .replace("{phone}", readinessCounts.phone.toLocaleString())}
                     </p>
                   ) : null}
                 </div>

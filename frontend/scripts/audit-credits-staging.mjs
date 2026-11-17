@@ -17,8 +17,8 @@ function check(name, ok, detail = "") {
 }
 
 function num(text) {
-  const match = String(text || "").match(/\d[\d.]*/);
-  return Number((match ? match[0] : "0").replace(/\./g, ""));
+  const match = String(text || "").match(/[\d.,]+/);
+  return Number((match ? match[0] : "0").replace(/[.,]/g, ""));
 }
 
 const browser = await chromium.launch();
