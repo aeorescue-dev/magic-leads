@@ -27,6 +27,14 @@ class Settings(BaseSettings):
     CREDITS_MOCK: bool = False
     CREDITS_PHONE_ENABLED: bool = False
 
+    # Novo modelo de assinatura semanal (substitui os micro-créditos).
+    BILLING_MODEL: str = "weekly_quota"
+    BILLING_MOCK: bool = False
+    ADDONS_MOCK: bool = False
+    SEARCHBUG_MOCK: bool = False
+    BILLING_TIMEZONE: str = "America/New_York"
+    DAILY_LETTER_LIMIT: int = 10
+
     # Vitrine pública (Fase 2A): inventário de leads, páginas e atribuição.
     SHOWCASE_BASE_URL: str = ""  # default: PUBLIC_API_URL
     SHOWCASE_MIN_ITEMS: int = 3

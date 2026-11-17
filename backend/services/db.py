@@ -37,6 +37,7 @@ from .lead_rules import (
     institutional_owner_name_where,
     is_institutional_name,
 )
+from .plans import PLAN_CATALOG, stripe_price_id_for
 from .searchbug import PhoneLookupResult, searchbug_service
 from .translations import DEFAULT_LOCALE
 from .translations import render as _render_i18n
@@ -2255,6 +2256,100 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN lifecycle_push_enabled INTEGER DEFAULT 0")
     if user_cols and "chime_enabled" not in user_cols:
         conn.execute("ALTER TABLE users ADD COLUMN chime_enabled INTEGER DEFAULT 1")
+    if user_cols and "daily_phone_limit" not in user_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN daily_phone_limit INTEGER DEFAULT 0")
+    if user_cols and "daily_letter_limit" not in user_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN daily_letter_limit INTEGER DEFAULT 0")
+
+    # Novo modelo de assinatura semanal (Fase 1). Sem `legacy_pro`: o produto
+    # trabalha apenas com os 7 planos do catálogo.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS subscription_plans (
+          code TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          price_cents INTEGER NOT NULL,
+          daily_phone_limit INTEGER NOT NULL,
+          daily_letter_limit INTEGER NOT NULL DEFAULT 10,
+          weekly_phone_total INTEGER NOT NULL,
+          stripe_price_id TEXT NOT NULL DEFAULT '',
+          stripe_product_id TEXT,
+          active INTEGER DEFAULT 1,
+          sort_order INTEGER NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS user_daily_usage (
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          date TEXT NOT NULL,
+          phone_used INTEGER DEFAULT 0,
+          phone_limit INTEGER DEFAULT 0,
+          letter_used INTEGER DEFAULT 0,
+          letter_limit INTEGER DEFAULT 0,
+          reset_at TEXT,
+          PRIMARY KEY (user_id, date)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS phone_addons (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          pack_code TEXT NOT NULL,
+          phone_count INTEGER NOT NULL,
+          used_count INTEGER DEFAULT 0,
+          price_cents INTEGER NOT NULL,
+          stripe_session_id TEXT UNIQUE,
+          purchased_at TEXT NOT NULL,
+          expires_at TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'active',
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_subscription_plans_active "
+        "ON subscription_plans (active, sort_order)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_phone_addons_user_status "
+        "ON phone_addons (user_id, status, expires_at)"
+    )
+    for plan in PLAN_CATALOG:
+        conn.execute(
+            """
+            INSERT INTO subscription_plans (
+              code, name, price_cents, daily_phone_limit, daily_letter_limit,
+              weekly_phone_total, stripe_price_id, active, sort_order
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+            ON CONFLICT(code) DO UPDATE SET
+              name=excluded.name,
+              price_cents=excluded.price_cents,
+              daily_phone_limit=excluded.daily_phone_limit,
+              daily_letter_limit=excluded.daily_letter_limit,
+              weekly_phone_total=excluded.weekly_phone_total,
+              stripe_price_id=CASE
+                WHEN excluded.stripe_price_id <> '' THEN excluded.stripe_price_id
+                ELSE subscription_plans.stripe_price_id
+              END,
+              active=1,
+              sort_order=excluded.sort_order
+            """,
+            (
+                plan["code"],
+                plan["name"],
+                int(plan["price_cents"]),
+                int(plan["daily_phone_limit"]),
+                int(plan["daily_letter_limit"]),
+                int(plan["weekly_phone_total"]),
+                stripe_price_id_for(plan),
+                int(plan["sort_order"]),
+            ),
+        )
+    conn.commit()
 
     event_cols = {r["name"] for r in conn.execute("PRAGMA table_info(lead_events)").fetchall()}
     if event_cols:
