@@ -193,7 +193,7 @@ export default function LandingShell({ children }: { children: React.ReactNode }
                   <button
                     key={id}
                     onClick={() => scrollTo(id)}
-                    className="whitespace-nowrap rounded-full px-3.5 py-2 text-[12px] font-semibold text-[#9aa7ba] transition hover:bg-white/[0.07] hover:text-white"
+                    className="whitespace-nowrap rounded-full px-3 py-2 text-[12px] font-semibold text-[#9aa7ba] transition hover:bg-white/[0.07] hover:text-white"
                   >
                     {label}
                   </button>
