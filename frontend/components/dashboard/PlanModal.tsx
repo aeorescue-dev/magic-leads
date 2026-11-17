@@ -24,6 +24,7 @@ const COPY = {
     phone: "telefones/dia",
     letters: "10 cartas/visitas/dia",
     week: "por semana",
+    perWeek: "/ semana",
     close: "Fechar",
     mock: "Ativar plano de teste",
     mockNote: "Staging: ativação de teste, sem pagamento real.",
@@ -38,6 +39,7 @@ const COPY = {
     phone: "phones/day",
     letters: "10 letters/visits/day",
     week: "per week",
+    perWeek: "/ week",
     close: "Close",
     mock: "Activate test plan",
     mockNote: "Staging: test activation, no real payment.",
@@ -52,6 +54,7 @@ const COPY = {
     phone: "teléfonos/día",
     letters: "10 cartas/visitas/día",
     week: "por semana",
+    perWeek: "/ semana",
     close: "Cerrar",
     mock: "Activar plan de prueba",
     mockNote: "Staging: activación de prueba, sin pago real.",
@@ -60,7 +63,8 @@ const COPY = {
 } as const;
 
 function money(cents: number) {
-  return `$${(Math.max(0, cents) / 100).toFixed(2)}`;
+  const value = Math.max(0, cents) / 100;
+  return Number.isInteger(value) ? `$${value}` : `$${value.toFixed(2)}`;
 }
 
 export default function PlanModal({
@@ -109,6 +113,8 @@ export default function PlanModal({
   if (!open) return null;
 
   const currentPlan = info?.plan || usage?.plan || "";
+  const currentPlanName =
+    plans.find((p) => p.code === currentPlan)?.name || currentPlan;
   const canAccess = Boolean(info?.can_access);
 
   const subscribe = async (plan: SubscriptionPlan) => {
@@ -163,7 +169,7 @@ export default function PlanModal({
             <div className="text-[10px] font-black uppercase tracking-[0.16em] text-[var(--sd-accent)]">
               {c.title}
             </div>
-            <h2 className="mt-1 text-2xl font-black">{canAccess ? `${currentPlan}` : c.title}</h2>
+            <h2 className="mt-1 text-2xl font-black">{canAccess ? `${currentPlanName}` : c.title}</h2>
             <p className="mt-1 text-xs text-[var(--sd-muted)]">{c.subtitle}</p>
           </div>
           <button
@@ -202,7 +208,7 @@ export default function PlanModal({
                 <div className="text-[10px] text-[var(--sd-muted)]">{c.week}</div>
                 <div className="mt-3 space-y-1 text-[11px] text-[var(--sd-muted)]">
                   <div><b className="text-[var(--sd-text)]">{plan.daily_phone_limit}</b> {c.phone}</div>
-                  <div><b className="text-[var(--sd-text)]">{plan.weekly_phone_total}</b> / semana</div>
+                  <div><b className="text-[var(--sd-text)]">{plan.weekly_phone_total}</b> {c.perWeek}</div>
                   <div>{c.letters}</div>
                 </div>
                 <button

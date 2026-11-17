@@ -210,7 +210,7 @@ const ROI_TEXT: Record<Lang, RoiText> = {
     months: "meses",
     years: "anos",
     ticketNote: "Ticket ilustrativo. Ajuste ao seu serviço.",
-    limit: "Inclui até 10 telefones/dia · endereços completos para visita",
+    limit: "Cota diária de 2 a 20 telefones conforme o plano · endereços completos para visita",
   },
   en: {
     breakEven: "To cover the platform",
@@ -218,7 +218,7 @@ const ROI_TEXT: Record<Lang, RoiText> = {
     months: "months",
     years: "years",
     ticketNote: "Illustrative ticket. Adjust it to your job.",
-    limit: "Includes up to 10 phones/day · complete addresses for visits",
+    limit: "Daily quota of 2 to 20 phones depending on your plan · complete addresses for visits",
   },
   es: {
     breakEven: "Para cubrir la plataforma",
@@ -226,7 +226,7 @@ const ROI_TEXT: Record<Lang, RoiText> = {
     months: "meses",
     years: "años",
     ticketNote: "Ticket ilustrativo. Ajusta a tu servicio.",
-    limit: "Incluye hasta 10 teléfonos/día · direcciones completas para visitas",
+    limit: "Cuota diaria de 2 a 20 teléfonos según tu plan · direcciones completas para visitas",
   },
 };
 

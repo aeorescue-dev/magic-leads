@@ -21,6 +21,11 @@ const COPY = {
     letter: "Morada / Carta",
     phone: "Revelar Telefone",
     remaining: "Restam {n} hoje",
+    addonLeft: "Restam {n} add-on",
+    lettersShort: "cartas",
+    phonesShort: "telefones",
+    maskedOwner: "Proprietário mascarado",
+    phoneOnRequest: "Telefone sob consulta",
     subscribe: "Assinar para desbloquear",
     addons: "Comprar mais telefones",
     noPhone: "Sem telefone elegível",
@@ -46,6 +51,11 @@ const COPY = {
     letter: "Address / Letter",
     phone: "Reveal Phone",
     remaining: "{n} left today",
+    addonLeft: "{n} add-on left",
+    lettersShort: "letters",
+    phonesShort: "phones",
+    maskedOwner: "Masked owner",
+    phoneOnRequest: "Phone on request",
     subscribe: "Subscribe to unlock",
     addons: "Buy more phones",
     noPhone: "No phone eligible",
@@ -71,6 +81,11 @@ const COPY = {
     letter: "Dirección / Carta",
     phone: "Revelar Teléfono",
     remaining: "Quedan {n} hoy",
+    addonLeft: "Quedan {n} add-on",
+    lettersShort: "cartas",
+    phonesShort: "teléfonos",
+    maskedOwner: "Propietario enmascarado",
+    phoneOnRequest: "Teléfono bajo consulta",
     subscribe: "Suscribirse para desbloquear",
     addons: "Comprar más teléfonos",
     noPhone: "Sin teléfono elegible",
@@ -139,7 +154,12 @@ export default function SubscriptionFeed({
     () => plans.find((p) => p.code === usage?.plan)?.name || usage?.plan || "",
     [plans, usage?.plan],
   );
-  const phoneRemaining = usage?.phone_remaining ?? 0;
+  const baseRemaining = Math.max(
+    0,
+    (usage?.phone_limit ?? 0) - (usage?.phone_used ?? 0),
+  );
+  const addonRemaining = usage?.addon_remaining ?? 0;
+  const phoneRemaining = baseRemaining + addonRemaining;
 
   const doLetter = async (lead: LeadResponse) => {
     if (!isActive) {
@@ -223,8 +243,11 @@ export default function SubscriptionFeed({
                 {c.plan} {planName} · {usage?.phone_used ?? 0}/{usage?.phone_limit ?? 0} {c.today}
               </div>
               <div>
-                {usage?.letter_used ?? 0}/{usage?.letter_limit ?? 10} cartas ·{" "}
-                {phoneRemaining} telefones
+                {usage?.letter_used ?? 0}/{usage?.letter_limit ?? 10} {c.lettersShort} ·{" "}
+                {baseRemaining} {c.phonesShort}
+                {addonRemaining > 0
+                  ? ` · ${c.addonLeft.replace("{n}", String(addonRemaining))}`
+                  : ""}
               </div>
             </>
           ) : (
@@ -283,7 +306,7 @@ export default function SubscriptionFeed({
                   {revealed?.address || maskAddress(lead.address)}
                 </p>
                 <p className="text-[10px] text-[var(--sd-muted)]">
-                  {revealed?.owner_name || lead.owner_name || "Proprietário mascarado"} ·{" "}
+                  {revealed?.owner_name || lead.owner_name || c.maskedOwner} ·{" "}
                   {lead.neighborhood || lead.zip_code || lead.city}
                 </p>
                 <div className="mt-2 flex flex-wrap gap-1 text-[9px]">
@@ -298,7 +321,7 @@ export default function SubscriptionFeed({
                     </span>
                   ) : lead.phone_eligible ? (
                     <span className="rounded bg-[var(--sd-info-soft)] px-1.5 py-0.5 font-bold text-[var(--sd-info)]">
-                      Telefone sob consulta
+                      {c.phoneOnRequest}
                     </span>
                   ) : (
                     <span className="rounded bg-[var(--sd-surface)] px-1.5 py-0.5 font-bold text-[var(--sd-muted)]">
@@ -328,7 +351,11 @@ export default function SubscriptionFeed({
                       ? c.noPhone
                       : phoneRemaining <= 0
                         ? c.addons
-                        : `${c.phone} · ${c.remaining.replace("{n}", String(phoneRemaining))}`}
+                        : baseRemaining > 0
+                          ? `${c.phone} · ${c.remaining.replace("{n}", String(baseRemaining))}${
+                              addonRemaining > 0 ? ` (+${addonRemaining})` : ""
+                            }`
+                          : `${c.phone} · ${c.addonLeft.replace("{n}", String(addonRemaining))}`}
                 </button>
               </article>
             );

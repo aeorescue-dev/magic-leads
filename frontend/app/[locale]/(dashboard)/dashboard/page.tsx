@@ -2341,7 +2341,9 @@ function DashboardPageInner() {
                 {lang === "en" ? "Plan & Billing" : "Plano & Faturação"}
               </span>
               <span className={`text-[10px] font-bold bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full ${railCollapsed ? "lg:hidden" : ""}`}>
-                {usage ? `${usage.phone_remaining}/${usage.phone_limit}` : "—"}
+                {usage
+                  ? `${usage.phone_used}/${usage.phone_limit}${usage.addon_remaining > 0 ? ` +${usage.addon_remaining}` : ""}`
+                  : "—"}
               </span>
             </button>
             <Link
@@ -2489,7 +2491,9 @@ function DashboardPageInner() {
               <CreditCard className="h-4 w-4 text-emerald-500" />
               <span>
                 {isActiveWeekly
-                  ? `${billingPlans.find((p) => p.code === usage?.plan)?.name || usage?.plan} · ${usage?.phone_remaining ?? 0}/${usage?.phone_limit ?? 0}`
+                  ? `${billingPlans.find((p) => p.code === usage?.plan)?.name || usage?.plan} · ${usage?.phone_used ?? 0}/${usage?.phone_limit ?? 0}${
+                      (usage?.addon_remaining ?? 0) > 0 ? ` +${usage?.addon_remaining}` : ""
+                    }`
                   : lang === "en"
                     ? "Subscribe"
                     : "Assinar"}

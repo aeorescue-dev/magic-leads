@@ -29,7 +29,7 @@ const COPY: Record<Lang, Copy> = {
     kicker: "PARA QUEM É",
     titleA: "Do pintor autônomo à construtora.",
     titleHl: "O painel é o mesmo.",
-    sub: "Não existe plano pequeno nem plano enterprise. Existem oportunidades reais, um preço e o contato do dono, seja para um serviço de uma tarde ou uma obra de seis meses.",
+    sub: "Sete planos semanais, do pintor autônomo à construtora. Todos incluem 10 cartas/visitas por dia e uma cota diária de telefones.",
     cards: [
       {
         tag: "1 pessoa",
@@ -62,7 +62,7 @@ const COPY: Record<Lang, Copy> = {
     kicker: "WHO IT IS FOR",
     titleA: "From the solo painter to the builder.",
     titleHl: "Same panel.",
-    sub: "There is no small plan and no enterprise plan. There are real opportunities, one price and the owner's contact, for a one-afternoon job or a six-month build.",
+    sub: "Seven weekly plans, from the solo painter to the builder. Every plan includes 10 letters/visits per day and a daily phone quota.",
     cards: [
       {
         tag: "1 person",
@@ -95,7 +95,7 @@ const COPY: Record<Lang, Copy> = {
     kicker: "PARA QUIÉN ES",
     titleA: "Del pintor autónomo a la constructora.",
     titleHl: "El panel es el mismo.",
-    sub: "No hay plan pequeño ni plan enterprise. Hay oportunidades reales, un precio y el contacto del dueño, ya sea para un servicio de una tarde o una obra de seis meses.",
+    sub: "Siete planes semanales, del pintor autónomo a la constructora. Todos incluyen 10 cartas/visitas al día y una cuota diaria de teléfonos.",
     cards: [
       {
         tag: "1 persona",

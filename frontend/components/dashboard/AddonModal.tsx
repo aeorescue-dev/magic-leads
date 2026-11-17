@@ -53,7 +53,8 @@ const COPY = {
 } as const;
 
 function money(cents: number) {
-  return `$${(Math.max(0, cents) / 100).toFixed(2)}`;
+  const value = Math.max(0, cents) / 100;
+  return Number.isInteger(value) ? `$${value}` : `$${value.toFixed(2)}`;
 }
 
 export default function AddonModal({
