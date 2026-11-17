@@ -205,13 +205,14 @@ const freePanel = freePage.getByTestId("credits-panel").first();
 await freePanel.waitFor({ timeout: 30000 });
 await freePage.waitForTimeout(800);
 await freePanel.locator('button:has-text("Revelar sinal"):not([disabled])').first().click();
-await freePage.waitForTimeout(1200);
-const insufficient = await freePage
-  .getByText(/Saldo insuficiente/)
-  .first()
-  .innerText()
-  .catch(() => "");
-check("Insufficient balance opens pack paywall", Boolean(insufficient), insufficient);
+const paywall = freePage.getByTestId("credit-paywall");
+await paywall.first().waitFor({ timeout: 15000 });
+const paywallText = await paywall.first().innerText().catch(() => "");
+check("Insufficient balance opens elegant paywall modal", Boolean(paywallText), paywallText.slice(0, 120));
+check(
+  "Paywall shows $6–$180 packs over the dashboard",
+  paywallText.includes("Starter") && paywallText.includes("Agency"),
+);
 check(
   "Zero-balance wallet unchanged",
   (await freePage
@@ -220,6 +221,23 @@ check(
     .innerText()).trim().includes("$0.00"),
 );
 await freePage.screenshot({ path: `${OUT}/09-insufficient-paywall.png`, fullPage: true });
+
+// Compra dentro da modal: os créditos entram e o lead desbloqueia sem sair
+// do dashboard (mock staging).
+await paywall.locator('button:has-text("Starter")').first().click();
+await freePage.getByText(/Mock: Starter/).first().waitFor({ timeout: 10000 });
+await paywall.locator('button:has-text("Simular pagamento")').first().click();
+await freePage.getByText("Sinal desbloqueado").first().waitFor({ timeout: 20000 });
+check("Payment in paywall unlocks lead without leaving dashboard", true);
+check(
+  "Header wallet after paywall purchase + reveal",
+  (await freePage
+    .locator('button[title="Carteira de créditos"]')
+    .first()
+    .innerText()).trim().includes("$5.50"),
+  await freePage.locator('button[title="Carteira de créditos"]').first().innerText(),
+);
+await freePage.screenshot({ path: `${OUT}/10-paywall-purchase-unlock.png`, fullPage: true });
 
 fs.writeFileSync(`${OUT}/results.json`, JSON.stringify(results, null, 2));
 await browser.close();

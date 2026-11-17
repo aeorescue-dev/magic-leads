@@ -45,6 +45,10 @@ const COPY = {
     success: "Créditos adicionados",
     duplicate: "Evento duplicado — saldo não mudou",
     notEnough: "Saldo insuficiente. Escolhe um pacote acima.",
+    paywallTitle: "Créditos insuficientes",
+    paywallHeadline: "Desbloqueia este lead",
+    paywallSub: "Este sinal custa $1,50. Escolhe um pacote — os créditos entram na carteira e o lead desbloqueia aqui mesmo.",
+    paywallNeed: "Necessário",
     blocked: "Exclusivo para outro empreiteiro neste ofício.",
     address: "Endereço da obra",
     owner: "Proprietário oficial",
@@ -79,6 +83,10 @@ const COPY = {
     success: "Credits added",
     duplicate: "Duplicate event — balance unchanged",
     notEnough: "Insufficient balance. Choose a pack above.",
+    paywallTitle: "Not enough credits",
+    paywallHeadline: "Unlock this lead",
+    paywallSub: "This signal costs $1.50. Choose a pack — credits land in your wallet and the lead unlocks right here.",
+    paywallNeed: "Required",
     blocked: "Exclusive to another contractor in this trade.",
     address: "Job address",
     owner: "Registered owner",
@@ -113,6 +121,10 @@ const COPY = {
     success: "Créditos añadidos",
     duplicate: "Evento duplicado — saldo sin cambios",
     notEnough: "Saldo insuficiente. Elige un paquete arriba.",
+    paywallTitle: "Créditos insuficientes",
+    paywallHeadline: "Desbloquea este lead",
+    paywallSub: "Esta señal cuesta $1,50. Elige un paquete — los créditos entran en la cartera y el lead se desbloquea aquí mismo.",
+    paywallNeed: "Necesario",
     blocked: "Exclusivo de otro contratista en este oficio.",
     address: "Dirección de la obra",
     owner: "Propietario registrado",
@@ -155,6 +167,7 @@ export default function CreditsPanel({
   const [trade, setTrade] = useState("");
   const [showAll, setShowAll] = useState(false);
   const [mockPurchase, setMockPurchase] = useState<{ id: number; pack: CreditPack } | null>(null);
+  const [paywallLead, setPaywallLead] = useState<CreditLead | null>(null);
   const [reveal, setReveal] = useState<RevealPayload | null>(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -205,12 +218,17 @@ export default function CreditsPanel({
 
   const payMock = async () => {
     if (!mockPurchase) return;
+    const pendingLead = paywallLead;
     setBusy(true);
     try {
       const res = await mockPay(mockPurchase.id);
       if (res.wallet) onWallet(res.wallet);
       setMessage(res.duplicate ? c.duplicate : c.success);
       await load();
+      setMockPurchase(null);
+      setPaywallLead(null);
+      // O crédito entrou: desbloqueia o lead que estava à espera na modal.
+      if (pendingLead) await doReveal(pendingLead);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Mock pay error");
     } finally {
@@ -237,7 +255,7 @@ export default function CreditsPanel({
     }
   };
 
-  const doReveal = async (lead: CreditLead) => {
+  async function doReveal(lead: CreditLead) {
     setBusy(true);
     setMessage("");
     try {
@@ -250,7 +268,7 @@ export default function CreditsPanel({
       if (err instanceof CreditsApiError) {
         if (err.status === 402) {
           setMessage(c.notEnough);
-          packsRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+          setPaywallLead(lead);
         } else if (err.status === 409) {
           setMessage(c.blocked);
         } else {
@@ -262,7 +280,7 @@ export default function CreditsPanel({
     } finally {
       setBusy(false);
     }
-  };
+  }
 
   const balance = wallet?.balance_cents ?? 0;
 
@@ -386,6 +404,109 @@ export default function CreditsPanel({
           </table>
         </div>
       </div>
+
+      {paywallLead && (
+        <div
+          data-testid="credit-paywall"
+          className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+          onClick={() => setPaywallLead(null)}
+        >
+          <div
+            className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-[var(--sd-border)] bg-[var(--sd-surface)] p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-[10px] font-black uppercase tracking-[0.16em] text-[var(--sd-accent)]">
+                  {c.paywallTitle}
+                </div>
+                <h2 className="mt-1 text-xl font-black">{c.paywallHeadline}</h2>
+                <p className="mt-1 max-w-xl text-xs leading-relaxed text-[var(--sd-muted)]">{c.paywallSub}</p>
+              </div>
+              <button
+                type="button"
+                aria-label={c.close}
+                onClick={() => setPaywallLead(null)}
+                className="rounded-lg px-2 py-1 text-lg text-[var(--sd-faint)] hover:bg-[var(--sd-surface-2)]"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-[var(--sd-border)] bg-[var(--sd-surface-2)] px-3 py-2 text-xs">
+              <span className="text-[var(--sd-muted)]">
+                {c.wallet}: <b className="text-[var(--sd-text)]">{money(balance)}</b>
+              </span>
+              <span className="text-[var(--sd-muted)]">
+                {c.paywallNeed}: <b className="text-[var(--sd-accent)]">{money(paywallLead.signal_price_cents)}</b>
+              </span>
+              <span className="ml-auto text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--sd-faint)]">
+                $1,50 = 150 · $3,00 = 300
+              </span>
+            </div>
+
+            <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {packs.map((pack) => (
+                <button
+                  key={pack.code}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => buy(pack)}
+                  className="rounded-xl border border-[var(--sd-border)] bg-[var(--sd-surface-2)] p-3 text-left transition hover:border-[var(--sd-accent)] disabled:opacity-50"
+                >
+                  <div className="flex items-baseline justify-between gap-1">
+                    <span className="text-xs font-black">{pack.label}</span>
+                    <span className="text-xs font-black text-[var(--sd-accent)]">{money(pack.price_cents)}</span>
+                  </div>
+                  <div className="text-[10px] text-[var(--sd-muted)]">{pack.credits_cents} {c.credits}</div>
+                  {pack.bonus_cents > 0 && (
+                    <div className="text-[9px] font-bold text-amber-500">+{pack.bonus_cents} bónus</div>
+                  )}
+                  <div className="mt-1 text-[9px] font-black uppercase tracking-[0.12em] text-[var(--sd-accent)]">
+                    {c.buy}
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            {mockPurchase && (
+              <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
+                <div className="text-[11px] font-bold text-amber-500">
+                  Mock: {mockPurchase.pack.label} · {money(mockPurchase.pack.price_cents)}
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={payMock}
+                    className="rounded-lg bg-[var(--sd-text)] px-3 py-1.5 text-[10px] font-black text-[var(--sd-surface)] disabled:opacity-50"
+                  >
+                    {c.mockPay}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={webhookTwice}
+                    className="rounded-lg border border-amber-500/40 px-3 py-1.5 text-[10px] font-black text-amber-500 disabled:opacity-50"
+                  >
+                    {c.webhook}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setPaywallLead(null)}
+                className="rounded-lg border border-[var(--sd-border)] px-4 py-2 text-xs font-bold text-[var(--sd-muted)] hover:bg-[var(--sd-surface-2)]"
+              >
+                {c.close}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {reveal && (
         <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={() => setReveal(null)}>
