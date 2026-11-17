@@ -34,6 +34,9 @@ const LANGS: { id: Lang; label: string }[] = [
   { id: "es", label: "Español (ES)" },
 ];
 
+// O header fica com poucos links para respirar; o footer mantém o mapa completo.
+const HEADER_NAV_IDS = new Set(["oficios", "como-funciona", "preco", "faq"]);
+
 function Flag({ id, className = "h-5 w-7" }: { id: Lang; className?: string }) {
   if (id === "pt") {
     return (
@@ -153,6 +156,11 @@ export default function LandingShell({ children }: { children: React.ReactNode }
     return pairs;
   }, [t]);
 
+  const headerNavPairs = useMemo(
+    () => navPairs.filter(([, id]) => HEADER_NAV_IDS.has(id)),
+    [navPairs],
+  );
+
   const scrollTo = (id: string) => {
     setMenuOpen(false);
     const el = document.getElementById(id);
@@ -180,9 +188,9 @@ export default function LandingShell({ children }: { children: React.ReactNode }
   return (
     <Ctx.Provider value={{ openModal, scrollTo }}>
       <div className="landing-light min-h-screen bg-white text-[#0b1220]">
-        <header className={`sticky top-0 z-[900] border-b transition-all duration-300 ${scrolled ? "border-white/10 bg-[#070A12]/90 shadow-[0_18px_50px_-20px_rgba(0,0,0,0.8)] backdrop-blur-xl" : "border-transparent bg-[#070A12]/60 backdrop-blur-md"}`}>
-          <div className="mx-auto max-w-[1400px] px-4 sm:px-6">
-            <div className="flex h-16 items-center justify-between gap-4 2xl:gap-6">
+        <header className={`sticky top-0 z-[900] border-b transition-all duration-300 ${scrolled ? "border-white/10 bg-[#070A12]/92 shadow-[0_18px_50px_-20px_rgba(0,0,0,0.8)] backdrop-blur-xl" : "border-white/[0.06] bg-[#070A12]/65 backdrop-blur-md"}`}>
+          <div className="mx-auto max-w-[1440px] px-4 sm:px-6 lg:px-8">
+            <div className="flex h-[72px] items-center gap-6 xl:gap-10">
               <button onClick={() => scrollTo("topo")} className="flex shrink-0 items-center gap-2.5">
                 <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-[#7c5cff] to-[#10b981] shadow-md shadow-[#10b981]/20">
                   <svg className="h-4 w-4 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="m13 2-9 12h7l-1 8 10-13h-7V2Z" /></svg>
@@ -190,39 +198,40 @@ export default function LandingShell({ children }: { children: React.ReactNode }
                 <span className="hidden font-display text-lg font-black text-white min-[420px]:inline">Magic<span className="text-[#34e0a1]">Leads</span></span>
               </button>
 
-              <nav className="hidden items-center gap-1 rounded-full border border-white/10 bg-white/[0.035] p-1 2xl:flex">
-                {navPairs.map(([label, id]) => (
+              <nav className="hidden flex-1 items-center justify-center gap-8 xl:flex">
+                {headerNavPairs.map(([label, id]) => (
                   <button
                     key={id}
                     onClick={() => scrollTo(id)}
-                    className="whitespace-nowrap rounded-full px-3 py-2 text-[12px] font-semibold text-[#9aa7ba] transition hover:bg-white/[0.07] hover:text-white"
+                    className="group relative whitespace-nowrap py-2 text-[13px] font-semibold text-white/60 transition hover:text-white"
                   >
                     {label}
+                    <span className="absolute inset-x-0 -bottom-0.5 h-px origin-left scale-x-0 bg-[#34e0a1] transition-transform duration-300 group-hover:scale-x-100" />
                   </button>
                 ))}
               </nav>
 
-              <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+              <div className="ml-auto flex shrink-0 items-center gap-3 lg:gap-4 xl:gap-5">
                 <div className="hidden md:block">
                   <LangSwitch lang={lang} setLang={changeLang} />
                 </div>
                 <Link
                   href={localePath("/auth")}
-                  className="hidden h-10 items-center rounded-full px-3 text-[13px] font-bold text-white/65 transition hover:bg-white/5 hover:text-white sm:inline-flex"
+                  className="hidden h-10 items-center rounded-full px-2 text-[13px] font-semibold text-white/60 transition hover:text-white sm:inline-flex"
                 >
                   {t("landing.enter")}
                 </Link>
-                <span className="ml-0.5 hidden h-6 w-px bg-white/10 sm:block" aria-hidden />
+                <span className="hidden h-6 w-px bg-white/10 sm:block" aria-hidden />
                 <button
                   onClick={() => scrollTo("preco")}
                   data-track="header_cta"
-                  className="btn-mint hidden whitespace-nowrap px-4 py-2.5 text-[12px] sm:block"
+                  className="btn-mint hidden h-11 items-center whitespace-nowrap px-5 text-[12px] font-bold sm:inline-flex"
                 >
                   {t("landing.start")}
                 </button>
                 <button
                   onClick={() => setMenuOpen(!menuOpen)}
-                  className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 text-white 2xl:hidden"
+                  className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 text-white xl:hidden"
                   aria-label="Menu"
                 >
                   <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -233,16 +242,16 @@ export default function LandingShell({ children }: { children: React.ReactNode }
             </div>
           </div>
           {menuOpen && (
-            <div className="border-t border-white/10 bg-[#070A12] px-4 py-4 2xl:hidden">
-              <div className="flex flex-col gap-1">
-                {navPairs.map(([label, id]) => (
-                  <button key={id} onClick={() => scrollTo(id)} className="rounded-lg px-3 py-2.5 text-left text-sm font-semibold text-[#9aa7ba] hover:bg-white/5 hover:text-white">{label}</button>
+            <div className="border-t border-white/10 bg-[#070A12] px-4 py-5 sm:px-6 xl:hidden">
+              <div className="mx-auto flex max-w-[1440px] flex-col gap-1">
+                {headerNavPairs.map(([label, id]) => (
+                  <button key={id} onClick={() => scrollTo(id)} className="rounded-lg px-3 py-3 text-left text-sm font-semibold text-[#9aa7ba] hover:bg-white/5 hover:text-white">{label}</button>
                 ))}
-                <div className="mt-3 flex items-center justify-between gap-3 border-t border-white/10 pt-3">
+                <div className="mt-3 flex items-center justify-between gap-3 border-t border-white/10 pt-4">
                   <LangSwitch lang={lang} setLang={changeLang} />
                   <Link href={localePath("/auth")} className="text-sm font-bold text-white/70 hover:text-white">{t("landing.enter")}</Link>
                 </div>
-                <button onClick={() => scrollTo("preco")} data-track="mobile_menu_cta" className="btn-mint mt-2 py-3 text-sm">{t("landing.start")}</button>
+                <button onClick={() => scrollTo("preco")} data-track="mobile_menu_cta" className="btn-mint mt-3 py-3 text-sm">{t("landing.start")}</button>
               </div>
             </div>
           )}
