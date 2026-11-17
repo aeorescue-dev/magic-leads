@@ -72,3 +72,27 @@
 
 **Fase 5:** auditoria visual do Fábio no alias de staging.  
 **Não há merge para produção, nem deploy de produção, sem aprovação escrita.**
+
+## Fase 4.1 — Face-lift e fluxo de conversão
+
+**Commits:** `2888642`, `ab7db49`
+
+- Header redesenhado numa única linha: logo, navegação central, seletor de idioma,
+  link **Entrar** separado e CTA de conversão.
+- CTA do header passou a fazer scroll suave até `#preco`; já não abre login.
+- Os 7 cartões de plano são botões interativos, com hover/glow e seleção
+  destacada a verde. Pro marcado como “Mais popular”.
+- O plano escolhido é fixo no topo da modal de cadastro
+  (`Plano selecionado · nome · preço · telefones/dia`).
+- Registo e login com plano escolhido enviam `plan_code` para
+  `/api/billing/checkout`. Em staging com `BILLING_MOCK=1`, o plano é ativado
+  e o utilizador segue para `/dashboard?billing=success`.
+- Copy nova:
+  - header PT/EN/ES: `Começar por $25.90` / `Start for $25.90` / `Empezar por $25.90`;
+  - CTA de planos: `DESBLOQUEAR TELEFONES E FALAR COM O DONO` /
+    `UNLOCK PHONE NUMBERS & CALL HOMEOWNERS NOW` /
+    `DESBLOQUEAR TELÉFONOS Y LLAMAR AL DUEÑO`.
+- Corrigidos os textos com `?` em PT (`Come?ar agora`).
+- Verificado em staging: seleção do plano Growth, login, ativação mock e
+  redirecionamento para o dashboard com `Growth · 1/6 +4`.
+
