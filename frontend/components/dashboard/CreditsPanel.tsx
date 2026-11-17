@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -19,30 +19,30 @@ import {
 
 const COPY = {
   pt: {
-    freemium: "Modo gratuito: vÃª os sinais. Desbloqueia endereÃ§o, proprietÃ¡rio e mailing com crÃ©ditos.",
+    freemium: "Modo gratuito: vê os sinais. Desbloqueia endereço, proprietário e mailing com créditos.",
     wallet: "Carteira",
-    credits: "crÃ©ditos",
-    packs: "CrÃ©ditos / Planos",
-    packHint: "Compra Ãºnica. Os crÃ©ditos entram na hora apÃ³s o pagamento.",
+    credits: "créditos",
+    packs: "Créditos / Planos",
+    packHint: "Compra única. Os créditos entram na hora após o pagamento.",
     buy: "Comprar",
     mockPay: "Simular pagamento",
     mockHint: "Staging: Checkout mock ativo. Com chave sk_test passa a Stripe real.",
     webhook: "Simular webhook duplicado",
     signals: "Sinais ativos",
-    signalsSub: "Dados mascarados atÃ© ao reveal. Telefone sob consulta.",
-    city: "PraÃ§a",
+    signalsSub: "Dados mascarados até ao reveal. Telefone sob consulta.",
+    city: "Praça",
     all: "Todas",
-    trade: "OfÃ­cio",
-    reveal: "Revelar sinal â€” $1,50",
-    phoneCta: "Buscar telefone â€” $3,00",
-    phoneUnavailable: "Consulta de telefone indisponÃ­vel neste momento.",
-    phoneNotFound: "NÃ£o encontrÃ¡mos um telefone para este lead.",
+    trade: "Ofício",
+    reveal: "Revelar sinal — $1,50",
+    phoneCta: "Buscar telefone — $3,00",
+    phoneUnavailable: "Consulta de telefone indisponível neste momento.",
+    phoneNotFound: "Não encontrámos um telefone para este lead.",
     phoneAttemptLimit: "Limite de consultas atingido. Tenta novamente mais tarde.",
-    phoneNotEligible: "Este lead nÃ£o tem telefone elegÃ­vel.",
+    phoneNotEligible: "Este lead não tem telefone elegível.",
     phoneUnlockedTitle: "Telefone desbloqueado",
     phoneLabel: "Telefone",
     paywallPhoneHeadline: "Consulta de telefone",
-    paywallPhoneSub: "A consulta custa $3,00. Escolhe um pacote â€” os crÃ©ditos entram na carteira e o telefone Ã© consultado na hora.",
+    paywallPhoneSub: "A consulta custa $3,00. Escolhe um pacote — os créditos entram na carteira e o telefone é consultado na hora.",
     paywallPhoneNeed: "Consulta",
     mailing: "Mailing pronto",
     noMailing: "Sem mailing",
@@ -50,33 +50,33 @@ const COPY = {
     mine: "Seu exclusivo",
     noPhone: "Telefone sob consulta",
     ledger: "Movimentos",
-    empty: "Sem sinais sintÃ©ticos. Corre o seed de staging.",
+    empty: "Sem sinais sintéticos. Corre o seed de staging.",
     readyAll: "Todos",
     readyLetter: "Carta / Visita",
     readyPhone: "Com telefone",
     readyLetterBadge: "Pronto para carta",
     readyPhoneBadge: "Telefone verificado",
     readyPhoneEligible: "Telefone sob consulta",
-    readyLetterHint: "EndereÃ§o exato + owner + mailing.",
-    readyPhoneHint: "Consulta na hora â€” $3,00.",
-    coverage: "Cobertura atual: {letter} prontos para carta Â· {phone} com telefone sob consulta.",
-    readyLetterEmpty: "Ainda nÃ£o hÃ¡ sinais prontos para carta nesta praÃ§a.",
+    readyLetterHint: "Endereço exato + owner + mailing.",
+    readyPhoneHint: "Consulta na hora — $3,00.",
+    coverage: "Cobertura atual: {letter} prontos para carta · {phone} com telefone sob consulta.",
+    readyLetterEmpty: "Ainda não há sinais prontos para carta nesta praça.",
     readyLetterEmptyCta: "Ver todos os sinais",
-    readyPhoneEmpty: "Sem telefones elegÃ­veis nesta praÃ§a. Ajusta a cidade ou o ofÃ­cio.",
+    readyPhoneEmpty: "Sem telefones elegíveis nesta praça. Ajusta a cidade ou o ofício.",
     readyPhoneEmptyCta: "Ver todos os sinais",
-    notReady: "Ainda nÃ£o pronto",
-    success: "CrÃ©ditos adicionados",
-    duplicate: "Evento duplicado â€” saldo nÃ£o mudou",
+    notReady: "Ainda não pronto",
+    success: "Créditos adicionados",
+    duplicate: "Evento duplicado — saldo não mudou",
     notEnough: "Saldo insuficiente. Escolhe um pacote acima.",
-    paywallTitle: "CrÃ©ditos insuficientes",
+    paywallTitle: "Créditos insuficientes",
     paywallHeadline: "Desbloqueia este lead",
-    paywallSub: "Este sinal custa $1,50. Escolhe um pacote â€” os crÃ©ditos entram na carteira e o lead desbloqueia aqui mesmo.",
-    paywallNeed: "NecessÃ¡rio",
-    blocked: "Exclusivo para outro empreiteiro neste ofÃ­cio.",
-    address: "EndereÃ§o da obra",
-    owner: "ProprietÃ¡rio oficial",
+    paywallSub: "Este sinal custa $1,50. Escolhe um pacote — os créditos entram na carteira e o lead desbloqueia aqui mesmo.",
+    paywallNeed: "Necessário",
+    blocked: "Exclusivo para outro empreiteiro neste ofício.",
+    address: "Endereço da obra",
+    owner: "Proprietário oficial",
     mailingAddress: "Mailing address",
-    until: "Exclusivo atÃ©",
+    until: "Exclusivo até",
     close: "Fechar",
   },
   en: {
@@ -94,8 +94,8 @@ const COPY = {
     city: "Market",
     all: "All",
     trade: "Trade",
-    reveal: "Reveal signal â€” $1.50",
-    phoneCta: "Find phone â€” $3.00",
+    reveal: "Reveal signal — $1.50",
+    phoneCta: "Find phone — $3.00",
     phoneUnavailable: "Phone lookup is unavailable right now.",
     phoneNotFound: "We couldn't find a phone for this lead.",
     phoneAttemptLimit: "Lookup limit reached. Try again later.",
@@ -103,7 +103,7 @@ const COPY = {
     phoneUnlockedTitle: "Phone unlocked",
     phoneLabel: "Phone",
     paywallPhoneHeadline: "Phone lookup",
-    paywallPhoneSub: "The lookup costs $3.00. Choose a pack â€” credits land in your wallet and the phone is looked up on demand.",
+    paywallPhoneSub: "The lookup costs $3.00. Choose a pack — credits land in your wallet and the phone is looked up on demand.",
     paywallPhoneNeed: "Lookup",
     mailing: "Mailing ready",
     noMailing: "No mailing",
@@ -119,19 +119,19 @@ const COPY = {
     readyPhoneBadge: "Verified phone",
     readyPhoneEligible: "Phone on demand",
     readyLetterHint: "Exact address + owner + mailing.",
-    readyPhoneHint: "On-demand lookup â€” $3.00.",
-    coverage: "Current coverage: {letter} ready to mail Â· {phone} with phone on demand.",
+    readyPhoneHint: "On-demand lookup — $3.00.",
+    coverage: "Current coverage: {letter} ready to mail · {phone} with phone on demand.",
     readyLetterEmpty: "No signals ready to mail in this market yet.",
     readyLetterEmptyCta: "View all signals",
     readyPhoneEmpty: "No phone-eligible leads in this market. Adjust the city or trade.",
     readyPhoneEmptyCta: "View all signals",
     notReady: "Not ready yet",
     success: "Credits added",
-    duplicate: "Duplicate event â€” balance unchanged",
+    duplicate: "Duplicate event — balance unchanged",
     notEnough: "Insufficient balance. Choose a pack above.",
     paywallTitle: "Not enough credits",
     paywallHeadline: "Unlock this lead",
-    paywallSub: "This signal costs $1.50. Choose a pack â€” credits land in your wallet and the lead unlocks right here.",
+    paywallSub: "This signal costs $1.50. Choose a pack — credits land in your wallet and the lead unlocks right here.",
     paywallNeed: "Required",
     blocked: "Exclusive to another contractor in this trade.",
     address: "Job address",
@@ -141,61 +141,61 @@ const COPY = {
     close: "Close",
   },
   es: {
-    freemium: "Modo gratuito: ves las seÃ±ales. Desbloquea direcciÃ³n, propietario y mailing con crÃ©ditos.",
+    freemium: "Modo gratuito: ves las señales. Desbloquea dirección, propietario y mailing con créditos.",
     wallet: "Cartera",
-    credits: "crÃ©ditos",
-    packs: "CrÃ©ditos / Planes",
-    packHint: "Compra Ãºnica. Los crÃ©ditos entran al instante tras el pago.",
+    credits: "créditos",
+    packs: "Créditos / Planes",
+    packHint: "Compra única. Los créditos entran al instante tras el pago.",
     buy: "Comprar",
     mockPay: "Simular pago",
     mockHint: "Staging: Checkout mock activo. Con sk_test pasa a Stripe real.",
     webhook: "Simular webhook duplicado",
-    signals: "SeÃ±ales activas",
-    signalsSub: "Datos enmascarados hasta el reveal. TelÃ©fono bajo consulta.",
+    signals: "Señales activas",
+    signalsSub: "Datos enmascarados hasta el reveal. Teléfono bajo consulta.",
     city: "Plaza",
     all: "Todas",
     trade: "Oficio",
-    reveal: "Revelar seÃ±al â€” $1,50",
-    phoneCta: "Buscar telÃ©fono â€” $3,00",
-    phoneUnavailable: "La consulta de telÃ©fono no estÃ¡ disponible ahora.",
-    phoneNotFound: "No encontramos un telÃ©fono para este lead.",
-    phoneAttemptLimit: "LÃ­mite de consultas alcanzado. IntÃ©ntalo mÃ¡s tarde.",
-    phoneNotEligible: "Este lead no tiene telÃ©fono elegible.",
-    phoneUnlockedTitle: "TelÃ©fono desbloqueado",
-    phoneLabel: "TelÃ©fono",
-    paywallPhoneHeadline: "Consulta de telÃ©fono",
-    paywallPhoneSub: "La consulta cuesta $3,00. Elige un paquete â€” los crÃ©ditos entran en la cartera y el telÃ©fono se consulta al instante.",
+    reveal: "Revelar señal — $1,50",
+    phoneCta: "Buscar teléfono — $3,00",
+    phoneUnavailable: "La consulta de teléfono no está disponible ahora.",
+    phoneNotFound: "No encontramos un teléfono para este lead.",
+    phoneAttemptLimit: "Límite de consultas alcanzado. Inténtalo más tarde.",
+    phoneNotEligible: "Este lead no tiene teléfono elegible.",
+    phoneUnlockedTitle: "Teléfono desbloqueado",
+    phoneLabel: "Teléfono",
+    paywallPhoneHeadline: "Consulta de teléfono",
+    paywallPhoneSub: "La consulta cuesta $3,00. Elige un paquete — los créditos entran en la cartera y el teléfono se consulta al instante.",
     paywallPhoneNeed: "Consulta",
     mailing: "Mailing listo",
     noMailing: "Sin mailing",
     exclusive: "Exclusivo",
     mine: "Tu exclusivo",
-    noPhone: "TelÃ©fono bajo consulta",
+    noPhone: "Teléfono bajo consulta",
     ledger: "Movimientos",
-    empty: "Sin seÃ±ales sintÃ©ticas. Ejecuta el seed de staging.",
+    empty: "Sin señales sintéticas. Ejecuta el seed de staging.",
     readyAll: "Todos",
     readyLetter: "Carta / Visita",
-    readyPhone: "Con telÃ©fono",
+    readyPhone: "Con teléfono",
     readyLetterBadge: "Listo para carta",
-    readyPhoneBadge: "TelÃ©fono verificado",
-    readyPhoneEligible: "TelÃ©fono bajo consulta",
-    readyLetterHint: "DirecciÃ³n exacta + owner + mailing.",
-    readyPhoneHint: "Consulta al instante â€” $3,00.",
-    coverage: "Cobertura actual: {letter} listos para carta Â· {phone} con telÃ©fono bajo consulta.",
-    readyLetterEmpty: "AÃºn no hay seÃ±ales listas para carta en esta plaza.",
-    readyLetterEmptyCta: "Ver todas las seÃ±ales",
-    readyPhoneEmpty: "Sin telÃ©fonos elegibles en esta plaza. Ajusta la ciudad o el oficio.",
-    readyPhoneEmptyCta: "Ver todas las seÃ±ales",
-    notReady: "AÃºn no listo",
-    success: "CrÃ©ditos aÃ±adidos",
-    duplicate: "Evento duplicado â€” saldo sin cambios",
+    readyPhoneBadge: "Teléfono verificado",
+    readyPhoneEligible: "Teléfono bajo consulta",
+    readyLetterHint: "Dirección exacta + owner + mailing.",
+    readyPhoneHint: "Consulta al instante — $3,00.",
+    coverage: "Cobertura actual: {letter} listos para carta · {phone} con teléfono bajo consulta.",
+    readyLetterEmpty: "Aún no hay señales listas para carta en esta plaza.",
+    readyLetterEmptyCta: "Ver todas las señales",
+    readyPhoneEmpty: "Sin teléfonos elegibles en esta plaza. Ajusta la ciudad o el oficio.",
+    readyPhoneEmptyCta: "Ver todas las señales",
+    notReady: "Aún no listo",
+    success: "Créditos añadidos",
+    duplicate: "Evento duplicado — saldo sin cambios",
     notEnough: "Saldo insuficiente. Elige un paquete arriba.",
-    paywallTitle: "CrÃ©ditos insuficientes",
+    paywallTitle: "Créditos insuficientes",
     paywallHeadline: "Desbloquea este lead",
-    paywallSub: "Esta seÃ±al cuesta $1,50. Elige un paquete â€” los crÃ©ditos entran en la cartera y el lead se desbloquea aquÃ­ mismo.",
+    paywallSub: "Esta señal cuesta $1,50. Elige un paquete — los créditos entran en la cartera y el lead se desbloquea aquí mismo.",
     paywallNeed: "Necesario",
     blocked: "Exclusivo de otro contratista en este oficio.",
-    address: "DirecciÃ³n de la obra",
+    address: "Dirección de la obra",
     owner: "Propietario registrado",
     mailingAddress: "Mailing address",
     until: "Exclusivo hasta",
@@ -319,7 +319,7 @@ export default function CreditsPanel({
       await load();
       setMockPurchase(null);
       setPaywallLead(null);
-      // O crÃ©dito entrou: desbloqueia o que estava Ã  espera na modal.
+      // O crédito entrou: desbloqueia o que estava à espera na modal.
       if (pendingLead) {
         if (action === "phone") await doPhoneReveal(pendingLead);
         else await doReveal(pendingLead);
@@ -340,7 +340,7 @@ export default function CreditsPanel({
       const second = await mockWebhook(mockPurchase.id, eventId);
       if (first.wallet) onWallet(first.wallet);
       setMessage(
-        `Webhook 1: ${first.duplicate ? "duplicado" : "aplicado"} Â· Webhook 2: ${second.duplicate ? "duplicado" : "aplicado"}`,
+        `Webhook 1: ${first.duplicate ? "duplicado" : "aplicado"} · Webhook 2: ${second.duplicate ? "duplicado" : "aplicado"}`,
       );
       await load();
     } catch (err) {
@@ -507,7 +507,7 @@ export default function CreditsPanel({
             <div className="col-span-full rounded-xl border border-[var(--sd-border)] bg-[var(--sd-surface-2)] p-6 text-center">
               {readiness === "phone" ? (
                 <>
-                  <div className="text-3xl">ðŸ“ž</div>
+                  <div className="text-3xl">📞</div>
                   <p className="mt-2 text-sm font-semibold text-[var(--sd-text)]">{c.readyPhoneEmpty}</p>
                   <button
                     type="button"
@@ -519,7 +519,7 @@ export default function CreditsPanel({
                 </>
               ) : readiness === "letter" ? (
                 <>
-                  <div className="text-3xl">âœ‰ï¸</div>
+                  <div className="text-3xl">✉️</div>
                   <p className="mt-2 text-sm font-semibold text-[var(--sd-text)]">{c.readyLetterEmpty}</p>
                   <button
                     type="button"
@@ -538,7 +538,7 @@ export default function CreditsPanel({
             <article key={lead.id} className="rounded-xl border border-[var(--sd-border)] bg-[var(--sd-surface-2)] p-3">
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <div className="text-[9px] font-black uppercase tracking-[0.12em] text-[var(--sd-accent)]">{lead.city} Â· {lead.trade_code}</div>
+                  <div className="text-[9px] font-black uppercase tracking-[0.12em] text-[var(--sd-accent)]">{lead.city} · {lead.trade_code}</div>
                   <h3 className="mt-1 text-xs font-black">{lead.title}</h3>
                 </div>
                 <span className={`rounded-full px-2 py-0.5 text-[8px] font-black ${lead.exclusive ? "bg-amber-500/20 text-amber-500" : "bg-[var(--sd-accent-soft)] text-[var(--sd-accent)]"}`}>
@@ -546,7 +546,7 @@ export default function CreditsPanel({
                 </span>
               </div>
               <p className="mt-2 text-[11px] font-semibold text-[var(--sd-text)]">{lead.address_masked}</p>
-              <p className="text-[10px] text-[var(--sd-muted)]">{lead.owner_masked} Â· {lead.zone}</p>
+              <p className="text-[10px] text-[var(--sd-muted)]">{lead.owner_masked} · {lead.zone}</p>
               <div className="mt-2 flex flex-wrap gap-1 text-[9px]">
                 {lead.signal_ready ? (
                   <span className="rounded bg-[var(--sd-accent-soft)] px-1.5 py-0.5 font-bold text-[var(--sd-accent)]">
@@ -622,7 +622,7 @@ export default function CreditsPanel({
                 onClick={() => setPaywallLead(null)}
                 className="rounded-lg px-2 py-1 text-lg text-[var(--sd-faint)] hover:bg-[var(--sd-surface-2)]"
               >
-                âœ•
+                ✕
               </button>
             </div>
 
@@ -634,7 +634,7 @@ export default function CreditsPanel({
                 {c.paywallNeed}: <b className="text-[var(--sd-accent)]">{money(paywallAction === "phone" ? paywallLead.phone_price_cents : paywallLead.signal_price_cents)}</b>
               </span>
               <span className="ml-auto text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--sd-faint)]">
-                $1,50 = 150 Â· $3,00 = 300
+                $1,50 = 150 · $3,00 = 300
               </span>
             </div>
 
@@ -653,7 +653,7 @@ export default function CreditsPanel({
                   </div>
                   <div className="text-[10px] text-[var(--sd-muted)]">{pack.credits_cents} {c.credits}</div>
                   {pack.bonus_cents > 0 && (
-                    <div className="text-[9px] font-bold text-amber-500">+{pack.bonus_cents} bÃ³nus</div>
+                    <div className="text-[9px] font-bold text-amber-500">+{pack.bonus_cents} bónus</div>
                   )}
                   <div className="mt-1 text-[9px] font-black uppercase tracking-[0.12em] text-[var(--sd-accent)]">
                     {c.buy}
@@ -665,7 +665,7 @@ export default function CreditsPanel({
             {mockPurchase && (
               <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
                 <div className="text-[11px] font-bold text-amber-500">
-                  Mock: {mockPurchase.pack.label} Â· {money(mockPurchase.pack.price_cents)}
+                  Mock: {mockPurchase.pack.label} · {money(mockPurchase.pack.price_cents)}
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
                   <button
@@ -706,7 +706,7 @@ export default function CreditsPanel({
           <div className="w-full max-w-lg rounded-2xl border border-[var(--sd-border)] bg-[var(--sd-surface)] p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <div className="text-[10px] font-black uppercase tracking-[0.16em] text-[var(--sd-accent)]">Sinal desbloqueado</div>
-              <button onClick={() => setReveal(null)} className="text-[var(--sd-faint)]">âœ•</button>
+              <button onClick={() => setReveal(null)} className="text-[var(--sd-faint)]">✕</button>
             </div>
             <h2 className="mt-2 text-lg font-black">{reveal.owner_name}</h2>
             <div className="mt-3 space-y-1.5 text-sm">
@@ -726,7 +726,7 @@ export default function CreditsPanel({
           <div className="w-full max-w-lg rounded-2xl border border-[var(--sd-border)] bg-[var(--sd-surface)] p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <div className="text-[10px] font-black uppercase tracking-[0.16em] text-[var(--sd-info)]">{c.phoneUnlockedTitle}</div>
-              <button onClick={() => setPhoneReveal(null)} className="text-[var(--sd-faint)]">âœ•</button>
+              <button onClick={() => setPhoneReveal(null)} className="text-[var(--sd-faint)]">✕</button>
             </div>
             <h2 className="mt-2 text-lg font-black">{phoneReveal.owner_name}</h2>
             <div className="mt-3 space-y-1.5 text-sm">

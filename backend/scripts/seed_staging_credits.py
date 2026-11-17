@@ -1,7 +1,7 @@
-﻿"""Seed sintÃ©tico do staging para o Marco 1A.
+"""Seed sintético do staging para o Marco 1A.
 
-Nunca correr em produÃ§Ã£o. Requer RAILWAY_ENVIRONMENT_NAME=staging ou
-CREDITS_SEED=1. Cria 2 contas de teste e 50 leads sintÃ©ticos com sinal pronto.
+Nunca correr em produção. Requer RAILWAY_ENVIRONMENT_NAME=staging ou
+CREDITS_SEED=1. Cria 2 contas de teste e 50 leads sintéticos com sinal pronto.
 """
 from __future__ import annotations
 
