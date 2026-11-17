@@ -115,9 +115,11 @@ from .services import (
     notifier,
     outbound_templates,
     owner_backfill,
+    plans,
     scrape_guard,
     security,
     showcase,
+    subscription_billing,
     system_health,
     telnyx_voice,
     voice_audio_cache,
@@ -8289,6 +8291,138 @@ def _stripe_configured() -> bool:
         and settings.STRIPE_PRICE_ID_PRO
         and settings.STRIPE_PRICE_ID_PRO != "price_..."
     )
+
+
+# ------------------------------------------------------------------
+# Fase 2: assinatura semanal (sem UI nesta fase)
+# ------------------------------------------------------------------
+@app.get("/api/billing/plans")
+async def billing_plans():
+    """Catálogo público dos 7 planos (sem expor Price IDs)."""
+    return {
+        "billing_model": settings.BILLING_MODEL,
+        "billing_mock": bool(settings.BILLING_MOCK),
+        "plans": [
+            {
+                "code": plan["code"],
+                "name": plan["name"],
+                "price_cents": plan["price_cents"],
+                "daily_phone_limit": plan["daily_phone_limit"],
+                "daily_letter_limit": plan["daily_letter_limit"],
+                "weekly_phone_total": plan["weekly_phone_total"],
+            }
+            for plan in plans.list_plans()
+        ],
+    }
+
+
+@app.get("/api/billing/subscription")
+async def billing_subscription(user: dict = Depends(_get_current_user)):
+    status = await db_service.get_user_subscription_status(user["id"])
+    full = await db_service.get_user_by_id(user["id"]) or {}
+    return {
+        "plan": full.get("plan"),
+        "status": status.get("status"),
+        "can_access": status.get("can_access"),
+        "plan_until": full.get("plan_until"),
+        "daily_phone_limit": full.get("daily_phone_limit") or 0,
+        "daily_letter_limit": full.get("daily_letter_limit") or 0,
+        "stripe_subscription_id": full.get("stripe_subscription_id"),
+        "stripe_customer_id": full.get("stripe_customer_id"),
+    }
+
+
+@app.post("/api/billing/checkout")
+async def billing_checkout(request: Request, user: dict = Depends(_get_current_user)):
+    body = await request.json()
+    plan_code = str((body or {}).get("plan_code") or "").strip()
+    locale = str((body or {}).get("locale") or "en").lower()
+    if not subscription_billing.plan_for_code(plan_code):
+        raise HTTPException(status_code=400, detail="unknown_plan")
+    try:
+        result = await anyio.to_thread.run_sync(
+            lambda: subscription_billing.create_weekly_checkout(
+                user["id"], plan_code, locale=locale, email=user.get("email")
+            )
+        )
+        return result
+    except Exception as exc:
+        logger.warning("[BILLING] checkout falhou: %s", exc)
+        raise HTTPException(status_code=502, detail="billing_checkout_failed") from exc
+
+
+@app.post("/api/billing/portal")
+async def billing_portal(request: Request, user: dict = Depends(_get_current_user)):
+    """Stripe Customer Portal para upgrade/downgrade/cancelamento."""
+    full = await db_service.get_user_by_id(user["id"]) or {}
+    customer_id = str(full.get("stripe_customer_id") or "").strip()
+    if not customer_id or not settings.STRIPE_API_KEY:
+        raise HTTPException(status_code=409, detail="billing_portal_unavailable")
+    body: dict = {}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    locale = str((body or {}).get("locale") or "en").lower()
+    if locale not in ("pt", "en", "es"):
+        locale = "en"
+    frontend = (settings.FRONTEND_URL or "").rstrip("/")
+    try:
+        stripe.api_key = settings.STRIPE_API_KEY
+        session = stripe.billing_portal.Session.create(
+            customer=customer_id,
+            return_url=f"{frontend}/{locale}/dashboard",
+        )
+        return {"url": session.url}
+    except Exception as exc:
+        logger.warning("[BILLING] portal falhou: %s", exc)
+        raise HTTPException(status_code=502, detail="billing_portal_failed") from exc
+
+
+@app.post("/api/billing/mock-activate")
+async def billing_mock_activate(request: Request, user: dict = Depends(_get_current_user)):
+    """Ativação mock para QA visual; nunca disponível em produção."""
+    if not settings.BILLING_MOCK:
+        raise HTTPException(status_code=404, detail="not_found")
+    body = await request.json()
+    plan_code = str((body or {}).get("plan_code") or "").strip()
+    try:
+        result = subscription_billing.activate_weekly_subscription(
+            user["id"], plan_code, status="active"
+        )
+        return {"mock": True, **result}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/billing/webhook")
+async def billing_webhook(request: Request, stripe_signature: str | None = Header(None)):
+    """Webhook das subscrições semanais (idempotente)."""
+    if not settings.STRIPE_WEBHOOK_SECRET:
+        logger.error("STRIPE_WEBHOOK_SECRET nao configurado - billing webhook recusado")
+        return JSONResponse(status_code=503, content={"status": "not_configured"})
+    if not stripe_signature:
+        raise HTTPException(status_code=400, detail="Header Stripe-Signature ausente")
+    payload = await request.body()
+    try:
+        stripe.api_key = settings.STRIPE_API_KEY
+        event = stripe.Webhook.construct_event(
+            payload, stripe_signature, settings.STRIPE_WEBHOOK_SECRET
+        )
+    except Exception as exc:
+        logger.warning("[BILLING] assinatura webhook invalida: %s", exc)
+        raise HTTPException(status_code=400, detail="Assinatura inválida") from exc
+    try:
+        result = await anyio.to_thread.run_sync(
+            subscription_billing.handle_billing_event, event
+        )
+        return result
+    except ValueError as exc:
+        logger.warning("[BILLING] evento ignorado: %s", exc)
+        return {"status": "received", "handled": False, "reason": str(exc)}
+    except Exception as exc:
+        logger.exception("[BILLING] falha ao processar webhook: %s", exc)
+        raise HTTPException(status_code=500, detail="billing_webhook_failed") from exc
 
 
 async def _create_stripe_checkout_session(
