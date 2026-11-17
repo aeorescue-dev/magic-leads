@@ -8,6 +8,9 @@ const API_PROXY_TARGET = (
 ).replace(/\/$/, "");
 const nextConfig = {
   reactStrictMode: true,
+  experimental: {
+    agentUpgrade: "security",
+  },
   // Evita que o tracing suba até C:\Users e apanhe package-lock alheios.
   outputFileTracingRoot: path.join(__dirname),
   env: {
