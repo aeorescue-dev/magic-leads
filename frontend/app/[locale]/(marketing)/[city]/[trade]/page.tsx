@@ -226,7 +226,7 @@ export default async function ShowcasePage({
                 },
                 {
                   title: "Public weekly price",
-                  text: "$120 for 7 days. No quote, no annual contract, no per-lead surprise.",
+                  text: "Seven weekly plans from $25.90. No quote, no annual contract, no per-lead surprise.",
                 },
                 {
                   title: "Local public records",

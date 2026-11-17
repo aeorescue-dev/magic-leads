@@ -79,8 +79,11 @@ def test_no_credit_selling_copy_anywhere_in_i18n():
 
 def test_dashboard_sidebar_renders_daily_usage_not_credit_balance():
     source = DASHBOARD.read_text(encoding="utf-8")
-    assert "dashboard.sidebar.daily_quota" in source
-    assert "dailyStats?.used" in source
+    # Fase 4: a barra lateral mostra o plano e as duas cotas diárias
+    # (telefones e cartas/visitas), nunca um saldo em dinheiro/cêntimos.
+    assert 'data-testid="plan-quota"' in source
+    assert "usage.phone_used" in source
+    assert "usage.letter_used" in source
     assert "credit_balance" not in source
     assert "credits_available" not in source
     # O rótulo não pode ter fallback hardcoded em português.

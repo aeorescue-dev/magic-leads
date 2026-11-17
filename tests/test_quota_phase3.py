@@ -290,3 +290,72 @@ def test_subscription_usage_letter_and_phone_endpoints(monkeypatch) -> None:
         _cleanup(email, [ext], [])
 
 
+
+def test_staging_mock_checkout_and_addon_endpoints(monkeypatch) -> None:
+    """Staging: BILLING_MOCK/ADDONS_MOCK ativam plano e injetam add-on 24h."""
+    suffix = uuid.uuid4().hex[:8]
+    email = f"quota-mock-{suffix}@magicleads.app"
+    monkeypatch.setattr(settings, "BILLING_MOCK", True, raising=False)
+    monkeypatch.setattr(settings, "ADDONS_MOCK", True, raising=False)
+    client = TestClient(app)
+    register = client.post(
+        "/api/auth/register",
+        json={"email": email, "password": "test-pass-123", "company_name": "Mock QA"},
+    )
+    assert register.status_code == 200, register.text
+    headers = {"Authorization": f"Bearer {register.json()['token']}"}
+    try:
+        checkout = client.post(
+            "/api/billing/mock-checkout",
+            headers=headers,
+            json={"plan_code": "weekly_2"},
+        )
+        assert checkout.status_code == 200, checkout.text
+        assert checkout.json()["plan"] == "weekly_2"
+
+        usage = client.get("/api/subscription/usage", headers=headers).json()
+        assert usage["phone_limit"] == 2
+        assert usage["letter_limit"] == 10
+
+        addon = client.post(
+            "/api/billing/addons/mock-pay",
+            headers=headers,
+            json={"pack_code": "addon_4"},
+        )
+        assert addon.status_code == 200, addon.text
+        body = addon.json()
+        assert body["addon"]["phone_count"] == 4
+        assert body["usage"]["addon_remaining"] == 4
+        assert body["usage"]["phone_remaining"] == 6
+    finally:
+        _cleanup(email, [], [])
+
+
+def test_staging_mock_endpoints_are_404_when_disabled(monkeypatch) -> None:
+    """Sem as flags de staging os endpoints não existem (404, não 200)."""
+    suffix = uuid.uuid4().hex[:8]
+    email = f"quota-mock-off-{suffix}@magicleads.app"
+    monkeypatch.setattr(settings, "BILLING_MOCK", False, raising=False)
+    monkeypatch.setattr(settings, "ADDONS_MOCK", False, raising=False)
+    client = TestClient(app)
+    register = client.post(
+        "/api/auth/register",
+        json={"email": email, "password": "test-pass-123", "company_name": "Mock Off"},
+    )
+    assert register.status_code == 200, register.text
+    headers = {"Authorization": f"Bearer {register.json()['token']}"}
+    try:
+        checkout = client.post(
+            "/api/billing/mock-checkout",
+            headers=headers,
+            json={"plan_code": "weekly_2"},
+        )
+        assert checkout.status_code == 404, checkout.text
+        addon = client.post(
+            "/api/billing/addons/mock-pay",
+            headers=headers,
+            json={"pack_code": "addon_4"},
+        )
+        assert addon.status_code == 404, addon.text
+    finally:
+        _cleanup(email, [], [])

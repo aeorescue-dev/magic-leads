@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   title: "Magic Leads · Obras reais com dono identificado",
-  description: "Oportunidades de reforma e correção com dono identificado, prioridade exclusiva e contato pronto para agir. Plano de $120 por semana, sem fidelidade. Sistema disponível 24/7.",
+  description: "Oportunidades de reforma e correção com dono identificado, prioridade exclusiva e contato pronto para agir. Sete planos semanais desde $25,90, sem fidelidade. Sistema disponível 24/7.",
   manifest: "/manifest.json",
 };
 

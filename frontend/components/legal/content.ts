@@ -150,7 +150,7 @@ const PT_TERMS: LegalDoc = {
     {
       title: "Planos e pagamentos",
       body: [
-        "O plano semanal custa $120 e libera 7 dias de acesso. No oitavo dia, o plano pausa automaticamente se não for renovado.",
+        "Os planos semanais vão de $25,90 a $231 e liberam 7 dias de acesso. No oitavo dia, o plano pausa automaticamente se não for renovado.",
         "Não há fidelidade nem comissão sobre suas obras.",
         "Os valores e condições aplicáveis são os exibidos no checkout.",
         "Pagamentos são processados por provedores terceirizados.",
@@ -360,7 +360,7 @@ const EN_TERMS: LegalDoc = {
     {
       title: "Plans and payments",
       body: [
-        "The weekly plan costs $120 and unlocks 7 days of access. On day 8, the plan pauses automatically if it is not renewed.",
+        "Weekly plans range from $25.90 to $231 and unlock 7 days of access. On day 8, the plan pauses automatically if it is not renewed.",
         "There is no lock-in and no commission on your jobs.",
         "The applicable prices and conditions are shown at checkout.",
         "Payments are processed by third-party providers.",
@@ -570,7 +570,7 @@ const ES_TERMS: LegalDoc = {
     {
       title: "Planes y pagos",
       body: [
-        "El plan semanal cuesta $120 y libera 7 días de acceso. El día 8, el plan se pausa automáticamente si no se renueva.",
+        "Los planes semanales van de $25.90 a $231 y liberan 7 días de acceso. El día 8, el plan se pausa automáticamente si no se renueva.",
         "No hay permanencia ni comisión sobre tus obras.",
         "Los precios y condiciones aplicables se muestran en el checkout.",
         "Los pagos son procesados por proveedores externos.",

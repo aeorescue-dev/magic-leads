@@ -40,8 +40,8 @@ export const LP_INTENTS: LpIntentFlow[] = [
     confidence: "0.96",
     replies: [
       {
-        pt: "Porque aqui não paga por cliques. Paga $120 por semana por oportunidades concretas, com proprietário identificado e telefone verificado — reservadas 60 minutos só para si. Se um único trabalho fechar, o passe pagou-se.",
-        en: "Because here you don't pay for clicks. You pay $120 a week for concrete opportunities, with an identified owner and a verified phone — reserved for 60 minutes only for you. If a single job closes, the pass pays for itself.",
+        pt: "Porque aqui não paga por cliques. Planos semanais desde $25,90 para oportunidades concretas, com proprietário identificado e telefone verificado — reservadas 60 minutos só para si. Se um único trabalho fechar, o passe pagou-se.",
+        en: "Because here you don't pay for clicks. Weekly plans from $25.90 for concrete opportunities, with an identified owner and a verified phone — reserved for 60 minutes only for you. If a single job closes, the pass pays for itself.",
       },
       {
         pt: "A $70–$200 por dia, os anúncios compram impressões e contactos partilhados. Aqui vê a oportunidade antes de gastar tempo: morada, proprietário e telefone. Sem leilão e sem contrato.",
@@ -96,10 +96,10 @@ export const LP_INTENTS: LpIntentFlow[] = [
   },
   {
     key: "price",
-    chip: "$120/week. No contract.",
+    chip: "from $25.90/week. No contract.",
     sub: "Cancel anytime. No setup fee.",
-    question: "What exactly do I get for $120 per week? Is there a contract?",
-    questionPt: "O que recebo exatamente por $120 por semana? Existe contrato?",
+    question: "What exactly do I get from $25.90 per week? Is there a contract?",
+    questionPt: "O que recebo exatamente a partir de $25,90 por semana? Existe contrato?",
     tags: [
       "intent: pricing",
       "topic: contract",
@@ -109,8 +109,8 @@ export const LP_INTENTS: LpIntentFlow[] = [
     confidence: "0.97",
     replies: [
       {
-        pt: "Por $120 por semana tem acesso ao painel com oportunidades da sua cidade e do seu ofício, com proprietário, morada e telefone verificados. Sem contrato: o passe é semanal e cancela quando quiser.",
-        en: "For $120 a week you get access to the dashboard with opportunities in your city and trade, including the verified owner, address, and phone. No contract: the pass is weekly and you can cancel anytime.",
+        pt: "A partir de $25,90 por semana tem acesso ao painel com oportunidades da sua cidade e do seu ofício, com proprietário, morada e telefone verificados. Sem contrato: o passe é semanal e cancela quando quiser.",
+        en: "From $25.90 a week you get access to the dashboard with opportunities in your city and trade, including the verified owner, address, and phone. No contract: the pass is weekly and you can cancel anytime.",
       },
       {
         pt: "Inclui a reserva exclusiva de 60 minutos por oportunidade e acesso contínuo ao painel. Sem taxa de adesão e sem cobrança por lead.",

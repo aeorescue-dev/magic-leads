@@ -8315,6 +8315,46 @@ async def billing_plans():
             }
             for plan in plans.list_plans()
         ],
+        "addons": plans.list_addons(),
+    }
+
+
+@app.post("/api/billing/mock-checkout")
+async def billing_mock_checkout(request: Request, user: dict = Depends(_get_current_user)):
+    """Staging-only: ativa um plano sem Stripe quando BILLING_MOCK=1."""
+    if not settings.BILLING_MOCK:
+        raise HTTPException(status_code=404, detail="not_found")
+    body = await request.json()
+    plan_code = str((body or {}).get("plan_code") or "").strip()
+    try:
+        result = await anyio.to_thread.run_sync(
+            lambda: subscription_billing.activate_weekly_subscription(
+                user["id"], plan_code, status="active"
+            )
+        )
+        return {"mock": True, **result}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/billing/addons/mock-pay")
+async def billing_addon_mock_pay(request: Request, user: dict = Depends(_get_current_user)):
+    """Staging-only: injeta add-on quando ADDONS_MOCK=1."""
+    if not settings.ADDONS_MOCK:
+        raise HTTPException(status_code=404, detail="not_found")
+    await _require_active_access(user)
+    body = await request.json()
+    pack_code = str((body or {}).get("pack_code") or "").strip()
+    if not plans.get_addon(pack_code):
+        raise HTTPException(status_code=400, detail="unknown_addon")
+    addon = await anyio.to_thread.run_sync(
+        lambda: daily_quota.add_addon(user["id"], pack_code)
+    )
+    return {
+        "mock": True,
+        "addon": plans.get_addon(pack_code),
+        "usage": daily_quota.usage_payload(user["id"]),
+        "row": addon,
     }
 
 

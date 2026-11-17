@@ -23,7 +23,7 @@ const EN = {
   hint1: "Pick the one that hurts most. About 30 seconds.",
   ownPlaceholder: "Or type your question…",
   sendQuestion: "Send question",
-  micro: "No contract · Cancel anytime · $120/week",
+  micro: "No contract · Cancel anytime · from $25.90/week",
   q2: "Where do you work?",
   hint2: "This is how we check today's availability.",
   tradeTitle: "What's your trade?",
@@ -62,7 +62,7 @@ const EN = {
   attach: "Attach file",
   uploading: "Uploading…",
   attachError: "Could not upload. Max 10 MB.",
-  noContract: "No contract · Cancel anytime · $120/week",
+  noContract: "No contract · Cancel anytime · from $25.90/week",
   systemAck:
     "Message received. A specialist will reply within 4 business hours.",
   networkError: "Could not send your message. Please try again.",
@@ -90,7 +90,7 @@ const PT: Copy = {
   hint1: "Escolha o que mais dói. Cerca de 30 segundos.",
   ownPlaceholder: "Ou escreva a sua pergunta…",
   sendQuestion: "Enviar pergunta",
-  micro: "Sem contrato · Cancele quando quiser · $120/semana",
+  micro: "Sem contrato · Cancele quando quiser · desde $25,90/semana",
   q2: "Onde trabalha?",
   hint2: "É assim que verificamos a disponibilidade de hoje.",
   tradeTitle: "Qual é o seu ofício?",
@@ -129,7 +129,7 @@ const PT: Copy = {
   attach: "Anexar ficheiro",
   uploading: "A enviar…",
   attachError: "Não foi possível enviar. Máx. 10 MB.",
-  noContract: "Sem contrato · Cancele quando quiser · $120/semana",
+  noContract: "Sem contrato · Cancele quando quiser · desde $25,90/semana",
   systemAck:
     "Mensagem recebida. Um especialista responde em até 4 horas úteis.",
   networkError: "Não foi possível enviar a mensagem. Tente novamente.",
@@ -155,7 +155,7 @@ const ES: Copy = {
   hint1: "Elige lo que más te duela. Unos 30 segundos.",
   ownPlaceholder: "O escribe tu pregunta…",
   sendQuestion: "Enviar pregunta",
-  micro: "Sin contrato · Cancela cuando quieras · $120/semana",
+  micro: "Sin contrato · Cancela cuando quieras · desde $25,90/semana",
   q2: "¿Dónde trabajas?",
   hint2: "Así comprobamos la disponibilidad de hoy.",
   tradeTitle: "¿Cuál es tu oficio?",
@@ -194,7 +194,7 @@ const ES: Copy = {
   attach: "Adjuntar archivo",
   uploading: "Enviando…",
   attachError: "No se pudo enviar. Máx. 10 MB.",
-  noContract: "Sin contrato · Cancela cuando quieras · $120/semana",
+  noContract: "Sin contrato · Cancela cuando quieras · desde $25,90/semana",
   systemAck:
     "Mensaje recibido. Un especialista responderá en un plazo de 4 horas hábiles.",
   networkError: "No se pudo enviar el mensaje. Inténtalo de nuevo.",
@@ -286,9 +286,9 @@ export const INTENT_L10N: Record<
       question: "Como consigo números de telefone exclusivos do proprietário?",
     },
     price: {
-      chip: "$120/semana. Sem contrato.",
+      chip: "desde $25,90/semana. Sem contrato.",
       sub: "Cancele quando quiser. Sem taxa de adesão.",
-      question: "O que recebo exatamente por $120 por semana? Existe contrato?",
+      question: "O que recebo exatamente a partir de $25,90 por semana? Existe contrato?",
     },
     area: {
       chip: "Ver leads na minha cidade e ofício",
@@ -320,9 +320,9 @@ export const INTENT_L10N: Record<
       question: "¿Cómo consigo números de teléfono exclusivos del propietario?",
     },
     price: {
-      chip: "$120/semana. Sin contrato.",
+      chip: "desde $25,90/semana. Sin contrato.",
       sub: "Cancela cuando quieras. Sin cuota de alta.",
-      question: "¿Qué recibo exactamente por $120 a la semana? ¿Hay contrato?",
+      question: "¿Qué recibo exactamente desde $25.90 a la semana? ¿Hay contrato?",
     },
     area: {
       chip: "Ver leads en mi ciudad y oficio",

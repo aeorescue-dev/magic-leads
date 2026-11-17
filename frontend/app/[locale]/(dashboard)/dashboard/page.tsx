@@ -1,7 +1,7 @@
 "use client";
 
-// Assinatura: contas sem acesso vigente abrem o modal de checkout (CheckoutModal),
-// que coleta o nome da empresa e redireciona para a sessão Stripe do Plano Pro.
+// Painel: modelo de assinatura semanal com quotas diárias de telefones e
+// cartas/visitas. Planos e add-ons abrem em PlanModal/AddonModal.
 export const dynamic = 'force-dynamic';
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -34,7 +34,6 @@ import { buildOutreachMessage } from "@/lib/outreach";
 import { buildFullAddress } from "@/lib/address";
 import { toggleInterestKey } from "@/lib/interests";
 import { needsOnboarding, TRADE_CATEGORIES } from "@/lib/categories";
-import CheckoutModal from "@/components/CheckoutModal";
 import ReleaseModal from "@/components/ReleaseModal";
 import WelcomePopup from "@/components/WelcomePopup";
 import { PushNotificationButton } from "@/components/PushNotificationButton";
@@ -56,9 +55,15 @@ import {
 import { PreventiveFeed } from "@/components/dashboard/PreventiveFeed";
 import { NeighborhoodPanel } from "@/components/dashboard/opportunities-map/NeighborhoodPanel";
 import { LeadsNeighborhoodPanel } from "@/components/dashboard/opportunities-map/LeadsNeighborhoodPanel";
-import CreditsPanel from "@/components/dashboard/CreditsPanel";
-import CreditWalletModal from "@/components/dashboard/CreditWalletModal";
-import { getWallet, type Wallet as CreditWallet } from "@/lib/credits-api";
+import SubscriptionFeed from "@/components/dashboard/SubscriptionFeed";
+import PlanModal from "@/components/dashboard/PlanModal";
+import AddonModal from "@/components/dashboard/AddonModal";
+import {
+  SubscriptionPlan,
+  Usage,
+  getBillingPlans,
+  getSubscriptionUsage,
+} from "@/lib/subscription-api";
 import type { LeadZone } from "@/components/dashboard/opportunities-map/leadZones";
 import { FeedToolbar } from "@/components/dashboard/FeedToolbar";
 import { FeedRail } from "@/components/dashboard/FeedRail";
@@ -247,8 +252,13 @@ function DashboardPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, subscription, loading: authLoading, signOut, refreshSubscription } = useAuth();
-  const isFreemium = !user?.plan || user.plan === "free";
-  const [creditWallet, setCreditWallet] = useState<CreditWallet | null>(null);
+  const isWeeklyPlan = Boolean(user?.plan?.startsWith("weekly_"));
+  const isActiveWeekly = isWeeklyPlan && Boolean(subscription?.can_access);
+  const isFreemium = !isActiveWeekly;
+  const [usage, setUsage] = useState<Usage | null>(null);
+  const [billingPlans, setBillingPlans] = useState<SubscriptionPlan[]>([]);
+  const [planOpen, setPlanOpen] = useState(false);
+  const [addonOpen, setAddonOpen] = useState(false);
   const { t, lang } = useI18n();
 
   // DECLARE userId BEFORE ALL HANDLERS
@@ -282,8 +292,6 @@ function DashboardPageInner() {
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<"overview" | "opportunities" | "prevention" | "favorites" | "interests" | "alerts" | "history">("overview");
   const [readiness, setReadiness] = useState<"all" | "letter" | "phone">("all");
-  const [walletOpen, setWalletOpen] = useState(false);
-  const [creditCounts, setCreditCounts] = useState({ all: 0, letter: 0, phone: 0 });
   const [interests, setInterests] = useState<Set<string>>(new Set(ALL_CATEGORY_KEYS));
   const [interestsConfigured, setInterestsConfigured] = useState<boolean | null>(null);
   // O utilizador ja' interagiu com as especialidades? Distingue "nunca
@@ -426,8 +434,6 @@ function DashboardPageInner() {
   const bellRef = useRef<HTMLDivElement>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [showCheckout, setShowCheckout] = useState(false);
-  const checkoutAutoOpened = useRef(false);
   const [selectedLead, setSelectedLead] = useState<LeadResponse | null>(null);
   const [showWelcomePopup, setShowWelcomePopup] = useState(false);
   const welcomePopupChecked = useRef(false);
@@ -461,82 +467,64 @@ function DashboardPageInner() {
     }, 4000);
   }, []);
 
-  // Conta nova/inativa (sem acesso vigente): abre o modal de checkout do Plano Pro
-  // assim que o status é conhecido — mesmo fluxo fluido de renovação, sem tela travada.
-  // Marco 1A: contas free entram no dashboard em modo freemium e usam créditos;
-  // não abrimos o checkout da assinatura.
-  useEffect(() => {
-    if (!isFreemium && subscription && !subscription.can_access && !checkoutAutoOpened.current) {
-      checkoutAutoOpened.current = true;
-      setShowCheckout(true);
-    }
-  }, [subscription, setShowCheckout, isFreemium]);
-
-  // Marco 1A: carteira para o chip do header e para o painel de créditos.
-  useEffect(() => {
+  const loadBilling = useCallback(async () => {
     if (!user?.id) {
-      setCreditWallet(null);
+      setUsage(null);
+      setBillingPlans([]);
       return;
     }
-    let active = true;
-    getWallet()
-      .then((w) => {
-        if (active) setCreditWallet(w);
-      })
-      .catch(() => {
-        if (active) setCreditWallet(null);
-      });
-    return () => {
-      active = false;
-    };
+    try {
+      const [u, p] = await Promise.all([getSubscriptionUsage(), getBillingPlans()]);
+      setUsage(u);
+      setBillingPlans(p.plans || []);
+    } catch {
+      setUsage(null);
+    }
   }, [user?.id]);
 
-  // Marco 1A: `?tab=credits` (deep link / retorno do Checkout) abre a aba de
-  // créditos e revalida a carteira. `checkout=success` chega do Stripe depois
-  // do webhook, por isso relemos o saldo em vez de confiar no valor antigo.
+  useEffect(() => {
+    void loadBilling();
+  }, [loadBilling]);
+
+  // Retorno do Checkout/Portal e deep links de planos.
   useEffect(() => {
     if (!searchParams) return;
     const tab = searchParams.get("tab");
-    const checkout = searchParams.get("checkout");
-    if (tab !== "credits" && checkout !== "success" && checkout !== "cancel") return;
-    setWalletOpen(true);
-    if (!user?.id) return;
-    getWallet()
-      .then((w) => setCreditWallet(w))
-      .catch(() => {});
-  }, [searchParams, user?.id]);
+    const plansParam = searchParams.get("plans");
+    const billing = searchParams.get("billing");
+    const addon = searchParams.get("addon");
+    if (
+      tab === "credits" ||
+      plansParam === "1" ||
+      billing === "success" ||
+      billing === "cancel"
+    ) {
+      setPlanOpen(true);
+      void loadBilling();
+      void refreshSubscription();
+    }
+    if (addon === "success" || addon === "cancel") {
+      setAddonOpen(true);
+      void loadBilling();
+    }
+  }, [searchParams, loadBilling, refreshSubscription]);
 
-  // Freemium arranca na aba Carta/Visita (é o que o reveal de $1,50 entrega).
+  // O mapa da aba Oportunidades precisa de uma praça concreta.
   useEffect(() => {
     if (!user?.id) return;
-    if (isFreemium) setReadiness("letter");
-  }, [isFreemium, user?.id]);
+    if (selectedCity === "all") setSelectedCity("NYC");
+  }, [user?.id, selectedCity]);
 
-  // Freemium: o mapa da aba Oportunidades precisa de uma praça concreta.
-  // Arranca em NYC para o utilizador ver zonas e sinais sem passar pelo
-  // FeedToolbar legacy (que fica escondido em freemium).
-  useEffect(() => {
-    if (!user?.id) return;
-    if (isFreemium && selectedCity === "all") setSelectedCity("NYC");
-  }, [user?.id, isFreemium, selectedCity]);
-
-
-  // A5 (402): o interceptor do api-client emite este evento. Em freemium
-  // abre a aba de créditos; em legacy abre o checkout da assinatura.
+  // A5 (402): no modelo de subscrição, abre o modal de planos.
   useEffect(() => {
     const onPaymentRequired = () => {
-      if (isFreemium) {
-        setWalletOpen(true);
-        return;
-      }
-      checkoutAutoOpened.current = true;
-      setShowCheckout(true);
-      void refreshSubscription();
+      setPlanOpen(true);
+      void loadBilling();
     };
     window.addEventListener(PAYMENT_REQUIRED_EVENT, onPaymentRequired);
     return () =>
       window.removeEventListener(PAYMENT_REQUIRED_EVENT, onPaymentRequired);
-  }, [refreshSubscription, setShowCheckout, isFreemium]);
+  }, [loadBilling]);
 
   // Dynamic Greeting based on client local time
   const [greetingKey, setGreetingKey] = useState<string>("dashboard.greeting.morning");
@@ -757,7 +745,7 @@ function DashboardPageInner() {
   };
   const urgencyParam =
     selectedSeverity === "all" ? undefined : severityToUrgency[selectedSeverity];
-  const feedKey = userId && !isFreemium
+  const feedKey = userId
     ? [
         "leads-today",
         userId,
@@ -859,7 +847,7 @@ function DashboardPageInner() {
   // pedido para o interceptor 402 não saltar automaticamente para créditos.
   const { mutate: mutatePreventiveInsights } = useSWRConfig();
   const { data: preventiveInsightsData } = useSWR(
-    isFreemium ? null : "/api/opportunities/insights?kind=preventive",
+    isActiveWeekly ? "/api/opportunities/insights?kind=preventive" : null,
     () => fetchOpportunityInsights("preventive"),
     { refreshInterval: 60000, isPaused: swrPaused }
   );
@@ -2146,11 +2134,11 @@ function DashboardPageInner() {
     { key: "preventive", label: t("dashboard.feed.tab_preventive"), count: preventiveCount },
     { key: "permit", label: t("dashboard.feed.tab_works"), count: permitCount },
   ];
-  const readinessCounts = feedData?.counts ?? (isFreemium ? creditCounts : {
+  const readinessCounts = feedData?.counts ?? {
     all: feedTotal,
     letter: 0,
     phone: 0,
-  });
+  };
   const readinessTabs = [
     { key: "all", label: t("dashboard.readiness.all"), count: readinessCounts.all },
     { key: "letter", label: t("dashboard.readiness.letter"), count: readinessCounts.letter },
@@ -2344,16 +2332,16 @@ function DashboardPageInner() {
 
           <div className={`pt-4 mt-4 border-t space-y-1 ${T.divider}`}>
             <button
-              onClick={() => setWalletOpen(true)}
-              title={railCollapsed ? (lang === "en" ? "Credits / Plans" : "Créditos / Planos") : undefined}
+              onClick={() => setPlanOpen(true)}
+              title={railCollapsed ? (lang === "en" ? "Plan & Billing" : "Plano & Faturação") : undefined}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition ${railCollapsed ? "lg:justify-center lg:px-2" : ""} ${T.text2} ${T.navHover}`}
             >
               <CreditCard className="h-4 w-4 shrink-0 text-emerald-500" />
               <span className={`flex-1 text-left ${railCollapsed ? "lg:hidden" : ""}`}>
-                {lang === "en" ? "Credits / Plans" : "Créditos / Planos"}
+                {lang === "en" ? "Plan & Billing" : "Plano & Faturação"}
               </span>
               <span className={`text-[10px] font-bold bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full ${railCollapsed ? "lg:hidden" : ""}`}>
-                {creditWallet ? `$${(creditWallet.balance_cents / 100).toFixed(2)}` : "—"}
+                {usage ? `${usage.phone_remaining}/${usage.phone_limit}` : "—"}
               </span>
             </button>
             <Link
@@ -2370,58 +2358,34 @@ function DashboardPageInner() {
           </div>
         </nav>
 
-        {/* Daily reveal quota (modelo de passe semanal; sem "créditos") */}
-        {!isFreemium && (
-        <div data-testid="daily-quota" className={`px-3 py-2 border-t ${T.border} ${railCollapsed ? "lg:hidden" : ""}`}>
-          <div
-            className="text-[10px] font-semibold uppercase tracking-wider mb-1.5"
-            style={{ color: "var(--text-muted)" }}
-          >
-            {t("dashboard.sidebar.daily_quota")}
+        {/* Plano e quotas diárias (modelo semanal) */}
+        {usage && (
+          <div data-testid="plan-quota" className={`px-3 py-2 border-t ${T.border} ${railCollapsed ? "lg:hidden" : ""}`}>
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+                  Plano
+                </div>
+                <div className="truncate text-sm font-bold" style={{ color: "var(--text-primary)" }}>
+                  {billingPlans.find((p) => p.code === usage.plan)?.name || (isActiveWeekly ? usage.plan : "Conta gratuita")}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPlanOpen(true)}
+                className="rounded-lg bg-[var(--sd-accent)] px-2 py-1 text-[9px] font-black text-[var(--sd-accent-text)]"
+              >
+                {isActiveWeekly ? "Gerir" : "Assinar"}
+              </button>
+            </div>
+            <div className="mt-1 text-[10px]" style={{ color: "var(--text-muted)" }}>
+              {usage.phone_used}/{usage.phone_limit} telefones hoje
+              {usage.addon_remaining > 0 ? ` · +${usage.addon_remaining} add-on` : ""}
+            </div>
+            <div className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+              {usage.letter_used}/{usage.letter_limit} cartas/visitas hoje
+            </div>
           </div>
-          {(() => {
-            const used = dailyStats?.used ?? 0;
-            const limit = dailyStats?.limit ?? 10;
-            const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
-            const exhausted = used >= limit;
-            return (
-              <>
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <div className="h-7 w-7 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                      <TrendingUp className="h-3.5 w-3.5" />
-                    </div>
-                    <div>
-                      <div
-                        className="text-sm font-bold tabular-nums"
-                        style={{ color: "var(--text-primary)" }}
-                      >
-                        {used} / {limit}
-                      </div>
-                      <div className="text-[10px]" style={{ color: "var(--text-muted)" }}>
-                        {t("dashboard.sidebar.daily_quota_used")}
-                      </div>
-                    </div>
-                  </div>
-                  {exhausted && (
-                    <span className="text-[10px] font-semibold text-amber-400 text-right leading-tight">
-                      {t("dashboard.sidebar.daily_quota_reset")}
-                    </span>
-                  )}
-                </div>
-                <div
-                  className="mt-2 h-1.5 overflow-hidden rounded-full"
-                  style={{ backgroundColor: "hsl(var(--border))" }}
-                >
-                  <div
-                    className={`h-full rounded-full transition-all ${exhausted ? "bg-amber-400" : "bg-emerald-500"}`}
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-              </>
-            );
-          })()}
-        </div>
         )}
 
           {/* User Card in Sidebar */}
@@ -2435,11 +2399,15 @@ function DashboardPageInner() {
                 {user?.company_name || "Contratante Pro"}
               </div>
               <div className="text-[11px] text-emerald-400 font-medium capitalize">
-                {isFreemium
-                  ? (lang === "en" ? "Free account" : "Conta gratuita")
-                  : user?.plan
-                    ? `Plano ${user.plan}`
-                    : "Teste Grátis (7d)"}
+                {isActiveWeekly
+                  ? `Plano ${
+                      billingPlans.find((p) => p.code === (usage?.plan || user?.plan))?.name ||
+                      usage?.plan ||
+                      user?.plan
+                    }`
+                  : lang === "en"
+                    ? "Free account"
+                    : "Conta gratuita"}
               </div>
             </div>
             <button
@@ -2511,15 +2479,21 @@ function DashboardPageInner() {
             >
               <Command className="h-4 w-4" />
             </button>
-            {/* Wallet / créditos (Marco 1A) */}
+            {/* Plano e quota diária (modelo semanal) */}
             <button
               type="button"
-              onClick={() => setWalletOpen(true)}
+              onClick={() => setPlanOpen(true)}
               className={`inline-flex h-9 items-center gap-1.5 rounded-xl border px-2.5 text-[11px] font-black transition ${T.border} ${T.text2} ${T.navHover}`}
-              title={lang === "en" ? "Credits wallet" : "Carteira de créditos"}
+              title={lang === "en" ? "Plan and daily quotas" : "Plano e quotas diárias"}
             >
               <CreditCard className="h-4 w-4 text-emerald-500" />
-              <span>{creditWallet ? `$${(creditWallet.balance_cents / 100).toFixed(2)}` : "$0.00"}</span>
+              <span>
+                {isActiveWeekly
+                  ? `${billingPlans.find((p) => p.code === usage?.plan)?.name || usage?.plan} · ${usage?.phone_remaining ?? 0}/${usage?.phone_limit ?? 0}`
+                  : lang === "en"
+                    ? "Subscribe"
+                    : "Assinar"}
+              </span>
             </button>
 
             {/* Theme Toggle */}
@@ -2613,17 +2587,6 @@ function DashboardPageInner() {
             {/* Push Notification Button */}
               <PushNotificationButton />
 
-              {/* Trial CTA button — escondido em freemium (usa créditos) */}
-            {!isFreemium && (
-            <button
-              onClick={() => setShowCheckout(true)}
-              title={t("dashboard.trial.scribe")}
-              className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 px-2.5 py-2 text-xs font-semibold text-slate-950 shadow-md shadow-emerald-500/20 transition hover:from-emerald-400 hover:to-teal-400 sm:px-3.5 md:text-sm"
-            >
-              <CreditCard className="h-4 w-4" />
-              <span className="hidden sm:inline">{t("dashboard.trial.scribe")}</span>
-            </button>
-            )}
           </div>
         </header>
 
@@ -2717,15 +2680,15 @@ function DashboardPageInner() {
               <span>
                 <b>{lang === "en" ? "Free mode:" : "Modo gratuito:"}</b>{" "}
                 {lang === "en"
-                  ? "browse the map and active signals; addresses, owners and contacts unlock with credits."
-                  : "navega o mapa e os sinais ativos; endereços, proprietários e contactos desbloqueiam com créditos."}
+                  ? "browse the map and masked signals. Subscribe to unlock letters/visits and the daily phone quota."
+                  : "navega o mapa e os sinais mascarados. Assina para desbloquear cartas/visitas e a cota diária de telefones."}
               </span>
               <button
                 type="button"
-                onClick={() => setWalletOpen(true)}
+                onClick={() => setPlanOpen(true)}
                 className="shrink-0 rounded-lg bg-[var(--sd-accent)] px-3 py-1.5 text-[11px] font-black text-[var(--sd-accent-text)]"
               >
-                {lang === "en" ? "View credit packs" : "Ver pacotes de créditos"}
+                {lang === "en" ? "View plans" : "Ver planos"}
               </button>
             </div>
           )}
@@ -2745,7 +2708,7 @@ function DashboardPageInner() {
             />
           )}
 
-          {!isFreemium && ["overview", "opportunities", "prevention"].includes(activeTab) ? (
+          {["overview", "opportunities", "prevention"].includes(activeTab) ? (
             <FeedToolbar
               tabs={feedTabs}
               activeTab={activeFeedTab}
@@ -3458,165 +3421,25 @@ function DashboardPageInner() {
             </Sheet>
 
 
-            {/* OPPORTUNITIES FEED — freemium usa créditos; pago mantém o feed */}
-            {isFreemium ? (
-              <CreditsPanel
-                lang={lang}
-                wallet={creditWallet}
-                onWallet={setCreditWallet}
-                readiness={readiness}
-                onReadinessChange={handleReadinessChange}
-                city={selectedCity === "all" ? undefined : selectedCity}
-                category={selectedCategory === "all" ? "" : selectedCategory}
-                onCategoryChange={(value) => setSelectedCategory(value || "all")}
-                onCounts={setCreditCounts}
-              />
-            ) : (
-            <section id="opportunities-feed" className="scroll-mt-24 flex flex-col overflow-hidden rounded-2xl border border-[var(--sd-border)] bg-[var(--sd-surface)]">
-              <div className={`px-5 py-4 border-b flex items-center justify-between ${T.border}`}>
-                <div>
-                  <h2 className="font-bold text-base flex items-center gap-2">
-                    <span>{t("dashboard.feed.all_title")}</span>
-                    {/* ACCURATE COUNT INDICATOR */}
-                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400">
-                      {filteredLeads.length.toLocaleString()} de {feedTotal.toLocaleString()}
-                    </span>
-                  </h2>
-                  <p className={`text-xs ${T.text2}`}>{t("dashboard.feed.filtered_sub")}</p>
-                  {readiness === "letter" ? (
-                    <p className="mt-1 text-[10px] font-medium text-[var(--sd-faint)]">
-                      {t("dashboard.readiness.coverage_note")
-                        .replace("{letter}", readinessCounts.letter.toLocaleString())
-                        .replace("{phone}", readinessCounts.phone.toLocaleString())}
-                    </p>
-                  ) : null}
-                </div>
-                <Filter className={`h-4 w-4 ${T.text2}`} />
-              </div>
-
-              <div className={`flex-1 overflow-y-auto max-h-[640px] divide-y ${T.border}`}>
-                {loadingLeads ? (
-                  // Skeletons: preservam a altura dos cartoes reais para evitar
-                  // salto de layout quando os dados chegam.
-                  <div aria-busy="true" aria-live="polite">
-                    <span className="sr-only">{t("dashboard.feed.loading")}</span>
-                    {[0, 1, 2, 3].map((i) => (
-                      <div
-                        key={i}
-                        aria-hidden="true"
-                        className={`px-5 py-4 animate-pulse ${i > 0 ? `border-t ${T.border}` : ""}`}
-                      >
-                        <div className="flex items-center gap-2 mb-3 flex-wrap">
-                          <div className={`h-5 w-24 rounded-full ${T.track}`} />
-                          <div className={`h-5 w-20 rounded-full ${T.track}`} />
-                          <div className={`h-5 w-16 rounded-full ${T.track}`} />
-                        </div>
-                        <div className={`h-4 w-2/3 rounded ${T.track}`} />
-                        <div className={`h-3 w-1/2 rounded mt-2 ${T.track}`} />
-                        <div className={`h-8 w-28 rounded-lg mt-4 ${T.track}`} />
-                      </div>
-                    ))}
-                  </div>
-                ) : filteredLeads.length === 0 ? (
-                  <div className="p-12 text-center">
-                    <div className="text-4xl mb-3">
-                      {readiness === "phone" ? "📞" : readiness === "letter" ? "✉️" : "🧰"}
-                    </div>
-                    {readiness === "phone" ? (
-                      <>
-                        <div className={`text-sm font-medium ${isDark ? "text-slate-300" : "text-slate-700"}`}>
-                          {t("dashboard.readiness.phone_empty_title")}
-                        </div>
-                        <div className={`text-xs mt-1 ${T.text2}`}>
-                          {t("dashboard.readiness.phone_empty_body")}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleReadinessChange("letter")}
-                          className="mt-4 rounded-lg bg-[var(--sd-accent)] px-3 py-1.5 text-[11px] font-black text-[var(--sd-accent-text)]"
-                        >
-                          {t("dashboard.readiness.phone_empty_cta")}
-                        </button>
-                      </>
-                    ) : readiness === "letter" ? (
-                      <>
-                        <div className={`text-sm font-medium ${isDark ? "text-slate-300" : "text-slate-700"}`}>
-                          {t("dashboard.readiness.letter_empty_title")}
-                        </div>
-                        <div className={`text-xs mt-1 ${T.text2}`}>
-                          {t("dashboard.readiness.letter_empty_body")}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleReadinessChange("all")}
-                          className="mt-4 rounded-lg bg-[var(--sd-accent)] px-3 py-1.5 text-[11px] font-black text-[var(--sd-accent-text)]"
-                        >
-                          {t("dashboard.readiness.letter_empty_cta")}
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <div className={`text-sm font-medium ${isDark ? "text-slate-300" : "text-slate-700"}`}>
-                          {t("dashboard.feed.empty")}
-                        </div>
-                        <div className={`text-xs mt-1 ${T.text2}`}>
-                          {t("dashboard.feed.empty_hint")}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                ) : (
-                  <>
-                    {/* Resumo agregado do contacto. Substitui o aviso repetido em
-                        cada cartao: em producao essentially todos os leads sao
-                        "incomplete_delivery", e um aviso em 100% dos cartoes
-                        informava zero. Aqui diz quantos e o que isso permite. */}
-                    {countLeadsWithoutContact(filteredLeads) > 0 && (
-                      <div className="flex items-start gap-2 px-5 py-2.5 bg-amber-500/5 border-b border-amber-500/20">
-                        <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0 text-amber-500/80" />
-                        <span className="text-[11px] text-amber-500/90 leading-snug">
-                          {t("dashboard.badge.contact_summary")
-                            .replace("{count}", String(countLeadsWithoutContact(filteredLeads)))
-                            .replace("{total}", String(filteredLeads.length))}
-                        </span>
-                      </div>
-                    )}
-                    <div className="space-y-3 p-3">
-                    {filteredLeads.map((lead) => (
-                      <OpportunityCard
-                        key={lead.id}
-                        lead={lead}
-                        category={categoryOf(lead)}
-                        ctx={opportunityCardCtx}
-                      />
-                    ))}
-                  </div>
-                                      {hasMoreLeads && (
-                      <div className={`px-5 py-4 border-t ${T.divider}`}>
-                        <button
-                          onClick={loadMoreLeads}
-                          disabled={loadingMore}
-                          className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl border text-sm font-medium transition disabled:opacity-50 ${T.border} ${T.text} ${T.navHover}`}
-                        >
-                          {loadingMore ? (
-                            <>
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                              Carregando...
-                            </>
-                          ) : (
-                            <>
-                              <ArrowUpRight className="h-4 w-4" />
-                              {t("dashboard.feed.load_more") || "Carregar mais oportunidades"}
-                            </>
-                          )}
-                        </button>
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            </section>
-            )}
+            <SubscriptionFeed
+              leads={filteredLeads}
+              loading={loadingLeads}
+              usage={usage}
+              plans={billingPlans}
+              isActive={isActiveWeekly}
+              onOpenPlans={() => setPlanOpen(true)}
+              onOpenAddons={() => setAddonOpen(true)}
+              onRefresh={() => {
+                void loadBilling();
+                void refreshSubscription();
+              }}
+              lang={lang}
+              readiness={readiness}
+              hasMore={hasMoreLeads}
+              loadingMore={loadingMore}
+              onLoadMore={loadMoreLeads}
+              onOpenLead={openLeadDetail}
+            />
           </div>
           <FeedRail
             deadlines={reactiveRail.deadlines}
@@ -4309,21 +4132,24 @@ function DashboardPageInner() {
         </div>
       )}
 
-      {/* CHECKOUT / PLANS MODAL */}
-      <CheckoutModal
-        open={showCheckout}
-        onClose={() => setShowCheckout(false)}
-        onActivated={() => window.location.reload()}
-        isDark={isDark}
-        mode={subscription?.status === "expired" || subscription?.status === "pending_payment" ? "new" : "reactivate"}
-      />
-      {/* WALLET / CREDITS MODAL (Marco 1A) */}
-      <CreditWalletModal
-        open={walletOpen}
-        onClose={() => setWalletOpen(false)}
+      {/* PLANOS E ADD-ONS (modelo semanal) */}
+      <PlanModal
+        open={planOpen}
+        onClose={() => setPlanOpen(false)}
         lang={lang}
-        wallet={creditWallet}
-        onWallet={setCreditWallet}
+        onChanged={() => {
+          void loadBilling();
+          void refreshSubscription();
+        }}
+      />
+      <AddonModal
+        open={addonOpen}
+        onClose={() => setAddonOpen(false)}
+        lang={lang}
+        usage={usage}
+        onChanged={() => {
+          void loadBilling();
+        }}
       />
       {/* WELCOME POPUP (First login after payment) */}
       <WelcomePopup
@@ -4331,39 +4157,6 @@ function DashboardPageInner() {
         onClose={() => setShowWelcomePopup(false)}
         isDark={isDark}
       />
-      {/* LOCK SCREEN: período (trial/plano) expirado */}
-      {subscription && !subscription.can_access && !isFreemium && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4" style={{ backgroundColor: isDark ? "rgba(11,13,18,0.85)" : "rgba(248,250,252,0.9)" }}>
-          <div className={`w-full max-w-md rounded-2xl border p-8 text-center shadow-2xl ${isDark ? "bg-[#10121a] border-white/10" : "bg-white border-slate-200"}`}>
-            <div className="mx-auto h-14 w-14 rounded-2xl bg-rose-500/15 flex items-center justify-center">
-              <Lock className="h-7 w-7 text-rose-500" />
-            </div>
-            <h2 className="text-xl font-bold mt-5" style={{ color: isDark ? "#fff" : "#0f172a" }}>
-              {subscription.status === "trial_expired"
-                ? t("dashboard.trial.ended")
-                : subscription.status === "expired" || subscription.status === "pending_payment"
-                  ? t("dashboard.subscription.expired")
-                  : t("dashboard.subscription.expired")}
-            </h2>
-            <p className={`text-sm mt-2 ${T.text2}`}>
-              {subscription.message || t("dashboard.trial.subscribe")}
-            </p>
-            <button
-              onClick={() => setShowCheckout(true)}
-              className="mt-6 inline-flex items-center justify-center gap-2 w-full px-5 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-bold transition"
-            >
-              <CreditCard className="h-4 w-4" />
-              {t("dashboard.trial.cta")}
-            </button>
-            <button
-              onClick={() => signOut()}
-              className="mt-3 text-xs font-medium text-slate-400 hover:text-slate-200 underline underline-offset-2"
-            >
-              {t("dashboard.lock.logout")}
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Toast Notifications (fila empilhável) */}
       {toasts.length > 0 && (

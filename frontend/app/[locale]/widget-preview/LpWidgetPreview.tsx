@@ -99,7 +99,7 @@ export default function LpWidgetPreview() {
               </button>
             </div>
             <p className="mt-3 text-[10px] text-slate-400">
-              $120/week · weekly pass · cancel anytime
+              From $25.90/week · 7 weekly plans · cancel anytime
             </p>
           </div>
 

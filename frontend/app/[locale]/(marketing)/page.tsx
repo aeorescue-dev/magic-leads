@@ -29,6 +29,17 @@ type BadgeKey = "urgent" | "high" | "medium";
 
 const CITIES: City[] = ["New York", "Boston", "Dallas", "Chicago"];
 
+// Catálogo público dos 7 planos semanais (fonte: backend/services/plans.py).
+const WEEKLY_PLANS = [
+  { code: "starter", name: "Starter", price: "$25.90", phones: 2 },
+  { code: "essential", name: "Essential", price: "$50.20", phones: 4 },
+  { code: "growth", name: "Growth", price: "$74.34", phones: 6 },
+  { code: "pro", name: "Pro", price: "$100.90", phones: 8 },
+  { code: "business", name: "Business", price: "$126", phones: 10 },
+  { code: "scale", name: "Scale", price: "$178.50", phones: 15 },
+  { code: "agency", name: "Agency", price: "$231", phones: 20 },
+] as const;
+
 const CITY_SEARCH_ALIASES: Record<string, City> = {
   "new york": "New York",
   nyc: "New York",
@@ -1452,24 +1463,31 @@ export default function LandingPage() {
                   <span className="mono-data text-[10px] uppercase tracking-widest text-white/30">{t("landing.trust3")}</span>
                 </div>
 
-                <div className="mt-6 flex items-end gap-3">
-                  <span className="font-display text-6xl font-black tracking-[-0.05em] text-white sm:text-7xl">$120</span>
-                  <span className="mb-2 text-sm font-semibold text-white/45">{t("landing.week")}<br /><span className="text-xs text-white/30">{t("landing.month")}</span></span>
+                <div className="mt-6 flex items-end gap-2">
+                  <span className="mb-2 text-[11px] font-black uppercase tracking-[0.12em] text-[#8ff5c8]">{t("landing.priceFrom")}</span>
+                  <span className="font-display text-5xl font-black tracking-[-0.05em] text-white sm:text-6xl">$25.90</span>
+                  <span className="mb-2 text-sm font-semibold text-white/45">{t("landing.week")}</span>
                 </div>
                 <p className="mt-3 text-sm text-white/50">{t("landing.planSub")}</p>
 
                 <div className="my-6 h-px bg-white/10" />
 
-                <ul className="grid gap-3 text-[14px] sm:grid-cols-2">
-                  {L.planFeatures.map((f) => (
-                    <li key={f} className="flex items-start gap-2.5">
-                      <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#34e0a1]/12 text-[#34e0a1] ring-1 ring-[#34e0a1]/20">✓</span>
-                      <span className="text-white/75">{f}</span>
-                    </li>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {WEEKLY_PLANS.map((plan) => (
+                    <div
+                      key={plan.code}
+                      className="flex items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2"
+                    >
+                      <span className="text-[12px] font-bold text-white/80">{plan.name}</span>
+                      <span className="text-[11px] font-semibold text-white/45">
+                        {plan.phones} {t("landing.phonesDay")}
+                      </span>
+                      <span className="text-[12px] font-black text-[#8ff5c8]">{plan.price}</span>
+                    </div>
                   ))}
-                </ul>
+                </div>
 
-                <button onClick={() => openModal()} data-track="plan_cta" className="btn-mint mt-8 w-full py-4 text-sm uppercase tracking-[0.1em]">{t("landing.planCta")}</button>
+                <button onClick={() => openModal()} data-track="plan_cta" className="btn-mint mt-6 w-full py-4 text-sm uppercase tracking-[0.1em]">{t("landing.planCta")}</button>
 
                 <div className="mt-4 rounded-xl border border-[#34e0a1]/25 bg-[#34e0a1]/[0.08] px-4 py-3 text-center">
                   <p className="text-[11px] font-black uppercase tracking-[0.1em] text-[#8ff5c8]">✓ {t("landing.trust2")} · ✓ {t("landing.trust3")}</p>
@@ -1576,7 +1594,7 @@ export default function LandingPage() {
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-[#070a12]/95 px-4 py-3 backdrop-blur-xl sm:hidden">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className="font-display text-lg font-black leading-none text-white">$120<span className="text-xs font-bold text-white/40">{t("landing.week")}</span></p>
+            <p className="font-display text-lg font-black leading-none text-white">{t("landing.priceFrom")} $25.90<span className="text-xs font-bold text-white/40">{t("landing.week")}</span></p>
             <p className="text-[11px] font-bold text-[#34e0a1]">{t("landing.stickyArea")}</p>
             <p className="text-[10px] font-bold text-[#8ff5c8]">✓ {t("landing.trust2")} · ✓ {t("landing.trust3")}</p>
           </div>

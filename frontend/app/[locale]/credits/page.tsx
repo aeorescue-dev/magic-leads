@@ -1,11 +1,9 @@
 import { redirect } from "next/navigation";
 
 /**
- * A página de créditos passou a viver dentro do dashboard oficial.
- *
- * Marco 1A: o login gratuito entra no painel (sidebar/header oficiais) e os
- * pacotes abrem na aba "Créditos / Planos". Esta rota mantém-se apenas como
- * redirect para não quebrar links antigos, emails ou o retorno do Checkout.
+ * A página de créditos deixou de existir no modelo de assinatura semanal.
+ * Esta rota mantém-se apenas como redirect para não quebrar links antigos,
+ * emails ou retornos de Checkout/Portal.
  */
 export default async function CreditsRedirect({
   params,
@@ -17,8 +15,10 @@ export default async function CreditsRedirect({
   const { locale } = await params;
   const sp = await searchParams;
 
-  const query = new URLSearchParams({ tab: "credits" });
-  for (const key of ["checkout", "session_id", "mock_purchase"]) {
+  const query = new URLSearchParams({ plans: "1" });
+  const billing = sp.billing ?? sp.checkout;
+  if (typeof billing === "string" && billing) query.set("billing", billing);
+  for (const key of ["session_id", "addon"]) {
     const value = sp[key];
     if (typeof value === "string" && value) query.set(key, value);
   }
