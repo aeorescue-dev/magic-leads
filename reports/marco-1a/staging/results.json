@@ -10,23 +10,63 @@
     "detail": ""
   },
   {
-    "name": "Free account login in staging",
+    "name": "Free login lands in official dashboard",
     "ok": true,
     "detail": ""
   },
   {
-    "name": "Staging webhook idempotency",
+    "name": "Official sidebar keeps Opportunities",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "Freemium keeps dashboard + masked signals",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "Sidebar opens credit packs in dashboard",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "Header wallet visible",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "Mock checkout created",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "Webhook idempotency",
     "ok": true,
     "detail": "Webhook 1: aplicado · Webhook 2: duplicado"
   },
   {
-    "name": "Staging wallet +700",
+    "name": "Credits appear in header wallet",
     "ok": true,
-    "detail": "CARTEIRA\n$7.00\n700 créditos\n\n$1,50 = 150 créditos · $3,00 = 300 crédit"
+    "detail": "$7.00"
   },
   {
-    "name": "Staging signal reveal",
+    "name": "Signal unlocks full address + owner + mailing",
     "ok": true,
-    "detail": "SINAL DESBLOQUEADO\n✕\nAlice Owner\n\nEndereço da obra: 100 Seed Street, NYC 10001\n\nProprietário oficial: Alice Owner\n\nMailing address: 200 Mail"
+    "detail": "SINAL DESBLOQUEADO\n✕\nAlice Owner\n\nEndereço da obra: 100 Seed Street, NYC 10001\n\nProprietário oficial: Alice Owner\n\nMailing address: 200 Mail Avenue, NYC, NY 100"
+  },
+  {
+    "name": "Wallet debited $1.50 after reveal",
+    "ok": true,
+    "detail": "$5.50"
+  },
+  {
+    "name": "Insufficient balance opens pack paywall",
+    "ok": true,
+    "detail": "Saldo insuficiente. Escolhe um pacote acima."
+  },
+  {
+    "name": "Zero-balance wallet unchanged",
+    "ok": true,
+    "detail": ""
   }
 ]
