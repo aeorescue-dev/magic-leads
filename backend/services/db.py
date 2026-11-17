@@ -2461,6 +2461,13 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
             "refunded": "INTEGER DEFAULT 0",
             "refund_reason": "TEXT",
             "refunded_at": "TEXT",
+            # Fase 3 (subscrição semanal): carta/telefone partilham lead_reveals.
+            "reveal_type": "TEXT DEFAULT 'signal'",
+            "trade_code": "TEXT",
+            "credits_cents": "INTEGER DEFAULT 0",
+            "exclusive_until": "TEXT",
+            "payload_json": "TEXT",
+            "searchbug_call_id": "INTEGER",
         }
         for name, ctype in reveal_extra.items():
             if name not in reveal_cols:

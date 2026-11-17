@@ -103,6 +103,7 @@ from .services import (
     contractor_ingest,
     control_tower,
     credits,
+    daily_quota,
     enrichment_queue,
     enrichment_scheduler,
     freshness,
@@ -120,6 +121,7 @@ from .services import (
     security,
     showcase,
     subscription_billing,
+    subscription_reveals,
     system_health,
     telnyx_voice,
     voice_audio_cache,
@@ -8358,6 +8360,82 @@ async def billing_portal(request: Request, user: dict = Depends(_get_current_use
     except Exception as exc:
         logger.warning("[BILLING] portal falhou: %s", exc)
         raise HTTPException(status_code=502, detail="billing_portal_failed") from exc
+
+
+@app.get("/api/subscription/usage")
+async def subscription_usage(user: dict = Depends(_get_current_user)):
+    """Plano + contadores diários + add-ons ativos (sem UI nesta fase)."""
+    full = await db_service.get_user_by_id(user["id"]) or {}
+    sub = await db_service.get_user_subscription_status(user["id"])
+    usage = daily_quota.usage_payload(user["id"])
+    return {
+        **usage,
+        "status": sub.get("status"),
+        "can_access": bool(sub.get("can_access")),
+        "plan_until": full.get("plan_until"),
+        "phone_eligible_count": None,
+    }
+
+
+@app.post("/api/subscription/leads/{lead_id}/reveal-letter")
+async def subscription_reveal_letter(lead_id: int, user: dict = Depends(_get_current_user)):
+    """Carta/visita livre: 10/dia para assinantes ativos."""
+    await _require_active_access(user)
+    try:
+        return await subscription_reveals.reveal_letter(user["id"], lead_id)
+    except daily_quota.QuotaError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={
+                "error": exc.code,
+                "message": exc.detail,
+                "usage": daily_quota.usage_payload(user["id"]),
+            },
+        ) from exc
+
+
+@app.post("/api/subscription/leads/{lead_id}/reveal-phone")
+async def subscription_reveal_phone(
+    request: Request, lead_id: int, user: dict = Depends(_get_current_user)
+):
+    """Telefone on-demand: base -> add-on 24h -> Searchbug, com estorno em falha."""
+    await _require_active_access(user)
+    body = await request.json()
+    idempotency_key = str((body or {}).get("idempotency_key") or "").strip()
+    trade_code = (body or {}).get("trade_code")
+    try:
+        return await subscription_reveals.reveal_phone(
+            user["id"], lead_id, idempotency_key, trade_code
+        )
+    except daily_quota.QuotaError as exc:
+        detail = {
+            "error": exc.code,
+            "message": exc.detail,
+            "usage": daily_quota.usage_payload(user["id"]),
+        }
+        if exc.code == "phone_quota_exhausted":
+            detail["addon_options"] = plans.list_addons()
+        raise HTTPException(status_code=exc.status_code, detail=detail) from exc
+
+
+@app.post("/api/billing/addons/checkout")
+async def billing_addon_checkout(request: Request, user: dict = Depends(_get_current_user)):
+    """Checkout de add-on de telefones (24h); mock em staging."""
+    await _require_active_access(user)
+    body = await request.json()
+    pack_code = str((body or {}).get("pack_code") or "").strip()
+    locale = str((body or {}).get("locale") or "en").lower()
+    if not plans.get_addon(pack_code):
+        raise HTTPException(status_code=400, detail="unknown_addon")
+    try:
+        return await anyio.to_thread.run_sync(
+            lambda: subscription_billing.create_addon_checkout(
+                user["id"], pack_code, locale=locale, email=user.get("email")
+            )
+        )
+    except Exception as exc:
+        logger.warning("[BILLING] add-on checkout falhou: %s", exc)
+        raise HTTPException(status_code=502, detail="addon_checkout_failed") from exc
 
 
 @app.post("/api/billing/webhook")

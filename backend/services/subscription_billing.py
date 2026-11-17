@@ -17,12 +17,13 @@ from typing import Any, Optional
 import stripe
 
 from ..config import settings
-from . import plans
+from . import daily_quota, plans
 from .db import get_connection
 
 logger = logging.getLogger(__name__)
 
 WEEKLY_SUBSCRIPTION_KIND = "weekly_subscription"
+PHONE_ADDON_KIND = "phone_addon"
 
 _ACTIVE_STRIPE_STATUSES = {"active", "trialing"}
 _PAST_DUE_STRIPE_STATUSES = {"past_due", "unpaid", "incomplete", "incomplete_expired"}
@@ -267,6 +268,85 @@ def create_weekly_checkout(
     }
 
 
+def create_addon_checkout(
+    user_id: int,
+    pack_code: str,
+    *,
+    locale: str = "en",
+    email: str | None = None,
+) -> dict[str, Any]:
+    """Checkout one-time de add-on de telefones (24h)."""
+    pack = plans.get_addon(pack_code)
+    if not pack:
+        raise ValueError("unknown_addon")
+    lang = locale if locale in ("pt", "en", "es") else "en"
+    stripe_key = str(getattr(settings, "STRIPE_API_KEY", "") or "").strip()
+    if getattr(settings, "ADDONS_MOCK", False) or not stripe_key:
+        return {
+            "mock": True,
+            "pack_code": pack["code"],
+            "pack": pack,
+            "checkout_url": None,
+            "message": "Staging: add-on mock. Usa o script interno para injetar unidades.",
+        }
+    stripe.api_key = stripe_key
+    frontend = (getattr(settings, "FRONTEND_URL", "") or "https://www.magicleads.app").rstrip("/")
+    success_url = f"{frontend}/{lang}/dashboard?addon=success&session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{frontend}/{lang}/dashboard?addon=cancel"
+    metadata = {
+        "kind": PHONE_ADDON_KIND,
+        "user_id": str(user_id),
+        "pack_code": pack["code"],
+        "phone_count": str(pack["phone_count"]),
+    }
+    session = stripe.checkout.Session.create(
+        mode="payment",
+        line_items=[{
+            "price_data": {
+                "currency": "usd",
+                "unit_amount": int(pack["price_cents"]),
+                "product_data": {
+                    "name": f"Magic Leads — +{pack['phone_count']} telefones (24h)",
+                },
+            },
+            "quantity": 1,
+        }],
+        success_url=success_url,
+        cancel_url=cancel_url,
+        client_reference_id=str(user_id),
+        customer_email=(email or "").strip().lower() or None,
+        locale=lang,
+        metadata=metadata,
+    )
+    try:
+        conn = get_connection()
+        try:
+            conn.execute(
+                "INSERT OR IGNORE INTO checkout_sessions "
+                "(user_id, session_id, email, amount_cents, currency, status, url) "
+                "VALUES (?, ?, ?, ?, 'usd', 'open', ?)",
+                (
+                    int(user_id),
+                    session.id,
+                    (email or "").strip().lower() or None,
+                    int(pack["price_cents"]),
+                    session.url,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as exc:
+        logger.warning("[BILLING] falha ao registar add-on checkout: %s", exc)
+    return {
+        "mock": False,
+        "pack_code": pack["code"],
+        "pack": pack,
+        "checkout_url": session.url,
+        "session_id": session.id,
+    }
+
+
 def _record_event(event_id: str, event_type: str, user_id: int | None) -> bool:
     conn = get_connection()
     try:
@@ -355,6 +435,24 @@ def handle_billing_event(event: dict[str, Any]) -> dict[str, Any]:
     try:
         if event_type == "checkout.session.completed":
             meta = obj.get("metadata") or {}
+            if meta.get("kind") == PHONE_ADDON_KIND:
+                pack_code = str(meta.get("pack_code") or "")
+                pack = plans.get_addon(pack_code)
+                if not pack:
+                    raise ValueError("unknown_addon")
+                try:
+                    user_id = int(meta.get("user_id") or obj.get("client_reference_id") or 0)
+                except (TypeError, ValueError):
+                    user_id = 0
+                if not user_id:
+                    raise ValueError("user_not_found")
+                addon = daily_quota.add_addon(
+                    user_id,
+                    pack_code,
+                    stripe_session_id=str(obj.get("id") or "") or None,
+                )
+                _mark_event_granted(event_id)
+                return {"status": "received", "handled": True, "addon": addon}
             if meta.get("kind") != WEEKLY_SUBSCRIPTION_KIND:
                 _mark_event_granted(event_id)
                 return {"status": "ignored", "reason": "not_weekly_subscription"}
