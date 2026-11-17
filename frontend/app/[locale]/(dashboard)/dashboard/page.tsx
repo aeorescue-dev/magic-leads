@@ -56,6 +56,8 @@ import {
 import { PreventiveFeed } from "@/components/dashboard/PreventiveFeed";
 import { NeighborhoodPanel } from "@/components/dashboard/opportunities-map/NeighborhoodPanel";
 import { LeadsNeighborhoodPanel } from "@/components/dashboard/opportunities-map/LeadsNeighborhoodPanel";
+import CreditsPanel from "@/components/dashboard/CreditsPanel";
+import { getWallet, type Wallet as CreditWallet } from "@/lib/credits-api";
 import type { LeadZone } from "@/components/dashboard/opportunities-map/leadZones";
 import { FeedToolbar } from "@/components/dashboard/FeedToolbar";
 import { FeedRail } from "@/components/dashboard/FeedRail";
@@ -244,6 +246,8 @@ function DashboardPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, subscription, loading: authLoading, signOut, refreshSubscription } = useAuth();
+  const isFreemium = !user?.plan || user.plan === "free";
+  const [creditWallet, setCreditWallet] = useState<CreditWallet | null>(null);
   const { t, lang } = useI18n();
 
   // DECLARE userId BEFORE ALL HANDLERS
@@ -275,7 +279,7 @@ function DashboardPageInner() {
   } | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
-  const [activeTab, setActiveTab] = useState<"overview" | "opportunities" | "prevention" | "favorites" | "interests" | "alerts" | "history">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "opportunities" | "prevention" | "favorites" | "interests" | "alerts" | "history" | "credits">("overview");
   const [interests, setInterests] = useState<Set<string>>(new Set(ALL_CATEGORY_KEYS));
   const [interestsConfigured, setInterestsConfigured] = useState<boolean | null>(null);
   // O utilizador ja' interagiu com as especialidades? Distingue "nunca
@@ -455,17 +459,58 @@ function DashboardPageInner() {
 
   // Conta nova/inativa (sem acesso vigente): abre o modal de checkout do Plano Pro
   // assim que o status é conhecido — mesmo fluxo fluido de renovação, sem tela travada.
+  // Marco 1A: contas free entram no dashboard em modo freemium e usam créditos;
+  // não abrimos o checkout da assinatura.
   useEffect(() => {
-    if (subscription && !subscription.can_access && !checkoutAutoOpened.current) {
+    if (!isFreemium && subscription && !subscription.can_access && !checkoutAutoOpened.current) {
       checkoutAutoOpened.current = true;
       setShowCheckout(true);
     }
-  }, [subscription, setShowCheckout]);
+  }, [subscription, setShowCheckout, isFreemium]);
 
-  // A5 (402): o interceptor do api-client emite este evento. Abre o checkout
-  // imediatamente — antes o utilizador esperava até 10 min pelo refresh.
+  // Marco 1A: carteira para o chip do header e para o painel de créditos.
+  useEffect(() => {
+    if (!user?.id) {
+      setCreditWallet(null);
+      return;
+    }
+    let active = true;
+    getWallet()
+      .then((w) => {
+        if (active) setCreditWallet(w);
+      })
+      .catch(() => {
+        if (active) setCreditWallet(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
+
+  // Marco 1A: `?tab=credits` (deep link / retorno do Checkout) abre a aba de
+  // créditos e revalida a carteira. `checkout=success` chega do Stripe depois
+  // do webhook, por isso relemos o saldo em vez de confiar no valor antigo.
+  useEffect(() => {
+    if (!searchParams) return;
+    const tab = searchParams.get("tab");
+    const checkout = searchParams.get("checkout");
+    if (tab !== "credits" && checkout !== "success" && checkout !== "cancel") return;
+    setActiveTab("credits");
+    if (!user?.id) return;
+    getWallet()
+      .then((w) => setCreditWallet(w))
+      .catch(() => {});
+  }, [searchParams, user?.id]);
+
+
+  // A5 (402): o interceptor do api-client emite este evento. Em freemium
+  // abre a aba de créditos; em legacy abre o checkout da assinatura.
   useEffect(() => {
     const onPaymentRequired = () => {
+      if (isFreemium) {
+        setActiveTab("credits");
+        return;
+      }
       checkoutAutoOpened.current = true;
       setShowCheckout(true);
       void refreshSubscription();
@@ -473,7 +518,7 @@ function DashboardPageInner() {
     window.addEventListener(PAYMENT_REQUIRED_EVENT, onPaymentRequired);
     return () =>
       window.removeEventListener(PAYMENT_REQUIRED_EVENT, onPaymentRequired);
-  }, [refreshSubscription, setShowCheckout]);
+  }, [refreshSubscription, setShowCheckout, isFreemium]);
 
   // Dynamic Greeting based on client local time
   const [greetingKey, setGreetingKey] = useState<string>("dashboard.greeting.morning");
@@ -694,7 +739,7 @@ function DashboardPageInner() {
   };
   const urgencyParam =
     selectedSeverity === "all" ? undefined : severityToUrgency[selectedSeverity];
-  const feedKey = userId
+  const feedKey = userId && !isFreemium
     ? [
         "leads-today",
         userId,
@@ -790,9 +835,11 @@ function DashboardPageInner() {
   }, [publicMetricsData]);
 
   // Agregados da pré-inspeção: alimentam os KPI e o painel lateral do feed.
+  // Marco 1A: o endpoint exige acesso vigente; em freemium não disparamos o
+  // pedido para o interceptor 402 não saltar automaticamente para créditos.
   const { mutate: mutatePreventiveInsights } = useSWRConfig();
   const { data: preventiveInsightsData } = useSWR(
-    "/api/opportunities/insights?kind=preventive",
+    isFreemium ? null : "/api/opportunities/insights?kind=preventive",
     () => fetchOpportunityInsights("preventive"),
     { refreshInterval: 60000, isPaused: swrPaused }
   );
@@ -2255,14 +2302,16 @@ function DashboardPageInner() {
 
           <div className={`pt-4 mt-4 border-t space-y-1 ${T.divider}`}>
             <button
-              onClick={() => setShowCheckout(true)}
-              title={railCollapsed ? t("dashboard.nav.plans") : undefined}
+              onClick={() => setActiveTab("credits")}
+              title={railCollapsed ? (lang === "en" ? "Credits / Plans" : "Créditos / Planos") : undefined}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition ${railCollapsed ? "lg:justify-center lg:px-2" : ""} ${T.text2} ${T.navHover}`}
             >
               <CreditCard className="h-4 w-4 shrink-0 text-emerald-500" />
-              <span className={`flex-1 text-left ${railCollapsed ? "lg:hidden" : ""}`}>{t("dashboard.nav.plans")}</span>
+              <span className={`flex-1 text-left ${railCollapsed ? "lg:hidden" : ""}`}>
+                {lang === "en" ? "Credits / Plans" : "Créditos / Planos"}
+              </span>
               <span className={`text-[10px] font-bold bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full ${railCollapsed ? "lg:hidden" : ""}`}>
-                  {t("dashboard.trial.week_badge")}
+                {creditWallet ? `$${(creditWallet.balance_cents / 100).toFixed(2)}` : "—"}
               </span>
             </button>
             <Link
@@ -2280,6 +2329,7 @@ function DashboardPageInner() {
         </nav>
 
         {/* Daily reveal quota (modelo de passe semanal; sem "créditos") */}
+        {!isFreemium && (
         <div data-testid="daily-quota" className={`px-3 py-2 border-t ${T.border} ${railCollapsed ? "lg:hidden" : ""}`}>
           <div
             className="text-[10px] font-semibold uppercase tracking-wider mb-1.5"
@@ -2330,6 +2380,7 @@ function DashboardPageInner() {
             );
           })()}
         </div>
+        )}
 
           {/* User Card in Sidebar */}
         <div className={`p-3 border-t ${T.border}`}>
@@ -2342,7 +2393,11 @@ function DashboardPageInner() {
                 {user?.company_name || "Contratante Pro"}
               </div>
               <div className="text-[11px] text-emerald-400 font-medium capitalize">
-                {user?.plan ? `Plano ${user.plan}` : "Teste Grátis (7d)"}
+                {user?.plan
+                  ? `Plano ${user.plan}`
+                  : isFreemium
+                    ? (lang === "en" ? "Free account" : "Conta gratuita")
+                    : "Teste Grátis (7d)"}
               </div>
             </div>
             <button
@@ -2414,6 +2469,17 @@ function DashboardPageInner() {
             >
               <Command className="h-4 w-4" />
             </button>
+            {/* Wallet / créditos (Marco 1A) */}
+            <button
+              type="button"
+              onClick={() => setActiveTab("credits")}
+              className={`inline-flex h-9 items-center gap-1.5 rounded-xl border px-2.5 text-[11px] font-black transition ${T.border} ${T.text2} ${T.navHover}`}
+              title={lang === "en" ? "Credits wallet" : "Carteira de créditos"}
+            >
+              <CreditCard className="h-4 w-4 text-emerald-500" />
+              <span>{creditWallet ? `$${(creditWallet.balance_cents / 100).toFixed(2)}` : "$0.00"}</span>
+            </button>
+
             {/* Theme Toggle */}
             <button
               data-testid="theme-toggle"
@@ -2596,6 +2662,27 @@ function DashboardPageInner() {
             satellites={kpiSatellites}
             onHero={() => setActiveTab("opportunities")}
           />
+
+          {isFreemium && (
+            <div
+              data-testid="freemium-banner"
+              className="flex flex-col gap-2 rounded-2xl border border-[var(--sd-accent)]/25 bg-[var(--sd-accent-soft)] px-4 py-3 text-xs text-[var(--sd-text)] sm:flex-row sm:items-center sm:justify-between"
+            >
+              <span>
+                <b>{lang === "en" ? "Free mode:" : "Modo gratuito:"}</b>{" "}
+                {lang === "en"
+                  ? "browse the map and active signals; addresses, owners and contacts unlock with credits."
+                  : "navega o mapa e os sinais ativos; endereços, proprietários e contactos desbloqueiam com créditos."}
+              </span>
+              <button
+                type="button"
+                onClick={() => setActiveTab("credits")}
+                className="shrink-0 rounded-lg bg-[var(--sd-accent)] px-3 py-1.5 text-[11px] font-black text-[var(--sd-accent-text)]"
+              >
+                {lang === "en" ? "View credit packs" : "Ver pacotes de créditos"}
+              </button>
+            </div>
+          )}
 
           {activeTab === "overview" && dashboardSummary && (
             <CoveragePanel
@@ -3198,6 +3285,10 @@ function DashboardPageInner() {
                 />
               </div>
             </div>
+          ) : activeTab === "credits" ? (
+            <div className="space-y-4">
+              <CreditsPanel lang={lang} wallet={creditWallet} onWallet={setCreditWallet} />
+            </div>
           ) : (
           <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
           {/* GRID: INTERESTS CONFIG + OPPORTUNITIES FEED */}
@@ -3312,7 +3403,10 @@ function DashboardPageInner() {
             </Sheet>
 
 
-            {/* OPPORTUNITIES FEED */}
+            {/* OPPORTUNITIES FEED — freemium usa créditos; pago mantém o feed */}
+            {isFreemium ? (
+              <CreditsPanel lang={lang} wallet={creditWallet} onWallet={setCreditWallet} />
+            ) : (
             <section id="opportunities-feed" className="scroll-mt-24 flex flex-col overflow-hidden rounded-2xl border border-[var(--sd-border)] bg-[var(--sd-surface)]">
               <div className={`px-5 py-4 border-b flex items-center justify-between ${T.border}`}>
                 <div>
@@ -3412,6 +3506,7 @@ function DashboardPageInner() {
                 )}
               </div>
             </section>
+            )}
           </div>
           <FeedRail
             deadlines={reactiveRail.deadlines}
@@ -4119,7 +4214,7 @@ function DashboardPageInner() {
         isDark={isDark}
       />
       {/* LOCK SCREEN: período (trial/plano) expirado */}
-      {subscription && !subscription.can_access && (
+      {subscription && !subscription.can_access && !isFreemium && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center p-4" style={{ backgroundColor: isDark ? "rgba(11,13,18,0.85)" : "rgba(248,250,252,0.9)" }}>
           <div className={`w-full max-w-md rounded-2xl border p-8 text-center shadow-2xl ${isDark ? "bg-[#10121a] border-white/10" : "bg-white border-slate-200"}`}>
             <div className="mx-auto h-14 w-14 rounded-2xl bg-rose-500/15 flex items-center justify-center">

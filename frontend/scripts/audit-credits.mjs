@@ -15,73 +15,122 @@ const browser = await chromium.launch();
 const context = await browser.newContext({ viewport: { width: 1440, height: 1100 } });
 const page = await context.newPage();
 
-await page.goto(`${BASE}/pt/credits`, { waitUntil: "networkidle", timeout: 60000 });
-await page.locator("h1").first().waitFor({ timeout: 30000 });
-check("Staging page loads", await page.locator("h1").first().isVisible());
-await page.screenshot({ path: `${OUT}/01-login.png`, fullPage: true });
+async function login(p, email) {
+  await p.goto(`${BASE}/pt/auth`, { waitUntil: "networkidle", timeout: 60000 });
+  await p.fill('input[type="email"]', email);
+  await p.fill('input[type="password"]', "dev-demo-only");
+  await p.locator('form button[type="submit"]').first().click();
+  await p.waitForURL(/\/pt\/dashboard/, { timeout: 60000 });
+  await p.getByText("Oportunidades").first().waitFor({ timeout: 30000 });
+  await p.waitForTimeout(800);
+}
 
-await page.fill('input[type="email"]', "qa-buyer+staging@magicleads.app");
-await page.fill('input[type="password"]', "dev-demo-only");
-await page.locator("form button").first().click();
-await page.getByText("Carteira").first().waitFor({ timeout: 30000 });
-await page.waitForTimeout(1200);
-check("Free account login", await page.getByText("qa-buyer+staging@magicleads.app").first().isVisible());
-await page.screenshot({ path: `${OUT}/02-wallet-leads.png`, fullPage: true });
+await login(page, "qa-buyer+staging@magicleads.app");
+check(
+  "Free login lands in official dashboard",
+  await page.getByText("Visão Geral").first().isVisible(),
+);
+await page.screenshot({ path: `${OUT}/01-dashboard-freemium.png`, fullPage: true });
 
-await page.locator('button:has-text("Starter")').first().click();
+// Masked signals inside the official shell.
+await page.locator('button:has-text("Oportunidades")').first().click();
+await page.getByTestId("credits-panel").first().waitFor({ timeout: 30000 });
+check(
+  "Freemium keeps masked signals",
+  await page.getByText(/\*\*\* Seed Street/).first().isVisible(),
+);
+await page.screenshot({ path: `${OUT}/02-map-masked-signals.png`, fullPage: true });
+
+// Packs via sidebar.
+await page.locator('button:has-text("Créditos / Planos")').first().click();
+const panel = page.getByTestId("credits-panel").first();
+await panel.waitFor({ timeout: 30000 });
+const headerWallet = page.locator('button[title="Carteira de créditos"]');
+check("Sidebar opens credit packs", (await panel.locator('button:has-text("Starter")').count()) > 0);
+await page.screenshot({ path: `${OUT}/03-credits-packs.png`, fullPage: true });
+
+// Mock purchase + webhook idempotency.
+await panel.locator('button:has-text("Starter")').first().click();
 await page.getByText(/Mock: Starter/).first().waitFor({ timeout: 10000 });
-await page.screenshot({ path: `${OUT}/03-mock-checkout.png`, fullPage: true });
-check("Mock checkout created", true);
-
+await page.screenshot({ path: `${OUT}/04-mock-checkout.png`, fullPage: true });
 await page.locator('button:has-text("Simular webhook duplicado")').first().click();
-await page.waitForTimeout(1200);
+await page.waitForTimeout(1500);
 const webhookMsg = await page.locator("text=Webhook 1:").first().innerText().catch(() => "");
-check("Webhook idempotency visible", webhookMsg.includes("aplicado") && webhookMsg.includes("duplicado"), webhookMsg);
-await page.screenshot({ path: `${OUT}/04-webhook-idempotent.png`, fullPage: true });
+check(
+  "Webhook idempotency visible",
+  webhookMsg.includes("aplicado") && webhookMsg.includes("duplicado"),
+  webhookMsg,
+);
+await page.screenshot({ path: `${OUT}/05-webhook-idempotent.png`, fullPage: true });
 
 await page.locator('button:has-text("Simular pagamento")').first().click();
-await page.waitForTimeout(1200);
-const walletAfter = await page.locator("section").first().innerText();
-check("Wallet credited 700", walletAfter.includes("$7.00") || walletAfter.includes("700"), walletAfter.slice(0, 80));
-await page.screenshot({ path: `${OUT}/05-wallet-700.png`, fullPage: true });
+await page.waitForTimeout(1500);
+check(
+  "Header wallet credited 700",
+  (await headerWallet.first().innerText()).trim().includes("$7.00"),
+  await headerWallet.first().innerText(),
+);
+await page.screenshot({ path: `${OUT}/06-wallet-700.png`, fullPage: true });
 
-await page.locator('button:has-text("Revelar sinal")').first().click();
+// Reveal signal.
+await panel.locator('button:has-text("Revelar sinal")').first().click();
 await page.getByText("Sinal desbloqueado").first().waitFor({ timeout: 15000 });
-const modalText = await page.locator("text=Sinal desbloqueado").first().locator("..").locator("..").innerText().catch(() => "");
-check("Signal reveal returns full owner/mailing", modalText.includes("Mail Avenue") && modalText.includes("Owner"), modalText.slice(0, 160));
-await page.screenshot({ path: `${OUT}/06-signal-reveal.png`, fullPage: true });
+const modalText = await page
+  .locator("text=Sinal desbloqueado")
+  .first()
+  .locator("..")
+  .locator("..")
+  .innerText()
+  .catch(() => "");
+check(
+  "Signal reveal returns address + owner + mailing",
+  modalText.includes("Seed Street") && modalText.includes("Mail Avenue"),
+  modalText.slice(0, 160),
+);
+await page.screenshot({ path: `${OUT}/07-signal-reveal.png`, fullPage: true });
 await page.locator('button:has-text("Fechar")').first().click();
-await page.waitForTimeout(600);
+await page.waitForTimeout(700);
 
-await page.locator("select").selectOption("Electrical");
-await page.locator('button:has-text("Revelar sinal")').first().click();
-await page.waitForTimeout(900);
-const crossTrade = await page.locator("text=Sinal desbloqueado").first().isVisible().catch(() => false);
+// Same address, another trade: new exclusivity allowed.
+const tradeSelect = panel.locator("select").nth(1);
+await tradeSelect.selectOption("Electrical");
+await panel.locator('button:has-text("Revelar sinal")').first().click();
+await page.waitForTimeout(1200);
+const crossTrade = await page
+  .getByText("Sinal desbloqueado")
+  .first()
+  .isVisible()
+  .catch(() => false);
 check("Same lead can be revealed by another trade", crossTrade);
-await page.screenshot({ path: `${OUT}/07-cross-trade.png`, fullPage: true });
+await page.screenshot({ path: `${OUT}/08-cross-trade.png`, fullPage: true });
 if (crossTrade) await page.locator('button:has-text("Fechar")').first().click();
 await page.waitForTimeout(500);
 
-await page.locator("select").selectOption("Plumbing");
-await page.locator('button:has-text("Revelar sinal")').first().click();
-await page.waitForTimeout(900);
+// Same user/trade twice: duplicate, no charge.
+await tradeSelect.selectOption("Plumbing");
+await panel.locator('button:has-text("Revelar sinal")').first().click();
+await page.waitForTimeout(1200);
 const dupMsg = await page.getByText(/duplicado|Duplicate/i).first().innerText().catch(() => "");
 check("Same user/trade duplicate does not charge", Boolean(dupMsg), dupMsg);
-await page.screenshot({ path: `${OUT}/08-duplicate.png`, fullPage: true });
+await page.screenshot({ path: `${OUT}/09-duplicate.png`, fullPage: true });
 
+// Zero balance account -> paywall.
 const context2 = await browser.newContext({ viewport: { width: 1440, height: 1100 } });
 const page2 = await context2.newPage();
-await page2.goto(`${BASE}/pt/credits`, { waitUntil: "networkidle", timeout: 60000 });
-await page2.fill('input[type="email"]', "qa-free+staging@magicleads.app");
-await page2.fill('input[type="password"]', "dev-demo-only");
-await page2.locator("form button").first().click();
-await page2.getByText("Carteira").first().waitFor({ timeout: 30000 });
+await login(page2, "qa-free+staging@magicleads.app");
+await page2.locator('button:has-text("Créditos / Planos")').first().click();
+const panel2 = page2.getByTestId("credits-panel").first();
+await panel2.waitFor({ timeout: 30000 });
 await page2.waitForTimeout(800);
-await page2.locator('button:has-text("Revelar sinal")').nth(1).click();
-await page2.waitForTimeout(900);
-const insufficient = await page2.getByText(/Saldo insuficiente/).first().innerText().catch(() => "");
+await panel2.locator('button:has-text("Revelar sinal")').first().click();
+await page2.waitForTimeout(1200);
+const insufficient = await page2
+  .getByText(/Saldo insuficiente/)
+  .first()
+  .innerText()
+  .catch(() => "");
 check("Insufficient credits blocked", Boolean(insufficient), insufficient);
-await page2.screenshot({ path: `${OUT}/09-insufficient.png`, fullPage: true });
+await page2.screenshot({ path: `${OUT}/10-insufficient.png`, fullPage: true });
 
 fs.writeFileSync(`${OUT}/results.json`, JSON.stringify(results, null, 2));
 await browser.close();

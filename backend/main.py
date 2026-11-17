@@ -9651,8 +9651,10 @@ async def opportunity_territories(
 
     Uma única query `GROUP BY` devolve apenas `zonas x nichos` linhas; o
     resultado é estável durante 60 s, pelo que pode ser cacheado no browser.
+
+    Marco 1A (freemium): os agregados não expõem contacto; uma conta free pode
+    ver o mapa. O feed de leads continua a passar pelo gate de acesso/créditos.
     """
-    await _require_active_access(user)
     if not str(city or "").strip():
         raise HTTPException(status_code=400, detail="city_required")
     started = time.perf_counter()
@@ -10471,7 +10473,7 @@ async def credits_checkout(request: Request, user: dict = Depends(_get_current_u
             "mock": True,
             "purchase_id": purchase["id"],
             "pack": pack,
-            "checkout_url": f"{base}/{lang}/credits?mock_purchase={purchase['id']}",
+            "checkout_url": f"{base}/{lang}/dashboard?tab=credits&mock_purchase={purchase['id']}",
             "message": "Staging: use o botão Simular pagamento para creditar a carteira.",
         }
 
@@ -10495,8 +10497,8 @@ async def credits_checkout(request: Request, user: dict = Depends(_get_current_u
                 "user_id": str(user["id"]),
                 "credits_cents": str(pack["credits_cents"]),
             },
-            success_url=f"{base}/{lang}/credits?checkout=success&session_id={{CHECKOUT_SESSION_ID}}",
-            cancel_url=f"{base}/{lang}/credits?checkout=cancel",
+            success_url=f"{base}/{lang}/dashboard?tab=credits&checkout=success&session_id={{CHECKOUT_SESSION_ID}}",
+            cancel_url=f"{base}/{lang}/dashboard?tab=credits&checkout=cancel",
         )
         credits.attach_session(purchase["id"], session.id)
         return {"mock": False, "purchase_id": purchase["id"], "checkout_url": session.url}

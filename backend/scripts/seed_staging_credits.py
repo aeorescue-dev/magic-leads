@@ -55,6 +55,14 @@ for email, company in TEST_USERS:
     )
     user_ids.append(int(conn.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone()["id"]))
 
+# Interesses mínimos para o dashboard não redirecionar para o onboarding no staging.
+for uid in user_ids:
+    for category in ("Plumbing", "Electrical", "Heating", "Paint"):
+        conn.execute(
+            "INSERT OR IGNORE INTO user_interests (user_id, category, push_enabled) VALUES (?, ?, 0)",
+            (uid, category),
+        )
+
 # Reset only the test users' ledger/purchases/reveals so the demo is deterministic.
 placeholders = ",".join("?" for _ in user_ids)
 conn.execute(f"DELETE FROM lead_exclusivity WHERE user_id IN ({placeholders})", user_ids)
