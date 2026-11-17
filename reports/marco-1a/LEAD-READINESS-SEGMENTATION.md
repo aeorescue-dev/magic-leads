@@ -2,6 +2,7 @@
 
 **Data:** 2026-11-17  
 **Âmbito:** aba Oportunidades do dashboard (freemium e assinatura legacy)  
+**Estado:** aprovado e implementado em staging (2026-11-17).  
 **Pergunta:** dividir os leads em **Todos**, **Prontos para Carta/Visita** e **Com Telefone Disponível**, com performance e layout limpos.
 
 ---
@@ -476,3 +477,32 @@ A segmentação é **simples de consultar** e **complexa de preencher**. O desen
 - **estados vazios honestos** e seed de staging populado.
 
 Isto mantém o layout limpo, evita 7 pills e prepara o 1B sem refazer a interface.
+
+---
+
+## 10. Implementação (2026-11-17)
+
+Implementado em `feat/credits-pay-as-you-go` e publicado no staging:
+
+- **`backend/services/db.py`**
+  - `signal_ready` / `phone_ready` materializados no núcleo;
+  - backfill único (`schema_meta.readiness_v1`) + triggers em `owner_name`, `owner_phone`, `phone_verified`, `mailing_address`, etc.;
+  - índices parciais `idx_leads_letter_ready`, `idx_leads_letter_city_trade`, `idx_leads_phone_ready`, `idx_leads_phone_city_trade`;
+  - `readiness` em `get_leads_feed` / `get_leads_geo_summary` e `count_leads_by_readiness`.
+- **API**
+  - `readiness=all|letter|phone` em `/api/leads/today`, `/api/leads`, `/api/leads/neighborhoods` e `/api/credits/leads`;
+  - `counts: { all, letter, phone }` no mesmo filtro base;
+  - telefone exposto apenas como `phone_ready=1` (sem elegíveis).
+- **UI**
+  - linha primária **Todos / Carta-Visita / Com telefone** (telefone com selo `1B`);
+  - linha secundária de origem/filtros;
+  - badges “Pronto para carta” e “Telefone verificado” nos cartões;
+  - estados vazios dedicados e nota de cobertura;
+  - mapa segue a aba ativa (`Mapa: Carta / Visita`).
+- **Staging**: 68 prontos para carta, 0 com telefone; audit **20/20**.
+
+### Desvios face ao parecer
+
+1. O predicado institucional na prontidão usa `institutional_owner_name_where` (SQL partilhado) em vez da função Python `is_institutional_name`. Motivo: os triggers correm em **qualquer** conexão SQLite (seed, scripts, testes) e funções custom não existem nessas conexões. A aproximação SQL cobre prefixos + tokens fortes.
+2. `signal_ready` inclui `mailing_address`; por isso um lead sem mailing devolve `signal_not_ready` no reveal (antes a ordem era `mailing_missing`). O teste de créditos foi atualizado para a nova semântica.
+3. `readiness=all` é uma vista, não um bucket exclusivo: Carta e Telefone podem sobrepor-se.

@@ -25,6 +25,21 @@
     "detail": ""
   },
   {
+    "name": "Map follows active readiness",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "Readiness tabs visible (Todos / Carta / Telefone)",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "Phone tab locked for Milestone 1B",
+    "ok": true,
+    "detail": ""
+  },
+  {
     "name": "Sidebar opens credit packs in dashboard",
     "ok": true,
     "detail": ""
@@ -52,7 +67,7 @@
   {
     "name": "Signal unlocks full address + owner + mailing",
     "ok": true,
-    "detail": "SINAL DESBLOQUEADO\n✕\nAlice Owner\n\nEndereço da obra: 100 Seed Street, NYC 10001\n\nProprietário oficial: Alice Owner\n\nMailing address: 200 Mail Avenue, NYC, NY 100"
+    "detail": "SINAL DESBLOQUEADO\n✕\nCarla Builder\n\nEndereço da obra: 142 Seed Street, Boston 02108\n\nProprietário oficial: Carla Builder\n\nMailing address: 242 Mail Avenue, Bost"
   },
   {
     "name": "Wallet debited $1.50 after reveal",

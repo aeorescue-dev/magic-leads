@@ -23,6 +23,17 @@
 - Seed sintético: **50 leads** nas 4 praças + contas `qa-buyer+staging@magicleads.app` / `qa-free+staging@magicleads.app` (password `dev-demo-only`).
 - Nenhum dado de produção usado no seed; nenhuma chamada Searchbug/Telnyx.
 
+## Segmentação por prontidão (implementada)
+
+- **Flags materializadas no núcleo** (`backend/services/db.py`): `signal_ready` (owner + mailing + sinal) e `phone_ready` (telefone verificado), com backfill único (`schema_meta.readiness_v1`), triggers de escrita e índices parciais (`idx_leads_letter_ready`, `idx_leads_phone_ready`, variantes cidade/ofício).
+- **API**: `readiness=all|letter|phone` em `/api/leads/today`, `/api/leads`, `/api/leads/neighborhoods` e `/api/credits/leads`; `counts` calculado no mesmo filtro base.
+- **UI de dois níveis** no dashboard: linha primária **Todos / Carta-Visita / Com telefone**; linha secundária de origem (Reativos/Preventivos/Obras) + cidade/ofício/busca/filtros.
+- **Telefone visível mas bloqueado** no 1A (`1B`), apenas `phone_ready=1`; Carta e Telefone podem sobrepor-se no mesmo lead.
+- **Mapa segue a aba ativa** (`Mapa: Carta / Visita`) e os counts acompanham o filtro.
+- **Copy honesta**: “Pronto para carta” (sem afirmar mailing auditado) e nota de cobertura (“Cobertura em expansão: N prontos para carta · M com telefone”).
+- **Staging atual**: 68 prontos para carta, 0 com telefone; mapa NYC em Carta mostra 8 (janela de 7 dias).
+- **Seed** passa a preencher `signal_type`/`signal_status` e timestamps completos, para os triggers de prontidão e a serialização da API.
+
 ## Fluxo validado (dashboard)
 
 1. Login gratuito → `/pt/dashboard` com o layout oficial e sidebar completo.
@@ -54,7 +65,7 @@ Capturas em `reports/marco-1a/staging/`:
 ## Resultado do audit de staging
 
 ```
-RESULT ALL PASS (17/17)
+RESULT ALL PASS (20/20)
 ```
 
 - Staging gate redirects
@@ -62,6 +73,9 @@ RESULT ALL PASS (17/17)
 - Free login lands in official dashboard
 - Official sidebar keeps Opportunities
 - Freemium keeps dashboard + masked signals
+- Map follows active readiness
+- Readiness tabs visible (Todos / Carta / Telefone)
+- Phone tab locked for Milestone 1B
 - Sidebar opens credit packs in dashboard
 - Header wallet visible
 - Mock checkout created
@@ -112,7 +126,7 @@ O webhook duplicado não altera o saldo: `stripe_events` único + `credit_purcha
 - Frontend: **`https://magic-leads-staging-fabio-dev2.vercel.app`** (alias estável do preview aprovado). O preview antigo `magic-leads-frontend-final-gv537n0ha-fabio-dev2.vercel.app` está **obsoleto** e já não deve ser usado.
 - Seed: `backend/scripts/seed_staging_credits.py` executado no staging; **50 leads sintéticos** e contas de teste.
 - Proteção: **Vercel Deployment Protection** + **token gate** da app (`STAGING_GATE=1`); credenciais partilhadas fora de banda.
-- **Audit de staging: ALL PASS (17/17)** — dashboard oficial, mapa/sinais mascarados, pacotes, webhook idempotente, carteira $7.00, reveal $1,50, saldo $5.50, modal de paywall e desbloqueio automático após compra na modal.
+- **Audit de staging: ALL PASS (20/20)** — dashboard oficial, mapa/sinais mascarados, abas de prontidão, telefone bloqueado 1B, pacotes, webhook idempotente, carteira $7.00, reveal $1,50, saldo $5.50, modal de paywall e desbloqueio automático após compra na modal.
 - `CREDITS_MOCK=1` enquanto a chave `sk_test_` não está configurada; o caminho Stripe real está implementado e pronto a ativar.
 - O link e os tokens não ficam no repositório; são partilhados no canal seguro.
 
