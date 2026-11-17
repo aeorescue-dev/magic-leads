@@ -153,7 +153,10 @@ export default function LandingShell({ children }: { children: React.ReactNode }
 
   const scrollTo = (id: string) => {
     setMenuOpen(false);
-    document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
+    const el = document.getElementById(id);
+    if (!el) return;
+    const top = el.getBoundingClientRect().top + window.scrollY - 76;
+    window.scrollTo({ top, behavior: "smooth" });
   };
 
   const openModal = (context?: string | ModalContext) => {
@@ -185,7 +188,7 @@ export default function LandingShell({ children }: { children: React.ReactNode }
                 <span className="hidden font-display text-lg font-black text-white min-[420px]:inline">Magic<span className="text-[#34e0a1]">Leads</span></span>
               </button>
 
-              <nav className="hidden items-center gap-1 rounded-full border border-white/10 bg-white/[0.035] p-1 lg:flex">
+              <nav className="hidden items-center gap-1 rounded-full border border-white/10 bg-white/[0.035] p-1 xl:flex">
                 {navPairs.map(([label, id]) => (
                   <button
                     key={id}
@@ -216,7 +219,7 @@ export default function LandingShell({ children }: { children: React.ReactNode }
                 </button>
                 <button
                   onClick={() => setMenuOpen(!menuOpen)}
-                  className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 text-white lg:hidden"
+                  className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 text-white xl:hidden"
                   aria-label="Menu"
                 >
                   <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -227,7 +230,7 @@ export default function LandingShell({ children }: { children: React.ReactNode }
             </div>
           </div>
           {menuOpen && (
-            <div className="border-t border-white/10 bg-[#070A12] px-4 py-4 lg:hidden">
+            <div className="border-t border-white/10 bg-[#070A12] px-4 py-4 xl:hidden">
               <div className="flex flex-col gap-1">
                 {navPairs.map(([label, id]) => (
                   <button key={id} onClick={() => scrollTo(id)} className="rounded-lg px-3 py-2.5 text-left text-sm font-semibold text-[#9aa7ba] hover:bg-white/5 hover:text-white">{label}</button>
@@ -300,10 +303,18 @@ export default function LandingShell({ children }: { children: React.ReactNode }
                 <span className="text-xs text-[#94a3b8]">{t("landing.noLock")}</span>
               </div>
               <h3 className="font-display mt-3 text-2xl font-black">
-                {modalContext?.zone ? t("landing.mapTeaserTitle") : t("landing.modalTitle")}
+                {modalContext?.plan
+                  ? t("landing.planModalTitle")
+                  : modalContext?.zone
+                    ? t("landing.mapTeaserTitle")
+                    : t("landing.modalTitle")}
               </h3>
               <p className="mt-1 text-sm text-[#54617a]">
-                {modalContext?.zone ? t("landing.mapTeaserSub") : t("landing.modalSub")}
+                {modalContext?.plan
+                  ? t("landing.planModalSub")
+                  : modalContext?.zone
+                    ? t("landing.mapTeaserSub")
+                    : t("landing.modalSub")}
               </p>
 
               {selectedPlan ? (

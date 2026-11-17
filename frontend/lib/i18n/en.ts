@@ -817,6 +817,8 @@ const EN: Dict = {
   "landing.selectPlan": "Select plan",
   "landing.selected": "Selected",
   "landing.selectedPlan": "Selected plan",
+  "landing.planModalTitle": "Create account and activate plan",
+  "landing.planModalSub": "Choose your plan and create your account in seconds. Checkout opens next.",
   "landing.heroKicker": "opportunities in the bank right now",
   "landing.heroEyebrow": "FROM THE REPAIR TO THE FULL JOB. SAME OWNER.",
   "landing.hudCta": "See live signals",

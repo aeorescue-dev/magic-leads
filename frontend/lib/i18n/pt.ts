@@ -801,6 +801,8 @@ const PT: Dict = {
   "landing.selectPlan": "Selecionar plano",
   "landing.selected": "Selecionado",
   "landing.selectedPlan": "Plano selecionado",
+  "landing.planModalTitle": "Criar conta e ativar plano",
+  "landing.planModalSub": "Escolhe o plano e cria a conta em segundos. O checkout abre logo a seguir.",
   "landing.heroKicker": "oportunidades no banco agora",
   "landing.heroEyebrow": "DO REPARO À OBRA. O DONO É O MESMO.",
   "landing.hudCta": "Ver sinais ao vivo",
