@@ -1,0 +1,74 @@
+# Fase 4 — UI do dashboard (staging)
+
+**Branch:** `feat/weekly-subscription-quotas`  
+**Commits:** `34393d0`, `e52dde6`, `da5f18a`  
+**Âmbito:** frontend de staging + endpoints mock de staging.  
+**Produção:** intocada; sem merge.
+
+## Staging
+
+- Backend: `https://magic-leads-staging-staging.up.railway.app` (health `healthy`).
+- Frontend: `https://magic-leads-staging-fabio-dev2.vercel.app` (alias do preview `hn7tqph28`).
+- Flags: `BILLING_MOCK=1`, `ADDONS_MOCK=1`, `SEARCHBUG_MOCK=1`, `BILLING_MODEL=weekly_quota`, `BILLING_TIMEZONE=America/New_York`, `DAILY_LETTER_LIMIT=10`.
+
+## O que mudou
+
+### Dashboard
+
+- `SubscriptionFeed` substitui o painel de créditos e o feed legacy:
+  - cartões com morada mascarada, dono mascarado e estado do telefone;
+  - botão **Address / Letter** (10/dia, independente do telefone);
+  - botão **Reveal Phone** com contador base e add-on separado;
+  - modal de morada/proprietário e modal de telefone revelado;
+  - “load more” preservado.
+- Header: chip `Plano · usados/limite [+add-on]`.
+- Sidebar: cartão de plano com telefones e cartas/visitas do dia; botão **Gerir/Assinar**.
+- Removidos: `CreditsPanel`, `CreditWalletModal`, carteira em cêntimos, botões de $1,50/$3,00, pacotes de crédito e o lock screen legacy.
+- `PlanModal`: 7 planos, preço semanal, telefones/dia, total semanal, letras/dia, plano atual destacado, portal Stripe quando aplicável.
+- `AddonModal`: pacotes de 24h (+2 a +20), estado base/add-on e validade.
+- Deep links: `?plans=1` e `?addon=success`; `/credits` redireciona para `?plans=1`.
+
+### Landing e copy
+
+- `PricingSection` e a secção de preço da landing mostram os 7 planos:
+  - Starter $25.90/2, Essential $50.20/4, Growth $74.34/6, Pro $100.90/8,
+    Business $126/10, Scale $178.50/15, Agency $231/20.
+- Todos os planos: 10 cartas/visitas por dia.
+- Add-ons: +2 $2.50, +4 $4.80, +6 $7.20, +8 $9.60, +10 $12, +15 $18, +20 $24.
+- Removidas as referências a `$120` na landing, metadata, widget, termos e i18n.
+- `HowItWorks` passa a usar o Starter como âncora de custo.
+
+### Backend de staging
+
+- `GET /api/billing/plans` passa a devolver `addons`.
+- `POST /api/billing/mock-checkout` (apenas `BILLING_MOCK=1`) ativa plano para QA.
+- `POST /api/billing/addons/mock-pay` (apenas `ADDONS_MOCK=1`) injeta add-on 24h.
+- `/api/billing/mock-activate` continua **410 Gone**.
+
+## QA de staging
+
+- Utilizador: `qa-buyer+staging@magicleads.app`.
+- Plano ativado via mock-checkout: **Pro (`weekly_8`)**, 8 telefones/dia, 10 cartas/dia.
+- Add-on injetado: **+4** (24h).
+- Uso observado: `1/8` telefones, `0/10` cartas, `4` add-on.
+- Reset diário: `2026-11-18T05:00:00+00:00` (meia-noite de Nova Iorque).
+
+## Verificação
+
+- Backend: `1727 passed, 1 skipped` (`pytest tests/ -q`).
+- Ruff: `ruff check backend tests --select=E,F,W,I --ignore=E501` limpo.
+- Frontend: `npx tsc --noEmit` limpo; `vitest` 111 passed.
+- Build: `npm run build` verde (Next.js 16.4.3).
+- ESLint: 0 erros (121 avisos pré-existentes de `react-hooks`).
+
+## Limitações conhecidas
+
+- Sem `sk_test_`: Stripe continua em mock e os 7 `stripe_price_id` estão vazios.
+- O add-on modal foi aberto por deep link para auditoria; em uso normal abre quando a cota base chega a zero.
+- O `investor-room` admin ainda usa `$120` como input do modelo interno; não é UI de cliente.
+- Next.js 16.4.3 tem aviso de segurança; o worktree `garimpador-leads-security-next` já tem 16.4.6, mas não foi integrado nesta branch.
+
+## Paragem obrigatória
+
+**Fase 5:** auditoria visual do Fábio no alias de staging.  
+**Não há merge para produção, nem deploy de produção, sem aprovação escrita.**
