@@ -502,6 +502,14 @@ function DashboardPageInner() {
       .catch(() => {});
   }, [searchParams, user?.id]);
 
+  // Freemium: o mapa da aba Oportunidades precisa de uma praça concreta.
+  // Arranca em NYC para o utilizador ver zonas e sinais sem passar pelo
+  // FeedToolbar legacy (que fica escondido em freemium).
+  useEffect(() => {
+    if (!user?.id) return;
+    if (isFreemium && selectedCity === "all") setSelectedCity("NYC");
+  }, [user?.id, isFreemium, selectedCity]);
+
 
   // A5 (402): o interceptor do api-client emite este evento. Em freemium
   // abre a aba de créditos; em legacy abre o checkout da assinatura.

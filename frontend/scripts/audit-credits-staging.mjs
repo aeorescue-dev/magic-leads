@@ -3,7 +3,7 @@ import fs from "node:fs";
 
 const BASE =
   process.env.AUDIT_BASE_URL ||
-  "https://magic-leads-frontend-final-gv537n0ha-fabio-dev2.vercel.app";
+  "https://magic-leads-frontend-final-git-feat-credits-p-7904a9-fabio-dev2.vercel.app";
 const TOKEN = process.env.STAGING_ACCESS_TOKEN || "";
 const BYPASS = process.env.VERCEL_AUTOMATION_BYPASS_SECRET || "";
 const OUT = process.env.AUDIT_OUT || "../reports/marco-1a/staging";
@@ -106,7 +106,7 @@ await page.screenshot({ path: `${OUT}/02-dashboard-freemium.png`, fullPage: true
 // Map / freemium browse: Opportunities tab keeps the dashboard shell and the
 // masked credits panel. No contact details are shown before a reveal.
 await page.locator('button:has-text("Oportunidades")').first().click();
-await page.waitForTimeout(1200);
+await page.waitForTimeout(2500);
 await page.getByTestId("credits-panel").first().waitFor({ timeout: 30000 });
 check(
   "Freemium keeps dashboard + masked signals",
