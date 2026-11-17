@@ -123,7 +123,9 @@ export default function LandingShell({ children }: { children: React.ReactNode }
   // para o push/in-app acompanharem. Sem isto, um cliente EN que trocasse
   // idioma aqui continuaria a receber no idioma antigo.
   const changeLang = (next: Lang) => {
-    setLang(next);
+    // Troca em memória: não navega para outro prefixo de locale. Isso evita
+    // o gate/SSO do staging e mantém o utilizador na landing.
+    setLang(next, { navigate: false });
     const stored = readStoredUser();
     if (stored?.id) {
       updateUserLocale(stored.id, next).then(updateUser).catch(() => {});

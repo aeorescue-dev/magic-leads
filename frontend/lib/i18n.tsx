@@ -60,7 +60,7 @@ type Dict = Record<string, string>;
 
 interface I18nCtx {
   lang: Lang;
-  setLang: (l: Lang) => void;
+  setLang: (l: Lang, options?: { navigate?: boolean }) => void;
   t: (key: string, values?: Record<string, string | number>) => string;
 }
 
@@ -153,10 +153,14 @@ export function LanguageProvider({ children, initialLocale }: { children: ReactN
     };
   }, [lang]);
 
-  const setLang = (l: Lang) => {
+  const setLang = (l: Lang, options?: { navigate?: boolean }) => {
     setLangState(l);
     persistLocale(l);
     if (typeof window === "undefined") return;
+    // Na landing o idioma troca em memória (sem navegação), para não passar
+    // pelo gate/SSO do staging nem perder o contexto do utilizador. No resto
+    // da app mantém-se a navegação com prefixo de locale.
+    if (options?.navigate === false) return;
     // O prefixo da URL manda no idioma. Trocar a bandeira tem de navegar
     // (ex.: /en/dashboard -> /pt/dashboard), não apenas trocar o dicionário.
     const segments = (pathname || "/").split("/");
