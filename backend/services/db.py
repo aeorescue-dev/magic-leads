@@ -13333,6 +13333,7 @@ class AsyncDatabaseService:
                 layer=layer,
                 owner_type=owner_type,
                 search=search,
+                readiness=readiness,
             )
         )
 

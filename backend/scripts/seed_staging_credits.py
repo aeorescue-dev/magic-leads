@@ -100,7 +100,7 @@ for i in range(50):
             f"{trade} Â· Staging signal {i + 1}",
             owner,
             f"{200 + i} Mail Avenue, {city}, {state} {zip_code}",
-            (now - timedelta(days=i % 14)).date().isoformat(),
+            (now - timedelta(days=i % 14)).isoformat(),
             now.isoformat(),
             f"SEED-{city.upper()}-{i:03d}",
         ),
