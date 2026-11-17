@@ -111,4 +111,12 @@
 - Verificado no staging em PT/EN/ES: título, CTA, seleção de plano, modal com
   plano fixo e ausência da frase de checkout.
 
+### Troca de idioma na landing
+
+- As bandeiras PT/EN/ES trocam o dicionário **em memória**, sem `router.push`.
+  O URL mantém-se e o utilizador não passa pelo gate/SSO do staging nem pelo
+  login.
+- Verificado no staging: `/en` → PT → ES sem mudar de página e sem pedir login;
+  título e CTA atualizam imediatamente.
+
 
