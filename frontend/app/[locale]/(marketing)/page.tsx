@@ -1443,8 +1443,8 @@ export default function LandingPage() {
             </h2>
           </div>
 
-          <div className="mx-auto mt-14 max-w-6xl">
-            <div className="mb-8 flex flex-col items-center justify-between gap-3 sm:flex-row">
+          <div className="mx-auto mt-16 max-w-6xl">
+            <div className="mb-10 flex flex-col items-center justify-between gap-3 sm:flex-row">
               <div className="inline-flex items-center gap-2 rounded-full border border-[#34e0a1]/25 bg-[#34e0a1]/10 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-[#8ff5c8]">
                 <span className="blink-dot" /> {t("landing.planTag")}
               </div>
@@ -1453,7 +1453,7 @@ export default function LandingPage() {
               </p>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               {WEEKLY_PLANS.map((plan) => {
                 const selected = selectedPlan === plan.code;
                 return (
@@ -1463,28 +1463,28 @@ export default function LandingPage() {
                     onClick={() => setSelectedPlan(plan.code)}
                     aria-pressed={selected}
                     data-plan={plan.code}
-                    className={`group relative overflow-hidden rounded-2xl border p-5 text-left transition-all duration-300 ${
+                    className={`group relative flex h-full flex-col overflow-hidden rounded-[1.35rem] border p-6 text-left transition-all duration-300 ${
                       selected
-                        ? "border-[#34e0a1] bg-[linear-gradient(160deg,rgba(52,224,161,0.16),rgba(7,12,20,0.92))] shadow-[0_0_0_1px_rgba(52,224,161,0.55),0_28px_80px_-32px_rgba(52,224,161,0.65)]"
-                        : "border-white/10 bg-white/[0.035] hover:-translate-y-0.5 hover:border-[#34e0a1]/45 hover:bg-white/[0.06] hover:shadow-[0_22px_60px_-35px_rgba(52,224,161,0.45)]"
+                        ? "border-[#34e0a1]/75 bg-[linear-gradient(160deg,rgba(52,224,161,0.12),rgba(8,14,22,0.96))] shadow-[0_0_0_1px_rgba(52,224,161,0.35),0_22px_60px_-42px_rgba(52,224,161,0.45)]"
+                        : "border-white/[0.08] bg-white/[0.025] shadow-[0_18px_45px_-38px_rgba(0,0,0,0.95)] hover:-translate-y-0.5 hover:border-[#34e0a1]/35 hover:bg-white/[0.045] hover:shadow-[0_24px_60px_-42px_rgba(0,0,0,0.9)]"
                     }`}
                   >
-                    <span className={`pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent to-transparent ${selected ? "via-[#34e0a1]" : "via-white/20"}`} />
+                    <span className={`pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent to-transparent ${selected ? "via-[#34e0a1]/80" : "via-white/15"}`} />
                     <div className="flex items-start justify-between gap-2">
                       <span className="text-[13px] font-black tracking-[-0.01em] text-white">{plan.name}</span>
                       {plan.popular ? (
-                        <span className="rounded-full border border-[#34e0a1]/30 bg-[#34e0a1]/10 px-2 py-0.5 text-[8px] font-black uppercase tracking-[0.12em] text-[#8ff5c8]">
+                        <span className="rounded-full border border-[#34e0a1]/25 bg-[#34e0a1]/10 px-2.5 py-1 text-[8px] font-black uppercase tracking-[0.12em] text-[#8ff5c8]">
                           {t("landing.mostPopular")}
                         </span>
                       ) : null}
                     </div>
 
-                    <div className="mt-5 flex items-baseline gap-1">
-                      <span className="font-display text-[2rem] font-black tracking-[-0.04em] text-white">{plan.price}</span>
+                    <div className="mt-6 flex items-baseline gap-1">
+                      <span className="font-display text-[2.1rem] font-black tracking-[-0.04em] text-white">{plan.price}</span>
                       <span className="text-[10px] font-semibold text-white/40">{t("landing.week")}</span>
                     </div>
 
-                    <div className="mt-5 space-y-2 text-[11px] font-semibold text-white/55">
+                    <div className="mt-6 space-y-2.5 text-[11px] font-semibold text-white/55">
                       <div className="flex items-center gap-2">
                         <span className="h-1.5 w-1.5 rounded-full bg-[#34e0a1]" />
                         <span><b className="text-white/90">{plan.phones}</b> {t("landing.phonesDay")}</span>
@@ -1495,7 +1495,7 @@ export default function LandingPage() {
                       </div>
                     </div>
 
-                    <div className={`mt-5 flex items-center justify-between border-t pt-3 text-[10px] font-black uppercase tracking-[0.1em] ${selected ? "border-[#34e0a1]/25 text-[#8ff5c8]" : "border-white/10 text-white/30"}`}>
+                    <div className={`mt-auto flex items-center justify-between border-t pt-4 text-[10px] font-black uppercase tracking-[0.1em] ${selected ? "border-[#34e0a1]/25 text-[#8ff5c8]" : "border-white/10 text-white/30"}`}>
                       <span>{selected ? t("landing.selected") : t("landing.selectPlan")}</span>
                       <span className={`grid h-5 w-5 place-items-center rounded-full border ${selected ? "border-[#34e0a1] bg-[#34e0a1] text-[#06251c]" : "border-white/20 text-transparent"}`}>
                         <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
@@ -1506,11 +1506,11 @@ export default function LandingPage() {
               })}
             </div>
 
-            <div className="mt-8 flex flex-col items-center gap-3">
+            <div className="mt-10 flex flex-col items-center gap-3">
               <button
                 onClick={() => openModal({ plan: selectedPlan })}
                 data-track="plan_cta"
-                className="btn-mint w-full max-w-2xl px-6 py-4 text-center text-[12px] uppercase tracking-[0.08em] sm:text-[13px]"
+                className="btn-mint w-full max-w-2xl px-6 py-4 text-center text-[12px] font-bold tracking-[0.01em] sm:text-[13px]"
               >
                 {t("landing.planCta")}
               </button>

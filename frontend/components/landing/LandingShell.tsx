@@ -68,7 +68,7 @@ function Flag({ id, className = "h-5 w-7" }: { id: Lang; className?: string }) {
 
 function LangSwitch({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void }) {
   return (
-    <div className="flex items-center gap-1 rounded-[18px] bg-[#141820] p-1.5" role="group" aria-label="Language">
+    <div className="flex items-center gap-1 rounded-2xl border border-white/10 bg-white/[0.04] p-1" role="group" aria-label="Language">
       {LANGS.map((l) => (
         <button
           key={l.id}
@@ -76,9 +76,9 @@ function LangSwitch({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void 
           data-track={`language_${l.id}`}
           aria-label={l.label}
           aria-pressed={lang === l.id}
-          className={`grid h-10 w-11 place-items-center rounded-[12px] transition ${lang === l.id ? "bg-[#0f2a24] ring-2 ring-[#2feaa8]" : "opacity-70 hover:opacity-100"}`}
+          className={`grid h-8 w-9 place-items-center rounded-xl transition ${lang === l.id ? "bg-[#0f2a24] ring-1 ring-[#2feaa8]" : "opacity-60 hover:bg-white/5 hover:opacity-100"}`}
         >
-          <Flag id={l.id} />
+          <Flag id={l.id} className="h-4 w-6" />
         </button>
       ))}
     </div>
@@ -180,7 +180,7 @@ export default function LandingShell({ children }: { children: React.ReactNode }
       <div className="landing-light min-h-screen bg-white text-[#0b1220]">
         <header className={`sticky top-0 z-[900] border-b transition-all duration-300 ${scrolled ? "border-white/10 bg-[#070A12]/90 shadow-[0_18px_50px_-20px_rgba(0,0,0,0.8)] backdrop-blur-xl" : "border-transparent bg-[#070A12]/60 backdrop-blur-md"}`}>
           <div className="mx-auto max-w-[1400px] px-4 sm:px-6">
-            <div className="flex h-16 items-center justify-between gap-3">
+            <div className="flex h-16 items-center justify-between gap-4 2xl:gap-6">
               <button onClick={() => scrollTo("topo")} className="flex shrink-0 items-center gap-2.5">
                 <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-[#7c5cff] to-[#10b981] shadow-md shadow-[#10b981]/20">
                   <svg className="h-4 w-4 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="m13 2-9 12h7l-1 8 10-13h-7V2Z" /></svg>
@@ -188,7 +188,7 @@ export default function LandingShell({ children }: { children: React.ReactNode }
                 <span className="hidden font-display text-lg font-black text-white min-[420px]:inline">Magic<span className="text-[#34e0a1]">Leads</span></span>
               </button>
 
-              <nav className="hidden items-center gap-1 rounded-full border border-white/10 bg-white/[0.035] p-1 xl:flex">
+              <nav className="hidden items-center gap-1 rounded-full border border-white/10 bg-white/[0.035] p-1 2xl:flex">
                 {navPairs.map(([label, id]) => (
                   <button
                     key={id}
@@ -200,16 +200,17 @@ export default function LandingShell({ children }: { children: React.ReactNode }
                 ))}
               </nav>
 
-              <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+              <div className="flex shrink-0 items-center gap-2 sm:gap-3">
                 <div className="hidden md:block">
                   <LangSwitch lang={lang} setLang={changeLang} />
                 </div>
                 <Link
                   href={localePath("/auth")}
-                  className="hidden h-10 items-center rounded-full px-3.5 text-[13px] font-bold text-white/65 transition hover:bg-white/5 hover:text-white sm:inline-flex"
+                  className="hidden h-10 items-center rounded-full px-3 text-[13px] font-bold text-white/65 transition hover:bg-white/5 hover:text-white sm:inline-flex"
                 >
                   {t("landing.enter")}
                 </Link>
+                <span className="ml-0.5 hidden h-6 w-px bg-white/10 sm:block" aria-hidden />
                 <button
                   onClick={() => scrollTo("preco")}
                   data-track="header_cta"
@@ -219,7 +220,7 @@ export default function LandingShell({ children }: { children: React.ReactNode }
                 </button>
                 <button
                   onClick={() => setMenuOpen(!menuOpen)}
-                  className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 text-white xl:hidden"
+                  className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 text-white 2xl:hidden"
                   aria-label="Menu"
                 >
                   <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -230,7 +231,7 @@ export default function LandingShell({ children }: { children: React.ReactNode }
             </div>
           </div>
           {menuOpen && (
-            <div className="border-t border-white/10 bg-[#070A12] px-4 py-4 xl:hidden">
+            <div className="border-t border-white/10 bg-[#070A12] px-4 py-4 2xl:hidden">
               <div className="flex flex-col gap-1">
                 {navPairs.map(([label, id]) => (
                   <button key={id} onClick={() => scrollTo(id)} className="rounded-lg px-3 py-2.5 text-left text-sm font-semibold text-[#9aa7ba] hover:bg-white/5 hover:text-white">{label}</button>
