@@ -2108,13 +2108,13 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         "key TEXT PRIMARY KEY, value TEXT, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)"
     )
     _readiness_backfilled = conn.execute(
-        "SELECT 1 FROM schema_meta WHERE key='readiness_v2'"
+        "SELECT 1 FROM schema_meta WHERE key='readiness_v3'"
     ).fetchone()
     if not _readiness_backfilled:
         _t0 = time.perf_counter()
         _ready_done = refresh_readiness(conn, "1=1", ())
         conn.execute(
-            "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('readiness_v2', '1')"
+            "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('readiness_v3', '1')"
         )
         conn.commit()
         logger.info(
@@ -2179,6 +2179,8 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         "case_status, source_type, owner_name, owner_phone, phone_verified, "
         "mailing_address"
     )
+    conn.execute("DROP TRIGGER IF EXISTS trg_leads_quality_ins")
+    conn.execute("DROP TRIGGER IF EXISTS trg_leads_quality_upd")
     conn.executescript(
         "CREATE TRIGGER IF NOT EXISTS trg_leads_quality_ins "
         f"AFTER INSERT ON leads BEGIN {_quality_update} END;"
