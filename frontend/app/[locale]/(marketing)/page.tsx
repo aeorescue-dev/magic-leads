@@ -13,6 +13,7 @@ import { FoldWave, useLandingShell } from "@/components/landing/LandingShell";
 import { LiveTradeGrid } from "@/components/landing/LiveTradeGrid";
 import { PublicLiveMap } from "@/components/landing/PublicLiveMap";
 import ForEveryoneSection from "@/components/landing/ForEveryoneSection";
+import { WEEKLY_PLANS } from "@/lib/weekly-plans";
 import { Building2, Phone, ShieldCheck, Megaphone, Search, Users, Mail, MessageCircle, MessageSquare, MapPin, Clock, MousePointerClick } from "lucide-react";
 
 // ------------------------------------------------------------------
@@ -28,17 +29,6 @@ type Channel = "whatsapp" | "sms" | "email";
 type BadgeKey = "urgent" | "high" | "medium";
 
 const CITIES: City[] = ["New York", "Boston", "Dallas", "Chicago"];
-
-// Catálogo público dos 7 planos semanais (fonte: backend/services/plans.py).
-const WEEKLY_PLANS = [
-  { code: "starter", name: "Starter", price: "$25.90", phones: 2 },
-  { code: "essential", name: "Essential", price: "$50.20", phones: 4 },
-  { code: "growth", name: "Growth", price: "$74.34", phones: 6 },
-  { code: "pro", name: "Pro", price: "$100.90", phones: 8 },
-  { code: "business", name: "Business", price: "$126", phones: 10 },
-  { code: "scale", name: "Scale", price: "$178.50", phones: 15 },
-  { code: "agency", name: "Agency", price: "$231", phones: 20 },
-] as const;
 
 const CITY_SEARCH_ALIASES: Record<string, City> = {
   "new york": "New York",
@@ -333,6 +323,7 @@ export default function LandingPage() {
   const [ticketValue, setTicketValue] = useState(6500);
   const [roiProfile, setRoiProfile] = useState<RoiProfile>("team");
   const [openFaq, setOpenFaq] = useState<number | null>(0);
+  const [selectedPlan, setSelectedPlan] = useState<string>("weekly_8");
 
   // dados reais (métricas públicas — fonte única da verdade)
   // null = ainda a carregar: nunca mostramos "0" antes de haver resposta.
@@ -1119,7 +1110,7 @@ export default function LandingPage() {
                     <svg className="h-3.5 w-3.5 text-[#34e0a1]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
                     {t("landing.payOk")}
                   </span>
-                  <button onClick={() => openModal()} data-track="unlock_cta" className="inline-flex items-center gap-1.5 font-bold text-[#34e0a1] hover:text-white">{t("landing.unlock4")}<svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" /></svg></button>
+                  <button onClick={() => scrollTo("preco")} data-track="unlock_cta" className="inline-flex items-center gap-1.5 font-bold text-[#34e0a1] hover:text-white">{t("landing.unlock4")}<svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" /></svg></button>
                 </div>
               </div>
             </div>
@@ -1178,7 +1169,7 @@ export default function LandingPage() {
                   </div>
 
                   <div className="mt-auto pt-8">
-                    <button onClick={() => openModal()} data-track="compare_cta" className="btn-mint w-full py-3.5 text-sm">{t("landing.ctaPanel")}</button>
+                    <button onClick={() => scrollTo("preco")} data-track="compare_cta" className="btn-mint w-full py-3.5 text-sm">{t("landing.ctaPanel")}</button>
                     <p className="mt-3 text-center text-[10px] font-bold uppercase tracking-[0.14em] text-[#8ff5c8]">✓ {t("landing.trust2")} · ✓ {t("landing.trust3")}</p>
                   </div>
                 </div>
@@ -1402,7 +1393,7 @@ export default function LandingPage() {
               </div>
 
               <div className="relative">
-                <button onClick={() => openModal()} data-track="calc_cta" className="w-full rounded-xl bg-white py-4 text-sm font-black uppercase tracking-[0.08em] text-[#0a8f65] shadow-lg shadow-black/20 transition hover:-translate-y-0.5 hover:bg-[#f0fdf8]">{t("landing.calcCta")}</button>
+                <button onClick={() => scrollTo("preco")} data-track="calc_cta" className="w-full rounded-xl bg-white py-4 text-sm font-black uppercase tracking-[0.08em] text-[#0a8f65] shadow-lg shadow-black/20 transition hover:-translate-y-0.5 hover:bg-[#f0fdf8]">{t("landing.calcCta")}</button>
                 <p className="mt-3 text-center text-[10px] font-black uppercase tracking-[0.12em] text-white/80">✓ {t("landing.trust2")} · ✓ {t("landing.trust3")}</p>
               </div>
             </div>
@@ -1452,54 +1443,83 @@ export default function LandingPage() {
             </h2>
           </div>
 
-          <div className="mx-auto mt-14 grid max-w-6xl gap-5 lg:grid-cols-[1.08fr_0.92fr]">
-            <div className="relative overflow-hidden rounded-[1.7rem] border border-[#34e0a1]/30 bg-gradient-to-b from-[#0a1c19] via-[#08131a] to-[#070c14] p-7 shadow-[0_50px_120px_-50px_rgba(16,185,129,0.55)] sm:p-9">
-              <div className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full bg-[#34e0a1]/[0.16] blur-3xl" />
-              <div className="relative">
-                <div className="flex items-center justify-between">
-                  <span className="inline-flex items-center gap-1.5 rounded-full border border-[#34e0a1]/30 bg-[#34e0a1]/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-[#34e0a1]">
-                    <span className="blink-dot" />{t("landing.planTag")}
-                  </span>
-                  <span className="mono-data text-[10px] uppercase tracking-widest text-white/30">{t("landing.trust3")}</span>
-                </div>
-
-                <div className="mt-6 flex items-end gap-2">
-                  <span className="mb-2 text-[11px] font-black uppercase tracking-[0.12em] text-[#8ff5c8]">{t("landing.priceFrom")}</span>
-                  <span className="font-display text-5xl font-black tracking-[-0.05em] text-white sm:text-6xl">$25.90</span>
-                  <span className="mb-2 text-sm font-semibold text-white/45">{t("landing.week")}</span>
-                </div>
-                <p className="mt-3 text-sm text-white/50">{t("landing.planSub")}</p>
-
-                <div className="my-6 h-px bg-white/10" />
-
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  {WEEKLY_PLANS.map((plan) => (
-                    <div
-                      key={plan.code}
-                      className="flex items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2"
-                    >
-                      <span className="text-[12px] font-bold text-white/80">{plan.name}</span>
-                      <span className="text-[11px] font-semibold text-white/45">
-                        {plan.phones} {t("landing.phonesDay")}
-                      </span>
-                      <span className="text-[12px] font-black text-[#8ff5c8]">{plan.price}</span>
-                    </div>
-                  ))}
-                </div>
-
-                <button onClick={() => openModal()} data-track="plan_cta" className="btn-mint mt-6 w-full py-4 text-sm uppercase tracking-[0.1em]">{t("landing.planCta")}</button>
-
-                <div className="mt-4 rounded-xl border border-[#34e0a1]/25 bg-[#34e0a1]/[0.08] px-4 py-3 text-center">
-                  <p className="text-[11px] font-black uppercase tracking-[0.1em] text-[#8ff5c8]">✓ {t("landing.trust2")} · ✓ {t("landing.trust3")}</p>
-                  {L.quotes[0] && (
-                    <p className="mt-1.5 text-[11px] font-semibold text-white/65">“{L.quotes[0].badge}” · {L.quotes[0].name}, {L.quotes[0].role}</p>
-                  )}
-                </div>
-                <p className="mt-3 text-center text-[10px] font-semibold uppercase tracking-[0.1em] text-white/30">{t("landing.planSafe")}</p>
+          <div className="mx-auto mt-14 max-w-6xl">
+            <div className="mb-8 flex flex-col items-center justify-between gap-3 sm:flex-row">
+              <div className="inline-flex items-center gap-2 rounded-full border border-[#34e0a1]/25 bg-[#34e0a1]/10 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-[#8ff5c8]">
+                <span className="blink-dot" /> {t("landing.planTag")}
               </div>
+              <p className="text-[11px] font-semibold text-white/40">
+                {t("landing.priceFrom")} <span className="text-white/80">$25.90</span> {t("landing.week")}
+              </p>
             </div>
 
-            <div className="flex flex-col gap-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {WEEKLY_PLANS.map((plan) => {
+                const selected = selectedPlan === plan.code;
+                return (
+                  <button
+                    key={plan.code}
+                    type="button"
+                    onClick={() => setSelectedPlan(plan.code)}
+                    aria-pressed={selected}
+                    data-plan={plan.code}
+                    className={`group relative overflow-hidden rounded-2xl border p-5 text-left transition-all duration-300 ${
+                      selected
+                        ? "border-[#34e0a1] bg-[linear-gradient(160deg,rgba(52,224,161,0.16),rgba(7,12,20,0.92))] shadow-[0_0_0_1px_rgba(52,224,161,0.55),0_28px_80px_-32px_rgba(52,224,161,0.65)]"
+                        : "border-white/10 bg-white/[0.035] hover:-translate-y-0.5 hover:border-[#34e0a1]/45 hover:bg-white/[0.06] hover:shadow-[0_22px_60px_-35px_rgba(52,224,161,0.45)]"
+                    }`}
+                  >
+                    <span className={`pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent to-transparent ${selected ? "via-[#34e0a1]" : "via-white/20"}`} />
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-[13px] font-black tracking-[-0.01em] text-white">{plan.name}</span>
+                      {plan.popular ? (
+                        <span className="rounded-full border border-[#34e0a1]/30 bg-[#34e0a1]/10 px-2 py-0.5 text-[8px] font-black uppercase tracking-[0.12em] text-[#8ff5c8]">
+                          {t("landing.mostPopular")}
+                        </span>
+                      ) : null}
+                    </div>
+
+                    <div className="mt-5 flex items-baseline gap-1">
+                      <span className="font-display text-[2rem] font-black tracking-[-0.04em] text-white">{plan.price}</span>
+                      <span className="text-[10px] font-semibold text-white/40">{t("landing.week")}</span>
+                    </div>
+
+                    <div className="mt-5 space-y-2 text-[11px] font-semibold text-white/55">
+                      <div className="flex items-center gap-2">
+                        <span className="h-1.5 w-1.5 rounded-full bg-[#34e0a1]" />
+                        <span><b className="text-white/90">{plan.phones}</b> {t("landing.phonesDay")}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="h-1.5 w-1.5 rounded-full bg-[#34e0a1]" />
+                        <span>10 {t("landing.lettersDay")}</span>
+                      </div>
+                    </div>
+
+                    <div className={`mt-5 flex items-center justify-between border-t pt-3 text-[10px] font-black uppercase tracking-[0.1em] ${selected ? "border-[#34e0a1]/25 text-[#8ff5c8]" : "border-white/10 text-white/30"}`}>
+                      <span>{selected ? t("landing.selected") : t("landing.selectPlan")}</span>
+                      <span className={`grid h-5 w-5 place-items-center rounded-full border ${selected ? "border-[#34e0a1] bg-[#34e0a1] text-[#06251c]" : "border-white/20 text-transparent"}`}>
+                        <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-8 flex flex-col items-center gap-3">
+              <button
+                onClick={() => openModal({ plan: selectedPlan })}
+                data-track="plan_cta"
+                className="btn-mint w-full max-w-2xl px-6 py-4 text-center text-[12px] uppercase tracking-[0.08em] sm:text-[13px]"
+              >
+                {t("landing.planCta")}
+              </button>
+              <p className="text-center text-[10px] font-semibold uppercase tracking-[0.12em] text-white/30">
+                ✓ {t("landing.planSafe")} · {t("landing.trust3")}
+              </p>
+            </div>
+
+            <div className="mt-10 grid gap-3 md:grid-cols-3">
               <div className="glass-panel rounded-[1.4rem] p-6">
                 <p className="font-display text-lg font-bold text-white">{t("landing.billing")}</p>
                 <ol className="mt-4 space-y-3 text-sm text-white/55">
@@ -1542,7 +1562,7 @@ export default function LandingPage() {
             <span className="eyebrow eyebrow-light"><span className="dot" style={{ background: "#f43f5e", boxShadow: "0 0 10px #f43f5e" }} />{t("landing.faqKicker")}</span>
             <h2 className="font-display mt-5 text-[2.3rem] font-black leading-[0.98] tracking-[-0.03em] text-[#0b1220] sm:text-5xl">{t("landing.faqTitle")}</h2>
             <p className="mt-6 text-[15px] leading-relaxed text-[#54617a]">{t("landing.faqSub")}</p>
-            <button onClick={() => openModal()} data-track="faq_cta" className="btn-dark mt-7 px-6 py-3.5 text-sm">{t("landing.faqCta")}</button>
+            <button onClick={() => scrollTo("preco")} data-track="faq_cta" className="btn-dark mt-7 px-6 py-3.5 text-sm">{t("landing.faqCta")}</button>
             <div className="mt-8 rounded-2xl border border-[#10b981]/15 bg-white/70 p-5">
               <p className="text-sm font-semibold text-[#0b1220]">✓ {t("landing.trust2")} · ✓ {t("landing.trust3")}</p>
             </div>
@@ -1577,7 +1597,7 @@ export default function LandingPage() {
             <span className="hl">{t("landing.finalHl")}</span>
           </h2>
           <p className="mx-auto mt-6 max-w-xl text-base text-[#9fb0c6] sm:text-lg">{t("landing.finalSub")}</p>
-          <button onClick={() => openModal()} data-track="final_cta" className="btn-mint mx-auto mt-9 inline-flex items-center gap-2.5 px-9 py-4 text-sm uppercase tracking-[0.1em]">{t("landing.finalCta")}</button>
+          <button onClick={() => scrollTo("preco")} data-track="final_cta" className="btn-mint mx-auto mt-9 inline-flex items-center gap-2.5 px-9 py-4 text-sm uppercase tracking-[0.1em]">{t("landing.finalCta")}</button>
           <div className="glass-panel mx-auto mt-6 flex max-w-xl flex-col items-center gap-2 rounded-2xl px-5 py-4">
             <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-[11px] font-black uppercase tracking-[0.12em] text-[#8ff5c8]">
               <span>✓ {t("landing.trust2")}</span>
@@ -1598,7 +1618,7 @@ export default function LandingPage() {
             <p className="text-[11px] font-bold text-[#34e0a1]">{t("landing.stickyArea")}</p>
             <p className="text-[10px] font-bold text-[#8ff5c8]">✓ {t("landing.trust2")} · ✓ {t("landing.trust3")}</p>
           </div>
-          <button onClick={() => openModal()} data-track="sticky_cta" className="btn-mint flex-1 py-3 text-sm">{t("landing.stickyNow")}</button>
+          <button onClick={() => scrollTo("preco")} data-track="sticky_cta" className="btn-mint flex-1 py-3 text-sm">{t("landing.stickyNow")}</button>
         </div>
       </div>
 

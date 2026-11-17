@@ -3,16 +3,9 @@
 import { CheckCircle2, Shield, Clock, RotateCcw, Phone, Mail, Zap } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { DemoLoginButton } from "@/components/DemoLoginButton";
+import { WEEKLY_PLANS } from "@/lib/weekly-plans";
 
-const PLANS = [
-  { code: "starter", name: "Starter", price: "$25.90", phones: 2 },
-  { code: "essential", name: "Essential", price: "$50.20", phones: 4 },
-  { code: "growth", name: "Growth", price: "$74.34", phones: 6 },
-  { code: "pro", name: "Pro", price: "$100.90", phones: 8, popular: true },
-  { code: "business", name: "Business", price: "$126", phones: 10 },
-  { code: "scale", name: "Scale", price: "$178.50", phones: 15 },
-  { code: "agency", name: "Agency", price: "$231", phones: 20 },
-] as const;
+const PLANS = WEEKLY_PLANS;
 
 const COPY = {
   pt: {

@@ -9,6 +9,7 @@ import { useI18n } from '@/lib/i18n';
 import { useStartCheckout } from '@/lib/billing';
 import { trackEvent } from '@/lib/analytics';
 import { requestPasswordReset, setAuthCookie, setToken } from '@/lib/api-client';
+import { mockPlanCheckout } from '@/lib/subscription-api';
 import { hasPasskeyHint, isPasskeySupported, loginWithPasskey, PasskeyError, passkeyMessageKey, passkeyPlatform, passkeyPlatformSuffix, setPasskeyHint } from '@/lib/webauthn';
 
 const subscribeNoop = () => () => {};
@@ -88,9 +89,11 @@ function ForgotPasswordForm({ onClose }: { onClose: () => void }) {
 
 function AuthFormInner({
   preselectedTrade,
+  preselectedPlan,
   initialRegister,
 }: {
   preselectedTrade?: string;
+  preselectedPlan?: string;
   initialRegister?: boolean;
 }) {
   const router = useRouter();
@@ -113,6 +116,18 @@ function AuthFormInner({
   const checkoutIntent = searchParams.get('checkout') === '1';
 
   const localePath = (href: string) => `/${lang}${href}`;
+
+  // Checkout com plano escolhido na landing. Em produção devolve o URL do
+  // Stripe; em staging com BILLING_MOCK=1 ativa o plano e segue para o painel.
+  const startCheckoutWithPlan = async (): Promise<string | null> => {
+    const res = await startCheckout(preselectedTrade, preselectedPlan);
+    if (res.checkout_url) return res.checkout_url;
+    if (res.mock && preselectedPlan) {
+      await mockPlanCheckout(preselectedPlan);
+      return `${localePath('/dashboard')}?billing=success`;
+    }
+    return null;
+  };
 
   // Mensagem direta sem depender de t() — evita chave crua mesmo se i18n falhar.
   const sessionMessage = sessionReason === 'fifo_evicted'
@@ -223,8 +238,7 @@ function AuthFormInner({
         // NUNCA cai em fallback para /dashboard: sem URL real é erro.
         let checkoutUrl: string | null = null;
         try {
-          const res = await startCheckout(preselectedTrade);
-          checkoutUrl = res.checkout_url;
+          checkoutUrl = await startCheckoutWithPlan();
         } catch (err: any) {
           const msg = err?.response?.data?.detail || err?.message || t('dashboard.auth.error_generic') || 'Erro ao iniciar pagamento';
           setErrors({ general: msg });
@@ -241,14 +255,14 @@ function AuthFormInner({
         setTimeout(() => {
           window.location.href = checkoutUrl;
         }, 600);
-      } else if (checkoutIntent) {
+      } else if (checkoutIntent || preselectedPlan) {
         setSuccess(true);
         try {
-          const res = await startCheckout(preselectedTrade);
-          if (!res.checkout_url) throw new Error("checkout_unavailable");
+          const checkoutUrl = await startCheckoutWithPlan();
+          if (!checkoutUrl) throw new Error("checkout_unavailable");
           trackEvent("checkout_started", "login");
           setTimeout(() => {
-            window.location.href = res.checkout_url!;
+            window.location.href = checkoutUrl;
           }, 600);
         } catch (err: any) {
           setSuccess(false);
@@ -495,12 +509,14 @@ function AuthFormInner({
 
 export function AuthForm({
   preselectedTrade,
+  preselectedPlan,
   initialRegister,
-}: { preselectedTrade?: string; initialRegister?: boolean } = {}) {
+}: { preselectedTrade?: string; preselectedPlan?: string; initialRegister?: boolean } = {}) {
   return (
     <Suspense fallback={null}>
       <AuthFormInner
         preselectedTrade={preselectedTrade}
+        preselectedPlan={preselectedPlan}
         initialRegister={initialRegister}
       />
     </Suspense>

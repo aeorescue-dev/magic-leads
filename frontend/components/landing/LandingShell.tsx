@@ -9,6 +9,7 @@ import AnalyticsBeacon from "@/components/AnalyticsBeacon";
 import LpWidgetMount from "@/components/landing/LpWidget/LpWidgetMount";
 import { readStoredUser, useAuth } from "@/lib/auth";
 import { updateUserLocale } from "@/lib/api-client";
+import { weeklyPlanByCode } from "@/lib/weekly-plans";
 
 // ------------------------------------------------------------------
 // Shared helpers
@@ -93,6 +94,8 @@ export interface ModalContext {
   city?: string;
   count?: number;
   fresh?: number;
+  /** Código do plano semanal escolhido na landing (`weekly_2`…`weekly_20`). */
+  plan?: string;
 }
 
 interface LandingShellCtx {
@@ -167,33 +170,61 @@ export default function LandingShell({ children }: { children: React.ReactNode }
     setModalContext(null);
   };
 
+  const selectedPlan = weeklyPlanByCode(modalContext?.plan);
+
   return (
     <Ctx.Provider value={{ openModal, scrollTo }}>
       <div className="landing-light min-h-screen bg-white text-[#0b1220]">
-        <header className={`sticky top-0 z-[900] transition-all duration-300 ${scrolled ? "border-b border-white/10 bg-[#070A12]/85 backdrop-blur-xl shadow-2xl shadow-black/40" : "bg-[#070A12]/65 backdrop-blur-md"}`}>
+        <header className={`sticky top-0 z-[900] border-b transition-all duration-300 ${scrolled ? "border-white/10 bg-[#070A12]/90 shadow-[0_18px_50px_-20px_rgba(0,0,0,0.8)] backdrop-blur-xl" : "border-transparent bg-[#070A12]/60 backdrop-blur-md"}`}>
           <div className="mx-auto max-w-[1400px] px-4 sm:px-6">
-            <div className="flex h-16 items-center justify-between gap-4">
+            <div className="flex h-16 items-center justify-between gap-3">
               <button onClick={() => scrollTo("topo")} className="flex shrink-0 items-center gap-2.5">
                 <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-[#7c5cff] to-[#10b981] shadow-md shadow-[#10b981]/20">
                   <svg className="h-4 w-4 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="m13 2-9 12h7l-1 8 10-13h-7V2Z" /></svg>
                 </div>
                 <span className="hidden font-display text-lg font-black text-white min-[420px]:inline">Magic<span className="text-[#34e0a1]">Leads</span></span>
               </button>
-              <div className="flex shrink-0 items-center gap-3">
-                <LangSwitch lang={lang} setLang={changeLang} />
-                <button onClick={() => openModal()} data-track="header_cta" className="btn-mint hidden px-5 py-2.5 text-[13px] sm:block">{t("landing.start")}</button>
-                <button onClick={() => setMenuOpen(!menuOpen)} className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 text-white lg:hidden" aria-label="Menu">
+
+              <nav className="hidden items-center gap-1 rounded-full border border-white/10 bg-white/[0.035] p-1 lg:flex">
+                {navPairs.map(([label, id]) => (
+                  <button
+                    key={id}
+                    onClick={() => scrollTo(id)}
+                    className="whitespace-nowrap rounded-full px-3.5 py-2 text-[12px] font-semibold text-[#9aa7ba] transition hover:bg-white/[0.07] hover:text-white"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </nav>
+
+              <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+                <div className="hidden md:block">
+                  <LangSwitch lang={lang} setLang={changeLang} />
+                </div>
+                <Link
+                  href={localePath("/auth")}
+                  className="hidden h-10 items-center rounded-full px-3.5 text-[13px] font-bold text-white/65 transition hover:bg-white/5 hover:text-white sm:inline-flex"
+                >
+                  {t("landing.enter")}
+                </Link>
+                <button
+                  onClick={() => scrollTo("preco")}
+                  data-track="header_cta"
+                  className="btn-mint hidden whitespace-nowrap px-4 py-2.5 text-[12px] sm:block"
+                >
+                  {t("landing.start")}
+                </button>
+                <button
+                  onClick={() => setMenuOpen(!menuOpen)}
+                  className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 text-white lg:hidden"
+                  aria-label="Menu"
+                >
                   <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     {menuOpen ? <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" /> : <path d="M4 7h16M4 12h16M4 17h16" strokeLinecap="round" />}
                   </svg>
                 </button>
               </div>
             </div>
-            <nav className="hidden h-11 items-center justify-center gap-8 border-t border-white/10 text-[13px] font-semibold text-[#9aa7ba] lg:flex">
-              {navPairs.map(([label, id]) => (
-                <button key={id} onClick={() => scrollTo(id)} className="whitespace-nowrap transition hover:text-white">{label}</button>
-              ))}
-            </nav>
           </div>
           {menuOpen && (
             <div className="border-t border-white/10 bg-[#070A12] px-4 py-4 lg:hidden">
@@ -201,7 +232,11 @@ export default function LandingShell({ children }: { children: React.ReactNode }
                 {navPairs.map(([label, id]) => (
                   <button key={id} onClick={() => scrollTo(id)} className="rounded-lg px-3 py-2.5 text-left text-sm font-semibold text-[#9aa7ba] hover:bg-white/5 hover:text-white">{label}</button>
                 ))}
-                <button onClick={() => openModal()} data-track="mobile_menu_cta" className="btn-mint mt-2 py-3 text-sm">{t("landing.start")}</button>
+                <div className="mt-3 flex items-center justify-between gap-3 border-t border-white/10 pt-3">
+                  <LangSwitch lang={lang} setLang={changeLang} />
+                  <Link href={localePath("/auth")} className="text-sm font-bold text-white/70 hover:text-white">{t("landing.enter")}</Link>
+                </div>
+                <button onClick={() => scrollTo("preco")} data-track="mobile_menu_cta" className="btn-mint mt-2 py-3 text-sm">{t("landing.start")}</button>
               </div>
             </div>
           )}
@@ -230,7 +265,7 @@ export default function LandingShell({ children }: { children: React.ReactNode }
                 <div className="mt-4 flex flex-col gap-2.5">
                   {navPairs.slice(4).map(([label, id]) => <button key={id} onClick={() => scrollTo(id)} className="text-left hover:text-white">{label}</button>)}
                   <a href="mailto:contato@magicleads.app" className="hover:text-white">{t("landing.talk")}</a>
-                  <button onClick={() => openModal()} data-track="footer_start_week" className="text-left font-semibold text-[#34e0a1]">{t("landing.startWeek")}</button>
+                  <button onClick={() => scrollTo("preco")} data-track="footer_start_week" className="text-left font-semibold text-[#34e0a1]">{t("landing.startWeek")}</button>
                 </div>
               </div>
             </div>
@@ -256,7 +291,11 @@ export default function LandingShell({ children }: { children: React.ReactNode }
               <button onClick={closeModal} className="absolute right-4 top-4 text-[#94a3b8]">✕</button>
               <div className="flex items-center gap-2">
                 <span className="rounded bg-[#e8f9ef] px-2.5 py-0.5 text-[10px] font-black text-[#0a8f65]">
-                  {modalContext?.zone ? t("landing.mapTeaserTag") : t("landing.modalTag")}
+                  {modalContext?.plan
+                    ? t("landing.selectedPlan")
+                    : modalContext?.zone
+                      ? t("landing.mapTeaserTag")
+                      : t("landing.modalTag")}
                 </span>
                 <span className="text-xs text-[#94a3b8]">{t("landing.noLock")}</span>
               </div>
@@ -266,6 +305,26 @@ export default function LandingShell({ children }: { children: React.ReactNode }
               <p className="mt-1 text-sm text-[#54617a]">
                 {modalContext?.zone ? t("landing.mapTeaserSub") : t("landing.modalSub")}
               </p>
+
+              {selectedPlan ? (
+                <div className="mt-4 rounded-2xl border border-[#bfead9] bg-[#f0fdf7] p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-[9px] font-black uppercase tracking-[0.14em] text-[#0a8f65]">
+                        {t("landing.selectedPlan")}
+                      </p>
+                      <p className="font-display mt-1 text-lg font-black text-[#0b1220]">{selectedPlan.name}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-display text-lg font-black text-[#0b1220]">{selectedPlan.price}</p>
+                      <p className="text-[10px] font-semibold text-[#54617a]">{t("landing.week")}</p>
+                    </div>
+                  </div>
+                  <p className="mt-2 text-[11px] font-semibold text-[#54617a]">
+                    {selectedPlan.phones} {t("landing.phonesDay")} · 10 {t("landing.lettersDay")}
+                  </p>
+                </div>
+              ) : null}
 
               {modalContext?.zone ? (
                 <div className="mt-4 rounded-2xl border border-[#d9f3e8] bg-[#f0fdf7] p-4">
@@ -313,7 +372,8 @@ export default function LandingShell({ children }: { children: React.ReactNode }
               <div className="mt-5">
                 <AuthForm
                   preselectedTrade={modalContext?.trade ?? undefined}
-                  initialRegister={Boolean(modalContext?.zone)}
+                  preselectedPlan={modalContext?.plan ?? undefined}
+                  initialRegister={Boolean(modalContext?.zone || modalContext?.plan)}
                 />
               </div>
               <button onClick={() => { closeModal(); router.push(localePath("/auth")); }} className="mt-6 w-full rounded-xl border border-[#e2e8f0] py-3 text-sm font-bold text-[#54617a] hover:border-[#0b1220]">

@@ -965,17 +965,20 @@ export interface CheckoutResponse {
   plan: CheckoutPlan;
 }
 
-export async function createCheckoutSession(locale?: string, trade?: string): Promise<CheckoutResponse> {
+export async function createCheckoutSession(locale?: string, trade?: string, planCode?: string): Promise<CheckoutResponse> {
   const headers: Record<string, string> = { "Accept-Language": locale || "" };
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
-  if (trade) headers["Content-Type"] = "application/json";
+  const hasBody = Boolean(trade || planCode);
+  if (hasBody) headers["Content-Type"] = "application/json";
   return handle<CheckoutResponse>(
     await fetch(`${API_URL}/api/billing/checkout`, {
       method: "POST",
       credentials: "include",
       headers,
-      ...(trade ? { body: JSON.stringify({ trade }) } : {}),
+      ...(hasBody
+        ? { body: JSON.stringify({ ...(trade ? { trade } : {}), ...(planCode ? { plan_code: planCode } : {}) }) }
+        : {}),
     })
   );
 }

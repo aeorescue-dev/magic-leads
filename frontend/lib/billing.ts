@@ -16,8 +16,8 @@ export interface CheckoutResult {
 
 export function useStartCheckout() {
   const { lang } = useI18n();
-  return async (trade?: string): Promise<CheckoutResult> => {
-    const res = await createCheckoutSession(lang, trade);
+  return async (trade?: string, planCode?: string): Promise<CheckoutResult> => {
+    const res = await createCheckoutSession(lang, trade, planCode);
     return { mock: res.mock, checkout_url: res.checkout_url };
   };
 }
