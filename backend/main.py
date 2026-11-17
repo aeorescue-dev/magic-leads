@@ -8373,7 +8373,6 @@ async def subscription_usage(user: dict = Depends(_get_current_user)):
         "status": sub.get("status"),
         "can_access": bool(sub.get("can_access")),
         "plan_until": full.get("plan_until"),
-        "phone_eligible_count": None,
     }
 
 
@@ -8400,7 +8399,10 @@ async def subscription_reveal_phone(
 ):
     """Telefone on-demand: base -> add-on 24h -> Searchbug, com estorno em falha."""
     await _require_active_access(user)
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
     idempotency_key = str((body or {}).get("idempotency_key") or "").strip()
     trade_code = (body or {}).get("trade_code")
     try:
@@ -8422,7 +8424,10 @@ async def subscription_reveal_phone(
 async def billing_addon_checkout(request: Request, user: dict = Depends(_get_current_user)):
     """Checkout de add-on de telefones (24h); mock em staging."""
     await _require_active_access(user)
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
     pack_code = str((body or {}).get("pack_code") or "").strip()
     locale = str((body or {}).get("locale") or "en").lower()
     if not plans.get_addon(pack_code):
