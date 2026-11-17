@@ -13,7 +13,7 @@ import {
 const COPY = {
   pt: {
     title: "Mais telefones por 24h",
-    subtitle: "A tua cota diária terminou. Escolhe um add-on para continuar agora.",
+    subtitle: "Precisas de mais telefones? Adiciona um pacote de 24h e continua a trabalhar.",
     remaining: "Telefones disponíveis",
     base: "Cota diária",
     addon: "Add-on ativo",
@@ -26,7 +26,7 @@ const COPY = {
   },
   en: {
     title: "More phones for 24h",
-    subtitle: "Your daily quota is over. Choose an add-on to keep working now.",
+    subtitle: "Need more phones? Add a 24h pack and keep working.",
     remaining: "Available phones",
     base: "Daily quota",
     addon: "Active add-on",
@@ -39,7 +39,7 @@ const COPY = {
   },
   es: {
     title: "Más teléfonos por 24h",
-    subtitle: "Tu cuota diaria terminó. Elige un add-on para continuar ahora.",
+    subtitle: "¿Necesitas más teléfonos? Añade un paquete de 24h y sigue trabajando.",
     remaining: "Teléfonos disponibles",
     base: "Cuota diaria",
     addon: "Add-on activo",
