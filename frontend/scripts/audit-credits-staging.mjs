@@ -115,6 +115,26 @@ check(
 );
 await page.screenshot({ path: `${OUT}/03-map-masked-signals.png`, fullPage: true });
 
+check(
+  "Map follows active readiness",
+  await page.getByText(/Mapa: Carta \/ Visita/i).first().isVisible(),
+);
+const readyAll = page.getByTestId("readiness-all").first();
+const readyLetter = page.getByTestId("readiness-letter").first();
+const readyPhone = page.getByTestId("readiness-phone").first();
+check(
+  "Readiness tabs visible (Todos / Carta / Telefone)",
+  (await readyAll.isVisible()) && (await readyLetter.isVisible()) && (await readyPhone.isVisible()),
+);
+await readyPhone.click();
+await page.waitForTimeout(1000);
+check(
+  "Phone tab locked for Milestone 1B",
+  await page.getByText(/Marco 1B|Milestone 1B/i).first().isVisible(),
+);
+await readyLetter.click();
+await page.waitForTimeout(1200);
+
 // ---------------------------------------------------------------------------
 // 2. Sidebar "Créditos / Planos" opens the packs inside the dashboard
 // ---------------------------------------------------------------------------

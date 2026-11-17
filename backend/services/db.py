@@ -173,13 +173,83 @@ def _feed_where(alias: str = "") -> str:
     )
 
 
+def _owner_ready_where(alias: str = "") -> str:
+    """Owner/empresa registado e não institucional (pré-requisito de carta).
+
+    Usa o predicado SQL partilhado `institutional_owner_name_where` em vez da
+    função Python: os triggers de prontidão correm em QUALQUER conexão SQLite
+    (seed, scripts, testes) e funções custom não existem nessas conexões.
+    """
+    prefix = f"{alias}." if alias else ""
+    return (
+        f"TRIM(COALESCE({prefix}owner_name, '')) <> '' "
+        f"AND NOT {institutional_owner_name_where(alias)}"
+    )
+
+
+def _mailing_ready_where(alias: str = "") -> str:
+    """Mailing presente. A auditoria de qualidade é uma fase posterior (1B)."""
+    prefix = f"{alias}." if alias else ""
+    return f"TRIM(COALESCE({prefix}mailing_address, '')) <> ''"
+
+
+def _phone_ready_where(alias: str = "") -> str:
+    """Telefone verificado e presente."""
+    prefix = f"{alias}." if alias else ""
+    return (
+        f"COALESCE({prefix}phone_verified, 0) = 1 "
+        f"AND TRIM(COALESCE({prefix}owner_phone, '')) <> ''"
+    )
+
+
+def _readiness_set_clause() -> str:
+    """SET das flags de prontidão (Marco 1A).
+
+    Usa os predicados BRUTOS (`_qualified_where`) em vez de `is_qualified`,
+    porque numa única UPDATE o SQLite avalia as expressões com os valores
+    antigos da linha. `signal_type IS NOT NULL` alinha com o feed; o reveal de
+    carta continua a exigir `signal_ready=1`.
+    """
+    base = f"({_qualified_where()}) AND signal_type IS NOT NULL"
+    return (
+        f"signal_ready = CASE WHEN {base} "
+        f"AND {_owner_ready_where()} AND {_mailing_ready_where()} "
+        f"THEN 1 ELSE 0 END, "
+        f"phone_ready = CASE WHEN {base} AND {_phone_ready_where()} "
+        f"THEN 1 ELSE 0 END"
+    )
+
+
 def _quality_set_clause() -> str:
-    """SET que (re)calcula as três colunas materializadas da Fase 22."""
+    """SET que (re)calcula as colunas materializadas da Fase 22 + prontidão."""
     return (
         f"is_junk = CASE WHEN {_junk_where()} THEN 1 ELSE 0 END, "
         f"is_feed_ok = CASE WHEN ({_feed_where()}) THEN 1 ELSE 0 END, "
-        f"is_qualified = CASE WHEN ({_qualified_where()}) THEN 1 ELSE 0 END"
+        f"is_qualified = CASE WHEN ({_qualified_where()}) THEN 1 ELSE 0 END, "
+        f"{_readiness_set_clause()}"
     )
+
+
+def refresh_readiness(conn, where_sql: str = "1=1", params: tuple = ()) -> int:
+    """Recalcula apenas as flags de prontidão (backfill/migração).
+
+    Não toca em `is_*` para não disparar os triggers de qualidade por linha.
+    Devolve o número de linhas atualizadas.
+    """
+    cur = conn.execute(
+        f"UPDATE leads SET {_readiness_set_clause()} WHERE {where_sql}", params
+    )
+    return int(cur.rowcount or 0)
+
+
+def _readiness_where(readiness: Optional[str]) -> Optional[str]:
+    """Fragmento SQL da aba de prontidão ativa (None = Todos)."""
+    if readiness == "letter":
+        return "l.signal_ready = 1"
+    if readiness == "phone":
+        return "l.phone_ready = 1"
+    return None
+
 
 
 def refresh_lead_quality(conn, where_sql: str, params: tuple) -> int:
@@ -1894,6 +1964,9 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         "is_junk": "INTEGER",
         "is_feed_ok": "INTEGER",
         "is_qualified": "INTEGER",
+        # Marco 1A: prontidão materializada (backfill no fim da migração).
+        "signal_ready": "INTEGER DEFAULT 0",
+        "phone_ready": "INTEGER DEFAULT 0",
     }
     for name, ctype in extra_cols.items():
         if name not in cols:
@@ -2019,6 +2092,29 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
             _done,
             (time.perf_counter() - _t0) * 1000,
         )
+    # Marco 1A: materializa `signal_ready`/`phone_ready` para os leads
+    # existentes. O módulo de créditos criava as colunas, mas só o seed as
+    # preenchia; sem este backfill as abas de prontidão ficavam vazias.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS schema_meta ("
+        "key TEXT PRIMARY KEY, value TEXT, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)"
+    )
+    _readiness_backfilled = conn.execute(
+        "SELECT 1 FROM schema_meta WHERE key='readiness_v1'"
+    ).fetchone()
+    if not _readiness_backfilled:
+        _t0 = time.perf_counter()
+        _ready_done = refresh_readiness(conn, "1=1", ())
+        conn.execute(
+            "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('readiness_v1', '1')"
+        )
+        conn.commit()
+        logger.info(
+            "[PERF] prontidão materializada: %s leads em %.0f ms",
+            _ready_done,
+            (time.perf_counter() - _t0) * 1000,
+        )
+
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_leads_feed_order "
         "ON leads (is_feed_ok, date_reported DESC, id DESC)"
@@ -2031,6 +2127,28 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_leads_qualified_city "
         "ON leads (is_qualified, city, issue_category)"
     )
+    # Índices parciais das abas de prontidão (Marco 1A). O predicado é
+    # `flag = 1` (nunca COALESCE) para o planner poder escolher o índice.
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_leads_letter_ready "
+        "ON leads (signal_ready, date_reported DESC, id DESC) "
+        "WHERE signal_ready = 1"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_leads_letter_city_trade "
+        "ON leads (signal_ready, city COLLATE NOCASE, issue_category, date_reported DESC) "
+        "WHERE signal_ready = 1"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_leads_phone_ready "
+        "ON leads (phone_ready, date_reported DESC, id DESC) "
+        "WHERE phone_ready = 1"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_leads_phone_city_trade "
+        "ON leads (phone_ready, city COLLATE NOCASE, issue_category, date_reported DESC) "
+        "WHERE phone_ready = 1"
+    )
     # Fase 22: triggers mantêm as colunas materializadas em QUALQUER escrita
     # (ingestão, admin, scripts, testes). Sem isto, uma linha inserida por SQL
     # direto ficava com is_* NULL e desaparecia do feed.
@@ -2040,7 +2158,8 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     _watch_cols = (
         "address, issue_category, issue_description, descriptor, case_title, "
         "resolution_description, department, signal_type, signal_status, "
-        "case_status, source_type"
+        "case_status, source_type, owner_name, owner_phone, phone_verified, "
+        "mailing_address"
     )
     conn.executescript(
         "CREATE TRIGGER IF NOT EXISTS trg_leads_quality_ins "
@@ -5608,11 +5727,13 @@ class DatabaseService:
         layer: Optional[str] = None,
         owner_type: Optional[str] = None,
         search: Optional[str] = None,
+        readiness: Optional[str] = None,
     ) -> dict:
         """Agregado por bairro/ZIP diretamente no SQLite (GROUP BY).
 
         Devolve poucas linhas (bairros ou ZIPs da cidade), nunca o inventário.
         Os grupos sem bairro caem para o ZIP; sem ambos ficam em `none`.
+        `readiness` aplica a mesma prontidão da aba ativa (carta/telefone).
         """
         where_sql, params = self._leads_feed_where(
             city=city,
@@ -5627,6 +5748,9 @@ class DatabaseService:
             owner_type=owner_type,
             search=search,
         )
+        readiness_clause = _readiness_where(readiness)
+        if readiness_clause:
+            where_sql = f"{where_sql} AND {readiness_clause}"
         conn = None
         try:
             with _geo_read_lock:
@@ -5705,11 +5829,13 @@ class DatabaseService:
         layer: Optional[str] = None,
         owner_type: Optional[str] = None,
         search: Optional[str] = None,
+        readiness: Optional[str] = None,
     ) -> tuple[List[dict], int]:
         """Feed qualificado com filtros/total em SQL (P0-B).
 
         O `total` e' o COUNT do MESMO WHERE — o cartao e a lista deixam de
         divergir. `closed` fica fora por defeito; `include_closed=True` mostra-o.
+        `readiness` filtra a aba de prontidão (carta/telefone).
         """
         limit = max(1, min(int(limit), 200))
         offset = max(0, int(offset))
@@ -5729,6 +5855,9 @@ class DatabaseService:
             owner_type=owner_type,
             search=search,
         )
+        readiness_clause = _readiness_where(readiness)
+        if readiness_clause:
+            where_sql = f"{where_sql} AND {readiness_clause}"
 
         conn = get_connection()
         try:
@@ -5751,6 +5880,34 @@ class DatabaseService:
                 params + [limit, offset],
             ).fetchall()
             return [dict(r) for r in rows], int(total)
+        finally:
+            conn.close()
+
+    def count_leads_by_readiness(self, **filters) -> dict:
+        """Counts das três abas no MESMO filtro base (cidade/ofício/zona).
+
+        O count não aplica a prontidão ativa: serve para mostrar os três
+        contadores ao mesmo tempo. É uma única varredura sobre o feed.
+        """
+        filters.pop("readiness", None)
+        where_sql, params = self._leads_feed_where(**filters)
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                f"""
+                SELECT COUNT(*) AS all_count,
+                       COALESCE(SUM(CASE WHEN l.signal_ready = 1 THEN 1 ELSE 0 END), 0) AS letter_count,
+                       COALESCE(SUM(CASE WHEN l.phone_ready = 1 THEN 1 ELSE 0 END), 0) AS phone_count
+                  FROM leads l
+                 WHERE {where_sql}
+                """,
+                params,
+            ).fetchone()
+            return {
+                "all": int(row["all_count"] or 0),
+                "letter": int(row["letter_count"] or 0),
+                "phone": int(row["phone_count"] or 0),
+            }
         finally:
             conn.close()
 
@@ -13118,6 +13275,7 @@ class AsyncDatabaseService:
         layer: Optional[str] = None,
         owner_type: Optional[str] = None,
         search: Optional[str] = None,
+        readiness: Optional[str] = None,
     ) -> tuple[List[dict], int]:
         return await anyio.to_thread.run_sync(
             lambda: self._service.get_leads_feed(
@@ -13137,7 +13295,13 @@ class AsyncDatabaseService:
                 layer=layer,
                 owner_type=owner_type,
                 search=search,
+                readiness=readiness,
             )
+        )
+
+    async def count_leads_by_readiness(self, **filters) -> dict:
+        return await anyio.to_thread.run_sync(
+            lambda: self._service.count_leads_by_readiness(**filters)
         )
 
     async def get_leads_geo_summary(
@@ -13154,6 +13318,7 @@ class AsyncDatabaseService:
         layer: Optional[str] = None,
         owner_type: Optional[str] = None,
         search: Optional[str] = None,
+        readiness: Optional[str] = None,
     ) -> dict:
         return await anyio.to_thread.run_sync(
             lambda: self._service.get_leads_geo_summary(

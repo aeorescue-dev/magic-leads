@@ -82,9 +82,11 @@ for i in range(50):
     conn.execute(
         "INSERT INTO leads (external_id, source_type, address, city, state, zip_code, neighborhood, "
         "issue_category, issue_description, case_title, owner_name, mailing_address, date_reported, "
-        "created_at, is_qualified, is_junk, case_status, signal_ready, phone_ready, owner_source, "
+        "created_at, is_qualified, is_junk, case_status, signal_type, signal_status, "
+        "signal_ready, phone_ready, owner_source, "
         "owner_kind, parcel_id, lead_status) "
-        "VALUES (?, 'credits_seed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 'open', 1, 0, "
+        "VALUES (?, 'credits_seed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 'open', "
+        "'open_request', 'open', 1, 0, "
         "'seed_staging', 'person', ?, 'available')",
         (
             f"credits-seed-{i:03d}",

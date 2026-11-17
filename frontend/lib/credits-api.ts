@@ -134,12 +134,22 @@ export function getWallet() {
   return request<Wallet>("/api/credits/wallet");
 }
 
-export function getLeads(params: { trade_code?: string; city?: string; limit?: number } = {}) {
+export function getLeads(params: {
+  trade_code?: string;
+  city?: string;
+  limit?: number;
+  readiness?: "all" | "letter" | "phone";
+} = {}) {
   const q = new URLSearchParams();
   if (params.trade_code) q.set("trade_code", params.trade_code);
   if (params.city) q.set("city", params.city);
   if (params.limit) q.set("limit", String(params.limit));
-  return request<{ leads: CreditLead[] }>(`/api/credits/leads?${q.toString()}`);
+  if (params.readiness) q.set("readiness", params.readiness);
+  return request<{
+    leads: CreditLead[];
+    counts: { all: number; letter: number; phone: number };
+    readiness: string;
+  }>(`/api/credits/leads?${q.toString()}`);
 }
 
 export function getPreview(leadId: number, tradeCode?: string) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { Search, SlidersHorizontal, X } from "lucide-react";
+import { Layers, Lock, Mail, Phone, Search, SlidersHorizontal, X } from "lucide-react";
 import type { Ref } from "react";
 import { useI18n } from "@/lib/i18n";
 import { TRADE_CATEGORIES } from "@/lib/categories";
@@ -13,10 +13,20 @@ export interface FeedTab {
 
 const SEVERITY_OPTIONS = ["critical", "high", "medium", "routine"] as const;
 
+const READINESS_ICONS = {
+  all: Layers,
+  letter: Mail,
+  phone: Phone,
+} as const;
+
 export function FeedToolbar({
   tabs,
   activeTab,
   onTabChange,
+  readinessTabs,
+  activeReadiness,
+  onReadinessChange,
+  readinessLabel,
   cities,
   city,
   onCityChange,
@@ -42,6 +52,10 @@ export function FeedToolbar({
   tabs: FeedTab[];
   activeTab: string;
   onTabChange: (key: string) => void;
+  readinessTabs?: FeedTab[];
+  activeReadiness?: string;
+  onReadinessChange?: (key: string) => void;
+  readinessLabel?: string;
   cities: string[];
   city: string;
   onCityChange: (value: string) => void;
@@ -68,8 +82,64 @@ export function FeedToolbar({
 
   return (
     <section className="overflow-hidden rounded-2xl border border-[var(--sd-border)] bg-[var(--sd-surface)]">
+      {readinessTabs?.length && onReadinessChange ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--sd-border)] px-4 py-3">
+          <div className="sd-scroll-x flex min-w-0 items-center gap-1.5 overflow-x-auto">
+            {readinessTabs.map((tab) => {
+              const active = tab.key === activeReadiness;
+              const Icon =
+                READINESS_ICONS[tab.key as keyof typeof READINESS_ICONS] ?? Layers;
+              const locked = tab.key === "phone" && tab.count === 0;
+              return (
+                <button
+                  key={tab.key}
+                  type="button"
+                  data-testid={`readiness-${tab.key}`}
+                  onClick={() => onReadinessChange(tab.key)}
+                  aria-pressed={active}
+                  title={locked ? "Marco 1B" : undefined}
+                  className={`inline-flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-[11.5px] font-bold transition ${
+                    active
+                      ? "bg-[var(--sd-accent)] text-[var(--sd-accent-text)] shadow-sm"
+                      : "bg-[var(--sd-surface-2)] text-[var(--sd-muted)] hover:text-[var(--sd-text)]"
+                  }`}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {tab.label}
+                  <span
+                    className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9px] font-black ${
+                      active
+                        ? "bg-black/10 text-[var(--sd-accent-text)]"
+                        : "bg-[var(--sd-surface)] text-[var(--sd-faint)]"
+                    }`}
+                  >
+                    {locked ? (
+                      <>
+                        <Lock className="h-2.5 w-2.5" />1B
+                      </>
+                    ) : (
+                      tab.count
+                    )}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          {readinessLabel ? (
+            <span className="text-[10px] font-semibold text-[var(--sd-muted)]">
+              {readinessLabel}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--sd-border)] px-4 py-2.5">
         <div className="sd-scroll-x flex min-w-0 items-center gap-1 overflow-x-auto">
+          {readinessTabs?.length ? (
+            <span className="mr-1 shrink-0 text-[9px] font-black uppercase tracking-[0.14em] text-[var(--sd-faint)]">
+              {t("dashboard.readiness.source") || "Origem"}
+            </span>
+          ) : null}
           {tabs.map((tab) => {
             const active = tab.key === activeTab;
             return (

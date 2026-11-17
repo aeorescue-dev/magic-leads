@@ -280,6 +280,7 @@ function DashboardPageInner() {
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<"overview" | "opportunities" | "prevention" | "favorites" | "interests" | "alerts" | "history" | "credits">("overview");
+  const [readiness, setReadiness] = useState<"all" | "letter" | "phone">("all");
   const [interests, setInterests] = useState<Set<string>>(new Set(ALL_CATEGORY_KEYS));
   const [interestsConfigured, setInterestsConfigured] = useState<boolean | null>(null);
   // O utilizador ja' interagiu com as especialidades? Distingue "nunca
@@ -501,6 +502,12 @@ function DashboardPageInner() {
       .then((w) => setCreditWallet(w))
       .catch(() => {});
   }, [searchParams, user?.id]);
+
+  // Freemium arranca na aba Carta/Visita (é o que o reveal de $1,50 entrega).
+  useEffect(() => {
+    if (!user?.id) return;
+    if (isFreemium) setReadiness("letter");
+  }, [isFreemium, user?.id]);
 
   // Freemium: o mapa da aba Oportunidades precisa de uma praça concreta.
   // Arranca em NYC para o utilizador ver zonas e sinais sem passar pelo
@@ -761,6 +768,7 @@ function DashboardPageInner() {
         selectedOwnerType,
         debouncedSearchQuery,
         leadZone?.name ?? "all",
+        readiness,
       ]
     : null;
   const { data: feedData, isLoading: feedLoading } = useSWR(
@@ -786,6 +794,7 @@ function DashboardPageInner() {
           layer: feedLayer,
           ownerType: selectedOwnerType,
           search: debouncedSearchQuery,
+          readiness,
         }
       ),
     { refreshInterval: 60000, isPaused: swrPaused }
@@ -1028,6 +1037,7 @@ function DashboardPageInner() {
           layer: feedLayer,
           ownerType: selectedOwnerType,
           search: debouncedSearchQuery,
+          readiness,
         }
       );
       if (data.leads && data.leads.length > 0) {
@@ -1047,7 +1057,7 @@ function DashboardPageInner() {
     }
     // includeClosed FALTOU: alternar o interruptor de historico nao recriava o
     // callback, por isso "carregar mais" continuava a pagina sem o parametro.
-  }, [currentPage, hasMoreLeads, loadingMore, selectedCity, selectedType, selectedCategory, selectedSeverity, urgencyParam, includeClosed, leadZone, onlyDeadline, feedLayer, selectedOwnerType, debouncedSearchQuery]);
+  }, [currentPage, hasMoreLeads, loadingMore, selectedCity, selectedType, selectedCategory, selectedSeverity, urgencyParam, includeClosed, leadZone, onlyDeadline, feedLayer, selectedOwnerType, debouncedSearchQuery, readiness]);
 
   // O lead já está em "Meus Leads" (revelado por mim: reservado, em negociação,
   // convertido, liberado ou com hold expirado). Nesse estado o botão
@@ -2133,6 +2143,20 @@ function DashboardPageInner() {
     { key: "preventive", label: t("dashboard.feed.tab_preventive"), count: preventiveCount },
     { key: "permit", label: t("dashboard.feed.tab_works"), count: permitCount },
   ];
+  const readinessCounts = feedData?.counts ?? {
+    all: feedTotal,
+    letter: 0,
+    phone: 0,
+  };
+  const readinessTabs = [
+    { key: "all", label: t("dashboard.readiness.all"), count: readinessCounts.all },
+    { key: "letter", label: t("dashboard.readiness.letter"), count: readinessCounts.letter },
+    { key: "phone", label: t("dashboard.readiness.phone"), count: readinessCounts.phone },
+  ];
+  const readinessLabel = t("dashboard.readiness.map_label").replace(
+    "{tab}",
+    readinessTabs.find((tab) => tab.key === readiness)?.label ?? readinessTabs[0].label
+  );
   const activeFeedTab =
     activeTab === "prevention"
       ? "preventive"
@@ -2148,6 +2172,13 @@ function DashboardPageInner() {
     }
     setActiveTab("opportunities");
     setFeedLayer(key === "reactive" ? "reactive" : key === "permit" ? "permit" : "all");
+  };
+  const handleReadinessChange = (key: string) => {
+    if (key !== "all" && key !== "letter" && key !== "phone") return;
+    setReadiness(key);
+    setCurrentPage(1);
+    setLeads([]);
+    setHasMoreLeads(false);
   };
   const feedFilters = {
     city: selectedCity,
@@ -2716,6 +2747,9 @@ function DashboardPageInner() {
               tabs={feedTabs}
               activeTab={activeFeedTab}
               onTabChange={handleFeedTab}
+              readinessTabs={activeTab !== "prevention" ? readinessTabs : undefined}
+              activeReadiness={readiness}
+              onReadinessChange={handleReadinessChange}
               cities={["NYC", "Chicago", "Boston", "Dallas"]}
               city={selectedCity}
               onCityChange={setSelectedCity}
@@ -2734,11 +2768,19 @@ function DashboardPageInner() {
               onToggleFines={() => setWithFines((value) => !value)}
               search={searchQuery}
               onSearchChange={setSearchQuery}
-              resultCount={activeFeedTab === "preventive" ? preventiveShown : filteredLeads.length}
+              resultCount={
+                activeFeedTab === "preventive"
+                  ? preventiveShown
+                  : (feedData?.total ?? filteredLeads.length)
+              }
               resultLabel={
                 activeFeedTab === "preventive"
                   ? t("dashboard.feed.tab_preventive").toLowerCase()
-                  : t("dashboard.filter.showing") || "oportunidades"
+                  : readiness === "letter"
+                    ? t("dashboard.readiness.letter").toLowerCase()
+                    : readiness === "phone"
+                      ? t("dashboard.readiness.phone").toLowerCase()
+                      : t("dashboard.filter.showing") || "oportunidades"
               }
               onOpenAdvanced={() => setFiltersOpen(true)}
               onClear={clearFilters}
@@ -2759,6 +2801,8 @@ function DashboardPageInner() {
                 layer={feedLayer}
                 ownerType={selectedOwnerType}
                 search={debouncedSearchQuery}
+                readiness={readiness}
+                readinessLabel={readinessLabel}
                 activeName={leadZone?.name ?? null}
                 onSelect={(zone) => {
                   setLeadZone(zone);
@@ -3299,7 +3343,13 @@ function DashboardPageInner() {
             </div>
           ) : activeTab === "credits" ? (
             <div className="space-y-4">
-              <CreditsPanel lang={lang} wallet={creditWallet} onWallet={setCreditWallet} />
+              <CreditsPanel
+  lang={lang}
+  wallet={creditWallet}
+  onWallet={setCreditWallet}
+  readiness={readiness}
+  onReadinessChange={handleReadinessChange}
+/>
             </div>
           ) : (
           <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
@@ -3417,7 +3467,13 @@ function DashboardPageInner() {
 
             {/* OPPORTUNITIES FEED — freemium usa créditos; pago mantém o feed */}
             {isFreemium ? (
-              <CreditsPanel lang={lang} wallet={creditWallet} onWallet={setCreditWallet} />
+              <CreditsPanel
+  lang={lang}
+  wallet={creditWallet}
+  onWallet={setCreditWallet}
+  readiness={readiness}
+  onReadinessChange={handleReadinessChange}
+/>
             ) : (
             <section id="opportunities-feed" className="scroll-mt-24 flex flex-col overflow-hidden rounded-2xl border border-[var(--sd-border)] bg-[var(--sd-surface)]">
               <div className={`px-5 py-4 border-b flex items-center justify-between ${T.border}`}>
@@ -3430,6 +3486,13 @@ function DashboardPageInner() {
                     </span>
                   </h2>
                   <p className={`text-xs ${T.text2}`}>{t("dashboard.feed.filtered_sub")}</p>
+                  {readiness === "letter" ? (
+                    <p className="mt-1 text-[10px] font-medium text-[var(--sd-faint)]">
+                      {t("dashboard.readiness.coverage_note")
+                        .replace("{letter}", String(readinessCounts.letter))
+                        .replace("{phone}", String(readinessCounts.phone))}
+                    </p>
+                  ) : null}
                 </div>
                 <Filter className={`h-4 w-4 ${T.text2}`} />
               </div>
@@ -3459,13 +3522,51 @@ function DashboardPageInner() {
                   </div>
                 ) : filteredLeads.length === 0 ? (
                   <div className="p-12 text-center">
-                    <div className="text-4xl mb-3">🧰</div>
-                    <div className={`text-sm font-medium ${isDark ? "text-slate-300" : "text-slate-700"}`}>
-                      {t("dashboard.feed.empty")}
+                    <div className="text-4xl mb-3">
+                      {readiness === "phone" ? "📞" : readiness === "letter" ? "✉️" : "🧰"}
                     </div>
-                    <div className={`text-xs mt-1 ${T.text2}`}>
-                      {t("dashboard.feed.empty_hint")}
-                    </div>
+                    {readiness === "phone" ? (
+                      <>
+                        <div className={`text-sm font-medium ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                          {t("dashboard.readiness.phone_empty_title")}
+                        </div>
+                        <div className={`text-xs mt-1 ${T.text2}`}>
+                          {t("dashboard.readiness.phone_empty_body")}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleReadinessChange("letter")}
+                          className="mt-4 rounded-lg bg-[var(--sd-accent)] px-3 py-1.5 text-[11px] font-black text-[var(--sd-accent-text)]"
+                        >
+                          {t("dashboard.readiness.phone_empty_cta")}
+                        </button>
+                      </>
+                    ) : readiness === "letter" ? (
+                      <>
+                        <div className={`text-sm font-medium ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                          {t("dashboard.readiness.letter_empty_title")}
+                        </div>
+                        <div className={`text-xs mt-1 ${T.text2}`}>
+                          {t("dashboard.readiness.letter_empty_body")}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleReadinessChange("all")}
+                          className="mt-4 rounded-lg bg-[var(--sd-accent)] px-3 py-1.5 text-[11px] font-black text-[var(--sd-accent-text)]"
+                        >
+                          {t("dashboard.readiness.letter_empty_cta")}
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <div className={`text-sm font-medium ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                          {t("dashboard.feed.empty")}
+                        </div>
+                        <div className={`text-xs mt-1 ${T.text2}`}>
+                          {t("dashboard.feed.empty_hint")}
+                        </div>
+                      </>
+                    )}
                   </div>
                 ) : (
                   <>

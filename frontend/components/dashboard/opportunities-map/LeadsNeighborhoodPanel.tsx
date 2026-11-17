@@ -34,6 +34,8 @@ export function LeadsNeighborhoodPanel({
   search,
   activeName,
   onSelect,
+  readiness = "all",
+  readinessLabel,
 }: {
   city: string;
   category: string;
@@ -46,6 +48,8 @@ export function LeadsNeighborhoodPanel({
   search: string;
   activeName: string | null;
   onSelect: (zone: LeadZone) => void;
+  readiness?: "all" | "letter" | "phone";
+  readinessLabel?: string;
 }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(true);
@@ -73,6 +77,7 @@ export function LeadsNeighborhoodPanel({
           layer,
           ownerType,
           search,
+          readiness,
         ]
       : null,
     () =>
@@ -86,6 +91,7 @@ export function LeadsNeighborhoodPanel({
         layer,
         ownerType,
         search,
+        readiness,
       }),
     { revalidateOnFocus: false, keepPreviousData: true }
   );
@@ -161,7 +167,7 @@ export function LeadsNeighborhoodPanel({
             </h2>
             <p className="truncate text-[11px] text-[var(--sd-muted)]">
               {enabled
-                ? `${niche} · ${cityLabel}`
+                ? `${niche} · ${cityLabel}${readinessLabel ? ` · ${readinessLabel}` : ""}`
                 : t("dashboard.oppmap.choose_city")}
             </p>
           </div>

@@ -42,6 +42,20 @@ const COPY = {
     noPhone: "Sem telefone — sinal para carta/visita",
     ledger: "Movimentos",
     empty: "Sem sinais sintéticos. Corre o seed de staging.",
+    readyAll: "Todos",
+    readyLetter: "Carta / Visita",
+    readyPhone: "Com telefone",
+    readyPhoneLocked: "1B",
+    readyLetterBadge: "Pronto para carta",
+    readyPhoneBadge: "Telefone verificado",
+    readyLetterHint: "Endereço exato + owner + mailing. Sem Searchbug.",
+    readyPhoneHint: "Telefone verificado (Marco 1B).",
+    coverage: "Cobertura em expansão: {letter} prontos para carta · {phone} com telefone.",
+    readyLetterEmpty: "Ainda não há sinais prontos para carta nesta praça.",
+    readyLetterEmptyCta: "Ver todos os sinais",
+    readyPhoneEmpty: "O telefone verificado chega no Marco 1B. Entretanto, podes desbloquear carta por $1,50.",
+    readyPhoneEmptyCta: "Ver prontos para carta",
+    notReady: "Ainda não pronto",
     success: "Créditos adicionados",
     duplicate: "Evento duplicado — saldo não mudou",
     notEnough: "Saldo insuficiente. Escolhe um pacote acima.",
@@ -80,6 +94,20 @@ const COPY = {
     noPhone: "No phone — signal for letter/visit",
     ledger: "Activity",
     empty: "No synthetic signals. Run the staging seed.",
+    readyAll: "All",
+    readyLetter: "Letter / Visit",
+    readyPhone: "With phone",
+    readyPhoneLocked: "1B",
+    readyLetterBadge: "Ready to mail",
+    readyPhoneBadge: "Verified phone",
+    readyLetterHint: "Exact address + owner + mailing. No Searchbug.",
+    readyPhoneHint: "Verified phone (Milestone 1B).",
+    coverage: "Coverage expanding: {letter} ready to mail · {phone} with phone.",
+    readyLetterEmpty: "No signals ready to mail in this market yet.",
+    readyLetterEmptyCta: "View all signals",
+    readyPhoneEmpty: "Verified phone arrives in Milestone 1B. Meanwhile, unlock the letter signal for $1.50.",
+    readyPhoneEmptyCta: "View ready to mail",
+    notReady: "Not ready yet",
     success: "Credits added",
     duplicate: "Duplicate event — balance unchanged",
     notEnough: "Insufficient balance. Choose a pack above.",
@@ -118,6 +146,20 @@ const COPY = {
     noPhone: "Sin teléfono — señal para carta/visita",
     ledger: "Movimientos",
     empty: "Sin señales sintéticas. Ejecuta el seed de staging.",
+    readyAll: "Todos",
+    readyLetter: "Carta / Visita",
+    readyPhone: "Con teléfono",
+    readyPhoneLocked: "1B",
+    readyLetterBadge: "Listo para carta",
+    readyPhoneBadge: "Teléfono verificado",
+    readyLetterHint: "Dirección exacta + owner + mailing. Sin Searchbug.",
+    readyPhoneHint: "Teléfono verificado (Hito 1B).",
+    coverage: "Cobertura en expansión: {letter} listos para carta · {phone} con teléfono.",
+    readyLetterEmpty: "Aún no hay señales listas para carta en esta plaza.",
+    readyLetterEmptyCta: "Ver todas las señales",
+    readyPhoneEmpty: "El teléfono verificado llega en el Hito 1B. Mientras tanto, desbloquea la carta por $1,50.",
+    readyPhoneEmptyCta: "Ver listos para carta",
+    notReady: "Aún no listo",
     success: "Créditos añadidos",
     duplicate: "Evento duplicado — saldo sin cambios",
     notEnough: "Saldo insuficiente. Elige un paquete arriba.",
@@ -154,10 +196,14 @@ export default function CreditsPanel({
   lang,
   wallet,
   onWallet,
+  readiness: controlledReadiness,
+  onReadinessChange,
 }: {
   lang: string;
   wallet: Wallet | null;
   onWallet: (wallet: Wallet) => void;
+  readiness?: "all" | "letter" | "phone";
+  onReadinessChange?: (key: "all" | "letter" | "phone") => void;
 }) {
   const c = COPY[(lang as keyof typeof COPY) || "pt"] || COPY.pt;
   const [packs, setPacks] = useState<CreditPack[]>([]);
@@ -165,6 +211,13 @@ export default function CreditsPanel({
   const [ledger, setLedger] = useState<LedgerEntry[]>([]);
   const [city, setCity] = useState("");
   const [trade, setTrade] = useState("");
+  const [internalReadiness, setInternalReadiness] = useState<"all" | "letter" | "phone">("letter");
+  const readiness = controlledReadiness ?? internalReadiness;
+  const setReadiness = (key: "all" | "letter" | "phone") => {
+    if (onReadinessChange) onReadinessChange(key);
+    else setInternalReadiness(key);
+  };
+  const [counts, setCounts] = useState({ all: 0, letter: 0, phone: 0 });
   const [showAll, setShowAll] = useState(false);
   const [mockPurchase, setMockPurchase] = useState<{ id: number; pack: CreditPack } | null>(null);
   const [paywallLead, setPaywallLead] = useState<CreditLead | null>(null);
@@ -177,26 +230,30 @@ export default function CreditsPanel({
     try {
       const [p, l, lg] = await Promise.all([
         getPacks(),
-        getLeads({ limit: 60 }),
+        getLeads({
+          limit: 60,
+          readiness,
+          city: city || undefined,
+        }),
         getLedger(20),
       ]);
       setPacks(p.packs);
       setLeads(l.leads);
+      if (l.counts) setCounts(l.counts);
       setLedger(lg.entries);
     } catch (err) {
       if (err instanceof CreditsApiError && err.status === 401) return;
       setMessage(err instanceof Error ? err.message : "Erro ao carregar sinais");
     }
-  }, []);
+  }, [readiness, city]);
 
   useEffect(() => {
     load();
   }, [load]);
 
   const visibleLeads = useMemo(() => {
-    const filtered = leads.filter((lead) => (!city || lead.city === city));
-    return showAll ? filtered : filtered.slice(0, 9);
-  }, [leads, city, showAll]);
+    return showAll ? leads : leads.slice(0, 9);
+  }, [leads, showAll]);
 
   const buy = async (pack: CreditPack) => {
     setBusy(true);
@@ -283,9 +340,53 @@ export default function CreditsPanel({
   }
 
   const balance = wallet?.balance_cents ?? 0;
+  const readinessTabs = [
+    { key: "all" as const, label: c.readyAll, count: counts.all },
+    { key: "letter" as const, label: c.readyLetter, count: counts.letter },
+    { key: "phone" as const, label: c.readyPhone, count: counts.phone },
+  ];
 
   return (
     <section data-testid="credits-panel" className="space-y-4">
+      <div className="flex flex-wrap items-center gap-1.5 rounded-2xl border border-[var(--sd-border)] bg-[var(--sd-surface)] p-2">
+        {readinessTabs.map((tab) => {
+          const active = tab.key === readiness;
+          const locked = tab.key === "phone" && tab.count === 0;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              data-testid={`readiness-${tab.key}`}
+              onClick={() => {
+                setReadiness(tab.key);
+                setShowAll(false);
+              }}
+              aria-pressed={active}
+              title={locked ? c.readyPhoneLocked : undefined}
+              className={`inline-flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-[11px] font-black transition ${
+                active
+                  ? "bg-[var(--sd-accent)] text-[var(--sd-accent-text)] shadow-sm"
+                  : "bg-[var(--sd-surface-2)] text-[var(--sd-muted)] hover:text-[var(--sd-text)]"
+              }`}
+            >
+              {tab.label}
+              <span
+                className={`rounded-full px-1.5 py-0.5 text-[9px] font-black ${
+                  active
+                    ? "bg-black/10 text-[var(--sd-accent-text)]"
+                    : "bg-[var(--sd-surface)] text-[var(--sd-faint)]"
+                }`}
+              >
+                {locked ? c.readyPhoneLocked : tab.count}
+              </span>
+            </button>
+          );
+        })}
+        <span className="ml-auto px-1 text-[10px] font-semibold text-[var(--sd-muted)]">
+          {readiness === "letter" ? c.readyLetterHint : readiness === "phone" ? c.readyPhoneHint : ""}
+        </span>
+      </div>
+
       <div ref={packsRef} className="rounded-2xl border border-[var(--sd-border)] bg-[var(--sd-surface)] p-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
@@ -335,6 +436,11 @@ export default function CreditsPanel({
           <div>
             <div className="text-[10px] font-black uppercase tracking-[0.16em] text-[var(--sd-faint)]">{c.signals}</div>
             <div className="text-[11px] text-[var(--sd-muted)]">{c.signalsSub}</div>
+            <div className="mt-1 text-[10px] text-[var(--sd-faint)]">
+              {c.coverage
+                .replace("{letter}", String(counts.letter))
+                .replace("{phone}", String(counts.phone))}
+            </div>
           </div>
           <div className="flex flex-wrap gap-2">
             <select value={city} onChange={(e) => setCity(e.target.value)} className="rounded-lg border border-[var(--sd-border)] bg-[var(--sd-surface)] px-2 py-1 text-[11px]">
@@ -349,7 +455,37 @@ export default function CreditsPanel({
         </div>
 
         <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {visibleLeads.length === 0 && <p className="text-sm text-[var(--sd-muted)]">{c.empty}</p>}
+          {visibleLeads.length === 0 && (
+            <div className="col-span-full rounded-xl border border-[var(--sd-border)] bg-[var(--sd-surface-2)] p-6 text-center">
+              {readiness === "phone" ? (
+                <>
+                  <div className="text-3xl">📞</div>
+                  <p className="mt-2 text-sm font-semibold text-[var(--sd-text)]">{c.readyPhoneEmpty}</p>
+                  <button
+                    type="button"
+                    onClick={() => setReadiness("letter")}
+                    className="mt-3 rounded-lg bg-[var(--sd-accent)] px-3 py-1.5 text-[10px] font-black text-[var(--sd-accent-text)]"
+                  >
+                    {c.readyPhoneEmptyCta}
+                  </button>
+                </>
+              ) : readiness === "letter" ? (
+                <>
+                  <div className="text-3xl">✉️</div>
+                  <p className="mt-2 text-sm font-semibold text-[var(--sd-text)]">{c.readyLetterEmpty}</p>
+                  <button
+                    type="button"
+                    onClick={() => setReadiness("all")}
+                    className="mt-3 rounded-lg bg-[var(--sd-accent)] px-3 py-1.5 text-[10px] font-black text-[var(--sd-accent-text)]"
+                  >
+                    {c.readyLetterEmptyCta}
+                  </button>
+                </>
+              ) : (
+                <p className="text-sm text-[var(--sd-muted)]">{c.empty}</p>
+              )}
+            </div>
+          )}
           {visibleLeads.map((lead) => (
             <article key={lead.id} className="rounded-xl border border-[var(--sd-border)] bg-[var(--sd-surface-2)] p-3">
               <div className="flex items-start justify-between gap-2">
@@ -364,15 +500,31 @@ export default function CreditsPanel({
               <p className="mt-2 text-[11px] font-semibold text-[var(--sd-text)]">{lead.address_masked}</p>
               <p className="text-[10px] text-[var(--sd-muted)]">{lead.owner_masked} · {lead.zone}</p>
               <div className="mt-2 flex flex-wrap gap-1 text-[9px]">
-                <span className={`rounded px-1.5 py-0.5 font-bold ${lead.mailing_ready ? "bg-[var(--sd-accent-soft)] text-[var(--sd-accent)]" : "bg-[var(--sd-surface)] text-[var(--sd-muted)]"}`}>{lead.mailing_ready ? c.mailing : c.noMailing}</span>
-                <span className="rounded bg-[var(--sd-surface)] px-1.5 py-0.5 font-bold text-[var(--sd-muted)]">{c.noPhone}</span>
+                {lead.signal_ready ? (
+                  <span className="rounded bg-[var(--sd-accent-soft)] px-1.5 py-0.5 font-bold text-[var(--sd-accent)]">
+                    {c.readyLetterBadge}
+                  </span>
+                ) : (
+                  <span className="rounded bg-[var(--sd-surface)] px-1.5 py-0.5 font-bold text-[var(--sd-muted)]">
+                    {c.notReady}
+                  </span>
+                )}
+                {lead.phone_ready ? (
+                  <span className="rounded bg-[var(--sd-info-soft)] px-1.5 py-0.5 font-bold text-[var(--sd-info)]">
+                    {c.readyPhoneBadge}
+                  </span>
+                ) : (
+                  <span className="rounded bg-[var(--sd-surface)] px-1.5 py-0.5 font-bold text-[var(--sd-muted)]">
+                    {c.noPhone}
+                  </span>
+                )}
               </div>
               <button
-                disabled={busy || (lead.exclusive && !lead.exclusive_mine)}
+                disabled={busy || !lead.signal_ready || (lead.exclusive && !lead.exclusive_mine)}
                 onClick={() => doReveal(lead)}
                 className="mt-3 w-full rounded-lg bg-[var(--sd-accent)] px-3 py-2 text-[10px] font-black text-[var(--sd-accent-text)] disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {c.reveal}
+                {lead.signal_ready ? c.reveal : c.notReady}
               </button>
               <button disabled className="mt-1.5 w-full rounded-lg border border-[var(--sd-border)] px-3 py-1.5 text-[9px] font-bold text-[var(--sd-faint)]">{c.phoneSoon}</button>
             </article>

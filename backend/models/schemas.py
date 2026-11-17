@@ -162,6 +162,9 @@ class LeadResponse(BaseModel):
     owner_name: Optional[str]
     owner_phone: Optional[str]
     phone_verified: bool = False
+    # Marco 1A: prontidão materializada (não expõe owner/mailing; só o estado).
+    signal_ready: bool = False
+    phone_ready: bool = False
     phone_confidence: str = "unknown"
     # P2: percentagem real de sucesso (>=30 amostras). `None` quando a amostra
     # do segmento e' insuficiente — a UI nao inventa numeros.
@@ -258,11 +261,18 @@ class LeadResponse(BaseModel):
     model_config = ConfigDict(exclude_none=False)
 
 
+class ReadinessCounts(BaseModel):
+    all: int = 0
+    letter: int = 0
+    phone: int = 0
+
+
 class LeadsListResponse(BaseModel):
     total: int
     page: int
     per_page: int
     leads: List[LeadResponse]
+    counts: Optional[ReadinessCounts] = None
 
 
 class NoteCreate(BaseModel):

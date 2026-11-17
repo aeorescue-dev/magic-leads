@@ -63,6 +63,8 @@ export interface LeadResponse {
   oldest_open_days?: number | null;
   last_case_at?: string | null;
   phone_verified?: boolean;
+  signal_ready?: boolean;
+  phone_ready?: boolean;
   phone_confidence?: string;
   phone_success_pct?: number | null;
   phone_sample_size?: number;
@@ -156,6 +158,7 @@ export interface LeadsListResponse {
   page: number;
   per_page: number;
   leads: LeadResponse[];
+  counts?: { all: number; letter: number; phone: number };
 }
 
 export interface LeadStats {
@@ -297,6 +300,7 @@ export interface LeadFeedExtraFilters {
   layer?: string;
   ownerType?: string;
   search?: string;
+  readiness?: "all" | "letter" | "phone";
 }
 
 export async function fetchTodayLeads(
@@ -331,6 +335,9 @@ export async function fetchTodayLeads(
   }
   const term = extra?.search?.trim();
   if (term) q.set("search", term);
+  if (extra?.readiness && extra.readiness !== "all") {
+    q.set("readiness", extra.readiness);
+  }
   return handle<LeadsListResponse>(await fetch(`${API_URL}/api/leads/today?${q.toString()}`, { credentials: "include", headers: { ...authHeaders() } }));
 }
 
@@ -410,6 +417,7 @@ export async function fetchLeadNeighborhoods(
     layer?: string;
     ownerType?: string;
     search?: string;
+    readiness?: "all" | "letter" | "phone";
   } = {}
 ): Promise<LeadGeoResponse> {
   const q = new URLSearchParams();
@@ -431,6 +439,9 @@ export async function fetchLeadNeighborhoods(
   }
   const term = params.search?.trim();
   if (term) q.set("search", term);
+  if (params.readiness && params.readiness !== "all") {
+    q.set("readiness", params.readiness);
+  }
   q.set("days", String(params.days ?? 7));
   return handle<LeadGeoResponse>(
     await fetch(`${API_URL}/api/leads/neighborhoods?${q.toString()}`, {

@@ -494,21 +494,46 @@ def active_exclusivity(conn: sqlite3.Connection, lead_id: int, trade_code: str) 
     ).fetchone()
 
 
-def list_leads(user_id: int, trade_code: Optional[str] = None, city: Optional[str] = None, limit: int = 60) -> list[dict[str, Any]]:
+def _readiness_base(trade_code: Optional[str] = None, city: Optional[str] = None) -> tuple[list[str], list[Any]]:
+    """Base comum das três abas do painel de créditos.
+
+    `is_feed_ok=1` alinha com o feed oficial; `signal_type` e `lead_status`
+    evitam lixo e convertidos. A prontidão é aplicada por `list_leads`.
+    """
+    where = [
+        "l.is_feed_ok = 1",
+        "l.signal_type IS NOT NULL",
+        "l.lead_status != 'converted'",
+    ]
+    params: list[Any] = []
+    if trade_code:
+        where.append("l.issue_category = ?")
+        params.append(trade_code)
+    if city:
+        where.append("UPPER(l.city) = UPPER(?)")
+        params.append(city)
+    return where, params
+
+
+def list_leads(
+    user_id: int,
+    trade_code: Optional[str] = None,
+    city: Optional[str] = None,
+    limit: int = 60,
+    readiness: str = "letter",
+) -> list[dict[str, Any]]:
     init()
     conn = get_conn()
     try:
-        where = ["COALESCE(l.signal_ready,0)=1", "COALESCE(l.is_junk,0)=0"]
-        params: list[Any] = []
-        if trade_code:
-            where.append("l.issue_category = ?")
-            params.append(trade_code)
-        if city:
-            where.append("UPPER(l.city) = UPPER(?)")
-            params.append(city)
+        where, params = _readiness_base(trade_code, city)
+        readiness = str(readiness or "letter").strip().lower()
+        if readiness == "letter":
+            where.append("l.signal_ready = 1")
+        elif readiness == "phone":
+            where.append("l.phone_ready = 1")
         rows = conn.execute(
             "SELECT l.* FROM leads l WHERE " + " AND ".join(where) +
-            " ORDER BY datetime(COALESCE(l.date_reported, l.created_at)) DESC LIMIT ?",
+            " ORDER BY l.date_reported DESC, l.id DESC LIMIT ?",
             (*params, max(1, min(int(limit), 100))),
         ).fetchall()
         out = []
@@ -534,6 +559,28 @@ def list_leads(user_id: int, trade_code: Optional[str] = None, city: Optional[st
                 "exclusive_until": excl["expires_at"] if excl else None,
             })
         return out
+    finally:
+        conn.close()
+
+
+def readiness_counts(trade_code: Optional[str] = None, city: Optional[str] = None) -> dict[str, int]:
+    """Counts das três abas no mesmo filtro de cidade/ofício."""
+    init()
+    conn = get_conn()
+    try:
+        where, params = _readiness_base(trade_code, city)
+        row = conn.execute(
+            "SELECT COUNT(*) AS all_count, "
+            "COALESCE(SUM(CASE WHEN l.signal_ready = 1 THEN 1 ELSE 0 END), 0) AS letter_count, "
+            "COALESCE(SUM(CASE WHEN l.phone_ready = 1 THEN 1 ELSE 0 END), 0) AS phone_count "
+            "FROM leads l WHERE " + " AND ".join(where),
+            params,
+        ).fetchone()
+        return {
+            "all": int(row["all_count"] or 0),
+            "letter": int(row["letter_count"] or 0),
+            "phone": int(row["phone_count"] or 0),
+        }
     finally:
         conn.close()
 

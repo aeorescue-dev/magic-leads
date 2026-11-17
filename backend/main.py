@@ -79,6 +79,7 @@ from .models.schemas import (
     PushPreferencesUpdate,
     PushSubscribeRequest,
     PushUnsubscribeRequest,
+    ReadinessCounts,
     RejectLeadRequest,
     ReleaseLeadRequest,
     ReserverLeadRequest,
@@ -326,6 +327,8 @@ def _to_lead_response(lead: dict) -> LeadResponse:
         owner_name=lead.get("owner_name") if show_owner else None,
         owner_phone=lead.get("owner_phone") if show_owner else None,
         phone_verified=bool(lead.get("phone_verified")) if show_owner else False,
+        signal_ready=bool(lead.get("signal_ready")),
+        phone_ready=bool(lead.get("phone_ready")),
         # O selo nunca pode denunciar um telefone que o utilizador ainda nao
         # revelou: sem reveal, avalia-se a resolubilidade (high/medium), nao a
         # existencia do numero em cache.
@@ -862,6 +865,12 @@ def _signal_type_from_filter(value) -> str | None:
     return None
 
 
+def _normalize_readiness(value) -> str:
+    """Valida a aba de prontidão; default seguro = all."""
+    raw = str(value or "all").strip().lower()
+    return raw if raw in ("all", "letter", "phone") else "all"
+
+
 @app.get("/api/leads", response_model=LeadsListResponse)
 @limiter.limit("120/minute")
 async def get_leads(
@@ -872,6 +881,7 @@ async def get_leads(
     page: int = 1,
     per_page: int = 20,
     include_closed: bool = False,
+    readiness: str = "all",
     user: dict = Depends(_get_current_user),
 ):
     """Retorna o feed qualificado com filtros e total reais em SQL (P0-B).
@@ -883,6 +893,7 @@ async def get_leads(
     try:
         signal_type = _signal_type_from_filter(type)
         user_id = user["id"]
+        readiness = _normalize_readiness(readiness)
         # Teto explícito também na resposta (o DB já limita as linhas a 200).
         per_page = max(1, min(int(per_page), 200))
         page = max(1, int(page))
@@ -894,6 +905,14 @@ async def get_leads(
             user_id=user_id,
             limit=per_page,
             offset=(max(1, page) - 1) * per_page,
+            readiness=readiness,
+        )
+        counts = await db_service.count_leads_by_readiness(
+            city=city,
+            signal_type=signal_type,
+            category=category,
+            include_closed=include_closed,
+            user_id=user_id,
         )
         await _annotate_visibility(leads, user)
 
@@ -902,6 +921,7 @@ async def get_leads(
             page=page,
             per_page=per_page,
             leads=[_to_lead_response(lead) for lead in leads],
+            counts=ReadinessCounts(**counts),
         )
 
     except Exception as e:
@@ -1003,6 +1023,7 @@ async def leads_today(
     layer: str = None,
     owner_type: str = None,
     search: str = None,
+    readiness: str = "all",
     user: dict = Depends(_get_current_user),
 ):
     """Feed dos últimos 7 dias — filtros, total e exclusão de fechados em SQL.
@@ -1011,10 +1032,13 @@ async def leads_today(
     pode mostrar. `include_closed=True` (toggle do painel) mostra encerrados.
 
     A1: exige conta (antes era anónimo com `page` livre e 60/página).
+    Marco 1A: `readiness=all|letter|phone` filtra a aba de prontidão e devolve
+    os contadores das três abas no mesmo filtro base.
     """
     try:
         signal_type = _signal_type_from_filter(type)
         user_id = user["id"]
+        readiness = _normalize_readiness(readiness)
         limit = max(1, min(int(limit), 200))
         page = max(1, int(page))
         neighborhood_list = [
@@ -1044,6 +1068,23 @@ async def leads_today(
             layer=layer,
             owner_type=owner_type,
             search=search,
+            readiness=readiness,
+        )
+        counts = await db_service.count_leads_by_readiness(
+            city=city,
+            signal_type=signal_type,
+            category=category,
+            urgency=urgency,
+            include_closed=include_closed,
+            days=7,
+            user_id=user_id,
+            neighborhoods=neighborhood_list or None,
+            zips=zip_list or None,
+            no_geo=bool(no_geo),
+            deadline_only=bool(deadline_only),
+            layer=layer,
+            owner_type=owner_type,
+            search=search,
         )
         await _annotate_visibility(leads, user)
 
@@ -1052,6 +1093,7 @@ async def leads_today(
             page=page,
             per_page=limit,
             leads=[_to_lead_response(lead) for lead in leads],
+            counts=ReadinessCounts(**counts),
         )
     except Exception as e:
         logger.error(f"Erro ao buscar demandas do dia: {e}", exc_info=True)
@@ -1073,6 +1115,7 @@ async def leads_neighborhoods(
     layer: str = None,
     owner_type: str = None,
     search: str = None,
+    readiness: str = "all",
     user: dict = Depends(_get_current_user),
 ):
     """Agregado geográfico do feed de leads (bairro/ZIP) em SQL.
@@ -1083,6 +1126,7 @@ async def leads_neighborhoods(
     """
     try:
         signal_type = _signal_type_from_filter(type)
+        readiness = _normalize_readiness(readiness)
         started = time.perf_counter()
         result = await db_service.get_leads_geo_summary(
             city=city,
@@ -1096,6 +1140,7 @@ async def leads_neighborhoods(
             layer=layer,
             owner_type=owner_type,
             search=search,
+            readiness=readiness,
         )
         elapsed_ms = (time.perf_counter() - started) * 1000
         response.headers["Server-Timing"] = f"db;dur={elapsed_ms:.1f}"
@@ -10419,9 +10464,15 @@ async def credits_leads(
     trade_code: str | None = None,
     city: str | None = None,
     limit: int = 60,
+    readiness: str = "letter",
     user: dict = Depends(_get_current_user),
 ):
-    return {"leads": credits.list_leads(user["id"], trade_code, city, limit)}
+    readiness = _normalize_readiness(readiness)
+    return {
+        "leads": credits.list_leads(user["id"], trade_code, city, limit, readiness),
+        "counts": credits.readiness_counts(trade_code, city),
+        "readiness": readiness,
+    }
 
 
 @app.get("/api/credits/leads/{lead_id}")

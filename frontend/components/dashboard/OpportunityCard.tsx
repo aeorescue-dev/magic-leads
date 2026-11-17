@@ -206,7 +206,7 @@ export function OpportunityCard({
           <Clock className="h-3.5 w-3.5" />
           {t("dashboard.freshness.reported")}: {ctx.relativeTime(lead.date_reported)}
         </span>
-        {lead.phone_confidence === "verified" ? (
+        {lead.phone_confidence === "verified" && !lead.phone_ready ? (
           <span className="inline-flex items-center gap-1 text-[var(--sd-success)]">
             <Phone className="h-3.5 w-3.5" />
             {t("dashboard.phone.verified")}
@@ -216,6 +216,18 @@ export function OpportunityCard({
             <Phone className="h-3.5 w-3.5" />
             {t("dashboard.phone.high")}
             {lead.phone_success_pct != null ? ` · ${lead.phone_success_pct}%` : ""}
+          </span>
+        ) : null}
+        {lead.signal_ready ? (
+          <span className="inline-flex items-center gap-1 font-semibold text-[var(--sd-success)]">
+            <Mail className="h-3.5 w-3.5" />
+            {t("dashboard.readiness.letter_badge")}
+          </span>
+        ) : null}
+        {lead.phone_ready ? (
+          <span className="inline-flex items-center gap-1 font-semibold text-[var(--sd-info)]">
+            <Phone className="h-3.5 w-3.5" />
+            {t("dashboard.readiness.phone_badge")}
           </span>
         ) : null}
         {ctx.shouldShowAddressWarning(lead) ? (

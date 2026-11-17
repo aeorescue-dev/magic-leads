@@ -37,11 +37,11 @@ def _lead(external_id: str, *, mailing: str = "1 Mail St, New York, NY 10001", t
         cur = conn.execute(
             "INSERT INTO leads (external_id, source_type, address, city, state, zip_code, "
             "issue_category, issue_description, owner_name, mailing_address, date_reported, "
-            "is_qualified, is_junk, case_status, signal_ready, phone_ready, owner_source, "
-            "owner_kind, parcel_id, lead_status) "
+            "is_qualified, is_junk, case_status, signal_type, signal_status, signal_ready, "
+            "phone_ready, owner_source, owner_kind, parcel_id, lead_status) "
             "VALUES (?, 'credits_seed', '123 Test Street', 'NYC', 'NY', '10001', ?, "
-            "'Test signal', 'Alice Owner', ?, date('now'), 1, 0, 'open', 1, 0, "
-            "'seed_staging', 'person', ?, 'available')",
+            "'Test signal', 'Alice Owner', ?, date('now'), 1, 0, 'open', "
+            "'open_request', 'open', 1, 0, 'seed_staging', 'person', ?, 'available')",
             (external_id, trade, mailing, f"BBL-{external_id}"),
         )
         conn.commit()
@@ -132,7 +132,7 @@ def test_signal_requires_credits_and_mailing():
     try:
         with pytest.raises(credits.CreditsError) as exc:
             credits.reveal_signal(uid, lead_id, "Plumbing", f"idem-{suffix}-1")
-        assert exc.value.code == "mailing_missing"
+        assert exc.value.code == "signal_not_ready"
         assert exc.value.status_code == 422
         assert credits.get_wallet(uid)["balance_cents"] == 0
     finally:
@@ -144,3 +144,65 @@ def test_phone_reveal_is_disabled_in_1a():
         credits.reveal_phone(1, 1, "Plumbing", "idem")
     assert exc.value.code == "phone_reveal_disabled"
     assert exc.value.status_code == 503
+
+
+def test_readiness_flags_materialize_and_filter():
+    """Carta = owner + mailing + sinal; telefone = verificado + número."""
+    suffix = uuid.uuid4().hex[:8]
+    email = f"credits-r-{suffix}@magic.test"
+    ext = f"test-readiness-{suffix}"
+    uid = _user(email)
+    conn = _conn()
+    lead_id = 0
+    try:
+        cur = conn.execute(
+            "INSERT INTO leads (external_id, source_type, address, city, state, zip_code, "
+            "issue_category, issue_description, owner_name, mailing_address, date_reported, "
+            "is_qualified, is_junk, case_status, signal_type, signal_status, owner_source, "
+            "owner_kind, lead_status) "
+            "VALUES (?, 'credits_seed', '999 Readiness Lane', 'NYC', 'NY', '10001', "
+            "'Plumbing', 'Readiness signal', 'Alice Owner', '1 Mail St, New York, NY 10001', "
+            "date('now'), 1, 0, 'open', 'open_request', 'open', 'seed_staging', "
+            "'person', 'available')",
+            (ext,),
+        )
+        lead_id = int(cur.lastrowid)
+        conn.commit()
+        row = conn.execute(
+            "SELECT signal_ready, phone_ready FROM leads WHERE id=?", (lead_id,)
+        ).fetchone()
+        assert int(row["signal_ready"]) == 1
+        assert int(row["phone_ready"]) == 0
+
+        conn.execute(
+            "UPDATE leads SET owner_phone=?, phone_verified=1 WHERE id=?",
+            ("+1 212 555 0100", lead_id),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT signal_ready, phone_ready FROM leads WHERE id=?", (lead_id,)
+        ).fetchone()
+        assert int(row["signal_ready"]) == 1
+        assert int(row["phone_ready"]) == 1
+    finally:
+        conn.close()
+
+    try:
+        letter, _ = db_service._service.get_leads_feed(
+            city="NYC", search="999 Readiness", readiness="letter"
+        )
+        assert any(int(row["id"]) == lead_id for row in letter)
+        phone, _ = db_service._service.get_leads_feed(
+            city="NYC", search="999 Readiness", readiness="phone"
+        )
+        assert any(int(row["id"]) == lead_id for row in phone)
+        counts = db_service._service.count_leads_by_readiness(
+            city="NYC", search="999 Readiness"
+        )
+        assert counts == {"all": 1, "letter": 1, "phone": 1}
+
+        credit_rows = credits.list_leads(uid, city="NYC", limit=100, readiness="letter")
+        assert any(row["id"] == lead_id for row in credit_rows)
+        assert credits.readiness_counts(city="NYC")["letter"] >= 1
+    finally:
+        _cleanup([email], [ext])
