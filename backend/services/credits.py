@@ -505,6 +505,8 @@ def _readiness_base(trade_code: Optional[str] = None, city: Optional[str] = None
         "l.is_feed_ok = 1",
         "l.signal_type IS NOT NULL",
         "l.lead_status != 'converted'",
+        "datetime(l.date_reported) >= datetime('now', '-7 days')",
+        "l.date_reported >= date('now', '-7 days')",
     ]
     params: list[Any] = []
     if trade_code:
