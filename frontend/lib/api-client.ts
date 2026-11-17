@@ -64,6 +64,7 @@ export interface LeadResponse {
   last_case_at?: string | null;
   phone_verified?: boolean;
   signal_ready?: boolean;
+  phone_eligible?: boolean;
   phone_ready?: boolean;
   phone_confidence?: string;
   phone_success_pct?: number | null;

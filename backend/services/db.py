@@ -209,11 +209,16 @@ def _readiness_set_clause() -> str:
     porque numa única UPDATE o SQLite avalia as expressões com os valores
     antigos da linha. `signal_type IS NOT NULL` alinha com o feed; o reveal de
     carta continua a exigir `signal_ready=1`.
+
+    `phone_eligible` é a elegibilidade para consulta Searchbug on-demand:
+    owner/empresa registado + endereço exato, mesmo sem telefone guardado.
     """
     base = f"({_qualified_where()}) AND signal_type IS NOT NULL"
     return (
         f"signal_ready = CASE WHEN {base} "
         f"AND {_owner_ready_where()} AND {_mailing_ready_where()} "
+        f"THEN 1 ELSE 0 END, "
+        f"phone_eligible = CASE WHEN {base} AND {_owner_ready_where()} "
         f"THEN 1 ELSE 0 END, "
         f"phone_ready = CASE WHEN {base} AND {_phone_ready_where()} "
         f"THEN 1 ELSE 0 END"
@@ -247,7 +252,8 @@ def _readiness_where(readiness: Optional[str]) -> Optional[str]:
     if readiness == "letter":
         return "l.signal_ready = 1"
     if readiness == "phone":
-        return "l.phone_ready = 1"
+        # Elegível para consulta on-demand OU já enriquecido.
+        return "(l.phone_eligible = 1 OR l.phone_ready = 1)"
     return None
 
 
@@ -1966,6 +1972,7 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         "is_qualified": "INTEGER",
         # Marco 1A: prontidão materializada (backfill no fim da migração).
         "signal_ready": "INTEGER DEFAULT 0",
+        "phone_eligible": "INTEGER DEFAULT 0",
         "phone_ready": "INTEGER DEFAULT 0",
     }
     for name, ctype in extra_cols.items():
@@ -2100,13 +2107,13 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         "key TEXT PRIMARY KEY, value TEXT, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)"
     )
     _readiness_backfilled = conn.execute(
-        "SELECT 1 FROM schema_meta WHERE key='readiness_v1'"
+        "SELECT 1 FROM schema_meta WHERE key='readiness_v2'"
     ).fetchone()
     if not _readiness_backfilled:
         _t0 = time.perf_counter()
         _ready_done = refresh_readiness(conn, "1=1", ())
         conn.execute(
-            "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('readiness_v1', '1')"
+            "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('readiness_v2', '1')"
         )
         conn.commit()
         logger.info(
@@ -2148,6 +2155,16 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_leads_phone_city_trade "
         "ON leads (phone_ready, city COLLATE NOCASE, issue_category, date_reported DESC) "
         "WHERE phone_ready = 1"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_leads_phone_eligible "
+        "ON leads (phone_eligible, date_reported DESC, id DESC) "
+        "WHERE phone_eligible = 1"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_leads_phone_eligible_city_trade "
+        "ON leads (phone_eligible, city COLLATE NOCASE, issue_category, date_reported DESC) "
+        "WHERE phone_eligible = 1"
     )
     # Fase 22: triggers mantêm as colunas materializadas em QUALQUER escrita
     # (ingestão, admin, scripts, testes). Sem isto, uma linha inserida por SQL
@@ -5897,7 +5914,7 @@ class DatabaseService:
                 f"""
                 SELECT COUNT(*) AS all_count,
                        COALESCE(SUM(CASE WHEN l.signal_ready = 1 THEN 1 ELSE 0 END), 0) AS letter_count,
-                       COALESCE(SUM(CASE WHEN l.phone_ready = 1 THEN 1 ELSE 0 END), 0) AS phone_count
+                       COALESCE(SUM(CASE WHEN l.phone_eligible = 1 OR l.phone_ready = 1 THEN 1 ELSE 0 END), 0) AS phone_count
                   FROM leads l
                  WHERE {where_sql}
                 """,

@@ -328,6 +328,7 @@ def _to_lead_response(lead: dict) -> LeadResponse:
         owner_phone=lead.get("owner_phone") if show_owner else None,
         phone_verified=bool(lead.get("phone_verified")) if show_owner else False,
         signal_ready=bool(lead.get("signal_ready")),
+        phone_eligible=bool(lead.get("phone_eligible")),
         phone_ready=bool(lead.get("phone_ready")),
         # O selo nunca pode denunciar um telefone que o utilizador ainda nao
         # revelou: sem reveal, avalia-se a resolubilidade (high/medium), nao a
@@ -10498,6 +10499,72 @@ async def credits_reveal(request: Request, user: dict = Depends(_get_current_use
         if reveal_type == "phone":
             return credits.reveal_phone(user["id"], lead_id, trade_code, idempotency_key)
         return credits.reveal_signal(user["id"], lead_id, trade_code, idempotency_key)
+    except credits.CreditsError as exc:
+        _credits_http(exc)
+
+
+@app.post("/api/credits/reveal-phone")
+async def credits_reveal_phone(request: Request, user: dict = Depends(_get_current_user)):
+    """Reveal de telefone on-demand: cobra $3 e consulta a Searchbug só se necessário."""
+    body = await request.json()
+    lead_id = int(body.get("lead_id") or 0)
+    trade_code = body.get("trade_code")
+    idempotency_key = str(body.get("idempotency_key") or "")
+    try:
+        quote = credits.phone_quote(user["id"], lead_id, trade_code)
+        if quote["already_revealed"]:
+            return {
+                "success": True,
+                "duplicate": True,
+                "payload": quote["payload"],
+                "wallet": credits.get_wallet(user["id"]),
+            }
+        if not quote["eligible"]:
+            raise HTTPException(
+                status_code=422,
+                detail={"error": "phone_not_eligible", "message": "Lead sem elegibilidade para consulta de telefone."},
+            )
+        if quote["balance_cents"] < quote["price_cents"]:
+            raise HTTPException(
+                status_code=402,
+                detail={"error": "insufficient_credits", "message": "Saldo insuficiente para consultar o telefone."},
+            )
+        lead = quote["lead"]
+        phone = str(lead.get("owner_phone") or "").strip()
+        if not phone:
+            if not settings.SEARCHBUG_API_KEY:
+                return {
+                    "success": False,
+                    "error": "phone_unavailable",
+                    "message": "Consulta de telefone indisponível neste momento.",
+                }
+            attempt = await db_service.reserve_phone_attempt(user["id"])
+            if not attempt.get("ok"):
+                return {
+                    "success": False,
+                    "error": "attempt_limit",
+                    "message": "Limite de consultas atingido. Tenta novamente mais tarde.",
+                }
+            result = await searchbug_service.lookup_phone(
+                lead.get("address", ""),
+                lead.get("city", ""),
+                lead.get("state", ""),
+                owner_name=lead.get("owner_name"),
+                zip_code=lead.get("zip_code"),
+                owner_class=get_owner_class(lead.get("owner_name")),
+                lead_id=lead_id,
+            )
+            if not result.success or not result.phone:
+                return {
+                    "success": False,
+                    "error": "phone_not_found",
+                    "message": "Não encontrámos um telefone para este lead.",
+                }
+            phone = result.phone
+            await db_service.update_owner_phone(lead_id, phone, verified=result.verified)
+        return credits.complete_phone_reveal(
+            user["id"], lead_id, trade_code, idempotency_key, phone
+        )
     except credits.CreditsError as exc:
         _credits_http(exc)
 

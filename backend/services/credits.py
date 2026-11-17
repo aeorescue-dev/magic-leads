@@ -149,6 +149,7 @@ def init() -> None:
             """
         )
         _add_column(conn, "leads", "signal_ready", "INTEGER DEFAULT 0")
+        _add_column(conn, "leads", "phone_eligible", "INTEGER DEFAULT 0")
         _add_column(conn, "leads", "phone_ready", "INTEGER DEFAULT 0")
         _add_column(conn, "leads", "parcel_id", "TEXT")
         _add_column(conn, "leads", "owner_source", "TEXT")
@@ -530,7 +531,7 @@ def list_leads(
         if readiness == "letter":
             where.append("l.signal_ready = 1")
         elif readiness == "phone":
-            where.append("l.phone_ready = 1")
+            where.append("(l.phone_eligible = 1 OR l.phone_ready = 1)")
         rows = conn.execute(
             "SELECT l.* FROM leads l WHERE " + " AND ".join(where) +
             " ORDER BY l.date_reported DESC, l.id DESC LIMIT ?",
@@ -551,6 +552,7 @@ def list_leads(
                 "owner_masked": _mask_owner(row["owner_name"]),
                 "mailing_ready": bool((row["mailing_address"] or "").strip()),
                 "signal_ready": bool(int(row["signal_ready"] or 0)),
+                "phone_eligible": bool(int(row["phone_eligible"] or 0)),
                 "phone_ready": bool(int(row["phone_ready"] or 0)),
                 "signal_price_cents": SIGNAL_PRICE_CENTS,
                 "phone_price_cents": PHONE_PRICE_CENTS,
@@ -572,7 +574,7 @@ def readiness_counts(trade_code: Optional[str] = None, city: Optional[str] = Non
         row = conn.execute(
             "SELECT COUNT(*) AS all_count, "
             "COALESCE(SUM(CASE WHEN l.signal_ready = 1 THEN 1 ELSE 0 END), 0) AS letter_count, "
-            "COALESCE(SUM(CASE WHEN l.phone_ready = 1 THEN 1 ELSE 0 END), 0) AS phone_count "
+            "COALESCE(SUM(CASE WHEN l.phone_eligible = 1 OR l.phone_ready = 1 THEN 1 ELSE 0 END), 0) AS phone_count "
             "FROM leads l WHERE " + " AND ".join(where),
             params,
         ).fetchone()
@@ -729,8 +731,139 @@ def reveal_signal(user_id: int, lead_id: int, trade_code: Optional[str], idempot
         conn.close()
 
 
+def phone_quote(user_id: int, lead_id: int, trade_code: Optional[str] = None) -> dict[str, Any]:
+    """Elegibilidade e saldo para o reveal de telefone on-demand."""
+    init()
+    conn = get_conn()
+    try:
+        lead = _lead_row(conn, lead_id)
+        wallet = _ensure_wallet(conn, int(user_id))
+        prior = conn.execute(
+            "SELECT * FROM lead_reveals WHERE lead_id=? AND user_id=? "
+            "AND reveal_type='phone' ORDER BY id DESC LIMIT 1",
+            (int(lead_id), int(user_id)),
+        ).fetchone()
+        prior_payload = (
+            json.loads(prior["payload_json"])
+            if prior and prior["payload_json"]
+            else None
+        )
+        return {
+            "lead_id": int(lead_id),
+            "trade_code": (trade_code or str(lead["issue_category"] or "")).strip(),
+            "eligible": bool(
+                int(lead["phone_eligible"] or 0) or int(lead["phone_ready"] or 0)
+            ),
+            "phone_ready": bool(int(lead["phone_ready"] or 0)),
+            "owner_phone": str(lead["owner_phone"] or "") if prior else "",
+            "already_revealed": bool(prior),
+            "payload": prior_payload,
+            "price_cents": PHONE_PRICE_CENTS,
+            "balance_cents": int(wallet["balance_cents"] or 0) - int(wallet["reserved_cents"] or 0),
+            "lead": dict(lead),
+        }
+    finally:
+        conn.close()
+
+
+def complete_phone_reveal(
+    user_id: int,
+    lead_id: int,
+    trade_code: Optional[str],
+    idempotency_key: str,
+    phone: str,
+    searchbug_call_id: Optional[int] = None,
+) -> dict[str, Any]:
+    """Cobra 300 créditos e regista o telefone revelado (idempotente)."""
+    init()
+    if not idempotency_key:
+        raise CreditsError("idempotency_key_required", 422)
+    if not str(phone or "").strip():
+        raise CreditsError("phone_missing", 422)
+    conn = get_conn()
+    try:
+        existing = conn.execute(
+            "SELECT * FROM lead_reveals WHERE idempotency_key=?", (idempotency_key,)
+        ).fetchone()
+        if existing:
+            payload = json.loads(existing["payload_json"]) if existing["payload_json"] else None
+            return {
+                "success": True,
+                "duplicate": True,
+                "reveal_id": int(existing["id"]),
+                "payload": payload,
+                "wallet": get_wallet(user_id),
+            }
+        prior = conn.execute(
+            "SELECT * FROM lead_reveals WHERE lead_id=? AND user_id=? "
+            "AND reveal_type='phone' ORDER BY id DESC LIMIT 1",
+            (int(lead_id), int(user_id)),
+        ).fetchone()
+        if prior:
+            payload = json.loads(prior["payload_json"]) if prior["payload_json"] else None
+            return {
+                "success": True,
+                "duplicate": True,
+                "reveal_id": int(prior["id"]),
+                "payload": payload,
+                "wallet": get_wallet(user_id),
+            }
+        lead = _lead_row(conn, lead_id)
+        trade = (trade_code or str(lead["issue_category"] or "")).strip()
+        payload = {
+            "lead_id": int(lead_id),
+            "type": "phone",
+            "trade_code": trade,
+            "phone": str(phone).strip(),
+            "owner_name": lead["owner_name"],
+            "address": lead["address"],
+            "city": lead["city"],
+            "state": lead["state"],
+            "zip_code": lead["zip_code"],
+            "price_cents": PHONE_PRICE_CENTS,
+        }
+        conn.execute("BEGIN IMMEDIATE")
+        cur = conn.execute(
+            "INSERT INTO lead_reveals "
+            "(lead_id, user_id, revealed_date, idempotency_key, reveal_type, trade_code, "
+            "credits_cents, payload_json, searchbug_call_id) "
+            "VALUES (?, ?, date('now'), ?, 'phone', ?, ?, ?, ?)",
+            (
+                int(lead_id), int(user_id), idempotency_key, trade,
+                PHONE_PRICE_CENTS, json.dumps(payload, ensure_ascii=False),
+                searchbug_call_id,
+            ),
+        )
+        reveal_id = int(cur.lastrowid)
+        new_balance = _spend_locked(
+            conn, user_id, PHONE_PRICE_CENTS, "reveal_phone", "reveal_phone",
+            str(reveal_id), {"lead_id": int(lead_id), "trade_code": trade},
+        )
+        conn.execute(
+            "INSERT INTO lead_events (lead_id, event_type, user_id, detail) "
+            "VALUES (?, 'phone_revealed', ?, ?)",
+            (int(lead_id), int(user_id), f"phone:{PHONE_PRICE_CENTS}c"),
+        )
+        conn.commit()
+        return {
+            "success": True,
+            "duplicate": False,
+            "reveal_id": reveal_id,
+            "payload": payload,
+            "wallet": get_wallet(user_id),
+            "balance_after_cents": new_balance,
+        }
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def reveal_phone(*args, **kwargs) -> dict[str, Any]:
-    raise CreditsError("phone_reveal_disabled", 503, "O reveal de telefone $3 entra no Marco 1B, depois dos Property Masters.")
+    """Compatibilidade: o endpoint novo faz a consulta on-demand e chama
+    `complete_phone_reveal`; este atalho mantém o contrato antigo fechado."""
+    raise CreditsError("phone_reveal_disabled", 503, "Consulta de telefone indisponível.")
 
 
 def list_ledger(user_id: int, limit: int = 50) -> list[dict[str, Any]]:

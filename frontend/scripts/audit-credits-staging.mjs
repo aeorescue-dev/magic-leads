@@ -16,6 +16,11 @@ function check(name, ok, detail = "") {
   console.log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? " · " + detail : ""}`);
 }
 
+function num(text) {
+  const match = String(text || "").match(/\d[\d.]*/);
+  return Number((match ? match[0] : "0").replace(/\./g, ""));
+}
+
 const browser = await chromium.launch();
 const bypassHeaders = BYPASS
   ? {
@@ -108,6 +113,7 @@ await page.screenshot({ path: `${OUT}/02-dashboard-freemium.png`, fullPage: true
 await page.locator('button:has-text("Oportunidades")').first().click();
 await page.waitForTimeout(2500);
 await page.getByTestId("credits-panel").first().waitFor({ timeout: 30000 });
+const panel = page.getByTestId("credits-panel").first();
 check(
   "Freemium keeps dashboard + masked signals",
   (await page.getByTestId("credits-panel").first().isVisible()) &&
@@ -127,24 +133,53 @@ check(
   (await readyAll.isVisible()) && (await readyLetter.isVisible()) && (await readyPhone.isVisible()),
 );
 await readyPhone.click();
-await page.waitForTimeout(1000);
+await page.waitForTimeout(1200);
+const phoneTabText = await readyPhone.innerText();
+const phoneTabCount = num(phoneTabText);
 check(
-  "Phone tab locked for Milestone 1B",
-  await page.getByText(/Marco 1B|Milestone 1B/i).first().isVisible(),
+  "Phone tab shows eligible leads (not zero)",
+  phoneTabCount > 0,
+  phoneTabText,
+);
+const bodyAfterPhone = await page.locator("body").innerText();
+check(
+  "No internal phone jargon in UI",
+  !/Marco 1B|Milestone 1B|Hito 1B|Sem Searchbug/i.test(bodyAfterPhone),
 );
 await readyLetter.click();
 await page.waitForTimeout(1200);
 
+const sidebarCount = num(await page.locator('button:has-text("Oportunidades")').first().innerText());
+const todosCount = num(await readyAll.innerText());
+check(
+  "Sidebar count matches Todos tab",
+  sidebarCount === todosCount,
+  `${sidebarCount} vs ${todosCount}`,
+);
+const bodyText = await page.locator("body").innerText();
+check("Card titles use UTF-8 (no Â·)", !bodyText.includes("Â·"));
+
 // ---------------------------------------------------------------------------
-// 2. Sidebar "Créditos / Planos" opens the packs inside the dashboard
+// 2. Sidebar "Créditos / Planos" opens the wallet modal (packs + movements)
 // ---------------------------------------------------------------------------
 await page.locator('button:has-text("Créditos / Planos")').first().click();
-await page.getByTestId("credits-panel").first().waitFor({ timeout: 30000 });
-const panel = page.getByTestId("credits-panel").first();
-await panel.locator('button:has-text("Starter")').first().waitFor({ timeout: 30000 });
-const packs = await panel.locator('button:has-text("Starter")').count();
-check("Sidebar opens credit packs in dashboard", packs > 0);
-await page.screenshot({ path: `${OUT}/04-credits-packs.png`, fullPage: true });
+const walletModal = page.getByTestId("wallet-modal");
+await walletModal.waitFor({ timeout: 30000 });
+await walletModal.locator('button:has-text("Starter")').first().waitFor({ timeout: 30000 });
+check(
+  "Sidebar opens wallet modal with packs",
+  (await walletModal.locator('button:has-text("Starter")').count()) > 0,
+);
+check(
+  "Wallet modal includes movements",
+  await walletModal.getByText("MOVIMENTOS").first().isVisible(),
+);
+check(
+  "Feed no longer shows packs/ledger",
+  (await panel.getByText("MOVIMENTOS").count()) === 0 &&
+    (await panel.locator('button:has-text("Starter")').count()) === 0,
+);
+await page.screenshot({ path: `${OUT}/04-wallet-modal.png`, fullPage: true });
 
 // Header wallet starts empty for the seeded buyer.
 const headerWallet = page.locator('button[title="Carteira de créditos"]');
@@ -156,13 +191,13 @@ check(
 // ---------------------------------------------------------------------------
 // 3. Mock purchase + webhook idempotency + wallet in the header
 // ---------------------------------------------------------------------------
-await panel.locator('button:has-text("Starter")').first().click();
-await page.getByText(/Mock: Starter/).first().waitFor({ timeout: 10000 });
+await walletModal.locator('button:has-text("Starter")').first().click();
+await walletModal.getByText(/Mock: Starter/).first().waitFor({ timeout: 10000 });
 check("Mock checkout created", true);
 
-await page.locator('button:has-text("Simular webhook duplicado")').first().click();
+await walletModal.locator('button:has-text("Simular webhook duplicado")').first().click();
 await page.waitForTimeout(1500);
-const webhookMsg = await page
+const webhookMsg = await walletModal
   .locator("text=Webhook 1:")
   .first()
   .innerText()
@@ -174,14 +209,20 @@ check(
 );
 await page.screenshot({ path: `${OUT}/05-webhook-idempotent.png`, fullPage: true });
 
-await page.locator('button:has-text("Simular pagamento")').first().click();
+await walletModal.locator('button:has-text("Simular pagamento")').first().click();
 await page.waitForTimeout(1500);
 check(
   "Credits appear in header wallet",
   (await headerWallet.first().innerText()).trim().includes("$7.00"),
   await headerWallet.first().innerText(),
 );
+check(
+  "Wallet ledger shows pack purchase",
+  await walletModal.getByText("pack_purchase").first().isVisible(),
+);
 await page.screenshot({ path: `${OUT}/06-wallet-700-dashboard.png`, fullPage: true });
+await walletModal.locator('button:has-text("Fechar")').last().click();
+await page.waitForTimeout(500);
 
 // ---------------------------------------------------------------------------
 // 4. Reveal a signal in the dashboard and debit the wallet
@@ -220,10 +261,10 @@ const freeContext = await browser.newContext({
 const freePage = await freeContext.newPage();
 await unlockGate(freePage);
 await login(freePage, "qa-free+staging@magicleads.app");
-await freePage.locator('button:has-text("Créditos / Planos")').first().click();
+await freePage.locator('button:has-text("Oportunidades")').first().click();
 const freePanel = freePage.getByTestId("credits-panel").first();
 await freePanel.waitFor({ timeout: 30000 });
-await freePage.waitForTimeout(800);
+await freePage.waitForTimeout(1000);
 await freePanel.locator('button:has-text("Revelar sinal"):not([disabled])').first().click();
 const paywall = freePage.getByTestId("credit-paywall");
 await paywall.first().waitFor({ timeout: 15000 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { Layers, Lock, Mail, Phone, Search, SlidersHorizontal, X } from "lucide-react";
+import { Layers, Mail, Phone, Search, SlidersHorizontal, X } from "lucide-react";
 import type { Ref } from "react";
 import { useI18n } from "@/lib/i18n";
 import { TRADE_CATEGORIES } from "@/lib/categories";
@@ -89,7 +89,6 @@ export function FeedToolbar({
               const active = tab.key === activeReadiness;
               const Icon =
                 READINESS_ICONS[tab.key as keyof typeof READINESS_ICONS] ?? Layers;
-              const locked = tab.key === "phone" && tab.count === 0;
               return (
                 <button
                   key={tab.key}
@@ -97,7 +96,6 @@ export function FeedToolbar({
                   data-testid={`readiness-${tab.key}`}
                   onClick={() => onReadinessChange(tab.key)}
                   aria-pressed={active}
-                  title={locked ? "Marco 1B" : undefined}
                   className={`inline-flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-[11.5px] font-bold transition ${
                     active
                       ? "bg-[var(--sd-accent)] text-[var(--sd-accent-text)] shadow-sm"
@@ -113,13 +111,7 @@ export function FeedToolbar({
                         : "bg-[var(--sd-surface)] text-[var(--sd-faint)]"
                     }`}
                   >
-                    {locked ? (
-                      <>
-                        <Lock className="h-2.5 w-2.5" />1B
-                      </>
-                    ) : (
-                      tab.count
-                    )}
+                    {tab.count}
                   </span>
                 </button>
               );

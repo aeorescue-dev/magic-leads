@@ -34,6 +34,7 @@ export interface CreditLead {
   owner_masked: string;
   mailing_ready: boolean;
   signal_ready: boolean;
+  phone_eligible: boolean;
   phone_ready: boolean;
   signal_price_cents: number;
   phone_price_cents: number;
@@ -63,6 +64,29 @@ export interface RevealResult {
   payload: RevealPayload;
   wallet: Wallet;
   balance_after_cents?: number;
+}
+
+export interface PhoneRevealPayload {
+  lead_id: number;
+  type: "phone";
+  trade_code: string;
+  phone: string;
+  owner_name: string;
+  address: string;
+  city: string;
+  state?: string;
+  zip_code?: string;
+  price_cents: number;
+}
+
+export interface PhoneRevealResult {
+  success: boolean;
+  duplicate?: boolean;
+  reveal_id?: number;
+  payload?: PhoneRevealPayload;
+  wallet?: Wallet;
+  error?: string;
+  message?: string;
 }
 
 export interface LedgerEntry {
@@ -164,6 +188,17 @@ export function revealSignal(leadId: number, tradeCode: string, idempotencyKey: 
     method: "POST",
     body: JSON.stringify({
       type: "signal",
+      lead_id: leadId,
+      trade_code: tradeCode,
+      idempotency_key: idempotencyKey,
+    }),
+  });
+}
+
+export function revealPhone(leadId: number, tradeCode: string, idempotencyKey: string) {
+  return request<PhoneRevealResult>("/api/credits/reveal-phone", {
+    method: "POST",
+    body: JSON.stringify({
       lead_id: leadId,
       trade_code: tradeCode,
       idempotency_key: idempotencyKey,

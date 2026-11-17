@@ -57,6 +57,7 @@ import { PreventiveFeed } from "@/components/dashboard/PreventiveFeed";
 import { NeighborhoodPanel } from "@/components/dashboard/opportunities-map/NeighborhoodPanel";
 import { LeadsNeighborhoodPanel } from "@/components/dashboard/opportunities-map/LeadsNeighborhoodPanel";
 import CreditsPanel from "@/components/dashboard/CreditsPanel";
+import CreditWalletModal from "@/components/dashboard/CreditWalletModal";
 import { getWallet, type Wallet as CreditWallet } from "@/lib/credits-api";
 import type { LeadZone } from "@/components/dashboard/opportunities-map/leadZones";
 import { FeedToolbar } from "@/components/dashboard/FeedToolbar";
@@ -279,8 +280,10 @@ function DashboardPageInner() {
   } | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
-  const [activeTab, setActiveTab] = useState<"overview" | "opportunities" | "prevention" | "favorites" | "interests" | "alerts" | "history" | "credits">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "opportunities" | "prevention" | "favorites" | "interests" | "alerts" | "history">("overview");
   const [readiness, setReadiness] = useState<"all" | "letter" | "phone">("all");
+  const [walletOpen, setWalletOpen] = useState(false);
+  const [creditCounts, setCreditCounts] = useState({ all: 0, letter: 0, phone: 0 });
   const [interests, setInterests] = useState<Set<string>>(new Set(ALL_CATEGORY_KEYS));
   const [interestsConfigured, setInterestsConfigured] = useState<boolean | null>(null);
   // O utilizador ja' interagiu com as especialidades? Distingue "nunca
@@ -496,7 +499,7 @@ function DashboardPageInner() {
     const tab = searchParams.get("tab");
     const checkout = searchParams.get("checkout");
     if (tab !== "credits" && checkout !== "success" && checkout !== "cancel") return;
-    setActiveTab("credits");
+    setWalletOpen(true);
     if (!user?.id) return;
     getWallet()
       .then((w) => setCreditWallet(w))
@@ -523,7 +526,7 @@ function DashboardPageInner() {
   useEffect(() => {
     const onPaymentRequired = () => {
       if (isFreemium) {
-        setActiveTab("credits");
+        setWalletOpen(true);
         return;
       }
       checkoutAutoOpened.current = true;
@@ -2143,11 +2146,11 @@ function DashboardPageInner() {
     { key: "preventive", label: t("dashboard.feed.tab_preventive"), count: preventiveCount },
     { key: "permit", label: t("dashboard.feed.tab_works"), count: permitCount },
   ];
-  const readinessCounts = feedData?.counts ?? {
+  const readinessCounts = feedData?.counts ?? (isFreemium ? creditCounts : {
     all: feedTotal,
     letter: 0,
     phone: 0,
-  };
+  });
   const readinessTabs = [
     { key: "all", label: t("dashboard.readiness.all"), count: readinessCounts.all },
     { key: "letter", label: t("dashboard.readiness.letter"), count: readinessCounts.letter },
@@ -2302,7 +2305,7 @@ function DashboardPageInner() {
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
           {[
             { id: "overview", icon: LayoutDashboard, label: t("dashboard.nav.overview") },
-            { id: "opportunities", icon: FolderKanban, label: t("dashboard.nav.opportunities"),               badge: realTotalLeads.toLocaleString() },
+            { id: "opportunities", icon: FolderKanban, label: t("dashboard.nav.opportunities"),               badge: readinessCounts.all.toLocaleString() },
             { id: "prevention", icon: ShieldCheck, label: t("dashboard.nav.prevention") },
             { id: "favorites", icon: Star, label: t("dashboard.nav.favorites"), badge: String(leads.filter((l) => l.favorited).length || "") },
             { id: "interests", icon: SlidersHorizontal, label: t("dashboard.nav.interests"), badge: String(interests.size) },
@@ -2341,7 +2344,7 @@ function DashboardPageInner() {
 
           <div className={`pt-4 mt-4 border-t space-y-1 ${T.divider}`}>
             <button
-              onClick={() => setActiveTab("credits")}
+              onClick={() => setWalletOpen(true)}
               title={railCollapsed ? (lang === "en" ? "Credits / Plans" : "Créditos / Planos") : undefined}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition ${railCollapsed ? "lg:justify-center lg:px-2" : ""} ${T.text2} ${T.navHover}`}
             >
@@ -2511,7 +2514,7 @@ function DashboardPageInner() {
             {/* Wallet / créditos (Marco 1A) */}
             <button
               type="button"
-              onClick={() => setActiveTab("credits")}
+              onClick={() => setWalletOpen(true)}
               className={`inline-flex h-9 items-center gap-1.5 rounded-xl border px-2.5 text-[11px] font-black transition ${T.border} ${T.text2} ${T.navHover}`}
               title={lang === "en" ? "Credits wallet" : "Carteira de créditos"}
             >
@@ -2719,7 +2722,7 @@ function DashboardPageInner() {
               </span>
               <button
                 type="button"
-                onClick={() => setActiveTab("credits")}
+                onClick={() => setWalletOpen(true)}
                 className="shrink-0 rounded-lg bg-[var(--sd-accent)] px-3 py-1.5 text-[11px] font-black text-[var(--sd-accent-text)]"
               >
                 {lang === "en" ? "View credit packs" : "Ver pacotes de créditos"}
@@ -3341,16 +3344,6 @@ function DashboardPageInner() {
                 />
               </div>
             </div>
-          ) : activeTab === "credits" ? (
-            <div className="space-y-4">
-              <CreditsPanel
-  lang={lang}
-  wallet={creditWallet}
-  onWallet={setCreditWallet}
-  readiness={readiness}
-  onReadinessChange={handleReadinessChange}
-/>
-            </div>
           ) : (
           <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
           {/* GRID: INTERESTS CONFIG + OPPORTUNITIES FEED */}
@@ -3468,12 +3461,16 @@ function DashboardPageInner() {
             {/* OPPORTUNITIES FEED — freemium usa créditos; pago mantém o feed */}
             {isFreemium ? (
               <CreditsPanel
-  lang={lang}
-  wallet={creditWallet}
-  onWallet={setCreditWallet}
-  readiness={readiness}
-  onReadinessChange={handleReadinessChange}
-/>
+                lang={lang}
+                wallet={creditWallet}
+                onWallet={setCreditWallet}
+                readiness={readiness}
+                onReadinessChange={handleReadinessChange}
+                city={selectedCity === "all" ? undefined : selectedCity}
+                category={selectedCategory === "all" ? "" : selectedCategory}
+                onCategoryChange={(value) => setSelectedCategory(value || "all")}
+                onCounts={setCreditCounts}
+              />
             ) : (
             <section id="opportunities-feed" className="scroll-mt-24 flex flex-col overflow-hidden rounded-2xl border border-[var(--sd-border)] bg-[var(--sd-surface)]">
               <div className={`px-5 py-4 border-b flex items-center justify-between ${T.border}`}>
@@ -4319,6 +4316,14 @@ function DashboardPageInner() {
         onActivated={() => window.location.reload()}
         isDark={isDark}
         mode={subscription?.status === "expired" || subscription?.status === "pending_payment" ? "new" : "reactivate"}
+      />
+      {/* WALLET / CREDITS MODAL (Marco 1A) */}
+      <CreditWalletModal
+        open={walletOpen}
+        onClose={() => setWalletOpen(false)}
+        lang={lang}
+        wallet={creditWallet}
+        onWallet={setCreditWallet}
       />
       {/* WELCOME POPUP (First login after payment) */}
       <WelcomePopup

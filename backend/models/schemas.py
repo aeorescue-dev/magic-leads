@@ -164,6 +164,7 @@ class LeadResponse(BaseModel):
     phone_verified: bool = False
     # Marco 1A: prontidão materializada (não expõe owner/mailing; só o estado).
     signal_ready: bool = False
+    phone_eligible: bool = False
     phone_ready: bool = False
     phone_confidence: str = "unknown"
     # P2: percentagem real de sucesso (>=30 amostras). `None` quando a amostra

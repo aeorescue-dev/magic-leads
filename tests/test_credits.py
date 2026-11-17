@@ -139,11 +139,42 @@ def test_signal_requires_credits_and_mailing():
         _cleanup([email], [ext])
 
 
-def test_phone_reveal_is_disabled_in_1a():
-    with pytest.raises(credits.CreditsError) as exc:
-        credits.reveal_phone(1, 1, "Plumbing", "idem")
-    assert exc.value.code == "phone_reveal_disabled"
-    assert exc.value.status_code == 503
+def test_phone_reveal_charges_once_and_is_idempotent():
+    suffix = uuid.uuid4().hex[:8]
+    email = f"credits-p-{suffix}@magic.test"
+    ext = f"test-phone-{suffix}"
+    uid = _user(email)
+    lead_id = _lead(ext)
+    try:
+        _credit(uid)
+        quote = credits.phone_quote(uid, lead_id, "Plumbing")
+        assert quote["eligible"] is True
+        assert quote["balance_cents"] == 700
+        assert quote["price_cents"] == 300
+
+        first = credits.complete_phone_reveal(
+            uid, lead_id, "Plumbing", f"idem-phone-{suffix}-1", "+1 212 555 0100"
+        )
+        assert first["success"] is True
+        assert first["duplicate"] is False
+        assert first["wallet"]["balance_cents"] == 400
+        assert first["payload"]["phone"] == "+1 212 555 0100"
+
+        duplicate = credits.complete_phone_reveal(
+            uid, lead_id, "Plumbing", f"idem-phone-{suffix}-1", "+1 212 555 0100"
+        )
+        assert duplicate["duplicate"] is True
+        assert duplicate["wallet"]["balance_cents"] == 400
+
+        # Novo idempotency key, mesmo lead/utilizador: devolve o reveal
+        # anterior sem cobrar outra vez.
+        prior = credits.complete_phone_reveal(
+            uid, lead_id, "Plumbing", f"idem-phone-{suffix}-2", "+1 212 555 0100"
+        )
+        assert prior["duplicate"] is True
+        assert prior["wallet"]["balance_cents"] == 400
+    finally:
+        _cleanup([email], [ext])
 
 
 def test_readiness_flags_materialize_and_filter():

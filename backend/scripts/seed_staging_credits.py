@@ -97,7 +97,7 @@ for i in range(50):
             f"Test Zone {(i % 4) + 1}",
             trade,
             f"Synthetic {trade.lower()} opportunity for staging",
-            f"{trade} Â· Staging signal {i + 1}",
+            f"{trade} · Staging signal {i + 1}",
             owner,
             f"{200 + i} Mail Avenue, {city}, {state} {zip_code}",
             (now - timedelta(days=i % 14)).isoformat(),
