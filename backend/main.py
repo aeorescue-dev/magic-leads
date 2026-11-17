@@ -8332,25 +8332,6 @@ async def billing_subscription(user: dict = Depends(_get_current_user)):
     }
 
 
-@app.post("/api/billing/checkout")
-async def billing_checkout(request: Request, user: dict = Depends(_get_current_user)):
-    body = await request.json()
-    plan_code = str((body or {}).get("plan_code") or "").strip()
-    locale = str((body or {}).get("locale") or "en").lower()
-    if not subscription_billing.plan_for_code(plan_code):
-        raise HTTPException(status_code=400, detail="unknown_plan")
-    try:
-        result = await anyio.to_thread.run_sync(
-            lambda: subscription_billing.create_weekly_checkout(
-                user["id"], plan_code, locale=locale, email=user.get("email")
-            )
-        )
-        return result
-    except Exception as exc:
-        logger.warning("[BILLING] checkout falhou: %s", exc)
-        raise HTTPException(status_code=502, detail="billing_checkout_failed") from exc
-
-
 @app.post("/api/billing/portal")
 async def billing_portal(request: Request, user: dict = Depends(_get_current_user)):
     """Stripe Customer Portal para upgrade/downgrade/cancelamento."""
@@ -8377,22 +8358,6 @@ async def billing_portal(request: Request, user: dict = Depends(_get_current_use
     except Exception as exc:
         logger.warning("[BILLING] portal falhou: %s", exc)
         raise HTTPException(status_code=502, detail="billing_portal_failed") from exc
-
-
-@app.post("/api/billing/mock-activate")
-async def billing_mock_activate(request: Request, user: dict = Depends(_get_current_user)):
-    """Ativação mock para QA visual; nunca disponível em produção."""
-    if not settings.BILLING_MOCK:
-        raise HTTPException(status_code=404, detail="not_found")
-    body = await request.json()
-    plan_code = str((body or {}).get("plan_code") or "").strip()
-    try:
-        result = subscription_billing.activate_weekly_subscription(
-            user["id"], plan_code, status="active"
-        )
-        return {"mock": True, **result}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/billing/webhook")
@@ -8558,12 +8523,15 @@ async def create_checkout(request: Request, user: dict = Depends(_get_current_us
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
 
     # Optional P1 context: the trade the visitor selected in the live grid.
+    # Fase 2: se vier `plan_code`, usa o checkout de subscrição semanal.
     trade = ""
+    payload: dict = {}
     try:
         payload = await request.json()
         trade = str((payload or {}).get("trade") or "").strip()[:80]
     except Exception:
-        trade = ""
+        payload = {}
+    plan_code = str((payload or {}).get("plan_code") or "").strip()
 
     # Extract locale from Accept-Language header (sent by frontend)
     accept_language = request.headers.get("accept-language", "").lower()
@@ -8574,6 +8542,31 @@ async def create_checkout(request: Request, user: dict = Depends(_get_current_us
         locale = "en"
     elif accept_language.startswith("es"):
         locale = "es"
+
+    if plan_code:
+        if not subscription_billing.plan_for_code(plan_code):
+            raise HTTPException(status_code=400, detail="unknown_plan")
+        requested_locale = str((payload or {}).get("locale") or locale or "en").lower()
+        if requested_locale not in ("pt", "en", "es"):
+            requested_locale = "en"
+        try:
+            result = await anyio.to_thread.run_sync(
+                lambda: subscription_billing.create_weekly_checkout(
+                    user["id"],
+                    plan_code,
+                    locale=requested_locale,
+                    email=full.get("email"),
+                )
+            )
+            return {
+                "mock": result["mock"],
+                "checkout_url": result["checkout_url"],
+                "plan_code": result["plan_code"],
+                "plan": result["plan"],
+            }
+        except Exception as e:
+            logger.warning("[BILLING] checkout semanal falhou: %s", e)
+            raise HTTPException(status_code=502, detail="billing_checkout_failed") from e
 
     try:
         mock, checkout_url = await _create_stripe_checkout_session(
