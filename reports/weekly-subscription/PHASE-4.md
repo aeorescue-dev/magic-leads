@@ -150,5 +150,30 @@
 - Verificado no staging: Pro selecionado por defeito; Growth selecionável;
   nenhum gradiente nos cartões.
 
+## Fase 5 — Restauração do fluxo original de oportunidades
+
+**Commits:** `0aa5194`, `5b38255`
+
+Sem alterar a mecânica do produto, a dashboard voltou a usar o fluxo original:
+
+- `OpportunityCard` e o feed de produção restaurados (reserva 1h, consentimento,
+  enriquecimento completo, histórico, telefone e guia de ciclo de vida).
+- Login com plano ativo entra direto em `/dashboard`; a modal de planos deixou
+  de abrir no regresso do Stripe ou depois do login.
+- Apenas o consumo mudou para as novas cotas:
+  - **10 cartas/visitas/dia** via `user_daily_usage`;
+  - **telefone do plano** (base → add-on 24h) via `subscription_reveals`;
+  - telefone em cache também consome quota;
+  - telefone não autorizado pela quota é mascarado na resposta;
+  - falha/no resultado devolve a unidade ao bucket de origem.
+- Add-ons 24h só aparecem quando a cota de telefones chega a zero; sem plano
+  ativo, abre a seleção de planos.
+- O componente `SubscriptionFeed` foi removido.
+
+**Verificado no staging:** login sem modal; feed original com “Reserve 1 Hour”;
+consentimento; reserva de 1h ativa; modal completo com proprietário, telefone,
+morada de correspondência, histórico e fases.
+
+
 
 
