@@ -129,6 +129,8 @@ function applyFilters() {
   const category = $("#f-category").value;
   const fine = Number($("#f-fine").value || 0);
   const expiry = $("#f-expiry").value;
+  const frequency = $("#f-frequency").value;
+  const conditionStatus = $("#f-condition-status").value;
   const search = norm($("#f-search").value);
 
   S.filtered = S.data.leads.filter((item) => {
@@ -144,6 +146,14 @@ function applyFilters() {
       if (expiry === "expired" && !(days < 0)) return false;
       if (expiry !== "expired" && !(days >= 0 && days <= Number(expiry))) return false;
     }
+    if (frequency) {
+      const conditions = item.conditions || [];
+      if (!conditions.some((condition) => (condition.frequencies || []).includes(frequency) || condition.frequency_group === frequency)) return false;
+    }
+    if (conditionStatus) {
+      const conditions = item.conditions || [];
+      if (!conditions.some((condition) => condition.status === conditionStatus)) return false;
+    }
     if (search) {
       const haystack = norm([item.company, item.cnpj, item.cnpj_root, item.process, item.municipality, item.category].join(" "));
       if (!haystack.includes(search)) return false;
@@ -153,7 +163,8 @@ function applyFilters() {
 
   S.filtered.sort((a, b) => (b.priority || 0) - (a.priority || 0));
   const withCoords = S.filtered.filter((item) => item.lat && item.lng).length;
-  $("#result-count").textContent = `${INT.format(S.filtered.length)} oportunidades · ${INT.format(withCoords)} no mapa`;
+  const withConditions = S.filtered.filter((item) => (item.conditions || []).length).length;
+  $("#result-count").textContent = `${INT.format(S.filtered.length)} oportunidades · ${INT.format(withCoords)} no mapa · ${INT.format(withConditions)} com condicionantes`;
   renderList();
   renderPoints();
   if (S.selected && !S.filtered.some((item) => item.id === S.selected.id)) {
@@ -189,6 +200,7 @@ function renderList() {
         <div class="opp-numbers">
           <span class="pill pill-slate">${esc(item.source)}</span>
           <span class="small muted">${meta}</span>
+          ${(item.conditions || []).length ? `<span class="pill pill-blue">${INT.format(item.conditions.length)} cond.</span>` : ""}
           ${item.verified ? `<span class="pill pill-green">✓ verificado</span>` : `<span class="pill pill-amber">identidade parcial</span>`}
         </div>
         <div class="opp-actions">
@@ -252,6 +264,7 @@ function renderQuickDossier() {
     <div class="pill ${kindClass(item.kind)}">${kindLabel(item.kind)}</div>
     <h3 style="margin:10px 0 4px;font-size:16px;line-height:1.25">${esc(item.company)}</h3>
     <div class="small muted">${esc(item.municipality || "—")}${item.uf ? " · " + esc(item.uf) : ""} · ${esc(item.source)}</div>
+    ${(item.conditions || []).length ? `<div class="small" style="margin-top:6px"><b>${INT.format(item.conditions.length)} condicionantes</b> · ${esc(item.conditions_summary?.by_frequency ? Object.entries(item.conditions_summary.by_frequency).map(([k, v]) => `${v} ${k}`).join(" · ") : "periodicidade não classificada")}</div>` : ""}
     <div class="kv" style="margin-top:12px">
       <dt>CNPJ</dt><dd>${esc(item.cnpj ? fmtCnpj(item.cnpj) : item.cnpj_root ? `raiz ${item.cnpj_root}` : "—")}</dd>
       <dt>${isFine ? "Multa" : "Validade"}</dt><dd>${isFine ? BRL.format(item.fine || 0) : fmtDate(item.expires_at)}</dd>
@@ -261,6 +274,58 @@ function renderQuickDossier() {
     <button class="btn btn-emerald btn-sm btn-block" type="button" id="open-selected" style="margin-top:12px">Abrir dossiê completo</button>
   `;
   $("#open-selected")?.addEventListener("click", () => openDossier(item));
+}
+
+const FREQUENCY_LABELS = {
+  semanal: "Semanal", quinzenal: "Quinzenal", mensal: "Mensal",
+  bimestral: "Bimestral", trimestral: "Trimestral", quadrimestral: "Quadrimestral",
+  semestral: "Semestral", anual: "Anual", unica: "Única", constante: "Constante",
+  diario: "Diário", durante_vigencia: "Durante vigência", outra: "Outra",
+};
+const CONDITION_STATUS_LABELS = {
+  cumprida: "Cumprida",
+  cumprida_conforme_periodicidade: "Cumprida conforme periodicidade",
+  em_atendimento: "Em atendimento",
+  cumprida_parcialmente: "Cumprida parcialmente",
+  descumprida: "Descumprida",
+  desconhecido: "Não informado",
+};
+
+function frequencyLabel(key) {
+  return FREQUENCY_LABELS[key] || key || "—";
+}
+function conditionStatusLabel(key) {
+  return CONDITION_STATUS_LABELS[key] || key || "—";
+}
+
+function renderConditionsTable(conditions, summary) {
+  if (!conditions || !conditions.length) {
+    return `<div class="notice notice-amber">Nenhuma condicionante extraída neste processo.</div>`;
+  }
+  const byFrequency = summary?.by_frequency || {};
+  const byStatus = summary?.by_status || {};
+  return `
+    <div class="condition-summary">
+      ${Object.entries(byFrequency).map(([key, value]) => `<span class="pill pill-blue">${INT.format(value)} · ${frequencyLabel(key)}</span>`).join("")}
+      ${Object.entries(byStatus).map(([key, value]) => `<span class="pill ${key === "descumprida" ? "pill-red" : key === "em_atendimento" ? "pill-amber" : "pill-green"}">${INT.format(value)} · ${conditionStatusLabel(key)}</span>`).join("")}
+    </div>
+    <div class="table-wrap">
+      <table class="license-table">
+        <thead><tr><th>#</th><th>Condicionante</th><th>Origem</th><th>Prazo</th><th>Periodicidade</th><th>Status</th><th>Observação</th></tr></thead>
+        <tbody>
+          ${conditions.map((condition) => `<tr>
+            <td><b>${esc(condition.item || "—")}</b></td>
+            <td>${esc(condition.description || "—")}</td>
+            <td>${esc(condition.origin || "—").replace(/\n/g, "<br/>")}</td>
+            <td>${esc(condition.deadline || "—")}</td>
+            <td>${esc(condition.periodicity_raw || (condition.frequencies || []).map(frequencyLabel).join(" / ") || "—")}</td>
+            <td><span class="pill ${condition.status === "descumprida" ? "pill-red" : condition.status === "em_atendimento" ? "pill-amber" : "pill-green"}">${conditionStatusLabel(condition.status)}</span></td>
+            <td>${esc(condition.observation || "—")}</td>
+          </tr>`).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
 }
 
 function renderLicenseDetail(detail) {
@@ -343,10 +408,8 @@ function renderLicenseDetail(detail) {
         </div>
 
         <div class="license-section">
-          <h4>Condicionantes</h4>
-          ${conditions.length
-            ? `<ul class="doc-list">${conditions.map((condition) => `<li>${esc(condition.text || condition)}</li>`).join("")}</ul>`
-            : `<div class="notice notice-amber">${esc(detail.conditions_note || "O recorte disponível não inclui o texto das condicionantes. Consulte o processo oficial.")}</div>`}
+          <h4>Condicionantes (${INT.format(conditions.length)})</h4>
+          ${renderConditionsTable(conditions, detail.conditions_summary)}
         </div>
       </div>
     </details>
@@ -380,6 +443,12 @@ function openDossier(item) {
     </dl>
     ${item.description ? `<div class="notice notice-blue"><b>Descrição pública:</b><br/>${esc(item.description)}</div>` : ""}
     ${item.license_detail ? renderLicenseDetail(item.license_detail) : ""}
+    ${!item.license_detail && (item.conditions || []).length
+      ? `<details class="license-details" open>
+          <summary>Condicionantes — ${esc(item.process || "processo")}</summary>
+          <div class="license-body">${renderConditionsTable(item.conditions, item.conditions_summary)}</div>
+        </details>`
+      : ""}
     <div class="notice notice-amber">
       <b>LGPD:</b> dados de empresa/CNPJ e fonte pública. Não exibimos CPF, nome de sócio, telefone ou e-mail pessoal.
       Este dossiê é inteligência e priorização; não substitui certidão ou parecer oficial.
@@ -439,7 +508,7 @@ function activateTab(name) {
 }
 
 function bindUi() {
-  ["f-uf", "f-municipality", "f-kind", "f-source", "f-category", "f-fine", "f-expiry"].forEach((id) => {
+  ["f-uf", "f-municipality", "f-kind", "f-source", "f-category", "f-fine", "f-expiry", "f-frequency", "f-condition-status"].forEach((id) => {
     $(`#${id}`)?.addEventListener("change", () => {
       if (id === "f-uf") updateMunicipalityOptions($("#f-uf").value);
       applyFilters();
@@ -447,7 +516,7 @@ function bindUi() {
   });
   $("#f-search")?.addEventListener("input", applyFilters);
   $("#reset-filters")?.addEventListener("click", () => {
-    ["f-uf", "f-municipality", "f-kind", "f-source", "f-category", "f-fine", "f-expiry", "f-search"].forEach((id) => {
+    ["f-uf", "f-municipality", "f-kind", "f-source", "f-category", "f-fine", "f-expiry", "f-frequency", "f-condition-status", "f-search"].forEach((id) => {
       const el = $(`#${id}`);
       if (el) el.value = id === "f-fine" ? "0" : "";
     });
@@ -493,6 +562,7 @@ async function main() {
   $("#kpi-autos").textContent = INT.format(k.federal_autos_2026 || 0);
   $("#kpi-licenses").textContent = INT.format((k.mg_licenses || 0) + (k.sislic_licenses || 0));
   $("#kpi-expiring").textContent = INT.format(k.expiring_90 || 0);
+  $("#kpi-conditions").textContent = INT.format(k.conditions || 0);
   $("#kpi-coverage").textContent = "27 UF";
 
   fillFilters();

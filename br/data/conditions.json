@@ -1,0 +1,1994 @@
+{
+ "updated_at": "2026-11-18T18:40:12+00:00",
+ "source": "SLA/Sisema — CONDICIONANTES + PARECER",
+ "summary": {
+  "processes_with_conditions": 19,
+  "processes_with_compliance_xlsx": 1,
+  "processes_without_documents": 6,
+  "documents_without_parsed_conditions": 5,
+  "total_in_file": 19
+ },
+ "processes": {
+  "352/2025": {
+   "process": "352/2025",
+   "id_solicitacao": 215895,
+   "company": "AVG SIDERURGIA LTDA",
+   "cnpj": "20176160000284",
+   "status": "ok",
+   "compliance_document": "Condicionantes Ambientais_Reporte 02-01-2025.xlsx",
+   "parecer_document": "SEI_2090.01.0003692_2025_94 AVG 16-04-25.pdf",
+   "downloaded_at": "2026-11-18T18:37:25+00:00",
+   "summary": {
+    "total": 16,
+    "by_frequency": {
+     "mensal": 1,
+     "trimestral": 2,
+     "semestral": 4,
+     "anual": 4,
+     "unica": 7,
+     "diario": 1
+    },
+    "by_status": {
+     "cumprida_conforme_periodicidade": 7,
+     "cumprida": 3,
+     "em_atendimento": 1,
+     "nao_informado": 5
+    },
+    "by_source": {
+     "compliance_xlsx": 11,
+     "parecer_tecnico": 5
+    }
+   },
+   "conditions": [
+    {
+     "item": 1,
+     "description": "Executar o Programa de Automonitoramento, conforme definido no Anexo II.",
+     "origin": "Condicionante nº 01 da Renovação da Licença de Operação nº 116/2020\nAVG Siderurgia",
+     "deadline": "180 dias",
+     "periodicity_raw": "TRIMESTRAL / SEMESTRAL",
+     "frequencies": [
+      "trimestral",
+      "semestral"
+     ],
+     "frequency_group": "composta",
+     "responsible": "MEIO AMBIENTE",
+     "status": "cumprida_conforme_periodicidade",
+     "status_raw": "CUMPRIDA CONFORME PERIODICIDADE",
+     "observation": "",
+     "source": "compliance_xlsx"
+    },
+    {
+     "item": 2,
+     "description": "Destinar os resíduos gerados a empresas ambientalmente licenciadas, apresentando relatório conforme programa definido no Anexo II. 2- Resíduos Sólidos Apresentar, semestralmente, a Declaração de Movimentação de Resíduo – DMR, emitida via Sistema MTR-MG, referente às operações realizadas com resíduos sólidos e rejeitos gerados pelo empreendimento durante aquele semestre, conforme Art. 16 da Deliberação Normativa Copam nº. 232/2019.",
+     "origin": "Condicionante nº 02 da Renovação da Licença de Operação nº 116/2020\nAVG Siderurgia",
+     "deadline": "180 dias",
+     "periodicity_raw": "SEMESTRAL",
+     "frequencies": [
+      "semestral"
+     ],
+     "frequency_group": "semestral",
+     "responsible": "MEIO AMBIENTE",
+     "status": "cumprida_conforme_periodicidade",
+     "status_raw": "CUMPRIDA CONFORME PERIODICIDADE",
+     "observation": "",
+     "source": "compliance_xlsx"
+    },
+    {
+     "item": 3,
+     "description": "Apresentar documentação indicando a conformidade da empresa em relação à previsão contida na Portaria n° 08/2010 do IEF.",
+     "origin": "Condicionante nº 03 da Renovação da Licença de Operação nº 116/2020\nAVG Siderurgia",
+     "deadline": "365 dias",
+     "periodicity_raw": "ANUAL",
+     "frequencies": [
+      "anual"
+     ],
+     "frequency_group": "anual",
+     "responsible": "CARVÃO",
+     "status": "cumprida_conforme_periodicidade",
+     "status_raw": "CUMPRIDA CONFORME PERIODICIDADE",
+     "observation": "",
+     "source": "compliance_xlsx"
+    },
+    {
+     "item": 4,
+     "description": "Apresentar relatórios mensais com percentual de consumo de carvão proveniente de mata nativa e plantada, obedecendo aos percentuais determinados conforme artigo 47, incisos I, II e III, da Lei Estadual nº 14.309/2002.",
+     "origin": "Condicionante nº 04 da Renovação da Licença de Operação nº 116/2020\nAVG Siderurgia",
+     "deadline": "180 dias",
+     "periodicity_raw": "SEMESTRAL",
+     "frequencies": [
+      "mensal",
+      "semestral"
+     ],
+     "frequency_group": "composta",
+     "responsible": "CARVÃO",
+     "status": "cumprida_conforme_periodicidade",
+     "status_raw": "CUMPRIDA CONFORME PERIODICIDADE",
+     "observation": "",
+     "source": "compliance_xlsx"
+    },
+    {
+     "item": 5,
+     "description": "Apresentar à Feam/Gesar o Plano de Monitoramento da Qualidade do Ar - PMQAR, protocolando nos autos do processo de licenciamento ambiental documento comprobatório da formalização, que deverá conter os seguintes itens: a) inventário das fontes atmosféricas do empreendimento; b) modelagem atmosférica (com o modelo AERMOD) e descrição do resultado com avaliação da qualidade do ar da área de influência do empreendimento. Para elaboração do PMQAR deverão ser seguidas as diretrizes da Nota Técnica Gesar vigente, referente às “Orientações Técnicas para a elaboração de um Estudo de Dispersão Atmosférica”, disponibilizada no sítio eletrônico da FEAM: http://www.feam.br/noticias/1/1332-emissaofontes",
+     "origin": "Condicionante nº 05 da Renovação da Licença de Operação nº 116/2020\nAVG Siderurgia",
+     "deadline": "180 dias",
+     "periodicity_raw": "ÚNICA",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "PROJETOS",
+     "status": "cumprida",
+     "status_raw": "CUMPRIDA",
+     "observation": "",
+     "source": "compliance_xlsx"
+    },
+    {
+     "item": 6,
+     "description": "Realizar monitoramento de qualidade do ar, se necessário, conforme estipulado pela Feam/Gesar na conclusão da análise do PMQAR.",
+     "origin": "Condicionante nº 06 da Renovação da Licença de Operação nº 116/2020\nAVG Siderurgia",
+     "deadline": "180 dias",
+     "periodicity_raw": "ÚNICA",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "PROJETOS",
+     "status": "cumprida_conforme_periodicidade",
+     "status_raw": "CUMPRIDA CONFORME PERIODICIDADE",
+     "observation": "",
+     "source": "compliance_xlsx"
+    },
+    {
+     "item": 7,
+     "description": "Comprovar a instalação do sistema de medição e horímetro nas captações de águas subterrâneas por meio de poços tubulares e dos dispositivos que permitam a coleta de água para monitoramento de qualidade e medições de nível estático.",
+     "origin": "Condicionante nº 01 da Licenças das Outorgas nº  00017/1988/017/2018\nAVG Siderurgia",
+     "deadline": "60 dias",
+     "periodicity_raw": "ÚNICA",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "OUTORGA",
+     "status": "cumprida",
+     "status_raw": "CUMPRIDA",
+     "observation": "",
+     "source": "compliance_xlsx"
+    },
+    {
+     "item": 8,
+     "description": "Realizar leituras diárias de vazão captada e do tempo de captação, armazenando-as na forma de planilhas ou de outra forma determinada pelo IGAM, que deverão estar disponíveis no momento da fiscalização realizada por órgão integrante do Sistema Estadual de Meio Ambiente e Recursos Hídricos – SISEMA, ou entidade por ele delegada, e serem apresentadas ao IGAM, por meio físico e digital (planilha do Excel ou análoga), quando da renovação da outorga ou sempre que solicitado.",
+     "origin": "Condicionante nº 02 da Licenças das Outorgas nº  00017/1988/017/2018\nAVG Siderurgia",
+     "deadline": "Diário",
+     "periodicity_raw": "ANUAL",
+     "frequencies": [
+      "anual",
+      "diario"
+     ],
+     "frequency_group": "composta",
+     "responsible": "OUTORGA",
+     "status": "cumprida_conforme_periodicidade",
+     "status_raw": "CUMPRIDA CONFORME PERIODICIDADE",
+     "observation": "Poço 05 desligados, aguardando manutenção",
+     "source": "compliance_xlsx"
+    },
+    {
+     "item": 9,
+     "description": "Realizar monitoramento do nível estático SEMESTRALMENTE, armazenando os dados em formato de planilhas ou de outra forma determinada pelo IGAM, que deverão estar disponíveis no momento da fiscalização realizada por órgão integrante do Sistema Estadual de Meio Ambiente e Recursos Hídricos – SISEMA, ou entidade por ele delegada, e serem apresentadas ao IGAM, por meio físico e digital (planilha do Excel ou análoga), quando da renovação da outorga ou sempre que solicitado.",
+     "origin": "Condicionante nº 03 da Renovação das Outorgas nº  00017/1988/017/2018\nAVG Siderurgia",
+     "deadline": "180 dias",
+     "periodicity_raw": "SEMESTRAL",
+     "frequencies": [
+      "semestral"
+     ],
+     "frequency_group": "semestral",
+     "responsible": "OUTORGA",
+     "status": "cumprida_conforme_periodicidade",
+     "status_raw": "CUMPRIDA CONFORME PERIODICIDADE",
+     "observation": "",
+     "source": "compliance_xlsx"
+    },
+    {
+     "item": 10,
+     "description": "Comprovar a implantação de laje de proteção com 01m2 de área e 0,2m de espessura no poço por meio de relatório fotográfico.",
+     "origin": "Condicionante nº 04 da Licença das Outorgas nº  00017/1988/017/2018\nAVG Siderurgia",
+     "deadline": "90 dias",
+     "periodicity_raw": "ÚNICA",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "OUTORGA",
+     "status": "cumprida",
+     "status_raw": "CUMPRIDA",
+     "observation": "",
+     "source": "compliance_xlsx"
+    },
+    {
+     "item": 11,
+     "description": "Encaminhamento de relatórios técnicos fotográficos trimestrais, comprovando o andamento das intervenções propostas no plano de ação",
+     "origin": "Auto de fiscalização nº 227770/2022 de 04/10/2022",
+     "deadline": "Trimestral",
+     "periodicity_raw": "Trimestral",
+     "frequencies": [
+      "trimestral"
+     ],
+     "frequency_group": "trimestral",
+     "responsible": "Auto de Fiscalização",
+     "status": "em_atendimento",
+     "status_raw": "EM ATENDIMENTO",
+     "observation": "",
+     "source": "compliance_xlsx"
+    },
+    {
+     "item": 1,
+     "description": "Apresentar relatório técnico/fotográfico, com a devida anotação de responsabilidade técnica (ART), comprovando a instalação dos sistemas de controle de emissões atmosféricas que serão implantados nas novas plantas de sinterização, fundição, produção de carvão e UTM, conforme informado nos estudos.",
+     "origin": "",
+     "deadline": "Em até 30 dias após a instalação das estruturas",
+     "periodicity_raw": "Em até 30 dias após a instalação das estruturas",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 2,
+     "description": "Apresentar relatório técnico/fotográfico, com a devida anotação de responsabilidade técnica (ART), comprovando o enclausuramento das correias transportadoras.",
+     "origin": "",
+     "deadline": "Em até 30 dias após a instalação das estruturas",
+     "periodicity_raw": "Em até 30 dias após a instalação das estruturas",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 3,
+     "description": "Apresentar relatório técnico/fotográfico, com a devida anotação de responsabilidade técnica (ART), comprovando a manutenção da cortina arbórea presente no empreendimento.",
+     "origin": "",
+     "deadline": "Anualmente, com entrega do primeiro relatório 30 dias após a emissão da licença",
+     "periodicity_raw": "Anualmente, com entrega do primeiro relatório 30 dias após a emissão da licença",
+     "frequencies": [
+      "anual"
+     ],
+     "frequency_group": "anual",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 4,
+     "description": "Apresentar relatório técnico/fotográfico, com a devida anotação de responsabilidade técnica (ART), comprovando a manutenção e a limpeza do sistema de drenagem de toda a ADA do empreendimento.",
+     "origin": "",
+     "deadline": "Anualmente, com entrega do primeiro relatório 30 dias após a emissão da licença",
+     "periodicity_raw": "Anualmente, com entrega do primeiro relatório 30 dias após a emissão da licença",
+     "frequencies": [
+      "anual"
+     ],
+     "frequency_group": "anual",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 5,
+     "description": "Considerando que as novas atividades são fontes de emissão de poluentes atmosféricos, caso estas não sejam abarcadas pelo monitoramento realizado atualmente no empreendimento, ampliar a rede de monitoramento inserindo pontos de controle a fim de que as emissões atmosféricas provenientes das novas atividades possam ser medidas. Em caso de ampliação da rede de monitoramento, apresentar mapa sobreposto em imagem de satélite contendo os pontos de monitoramento autuais e novos.",
+     "origin": "",
+     "deadline": "Em até 30 dias após a instalação das estruturas, caso se aplique",
+     "periodicity_raw": "Em até 30 dias após a instalação das estruturas, caso se aplique",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    }
+   ]
+  },
+  "1027/2024": {
+   "process": "1027/2024",
+   "id_solicitacao": 241924,
+   "company": "MINERACAO MONTE AZUL LTDA",
+   "cnpj": "07554984000444",
+   "status": "ok_parecer",
+   "compliance_document": null,
+   "parecer_document": "SEI_2090.01.0007586_2024_10 (1).pdf",
+   "downloaded_at": "2026-11-18T18:37:39+00:00",
+   "summary": {
+    "total": 13,
+    "by_frequency": {
+     "semestral": 3,
+     "anual": 2,
+     "unica": 7,
+     "constante": 1,
+     "durante_vigencia": 2
+    },
+    "by_status": {
+     "nao_informado": 13
+    },
+    "by_source": {
+     "parecer_tecnico": 13
+    }
+   },
+   "conditions": [
+    {
+     "item": 1,
+     "description": "Apresentar a comprovação do término da instalação do empreendimento, por meio de relatório técnico descritivo e fotográfico – sistema de drenagem pluvial.",
+     "origin": "",
+     "deadline": "Previamente ao início da operação",
+     "periodicity_raw": "Previamente ao início da operação",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 1,
+     "description": "Executar o Programa de Automonitoramento, conforme definido no Anexo II, demonstrando o atendimento aos padrões definidos nas normas vigentes.",
+     "origin": "",
+     "deadline": "Durante a vigência da Licença Ambiental",
+     "periodicity_raw": "Durante a vigência da Licença Ambiental",
+     "frequencies": [
+      "durante_vigencia"
+     ],
+     "frequency_group": "durante_vigencia",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 2,
+     "description": "Apresentar laudo técnico guarnecido de ART atestando que não há bens acautelados de natureza material e imaterial, em nível federal, estadual e municipal na Área Diretamente Afetada (ADA) do empreendimento e que as atividades do empreendimento não geram impactos diretos sobre os bens culturais acautelados em suas áreas de influência direta e indireta.",
+     "origin": "",
+     "deadline": "60 dias após a emissão da licença e previamente as atividades de supressão",
+     "periodicity_raw": "60 dias após a emissão da licença e previamente as atividades de supressão",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 2,
+     "description": "Apresentar relatório técnico fotográfico com ART comprovando a execução dos Programas: 1- Programa de Monitoramento e Manejo da Fauna Silvestre com grau de ameaça de extinção, Lycalopex vetulus (raposa-do-campo) e Sylvilagus brasiliensis (tapeti) e Aplastodiscus cavicola (perereca), 2- PRAD, 3- Projeto de disposição de estéril em pilha. 4- Incluir no relatório vinculado a licença principal a comprovação da umectação nas vias da comunidade de Penedo e placa de limite de velocidade.",
+     "origin": "",
+     "deadline": "Anterior a operação, com envio anual",
+     "periodicity_raw": "Anterior a operação, com envio anual",
+     "frequencies": [
+      "anual"
+     ],
+     "frequency_group": "anual",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 3,
+     "description": "Apresentar relatório técnico e fotográfico comprovando as ações realizadas de afugentamento da fauna.",
+     "origin": "",
+     "deadline": "Previamente ao início da operação",
+     "periodicity_raw": "Previamente ao início da operação",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 3,
+     "description": "Apresentar relatório técnico fotográfico comprovando a execução do Projeto Técnico de Reconstituição de Flora na área de compensação pelo corte do ipê amarelo, incluindo as variáveis dendrométricas = CAP, altura, e % de sobrevivência e do desenvolvimento dos espécimes introduzidos de Accara elegans (DC.) Landrum. Obs: Com emissão de ART.",
+     "origin": "",
+     "deadline": "Semestralmente²",
+     "periodicity_raw": "Semestralmente²",
+     "frequencies": [
+      "semestral"
+     ],
+     "frequency_group": "semestral",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 4,
+     "description": "Apresentar relatório técnico e fotográfico comprovando a execução do resgate de germoplasma, da espécie Accara elegans (DC.) Landrum., espécies indicadoras de estágio avançado e outras de interesse econômico. Obs: o relatório deverá vir acompanhado de ART, contendo a metodologia utilizada para cada espécie, local da coleta, identificação da espécie, quantidade por material coletado, localização do viveiro.",
+     "origin": "",
+     "deadline": "Previamente ao início da operação, com envio semestral.",
+     "periodicity_raw": "Previamente ao início da operação, com envio semestral.",
+     "frequencies": [
+      "semestral"
+     ],
+     "frequency_group": "semestral",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 4,
+     "description": "Apesentar ao órgão ambiental licenciador os seguintes documentos: I - Formulário de Acompanhamento, conforme modelo constante no Anexo II, a ser apresentado anualmente, até trinta dias após o final do primeiro semestre de cada ano de execução do PEA, a contar do início da implementação do Programa; II - Relatório de Acompanhamento, conforme Termo de Referência constante no Anexo I, a ser apresentado anualmente, até trinta dias após o final do segundo semestre de cada ano de execução do PEA, a contar do início da implementação do Programa.\".",
+     "origin": "",
+     "deadline": "Anualmente durante a vigência da licença",
+     "periodicity_raw": "Anualmente durante a vigência da licença",
+     "frequencies": [
+      "anual",
+      "constante",
+      "durante_vigencia"
+     ],
+     "frequency_group": "composta",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 5,
+     "description": "Apresentar relatório técnico fotográfico comprovando o armazenamento ou implantação do top soil proveniente da área de supressão.",
+     "origin": "",
+     "deadline": "Previamente ao início da operação",
+     "periodicity_raw": "Previamente ao início da operação",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 5,
+     "description": "Apresentar cópia do protocolo do processo de compensação ambiental perante a Gerência de Compensação Ambiental do IEF, conforme procedimentos estipulados pela Portaria IEF 55/2012.",
+     "origin": "",
+     "deadline": "120 dias da emissão da licença",
+     "periodicity_raw": "120 dias da emissão da licença",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 6,
+     "description": "Apresentar relatório técnico e fotográfico da execução do Projeto Técnico de Reconstituição de Flora PTRF na área de compensação pelo corte do indivíduo de ipê. Obs: o relatório deverá vir acompanhado de ART, contendo a procedência das mudas e o local do plantio.",
+     "origin": "",
+     "deadline": "Previamente ao início da operação",
+     "periodicity_raw": "Previamente ao início da operação",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 7,
+     "description": "Apresentar relatório de acompanhamento das atividades de Educação Ambiental propostas para o público interno durante a instalação do empreendimento.",
+     "origin": "",
+     "deadline": "Semestralmente",
+     "periodicity_raw": "Semestralmente",
+     "frequencies": [
+      "semestral"
+     ],
+     "frequency_group": "semestral",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 8,
+     "description": "Apresentar autorização para manejo de fauna.",
+     "origin": "",
+     "deadline": "Previamente ao início da operação",
+     "periodicity_raw": "Previamente ao início da operação",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    }
+   ]
+  },
+  "1225/2024": {
+   "process": "1225/2024",
+   "id_solicitacao": 247169,
+   "company": "MELHORAMENTOS FLORESTAL LTDA.",
+   "cnpj": null,
+   "status": "ok_parecer",
+   "compliance_document": null,
+   "parecer_document": "SEI_2090.01.0027881_2024_95 (1).pdf",
+   "downloaded_at": "2026-11-18T18:37:44+00:00",
+   "summary": {
+    "total": 4,
+    "by_frequency": {
+     "anual": 1,
+     "unica": 3
+    },
+    "by_status": {
+     "nao_informado": 4
+    },
+    "by_source": {
+     "parecer_tecnico": 4
+    }
+   },
+   "conditions": [
+    {
+     "item": 1,
+     "description": "Informar a data prevista para início de operação do empreendimento.",
+     "origin": "",
+     "deadline": "Até 10 dias antes do início da operação.",
+     "periodicity_raw": "Até 10 dias antes do início da operação.",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 2,
+     "description": "Apresentar relatório técnico fotográfico comprovando a instalação dos sistemas de drenagem de águas pluviais, compostos por canaletas de direcionamento de fluxo de água e bacias de sedimentação no entorno da área da frente de lavra e estradas, de modo a mitigar impactos relacionados a geração de processos erosivos, ravinamentos e carreamento de sedimentos.",
+     "origin": "",
+     "deadline": "Previamente ao início de operação do empreendimento",
+     "periodicity_raw": "Previamente ao início de operação do empreendimento",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 3,
+     "description": "Apresentar relatório técnico-fotográfico comprovando a instalação de banheiro químico na área do empreendimento e informar a empresa responsável pela destinação dos efluentes.",
+     "origin": "",
+     "deadline": "Previamente ao início de operação do empreendimento",
+     "periodicity_raw": "Previamente ao início de operação do empreendimento",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 4,
+     "description": "Apresentar relatório comprovando a manutenção dos sistemas de controle ambiental (sistema de drenagem e banheiro químico).",
+     "origin": "",
+     "deadline": "Anualmente",
+     "periodicity_raw": "Anualmente",
+     "frequencies": [
+      "anual"
+     ],
+     "frequency_group": "anual",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    }
+   ]
+  },
+  "700/2023": {
+   "process": "700/2023",
+   "id_solicitacao": 180667,
+   "company": "WD AGROINDUSTRIAL LTDA",
+   "cnpj": null,
+   "status": "ok_parecer",
+   "compliance_document": null,
+   "parecer_document": "SEI_1370.01.0016085_2023_44.pdf",
+   "downloaded_at": "2026-11-18T18:37:47+00:00",
+   "summary": {
+    "total": 3,
+    "by_frequency": {
+     "anual": 1,
+     "unica": 1,
+     "durante_vigencia": 2
+    },
+    "by_status": {
+     "nao_informado": 3
+    },
+    "by_source": {
+     "parecer_tecnico": 3
+    }
+   },
+   "conditions": [
+    {
+     "item": 1,
+     "description": "Apresentar, anualmente, relatório técnico-fotográfico que comprove a implantação e execução das ações propostas nos programas, planos e projetos, com respectiva Anotação de Responsabilidade Técnica – ART.",
+     "origin": "",
+     "deadline": "Durante a vigência da licença",
+     "periodicity_raw": "Durante a vigência da licença",
+     "frequencies": [
+      "anual",
+      "durante_vigencia"
+     ],
+     "frequency_group": "composta",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 2,
+     "description": "Realizar disposição adequada das sucatas e dos resíduos sólidos gerados no empreendimento, conforme Lei Estadual nº 18.031/2009, bem como destinar os filtros de óleos, estopas e sedimentos contaminados a empresas que possuam regularização ambiental e manter os recibos da destinação no empreendimento para atendimento de eventuais fiscalizações.",
+     "origin": "",
+     "deadline": "Durante a vigência da licença",
+     "periodicity_raw": "Durante a vigência da licença",
+     "frequencies": [
+      "durante_vigencia"
+     ],
+     "frequency_group": "durante_vigencia",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 3,
+     "description": "Apresentar Plano de Aplicação do chorume, contendo os estudos referentes à sua caracterização, planta de localização das terras que serão fertirrigadas, com cronograma executivo e com Anotação de Responsabilidade Técnica – ART. Executar integralmente após apreciação da SUPRAM NOR.",
+     "origin": "",
+     "deadline": "120 dias",
+     "periodicity_raw": "120 dias",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    }
+   ]
+  },
+  "1473/2022": {
+   "process": "1473/2022",
+   "id_solicitacao": 122985,
+   "company": "NEXA RECURSOS MINERAIS S.A.",
+   "cnpj": null,
+   "status": "ok_parecer",
+   "compliance_document": null,
+   "parecer_document": "Parecer de LAS - NEXA Pátio de RS.pdf",
+   "downloaded_at": "2026-11-18T18:37:59+00:00",
+   "summary": {
+    "total": 3,
+    "by_frequency": {
+     "unica": 1,
+     "durante_vigencia": 2
+    },
+    "by_status": {
+     "nao_informado": 3
+    },
+    "by_source": {
+     "parecer_tecnico": 3
+    }
+   },
+   "conditions": [
+    {
+     "item": 1,
+     "description": "Executar o Programa de Automonitoramento, conforme definido no Anexo II, demonstrando o atendimento aos padrões definidos nas normas vigentes.",
+     "origin": "",
+     "deadline": "Durante a vigência da Licença",
+     "periodicity_raw": "Durante a vigência da Licença",
+     "frequencies": [
+      "durante_vigencia"
+     ],
+     "frequency_group": "durante_vigencia",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 2,
+     "description": "Realizar disposição e destinação adequadas dos resíduos sólidos gerados no empreendimento, conforme Lei Estadual nº 18.031/2009. Manter os recibos da destinação na propriedade para atender eventuais fiscalizações.",
+     "origin": "",
+     "deadline": "Durante a vigência da Licença",
+     "periodicity_raw": "Durante a vigência da Licença",
+     "frequencies": [
+      "durante_vigencia"
+     ],
+     "frequency_group": "durante_vigencia",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 3,
+     "description": "Apresentar Certificado de Regularidade junto ao Cadastro Técnico Federal de Atividades e Instrumentos de Defesa Ambiental (CTF/AIDA) do Empreendimento.",
+     "origin": "",
+     "deadline": "30 dias",
+     "periodicity_raw": "30 dias",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    }
+   ]
+  },
+  "6349/2021": {
+   "process": "6349/2021",
+   "id_solicitacao": 123505,
+   "company": "MARALPE LTDA",
+   "cnpj": null,
+   "status": "ok_parecer",
+   "compliance_document": null,
+   "parecer_document": "Parecer Técnico -Maralpe Ltda.pdf",
+   "downloaded_at": "2026-11-18T18:38:03+00:00",
+   "summary": {
+    "total": 1,
+    "by_frequency": {
+     "durante_vigencia": 1
+    },
+    "by_status": {
+     "nao_informado": 1
+    },
+    "by_source": {
+     "parecer_tecnico": 1
+    }
+   },
+   "conditions": [
+    {
+     "item": 1,
+     "description": "Dar continuidade ao cumprimento das condicionantes descritas no Parecer Único 0039058/2021 presente no PA 01491/2004/004/2019, Certificado de Renovação-LO Nº 25132325.",
+     "origin": "",
+     "deadline": "Durante a vigência da licença",
+     "periodicity_raw": "Durante a vigência da licença",
+     "frequencies": [
+      "durante_vigencia"
+     ],
+     "frequency_group": "durante_vigencia",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    }
+   ]
+  },
+  "1325/2021": {
+   "process": "1325/2021",
+   "id_solicitacao": 36389,
+   "company": "CAL OESTE LTDA",
+   "cnpj": null,
+   "status": "ok_parecer",
+   "compliance_document": null,
+   "parecer_document": "SEI_1370.01.0006439_2022_44.pdf",
+   "downloaded_at": "2026-11-18T18:38:10+00:00",
+   "summary": {
+    "total": 5,
+    "by_frequency": {
+     "anual": 1,
+     "unica": 1,
+     "durante_vigencia": 3
+    },
+    "by_status": {
+     "nao_informado": 5
+    },
+    "by_source": {
+     "parecer_tecnico": 5
+    }
+   },
+   "conditions": [
+    {
+     "item": 1,
+     "description": "Executar o Programa de Automonitoramento, conforme definido no Anexo II.",
+     "origin": "",
+     "deadline": "Durante a vigência da LOC.",
+     "periodicity_raw": "Durante a vigência da LOC.",
+     "frequencies": [
+      "durante_vigencia"
+     ],
+     "frequency_group": "durante_vigencia",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 2,
+     "description": "Promover a unificação do Cadastro Ambiental Rural – CAR, referente as matrículas nº 57.156, 12.520 e 70.092. Obs.: Para fins de cumprimento desta condicionante deverá ser apresentado o recibo de inscrição no SICAR contendo os dados das referidas matrículas, bem como as adequações nas áreas declaradas, tais como RL, APP e área consolidada, dentre outras.",
+     "origin": "",
+     "deadline": "120 dias.",
+     "periodicity_raw": "120 dias.",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 3,
+     "description": "Apresentar o relatório técnico e fotográfico das ações de manutenção/limpeza dos sistemas destinados ao tratamento do efluente sanitário e da caixa SAO (separadora de água e óleo), a fim de preservar suas respectivas finalidades e eficiências na remoção de contaminantes.",
+     "origin": "",
+     "deadline": "Anualmente, todo mês de fevereiro, durante toada a vigência da licença.",
+     "periodicity_raw": "Anualmente, todo mês de fevereiro, durante toada a vigência da licença.",
+     "frequencies": [
+      "anual"
+     ],
+     "frequency_group": "anual",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 4,
+     "description": "Manter no empreendimento para fins de fiscalização, registro válido emitido pelo IEF, conforme determina a Portaria do IEF n. 125/2020. A cada ano exercício, deverá ser protocolado na SUPRAM-ASF a cópia da renovação do Certificado de Registro junto ao IEF, segundo aludida Portaria ou eventual norma posterior que vier a regular a matéria.",
+     "origin": "",
+     "deadline": "Durante a vigência da licença.",
+     "periodicity_raw": "Durante a vigência da licença.",
+     "frequencies": [
+      "durante_vigencia"
+     ],
+     "frequency_group": "durante_vigencia",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 5,
+     "description": "No caso de a empresa não fazer mais uso da captação de água subterrânea de algum dos poços tubulares citados neste Parecer, o mesmo deverá ser desativado e tamponado, consoante determina a Portaria Igam n. 26/2007 e Nota Técnica do Igam - DIC/DvRC n. 01/2006; ou conforme eventual norma que venha a regular a matéria.",
+     "origin": "",
+     "deadline": "Durante a vigência da licença.",
+     "periodicity_raw": "Durante a vigência da licença.",
+     "frequencies": [
+      "durante_vigencia"
+     ],
+     "frequency_group": "durante_vigencia",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    }
+   ]
+  },
+  "4856/2021": {
+   "process": "4856/2021",
+   "id_solicitacao": 90923,
+   "company": "NUTRILI - INDUSTRIA E COMERCIO DE CARNES LTDA",
+   "cnpj": null,
+   "status": "ok_parecer",
+   "compliance_document": null,
+   "parecer_document": "SEI_1370.01.0000587_2022_35.pdf",
+   "downloaded_at": "2026-11-18T18:38:19+00:00",
+   "summary": {
+    "total": 6,
+    "by_frequency": {
+     "semestral": 1,
+     "anual": 1,
+     "unica": 3,
+     "durante_vigencia": 3
+    },
+    "by_status": {
+     "nao_informado": 6
+    },
+    "by_source": {
+     "parecer_tecnico": 6
+    }
+   },
+   "conditions": [
+    {
+     "item": 1,
+     "description": "Manter a execução do Programa de Automonitoramento, conforme definido no Processo Administrativo PA nº 01280/2003/012/2018 (Licença Principal), demonstrando o atendimento aos padrões definidos nas normas vigentes.",
+     "origin": "",
+     "deadline": "Durante a vigência da licença",
+     "periodicity_raw": "Durante a vigência da licença",
+     "frequencies": [
+      "durante_vigencia"
+     ],
+     "frequency_group": "durante_vigencia",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 2,
+     "description": "Apresentar Diagnóstico Socioambiental Participativo - DSP e, em consequência, apresentar Programa de Educação Ambiental - PEA, nos moldes da DN COPAM n° 214/2017, DN COPAM nº 238/2020 e Instrução de Serviço n° 04/2018.",
+     "origin": "",
+     "deadline": "120 dias, Contados a partir da publicação Licença Ambiental",
+     "periodicity_raw": "120 dias, Contados a partir da publicação Licença Ambiental",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 3,
+     "description": "Apresentar relatórios de acompanhamento do Programa de Educação Ambiental - PEA, após aprovação do programa.",
+     "origin": "",
+     "deadline": "[1] Anualmente, Durante a vigência da Licença Ambiental",
+     "periodicity_raw": "[1] Anualmente, Durante a vigência da Licença Ambiental",
+     "frequencies": [
+      "anual",
+      "durante_vigencia"
+     ],
+     "frequency_group": "composta",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 4,
+     "description": "Apresentar Relatório Técnico Fotográfico COMPROVANDO a instalação de cerca nas Áreas de Preservação Permanente - APP’s e nas Áreas de Reserva Legal - RL com placas de identificação OU justificativa técnica para o não cercamento.",
+     "origin": "",
+     "deadline": "180 dias, Contados a partir da publicação Licença Ambiental",
+     "periodicity_raw": "180 dias, Contados a partir da publicação Licença Ambiental",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 5,
+     "description": "Apresentar Relatórios Técnicos Fotográficos, com ART, COMPROVANDO a implantação E evolução do Projeto Técnico de Reconstituição de Flora - PTRF para as faixas de APP ao longo do curso d’água e nascente, incluindo as variáveis dendrométricas = CAP, altura e % de sobrevivência.",
+     "origin": "",
+     "deadline": "[1] Semestralmente, Durante a vigência da Licença Ambiental",
+     "periodicity_raw": "[1] Semestralmente, Durante a vigência da Licença Ambiental",
+     "frequencies": [
+      "semestral",
+      "durante_vigencia"
+     ],
+     "frequency_group": "composta",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 6,
+     "description": "Apresentar Relatório Técnico Fotográfico COMPROVANDO a instalação de medidor de vazão ao final do tratamento dos efluentes líquidos e antes do lançamento no corpo hídrico.",
+     "origin": "",
+     "deadline": "30 dias, Contados a partir da publicação Licença Ambiental",
+     "periodicity_raw": "30 dias, Contados a partir da publicação Licença Ambiental",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    }
+   ]
+  },
+  "2789/2021": {
+   "process": "2789/2021",
+   "id_solicitacao": 84166,
+   "company": "WD AGROINDUSTRIAL LTDA",
+   "cnpj": null,
+   "status": "ok_parecer",
+   "compliance_document": null,
+   "parecer_document": "PARECER ÚNICO WD Agroindustrial - Complexo Industrial - LP+LI+LO ampliação.pdf",
+   "downloaded_at": "2026-11-18T18:38:30+00:00",
+   "summary": {
+    "total": 5,
+    "by_frequency": {
+     "anual": 2,
+     "unica": 1,
+     "nao_classificada": 2
+    },
+    "by_status": {
+     "nao_informado": 5
+    },
+    "by_source": {
+     "parecer_tecnico": 5
+    }
+   },
+   "conditions": [
+    {
+     "item": 1,
+     "description": "Apresentar, anualmente, relatório técnico-fotográfico que comprove a implantação e execução das ações propostas nos programas, planos e projetos apresentados, com respectiva Anotação de Responsabilidade Técnica – ART.",
+     "origin": "",
+     "deadline": "",
+     "periodicity_raw": "",
+     "frequencies": [
+      "anual"
+     ],
+     "frequency_group": "anual",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 2,
+     "description": "Realizar disposição adequada das sucatas e dos resíduos sólidos gerados no empreendimento, conforme Lei Estadual nº 18.031/2009, bem como dar destinação adequada aos filtros de óleos, estopas contaminadas e sedimentos contaminados a empresas regularizadas ambientalmente, conforme Resolução CONAMA nº 362/2005. Dar destinação correta aos resíduos de construção civil, gerados na fase de instalação, conforme proposto no PCA. Manter os recibos da destinação na propriedade para atender eventuais fiscalizações.",
+     "origin": "",
+     "deadline": "",
+     "periodicity_raw": "",
+     "frequencies": [],
+     "frequency_group": "nao_classificada",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 3,
+     "description": "Promover o Manifesto de Transporte de Resíduos – MTR para todos os resíduos controlados, gerados durante a etapa de ampliação.",
+     "origin": "",
+     "deadline": "",
+     "periodicity_raw": "",
+     "frequencies": [],
+     "frequency_group": "nao_classificada",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 4,
+     "description": "Dar sequência as ações previstas no Programa de Educação Ambiental já em execução no empreendimento. Apresentar à SUPRAM NOR relatórios anuais das ações realizadas.",
+     "origin": "",
+     "deadline": "",
+     "periodicity_raw": "",
+     "frequencies": [
+      "anual"
+     ],
+     "frequency_group": "anual",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 5,
+     "description": "Comunicar à SUPRAM NOR eventuais acidentes ambientais que possam ocasionar danos ao meio ambiente, imediatamente após sua constatação, conforme plano apresentado, em atendimento à Resolução CONAMA nº 273/2000.",
+     "origin": "",
+     "deadline": "",
+     "periodicity_raw": "",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    }
+   ]
+  },
+  "3416/2020": {
+   "process": "3416/2020",
+   "id_solicitacao": 35128,
+   "company": "NEXA RECURSOS MINERAIS S.A.",
+   "cnpj": null,
+   "status": "ok_parecer",
+   "compliance_document": null,
+   "parecer_document": "SEI_1370.01.0012719_2021_43.pdf",
+   "downloaded_at": "2026-11-18T18:38:40+00:00",
+   "summary": {
+    "total": 4,
+    "by_frequency": {
+     "unica": 2,
+     "durante_vigencia": 2
+    },
+    "by_status": {
+     "nao_informado": 4
+    },
+    "by_source": {
+     "parecer_tecnico": 4
+    }
+   },
+   "conditions": [
+    {
+     "item": 1,
+     "description": "Apresentar relatório técnico-fotográfico que comprove a implantação das medidas mitigadoras durante a fase prévia e de instalação.",
+     "origin": "",
+     "deadline": "Antes do início da operação",
+     "periodicity_raw": "Antes do início da operação",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 1,
+     "description": "Apresentar relatório técnico-fotográfico que comprove a implantação e execução das ações propostas nos programas, planos e projetos propostos, com respectiva Anotação de Responsabilidade Técnica – ART.",
+     "origin": "",
+     "deadline": "Durante a vigência da licença",
+     "periodicity_raw": "Durante a vigência da licença",
+     "frequencies": [
+      "durante_vigencia"
+     ],
+     "frequency_group": "durante_vigencia",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 2,
+     "description": "Formalizar perante a Gerência de Compensação Ambiental do IEF, no prazo máximo de 120 dias contados da publicação da Licença, processo de compensação ambiental, conforme procedimentos estipulados pela Portaria IEF nº 55, de 23 de abril de 2012.",
+     "origin": "",
+     "deadline": "120 dias",
+     "periodicity_raw": "120 dias",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 2,
+     "description": "Manter a disposição adequada dos resíduos sólidos gerados no empreendimento, conforme Lei Estadual nº 18.031/2009, bem como dar destinação adequada aos filtros de óleos, estopas contaminadas e sedimentos contaminados, conforme Resolução CONAMA nº 362/2005. Manter os recibos da destinação na propriedade para atender eventuais fiscalizações.",
+     "origin": "",
+     "deadline": "Durante a vigência da licença",
+     "periodicity_raw": "Durante a vigência da licença",
+     "frequencies": [
+      "durante_vigencia"
+     ],
+     "frequency_group": "durante_vigencia",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    }
+   ]
+  },
+  "3417/2020": {
+   "process": "3417/2020",
+   "id_solicitacao": 37283,
+   "company": "FERNANDO MINORU AOYAGUI",
+   "cnpj": null,
+   "status": "ok_parecer",
+   "compliance_document": null,
+   "parecer_document": "PARECER ÚNICO - Faz. Salgueiro - Fernando Aoyagui - Revlo.pdf",
+   "downloaded_at": "2026-11-18T18:38:51+00:00",
+   "summary": {
+    "total": 7,
+    "by_frequency": {
+     "anual": 1,
+     "unica": 3,
+     "durante_vigencia": 4
+    },
+    "by_status": {
+     "nao_informado": 7
+    },
+    "by_source": {
+     "parecer_tecnico": 7
+    }
+   },
+   "conditions": [
+    {
+     "item": 1,
+     "description": "Executar o Programa de Automonitoramento, conforme definido no Anexo II, demonstrando o atendimento aos padrões definidos nas normas vigentes.",
+     "origin": "",
+     "deadline": "Durante a vigência da licença",
+     "periodicity_raw": "Durante a vigência da licença",
+     "frequencies": [
+      "durante_vigencia"
+     ],
+     "frequency_group": "durante_vigencia",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 2,
+     "description": "Apresentar anualmente relatório técnico-fotográfico que comprove a implantação e execução das ações propostas nos programas, planos e projetos, com respectiva Anotação de Responsabilidade Técnica – ART.",
+     "origin": "",
+     "deadline": "Durante a vigência da licença",
+     "periodicity_raw": "Durante a vigência da licença",
+     "frequencies": [
+      "anual",
+      "durante_vigencia"
+     ],
+     "frequency_group": "composta",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 2,
+     "description": "Realizar disposição adequada das sucatas e dos resíduos sólidos gerados no empreendimento, conforme Lei Estadual nº 18.031/2009, bem como dar destinação adequada aos filtros de óleos, estopas contaminadas e sedimentos contaminados a empresas regularizadas ambientalmente, conforme Resolução CONAMA nº 362/2005. Manter os recibos da destinação na propriedade para atender eventuais fiscalizações.",
+     "origin": "",
+     "deadline": "Durante a vigência da licença",
+     "periodicity_raw": "Durante a vigência da licença",
+     "frequencies": [
+      "durante_vigencia"
+     ],
+     "frequency_group": "durante_vigencia",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 4,
+     "description": "Manter arquivado por período de um ano os receituários agronômicos e as cópias das notas fiscais de compras de agrotóxicos utilizados na propriedade, bem como utilizar produtos com registro junto ao órgão competente, realizar tríplice lavagem e dar destinação correta às embalagens vazias.",
+     "origin": "",
+     "deadline": "Durante a vigência da licença",
+     "periodicity_raw": "Durante a vigência da licença",
+     "frequencies": [
+      "durante_vigencia"
+     ],
+     "frequency_group": "durante_vigencia",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 5,
+     "description": "Apresentar Programa de Monitoramento de Fauna (mastofauna, avifauna, herpetofauna, entomofauna e ictiofauna), incluindo as espécies ameaçadas de extinção e endêmicas do cerrado, com Anotação de Responsabilidade Técnica - ART. Executar integralmente após apreciação da SUPRAM NOR.",
+     "origin": "",
+     "deadline": "120 dias",
+     "periodicity_raw": "120 dias",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 6,
+     "description": "Apresentar Programa de Monitoramento de Estabilidade das Barragens, com Anotação de Responsabilidade Técnica – ART. Cumprir integralmente o programa após a apreciação da SUPRAM NOR.",
+     "origin": "",
+     "deadline": "120 dias",
+     "periodicity_raw": "120 dias",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 8,
+     "description": "Apresentar cronograma executivo atualizado para dar continuidade ao Projeto Técnico de Reconstituição da Flora – PTRF já apresentado.",
+     "origin": "",
+     "deadline": "Conforme cronograma atualizado",
+     "periodicity_raw": "Conforme cronograma atualizado",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    }
+   ]
+  },
+  "3373/2020": {
+   "process": "3373/2020",
+   "id_solicitacao": 35125,
+   "company": "NEXA RECURSOS MINERAIS S.A.",
+   "cnpj": null,
+   "status": "ok_parecer",
+   "compliance_document": null,
+   "parecer_document": "SEI_1370.01.0053433_2020_69.pdf",
+   "downloaded_at": "2026-11-18T18:39:07+00:00",
+   "summary": {
+    "total": 4,
+    "by_frequency": {
+     "anual": 1,
+     "durante_vigencia": 3,
+     "nao_classificada": 1
+    },
+    "by_status": {
+     "nao_informado": 4
+    },
+    "by_source": {
+     "parecer_tecnico": 4
+    }
+   },
+   "conditions": [
+    {
+     "item": 1,
+     "description": "Apresentar relatórios técnicos e/ou fotográficos que comprove a implantação e execução das ações propostas nos programas, planos e projetos propostos, com respectiva Anotação de Responsabilidade Técnica – ART.",
+     "origin": "",
+     "deadline": "Antes de iniciar a operação do empreendimento",
+     "periodicity_raw": "Antes de iniciar a operação do empreendimento",
+     "frequencies": [],
+     "frequency_group": "nao_classificada",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 1,
+     "description": "Dar continuidade ao Programa de Automonitoramento, conforme definido na Licença principal.",
+     "origin": "",
+     "deadline": "Durante a vigência da Licença de Operação",
+     "periodicity_raw": "Durante a vigência da Licença de Operação",
+     "frequencies": [
+      "durante_vigencia"
+     ],
+     "frequency_group": "durante_vigencia",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 2,
+     "description": "Dar destinação ambientalmente adequada aos resíduos sólidos da construção civil.",
+     "origin": "",
+     "deadline": "Durante a vigência de Licença Prévia e de Instalação",
+     "periodicity_raw": "Durante a vigência de Licença Prévia e de Instalação",
+     "frequencies": [
+      "durante_vigencia"
+     ],
+     "frequency_group": "durante_vigencia",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 2,
+     "description": "Apresentar anualmente relatórios técnicos e/ou fotográficos que comprove a implantação e execução das ações propostas nos programas, planos e projetos propostos, com respectiva Anotação de Responsabilidade Técnica – ART.",
+     "origin": "",
+     "deadline": "Durante a vigência da Licença de Operação",
+     "periodicity_raw": "Durante a vigência da Licença de Operação",
+     "frequencies": [
+      "anual",
+      "durante_vigencia"
+     ],
+     "frequency_group": "composta",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    }
+   ]
+  },
+  "508/2025": {
+   "process": "508/2025",
+   "id_solicitacao": 269621,
+   "company": "ALCOA ALUMINIO S/A",
+   "cnpj": "23637697000101",
+   "status": "ok_parecer",
+   "compliance_document": null,
+   "parecer_document": "SEI_2090.01.0003212_2026_53.pdf",
+   "downloaded_at": "2026-11-18T18:39:25+00:00",
+   "summary": {
+    "total": 3,
+    "by_frequency": {
+     "semestral": 1,
+     "unica": 2
+    },
+    "by_status": {
+     "nao_informado": 3
+    },
+    "by_source": {
+     "parecer_tecnico": 3
+    }
+   },
+   "conditions": [
+    {
+     "item": 1,
+     "description": "Apresentar relatório técnico fotográfico, acompanhado de ART, comprovando a execução de todas as medidas compensatórias propostas.",
+     "origin": "",
+     "deadline": "Semestralmente durante 5 anos.",
+     "periodicity_raw": "Semestralmente durante 5 anos.",
+     "frequencies": [
+      "semestral"
+     ],
+     "frequency_group": "semestral",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 2,
+     "description": "Apresentar a Autorização para Manejo de Fauna – AMF.",
+     "origin": "",
+     "deadline": "15 dias após obtenção da autorização",
+     "periodicity_raw": "15 dias após obtenção da autorização",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 3,
+     "description": "Apresentar o MTR dos resíduos sólidos gerados durante as obras",
+     "origin": "",
+     "deadline": "30 dias após o termino das obras",
+     "periodicity_raw": "30 dias após o termino das obras",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    }
+   ]
+  },
+  "12855/2025": {
+   "process": "12855/2025",
+   "id_solicitacao": 279862,
+   "company": "CLAUDIO DE CASTRO CUNHA",
+   "cnpj": null,
+   "status": "ok_parecer",
+   "compliance_document": null,
+   "parecer_document": "SEI_2090.01.0013372_2025_52.pdf",
+   "downloaded_at": "2026-11-18T18:39:35+00:00",
+   "summary": {
+    "total": 11,
+    "by_frequency": {
+     "anual": 1,
+     "unica": 10
+    },
+    "by_status": {
+     "nao_informado": 11
+    },
+    "by_source": {
+     "parecer_tecnico": 11
+    }
+   },
+   "conditions": [
+    {
+     "item": 1,
+     "description": "Formalizar processo de regularização ambiental conforme requerimento realizado no sistema ecossistema.",
+     "origin": "",
+     "deadline": "90 dias",
+     "periodicity_raw": "90 dias",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 1,
+     "description": "Comprovar, por meio de relatórios técnicos e fotográficos, o plantio e o desenvolvimento das mudas de espécies nativas nas áreas que receberão os plantios propostos no PRADA, e a situação de recuperação das áreas, conforme descrito no item 9 deste parecer. Obs: Anexar a ART do responsável técnico pelo relatório",
+     "origin": "",
+     "deadline": "Anualmente, até o último dia do mês de dezembro de cada ano.",
+     "periodicity_raw": "Anualmente, até o último dia do mês de dezembro de cada ano.",
+     "frequencies": [
+      "anual"
+     ],
+     "frequency_group": "anual",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 2,
+     "description": "Apresentar proposta de compensação por intervenção em APP, com PTRF - Projeto Técnico de Recuperação Florestal, com ART do responsável técnico, conforme os requisitos legais da Resolução CONAMA nº 369/2006 e do Decreto 47.749 de 2019, art. 75, I. Obs: As áreas propostas devem ser desprovidas de vegetação ou com vegetação degradada.",
+     "origin": "",
+     "deadline": "Apresentar como anexo na formalização do processo",
+     "periodicity_raw": "Apresentar como anexo na formalização do processo",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 2,
+     "description": "Apresentar matrículas atualizadas da propriedade constando a adequação das áreas referentes à cada município, conforme descrito no item 3.6 deste parecer.",
+     "origin": "",
+     "deadline": "1 ano",
+     "periodicity_raw": "1 ano",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 3,
+     "description": "Apresentar mapa com a delimitação da barragem construída, delimitando a área do entorno do barramento (distância entre a cota máxima de inundação e as áreas de plantio, classificação do uso do solo - demarcar as áreas com vegetação nativa e as áreas antropizadas). Obs: considerar APP de 30 metros no entorno do barramento, caso haja usos antrópicos neste raio, incluir a recuperação das áreas no PTRF solicitado no Item 2.",
+     "origin": "",
+     "deadline": "Apresentar como anexo na formalização do processo",
+     "periodicity_raw": "Apresentar como anexo na formalização do processo",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 3,
+     "description": "Apresentar matrículas atualizadas constando a regularização da reserva legal do imóvel, conforme descrito no item 3.6 deste parecer.",
+     "origin": "",
+     "deadline": "1 ano",
+     "periodicity_raw": "1 ano",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 4,
+     "description": "Apresentar levantamento florestal qualitativo e quantitativo e levantamento florístico e fitossociológico da vegetação remanescente do entorno do barramento, para definir as fitofisionomias existentes antes das intervenções, mapeando e quantificando a área de cada fitofisionomia com base em imagens de satélites históricas. Apresentar um mapa com a demarcação e quantificação das áreas de intervenção, delimitadas por fitofisionomia.",
+     "origin": "",
+     "deadline": "Apresentar como anexo na formalização do processo",
+     "periodicity_raw": "Apresentar como anexo na formalização do processo",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 4,
+     "description": "Comprovar a retificação do Registros no CAR dos imóveis conforme retificações que serão realizadas e detalhamento dos passivos indicados no item 3.6 deste parecer.",
+     "origin": "",
+     "deadline": "1 ano",
+     "periodicity_raw": "1 ano",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 5,
+     "description": "Comprovar a regularização da reserva legal de todos os imóveis afetados pela inundação do barramento, conforme pendências elencadas no parecer de indeferimento da licença, parecer único nº 100146693 (SEI!).",
+     "origin": "",
+     "deadline": "Apresentar como anexo na formalização do processo",
+     "periodicity_raw": "Apresentar como anexo na formalização do processo",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 5,
+     "description": "Apresentar matrícula nº 17.735 atualizada, constando a averbação do cancelamento dos AV-9 e AV-10, conforme descrito no item 3.6.",
+     "origin": "",
+     "deadline": "60 dias",
+     "periodicity_raw": "60 dias",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 6,
+     "description": "Com relação à reserva legal da Fazenda Lagoa da Capa, que se encontra compensada na matrícula nº 13.839 do município de Coromandel, além da compensação da Fazenda Lagoa da Capa, constam 05 outras averbações de reserva legal de outros imóveis (compensações) nesta matrícula, com área total de 83,8268 hectares. Dessa forma, deve-se apresentar mapa topográfico georreferenciado desta propriedade, demarcando todas as glebas de reserva legal compensadas, assim como a reserva legal própria do imóvel.",
+     "origin": "",
+     "deadline": "Apresentar como anexo na formalização do processo",
+     "periodicity_raw": "Apresentar como anexo na formalização do processo",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    }
+   ]
+  },
+  "3487/2024": {
+   "process": "3487/2024",
+   "id_solicitacao": 227261,
+   "company": "SOUFER INDUSTRIAL LTDA.",
+   "cnpj": "45987062000681",
+   "status": "ok_parecer",
+   "compliance_document": null,
+   "parecer_document": "SEI_2090.01.0005325_2025_41_Soufer_Industrial.pdf",
+   "downloaded_at": "2026-11-18T18:39:45+00:00",
+   "summary": {
+    "total": 1,
+    "by_frequency": {
+     "durante_vigencia": 1
+    },
+    "by_status": {
+     "nao_informado": 1
+    },
+    "by_source": {
+     "parecer_tecnico": 1
+    }
+   },
+   "conditions": [
+    {
+     "item": 1,
+     "description": "Dar continuidade ao Programa de Automonitoramento, conforme definido no Anexo II da Licença Ambiental – Certificado LOC nº 024/2017.",
+     "origin": "",
+     "deadline": "Durante a vigência da Licença de Operação",
+     "periodicity_raw": "Durante a vigência da Licença de Operação",
+     "frequencies": [
+      "durante_vigencia"
+     ],
+     "frequency_group": "durante_vigencia",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    }
+   ]
+  },
+  "715/2024": {
+   "process": "715/2024",
+   "id_solicitacao": 235234,
+   "company": "MCI RECICLAGEM E COMECIO LTDA",
+   "cnpj": null,
+   "status": "ok_parecer",
+   "compliance_document": null,
+   "parecer_document": "SEI_2090.01.0014559_2024_16.pdf",
+   "downloaded_at": "2026-11-18T18:39:53+00:00",
+   "summary": {
+    "total": 2,
+    "by_frequency": {
+     "unica": 1,
+     "durante_vigencia": 1
+    },
+    "by_status": {
+     "nao_informado": 2
+    },
+    "by_source": {
+     "parecer_tecnico": 2
+    }
+   },
+   "conditions": [
+    {
+     "item": 1,
+     "description": "Executar o Programa de Automonitoramento, conforme definido no Anexo II, demonstrando o atendimento aos padrões definidos nas normas vigentes.",
+     "origin": "",
+     "deadline": "Durante a vigência da licença",
+     "periodicity_raw": "Durante a vigência da licença",
+     "frequencies": [
+      "durante_vigencia"
+     ],
+     "frequency_group": "durante_vigencia",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 2,
+     "description": "Apresentar relatório fotográfico e descritivo para comprovar a instalação do filtro de mangas e periféricos para tratamento dos efluentes atmosféricos, conforme projeto e descrição apresentada junto ao RAS.",
+     "origin": "",
+     "deadline": "Anterior ao início de operação.",
+     "periodicity_raw": "Anterior ao início de operação.",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    }
+   ]
+  },
+  "64/2024": {
+   "process": "64/2024",
+   "id_solicitacao": 170147,
+   "company": "BT CONSTRUCOES LTDA.",
+   "cnpj": null,
+   "status": "ok_parecer",
+   "compliance_document": null,
+   "parecer_document": "SEI_2090.01.0010918_2024_62 BT CONSTRUÇÕES AMPLIAÇÃO.pdf",
+   "downloaded_at": "2026-11-18T18:39:58+00:00",
+   "summary": {
+    "total": 1,
+    "by_frequency": {
+     "durante_vigencia": 1
+    },
+    "by_status": {
+     "nao_informado": 1
+    },
+    "by_source": {
+     "parecer_tecnico": 1
+    }
+   },
+   "conditions": [
+    {
+     "item": 1,
+     "description": "Incluir esta ampliação em todas as condicionantes e o automonitoramento estabelecidos na Renovação de Licença de Operação - RenLO, P. A. n°12303/2018/001/2019 (SIAM), aprovada pelo Superintendente em 26/03/2021. Obs. 1: Para fins de informação, o ANEXO II, deste parecer, traz a cópi das condicionantes aprovadas no processo RenLO n° 12303/2018/001/2019. Obs. 2: O cumprimento é realizado no processo SEI n° 1370.01.0033923/2020-32.",
+     "origin": "",
+     "deadline": "Durante a vigência da a Licença",
+     "periodicity_raw": "Durante a vigência da a Licença",
+     "frequencies": [
+      "durante_vigencia"
+     ],
+     "frequency_group": "durante_vigencia",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    }
+   ]
+  },
+  "4995/2021": {
+   "process": "4995/2021",
+   "id_solicitacao": 99211,
+   "company": "ALCOA ALUMINIO S/A",
+   "cnpj": null,
+   "status": "ok_parecer",
+   "compliance_document": null,
+   "parecer_document": "SEI_1370.01.0017338_2022_69_Alcoa_Canalização.pdf",
+   "downloaded_at": "2026-11-18T18:40:08+00:00",
+   "summary": {
+    "total": 1,
+    "by_frequency": {
+     "durante_vigencia": 1
+    },
+    "by_status": {
+     "nao_informado": 1
+    },
+    "by_source": {
+     "parecer_tecnico": 1
+    }
+   },
+   "conditions": [
+    {
+     "item": 1,
+     "description": "Dar continuidade ao Programa de Automonitoramento, conforme definido na RevLO nº 029/2017, demonstrando o atendimento aos padrões definidos nas normas vigentes.",
+     "origin": "",
+     "deadline": "Durante a vigência da LOC – LAC1",
+     "periodicity_raw": "Durante a vigência da LOC – LAC1",
+     "frequencies": [
+      "durante_vigencia"
+     ],
+     "frequency_group": "durante_vigencia",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    }
+   ]
+  },
+  "1649/2022": {
+   "process": "1649/2022",
+   "id_solicitacao": 125077,
+   "company": "REDE SOL FUEL DISTRIBUIDORA S/A",
+   "cnpj": null,
+   "status": "ok_parecer",
+   "compliance_document": null,
+   "parecer_document": "PT Rede Sol Fuel_SEI_1370.01.0053013_2021_57.pdf",
+   "downloaded_at": "2026-11-18T18:40:12+00:00",
+   "summary": {
+    "total": 3,
+    "by_frequency": {
+     "unica": 2,
+     "durante_vigencia": 1
+    },
+    "by_status": {
+     "nao_informado": 3
+    },
+    "by_source": {
+     "parecer_tecnico": 3
+    }
+   },
+   "conditions": [
+    {
+     "item": 1,
+     "description": "Apresentar relatório técnico fotográfico com descritivo, comprovando a instalação dos novos tanques",
+     "origin": "",
+     "deadline": "Antes do início da operação",
+     "periodicity_raw": "Antes do início da operação",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 2,
+     "description": "Comprovar o cadastro no sistema MTR, conforme determina a DN 232/2019",
+     "origin": "",
+     "deadline": "30 dias após a emissão da licença de ampliação",
+     "periodicity_raw": "30 dias após a emissão da licença de ampliação",
+     "frequencies": [
+      "unica"
+     ],
+     "frequency_group": "unica",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    },
+    {
+     "item": 3,
+     "description": "Dar continuidade à execução das condicionantes estabelecidas no Parecer Único n. 359608/2017, relativo à Licença de Operação principal, PA n. 00182/2000/004/2016, de acordo com os prazos ali estabelecidos, abarcando todo o acréscimo relativo à ampliação.",
+     "origin": "",
+     "deadline": "Durante a vigência da Licença Ambiental",
+     "periodicity_raw": "Durante a vigência da Licença Ambiental",
+     "frequencies": [
+      "durante_vigencia"
+     ],
+     "frequency_group": "durante_vigencia",
+     "responsible": "Equipe",
+     "status": "nao_informado",
+     "status_raw": "",
+     "observation": "",
+     "source": "parecer_tecnico"
+    }
+   ]
+  }
+ }
+}

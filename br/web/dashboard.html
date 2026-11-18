@@ -30,6 +30,31 @@
           <option value="license_expired">Licença vencida</option>
         </select>
       </div>
+      <div class="filter"><label for="f-frequency">Periodicidade da condicionante</label>
+        <select id="f-frequency">
+          <option value="">Todas</option>
+          <option value="semanal">Semanal</option>
+          <option value="quinzenal">Quinzenal</option>
+          <option value="mensal">Mensal</option>
+          <option value="bimestral">Bimestral</option>
+          <option value="trimestral">Trimestral</option>
+          <option value="quadrimestral">Quadrimestral</option>
+          <option value="semestral">Semestral</option>
+          <option value="anual">Anual</option>
+          <option value="unica">Única</option>
+          <option value="constante">Constante</option>
+        </select>
+      </div>
+      <div class="filter"><label for="f-condition-status">Status da condição</label>
+        <select id="f-condition-status">
+          <option value="">Todos</option>
+          <option value="cumprida">Cumprida</option>
+          <option value="cumprida_conforme_periodicidade">Cumprida conforme periodicidade</option>
+          <option value="em_atendimento">Em atendimento</option>
+          <option value="cumprida_parcialmente">Cumprida parcialmente</option>
+          <option value="descumprida">Descumprida</option>
+        </select>
+      </div>
       <div class="filter"><label for="f-source">Fonte</label>
         <select id="f-source">
           <option value="">Todas</option>
@@ -86,6 +111,7 @@
           <div class="kpi"><span>Autos federais</span><b id="kpi-autos">—</b></div>
           <div class="kpi"><span>Licenças</span><b id="kpi-licenses">—</b></div>
           <div class="kpi"><span>Vencendo 90d</span><b id="kpi-expiring">—</b></div>
+          <div class="kpi"><span>Condicionantes</span><b id="kpi-conditions">—</b></div>
           <div class="kpi"><span>Cobertura</span><b id="kpi-coverage">—</b></div>
         </div>
 

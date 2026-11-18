@@ -26,6 +26,7 @@ BR = Path(__file__).resolve().parents[1]
 CACHE = BR / ".cache"
 ASSETS = BR / "web" / "assets"
 DETAILS = BR / "data" / "license_details.json"
+CONDITIONS = BR / "data" / "conditions.json"
 TODAY = date(2026, 11, 18)
 
 UF_BY_CODE = {
@@ -294,7 +295,7 @@ def parse_sislic(limit: int) -> tuple[list[dict], dict]:
     }
 
 
-def parse_mg(limit: int, muni_index: dict, details_by_process: dict) -> tuple[list[dict], dict]:
+def parse_mg(limit: int, muni_index: dict, details_by_process: dict, conditions_by_process: dict) -> tuple[list[dict], dict]:
     path = CACHE / "mg_licencas.json"
     if not path.exists():
         return [], {"total": 0, "distinct_roots": 0}
@@ -339,6 +340,16 @@ def parse_mg(limit: int, muni_index: dict, details_by_process: dict) -> tuple[li
             priority = 75
         elif 0 <= days <= 365:
             priority = 62
+        process = (props.get("n_processo") or "").strip()
+        detail = details_by_process.get(norm(process))
+        condition_data = conditions_by_process.get(norm(process)) or {}
+        if detail and condition_data:
+            detail = {
+                **detail,
+                "conditions": condition_data.get("conditions") or [],
+                "conditions_summary": condition_data.get("summary"),
+                "conditions_source": condition_data.get("document"),
+            }
         leads.append(
             {
                 "id": f"mg:{(props.get('n_solicit') or props.get('n_processo') or '').strip()}",
@@ -360,13 +371,15 @@ def parse_mg(limit: int, muni_index: dict, details_by_process: dict) -> tuple[li
                 "fine": None,
                 "date": issued.isoformat() if issued else None,
                 "expires_at": expiry.isoformat(),
-                "process": (props.get("n_processo") or "").strip(),
+                "process": process,
                 "status": (props.get("status_pro") or "Deferido").strip(),
                 "license_type": (props.get("modl_licen") or "").strip(),
                 "url": (props.get("link") or "").strip() or None,
                 "verified": bool(full),
                 "priority": priority,
-                "license_detail": details_by_process.get(norm(props.get("n_processo") or "")),
+                "license_detail": detail,
+                "conditions": condition_data.get("conditions") or [],
+                "conditions_summary": condition_data.get("summary"),
             }
         )
     leads.sort(key=lambda item: (item["priority"], item["expires_at"] or ""), reverse=True)
@@ -390,6 +403,13 @@ def main() -> None:
             norm(process): detail
             for process, detail in (payload.get("details") or {}).items()
         }
+    conditions_by_process: dict[str, dict] = {}
+    if CONDITIONS.exists():
+        payload = json.loads(CONDITIONS.read_text(encoding="utf-8"))
+        conditions_by_process = {
+            norm(process): detail
+            for process, detail in (payload.get("processes") or {}).items()
+        }
     cnpj_cache_path = CACHE / "cnpj_cache.json"
     cnpj_cache = (
         json.loads(cnpj_cache_path.read_text(encoding="utf-8"))
@@ -399,7 +419,7 @@ def main() -> None:
 
     ibama, ibama_stats = parse_ibama(650, muni_index)
     sislic, sislic_stats = parse_sislic(260)
-    mg, mg_stats = parse_mg(450, muni_index, details_by_process)
+    mg, mg_stats = parse_mg(450, muni_index, details_by_process, conditions_by_process)
 
     for item in ibama + mg:
         extra = cnpj_cache.get(item["cnpj"] or "") or {}
@@ -452,6 +472,8 @@ def main() -> None:
         1 for item in leads if item["kind"] == "license_expiring" and item.get("expires_at")
         and 0 <= (date.fromisoformat(item["expires_at"]) - TODAY).days <= 365
     )
+    conditions_total = sum(len(item.get("conditions") or []) for item in leads)
+    companies_with_conditions = sum(1 for item in leads if item.get("conditions"))
 
     data = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
@@ -466,6 +488,8 @@ def main() -> None:
             "sislic_licenses": sislic_stats.get("total", 0),
             "expiring_90": expiring_90,
             "expiring_365": expiring_365,
+            "conditions": conditions_total,
+            "companies_with_conditions": companies_with_conditions,
         },
         "coverage": {
             "federal": {
