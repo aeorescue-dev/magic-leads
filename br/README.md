@@ -12,6 +12,13 @@ Protótipo de validação para o mercado brasileiro de consultoria/engenharia am
 - **Dados:** snapshot de 18/11/2026 — 1.360 oportunidades, 650 autos IBAMA, 450 licenças MG, 260 licenças federais SISLIC.
 - **Cobertura:** federal em todo o Brasil + MG (WFS). PR tem fonte em PDF identificada; parser na fase 2.
 - **Billing:** simulado (mock). Sem cobrança real.
+## Deploy Vercel
+
+- Projeto: `magic-leads-br-staging`.
+- **Root Directory:** `br/web`.
+- **Framework:** Other (estático).
+- Produção manual: `vercel --prod` a partir de `br/web`.
+- Preview Git: qualquer push em `feat/br-environmental-mvp` gera preview.
 - **Domínio final:** `br.magicleads.app` exige CNAME no Porkbun; o preview Vercel está público.
 
 ## Estrutura
