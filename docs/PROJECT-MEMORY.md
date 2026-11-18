@@ -2120,6 +2120,19 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Recomendação:** SMS só como fallback transacional 1:1 para opt-in do chat, 1 número 10DLC SP, cap $2/dia e 100/dia; push e voz continuam primários; **nunca** SMS para a base B2B raspada.
 - **Sem código nem deploy:** parecer docs-only; deploy das 20:00 ET inalterado.
 
+### Correção — Estado 10DLC / Telnyx (2026-11-18)
+
+- **Erro corrigido:** o diagnóstico de 18/11 dizia “0 brands”. A API `/v2/10dlc/brand` devolve `records` (não `data`) e o detalhe devolve o objeto na raiz; o script leu o campo errado. O brand existe desde 12/11.
+- **Brand:** `4b2001a1-d187-485a-2062-cb5501a9fe37`, TCR `BCW3GRB`, criado **2026-11-12 20:52 UTC**, `status=OK`, `identityStatus=UNVERIFIED`, **0 campanhas**, **0 números atribuídos**, **0 external vetting**.
+- **EIN/CP575G:** EIN **43-2940311**, Name Control **SOAR**, FABIO HENRIQUE SOARES DE OLIVEIRA / MAGIC LEADS TECHNOLOGIES, 418 7th St Apt B, Harrison, NJ 07029. EIN e morada coincidem com o brand; `entityType=PRIVATE_PROFIT` é o ponto a confirmar face ao Name Control individual.
+- **Pedido manual:** e-mail de **2026-11-12 21:44 UTC** para `10dlcquestions@telnyx.com`, de `support@magicleads.app`, Reply-To `aeorescue@gmail.com`, anexo `CP575G.pdf`; Resend ID `01a1d1b7-c92d-753a-82c4-346eb622d781`; estado **delivered**.
+- **Contacto:** `businessContactEmail=fabio@magicleads.app`, caixa ativa no Google Workspace; `businessContactEmailVerifiedDate=null`.
+- **Infra:** messaging profile `4001a1d1-8bd1-4cdc-a13b-e05580d2b932` enabled; número `+19739137808` (local 973, A2P) no profile, `messaging_campaign_id=null`; **0 campanhas 10DLC**.
+- **Saldo Telnyx:** **$0,99** (insuficiente para retomar voz).
+- **Prazos:** 4 dias úteis desde o pedido (12→18/11); sem resposta/ticket oficial recuperável. Follow-up preparado e **não enviado**.
+- **Estado:** aguardar verificação manual; não criar campanha nem associar número até `identityStatus=VERIFIED`; campanhas de voz continuam pausadas.
+- **Documento:** `reports/10DLC-STATUS-2026-11-18.md`.
+
 ### Parecer — Collision & Accident Leads (2026-11-06)
 
 - **Documento completo:** `docs/COLLISION-LEADS-FEASIBILITY.md`.
