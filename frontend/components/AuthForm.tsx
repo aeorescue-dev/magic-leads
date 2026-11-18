@@ -124,7 +124,7 @@ function AuthFormInner({
     if (res.checkout_url) return res.checkout_url;
     if (res.mock && preselectedPlan) {
       await mockPlanCheckout(preselectedPlan);
-      return `${localePath('/dashboard')}?billing=success`;
+      return localePath('/dashboard');
     }
     return null;
   };

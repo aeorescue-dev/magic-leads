@@ -208,8 +208,8 @@ def test_exhausted_quota_skips_paid_call_and_delivers_free(user, client, monkeyp
     assert _used(user) == 10
 
 
-def test_attempt_budget_blocks_endpoint_before_provider(user, client, monkeypatch):
-    """30 tentativas hoje: 429 antes de qualquer chamada paga."""
+def test_attempt_budget_preserves_delivery_and_skips_provider(user, client, monkeypatch):
+    """30 tentativas hoje: a carta é entregue, o telefone não é consultado."""
     _reset_quota(user, 0)
     conn = get_connection()
     try:
@@ -231,8 +231,11 @@ def test_attempt_budget_blocks_endpoint_before_provider(user, client, monkeypatc
         json={"minutes": 60, "consent": True, "idempotency": f"q-budget-{lead_id}"},
     )
 
-    assert r.status_code == 429, r.text
-    assert "tentativas" in r.text.lower()
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["reserved"] is True
+    assert body["charged"] is False
+    assert body["owner"]["phone"] in (None, "")
     assert fake.calls == 0
 
 

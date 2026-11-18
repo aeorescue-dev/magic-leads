@@ -17,6 +17,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 import backend.main as main_module
+import backend.services.subscription_reveals as reveals_module
+from backend.config import settings
 from backend.main import _hash_token, app
 from backend.models.schemas import (
     EnrichedLead,
@@ -24,6 +26,7 @@ from backend.models.schemas import (
     SourceType,
     UrgencyLevel,
 )
+from backend.services import daily_quota
 from backend.services.db import db_service
 from backend.utils.time import utcnow
 
@@ -123,6 +126,14 @@ def _used(user_id: int) -> int:
     return int(db_service._service.get_daily_leads_used(user_id).get("used") or 0)
 
 
+def _phone_used(user_id: int) -> int:
+    return int(daily_quota.usage_payload(user_id)["phone_used"])
+
+
+def _letter_used(user_id: int) -> int:
+    return int(daily_quota.usage_payload(user_id)["letter_used"])
+
+
 @pytest.fixture
 def reset_quota():
     """Devolve a cota a 0 antes de cada teste, e restaura no fim."""
@@ -138,6 +149,10 @@ def reset_quota():
                    (user_id, date, leads_used, leads_limit, reset_at)
                    VALUES (?, ?, 0, 10, ?)""",
                 (user_id, today, svc._utc_tomorrow_midnight().isoformat()),
+            )
+            conn.execute(
+                "UPDATE user_daily_usage SET phone_used=0, letter_used=0 WHERE user_id=?",
+                (user_id,),
             )
             conn.commit()
         finally:
@@ -160,7 +175,8 @@ def test_provider_phone_turns_a_free_lead_into_a_paid_one(
     reset_quota(user_id)
 
     provider = _PhoneFound()
-    monkeypatch.setattr(main_module, "searchbug_service", provider)
+    monkeypatch.setattr(settings, "SEARCHBUG_MOCK", False, raising=False)
+    monkeypatch.setattr(reveals_module, "searchbug_service", provider)
     monkeypatch.setattr(main_module, "owner_enrichment", _NoName())
 
     lead_id = _make_lead(owner_name="MARIA SANTOS", owner_phone=None, mailing_address=None)
@@ -177,7 +193,8 @@ def test_provider_phone_turns_a_free_lead_into_a_paid_one(
     assert body["charged"] is True, "com telefone do provider devia cobrar"
     assert body["incomplete_delivery"] is False
     assert body["owner"]["phone"] == "+17185550111", body["owner"]
-    assert _used(user_id) == 1, "cota nao foi consumida num lead que virou completo"
+    assert _phone_used(user_id) == 1, "telefone do provider não consumiu quota"
+    assert _letter_used(user_id) == 1, "reserva não consumiu carta/visita"
 
 
 def test_provider_noresults_keeps_the_lead_free(user_and_client, reset_quota, monkeypatch):
@@ -185,7 +202,8 @@ def test_provider_noresults_keeps_the_lead_free(user_and_client, reset_quota, mo
     client, headers, user_id = user_and_client
     reset_quota(user_id)
 
-    monkeypatch.setattr(main_module, "searchbug_service", _NoPhone())
+    monkeypatch.setattr(settings, "SEARCHBUG_MOCK", False, raising=False)
+    monkeypatch.setattr(reveals_module, "searchbug_service", _NoPhone())
     monkeypatch.setattr(main_module, "owner_enrichment", _NoName())
 
     lead_id = _make_lead(owner_name="MARIA SANTOS", owner_phone=None, mailing_address=None)
@@ -203,7 +221,8 @@ def test_provider_noresults_keeps_the_lead_free(user_and_client, reset_quota, mo
     assert body["missing"], "devia dizer o que falta"
     assert body["owner"]["name"] == "MARIA SANTOS", "o nome tem de ser entregue"
     assert not body["owner"]["phone"], "nao ha telefone para entregar"
-    assert _used(user_id) == 0, "lead incompleto consumiu cota"
+    assert _phone_used(user_id) == 0, "lookup sem telefone devia devolver a unidade"
+    assert _letter_used(user_id) == 1, "a carta/visita foi entregue e deve contar"
 
 
 def test_provider_outage_does_not_break_delivery(user_and_client, reset_quota, monkeypatch):
@@ -215,7 +234,8 @@ def test_provider_outage_does_not_break_delivery(user_and_client, reset_quota, m
     client, headers, user_id = user_and_client
     reset_quota(user_id)
 
-    monkeypatch.setattr(main_module, "searchbug_service", _ProviderExplodes())
+    monkeypatch.setattr(settings, "SEARCHBUG_MOCK", False, raising=False)
+    monkeypatch.setattr(reveals_module, "searchbug_service", _ProviderExplodes())
     monkeypatch.setattr(main_module, "owner_enrichment", _NoName())
 
     lead_id = _make_lead(owner_name="MARIA SANTOS", owner_phone=None, mailing_address=None)
@@ -230,7 +250,8 @@ def test_provider_outage_does_not_break_delivery(user_and_client, reset_quota, m
 
     assert body["charged"] is False
     assert body["reserved"] is True, "o lead ficou por entregar"
-    assert _used(user_id) == 0
+    assert _phone_used(user_id) == 0
+    assert _letter_used(user_id) == 1
 
 
 def test_provider_is_not_called_when_the_lead_already_has_a_phone(
@@ -241,7 +262,8 @@ def test_provider_is_not_called_when_the_lead_already_has_a_phone(
     reset_quota(user_id)
 
     provider = _PhoneFound()
-    monkeypatch.setattr(main_module, "searchbug_service", provider)
+    monkeypatch.setattr(settings, "SEARCHBUG_MOCK", False, raising=False)
+    monkeypatch.setattr(reveals_module, "searchbug_service", provider)
     monkeypatch.setattr(main_module, "owner_enrichment", _NoName())
 
     lead_id = _make_lead(owner_name="JOHN DOE", owner_phone="(718) 555-0700")
@@ -254,4 +276,5 @@ def test_provider_is_not_called_when_the_lead_already_has_a_phone(
     assert r.status_code == 200, r.text
     assert provider.calls == [], "pagou uma consulta ao provider sem necessidade"
     assert r.json()["charged"] is True
-    assert _used(user_id) == 1
+    assert _phone_used(user_id) == 1
+    assert _letter_used(user_id) == 1

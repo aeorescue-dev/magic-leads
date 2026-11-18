@@ -11932,6 +11932,7 @@ class DatabaseService:
                 """SELECT * FROM lead_reveals
                    WHERE user_id = ? AND lead_id = ?
                      AND returned_to_pool = 0
+                     AND (reveal_type IS NULL OR reveal_type != 'phone')
                    ORDER BY id DESC LIMIT 1""",
                 (user_id, lead_id),
             ).fetchone()

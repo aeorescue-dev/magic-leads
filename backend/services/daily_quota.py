@@ -38,11 +38,17 @@ def _user_limits(conn, user_id: int) -> tuple[int, int, str]:
         raise QuotaError("user_not_found", 404)
     phone_limit = int(row["daily_phone_limit"] or 0)
     letter_limit = int(row["daily_letter_limit"] or 0)
-    plan = plans.get_plan(str(row["plan"] or ""))
+    plan_code = str(row["plan"] or "")
+    plan = plans.get_plan(plan_code)
     if plan:
         phone_limit = phone_limit or int(plan["daily_phone_limit"])
         letter_limit = letter_limit or int(plan["daily_letter_limit"])
-    return phone_limit, letter_limit, str(row["plan"] or "")
+    elif plan_code not in ("", "free"):
+        # Contas legacy ainda ativas (ex.: pro) mantêm o teto antigo de 10/dia
+        # até serem migradas para um dos 7 planos semanais.
+        phone_limit = phone_limit or 10
+        letter_limit = letter_limit or 10
+    return phone_limit, letter_limit, plan_code
 
 
 def _ensure_usage(conn, user_id: int, now: datetime) -> dict[str, Any]:

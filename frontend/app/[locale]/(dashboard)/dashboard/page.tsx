@@ -55,14 +55,15 @@ import {
 import { PreventiveFeed } from "@/components/dashboard/PreventiveFeed";
 import { NeighborhoodPanel } from "@/components/dashboard/opportunities-map/NeighborhoodPanel";
 import { LeadsNeighborhoodPanel } from "@/components/dashboard/opportunities-map/LeadsNeighborhoodPanel";
-import SubscriptionFeed from "@/components/dashboard/SubscriptionFeed";
 import PlanModal from "@/components/dashboard/PlanModal";
 import AddonModal from "@/components/dashboard/AddonModal";
 import {
   SubscriptionPlan,
   Usage,
+  SubscriptionApiError,
   getBillingPlans,
   getSubscriptionUsage,
+  revealPhone as revealSubscriptionPhone,
 } from "@/lib/subscription-api";
 import type { LeadZone } from "@/components/dashboard/opportunities-map/leadZones";
 import { FeedToolbar } from "@/components/dashboard/FeedToolbar";
@@ -90,7 +91,6 @@ import {
   fetchOpportunityInsights, OpportunityInsights,
   fetchScraperStatus, ScraperRunState,
   fetchPublicMetrics, PublicMetrics, EMPTY_PUBLIC_METRICS, RELEASE_REASONS,
-  revealPhone, PhoneRevealResult,
   PAYMENT_REQUIRED_EVENT,
 } from "@/lib/api-client";
 import { apiErrorKey } from "@/lib/api-errors";
@@ -300,6 +300,7 @@ function DashboardPageInner() {
   // assincrono, onde um useState seria um snapshot do momento do render.
   const interestsTouchedRef = useRef(false);
   const [dailyStats, setDailyStats] = useState<{ used: number; limit: number; remaining: number; reset_at: string } | null>(null);
+  const letterRemaining = usage?.letter_remaining ?? dailyStats?.remaining ?? 0;
 
   // Historico de casos encerrados. Desligado por omissao: o pool principal e
   // so de leads qualificados (obrigacao legal OU chamado aberto). Ligar este
@@ -493,18 +494,19 @@ function DashboardPageInner() {
     const plansParam = searchParams.get("plans");
     const billing = searchParams.get("billing");
     const addon = searchParams.get("addon");
-    if (
-      tab === "credits" ||
-      plansParam === "1" ||
-      billing === "success" ||
-      billing === "cancel"
-    ) {
+    if (tab === "credits" || plansParam === "1") {
       setPlanOpen(true);
       void loadBilling();
       void refreshSubscription();
     }
+    if (billing === "success" || billing === "cancel") {
+      // O regresso do Stripe não pode bloquear a dashboard com a modal de
+      // planos. Apenas revalidamos o estado; o utilizador continua no painel.
+      void loadBilling();
+      void refreshSubscription();
+    }
     if (addon === "success" || addon === "cancel") {
-      setAddonOpen(true);
+      // Add-ons só abrem por ação explícita ou quando a cota de telefone acaba.
       void loadBilling();
     }
   }, [searchParams, loadBilling, refreshSubscription]);
@@ -915,7 +917,7 @@ function DashboardPageInner() {
 
   const handleHistoryReserve = async (lead: MyLeadHistoryItem) => {
     if (busyAction || (subscription && !subscription.can_access)) return;
-    if (isBlockedByQuota(lead, dailyStats?.remaining)) {
+    if (isBlockedByQuota(lead, letterRemaining)) {
       showToast(t("dashboard.toast.daily_limit"), "warning");
       return;
     }
@@ -1061,30 +1063,52 @@ function DashboardPageInner() {
     return !!lead.my_status && lead.my_status !== "available";
   };
 
-  // Phone Reveal Handler (Phase 4)
+  // Phone Reveal Handler (quota semanal: base do plano -> add-on 24h)
   const revealPhoneForLead = async (lead: LeadResponse) => {
     if (!lead.owner_name || lead.owner_phone) return;
     if (phoneRevealing?.loading) return;
-    
+
+    if (!isActiveWeekly) {
+      setPlanOpen(true);
+      return;
+    }
+
     setPhoneRevealing({ leadId: lead.id, loading: true });
     setBusyAction(true);
     try {
-      const result = await revealPhone(lead.id);
-      if (result.success && result.phone) {
+      const result = await revealSubscriptionPhone(
+        Number(lead.id),
+        crypto.randomUUID(),
+      );
+      if (result.usage) setUsage(result.usage);
+      if (result.success && result.payload?.phone) {
+        const phone = result.payload.phone;
         // Update lead in list with the revealed phone
         setLeads((prev) => prev.map((l) =>
-          l.id === lead.id ? { ...l, owner_phone: result.phone } : l
+          l.id === lead.id ? { ...l, owner_phone: phone } : l
         ));
         // Update selected lead if it's open in modal
         if (selectedLead?.id === lead.id) {
-          setSelectedLead((prev) => prev ? { ...prev, owner_phone: result.phone } : null);
+          setSelectedLead((prev) => prev ? { ...prev, owner_phone: phone } : null);
         }
         showToast(t("dashboard.toast.phone_revealed") || "Telefone revelado com sucesso", "success");
       } else {
-        showToast(result.error || t("dashboard.toast.phone_reveal_failed"), "warning");
+        const remaining = result.usage?.phone_remaining ?? usage?.phone_remaining ?? 0;
+        if (result.error === "phone_quota_exhausted" || remaining <= 0) {
+          setAddonOpen(true);
+        }
+        showToast(result.message || result.error || t("dashboard.toast.phone_reveal_failed"), "warning");
       }
-    } catch (e: any) {
-      showToast(e?.message || t("dashboard.toast.phone_reveal_error"), "error");
+    } catch (e: unknown) {
+      if (e instanceof SubscriptionApiError && e.status === 429) {
+        setAddonOpen(true);
+        showToast(e.message, "warning");
+      } else {
+        showToast(
+          e instanceof Error ? e.message : t("dashboard.toast.phone_reveal_error"),
+          "error",
+        );
+      }
     } finally {
       setPhoneRevealing(null);
       setBusyAction(false);
@@ -1295,8 +1319,12 @@ function DashboardPageInner() {
   };
 
   const handleQuickReserve = async (lead: LeadResponse) => {
-    if (busyAction || (subscription && !subscription.can_access)) return;
-    if (isBlockedByQuota(lead, dailyStats?.remaining)) {
+    if (busyAction) return;
+    if (!isActiveWeekly) {
+      setPlanOpen(true);
+      return;
+    }
+    if (isBlockedByQuota(lead, letterRemaining)) {
       showToast(t("dashboard.toast.daily_limit"), "warning");
       return;
     }
@@ -1367,11 +1395,12 @@ function DashboardPageInner() {
   }, [selectedLead, revealTarget, busyAction]);
   const confirmReveal = async () => {
     if (!revealTarget || busyAction || !revealConsent) return;
-    if (subscription && !subscription.can_access) {
-      showToast(subscription.message || "Acesso negado", "error");
+    if (!isActiveWeekly) {
+      setRevealTarget(null);
+      setPlanOpen(true);
       return;
     }
-    if (isBlockedByQuota(revealTarget, dailyStats?.remaining)) {
+    if (isBlockedByQuota(revealTarget, letterRemaining)) {
       showToast(t("dashboard.toast.daily_limit"), "warning");
       return;
     }
@@ -1397,9 +1426,10 @@ function DashboardPageInner() {
             : res?.message || (isOpportunity ? t("dashboard.opportunity.reserved") : t("dashboard.toast.reveal_reserved")),
         "success"
       );
-      if (dailyStats) {
+      await loadBilling();
+      if (userId) {
         try {
-          const stats = await fetchUserDailyStats(userId!);
+          const stats = await fetchUserDailyStats(userId);
           setDailyStats(stats);
         } catch (e) {
           console.error(e);
@@ -2245,8 +2275,13 @@ function DashboardPageInner() {
     shouldShowAddressWarning,
     isFreeLead,
     isBlockedByQuota,
-    subscription,
-    dailyStats,
+    subscription: isActiveWeekly ? subscription : null,
+    dailyStats: {
+      used: usage?.letter_used ?? dailyStats?.used ?? 0,
+      limit: usage?.letter_limit ?? dailyStats?.limit ?? 10,
+      remaining: letterRemaining,
+      reset_at: usage?.reset_at ?? dailyStats?.reset_at ?? "",
+    },
     busyAction,
     phoneRevealing,
   };
@@ -3250,7 +3285,7 @@ function DashboardPageInner() {
                             {(lead.my_status === "hold_expired" || lead.my_status === "released" || lead.my_status === "available") && (
                               <button
                                 onClick={(e) => { e.stopPropagation(); handleHistoryReserve(lead); }}
-                                disabled={busyAction || (subscription && !subscription.can_access) || isBlockedByQuota(lead, dailyStats?.remaining)}
+                                disabled={busyAction || (subscription && !subscription.can_access) || isBlockedByQuota(lead, letterRemaining)}
                                 className="inline-flex items-center gap-1.5 text-[11px] font-bold bg-indigo-500 hover:bg-indigo-400 text-white px-3 py-1.5 rounded-lg transition disabled:opacity-50"
                               >
                                 <Lock className="h-3 w-3" /> {t("dashboard.action.rereserve")}
@@ -3425,25 +3460,106 @@ function DashboardPageInner() {
             </Sheet>
 
 
-            <SubscriptionFeed
-              leads={filteredLeads}
-              loading={loadingLeads}
-              usage={usage}
-              plans={billingPlans}
-              isActive={isActiveWeekly}
-              onOpenPlans={() => setPlanOpen(true)}
-              onOpenAddons={() => setAddonOpen(true)}
-              onRefresh={() => {
-                void loadBilling();
-                void refreshSubscription();
-              }}
-              lang={lang}
-              readiness={readiness}
-              hasMore={hasMoreLeads}
-              loadingMore={loadingMore}
-              onLoadMore={loadMoreLeads}
-              onOpenLead={openLeadDetail}
-            />
+            {/* OPPORTUNITIES FEED */}
+            <section id="opportunities-feed" className="scroll-mt-24 flex flex-col overflow-hidden rounded-2xl border border-[var(--sd-border)] bg-[var(--sd-surface)]">
+              <div className={`px-5 py-4 border-b flex items-center justify-between ${T.border}`}>
+                <div>
+                  <h2 className="font-bold text-base flex items-center gap-2">
+                    <span>{t("dashboard.feed.all_title")}</span>
+                    {/* ACCURATE COUNT INDICATOR */}
+                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400">
+                      {filteredLeads.length.toLocaleString()} de {feedTotal.toLocaleString()}
+                    </span>
+                  </h2>
+                  <p className={`text-xs ${T.text2}`}>{t("dashboard.feed.filtered_sub")}</p>
+                </div>
+                <Filter className={`h-4 w-4 ${T.text2}`} />
+              </div>
+
+              <div className={`flex-1 overflow-y-auto max-h-[640px] divide-y ${T.border}`}>
+                {loadingLeads ? (
+                  // Skeletons: preservam a altura dos cartoes reais para evitar
+                  // salto de layout quando os dados chegam.
+                  <div aria-busy="true" aria-live="polite">
+                    <span className="sr-only">{t("dashboard.feed.loading")}</span>
+                    {[0, 1, 2, 3].map((i) => (
+                      <div
+                        key={i}
+                        aria-hidden="true"
+                        className={`px-5 py-4 animate-pulse ${i > 0 ? `border-t ${T.border}` : ""}`}
+                      >
+                        <div className="flex items-center gap-2 mb-3 flex-wrap">
+                          <div className={`h-5 w-24 rounded-full ${T.track}`} />
+                          <div className={`h-5 w-20 rounded-full ${T.track}`} />
+                          <div className={`h-5 w-16 rounded-full ${T.track}`} />
+                        </div>
+                        <div className={`h-4 w-2/3 rounded ${T.track}`} />
+                        <div className={`h-3 w-1/2 rounded mt-2 ${T.track}`} />
+                        <div className={`h-8 w-28 rounded-lg mt-4 ${T.track}`} />
+                      </div>
+                    ))}
+                  </div>
+                ) : filteredLeads.length === 0 ? (
+                  <div className="p-12 text-center">
+                    <div className="text-4xl mb-3">🧰</div>
+                    <div className={`text-sm font-medium ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                      {t("dashboard.feed.empty")}
+                    </div>
+                    <div className={`text-xs mt-1 ${T.text2}`}>
+                      {t("dashboard.feed.empty_hint")}
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {/* Resumo agregado do contacto. Substitui o aviso repetido em
+                        cada cartao: em producao essentially todos os leads sao
+                        "incomplete_delivery", e um aviso em 100% dos cartoes
+                        informava zero. Aqui diz quantos e o que isso permite. */}
+                    {countLeadsWithoutContact(filteredLeads) > 0 && (
+                      <div className="flex items-start gap-2 px-5 py-2.5 bg-amber-500/5 border-b border-amber-500/20">
+                        <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0 text-amber-500/80" />
+                        <span className="text-[11px] text-amber-500/90 leading-snug">
+                          {t("dashboard.badge.contact_summary")
+                            .replace("{count}", String(countLeadsWithoutContact(filteredLeads)))
+                            .replace("{total}", String(filteredLeads.length))}
+                        </span>
+                      </div>
+                    )}
+                    <div className="space-y-3 p-3">
+                    {filteredLeads.map((lead) => (
+                      <OpportunityCard
+                        key={lead.id}
+                        lead={lead}
+                        category={categoryOf(lead)}
+                        ctx={opportunityCardCtx}
+                      />
+                    ))}
+                  </div>
+                                      {hasMoreLeads && (
+                      <div className={`px-5 py-4 border-t ${T.divider}`}>
+                        <button
+                          onClick={loadMoreLeads}
+                          disabled={loadingMore}
+                          className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl border text-sm font-medium transition disabled:opacity-50 ${T.border} ${T.text} ${T.navHover}`}
+                        >
+                          {loadingMore ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              Carregando...
+                            </>
+                          ) : (
+                            <>
+                              <ArrowUpRight className="h-4 w-4" />
+                              {t("dashboard.feed.load_more") || "Carregar mais oportunidades"}
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </section>
           </div>
           <FeedRail
             deadlines={reactiveRail.deadlines}
@@ -3748,9 +3864,9 @@ function DashboardPageInner() {
                 {!leadAlreadyMine(selectedLead) && (
                   <button
                     onClick={() => handleQuickReserve(selectedLead)}
-                    disabled={busyAction || (subscription && !subscription.can_access) || (!isFreeLead(selectedLead) && dailyStats?.remaining === 0)}
+                    disabled={busyAction || (subscription && !subscription.can_access) || (!isFreeLead(selectedLead) && letterRemaining === 0)}
                     className={`flex items-center gap-1.5 text-xs font-bold bg-indigo-500 hover:bg-indigo-400 text-white px-3.5 py-2 rounded-xl transition shadow-sm disabled:opacity-50 ${
-                      (subscription && !subscription.can_access) || isBlockedByQuota(selectedLead, dailyStats?.remaining) ? "opacity-30 cursor-not-allowed" : ""
+                      (subscription && !subscription.can_access) || isBlockedByQuota(selectedLead, letterRemaining) ? "opacity-30 cursor-not-allowed" : ""
                     }`}
                   >
                     <Lock className="h-3.5 w-3.5" /> {isFreeLead(selectedLead) ? t("dashboard.action.reserve_corporate") : t("dashboard.action.reserve_1h")}
@@ -4101,7 +4217,7 @@ function DashboardPageInner() {
               </div>
             </div>
 
-            {isBlockedByQuota(revealTarget, dailyStats?.remaining) ? (
+            {isBlockedByQuota(revealTarget, letterRemaining) ? (
               <div
                 role="alert"
                 className="mt-4 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs font-semibold text-amber-400"
@@ -4113,7 +4229,7 @@ function DashboardPageInner() {
             <div className="mt-5 flex gap-2">
               <button
                 onClick={confirmReveal}
-                disabled={busyAction || !revealConsent || (subscription && !subscription.can_access) || isBlockedByQuota(revealTarget, dailyStats?.remaining)}
+                disabled={busyAction || !revealConsent || (subscription && !subscription.can_access) || isBlockedByQuota(revealTarget, letterRemaining)}
                 className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-white text-sm font-bold transition disabled:opacity-50"
               >
                 {busyAction ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lock className="h-4 w-4" />}

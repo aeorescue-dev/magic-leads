@@ -36,8 +36,8 @@ from backend.models.schemas import (
     SourceType,
     UrgencyLevel,
 )
+from backend.services import daily_quota
 from backend.services.db import db_service, get_connection
-from backend.utils.time import utcnow
 
 EMAIL = "pytest-reserve-atomic@magicleads.app"
 
@@ -124,6 +124,14 @@ def _used(user_id: int) -> int:
     return int(db_service._service.get_daily_leads_used(user_id).get("used") or 0)
 
 
+def _letter_used(user_id: int) -> int:
+    return int(daily_quota.usage_payload(user_id)["letter_used"])
+
+
+def _phone_used(user_id: int) -> int:
+    return int(daily_quota.usage_payload(user_id)["phone_used"])
+
+
 def test_precheck_reveal_has_no_side_effects(user_and_client, no_external_data):
     """precheck_reveal não consome cota nem reserva o lead."""
     _, _, user_id = user_and_client
@@ -153,7 +161,8 @@ def test_corporate_lead_without_phone_is_allowed(user_and_client, no_external_da
     client, headers, user_id = user_and_client
     lead_id = _make_lead(owner_name="JOHN DOE", owner_phone=None, mailing_address="123 CORP AVE")
 
-    before_used = _used(user_id)
+    before_letter = _letter_used(user_id)
+    before_phone = _phone_used(user_id)
 
     r = client.post(
         f"/api/leads/{lead_id}/reserve",
@@ -166,23 +175,25 @@ def test_corporate_lead_without_phone_is_allowed(user_and_client, no_external_da
     assert body["revealed"] is True, body
     assert body["owner"]["name"] == "JOHN DOE", body
     assert body.get("corporate") is True, body
-    assert body["used"] == 0, body
+    assert body["used"] == before_letter + 1, body
     assert body["limit"] == 10
-    assert body["remaining"] == 10
+    assert body["remaining"] == 10 - (before_letter + 1)
 
-    assert _used(user_id) == before_used, "BUG: crédito foi debitado em lead corporativo"
+    assert _letter_used(user_id) == before_letter + 1, "carta/visita não consumiu quota"
+    assert _phone_used(user_id) == before_phone, "lead corporativo não devia consumir telefone"
     lead = db_service._service.get_lead_by_id(lead_id)
     assert lead["lead_status"] == "reserved"
     assert lead["owner_name"] == "JOHN DOE"
     assert lead["owner_phone"] is None
 
 
-def test_credit_debited_once_when_data_complete(user_and_client, no_external_data):
-    """Nome + telefone presentes => 200, +1 crédito e lead reservado."""
+def test_quota_consumed_once_when_data_complete(user_and_client, no_external_data):
+    """Nome + telefone presentes => 200, 1 carta + 1 telefone e lead reservado."""
     client, headers, user_id = user_and_client
     lead_id = _make_lead(owner_name="JANE ROE", owner_phone="(718) 555-0100")
 
-    before_used = _used(user_id)
+    before_letter = _letter_used(user_id)
+    before_phone = _phone_used(user_id)
 
     r = client.post(
         f"/api/leads/{lead_id}/reserve",
@@ -196,7 +207,8 @@ def test_credit_debited_once_when_data_complete(user_and_client, no_external_dat
     assert body["owner"]["name"] == "JANE ROE", body
     assert body["owner"]["phone"] == "(718) 555-0100", body
 
-    assert _used(user_id) == before_used + 1, "não debitou exatamente 1 crédito"
+    assert _letter_used(user_id) == before_letter + 1, "não consumiu exatamente 1 carta"
+    assert _phone_used(user_id) == before_phone + 1, "não consumiu exatamente 1 telefone"
 
     lead = db_service._service.get_lead_by_id(lead_id)
     assert lead["lead_status"] == "reserved", lead["lead_status"]
@@ -214,7 +226,8 @@ def test_reclick_does_not_debit_twice(user_and_client, no_external_data):
         json={"minutes": 60, "consent": True, "idempotency": f"pytest-idem-1-{lead_id}"},
     )
     assert r1.status_code == 200, r1.text
-    after_first = _used(user_id)
+    after_letter = _letter_used(user_id)
+    after_phone = _phone_used(user_id)
 
     r2 = client.post(
         f"/api/leads/{lead_id}/reserve",
@@ -223,7 +236,8 @@ def test_reclick_does_not_debit_twice(user_and_client, no_external_data):
     )
     assert r2.status_code == 200, r2.text
     assert r2.json()["counted_again"] is False, r2.json()
-    assert _used(user_id) == after_first, "re-clique consumiu um segundo crédito"
+    assert _letter_used(user_id) == after_letter, "re-clique consumiu uma segunda carta"
+    assert _phone_used(user_id) == after_phone, "re-clique consumiu um segundo telefone"
 
 
 def test_incomplete_lead_is_delivered_free_without_charging(user_and_client, no_external_data):
@@ -235,7 +249,8 @@ def test_incomplete_lead_is_delivered_free_without_charging(user_and_client, no_
     client, headers, user_id = user_and_client
     lead_id = _make_lead(owner_name=None, owner_phone=None, mailing_address=None)
 
-    before_used = _used(user_id)
+    before_letter = _letter_used(user_id)
+    before_phone = _phone_used(user_id)
 
     r = client.post(
         f"/api/leads/{lead_id}/reserve",
@@ -255,9 +270,8 @@ def test_incomplete_lead_is_delivered_free_without_charging(user_and_client, no_
     # O dado que existe (endereco do imovel) segue para carta/visita.
     assert body["owner"]["address"], body
 
-    assert _used(user_id) == before_used, (
-        f"BUG: lead incompleto consumiu cota ({before_used} -> {_used(user_id)})"
-    )
+    assert _letter_used(user_id) == before_letter + 1, "carta/visita não consumiu quota"
+    assert _phone_used(user_id) == before_phone, "lead incompleto não devia consumir telefone"
 
     lead = db_service._service.get_lead_by_id(lead_id)
     assert lead["lead_status"] == "reserved", "lead incompleto nao foi entregue"
@@ -269,7 +283,8 @@ def test_named_lead_without_phone_is_delivered_free(user_and_client, no_external
     client, headers, user_id = user_and_client
     lead_id = _make_lead(owner_name="65 MS LLC", owner_phone=None, mailing_address=None)
 
-    before_used = _used(user_id)
+    before_letter = _letter_used(user_id)
+    before_phone = _phone_used(user_id)
 
     r = client.post(
         f"/api/leads/{lead_id}/reserve",
@@ -282,36 +297,31 @@ def test_named_lead_without_phone_is_delivered_free(user_and_client, no_external
     assert body["owner"]["name"] == "65 MS LLC", body
     assert body["charged"] is False, body
     assert body["incomplete_delivery"] is True, body
-    assert _used(user_id) == before_used, "lead incompleto consumiu cota"
+    assert _letter_used(user_id) == before_letter + 1, "carta/visita não consumiu quota"
+    assert _phone_used(user_id) == before_phone, "lead sem telefone não devia consumir telefone"
 
     lead = db_service._service.get_lead_by_id(lead_id)
     assert lead["lead_status"] == "reserved"
 
 
-def test_free_lead_is_allowed_when_daily_quota_is_exhausted(user_and_client, no_external_data):
-    """Cota esgotada nao pode fechar a "reserva gratis": so fecha leads pagos."""
+def test_letter_quota_is_enforced_for_every_reservation(user_and_client, no_external_data):
+    """Com 10/10 cartas/visitas, qualquer reserva é recusada (429)."""
     client, headers, user_id = user_and_client
 
-    svc = db_service._service
-    today = utcnow().date().isoformat()
-    original_used = _used(user_id)
+    usage = daily_quota.usage_payload(user_id)
+    original_letter_used = int(usage["letter_used"])
     conn = get_connection()
     try:
         conn.execute(
-            """INSERT OR REPLACE INTO user_daily_stats
-               (user_id, date, leads_used, leads_limit, reset_at)
-               VALUES (?, ?, 10, 10, ?)""",
-            (user_id, today, svc._utc_tomorrow_midnight().isoformat()),
+            "UPDATE user_daily_usage SET letter_used = letter_limit "
+            "WHERE user_id=? AND date=?",
+            (user_id, usage["date"]),
         )
         conn.commit()
     finally:
         conn.close()
-    assert _used(user_id) == 10, "nao consegui esgotar a cota de teste"
+    assert daily_quota.usage_payload(user_id)["letter_remaining"] == 0
 
-    # O utilizador e partilhado por todo o modulo (fixture module-scoped), entao
-    # esgotar a cota e DEVE ser revertido: caso contrario os testes seguintes
-    # herdam um 10/10 fantasma e falham por motivos sem relacao com o seu
-    # objetivo. Por isso os testes que mexem na cota usam try/finally.
     try:
         free_lead = _make_lead(owner_name="75 PARK LLC", owner_phone=None, mailing_address=None)
         r_free = client.post(
@@ -319,11 +329,10 @@ def test_free_lead_is_allowed_when_daily_quota_is_exhausted(user_and_client, no_
             headers=headers,
             json={"minutes": 60, "consent": True, "idempotency": f"pytest-free-q-{free_lead}"},
         )
-        assert r_free.status_code == 200, f"lead gratis bloqueado com cota esgotada: {r_free.text}"
-        assert r_free.json()["charged"] is False, r_free.text
-        assert _used(user_id) == 10, "lead gratis consumiu cota com o limite esgotado"
+        assert r_free.status_code == 429, (
+            f"lead sem telefone devia respeitar a cota de cartas: {r_free.status_code} {r_free.text}"
+        )
 
-        # Um lead completo, esse sim, tem de ser recusado pela cota esgotada.
         paid_lead = _make_lead(owner_name="JOE PAID", owner_phone="(718) 555-0300")
         r_paid = client.post(
             f"/api/leads/{paid_lead}/reserve",
@@ -331,9 +340,9 @@ def test_free_lead_is_allowed_when_daily_quota_is_exhausted(user_and_client, no_
             json={"minutes": 60, "consent": True, "idempotency": f"pytest-paid-q-{paid_lead}"},
         )
         assert r_paid.status_code == 429, (
-            f"lead pago devia respeitar a cota esgotada: {r_paid.status_code} {r_paid.text}"
+            f"lead pago devia respeitar a cota de cartas: {r_paid.status_code} {r_paid.text}"
         )
-        assert _used(user_id) == 10, "cota foi consumida por um lead recusado"
+        assert daily_quota.usage_payload(user_id)["letter_remaining"] == 0
 
         paid = db_service._service.get_lead_by_id(paid_lead)
         assert paid["lead_status"] == "available", "lead pago foi reservado apesar da cota"
@@ -341,15 +350,13 @@ def test_free_lead_is_allowed_when_daily_quota_is_exhausted(user_and_client, no_
         conn = get_connection()
         try:
             conn.execute(
-                """INSERT OR REPLACE INTO user_daily_stats
-                   (user_id, date, leads_used, leads_limit, reset_at)
-                   VALUES (?, ?, ?, 10, ?)""",
-                (user_id, today, original_used, svc._utc_tomorrow_midnight().isoformat()),
+                "UPDATE user_daily_usage SET letter_used=? WHERE user_id=? AND date=?",
+                (original_letter_used, user_id, usage["date"]),
             )
             conn.commit()
         finally:
             conn.close()
-        assert _used(user_id) == original_used, "a cota de teste nao foi restaurada"
+        assert daily_quota.usage_payload(user_id)["letter_used"] == original_letter_used
 
 
 # ---------------------------------------------------------------------------
