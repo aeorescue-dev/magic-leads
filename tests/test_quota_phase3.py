@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.config import settings
-from backend.main import app
+from backend.main import _hash_token, app
 from backend.services import daily_quota, subscription_billing, subscription_reveals
 from backend.services.db import DB_PATH, db_service  # noqa: F401
 from backend.services.searchbug import PhoneLookupResult
@@ -23,7 +23,7 @@ def _conn():
     return conn
 
 
-def _user(email: str, plan: str = "weekly_2") -> int:
+def _create_user(email: str, plan: str | None = None) -> int:
     conn = _conn()
     try:
         cur = conn.execute(
@@ -35,10 +35,23 @@ def _user(email: str, plan: str = "weekly_2") -> int:
         uid = int(cur.lastrowid)
     finally:
         conn.close()
-    subscription_billing.activate_weekly_subscription(
-        uid, plan, plan_until="2030-01-01T00:00:00+00:00"
-    )
+    if plan:
+        subscription_billing.activate_weekly_subscription(
+            uid, plan, plan_until="2030-01-01T00:00:00+00:00"
+        )
     return uid
+
+
+def _user(email: str, plan: str = "weekly_2") -> int:
+    return _create_user(email, plan)
+
+
+def _auth(email: str, plan: str | None = None) -> tuple[dict[str, str], int]:
+    """Cria user + sessão sem passar pelo rate limit de /api/auth/register."""
+    uid = _create_user(email, plan)
+    token = f"pytest-quota-{uuid.uuid4().hex}"
+    db_service._service.create_user_session(uid, _hash_token(token), "Pytest", None)
+    return {"Authorization": f"Bearer {token}"}, uid
 
 
 def _lead(external_id: str, *, owner: str = "Alice Owner", mailing: str = "1 Mail St, New York, NY 10001") -> int:
@@ -247,19 +260,7 @@ def test_subscription_usage_letter_and_phone_endpoints(monkeypatch) -> None:
     ext = f"quota-api-{suffix}"
     monkeypatch.setattr(settings, "SEARCHBUG_MOCK", True, raising=False)
     client = TestClient(app)
-    register = client.post(
-        "/api/auth/register",
-        json={"email": email, "password": "test-pass-123", "company_name": "Quota API"},
-    )
-    assert register.status_code == 200, register.text
-    token = register.json()["token"]
-    headers = {"Authorization": f"Bearer {token}"}
-    me = client.get("/api/auth/me", headers=headers).json()
-    user = me.get("user", me)
-    uid = int(user["id"])
-    subscription_billing.activate_weekly_subscription(
-        uid, "weekly_2", plan_until="2030-01-01T00:00:00+00:00"
-    )
+    headers, uid = _auth(email, "weekly_2")
     lead_id = _lead(ext)
     try:
         usage = client.get("/api/subscription/usage", headers=headers)
@@ -298,12 +299,7 @@ def test_staging_mock_checkout_and_addon_endpoints(monkeypatch) -> None:
     monkeypatch.setattr(settings, "BILLING_MOCK", True, raising=False)
     monkeypatch.setattr(settings, "ADDONS_MOCK", True, raising=False)
     client = TestClient(app)
-    register = client.post(
-        "/api/auth/register",
-        json={"email": email, "password": "test-pass-123", "company_name": "Mock QA"},
-    )
-    assert register.status_code == 200, register.text
-    headers = {"Authorization": f"Bearer {register.json()['token']}"}
+    headers, _uid = _auth(email)
     try:
         checkout = client.post(
             "/api/billing/mock-checkout",
@@ -338,12 +334,7 @@ def test_staging_mock_endpoints_are_404_when_disabled(monkeypatch) -> None:
     monkeypatch.setattr(settings, "BILLING_MOCK", False, raising=False)
     monkeypatch.setattr(settings, "ADDONS_MOCK", False, raising=False)
     client = TestClient(app)
-    register = client.post(
-        "/api/auth/register",
-        json={"email": email, "password": "test-pass-123", "company_name": "Mock Off"},
-    )
-    assert register.status_code == 200, register.text
-    headers = {"Authorization": f"Bearer {register.json()['token']}"}
+    headers, _uid = _auth(email)
     try:
         checkout = client.post(
             "/api/billing/mock-checkout",
