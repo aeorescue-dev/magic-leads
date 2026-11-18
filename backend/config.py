@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     STRIPE_API_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""
     STRIPE_PRICE_ID_PRO: str = "price_..."  # Configurar após criar produto no Stripe
+    STRIPE_PORTAL_CONFIGURATION_ID: str = ""
 
     # Marco 1A: carteira de créditos. Em staging, CREDITS_MOCK=1 simula o
     # Checkout sem chave live/test; em produção fica 0.

@@ -8389,10 +8389,16 @@ async def billing_portal(request: Request, user: dict = Depends(_get_current_use
     frontend = (settings.FRONTEND_URL or "").rstrip("/")
     try:
         stripe.api_key = settings.STRIPE_API_KEY
-        session = stripe.billing_portal.Session.create(
-            customer=customer_id,
-            return_url=f"{frontend}/{locale}/dashboard",
-        )
+        portal_kwargs = {
+            "customer": customer_id,
+            "return_url": f"{frontend}/{locale}/dashboard",
+        }
+        portal_config = str(
+            getattr(settings, "STRIPE_PORTAL_CONFIGURATION_ID", "") or ""
+        ).strip()
+        if portal_config:
+            portal_kwargs["configuration"] = portal_config
+        session = stripe.billing_portal.Session.create(**portal_kwargs)
         return {"url": session.url}
     except Exception as exc:
         logger.warning("[BILLING] portal falhou: %s", exc)
