@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, Bell, BellOff, Check, CreditCard, Fingerprint, Loader2, LogOut, MapPin, Pencil, ShieldCheck, Trash2, X } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
+import { weeklyPlanByCode } from "@/lib/weekly-plans";
 import {
   deleteMyPasskey,
   fetchMyPasskeys,
@@ -324,7 +325,8 @@ export default function DashboardSettingsPage() {
     };
   }, [user?.id]);
 
-  const planLabel = (plan: string) => t(`plan.${plan}`);
+  const planLabel = (plan: string) =>
+    weeklyPlanByCode(plan)?.name || t(`plan.${plan}`);
 
   const handleLogout = async () => {
     setLoggingOut(true);
