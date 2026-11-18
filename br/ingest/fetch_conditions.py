@@ -25,7 +25,6 @@ import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
-from threading import Lock
 
 import openpyxl
 import pdfplumber
@@ -553,7 +552,6 @@ def main() -> None:
         f"workers={args.workers}); já verificados: {len(coverage)}"
     )
 
-    lock = Lock()
     done = 0
     started = time.time()
 
@@ -569,25 +567,7 @@ def main() -> None:
                 "error": repr(exc)[:300],
             }
 
-    results = []
-    if args.workers > 1:
-        with ThreadPoolExecutor(max_workers=args.workers) as pool:
-            futures = {pool.submit(run, lead): lead for lead in leads}
-            for future in as_completed(futures):
-                results.append(future.result())
-                done += 1
-                if done % 25 == 0 or done == len(leads):
-                    rate = done / max(time.time() - started, 1)
-                    print(f"  [{done}/{len(leads)}] {rate:.1f} proc/s")
-    else:
-        for lead in leads:
-            results.append(run(lead))
-            done += 1
-            if done % 25 == 0 or done == len(leads):
-                rate = done / max(time.time() - started, 1)
-                print(f"  [{done}/{len(leads)}] {rate:.1f} proc/s")
-
-    for result in results:
+    def record(result: dict) -> None:
         sid = str(result.get("id_solicitacao"))
         status = result.get("status") or "error"
         coverage[sid] = {
@@ -598,7 +578,30 @@ def main() -> None:
         }
         if status in ("ok", "ok_parecer"):
             processes[result.get("process") or sid] = result
-        time.sleep(0.02)
+
+    def persist() -> None:
+        write_output(processes, coverage)
+
+    if args.workers > 1:
+        with ThreadPoolExecutor(max_workers=args.workers) as pool:
+            futures = {pool.submit(run, lead): lead for lead in leads}
+            for future in as_completed(futures):
+                record(future.result())
+                done += 1
+                if done % 100 == 0:
+                    persist()
+                if done % 25 == 0 or done == len(leads):
+                    rate = done / max(time.time() - started, 1)
+                    print(f"  [{done}/{len(leads)}] {rate:.1f} proc/s", flush=True)
+    else:
+        for lead in leads:
+            record(run(lead))
+            done += 1
+            if done % 100 == 0:
+                persist()
+            if done % 25 == 0 or done == len(leads):
+                rate = done / max(time.time() - started, 1)
+                print(f"  [{done}/{len(leads)}] {rate:.1f} proc/s", flush=True)
 
     summary = write_output(processes, coverage)
     print(f"[ok] {OUT} — {summary}")

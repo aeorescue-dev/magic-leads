@@ -1,11 +1,11 @@
 {
- "updated_at": "2026-11-18T18:56:30+00:00",
+ "updated_at": "2026-11-18T18:59:52+00:00",
  "source": "SLA/Sisema — CONDICIONANTES + PARECER",
  "summary": {
-  "checked": 348,
+  "checked": 354,
   "with_conditions": 111,
   "with_compliance_xlsx": 1,
-  "without_documents": 233,
+  "without_documents": 239,
   "document_without_parsed_conditions": 23,
   "errors": 0,
   "total_in_file": 111
@@ -2098,6 +2098,42 @@
    "company": "VERDE TRANSMISSAO DE ENERGIA S.A.",
    "status": "ok_parecer",
    "checked_at": "2026-11-18T18:55:35+00:00"
+  },
+  "270557": {
+   "process": "470/2025",
+   "company": "FERNANDA BERTONI PALIS",
+   "status": "no_conditions_document",
+   "checked_at": "2026-11-18T18:59:48+00:00"
+  },
+  "285980": {
+   "process": "29153/2025",
+   "company": "S & D ORGANICOS LTDA",
+   "status": "no_conditions_document",
+   "checked_at": "2026-11-18T18:59:48+00:00"
+  },
+  "226809": {
+   "process": "332/2024",
+   "company": "ENGENHARIA SAO PATRICIO LTDA",
+   "status": "no_conditions_document",
+   "checked_at": "2026-11-18T18:59:50+00:00"
+  },
+  "222801": {
+   "process": "525/2024",
+   "company": "GRALS - GERENCIADORA DE RESIDUOS AMBIENTAIS LIQUIDOS E SOLIDOS LTDA",
+   "status": "no_conditions_document",
+   "checked_at": "2026-11-18T18:59:50+00:00"
+  },
+  "26063": {
+   "process": "1946/2020",
+   "company": "ARNALDO VILELA MARTINS",
+   "status": "no_conditions_document",
+   "checked_at": "2026-11-18T18:59:52+00:00"
+  },
+  "71134": {
+   "process": "3734/2021",
+   "company": "COMERCIAL AURELIO LTDA",
+   "status": "no_conditions_document",
+   "checked_at": "2026-11-18T18:59:52+00:00"
   }
  },
  "processes": {
