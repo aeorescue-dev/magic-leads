@@ -2427,6 +2427,15 @@ function DashboardPageInner() {
             <div className="text-[10px]" style={{ color: "var(--text-muted)" }}>
               {usage.letter_used}/{usage.letter_limit} cartas/visitas hoje
             </div>
+            {usage.phone_remaining <= 0 ? (
+              <button
+                type="button"
+                onClick={() => setAddonOpen(true)}
+                className="mt-2 w-full rounded-lg border border-amber-400/40 bg-amber-400/10 px-2 py-1.5 text-[9px] font-black uppercase tracking-wide text-amber-300"
+              >
+                {lang === "en" ? "Buy 24h phone pack" : "Comprar pacote 24h"}
+              </button>
+            ) : null}
           </div>
         )}
 
@@ -4248,6 +4257,13 @@ function DashboardPageInner() {
                 {t("dashboard.detail.close")}
               </button>
             </div>
+            {!revealConsent ? (
+              <p className="mt-2 text-center text-[11px] font-semibold text-amber-400">
+                {lang === "en"
+                  ? "Check the consent box to enable the reservation."
+                  : "Marque o consentimento para ativar a reserva."}
+              </p>
+            ) : null}
             {letterRemaining > 0 && letterRemaining <= 2 && (
               <p className="text-[11px] text-amber-400 mt-2 text-center">
                 {t("dashboard.reveal.remaining", { remaining: letterRemaining, limit: letterLimit })}
