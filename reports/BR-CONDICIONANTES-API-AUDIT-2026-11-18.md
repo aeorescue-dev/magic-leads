@@ -1,8 +1,8 @@
 # Condicionantes ambientais por empresa — auditoria e extrator (2026-11-18)
 
 **Âmbito:** SLA/Sisema (MG), APIs públicas, documentos de licenciamento e condicionantes por processo.
-**Piloto:** 30 processos de Minas Gerais; 19 com condicionantes extraídas; 93 condicionantes.
-**Veredito:** **é tecnicamente possível extrair condicionantes individuais por empresa**, via documentos públicos do SLA. A cobertura não é 100%: depende de o processo ter Parecer Técnico e/ou Relatório de Cumprimento de Condicionantes anexado.
+**Amostra aleatória:** 348 processos de Minas Gerais (de 19.713), 111 com condicionantes extraídas, 497 condicionantes em 105 empresas.
+**Veredito:** **é tecnicamente possível extrair condicionantes individuais por empresa** através dos documentos públicos do SLA. A cobertura não é 100%: depende de o processo ter Parecer Técnico e/ou Relatório de Cumprimento de Condicionantes anexado. Na amostra aleatória, **31,9%** dos processos tinham condicionantes extraíveis.
 
 ---
 
@@ -46,46 +46,50 @@ O Parecer Técnico traz o **Anexo I — Condicionantes** com `Item`, `Descriçã
 
 ### 2.3 Limites
 
-- **6/30** processos não tinham documento de condicionantes.
-- **5/30** tinham documento, mas era formulário/protocolo ou PDF sem tabela parseável.
+- **233/348** processos (67%) não tinham documento de condicionantes.
+- **23/348** (6,6%) tinham documento, mas era formulário/protocolo ou PDF sem tabela parseável.
 - O **CLIC Condicionantes** (`CLIC_URL`) devolveu **503** no teste; não foi usado.
 - Alguns PDFs são digitalizações; exigem OCR (não implementado).
 
 ---
 
-## 3. Piloto de 30 processos (MG)
+## 3. Amostra de 348 processos (MG)
+
+Amostra aleatória determinística sobre as 19.713 licenças do WFS (`random.Random(42)`), para evitar viés de região/data.
 
 | Métrica | Valor |
 |---|---:|
-| Processos analisados | **30** |
-| Com condicionantes extraídas | **19** (63%) |
-| Condicionantes extraídas | **93** |
-| Fonte XLSX (status/histórico) | **1** processo |
-| Fonte Parecer Técnico | **18** processos |
-| Sem documento de condicionantes | **6** |
-| Documento sem condições parseáveis | **5** |
+| Processos analisados | **348** |
+| Com condicionantes extraídas | **111** (31,9%) |
+| Condicionantes extraídas | **497** |
+| Empresas distintas | **105** |
+| Fonte XLSX (status/histórico) | **1** processo (11 condicionantes) |
+| Fonte Parecer Técnico | **110** processos (486 condicionantes) |
+| Sem documento de condicionantes | **233** (67,0%) |
+| Documento sem condições parseáveis | **23** (6,6%) |
+| Erros de rede/parse | **0** |
 
-### Distribuição por periodicidade (condicionantes; uma condição composta conta em mais de uma)
+### Distribuição por periodicidade (497 condicionantes; uma condição composta conta em mais de uma)
 
 | Periodicidade | Ocorrências |
 |---|---:|
-| Única | **44** |
-| Durante vigência | **27** |
-| Anual | **15** |
-| Semestral | **9** |
-| Trimestral | **2** |
-| Mensal | **1** |
-| Diário | **1** |
-| Constante | **1** |
-| Não classificada | **3** |
+| Durante vigência | **211** |
+| Única | **189** |
+| Anual | **86** |
+| Semestral | **34** |
+| Constante | **6** |
+| Trimestral | **3** |
+| Mensal | **3** |
+| Diário | **2** |
+| Não classificada | **36** (7,2%) |
 
-**Semanal e quinzenal:** **0 ocorrências** no piloto. O filtro já suporta as duas; a busca completa pode encontrar casos noutros processos.
+**Semanal e quinzenal:** **0 ocorrências** na amostra. O filtro já suporta as duas; a carga completa pode encontrar casos noutros processos.
 
 ### Distribuição por situação
 
 | Situação | Ocorrências |
 |---|---:|
-| Não informado (Parecer) | **82** |
+| Não informado (Parecer) | **486** |
 | Cumprida conforme periodicidade | **7** |
 | Cumprida | **3** |
 | Em atendimento | **1** |
@@ -100,6 +104,18 @@ O Parecer Técnico traz o **Anexo I — Condicionantes** com `Item`, `Descriçã
 
 ```json
 {
+  "summary": {
+    "checked": 348,
+    "with_conditions": 111,
+    "with_compliance_xlsx": 1,
+    "without_documents": 233,
+    "document_without_parsed_conditions": 23,
+    "errors": 0,
+    "total_in_file": 111
+  },
+  "coverage": {
+    "215895": { "process": "352/2025", "company": "AVG SIDERURGIA LTDA", "status": "ok", "checked_at": "..." }
+  },
   "processes": {
     "352/2025": {
       "company": "AVG SIDERURGIA LTDA",
@@ -139,6 +155,19 @@ O Parecer Técnico traz o **Anexo I — Condicionantes** com `Item`, `Descriçã
 - `status`: `cumprida`, `cumprida_conforme_periodicidade`, `em_atendimento`, `cumprida_parcialmente`, `descumprida`, `nao_informado`.
 - `responsible`: apenas área/equipe; nomes de pessoas são mascarados (`Equipe (nome não exibido)`).
 - `source`: `compliance_xlsx` ou `parecer_tecnico`.
+- `coverage`: um registo por `idSolicitacao` já verificado (retomável e auditável).
+
+### 4.1 Agregado por empresa
+
+`br/ingest/aggregate_conditions.py` gera `br/data/conditions_by_company.json`:
+
+- chave por **CNPJ** (14 dígitos) ou, na falta dele, por nome normalizado;
+- lista de processos e documentos de origem;
+- lista completa de condicionantes com periodicidade e status;
+- `by_frequency` e `by_status` por empresa;
+- ordenação por número de condicionantes.
+
+Estado atual: **105 empresas**, **497 condicionantes**.
 
 ---
 
@@ -185,21 +214,31 @@ O filtro cruza com UF, município, tipo, fonte, categoria, multa, validade e bus
 - Condicionante **semestral/anual** × multa/auto de infração.
 - ADA × APP/UC/bioma → risco de licenciamento.
 - Atividade (CNAE) × classe × histórico de autos.
-- Grupo econômico (raiz CNPJ) × múltiplos processos.
+- Grupo económico (raiz CNPJ) × múltiplos processos.
+- **Carga de condicionantes por empresa** × plano comercial (quem tem mais obrigações tem mais urgência de software).
 
 ---
 
 ## 7. Escala nacional
 
-- MG tem **19.713 licenças**; o extrator precisa de **2 chamadas + 1 download + parsing** por processo.
-- Com cache e 2–5 req/s, uma carga completa leva **algumas horas**; recomenda-se rodar em lotes de 500–1.000, com:
-  - cache por `idSolicitacao`;
-  - retries/backoff;
-  - pausa entre chamadas;
-  - monitor de falhas;
-  - QA amostral.
-- Cobertura do piloto: **63%**. O número nacional depende de quantos processos têm Parecer Técnico e/ou XLSX.
-- Para empresas com vários processos, agregar por CNPJ/raiz e manter a lista por processo.
+- MG tem **19.713 licenças**; o extrator faz **1 POST + até 2 downloads + parsing** por processo.
+- Ritmo medido: **0,5–1,1 processo/s** com 3–6 workers (o servidor do SLA abranda em lotes grandes).
+- Carga completa de MG: ~5–11 horas, executável em lotes retomáveis:
+  - cache por `idSolicitacao` em `br/.cache/conditions/`;
+  - `--offset`/`--limit` para lotes de 300–1.000;
+  - `--workers` 4–6; pausa natural entre chamadas;
+  - `coverage` no ficheiro final permite medir falhas por lote.
+
+```bash
+python fetch_conditions.py --source mg --offset 0    --limit 500 --workers 6
+python fetch_conditions.py --source mg --offset 500  --limit 500 --workers 6
+# ...
+python fetch_conditions.py --reclassify      # recalcula periodicidade sem rede
+python aggregate_conditions.py               # agregado por empresa
+python build_demo.py                         # snapshot do dashboard
+```
+
+**Projeção com base na amostra:** ~31,9% de 19.713 ≈ **6.300 processos** com condicionantes, ~**28.000 condicionantes** (média de 4,5 por processo).
 
 ---
 
@@ -212,15 +251,16 @@ O filtro cruza com UF, município, tipo, fonte, categoria, multa, validade e bus
 - **Retenção:** 12–24 meses; revisão.
 - **Risco:** PDFs e XLSX podem conter dados pessoais; o pipeline deve remover/mascarar antes de indexar.
 - **Qualidade:** condições do Parecer podem duplicar as do XLSX; deduplicar por descrição/origem; marcar `also_in_parecer`.
+- **Classificação:** 92,8% das condicionantes da amostra têm periodicidade atribuída; as restantes (36) ficam como `nao_classificada` em vez de serem inventadas.
 
 ---
 
 ## 9. Recomendação
 
-1. **Rodar a carga completa de MG em lotes** e medir cobertura real por cidade/atividade.
+1. **Rodar a carga completa de MG em lotes** e medir cobertura real por cidade/atividade. A amostra já permite estimar ~6.300 processos com condicionantes.
 2. **Usar XLSX quando existir** (status/histórico) + **Parecer** (condicionantes da licença).
 3. Manter o filtro por periodicidade/status e o dossiê por processo.
-4. Adicionar OCR para PDFs digitalizados só depois de medir a proporção.
+4. Adicionar OCR para PDFs digitalizados só depois de medir a proporção (6,6% na amostra).
 5. Expandir o mesmo extrator para outros estados que publiquem documentos de licença; onde não houver, manter apenas o que o WFS/CSV oferece.
 
-**Conclusão:** sim, é possível entregar condicionantes individuais por empresa com dados públicos, e o piloto já mostra 19 empresas e 93 condicionantes. O limite é documental, não técnico: processos sem Parecer/Relatório anexado não têm condicionantes extraíveis.
+**Conclusão:** sim, é possível entregar condicionantes individuais por empresa com dados públicos. A amostra de 348 processos produziu **497 condicionantes em 105 empresas**, com periodicidade classificada em 92,8% dos casos. O limite é documental, não técnico: processos sem Parecer/Relatório anexado não têm condicionantes extraíveis.
