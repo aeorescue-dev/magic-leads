@@ -3,6 +3,17 @@
 Protótipo de validação para o mercado brasileiro de consultoria/engenharia ambiental.
 **Não toca na produção US.** Tudo vive em `br/` e num worktree separado.
 
+## Demo publicada
+
+- **Staging:** https://magic-leads-br-staging.vercel.app
+- **Landing:** `/`
+- **Dashboard:** `/dashboard.html`
+- **Código:** branch `feat/br-environmental-mvp` (worktree `garimpador-leads-br`)
+- **Dados:** snapshot de 18/11/2026 — 1.360 oportunidades, 650 autos IBAMA, 450 licenças MG, 260 licenças federais SISLIC.
+- **Cobertura:** federal em todo o Brasil + MG (WFS). PR tem fonte em PDF identificada; parser na fase 2.
+- **Billing:** simulado (mock). Sem cobrança real.
+- **Domínio final:** `br.magicleads.app` exige CNAME no Porkbun; o preview Vercel está público.
+
 ## Estrutura
 
 ```text
@@ -58,3 +69,19 @@ python -m http.server 8088
 - SINAFLOR/CTF atrás de Cloudflare.
 - Cobrança real (Pix/Stripe) — mock apenas.
 - PR: fonte PDF identificada; parser na fase 2.
+
+## QA desta demo
+
+- Landing, dashboard, dossiê e planos navegáveis em desktop e mobile.
+- Sem erros de consola; sem overflow horizontal em 390px.
+- Dossiê LGPD: CNPJ/empresa/CNAE; sem CPF, nome de sócio, telefone ou e-mail pessoal.
+- Filtros por UF, município, tipo, fonte, categoria, multa e validade.
+- Reserva de 72h e checkout simulados.
+
+## Próximos passos
+
+1. Parser PR (PDFs mensais do IAT) e cobertura PR.
+2. Autenticação de consultoria + billing BRL/Pix (Asaas/Stripe BR).
+3. Alertas por e-mail reais e WhatsApp opt-in (template aprovado).
+4. Página de cobertura pública por UF e API de dossiê.
+5. Revisão jurídica da LIA/DPA e política de retenção.
