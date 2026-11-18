@@ -202,6 +202,29 @@ morada de correspondência, histórico e fases.
   está vazio. Chicago mostra o mapa base, mas o staging não tem linhas
   preventivas de Chicago (0 KPIs), pelo que não há pins nem dados a somar.
 
+### Fase 5.2 — Pré-inspeção restaurada (dados)
+
+Diff contra `origin/master`:
+
+- `frontend/components/dashboard/PreventiveFeed.tsx`: **sem diferenças**.
+- `backend/services/opportunity_workflow.py`: **sem diferenças**.
+- `/api/opportunities` e `/api/opportunities/insights`: **sem diferenças**.
+- O render dos KPIs e da “Fila de pré-inspeção” é o mesmo de produção.
+
+Causa real: a tabela `opportunity_workflow` do staging estava **vazia**
+(`0` linhas, com `leads` em `53.645`). Produção tinha os preventivos na mesma
+tabela. Executámos a ingestão oficial da Fase 1 no contentor de staging:
+
+- 1.516 candidatos, 1.515 linhas preventivas criadas;
+- Dallas 530, Boston 466, NYC 395, Chicago 124;
+- 407 deadlines e 35 multas.
+
+Resultado no staging: KPIs **846 preventivos / 95 prazos / $130k multas**,
+mapa presente, **fila de pré-inspeção visível com 50 cartões + “Load more”**.
+Os valores diferem dos 1.472 de produção porque o staging tem o seu próprio
+dataset/janela de ingestão; a query, filtros e render são os de produção.
+
+
 
 
 
