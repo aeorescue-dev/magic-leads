@@ -324,6 +324,8 @@ export default function LandingPage() {
   const [roiProfile, setRoiProfile] = useState<RoiProfile>("team");
   const [openFaq, setOpenFaq] = useState<number | null>(0);
   const [selectedPlan, setSelectedPlan] = useState<string>("weekly_8");
+  const featuredPlan = WEEKLY_PLANS.find((plan) => plan.popular) ?? WEEKLY_PLANS[3];
+  const otherPlans = WEEKLY_PLANS.filter((plan) => plan.code !== featuredPlan.code);
 
   // dados reais (métricas públicas — fonte única da verdade)
   // null = ainda a carregar: nunca mostramos "0" antes de haver resposta.
@@ -1453,74 +1455,91 @@ export default function LandingPage() {
               </p>
             </div>
 
-            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {WEEKLY_PLANS.map((plan) => {
-                const selected = selectedPlan === plan.code;
-                return (
-                  <button
-                    key={plan.code}
-                    type="button"
-                    onClick={() => setSelectedPlan(plan.code)}
-                    aria-pressed={selected}
-                    data-plan={plan.code}
-                    className={`group relative rounded-[1.6rem] p-px text-left transition-all duration-300 ${
-                      selected
-                        ? "bg-[linear-gradient(135deg,#34e0a1,#7c5cff_55%,#34e0a1)] shadow-[0_28px_80px_-42px_rgba(52,224,161,0.6)]"
-                        : plan.popular
-                          ? "bg-[linear-gradient(135deg,rgba(52,224,161,0.45),rgba(124,92,255,0.22),rgba(52,224,161,0.16))] hover:-translate-y-1 hover:shadow-[0_30px_80px_-48px_rgba(52,224,161,0.35)]"
-                          : "bg-white/[0.07] hover:-translate-y-1 hover:bg-white/[0.14] hover:shadow-[0_26px_70px_-48px_rgba(0,0,0,0.9)]"
-                    }`}
-                  >
-                    <div className={`flex h-full flex-col rounded-[calc(1.6rem-1px)] p-7 ${
-                      selected
-                        ? "bg-[radial-gradient(circle_at_top_right,rgba(52,224,161,0.18),transparent_48%),#07120f]"
-                        : plan.popular
-                          ? "bg-[radial-gradient(circle_at_top_right,rgba(52,224,161,0.11),transparent_44%),#0a1119]"
-                          : "bg-[#0a1018]"
-                    }`}>
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="text-[11px] font-black uppercase tracking-[0.16em] text-white/55">{plan.name}</p>
-                          {plan.popular ? (
-                            <span className="mt-2 inline-flex rounded-full border border-[#34e0a1]/30 bg-[#34e0a1]/10 px-2.5 py-1 text-[8px] font-black uppercase tracking-[0.12em] text-[#8ff5c8]">
-                              {t("landing.mostPopular")}
-                            </span>
-                          ) : null}
-                        </div>
-                        <span className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border ${selected ? "border-[#34e0a1] bg-[#34e0a1] text-[#06251c]" : "border-white/15 text-transparent group-hover:border-[#34e0a1]/45"}`}>
-                          <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
+            <div className="grid gap-5 lg:grid-cols-[1.05fr_1.95fr] lg:items-stretch">
+              <button
+                type="button"
+                onClick={() => setSelectedPlan(featuredPlan.code)}
+                aria-pressed={selectedPlan === featuredPlan.code}
+                data-plan={featuredPlan.code}
+                className={`group flex h-full flex-col rounded-3xl border p-8 text-left transition-all duration-200 ${
+                  selectedPlan === featuredPlan.code
+                    ? "border-emerald-400/45 bg-[#0b1210]"
+                    : "border-slate-800 bg-[#0a0f16] hover:border-slate-700"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <span className="text-[9px] font-semibold uppercase tracking-[0.2em] text-emerald-300/80">
+                      {t("landing.mostPopular")}
+                    </span>
+                    <h3 className="mt-3 font-display text-lg font-semibold text-white">{featuredPlan.name}</h3>
+                  </div>
+                  <span className={`grid h-5 w-5 shrink-0 place-items-center rounded-full border ${selectedPlan === featuredPlan.code ? "border-emerald-400/60 bg-emerald-400/10 text-emerald-300" : "border-slate-700 text-transparent"}`}>
+                    <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
+                  </span>
+                </div>
+
+                <div className="mt-7 flex items-baseline gap-1.5">
+                  <span className="font-display text-[3.2rem] font-semibold tracking-[-0.05em] text-white">{featuredPlan.price}</span>
+                  <span className="text-[11px] text-slate-500">{t("landing.week")}</span>
+                </div>
+
+                <div className="mt-7 space-y-3 text-[12px] text-slate-400">
+                  <div className="flex items-center gap-2.5">
+                    <Phone className="h-4 w-4 shrink-0 text-slate-500" />
+                    <span><b className="font-medium text-slate-200">{featuredPlan.phones}</b> {t("landing.phonesDay")}</span>
+                  </div>
+                  <div className="flex items-center gap-2.5">
+                    <Mail className="h-4 w-4 shrink-0 text-slate-500" />
+                    <span>10 {t("landing.lettersDay")}</span>
+                  </div>
+                </div>
+
+                <div className={`mt-auto pt-8 text-[9px] font-semibold uppercase tracking-[0.18em] ${selectedPlan === featuredPlan.code ? "text-emerald-300" : "text-slate-600 group-hover:text-slate-400"}`}>
+                  {selectedPlan === featuredPlan.code ? t("landing.selected") : t("landing.selectPlan")}
+                </div>
+              </button>
+
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {otherPlans.map((plan) => {
+                  const selected = selectedPlan === plan.code;
+                  return (
+                    <button
+                      key={plan.code}
+                      type="button"
+                      onClick={() => setSelectedPlan(plan.code)}
+                      aria-pressed={selected}
+                      data-plan={plan.code}
+                      className={`group flex h-full flex-col rounded-2xl border p-5 text-left transition-all duration-200 ${
+                        selected
+                          ? "border-emerald-400/40 bg-[#0b1210]"
+                          : "border-slate-800 bg-[#080d14] hover:-translate-y-0.5 hover:border-slate-700 hover:bg-[#0a1018]"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="text-[9px] font-semibold uppercase tracking-[0.16em] text-slate-500">{plan.name}</span>
+                        <span className={`grid h-5 w-5 shrink-0 place-items-center rounded-full border ${selected ? "border-emerald-400/60 bg-emerald-400/10 text-emerald-300" : "border-slate-700 text-transparent group-hover:border-slate-600"}`}>
+                          <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
                         </span>
                       </div>
 
-                      <div className="mt-7 flex items-baseline gap-1.5">
-                        <span className="font-display text-[2.5rem] font-black tracking-[-0.05em] text-white">{plan.price}</span>
-                        <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-white/35">{t("landing.week")}</span>
+                      <div className="mt-4 flex items-baseline gap-1">
+                        <span className="font-display text-2xl font-semibold tracking-[-0.03em] text-white">{plan.price}</span>
+                        <span className="text-[9px] text-slate-500">{t("landing.week")}</span>
                       </div>
 
-                      <div className="mt-7 h-px bg-white/[0.08]" />
-
-                      <div className="mt-6 space-y-3 text-[11px] font-semibold text-white/55">
-                        <div className="flex items-center gap-2.5">
-                          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-[#34e0a1]/10 text-[#34e0a1]">
-                            <Phone className="h-3.5 w-3.5" />
-                          </span>
-                          <span><b className="text-white/90">{plan.phones}</b> {t("landing.phonesDay")}</span>
-                        </div>
-                        <div className="flex items-center gap-2.5">
-                          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-[#34e0a1]/10 text-[#34e0a1]">
-                            <Mail className="h-3.5 w-3.5" />
-                          </span>
-                          <span>10 {t("landing.lettersDay")}</span>
-                        </div>
+                      <div className="mt-4 space-y-1.5 text-[10px] font-medium text-slate-500">
+                        <div>{plan.phones} {t("landing.phonesDay")}</div>
+                        <div>10 {t("landing.lettersDay")}</div>
                       </div>
 
-                      <div className={`mt-auto pt-7 text-[10px] font-black uppercase tracking-[0.12em] ${selected ? "text-[#8ff5c8]" : "text-white/30 group-hover:text-white/55"}`}>
+                      <div className={`mt-auto pt-4 text-[9px] font-semibold uppercase tracking-[0.14em] ${selected ? "text-emerald-300" : "text-slate-600 group-hover:text-slate-400"}`}>
                         {selected ? t("landing.selected") : t("landing.selectPlan")}
                       </div>
-                    </div>
-                  </button>
-                );
-              })}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             <div className="mt-10 flex flex-col items-center gap-3">
