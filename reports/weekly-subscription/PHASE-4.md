@@ -119,4 +119,20 @@
 - Verificado no staging: `/en` → PT → ES sem mudar de página e sem pedir login;
   título e CTA atualizam imediatamente.
 
+## Fase 4.3 — Polish e refinamento SaaS
+
+**Commits:** `77a3817`, `2cf889b`
+
+- Header reduzido a **4 links** (Trades, Como funciona, Preço, FAQ), com
+  `h-[72px]`, `gap-6/xl:gap-10`, navegação sem “pílula” e sublinhado animado.
+- Ações com `gap` maior e divider entre **Entrar** e o CTA; bandeiras compactas.
+- Título EN exato: **“Seven Plans, Unlock, Call and Close!”**.
+- Cartões reconstruídos com **borda em gradiente** (verde → violeta), fundo
+  radial iluminado, `p-7`, `gap-5`, hover com elevação e check verde imediato.
+- Pro: selo **Most Popular** abaixo do nome, sem corte; gradiente médio mesmo
+  quando não selecionado e gradiente brilhante quando selecionado.
+- Selo e check medidos no staging: sem sobreposição e totalmente dentro do cartão.
+- Modal mantém o plano escolhido no topo e já não tem a frase de checkout.
+
+
 
