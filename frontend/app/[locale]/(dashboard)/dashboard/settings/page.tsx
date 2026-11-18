@@ -30,7 +30,6 @@ import {
   setPushPreferences,
   updateCompanyName,
 } from "@/lib/api-client";
-import CheckoutModal from "@/components/CheckoutModal";
 
 const subscribeNoop = () => () => {};
 
@@ -298,7 +297,6 @@ export default function DashboardSettingsPage() {
   const { user, loading, signOut, updateUser } = useAuth();
   const { t, lang } = useI18n();
   const router = useRouter();
-  const [showCheckout, setShowCheckout] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [editingCompany, setEditingCompany] = useState(false);
   const [companyDraft, setCompanyDraft] = useState("");
@@ -787,12 +785,12 @@ export default function DashboardSettingsPage() {
                   {t("dashboard.settings.subscription_body")}
                 </p>
               </div>
-              <button
-                onClick={() => setShowCheckout(true)}
+              <Link
+                href={`/${lang}/dashboard?plans=1`}
                 className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-900 font-semibold text-sm"
               >
-                <CreditCard className="w-4 h-4" /> {t("dashboard.settings.renew")}
-              </button>
+                <CreditCard className="w-4 h-4" /> {lang === "en" ? "Manage plan" : "Gerir plano"}
+              </Link>
             </div>
 
             <button
@@ -804,14 +802,6 @@ export default function DashboardSettingsPage() {
             </button>
           </>
         )}
-
-        <CheckoutModal
-          open={showCheckout}
-          onClose={() => setShowCheckout(false)}
-          onActivated={() => window.location.reload()}
-          isDark
-          mode={user?.subscription_status === "expired" || user?.subscription_status === "pending_payment" ? "new" : "reactivate"}
-        />
       </div>
     </div>
   );
