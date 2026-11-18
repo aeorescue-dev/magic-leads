@@ -158,7 +158,11 @@ async def reveal_phone(
         lead = _lead(conn, lead_id)
         if not lead:
             raise daily_quota.QuotaError("lead_not_found", 404)
-        if not (int(lead.get("phone_eligible") or 0) or int(lead.get("phone_ready") or 0)):
+        if not (
+            int(lead.get("phone_eligible") or 0)
+            or int(lead.get("phone_ready") or 0)
+            or str(lead.get("owner_phone") or "").strip()
+        ):
             raise daily_quota.QuotaError("phone_not_eligible", 422)
         if not str(lead.get("owner_name") or "").strip():
             raise daily_quota.QuotaError("owner_missing", 422)

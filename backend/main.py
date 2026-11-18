@@ -9224,6 +9224,7 @@ async def reserve_lead(
     minutes = payload.minutes or 60
     quota_exhausted = False
     phone_consumed = False
+    phone_authorized = False
     phone_quota_ref: dict | None = None
     letter_consumed = False
 
@@ -9353,8 +9354,9 @@ async def reserve_lead(
                 )
                 if phone_reveal.get("success") and phone_reveal.get("payload"):
                     owner_phone = phone_reveal["payload"].get("phone")
-                    phone_consumed = True
-                    phone_quota_ref = phone_reveal.get("quota")
+                    phone_authorized = True
+                    phone_consumed = not bool(phone_reveal.get("duplicate"))
+                    phone_quota_ref = phone_reveal.get("quota") if phone_consumed else None
                 else:
                     logger.info(
                         "[RESERVE] telefone indisponível/cota preservada user=%s lead=%s: %s",
@@ -9390,7 +9392,10 @@ async def reserve_lead(
         # Nao devolvemos 422 por dados incompletos: isso escondia o lead do
         # utilizador e negava a "reserva gratis" prometida na landing page. A
         # qualidade dos dados nunca bloqueia a entrega -- decide o preco e o aviso.
-        missing_critical = missing_critical_fields(lead)
+        lead_for_delivery = dict(lead)
+        if not phone_authorized:
+            lead_for_delivery["owner_phone"] = None
+        missing_critical = missing_critical_fields(lead_for_delivery)
         # Modelo semanal: não há débito de créditos. O consumo é feito pelas
         # cotas (carta acima e telefone em 2.2b). `charged` passa a refletir
         # apenas se uma unidade de telefone foi consumida.
@@ -9498,7 +9503,7 @@ async def reserve_lead(
             "missing": missing_critical,
             "owner": {
                 "name": lead.get("owner_name"),
-                "phone": lead.get("owner_phone"),
+                "phone": lead.get("owner_phone") if phone_authorized else None,
                 "email": lead.get("owner_email"),
                 "mailing_address": lead.get("mailing_address"),
                 "address": lead.get("address"),

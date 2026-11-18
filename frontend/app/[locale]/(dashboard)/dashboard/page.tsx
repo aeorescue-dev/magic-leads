@@ -1437,7 +1437,7 @@ function DashboardPageInner() {
       }
       const revealedFields: Partial<LeadResponse> = {
         owner_name: res?.owner?.name ?? revealTarget.owner_name,
-        owner_phone: res?.owner?.phone ?? revealTarget.owner_phone,
+        owner_phone: res?.owner ? res.owner.phone : revealTarget.owner_phone,
         owner_email: res?.owner?.email ?? revealTarget.owner_email,
         mailing_address: res?.owner?.mailing_address ?? revealTarget.mailing_address,
         my_status: "reserved" as const,
