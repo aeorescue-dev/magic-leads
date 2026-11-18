@@ -2129,7 +2129,7 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Contacto:** `businessContactEmail=fabio@magicleads.app`, caixa ativa no Google Workspace; `businessContactEmailVerifiedDate=null`.
 - **Infra:** messaging profile `4001a1d1-8bd1-4cdc-a13b-e05580d2b932` enabled; número `+19739137808` (local 973, A2P) no profile, `messaging_campaign_id=null`; **0 campanhas 10DLC**.
 - **Saldo Telnyx:** **$0,99** (insuficiente para retomar voz).
-- **Prazos:** 4 dias úteis desde o pedido (12→18/11); sem resposta/ticket oficial recuperável. Follow-up preparado e **não enviado**.
+- **Prazos:** 4 dias úteis desde o pedido (12→18/11); sem resposta/ticket oficial recuperável. Follow-up **enviado em 2026-11-18 16:08 UTC** no mesmo thread, para `10dlcquestions@telnyx.com`, Reply-To `fabio@magicleads.app`, Cc `aeorescue@gmail.com`, com `In-Reply-To`/`References` do e-mail original e CP575G anexado; Resend ID `01a1ef6a-9dd7-7f2c-9535-b012e93a4e07`; estado **delivered**; a aguardar resposta/ticket.
 - **Estado:** aguardar verificação manual; não criar campanha nem associar número até `identityStatus=VERIFIED`; campanhas de voz continuam pausadas.
 - **Documento:** `reports/10DLC-STATUS-2026-11-18.md`.
 
