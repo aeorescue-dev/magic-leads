@@ -392,7 +392,7 @@ def main() -> None:
     sislic, sislic_stats = parse_sislic(260)
     mg, mg_stats = parse_mg(450, muni_index)
 
-    for item in ibama:
+    for item in ibama + mg:
         extra = cnpj_cache.get(item["cnpj"] or "") or {}
         if extra:
             item["cnae"] = extra.get("cnae")

@@ -19,8 +19,30 @@ import requests
 
 BR = Path(__file__).resolve().parents[1]
 CACHE = BR / ".cache"
+ASSETS = BR / "web" / "assets"
 OUT = CACHE / "cnpj_cache.json"
 API = "https://minhareceita.org/{cnpj}"
+
+
+def demo_cnpjs(limit: int) -> list[str]:
+    """CNPJs que realmente aparecem no snapshot da demo (prioridade)."""
+    path = ASSETS / "data.json"
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    found: list[str] = []
+    seen: set[str] = set()
+    for item in payload.get("leads") or []:
+        digits = re.sub(r"\D", "", str(item.get("cnpj") or ""))
+        if len(digits) == 14 and digits not in seen:
+            seen.add(digits)
+            found.append(digits)
+            if len(found) >= limit:
+                break
+    return found
 
 
 def ibama_cnpjs(limit: int) -> list[str]:
@@ -75,7 +97,7 @@ def main() -> None:
     if OUT.exists():
         print(f"[skip] {OUT}")
         return
-    cnpjs = ibama_cnpjs(args.limit)
+    cnpjs = demo_cnpjs(args.limit) or ibama_cnpjs(args.limit)
     print(f"[info] {len(cnpjs)} CNPJs para enriquecer")
     data: dict[str, dict] = {}
     for index, cnpj in enumerate(cnpjs, start=1):
