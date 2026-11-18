@@ -604,6 +604,9 @@ function DashboardPageInner() {
     if (authLoading || !user || welcomePopupChecked.current) return;
     welcomePopupChecked.current = true;
 
+    // Planos semanais ativos entram direto na dashboard, sem interrupções.
+    if (String(user.plan || "").startsWith("weekly_")) return;
+
     let dismissedLocally = false;
     try {
       const storageKey = `magic_leads_notice_seen_${user.id}`;
