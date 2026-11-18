@@ -79,11 +79,14 @@ export function NeighborhoodPanel({
   );
 
   const zones = useMemo<Zone[]>(() => {
-    if (!live) return snapshot?.zones ?? [];
+    const liveZones = live?.zones ?? [];
+    // Sem preventivos ao vivo (ex.: mercado ainda sem ingestão), mantém o mapa
+    // útil com o snapshot real em vez de mostrar "Map unavailable".
+    if (liveZones.length === 0) return snapshot?.zones ?? [];
     const centroids = new Map(
       (snapshot?.zones ?? []).map((zone) => [zone.zip, zone])
     );
-    return live.zones.map((zone) => {
+    return liveZones.map((zone) => {
       const geo = centroids.get(zone.zip);
       return {
         zip: zone.zip,
@@ -99,7 +102,7 @@ export function NeighborhoodPanel({
   }, [live, snapshot]);
 
   const meta = CITY_META[city];
-  const mapAvailable = Boolean(zones.length > 0 && meta);
+  const mapAvailable = Boolean(meta);
 
   const niches = useMemo(
     () => (snapshot ? snapshot.niches.slice(0, 8) : []),
