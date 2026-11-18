@@ -264,7 +264,7 @@ export function CityMap({
   return (
     <div
       ref={containerRef}
-      className="opp-map h-full w-full"
+      className="opp-map relative z-0 h-full w-full"
       role="application"
       aria-label={labels.aria.replace("{city}", city)}
     />

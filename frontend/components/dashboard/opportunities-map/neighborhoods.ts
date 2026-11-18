@@ -57,11 +57,12 @@ export const CITY_META: Record<
   { label: string; center: [number, number]; zoom: number }
 > = {
   Boston: { label: "Boston", center: [42.3601, -71.0589], zoom: 12 },
+  Chicago: { label: "Chicago", center: [41.8781, -87.6298], zoom: 11 },
   Dallas: { label: "Dallas", center: [32.7767, -96.797], zoom: 11 },
   NYC: { label: "New York", center: [40.7128, -74.006], zoom: 11 },
 };
 
-export const CITY_ORDER = ["Boston", "Dallas", "NYC"] as const;
+export const CITY_ORDER = ["Boston", "Chicago", "Dallas", "NYC"] as const;
 
 /**
  * Fora do perÃ­metro ou ZIP sem bairro reconhecido: agrupados em "Other areas"

@@ -44,7 +44,7 @@ export function ReserveGuideModal({
 
   return (
     <div
-      className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center sm:p-4"
+      className="fixed inset-0 z-[1000] flex items-end sm:items-center justify-center sm:p-4"
       style={{ backgroundColor: isDark ? "rgba(11,13,18,0.85)" : "rgba(248,250,252,0.9)" }}
       onClick={() => onClose(false)}
     >

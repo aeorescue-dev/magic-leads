@@ -301,6 +301,8 @@ function DashboardPageInner() {
   const interestsTouchedRef = useRef(false);
   const [dailyStats, setDailyStats] = useState<{ used: number; limit: number; remaining: number; reset_at: string } | null>(null);
   const letterRemaining = usage?.letter_remaining ?? dailyStats?.remaining ?? 0;
+  const letterUsed = usage?.letter_used ?? dailyStats?.used ?? 0;
+  const letterLimit = usage?.letter_limit ?? dailyStats?.limit ?? 10;
 
   // Historico de casos encerrados. Desligado por omissao: o pool principal e
   // so de leads qualificados (obrigacao legal OU chamado aberto). Ligar este
@@ -2842,7 +2844,7 @@ function DashboardPageInner() {
 
           {filtersOpen && (
             <div
-              className="fixed inset-0 z-[80]"
+              className="fixed inset-0 z-[900]"
               role="dialog"
               aria-modal="true"
               aria-labelledby="filters-sheet-title"
@@ -3594,7 +3596,7 @@ function DashboardPageInner() {
 
       {/* LEAD DETAIL MODAL */}
       {selectedLead && (
-        <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm" onClick={() => setSelectedLead(null)}>
+        <div className="fixed inset-0 z-[900] bg-black/70 backdrop-blur-sm" onClick={() => setSelectedLead(null)}>
           <div
             ref={detailDialogRef}
             role="dialog"
@@ -3988,7 +3990,7 @@ function DashboardPageInner() {
       {/* REVEAL CONSENT MODAL (dados do proprietário protegidos) */}
       {revealTarget && (
         <div
-          className="fixed inset-0 z-[85] flex items-center justify-center p-4"
+          className="fixed inset-0 z-[1000] flex items-center justify-center p-4"
           style={{ backgroundColor: isDark ? "rgba(11,13,18,0.85)" : "rgba(248,250,252,0.9)" }}
           onClick={closeRevealModal}
           onKeyDown={(e) => {
@@ -4208,7 +4210,7 @@ function DashboardPageInner() {
 <span>
                     <span className="font-semibold">{isCorporateLead(revealTarget)
                       ? t("dashboard.reveal.consent_corporate")
-                      : t("dashboard.reveal.consent", { used: dailyStats?.used ?? 1, limit: dailyStats?.limit ?? 10 })}</span>
+                      : t("dashboard.reveal.consent", { used: letterUsed, limit: letterLimit })}</span>
                     <span className={`block text-xs mt-1 ${T.text2}`}>
                       {t("dashboard.reveal.timeout", { title: t("dashboard.opportunities.title") })}
                     </span>
@@ -4229,7 +4231,7 @@ function DashboardPageInner() {
             <div className="mt-5 flex gap-2">
               <button
                 onClick={confirmReveal}
-                disabled={busyAction || !revealConsent || (subscription && !subscription.can_access) || isBlockedByQuota(revealTarget, letterRemaining)}
+                disabled={busyAction || !revealConsent || isBlockedByQuota(revealTarget, letterRemaining)}
                 className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-white text-sm font-bold transition disabled:opacity-50"
               >
                 {busyAction ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lock className="h-4 w-4" />}
@@ -4243,9 +4245,9 @@ function DashboardPageInner() {
                 {t("dashboard.detail.close")}
               </button>
             </div>
-            {dailyStats && dailyStats.remaining > 0 && dailyStats.remaining <= 2 && (
+            {letterRemaining > 0 && letterRemaining <= 2 && (
               <p className="text-[11px] text-amber-400 mt-2 text-center">
-                {t("dashboard.reveal.remaining", { remaining: dailyStats.remaining, limit: dailyStats.limit })}
+                {t("dashboard.reveal.remaining", { remaining: letterRemaining, limit: letterLimit })}
               </p>
             )}
           </div>
@@ -4280,7 +4282,7 @@ function DashboardPageInner() {
 
       {/* Toast Notifications (fila empilhável) */}
       {toasts.length > 0 && (
-        <div className="fixed bottom-6 right-6 z-[90] flex flex-col gap-2 items-end">
+        <div className="fixed bottom-6 right-6 z-[1300] flex flex-col gap-2 items-end">
           {toasts.map((t) => (
             <div
               key={t.id}
