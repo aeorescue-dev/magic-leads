@@ -56,7 +56,7 @@ const COPY: Record<Lang, Copy> = {
     note: "Sete planos semanais, do individual à equipa.",
     noteSub: "De $25,90 a $231 por semana. Cada plano inclui 10 cartas/visitas por dia.",
     ticketNote: "Valores ilustrativos de ticket. Não representam resultados.",
-    limitNote: "A cota de telefones é diária e definida pelo plano (2 a 20/dia). Precisa de mais? Compre um add-on de 24h.",
+    limitNote: "Cada plano inclui de 2 a 20 telefones por dia. Precisa de mais? Pode comprar um pacote extra de 24h.",
   },
   en: {
     kicker: "WHO IT IS FOR",
@@ -89,7 +89,7 @@ const COPY: Record<Lang, Copy> = {
     note: "Seven weekly plans, from solo to a full crew.",
     noteSub: "From $25.90 to $231 per week. Every plan includes 10 letters/visits per day.",
     ticketNote: "Illustrative ticket values. Not a representation of results.",
-    limitNote: "The phone quota is daily and set by your plan (2 to 20/day). Need more? Buy a 24h add-on.",
+    limitNote: "Every plan includes 2 to 20 phones per day. Need more? You can buy an extra 24h pack.",
   },
   es: {
     kicker: "PARA QUIÉN ES",
@@ -122,7 +122,7 @@ const COPY: Record<Lang, Copy> = {
     note: "Siete planes semanales, del individual al equipo completo.",
     noteSub: "De $25.90 a $231 por semana. Cada plan incluye 10 cartas/visitas al día.",
     ticketNote: "Valores ilustrativos de ticket. No representan resultados.",
-    limitNote: "La cuota de teléfonos es diaria y la define tu plan (2 a 20/día). ¿Necesitas más? Compra un add-on de 24h.",
+    limitNote: "Cada plan incluye de 2 a 20 teléfonos por día. ¿Necesitas más? Puedes comprar un paquete extra de 24h.",
   },
 };
 
