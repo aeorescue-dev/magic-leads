@@ -174,6 +174,21 @@ Sem alterar a mecânica do produto, a dashboard voltou a usar o fluxo original:
 consentimento; reserva de 1h ativa; modal completo com proprietário, telefone,
 morada de correspondência, histórico e fases.
 
+### Correções da revisão visual
+
+- Modais de detalhe, consentimento e guia passaram para `z-[900/1000]`; o mapa
+  Leaflet ficou num stacking context `relative z-0`. O mapa deixa de cobrir as
+  janelas.
+- O texto do consentimento passou a usar a cota nova (`letter_used/letter_limit`)
+  em vez do contador legacy — já não mostra `0/10` quando a sidebar mostra `1/10`.
+- O botão de reserva deixou de depender do objeto `subscription` em cache;
+  só exige consentimento, ausência de operação em curso e cota de cartas.
+- Chicago foi adicionado ao `CITY_META`, eliminando o estado
+  “Map unavailable for this city” na pré-inspeção.
+- Confirmado que o login de uma conta com plano ativo entra em `/dashboard`
+  sem modal de planos (`billing=success` não abre a modal).
+
+
 
 
 
