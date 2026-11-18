@@ -55,6 +55,26 @@ function kindClass(kind) {
 function kindColor(kind) {
   return { infraction: "#ef4444", license_expiring: "#f59e0b", license_expired: "#64748b" }[kind] || "#64748b";
 }
+function protectionLabel(protection) {
+  if (protection === "critical") return "⏰ crítico ≤120d";
+  if (protection === "prepare") return "🛡 preparação ≤180d";
+  if (protection === "expired") return "⚠ vencida";
+  return "";
+}
+
+function protectionPill(item) {
+  if (!item.protection) return "";
+  const cls = item.protection === "expired" ? "pill-red" : item.protection === "critical" ? "pill-amber" : "pill-green";
+  const days = item.days_to_expiry;
+  const suffix = Number.isFinite(days) ? ` · ${INT.format(days)}d` : "";
+  return `<span class="pill ${cls}">${protectionLabel(item.protection)}${suffix}</span>`;
+}
+
+function protectionColor(item) {
+  if (item.protection === "critical" || item.protection === "prepare") return "#16a34a";
+  return kindColor(item.kind);
+}
+
 function coverageFor(uf) {
   if (uf === "MG") return { color: "#10b981", label: "Federal + estadual" };
   if (PENDING_STATES[uf]) return { color: "#f59e0b", label: "Federal + fonte identificada" };
@@ -128,7 +148,9 @@ function applyFilters() {
   const source = $("#f-source").value;
   const category = $("#f-category").value;
   const fine = Number($("#f-fine").value || 0);
-  const expiry = $("#f-expiry").value;
+  const protection = $("#f-protection").value;
+  const hideRenewed = $("#f-hide-renewed").checked;
+  const pendingOnly = $("#f-pending-conditions").checked;
   const frequency = $("#f-frequency").value;
   const conditionStatus = $("#f-condition-status").value;
   const search = norm($("#f-search").value);
@@ -140,11 +162,21 @@ function applyFilters() {
     if (source && item.source !== source) return false;
     if (category && item.category !== category) return false;
     if (fine && Number(item.fine || 0) < fine) return false;
-    if (expiry) {
-      if (!item.expires_at) return false;
-      const days = daysTo(item.expires_at);
-      if (expiry === "expired" && !(days < 0)) return false;
-      if (expiry !== "expired" && !(days >= 0 && days <= Number(expiry))) return false;
+    if (hideRenewed && item.renewed_by) return false;
+    if (protection) {
+      if (protection === "expired") {
+        if (item.protection !== "expired") return false;
+      } else if (protection === "critical") {
+        if (!(item.protection === "critical" || item.protection === "expired")) return false;
+      } else if (protection === "prepare") {
+        if (!(item.protection === "critical" || item.protection === "prepare" || item.protection === "expired")) return false;
+      }
+    }
+    if (pendingOnly) {
+      const pending = (item.conditions || []).some((condition) =>
+        ["em_atendimento", "cumprida_parcialmente", "descumprida"].includes(condition.status)
+      );
+      if (!pending) return false;
     }
     if (frequency) {
       const conditions = item.conditions || [];
@@ -164,7 +196,8 @@ function applyFilters() {
   S.filtered.sort((a, b) => (b.priority || 0) - (a.priority || 0));
   const withCoords = S.filtered.filter((item) => item.lat && item.lng).length;
   const withConditions = S.filtered.filter((item) => (item.conditions || []).length).length;
-  $("#result-count").textContent = `${INT.format(S.filtered.length)} oportunidades · ${INT.format(withCoords)} no mapa · ${INT.format(withConditions)} com condicionantes`;
+  const inProtection = S.filtered.filter((item) => item.protection === "critical" || item.protection === "prepare").length;
+  $("#result-count").textContent = `${INT.format(S.filtered.length)} oportunidades · ${INT.format(withCoords)} no mapa · ${INT.format(withConditions)} com condicionantes · ${INT.format(inProtection)} na janela de proteção`;
   renderList();
   renderPoints();
   if (S.selected && !S.filtered.some((item) => item.id === S.selected.id)) {
@@ -201,6 +234,8 @@ function renderList() {
           <span class="pill pill-slate">${esc(item.source)}</span>
           <span class="small muted">${meta}</span>
           ${(item.conditions || []).length ? `<span class="pill pill-blue">${INT.format(item.conditions.length)} cond.</span>` : ""}
+          ${protectionPill(item)}
+          ${item.renewed_by ? `<span class="pill pill-slate">↻ renovada ${esc(item.renewed_by)}</span>` : ""}
           ${item.verified ? `<span class="pill pill-green">✓ verificado</span>` : `<span class="pill pill-amber">identidade parcial</span>`}
         </div>
         <div class="opp-actions">
@@ -237,7 +272,7 @@ function renderPoints() {
       radius: 5,
       color: "#fff",
       weight: 1,
-      fillColor: kindColor(item.kind),
+      fillColor: protectionColor(item),
       fillOpacity: 0.9,
     });
     marker.bindPopup(
@@ -416,6 +451,81 @@ function renderLicenseDetail(detail) {
   `;
 }
 
+function renderPartners(item) {
+  const partners = item.partners || [];
+  const contact = [item.phone ? `Telefone comercial: ${item.phone}` : "", item.email ? `E-mail comercial: ${item.email}` : ""].filter(Boolean);
+  if (!partners.length && !contact.length) {
+    return `<div class="notice notice-blue"><b>Sócios e contato:</b> não enriquecido para este CNPJ (a raiz do CNPJ estadual não permite consultar o QSA).</div>`;
+  }
+  return `
+    <details class="license-details" open>
+      <summary>Sócios e contato (Receita Federal)</summary>
+      <div class="license-body">
+        ${contact.length ? `<div class="small" style="margin-bottom:8px">${contact.map(esc).join(" · ")}</div>` : ""}
+        ${partners.length
+          ? `<div class="table-wrap"><table class="license-table"><thead><tr><th>Sócio</th><th>Qualificação</th><th>Entrada</th><th>Documento</th></tr></thead><tbody>
+              ${partners.map((partner) => `<tr>
+                <td>${esc(partner.name || "—")}</td>
+                <td>${esc(partner.role || "—")}</td>
+                <td>${fmtDate(partner.since)}</td>
+                <td>${partner.doc_type === "PJ" ? esc(partner.doc || "PJ") : "CPF não exibido"}</td>
+              </tr>`).join("")}
+            </tbody></table></div>`
+          : `<div class="small muted">Sem sócios no QSA.</div>`}
+        <div class="small muted" style="margin-top:8px">Fonte: Receita Federal via Minha Receita. Dados públicos de empresa; CPF nunca é exibido.</div>
+      </div>
+    </details>`;
+}
+
+function renderRegularizationPlan(item) {
+  if (!item.expires_at || item.kind === "infraction") return "";
+  const days = item.days_to_expiry;
+  const agency = item.agency || (item.source === "SEMAD-MG" ? "SEMAD-MG (SLA)" : item.source);
+  const pending = (item.conditions || []).filter((condition) =>
+    ["em_atendimento", "cumprida_parcialmente", "descumprida"].includes(condition.status)
+  );
+  const periodic = item.conditions_summary?.by_frequency || {};
+  const licenseType = String(item.license_type || "");
+  const study = /LAC|LAT/i.test(licenseType) ? "RADA" : /LAS/i.test(licenseType) ? "RAS de renovação" : "estudo de renovação";
+  const steps = [];
+  if (item.renewed_by) {
+    steps.push(`Renovação já deferida no processo <b>${esc(item.renewed_by)}</b> (${fmtDate(item.renewed_at)}). Arquivar esta licença-base e acompanhar a nova.`);
+  } else if (Number.isFinite(days) && days < 0) {
+    steps.push(`Licença vencida há <b>${INT.format(Math.abs(days))} dias</b>. Verificar TAC e regularização junto de ${esc(agency)} antes de retomar a operação.`);
+  } else {
+    const todayIso = S.data?.today || "2026-11-18";
+    if (Number.isFinite(days) && days <= 180) {
+      const preparePassed = item.prepare_from && item.prepare_from <= todayIso;
+      steps.push(preparePassed
+        ? `A janela de preparação está aberta desde ${fmtDate(item.prepare_from)}: concluir o ${study} e a revisão das condicionantes.`
+        : `Abrir a janela de preparação em ${fmtDate(item.prepare_from)} e iniciar o ${study} e a revisão das condicionantes.`);
+    }
+    const protocolPassed = item.protocol_deadline && item.protocol_deadline < todayIso;
+    steps.push(protocolPassed
+      ? `O prazo legal de protocolo (120 dias) venceu em <b>${fmtDate(item.protocol_deadline)}</b>. Protocolar imediatamente e verificar TAC com o órgão: a prorrogação automática pode não se aplicar.`
+      : `Protocolar a renovação até <b>${fmtDate(item.protocol_deadline)}</b> (120 dias antes do vencimento) para prorrogação automática — Decreto MG 47.383/2018, art. 37.`);
+  }
+  if (pending.length) {
+    steps.push(`Regularizar <b>${INT.format(pending.length)} condicionante(s) pendente(s)</b> antes do protocolo: ${pending.slice(0, 4).map((condition) => esc((condition.description || "").slice(0, 90))).join("; ")}${pending.length > 4 ? "…" : ""}.`);
+  } else if (!(item.conditions || []).length) {
+    steps.push(`Sem parecer/relatório de condicionantes público neste processo: pedir à ${esc(agency)} a lista oficial de pendências antes de protocolar.`);
+  }
+  const frequencies = Object.entries(periodic).map(([key, value]) => `${INT.format(value)} ${frequencyLabel(key).toLowerCase()}`).join(", ");
+  if (frequencies) {
+    steps.push(`Manter comprovação periódica das condicionantes: ${esc(frequencies)}.`);
+  }
+  return `
+    <div class="plan-box">
+      <div class="plan-box-head">
+        <b>Plano de regularização</b>
+        <span class="pill pill-green">fontes oficiais</span>
+      </div>
+      <div class="small muted" style="margin-bottom:8px">Órgão: ${esc(agency)} · Última licença emitida: ${fmtDate(item.date)} · Validade: ${fmtDate(item.expires_at)}</div>
+      <ol class="plan-steps">${steps.map((step) => `<li>${step}</li>`).join("")}</ol>
+      <div class="small muted">Gerado por regras a partir de WFS/SLA/Parecer/XLSX. Não é parecer jurídico nem substitui o órgão ambiental; confirme sempre no processo oficial.</div>
+    </div>`;
+}
+
 function openDossier(item) {
   S.selected = item;
   renderQuickDossier();
@@ -435,12 +545,20 @@ function openDossier(item) {
       <dt>CNAE</dt><dd>${esc(item.cnae ? `${item.cnae}${item.cnae_desc ? " — " + item.cnae_desc : ""}` : "—")}</dd>
       <dt>Fonte</dt><dd>${esc(item.source_label || item.source)}</dd>
       <dt>Processo</dt><dd>${esc(item.process || "—")}</dd>
+      ${item.agency ? `<dt>Órgão</dt><dd>${esc(item.agency)}</dd>` : ""}
       <dt>${isFine ? "Data do auto" : "Emissão"}</dt><dd>${fmtDate(item.date)}</dd>
-      ${isFine ? `<dt>Valor da multa</dt><dd>${BRL.format(item.fine || 0)}</dd>` : `<dt>Validade</dt><dd>${fmtDate(item.expires_at)}</dd>`}
+      ${isFine ? `<dt>Valor da multa</dt><dd>${BRL.format(item.fine || 0)}</dd>` : `<dt>Validade</dt><dd>${fmtDate(item.expires_at)}${Number.isFinite(item.days_to_expiry) ? ` · ${INT.format(item.days_to_expiry)} dias` : ""}</dd>`}
+      ${item.protocol_deadline ? `<dt>Protocolo até (120d)</dt><dd>${fmtDate(item.protocol_deadline)}</dd>` : ""}
+      ${item.prepare_from ? `<dt>Preparação desde (180d)</dt><dd>${fmtDate(item.prepare_from)}</dd>` : ""}
+      ${item.renewed_by ? `<dt>Renovação deferida</dt><dd>processo ${esc(item.renewed_by)} · ${fmtDate(item.renewed_at)}</dd>` : ""}
       ${item.license_type ? `<dt>Tipo de licença</dt><dd>${esc(item.license_type)}</dd>` : ""}
+      ${item.renewal_type ? `<dt>Tipo de solicitação</dt><dd>${esc(item.renewal_type)}</dd>` : ""}
       ${item.activity ? `<dt>Atividade</dt><dd>${esc(item.activity)}</dd>` : ""}
-      <dt>Sócios (QSA)</dt><dd>${item.qsa_count ? `${item.qsa_count} sócio(s) — nomes/CPF não exibidos` : "não enriquecido"}</dd>
+      ${item.cnpj_status ? `<dt>Situação cadastral</dt><dd>${esc(item.cnpj_status)}${item.opened_at ? ` · aberta em ${fmtDate(item.opened_at)}` : ""}</dd>` : ""}
     </dl>
+    ${item.protection ? `<div class="notice ${item.protection === "expired" ? "notice-red" : item.protection === "critical" ? "notice-amber" : "notice-green"}"><b>🛡 Janela de proteção:</b> ${esc(protectionLabel(item.protection))}${Number.isFinite(item.days_to_expiry) ? ` · ${INT.format(item.days_to_expiry)} dias até ao vencimento` : ""}. ${item.renewed_by ? `Renovação já deferida (${esc(item.renewed_by)}).` : "Cliente deve ser notificado para não perder o prazo."}</div>` : ""}
+    ${renderRegularizationPlan(item)}
+    ${renderPartners(item)}
     ${item.description ? `<div class="notice notice-blue"><b>Descrição pública:</b><br/>${esc(item.description)}</div>` : ""}
     ${item.license_detail ? renderLicenseDetail(item.license_detail) : ""}
     ${!item.license_detail && (item.conditions || []).length
@@ -450,8 +568,8 @@ function openDossier(item) {
         </details>`
       : ""}
     <div class="notice notice-amber">
-      <b>LGPD:</b> dados de empresa/CNPJ e fonte pública. Não exibimos CPF, nome de sócio, telefone ou e-mail pessoal.
-      Este dossiê é inteligência e priorização; não substitui certidão ou parecer oficial.
+      <b>LGPD:</b> empresa/CNPJ, condicionantes e contactos comerciais vêm de fontes públicas. Sócios são dados públicos do QSA da Receita Federal; <b>CPF nunca é exibido</b>. Não usamos e-mail/telefone pessoal. Pedidos de remoção: <a href="privacidade.html" style="text-decoration:underline">privacidade</a>.
+      Este dossiê é inteligência e priorização; não substitui certidão, parecer ou vistoria oficial.
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-emerald btn-sm" type="button" id="reserve">Reservar 72h (mock)</button>
@@ -501,6 +619,49 @@ function renderCoverage() {
   });
 }
 
+function csvCell(value) {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function exportAlerts() {
+  const rows = S.filtered.filter((item) =>
+    item.kind !== "infraction" && ["critical", "prepare", "expired"].includes(item.protection)
+  );
+  if (!rows.length) {
+    showToast("Nenhuma licença na janela de proteção com os filtros atuais.");
+    return;
+  }
+  const header = [
+    "Empresa", "CNPJ", "Processo", "UF", "Municipio", "Orgao", "Licenca", "Emissao",
+    "Validade", "Dias", "Janela", "Protocolo_ate", "Preparar_desde", "Condicionantes_pendentes",
+    "Periodicidades", "Telefone_comercial", "Email_comercial",
+  ];
+  const lines = rows.map((item) => {
+    const pending = (item.conditions || []).filter((condition) =>
+      ["em_atendimento", "cumprida_parcialmente", "descumprida"].includes(condition.status)
+    ).length;
+    const frequencies = Object.entries(item.conditions_summary?.by_frequency || {})
+      .map(([key, value]) => `${value} ${frequencyLabel(key)}`).join(", ");
+    return [
+      item.company, item.cnpj || item.cnpj_root, item.process, item.uf, item.municipality,
+      item.agency || "", item.license_type || "", item.date, item.expires_at,
+      item.days_to_expiry, protectionLabel(item.protection), item.protocol_deadline,
+      item.prepare_from, pending, frequencies, item.phone || "", item.email || "",
+    ].map(csvCell).join(";");
+  });
+  const csv = `\uFEFF${[header.map(csvCell).join(";"), ...lines].join("\r\n")}`;
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `fila-alertas-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(link.href);
+  showToast(`${INT.format(rows.length)} licenças exportadas para contacto.`);
+}
+
 function activateTab(name) {
   $$(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === name));
   $$(".tab-panel").forEach((panel) => panel.classList.toggle("active", panel.id === `tab-${name}`));
@@ -508,18 +669,25 @@ function activateTab(name) {
 }
 
 function bindUi() {
-  ["f-uf", "f-municipality", "f-kind", "f-source", "f-category", "f-fine", "f-expiry", "f-frequency", "f-condition-status"].forEach((id) => {
+  ["f-uf", "f-municipality", "f-kind", "f-source", "f-category", "f-fine", "f-protection", "f-frequency", "f-condition-status"].forEach((id) => {
     $(`#${id}`)?.addEventListener("change", () => {
       if (id === "f-uf") updateMunicipalityOptions($("#f-uf").value);
       applyFilters();
     });
   });
+  $("#f-hide-renewed")?.addEventListener("change", applyFilters);
+  $("#f-pending-conditions")?.addEventListener("change", applyFilters);
+  $("#export-alerts")?.addEventListener("click", exportAlerts);
   $("#f-search")?.addEventListener("input", applyFilters);
   $("#reset-filters")?.addEventListener("click", () => {
-    ["f-uf", "f-municipality", "f-kind", "f-source", "f-category", "f-fine", "f-expiry", "f-frequency", "f-condition-status", "f-search"].forEach((id) => {
+    ["f-uf", "f-municipality", "f-kind", "f-source", "f-category", "f-fine", "f-protection", "f-frequency", "f-condition-status", "f-search"].forEach((id) => {
       const el = $(`#${id}`);
       if (el) el.value = id === "f-fine" ? "0" : "";
     });
+    const hideRenewed = $("#f-hide-renewed");
+    if (hideRenewed) hideRenewed.checked = true;
+    const pendingOnly = $("#f-pending-conditions");
+    if (pendingOnly) pendingOnly.checked = false;
     updateMunicipalityOptions("");
     applyFilters();
   });
@@ -561,7 +729,7 @@ async function main() {
   $("#kpi-leads").textContent = INT.format(k.leads || 0);
   $("#kpi-autos").textContent = INT.format(k.federal_autos_2026 || 0);
   $("#kpi-licenses").textContent = INT.format((k.mg_licenses || 0) + (k.sislic_licenses || 0));
-  $("#kpi-expiring").textContent = INT.format(k.expiring_90 || 0);
+  $("#kpi-expiring").textContent = INT.format(k.expiring_180 || 0);
   $("#kpi-conditions").textContent = INT.format(k.conditions || 0);
   $("#kpi-coverage").textContent = "27 UF";
 

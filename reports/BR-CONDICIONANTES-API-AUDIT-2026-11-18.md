@@ -264,3 +264,59 @@ python build_demo.py                         # snapshot do dashboard
 5. Expandir o mesmo extrator para outros estados que publiquem documentos de licença; onde não houver, manter apenas o que o WFS/CSV oferece.
 
 **Conclusão:** sim, é possível entregar condicionantes individuais por empresa com dados públicos. A amostra de 348 processos produziu **497 condicionantes em 105 empresas**, com periodicidade classificada em 92,8% dos casos. O limite é documental, não técnico: processos sem Parecer/Relatório anexado não têm condicionantes extraíveis.
+
+---
+
+## 10. Proteção de prazos, renovação e dossiê de regularização
+
+### 10.1 Janela de proteção (180/120 dias)
+
+A licença de operação em MG deve ser renovada com **antecedência mínima de 120 dias** do vencimento (Decreto Estadual 47.383/2018, art. 37; LC 140/2011, art. 14, §4º), para prorrogação automática até a decisão do órgão. O produto trabalha em duas janelas:
+
+| Janela | Regra | Uso |
+|---|---|---|
+| **180 dias** | preparação (RADA/RAS, condicionantes, ARTs, taxas) | alerta antecipado ao cliente |
+| **120 dias** | prazo legal de protocolo | ação urgente; risco de TAC/sanção |
+
+Cada licença recebe `protection` = `prepare` (≤180d), `critical` (≤120d) ou `expired`, além de `days_to_expiry`, `protocol_deadline` (vencimento −120d) e `prepare_from` (vencimento −180d). No snapshot: **304 licenças na janela** (204 críticas, 100 em preparação).
+
+No dashboard:
+- filtro **Janela de proteção** (crítica / preparação / vencida);
+- **selo verde** nas licenças em preparação e verde com alerta nas críticas; marcadores do mapa ficam verdes na fila de proteção;
+- **exportação CSV da fila de alertas** com empresa, CNPJ, processo, órgão, validade, dias, prazo de protocolo, condicionantes pendentes e contactos comerciais.
+
+### 10.2 Exclusão de licenças já renovadas
+
+O WFS publica apenas processos **concluídos**. A renovação é detetada quando existe um processo posterior com `tipo_solic` de renovação/corretiva e a mesma combinação de **raiz de CNPJ (ou nome), atividade, município e modalidade**. O resultado é `renewed_by` (processo) e `renewed_at` (data).
+
+- Filtro **“Ocultar licenças já renovadas”** ativo por defeito.
+- **Limite:** pedidos de renovação *em análise* não aparecem no WFS; não é possível confirmar “protocolo em andamento” apenas com dados abertos. Para isso é necessário o SLA autenticado ou consulta ao processo.
+- No snapshot: 40 licenças-base com renovação deferida identificada.
+
+### 10.3 Proteção das condicionantes
+
+- Filtro **“Só condicionantes pendentes”** (`em_atendimento`, `cumprida_parcialmente`, `descumprida`).
+- O plano de regularização lista as condicionantes pendentes e as periodicidades que exigem comprovação (mensal…anual).
+- Quando o processo não tem parecer/relatório público, o dossiê instrui a pedir a lista oficial de pendências ao órgão — em vez de inventar.
+
+### 10.4 Dossiê de regularização (determinístico, com fontes)
+
+Ao abrir o dossiê, o sistema gera um plano a partir de dados oficiais:
+
+- órgão competente (WFS `und_analis` / SLA);
+- última licença emitida, validade e dias restantes;
+- prazo legal de protocolo e janela de preparação;
+- estudo aplicável (RAS para LAS; RADA para LAC/LAT);
+- condicionantes pendentes e periodicidades;
+- renovação já deferida (se existir);
+- aviso quando o prazo de 120 dias já venceu.
+
+Cada bloco indica a fonte (WFS, SLA, Parecer, XLSX) e o link oficial. **Não é IA generativa:** é um gerador de regras sobre dados reais, sem alucinação. Um LLM pode ser ligado depois como camada de redação, recebendo estes factos como contexto.
+
+### 10.5 Sócios e contactos
+
+- Enriquecimento via **Minha Receita (Receita Federal)**: nome do sócio, qualificação, data de entrada, natureza jurídica, porte, capital social, data de abertura e telefone/e-mail **comercial** da empresa.
+- **CPF nunca é guardado nem exibido**; sócio PJ mostra CNPJ público.
+- Sócios aparecem no dossiê com aviso LGPD e link de privacidade/opt-out.
+- E-mail/telefone **pessoal** de sócio não existe em fonte pública utilizada; não é inventado. Quando a Receita não publica contacto, o campo fica vazio.
+

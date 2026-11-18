@@ -72,14 +72,25 @@
           <option value="100000">R$ 100 mil+</option>
         </select>
       </div>
-      <div class="filter"><label for="f-expiry">Validade</label>
-        <select id="f-expiry">
-          <option value="">Qualquer</option>
-          <option value="90">Vence em 90 dias</option>
-          <option value="180">Vence em 180 dias</option>
-          <option value="365">Vence em 365 dias</option>
-          <option value="expired">Já venceu</option>
+      <div class="filter"><label for="f-protection">Janela de proteção</label>
+        <select id="f-protection">
+          <option value="">Todas</option>
+          <option value="critical">Crítica — até 120 dias (prazo legal)</option>
+          <option value="prepare">Preparação — até 180 dias</option>
+          <option value="expired">Licença vencida</option>
         </select>
+      </div>
+      <div class="filter">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="f-hide-renewed" checked style="width:auto" />
+          Ocultar licenças já renovadas
+        </label>
+      </div>
+      <div class="filter">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="f-pending-conditions" style="width:auto" />
+          Só condicionantes pendentes
+        </label>
       </div>
       <div class="filter"><label for="f-search">Buscar</label><input id="f-search" placeholder="Empresa, CNPJ, processo…" /></div>
       <button class="btn btn-ghost btn-block btn-sm" id="reset-filters" type="button">Limpar filtros</button>
@@ -100,6 +111,7 @@
         <div style="display:flex;gap:8px;align-items:center">
           <span class="pill pill-green">● demo</span>
           <span class="pill pill-slate">Plano Pro (mock)</span>
+          <button class="btn btn-ghost btn-sm" id="export-alerts" type="button">Exportar fila de alertas</button>
           <button class="btn btn-ghost btn-sm only-mobile" id="toggle-filters" type="button">Filtros</button>
           <a class="btn btn-ghost btn-sm" href="index.html">← Landing</a>
         </div>
@@ -110,7 +122,7 @@
           <div class="kpi"><span>Oportunidades</span><b id="kpi-leads">—</b></div>
           <div class="kpi"><span>Autos federais</span><b id="kpi-autos">—</b></div>
           <div class="kpi"><span>Licenças</span><b id="kpi-licenses">—</b></div>
-          <div class="kpi"><span>Vencendo 90d</span><b id="kpi-expiring">—</b></div>
+          <div class="kpi"><span>Proteção 180d</span><b id="kpi-expiring">—</b></div>
           <div class="kpi"><span>Condicionantes</span><b id="kpi-conditions">—</b></div>
           <div class="kpi"><span>Cobertura</span><b id="kpi-coverage">—</b></div>
         </div>

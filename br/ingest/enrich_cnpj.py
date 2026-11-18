@@ -1,8 +1,11 @@
-"""Enriquecimento mínimo de CNPJ para a demo.
+"""Enriquecimento de CNPJ para a demo.
 
-Usa a API pública Minha Receita (dados da Receita Federal) e guarda apenas
-campos de empresa: CNAE, telefone/e-mail comercial, UF/município e n.º de sócios.
-Nunca guarda CPF, nome de sócio ou telefone pessoal.
+Usa a API pública Minha Receita (dados da Receita Federal) e guarda:
+  - empresa: CNAE, telefone/e-mail comercial, UF/município, porte, capital, abertura;
+  - sócios (QSA): nome, qualificação e data de entrada — **nunca CPF**.
+
+O CPF do sócio nunca é guardado: quando a fonte devolve CPF mascarado ou
+apenas o número, o campo é descartado. Para sócio PJ guarda-se o CNPJ público.
 """
 from __future__ import annotations
 
@@ -72,12 +75,37 @@ def ibama_cnpjs(limit: int) -> list[str]:
     return found
 
 
+def format_phone(value: object) -> str:
+    digits = re.sub(r"\D", "", str(value or ""))
+    if len(digits) == 11:
+        return f"({digits[:2]}) {digits[2:7]}-{digits[7:]}"
+    if len(digits) == 10:
+        return f"({digits[:2]}) {digits[2:6]}-{digits[6:]}"
+    return ""
+
+
+def clean_partner(entry: dict) -> dict | None:
+    name = str(entry.get("nome_socio") or "").strip()
+    if not name:
+        return None
+    document = re.sub(r"\D", "", str(entry.get("cnpj_cpf_do_socio") or ""))
+    is_company = len(document) == 14
+    return {
+        "name": name,
+        "role": str(entry.get("qualificacao_socio") or "").strip(),
+        "since": str(entry.get("data_entrada_sociedade") or "").strip(),
+        "doc_type": "PJ" if is_company else "PF",
+        "doc": (
+            f"{document[:2]}.{document[2:5]}.{document[5:8]}/{document[8:12]}-{document[12:]}"
+            if is_company
+            else None  # CPF nunca é guardado
+        ),
+    }
+
+
 def normalize(payload: dict) -> dict:
-    phone = ""
-    ddd = str(payload.get("ddd1") or "").strip()
-    number = str(payload.get("telefone1") or "").strip()
-    if ddd and number:
-        phone = f"({ddd}) {number}"
+    phone = format_phone(payload.get("ddd_telefone_1")) or format_phone(payload.get("ddd_telefone_2"))
+    partners = [partner for partner in (clean_partner(item) for item in payload.get("qsa") or []) if partner]
     return {
         "cnae": str(payload.get("cnae_fiscal") or ""),
         "cnae_desc": str(payload.get("cnae_fiscal_descricao") or ""),
@@ -86,21 +114,31 @@ def normalize(payload: dict) -> dict:
         "uf": str(payload.get("uf") or "").strip().upper(),
         "municipality": str(payload.get("municipio") or "").strip(),
         "status": str(payload.get("descricao_situacao_cadastral") or "").strip(),
-        "qsa_count": len(payload.get("qsa") or []),
+        "status_date": str(payload.get("data_situacao_cadastral") or "").strip(),
+        "opened_at": str(payload.get("data_inicio_atividade") or "").strip(),
+        "legal_nature": str(payload.get("natureza_juridica") or "").strip(),
+        "size": str(payload.get("porte") or "").strip(),
+        "capital_social": payload.get("capital_social"),
+        "qsa_count": len(partners),
+        "partners": partners,
     }
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--limit", type=int, default=60)
+    parser.add_argument("--limit", type=int, default=800)
+    parser.add_argument("--refresh", action="store_true", help="Re-consulta CNPJs já em cache")
     args = parser.parse_args()
-    if OUT.exists():
-        print(f"[skip] {OUT}")
-        return
-    cnpjs = demo_cnpjs(args.limit) or ibama_cnpjs(args.limit)
-    print(f"[info] {len(cnpjs)} CNPJs para enriquecer")
     data: dict[str, dict] = {}
-    for index, cnpj in enumerate(cnpjs, start=1):
+    if OUT.exists() and not args.refresh:
+        try:
+            data = json.loads(OUT.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+    cnpjs = demo_cnpjs(args.limit) or ibama_cnpjs(args.limit)
+    pending = [cnpj for cnpj in cnpjs if cnpj not in data]
+    print(f"[info] {len(cnpjs)} CNPJs no snapshot; {len(pending)} por enriquecer; {len(data)} em cache")
+    for index, cnpj in enumerate(pending, start=1):
         try:
             response = requests.get(
                 API.format(cnpj=cnpj),
@@ -110,9 +148,12 @@ def main() -> None:
             if response.status_code == 200:
                 data[cnpj] = normalize(response.json())
             else:
-                print(f"  [{index}] {cnpj}: HTTP {response.status_code}")
+                print(f"  [{index}/{len(pending)}] {cnpj}: HTTP {response.status_code}", flush=True)
         except Exception as exc:  # noqa: BLE001
-            print(f"  [{index}] {cnpj}: {exc!r}")
+            print(f"  [{index}/{len(pending)}] {cnpj}: {exc!r}", flush=True)
+        if index % 25 == 0:
+            OUT.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+            print(f"  ... {index}/{len(pending)} guardados", flush=True)
         time.sleep(0.35)
     OUT.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"[ok  ] {OUT} ({len(data)} registos)")

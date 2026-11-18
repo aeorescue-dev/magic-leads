@@ -83,7 +83,9 @@ python -m http.server 8088
 
 ## LGPD
 
-- Nunca exibir CPF, nome de sócio ou telefone pessoal.
+- Nunca exibir CPF, telefone pessoal ou e-mail pessoal.
+- Sócios: nome, qualificação e data de entrada do **QSA público da Receita Federal**, com aviso de privacidade e opt-out. Sócio PJ mostra o CNPJ público; CPF nunca é guardado.
+- Contacto exibido é o **comercial da empresa** (telefone/e-mail publicados na Receita), não contacto pessoal.
 - Apenas dados de empresa/CNPJ e contacto comercial.
 - Fonte e data em cada registo; opt-out na landing.
 - Protótipo de staging; não usar com dados de clientes reais.
@@ -100,7 +102,10 @@ python -m http.server 8088
 - Landing, dashboard, dossiê e planos navegáveis em desktop e mobile.
 - Sem erros de consola; sem overflow horizontal em 390px.
 - Dossiê LGPD: CNPJ/empresa/CNAE; sem CPF, nome de sócio, telefone ou e-mail pessoal.
-- Filtros por UF, município, tipo, fonte, categoria, multa, validade, **periodicidade da condicionante** e **status da condição**.
+- Filtros por UF, município, tipo, fonte, categoria, multa, **janela de proteção (120/180 dias)**, **periodicidade da condicionante** e **status da condição**.
+- **Ocultar licenças já renovadas** (renovação deferida detetada no WFS) e **só condicionantes pendentes**.
+- **Fila de alertas exportável (CSV)** com prazos, órgão, condicionantes e contactos comerciais.
+- **Dossiê com plano de regularização** determinístico (RAS/RADA, prazo de 120 dias, pendências) e **sócios do QSA** da Receita, sem CPF.
 - Reserva de 72h e checkout simulados.
 
 ## Próximos passos

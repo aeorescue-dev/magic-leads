@@ -17,7 +17,7 @@ import json
 import re
 import unicodedata
 import zipfile
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 csv.field_size_limit(50_000_000)
@@ -295,7 +295,74 @@ def parse_sislic(limit: int) -> tuple[list[dict], dict]:
     }
 
 
-def parse_mg(limit: int, muni_index: dict, details_by_process: dict, conditions_by_process: dict) -> tuple[list[dict], dict]:
+PROTOCOL_DAYS = 120
+PREPARE_DAYS = 180
+
+
+def protection_for(days: int | None) -> str | None:
+    """Janela de proteção: 120 d = prazo legal de protocolo (MG); 180 d = preparação."""
+    if days is None:
+        return None
+    if days < 0:
+        return "expired"
+    if days <= PROTOCOL_DAYS:
+        return "critical"
+    if days <= PREPARE_DAYS:
+        return "prepare"
+    return None
+
+
+def build_renewal_index() -> dict[str, dict]:
+    """Mapeia licença-base → renovação posterior já deferida (mesma empresa/atividade/município).
+
+    O WFS só publica processos concluídos, portanto isto identifica renovações já
+    concedidas (protocolo validado), não pedidos em análise.
+    """
+    path = CACHE / "mg_licencas.json"
+    if not path.exists():
+        return {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    rows: list[dict] = []
+    for feature in payload.get("features") or []:
+        props = feature.get("properties") or {}
+        process = (props.get("n_processo") or "").strip()
+        issued = as_date(props.get("data_emiss"))
+        if not process or not issued:
+            continue
+        doc = cnpj_digits(props.get("cpf_cnpj"))
+        rows.append(
+            {
+                "process": process,
+                "issued": issued,
+                "renewal": "RENOVA" in norm(props.get("tipo_solic")),
+                "company": doc[:8] if len(doc) >= 8 else norm(props.get("nome_pf_pj")),
+                "activity": norm(props.get("cod_atvpri")),
+                "municipality": norm(props.get("mun_solic")),
+                "modality": norm(props.get("modl_licen")),
+            }
+        )
+    groups: dict[tuple[str, str, str, str], list[dict]] = {}
+    for row in rows:
+        groups.setdefault(
+            (row["company"], row["activity"], row["municipality"], row["modality"]), []
+        ).append(row)
+    index: dict[str, dict] = {}
+    for items in groups.values():
+        items.sort(key=lambda row: row["issued"])
+        for base in items:
+            if base["renewal"]:
+                continue
+            later = [row for row in items if row["renewal"] and row["issued"] > base["issued"]]
+            if later:
+                latest = later[-1]
+                index[base["process"]] = {
+                    "process": latest["process"],
+                    "date": latest["issued"].isoformat(),
+                }
+    return index
+
+
+def parse_mg(limit: int, muni_index: dict, details_by_process: dict, conditions_by_process: dict, renewals: dict[str, dict]) -> tuple[list[dict], dict]:
     path = CACHE / "mg_licencas.json"
     if not path.exists():
         return [], {"total": 0, "distinct_roots": 0}
@@ -343,6 +410,7 @@ def parse_mg(limit: int, muni_index: dict, details_by_process: dict, conditions_
         process = (props.get("n_processo") or "").strip()
         detail = details_by_process.get(norm(process))
         condition_data = conditions_by_process.get(norm(process)) or {}
+        renewal = renewals.get(process)
         if detail and condition_data:
             detail = {
                 **detail,
@@ -374,6 +442,10 @@ def parse_mg(limit: int, muni_index: dict, details_by_process: dict, conditions_
                 "process": process,
                 "status": (props.get("status_pro") or "Deferido").strip(),
                 "license_type": (props.get("modl_licen") or "").strip(),
+                "renewal_type": (props.get("tipo_solic") or "").strip(),
+                "agency": (props.get("und_analis") or "").strip() or None,
+                "renewed_by": renewal["process"] if renewal else None,
+                "renewed_at": renewal["date"] if renewal else None,
                 "url": (props.get("link") or "").strip() or None,
                 "verified": bool(full),
                 "priority": priority,
@@ -383,7 +455,16 @@ def parse_mg(limit: int, muni_index: dict, details_by_process: dict, conditions_
             }
         )
     leads.sort(key=lambda item: (item["priority"], item["expires_at"] or ""), reverse=True)
-    return leads[:limit], {
+    selected = leads[:limit]
+    # Inclui alguns casos já renovados para o filtro de exclusão ser demonstrável.
+    known = {item["id"] for item in selected}
+    extras = [
+        item for item in leads[limit:]
+        if item.get("renewed_by") and item["id"] not in known
+    ][:40]
+    selected.extend(extras)
+    selected.sort(key=lambda item: (item["priority"], item["expires_at"] or ""), reverse=True)
+    return selected, {
         "total": len(features),
         "distinct_roots": len(roots),
         "expiring_365": expiring_365,
@@ -419,7 +500,8 @@ def main() -> None:
 
     ibama, ibama_stats = parse_ibama(650, muni_index)
     sislic, sislic_stats = parse_sislic(260)
-    mg, mg_stats = parse_mg(450, muni_index, details_by_process, conditions_by_process)
+    renewals = build_renewal_index()
+    mg, mg_stats = parse_mg(450, muni_index, details_by_process, conditions_by_process, renewals)
 
     for item in ibama + mg:
         extra = cnpj_cache.get(item["cnpj"] or "") or {}
@@ -429,22 +511,44 @@ def main() -> None:
             item["phone"] = extra.get("phone")
             item["email"] = extra.get("email")
             item["qsa_count"] = extra.get("qsa_count")
+            item["partners"] = extra.get("partners") or []
             item["cnpj_status"] = extra.get("status")
+            item["opened_at"] = extra.get("opened_at")
+            item["legal_nature"] = extra.get("legal_nature")
+            item["size"] = extra.get("size")
+            item["capital_social"] = extra.get("capital_social")
         else:
             item["cnae"] = None
             item["cnae_desc"] = None
             item["phone"] = None
             item["email"] = None
             item["qsa_count"] = None
+            item["partners"] = []
             item["cnpj_status"] = None
+            item["opened_at"] = None
+            item["legal_nature"] = None
+            item["size"] = None
+            item["capital_social"] = None
 
     for item in sislic + mg:
-        item.setdefault("cnae", None)
-        item.setdefault("cnae_desc", None)
-        item.setdefault("phone", None)
-        item.setdefault("email", None)
-        item.setdefault("qsa_count", None)
-        item.setdefault("cnpj_status", None)
+        for field in (
+            "cnae", "cnae_desc", "phone", "email", "qsa_count", "cnpj_status",
+            "opened_at", "legal_nature", "size", "capital_social",
+        ):
+            item.setdefault(field, None)
+        item.setdefault("partners", [])
+
+    for item in ibama + sislic + mg:
+        if item["kind"] in ("license_expiring", "license_expired") and item.get("expires_at"):
+            expiry = date.fromisoformat(item["expires_at"])
+            days = (expiry - TODAY).days
+            item["days_to_expiry"] = days
+            item["protection"] = protection_for(days)
+            item["protocol_deadline"] = (expiry - timedelta(days=PROTOCOL_DAYS)).isoformat()
+            item["prepare_from"] = (expiry - timedelta(days=PREPARE_DAYS)).isoformat()
+        else:
+            item["days_to_expiry"] = None
+            item["protection"] = None
 
     leads = ibama + sislic + mg
     leads.sort(key=lambda item: (item["priority"], item.get("date") or ""), reverse=True)
@@ -472,6 +576,19 @@ def main() -> None:
         1 for item in leads if item["kind"] == "license_expiring" and item.get("expires_at")
         and 0 <= (date.fromisoformat(item["expires_at"]) - TODAY).days <= 365
     )
+    expiring_120 = sum(
+        1 for item in leads if item["kind"] == "license_expiring" and item.get("expires_at")
+        and 0 <= (date.fromisoformat(item["expires_at"]) - TODAY).days <= PROTOCOL_DAYS
+    )
+    expiring_180 = sum(
+        1 for item in leads if item["kind"] == "license_expiring" and item.get("expires_at")
+        and 0 <= (date.fromisoformat(item["expires_at"]) - TODAY).days <= PREPARE_DAYS
+    )
+    renewed_licenses = sum(1 for item in leads if item.get("renewed_by"))
+    protection_queue = sum(
+        1 for item in leads
+        if item.get("protection") in ("critical", "prepare") and not item.get("renewed_by")
+    )
     conditions_total = sum(len(item.get("conditions") or []) for item in leads)
     companies_with_conditions = sum(1 for item in leads if item.get("conditions"))
 
@@ -487,7 +604,11 @@ def main() -> None:
             "mg_licenses": mg_stats.get("total", 0),
             "sislic_licenses": sislic_stats.get("total", 0),
             "expiring_90": expiring_90,
+            "expiring_120": expiring_120,
+            "expiring_180": expiring_180,
             "expiring_365": expiring_365,
+            "renewed_licenses": renewed_licenses,
+            "protection_queue": protection_queue,
             "conditions": conditions_total,
             "companies_with_conditions": companies_with_conditions,
         },
