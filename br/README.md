@@ -17,7 +17,7 @@ Protótipo de validação para o mercado brasileiro de consultoria/engenharia am
 - Projeto: `magic-leads-br-staging`.
 - **Root Directory:** `br/web`.
 - **Framework:** Other (estático).
-- Produção manual: `vercel --prod` a partir de `br/web`.
+- Produção manual: **não** usar `vercel --prod` a partir de `br/web` (o Root Directory `br/web` já está definido no projeto). Fluxo correto: push na branch → preview Git → `vercel promote <preview-url> --yes`.
 - Preview Git: qualquer push em `feat/br-environmental-mvp` gera preview.
 - **Domínio final:** `br.magicleads.app` exige CNAME no Porkbun; o preview Vercel está público.
 
