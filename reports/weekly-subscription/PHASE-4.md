@@ -188,6 +188,21 @@ morada de correspondência, histórico e fases.
 - Confirmado que o login de uma conta com plano ativo entra em `/dashboard`
   sem modal de planos (`billing=success` não abre a modal).
 
+### Auditoria prática (Playwright, staging)
+
+- Login com Pro: `/en/dashboard`, **sem modal de planos e sem welcome popup**.
+- Sidebar/header: `Pro · 3/8 +4`, `1/10 cartas/visitas`.
+- Reserva: 50 botões disponíveis; botão bloqueado apenas antes do checkbox
+  (comportamento original), **habilitado depois do consentimento**.
+- Consentimento: `I agree to verify this lead's data (1/10 today).`
+- Modal: `z-index: 1000`, acima do Leaflet.
+- Reserva confirmada: guia de 1 hora abre com o pipeline completo.
+- Pré-inspeção: mapa renderiza (`.opp-map` presente), sem
+  “Map unavailable”; Nova Iorque usa o snapshot real quando o feed preventivo
+  está vazio. Chicago mostra o mapa base, mas o staging não tem linhas
+  preventivas de Chicago (0 KPIs), pelo que não há pins nem dados a somar.
+
+
 
 
 
