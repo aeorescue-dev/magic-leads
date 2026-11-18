@@ -25,6 +25,7 @@ csv.field_size_limit(50_000_000)
 BR = Path(__file__).resolve().parents[1]
 CACHE = BR / ".cache"
 ASSETS = BR / "web" / "assets"
+DETAILS = BR / "data" / "license_details.json"
 TODAY = date(2026, 11, 18)
 
 UF_BY_CODE = {
@@ -293,7 +294,7 @@ def parse_sislic(limit: int) -> tuple[list[dict], dict]:
     }
 
 
-def parse_mg(limit: int, muni_index: dict) -> tuple[list[dict], dict]:
+def parse_mg(limit: int, muni_index: dict, details_by_process: dict) -> tuple[list[dict], dict]:
     path = CACHE / "mg_licencas.json"
     if not path.exists():
         return [], {"total": 0, "distinct_roots": 0}
@@ -365,6 +366,7 @@ def parse_mg(limit: int, muni_index: dict) -> tuple[list[dict], dict]:
                 "url": (props.get("link") or "").strip() or None,
                 "verified": bool(full),
                 "priority": priority,
+                "license_detail": details_by_process.get(norm(props.get("n_processo") or "")),
             }
         )
     leads.sort(key=lambda item: (item["priority"], item["expires_at"] or ""), reverse=True)
@@ -381,6 +383,13 @@ def parse_mg(limit: int, muni_index: dict) -> tuple[list[dict], dict]:
 def main() -> None:
     ASSETS.mkdir(parents=True, exist_ok=True)
     municipalities, muni_index = load_municipalities()
+    details_by_process: dict[str, dict] = {}
+    if DETAILS.exists():
+        payload = json.loads(DETAILS.read_text(encoding="utf-8"))
+        details_by_process = {
+            norm(process): detail
+            for process, detail in (payload.get("details") or {}).items()
+        }
     cnpj_cache_path = CACHE / "cnpj_cache.json"
     cnpj_cache = (
         json.loads(cnpj_cache_path.read_text(encoding="utf-8"))
@@ -390,7 +399,7 @@ def main() -> None:
 
     ibama, ibama_stats = parse_ibama(650, muni_index)
     sislic, sislic_stats = parse_sislic(260)
-    mg, mg_stats = parse_mg(450, muni_index)
+    mg, mg_stats = parse_mg(450, muni_index, details_by_process)
 
     for item in ibama + mg:
         extra = cnpj_cache.get(item["cnpj"] or "") or {}

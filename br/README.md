@@ -62,6 +62,7 @@ python -m http.server 8088
 - **SEMAD-MG WFS** — licenças estaduais, validade, CNPJ truncado (raiz).
 - **Receita/Minha Receita** — CNAE e contacto comercial (sem CPF).
 - **IBGE** — malha dos estados e municípios.
+- **Detalhe de licenciamento** — `br/data/license_details.json`, indexado pelo número do processo. Inclui enquadramento, atividades, ADA, atos autorizativos, documentos e `conditions`. O exemplo AVG (`352/2025`) está carregado; as condicionantes ficam vazias até existir o bloco do SLA com o texto real.
 
 ## LGPD
 

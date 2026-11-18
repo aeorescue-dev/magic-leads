@@ -1,0 +1,137 @@
+{
+  "version": 1,
+  "source": "SLA/Sisema — Resumo de processos",
+  "updated_at": "2026-11-18",
+  "details": {
+    "352/2025": {
+      "cnpj": "20.176.160/0002-84",
+      "company": "AVG SIDERURGIA LTDA",
+      "trade_name": "AVG Siderurgia",
+      "enterprise": "AVG SIDERURGIA LTDA",
+      "municipality": "Sete Lagoas/MG",
+      "process": "352/2025",
+      "status": "Não informado no recorte",
+      "framework": {
+        "class": "3",
+        "locational_factor": "0",
+        "licensing_modality": "LAS RAS",
+        "licensing_phase": "LP+LI+LO",
+        "request_type": "Solicitação de licença para ampliação de empreendimento"
+      },
+      "activities": [
+        {
+          "code": "F-05-07-1",
+          "description": "Reciclagem ou regeneração de outros resíduos classe 2 (não-perigosos) não especificados",
+          "parameter": "Capacidade instalada",
+          "quantity": "30,000",
+          "unit": "t/dia"
+        },
+        {
+          "code": "B-02-01-2",
+          "description": "Sinterização de minério de ferro e outros resíduos siderúrgicos",
+          "parameter": "Capacidade instalada",
+          "quantity": "1.000,000",
+          "unit": "t/dia"
+        },
+        {
+          "code": "F-01-09-5",
+          "description": "Central de recebimento, armazenamento, triagem e/ou transbordo de outros resíduos não listados ou não classificados",
+          "parameter": "Área útil",
+          "quantity": "0,300",
+          "unit": "ha"
+        },
+        {
+          "code": "B-03-07-7",
+          "description": "Produção de fundidos de ferro e aço, sem tratamento químico superficial, inclusive a partir de reciclagem",
+          "parameter": "Capacidade instalada",
+          "quantity": "26,600",
+          "unit": "t/dia"
+        },
+        {
+          "code": "G-03-03-4",
+          "description": "Produção de carvão vegetal oriunda de floresta plantada",
+          "parameter": "Produção nominal",
+          "quantity": "75.000,000",
+          "unit": "mdc/ano"
+        },
+        {
+          "code": "A-05-01-0",
+          "description": "Unidade de Tratamento de Minerais - UTM, com tratamento a seco",
+          "parameter": "Capacidade instalada",
+          "quantity": "300.000,000",
+          "unit": "t/ano"
+        }
+      ],
+      "ada": {
+        "lat": -19.4681,
+        "lng": -44.2988,
+        "label": "Área diretamente afetada (ADA) preliminar"
+      },
+      "authorizations": [
+        {
+          "group": "Recursos Hídricos",
+          "type": "Outorga",
+          "number": "0309610/2020 de 18/12/2020",
+          "entity": "IGAM",
+          "protocol_date": "—"
+        },
+        {
+          "group": "Recursos Hídricos",
+          "type": "Outorga",
+          "number": "0309611/2020 de 18/12/2020",
+          "entity": "IGAM",
+          "protocol_date": "—"
+        },
+        {
+          "group": "Recursos Hídricos",
+          "type": "Outorga",
+          "number": "0309615/2020 de 18/12/2020",
+          "entity": "IGAM",
+          "protocol_date": "—"
+        },
+        {
+          "group": "Recursos Hídricos",
+          "type": "Outorga",
+          "number": "0309616/2020 de 18/12/2020",
+          "entity": "IGAM",
+          "protocol_date": "—"
+        },
+        {
+          "group": "Recursos Hídricos",
+          "type": "Outorga",
+          "number": "0309614/2020 de 18/12/2020",
+          "entity": "IGAM",
+          "protocol_date": "—"
+        }
+      ],
+      "documents": [
+        "Ato Autorizativo ou outro ato autêntico capaz de regularizar a intervenção em Recursos Hídricos",
+        "CAR - Cadastro Ambiental Rural",
+        "Certidão Municipal (uso e ocupação do solo)",
+        "Certificado de Regularidade junto ao Cadastro Técnico Federal de Atividades e Instrumentos de Defesa Ambiental (CTF/AIDA)",
+        "Certificado de Regularidade junto ao Cadastro Técnico Federal de Atividades e Instrumentos de Defesa Ambiental (CTF/AIDA)",
+        "Comprovante de propriedade, posse ou outra situação que legitime o uso do espaço territorial para o desenvolvimento da atividade",
+        "Comprovante de propriedade, posse ou outra situação que legitime o uso do espaço territorial para o desenvolvimento da atividade",
+        "Justificativa quanto ao não aumento de ADA do empreendimento",
+        "RAS - Relatório Ambiental Simplificado",
+        "RAS - Relatório Ambiental Simplificado",
+        "Certificado de Regularidade junto ao Cadastro Técnico Federal de Atividades e Instrumentos de Defesa Ambiental (CTF/AIDA)",
+        "Manifestação do Empreendedor",
+        "Comprovante de propriedade, posse ou outra situação que legitime o uso do espaço territorial para o desenvolvimento da atividade",
+        "RAS - Relatório Ambiental Simplificado",
+        "RAS - Relatório Ambiental Simplificado",
+        "Relatório de Cumprimento de Condicionantes e/ou Relatório de Automonitoramento",
+        "Publicação de Requerimento de Licença pelo Órgão Ambiental",
+        "Documentos de Resolução de Pendência",
+        "Documentos de Resolução de Pendência",
+        "Parecer Técnico",
+        "Parecer Único",
+        "Publicação de decisão final do processo administrativo",
+        "Relatório de Cumprimento de Condicionantes e/ou Relatório de Automonitoramento",
+        "Certificado"
+      ],
+      "conditions": [],
+      "conditions_note": "O recorte disponível lista documentos e atos autorizativos, mas não o texto das condicionantes. Para exibir as condicionantes por empresa é necessário o bloco 'Condicionantes' do processo ou o endpoint do SLA; o link oficial está no dossiê."
+    }
+  }
+}

@@ -263,6 +263,96 @@ function renderQuickDossier() {
   $("#open-selected")?.addEventListener("click", () => openDossier(item));
 }
 
+function renderLicenseDetail(detail) {
+  if (!detail) return "";
+  const docs = detail.documents || [];
+  const uniqueDocs = [...new Set(docs)];
+  const counts = {};
+  docs.forEach((doc) => { counts[doc] = (counts[doc] || 0) + 1; });
+  const conditions = detail.conditions || [];
+  const framework = detail.framework || {};
+  const activities = detail.activities || [];
+  const authorizations = detail.authorizations || [];
+  const ada = detail.ada || {};
+  return `
+    <details class="license-details" open>
+      <summary>Licenciamento — processo e condicionantes</summary>
+      <div class="license-body">
+        <div class="license-grid">
+          <div><span>CNPJ</span><b>${esc(detail.cnpj || "—")}</b></div>
+          <div><span>Razão social</span><b>${esc(detail.company || "—")}</b></div>
+          <div><span>Nome fantasia</span><b>${esc(detail.trade_name || "—")}</b></div>
+          <div><span>Empreendimento</span><b>${esc(detail.enterprise || "—")}</b></div>
+          <div><span>Município</span><b>${esc(detail.municipality || "—")}</b></div>
+          <div><span>Processo</span><b>${esc(detail.process || "—")}</b></div>
+          <div><span>Status</span><b>${esc(detail.status || "—")}</b></div>
+          <div><span>ADA preliminar</span><b>${ada.lat && ada.lng ? `${ada.lat}, ${ada.lng}` : "—"}</b></div>
+        </div>
+
+        <div class="license-section">
+          <h4>Enquadramento</h4>
+          <div class="license-grid">
+            <div><span>Classe predominante</span><b>${esc(framework.class || "—")}</b></div>
+            <div><span>Fator locacional</span><b>${esc(framework.locational_factor || "—")}</b></div>
+            <div><span>Modalidade</span><b>${esc(framework.licensing_modality || "—")}</b></div>
+            <div><span>Fase</span><b>${esc(framework.licensing_phase || "—")}</b></div>
+            <div style="grid-column:1/-1"><span>Tipo de solicitação</span><b>${esc(framework.request_type || "—")}</b></div>
+          </div>
+        </div>
+
+        <div class="license-section">
+          <h4>Atividades (${INT.format(activities.length)})</h4>
+          <div class="table-wrap">
+            <table class="license-table">
+              <thead><tr><th>Código</th><th>Descrição</th><th>Parâmetro</th><th>Quantidade</th><th>Unidade</th></tr></thead>
+              <tbody>${activities.map((activity) => `<tr>
+                <td><b>${esc(activity.code || "—")}</b></td>
+                <td>${esc(activity.description || "—")}</td>
+                <td>${esc(activity.parameter || "—")}</td>
+                <td>${esc(activity.quantity || "—")}</td>
+                <td>${esc(activity.unit || "—")}</td>
+              </tr>`).join("")}</tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="license-section">
+          <h4>Atos autorizativos (${INT.format(authorizations.length)})</h4>
+          <div class="table-wrap">
+            <table class="license-table">
+              <thead><tr><th>Grupo</th><th>Tipo</th><th>Número</th><th>Entidade</th><th>Protocolo</th></tr></thead>
+              <tbody>${authorizations.map((act) => `<tr>
+                <td>${esc(act.group || "—")}</td>
+                <td>${esc(act.type || "—")}</td>
+                <td>${esc(act.number || "—")}</td>
+                <td>${esc(act.entity || "—")}</td>
+                <td>${esc(act.protocol_date || "—")}</td>
+              </tr>`).join("")}</tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="license-section">
+          <h4>Documentos (${INT.format(uniqueDocs.length)} únicos · ${INT.format(docs.length)} menções)</h4>
+          <details>
+            <summary class="small strong">Ver lista de documentos</summary>
+            <ul class="doc-list">
+              ${uniqueDocs.map((doc) => `<li>${esc(doc)}${counts[doc] > 1 ? ` <span class="muted">(${counts[doc]}×)</span>` : ""}</li>`).join("")}
+            </ul>
+          </details>
+        </div>
+
+        <div class="license-section">
+          <h4>Condicionantes</h4>
+          ${conditions.length
+            ? `<ul class="doc-list">${conditions.map((condition) => `<li>${esc(condition.text || condition)}</li>`).join("")}</ul>`
+            : `<div class="notice notice-amber">${esc(detail.conditions_note || "O recorte disponível não inclui o texto das condicionantes. Consulte o processo oficial.")}</div>`}
+        </div>
+      </div>
+    </details>
+  `;
+}
+
 function openDossier(item) {
   S.selected = item;
   renderQuickDossier();
@@ -289,6 +379,7 @@ function openDossier(item) {
       <dt>Sócios (QSA)</dt><dd>${item.qsa_count ? `${item.qsa_count} sócio(s) — nomes/CPF não exibidos` : "não enriquecido"}</dd>
     </dl>
     ${item.description ? `<div class="notice notice-blue"><b>Descrição pública:</b><br/>${esc(item.description)}</div>` : ""}
+    ${item.license_detail ? renderLicenseDetail(item.license_detail) : ""}
     <div class="notice notice-amber">
       <b>LGPD:</b> dados de empresa/CNPJ e fonte pública. Não exibimos CPF, nome de sócio, telefone ou e-mail pessoal.
       Este dossiê é inteligência e priorização; não substitui certidão ou parecer oficial.
