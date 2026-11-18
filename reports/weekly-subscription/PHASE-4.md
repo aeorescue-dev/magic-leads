@@ -134,5 +134,21 @@
 - Selo e check medidos no staging: sem sobreposição e totalmente dentro do cartão.
 - Modal mantém o plano escolhido no topo e já não tem a frase de checkout.
 
+## Fase 4.4 — Pricing minimalista (sem gradiente)
+
+**Commit:** `c904e3c`, `340a6d6`
+
+- Removido o preenchimento/borda em gradiente e qualquer efeito “neon”.
+- Nova hierarquia: **cartão Pro em destaque** + **seis cartões compactos**
+  (grelha 3×2) em vez de sete blocos iguais.
+- Superfícies profundas: `#0a0f16` / `#080d14`; bordas finas `slate-800`.
+- Seleção discreta: borda `emerald-400/40-45`, fundo levemente esverdeado
+  (`#0b1210`) e check em `emerald-400/10` — sem manchas de cor.
+- Tipografia mais leve: preços em `font-semibold`, labels em `slate-500`.
+- Hover com elevação/realce de borda apenas nos cartões compactos.
+- Transição limitada a `transform/box-shadow`; o estado de seleção é imediato.
+- Verificado no staging: Pro selecionado por defeito; Growth selecionável;
+  nenhum gradiente nos cartões.
+
 
 
