@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Radar Ambiental BR — autos, embargos e licenças a vencer</title>
+  <meta name="description" content="Monitoramento de autos de infração, embargos e licenças ambientais a vencer. Dados públicos oficiais, dossiês verificados e alertas para consultorias ambientais." />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="index.html" aria-label="Radar Ambiental BR">
+        <span class="brand-mark">RA</span>
+        <span>Radar Ambiental <small>BRASIL</small></span>
+      </a>
+      <nav class="nav">
+        <a href="#cobertura">Cobertura</a>
+        <a href="#como-funciona">Como funciona</a>
+        <a href="#planos">Planos</a>
+        <a href="#faq">FAQ</a>
+        <a href="#contato">Contato</a>
+      </nav>
+      <div class="header-actions">
+        <a class="btn btn-ghost btn-sm" href="dashboard.html">Entrar na demo</a>
+        <a class="btn btn-emerald btn-sm" href="#contato">Solicitar diagnóstico</a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="container hero-grid">
+        <div>
+          <span class="eyebrow">Dados públicos oficiais · LGPD by design</span>
+          <h1>O radar da consultoria ambiental <span>brasileira.</span></h1>
+          <p class="lead">
+            Autos de infração, embargos e licenças a vencer — organizados por estado e município,
+            com CNPJ verificado, processo e dossiê pronto para abordagem. Antes do seu concorrente.
+          </p>
+          <div class="hero-actions">
+            <a class="btn btn-emerald" href="dashboard.html">Explorar a demo →</a>
+            <a class="btn btn-ghost" href="#planos">Ver planos</a>
+          </div>
+          <div class="hero-note">Demo de staging com dados públicos. Nenhum dado de cliente real. Sem CPF.</div>
+          <div class="hero-stats">
+            <div class="stat"><b id="stat-companies">2.526</b><span>empresas autuadas (PJ, 2026)</span></div>
+            <div class="stat"><b id="stat-mg">19.713</b><span>licenças em MG</span></div>
+            <div class="stat"><b id="stat-federal">14.405</b><span>licenças federais</span></div>
+            <div class="stat"><b id="stat-expiring">198</b><span>vencendo em 90 dias</span></div>
+          </div>
+        </div>
+        <div class="hero-panel">
+          <div class="hero-panel-head">
+            <b>Cobertura nacional</b>
+            <span class="pill pill-green">● federal ativo</span>
+          </div>
+          <div id="hero-map" class="hero-map" aria-label="Mapa de cobertura do Brasil"></div>
+          <div class="hero-panel-foot">
+            <span>Federal: todo o Brasil</span>
+            <span>Estadual: MG + PR (fase 2)</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="cobertura">
+      <div class="container">
+        <div class="section-head">
+          <div class="section-kicker">Cobertura</div>
+          <h2>O Brasil em camadas — sem prometer o que não existe.</h2>
+          <p>
+            A base federal cobre todo o território. O licenciamento estadual entra por adaptadores
+            (WFS, CKAN, CSV e PDFs). O municipal é seletivo, via diários oficiais e parceiros.
+            O mapa mostra exatamente onde há dado.
+          </p>
+        </div>
+        <div class="coverage-grid">
+          <div id="coverage-map" class="coverage-map" aria-label="Mapa de cobertura por estado"></div>
+          <aside class="coverage-side">
+            <div class="card card-pad">
+              <div class="legend" style="margin-bottom:10px">
+                <span><i style="background:#10b981"></i>Federal + estadual</span>
+                <span><i style="background:#93c5fd"></i>Federal</span>
+                <span><i style="background:#e2e8f0"></i>Sem fonte local</span>
+              </div>
+              <div id="state-detail" class="notice notice-green" style="margin-bottom:10px">
+                Clique num estado para ver a cobertura.
+              </div>
+              <div id="state-list" class="state-list"></div>
+            </div>
+            <div class="card card-pad">
+              <div class="tiny strong" style="margin-bottom:8px">O que entra no MVP</div>
+              <div class="small muted">
+                <div>✓ IBAMA: autos, embargos e licenças federais (diário)</div>
+                <div>✓ SEMAD-MG: licenças estaduais (WFS, quadrimestral)</div>
+                <div>◐ PR: extratos mensais em PDF (parser na fase 2)</div>
+                <div>— Municípios: diários oficiais/parceiros (fase 3)</div>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section-tight">
+      <div class="container">
+        <div class="grid-3">
+          <div class="card card-pad">
+            <span class="pill pill-red">Urgência</span>
+            <h3 style="margin:12px 0 6px">Autos de infração</h3>
+            <p class="small muted">Empresas autuadas pelo IBAMA, com multa, categoria, processo e CNPJ verificado. Priorize por valor e recência.</p>
+          </div>
+          <div class="card card-pad">
+            <span class="pill pill-amber">Planejamento</span>
+            <h3 style="margin:12px 0 6px">Licenças a vencer</h3>
+            <p class="small muted">Licenças federais e estaduais com data de validade. A consultoria chega antes do vencimento, não depois.</p>
+          </div>
+          <div class="card card-pad">
+            <span class="pill pill-green">Prova</span>
+            <h3 style="margin:12px 0 6px">Dossiê verificado</h3>
+            <p class="small muted">Fonte, data, processo e link oficial. Um dossiê que a consultoria pode abrir e usar na primeira conversa.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="como-funciona">
+      <div class="container">
+        <div class="section-head">
+          <div class="section-kicker">Como funciona</div>
+          <h2>Do dado público ao dossiê na sua mão.</h2>
+          <p>Sem planilhas, sem garimpo manual, sem depender de um único estado.</p>
+        </div>
+        <div class="grid-4">
+          <div class="card card-pad"><div class="pill pill-blue">01</div><h3 style="margin:12px 0 6px">Monitoramos</h3><p class="small muted">IBAMA, SISLIC, SEMAD-MG e, na fase 2, PR. Atualização diária no federal.</p></div>
+          <div class="card card-pad"><div class="pill pill-blue">02</div><h3 style="margin:12px 0 6px">Verificamos</h3><p class="small muted">CNPJ, razão social, CNAE, processo e fonte. Sem CPF e sem telefone pessoal.</p></div>
+          <div class="card card-pad"><div class="pill pill-blue">03</div><h3 style="margin:12px 0 6px">Priorizamos</h3><p class="small muted">Multa, gravidade, validade e atividade. O que exige ação hoje aparece primeiro.</p></div>
+          <div class="card card-pad"><div class="pill pill-blue">04</div><h3 style="margin:12px 0 6px">Entregamos</h3><p class="small muted">Dashboard, dossiê e alerta por e-mail. WhatsApp só com opt-in explícito.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="planos">
+      <div class="container">
+        <div class="section-head">
+          <div class="section-kicker">Planos</div>
+          <h2>Assinatura mensal, com quotas e <span style="white-space:nowrap">add-ons.</span></h2>
+          <p>Preço em reais. Sem taxa por lead, sem leilão e sem promessa de volume. O cliente paga pelo monitoramento e pelo dossiê.</p>
+        </div>
+        <div class="grid-3">
+          <div class="plan">
+            <h3>Starter</h3>
+            <div class="price">R$ 297 <small>/mês</small></div>
+            <p class="small muted">Para começar num estado e num segmento.</p>
+            <ul>
+              <li>1 estado</li>
+              <li>1 segmento</li>
+              <li>25 CNPJs monitorados</li>
+              <li>Alertas por e-mail</li>
+              <li>Dossiê no dashboard</li>
+            </ul>
+            <button class="btn btn-ghost btn-block" data-plan="Starter">Simular plano</button>
+          </div>
+          <div class="plan featured">
+            <span class="tag">Mais escolhido</span>
+            <h3>Pro</h3>
+            <div class="price">R$ 697 <small>/mês</small></div>
+            <p class="small muted">Para consultorias com operação em mais de um estado.</p>
+            <ul>
+              <li>3 estados</li>
+              <li>3 segmentos</li>
+              <li>100 CNPJs monitorados</li>
+              <li>WhatsApp opt-in</li>
+              <li>Exportação de dossiê</li>
+            </ul>
+            <button class="btn btn-emerald btn-block" data-plan="Pro">Simular plano</button>
+          </div>
+          <div class="plan">
+            <h3>Enterprise</h3>
+            <div class="price">R$ 1.497 <small>/mês</small></div>
+            <p class="small muted">Para operações nacionais e times dedicados.</p>
+            <ul>
+              <li>Federal + estados contratados</li>
+              <li>500 CNPJs monitorados</li>
+              <li>API/CSV</li>
+              <li>Analista dedicado</li>
+              <li>Onboarding assistido</li>
+            </ul>
+            <button class="btn btn-ghost btn-block" data-plan="Enterprise">Falar com vendas</button>
+          </div>
+        </div>
+        <div class="notice notice-amber" style="margin-top:16px">
+          <b>Add-ons:</b> + estado R$ 97/mês · + 100 CNPJs R$ 147/mês · dossiê avulso R$ 49.
+          O piloto de validação custa R$ 497 por 3 meses, com 1 estado e 50 CNPJs.
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="faq">
+      <div class="container" style="max-width:900px">
+        <div class="section-head">
+          <div class="section-kicker">Perguntas frequentes</div>
+          <h2>O que toda consultoria pergunta primeiro.</h2>
+        </div>
+        <div class="faq">
+          <details open>
+            <summary>De onde vêm os dados?</summary>
+            <p>De bases públicas oficiais: IBAMA (autos, embargos e licenças federais), SEMAD-MG (licenças estaduais), Receita Federal (CNPJ/CNAE) e IBGE (malha geográfica). Cada registo mostra a fonte e a data.</p>
+          </details>
+          <details>
+            <summary>O sistema cobre todos os municípios?</summary>
+            <p>Não. A camada federal cobre todo o Brasil. A estadual cobre os estados com fonte estruturada — MG agora, PR na fase 2. O municipal é seletivo e entra via diários oficiais/parceiros. O mapa mostra a cobertura real.</p>
+          </details>
+          <details>
+            <summary>Vocês exibem CPF ou telefone pessoal?</summary>
+            <p>Não. A plataforma trabalha com CNPJ, razão social, CNAE, endereço comercial e contacto comercial. Sócios aparecem apenas como contagem, sem CPF ou nome. A base legal é o legítimo interesse, com minimização e opt-out.</p>
+          </details>
+          <details>
+            <summary>Como funciona o WhatsApp?</summary>
+            <p>Somente por opt-in/inbound. O cliente escolhe receber alertas, autoriza expressamente e pode sair a qualquer momento. Não fazemos disparo frio em número raspado.</p>
+          </details>
+          <details>
+            <summary>O preço é por lead?</summary>
+            <p>Não. O modelo é assinatura mensal com quotas e add-ons. Lead avulso existe apenas como dossiê pontual. Isso evita leilão, disputa de atribuição e fraude.</p>
+          </details>
+          <details>
+            <summary>Os dados substituem uma certidão oficial?</summary>
+            <p>Não. São inteligência e priorização a partir de dados públicos. A certidão e o processo oficial continuam sendo a fonte de verdade. O dossiê inclui o link para o órgão competente.</p>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="contato">
+      <div class="container contact-wrap">
+        <div class="card card-pad">
+          <div class="section-kicker">Diagnóstico gratuito</div>
+          <h2 style="margin:8px 0 8px;font-size:30px;letter-spacing:-.03em">Veja a cobertura do seu estado.</h2>
+          <p class="small muted" style="margin-top:0">Preencha e receba uma amostra de dossiês do seu segmento. Sem compromisso.</p>
+          <form id="lead-form" class="form-grid" style="margin-top:14px">
+            <div class="field"><label for="name">Nome</label><input id="name" name="name" required autocomplete="name" /></div>
+            <div class="field"><label for="email">E-mail corporativo</label><input id="email" name="email" type="email" required autocomplete="email" /></div>
+            <div class="field"><label for="company">Empresa</label><input id="company" name="company" required autocomplete="organization" /></div>
+            <div class="field"><label for="state">Estado de interesse</label><select id="state" name="state" required></select></div>
+            <div class="field" style="grid-column:1/-1"><label for="segment">Segmento</label>
+              <select id="segment" name="segment">
+                <option>Mineração</option><option>Agronegócio</option><option>Indústria</option>
+                <option>Energia e infraestrutura</option><option>Postos e combustíveis</option><option>Resíduos e saneamento</option><option>Outro</option>
+              </select>
+            </div>
+            <div class="check" style="grid-column:1/-1">
+              <input id="consent" type="checkbox" required />
+              <label for="consent">Autorizo o contacto comercial e o tratamento dos meus dados para esta finalidade, nos termos da <a href="privacidade.html" style="text-decoration:underline">Política de Privacidade</a>. Posso revogar a qualquer momento.</label>
+            </div>
+            <div style="grid-column:1/-1"><button class="btn btn-emerald btn-block" type="submit">Solicitar diagnóstico</button></div>
+            <div id="form-msg" class="notice notice-green" style="grid-column:1/-1;display:none"></div>
+          </form>
+        </div>
+        <aside class="contact-side">
+          <span class="pill pill-green">opt-in</span>
+          <h3 style="margin-top:12px">Canais locais, sem spam.</h3>
+          <p>E-mail é o canal principal. WhatsApp só depois de autorização explícita. Sem SMS frio, sem ligação automática.</p>
+          <ul>
+            <li>Dados públicos, fonte e data em cada registo.</li>
+            <li>Sem CPF, sem telefone pessoal, sem sócios nominados.</li>
+            <li>Opt-out imediato e política de retenção.</li>
+            <li>Staging com dados de demonstração.</li>
+          </ul>
+          <div class="notice notice-blue" style="margin-top:16px">
+            <b>LGPD:</b> contacto do encarregado em <a href="mailto:privacidade@magicleads.app" style="text-decoration:underline">privacidade@magicleads.app</a>.
+          </div>
+        </aside>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-grid">
+      <div>
+        <div class="brand" style="margin-bottom:8px"><span class="brand-mark">RA</span><span>Radar Ambiental <small>BRASIL</small></span></div>
+        <div class="tiny muted">Protótipo de validação · staging · dados públicos.<br />Não substitui certidão ou parecer oficial.</div>
+      </div>
+      <div class="footer-links">
+        <a href="privacidade.html">Privacidade e LGPD</a>
+        <a href="termos.html">Termos de uso</a>
+        <a href="dashboard.html">Demo</a>
+        <a href="mailto:privacidade@magicleads.app">privacidade@magicleads.app</a>
+      </div>
+    </div>
+  </footer>
+
+  <div id="toast" class="toast"></div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="assets/app.js"></script>
+</body>
+</html>

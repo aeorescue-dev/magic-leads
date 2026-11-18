@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dashboard — Radar Ambiental BR</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="index.html">
+        <span class="brand-mark">RA</span>
+        <span>Radar Ambiental <small>BRASIL</small></span>
+      </a>
+
+      <div class="notice notice-blue" style="font-size:11px;padding:8px 10px">
+        <b>Demo staging</b><br />Dados públicos. Sem CPF. Sem cliente real.
+      </div>
+
+      <div class="side-title">Filtros</div>
+      <div class="filter"><label for="f-uf">Estado</label><select id="f-uf"><option value="">Todos</option></select></div>
+      <div class="filter"><label for="f-municipality">Município</label><select id="f-municipality"><option value="">Todos</option></select></div>
+      <div class="filter"><label for="f-kind">Tipo</label>
+        <select id="f-kind">
+          <option value="">Todos</option>
+          <option value="infraction">Auto de infração</option>
+          <option value="license_expiring">Licença a vencer</option>
+          <option value="license_expired">Licença vencida</option>
+        </select>
+      </div>
+      <div class="filter"><label for="f-source">Fonte</label>
+        <select id="f-source">
+          <option value="">Todas</option>
+          <option value="IBAMA">IBAMA — autos</option>
+          <option value="IBAMA SISLIC">IBAMA — licenças</option>
+          <option value="SEMAD-MG">SEMAD-MG</option>
+        </select>
+      </div>
+      <div class="filter"><label for="f-category">Categoria</label><select id="f-category"><option value="">Todas</option></select></div>
+      <div class="filter"><label for="f-fine">Multa mínima (R$)</label>
+        <select id="f-fine">
+          <option value="0">Qualquer</option>
+          <option value="10000">R$ 10 mil+</option>
+          <option value="50000">R$ 50 mil+</option>
+          <option value="100000">R$ 100 mil+</option>
+        </select>
+      </div>
+      <div class="filter"><label for="f-expiry">Validade</label>
+        <select id="f-expiry">
+          <option value="">Qualquer</option>
+          <option value="90">Vence em 90 dias</option>
+          <option value="180">Vence em 180 dias</option>
+          <option value="365">Vence em 365 dias</option>
+          <option value="expired">Já venceu</option>
+        </select>
+      </div>
+      <div class="filter"><label for="f-search">Buscar</label><input id="f-search" placeholder="Empresa, CNPJ, processo…" /></div>
+      <button class="btn btn-ghost btn-block btn-sm" id="reset-filters" type="button">Limpar filtros</button>
+
+      <div class="sidebar-foot">
+        <div><b>Fonte:</b> IBAMA · SISLIC · SEMAD-MG · Receita</div>
+        <div style="margin-top:6px">Atualização federal: 18/11/2026</div>
+        <div style="margin-top:6px"><a href="privacidade.html" style="text-decoration:underline">LGPD e privacidade</a></div>
+      </div>
+    </aside>
+
+    <main class="app-main">
+      <header class="app-header">
+        <div>
+          <h1>Oportunidades ambientais</h1>
+          <div class="sub">Mapa de cobertura + dossiês verificados · <span id="result-count">—</span></div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span class="pill pill-green">● demo</span>
+          <span class="pill pill-slate">Plano Pro (mock)</span>
+          <button class="btn btn-ghost btn-sm only-mobile" id="toggle-filters" type="button">Filtros</button>
+          <a class="btn btn-ghost btn-sm" href="index.html">← Landing</a>
+        </div>
+      </header>
+
+      <div class="app-content">
+        <div class="kpis">
+          <div class="kpi"><span>Oportunidades</span><b id="kpi-leads">—</b></div>
+          <div class="kpi"><span>Autos federais</span><b id="kpi-autos">—</b></div>
+          <div class="kpi"><span>Licenças</span><b id="kpi-licenses">—</b></div>
+          <div class="kpi"><span>Vencendo 90d</span><b id="kpi-expiring">—</b></div>
+          <div class="kpi"><span>Cobertura</span><b id="kpi-coverage">—</b></div>
+        </div>
+
+        <div class="tabs">
+          <button class="tab active" data-tab="opps" type="button">Oportunidades</button>
+          <button class="tab" data-tab="coverage" type="button">Cobertura</button>
+          <button class="tab" data-tab="plans" type="button">Planos</button>
+        </div>
+
+        <section class="tab-panel active" id="tab-opps">
+          <div id="map" class="map-card"></div>
+          <div class="legend" style="margin:10px 2px 0">
+            <span><i style="background:#ef4444"></i>Auto de infração</span>
+            <span><i style="background:#f59e0b"></i>Licença a vencer</span>
+            <span><i style="background:#64748b"></i>Licença vencida</span>
+            <span><i style="background:#e2e8f0"></i>Sem ponto exato (federal)</span>
+          </div>
+          <div class="opportunities">
+            <div>
+              <div class="tiny strong" style="margin:4px 0 8px;color:var(--muted)">LISTA</div>
+              <div id="opp-list" class="opp-list"></div>
+            </div>
+            <div>
+              <div class="tiny strong" style="margin:4px 0 8px;color:var(--muted)">DOSSIÊ RÁPIDO</div>
+              <div id="quick-dossier" class="card card-pad">
+                <div class="muted small">Selecione uma oportunidade para ver o dossiê.</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="tab-panel" id="tab-coverage">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>UF</th><th>Estado</th><th>Autos federais</th><th>Licenças estaduais</th><th>Fonte estadual</th><th>Frescura</th><th>Cobertura</th></tr></thead>
+              <tbody id="coverage-body"></tbody>
+            </table>
+          </div>
+          <div class="notice notice-amber" style="margin-top:12px">
+            <b>Leitura honesta:</b> federal cobre todo o Brasil; MG tem licenças estaduais via WFS; PR tem fonte em PDF e entra na fase 2; municípios entram de forma seletiva (diários/parceiros). O mapa não pinta de verde o que não existe.
+          </div>
+        </section>
+
+        <section class="tab-panel" id="tab-plans">
+          <div class="grid-3">
+            <div class="plan">
+              <h3>Starter</h3><div class="price">R$ 297 <small>/mês</small></div>
+              <ul><li>1 estado</li><li>1 segmento</li><li>25 CNPJs</li><li>Alertas por e-mail</li></ul>
+              <button class="btn btn-ghost btn-block" data-plan="Starter">Simular</button>
+            </div>
+            <div class="plan featured">
+              <span class="tag">Pro</span><h3>Pro</h3><div class="price">R$ 697 <small>/mês</small></div>
+              <ul><li>3 estados</li><li>3 segmentos</li><li>100 CNPJs</li><li>WhatsApp opt-in</li><li>Exportação</li></ul>
+              <button class="btn btn-emerald btn-block" data-plan="Pro">Simular</button>
+            </div>
+            <div class="plan">
+              <h3>Enterprise</h3><div class="price">R$ 1.497 <small>/mês</small></div>
+              <ul><li>Federal + estados</li><li>500 CNPJs</li><li>API/CSV</li><li>Analista dedicado</li></ul>
+              <button class="btn btn-ghost btn-block" data-plan="Enterprise">Falar com vendas</button>
+            </div>
+          </div>
+          <div class="notice notice-green" style="margin-top:14px">
+            <b>Piloto de validação:</b> R$ 497 por 3 meses · 1 estado · 50 CNPJs · onboarding assistido. Billing mock nesta demo; Pix/Asaas/Stripe BR no piloto pago.
+          </div>
+          <div class="card card-pad" style="margin-top:14px">
+            <div class="tiny strong" style="margin-bottom:8px">ADD-ONS</div>
+            <div class="grid-3">
+              <label class="check"><input type="checkbox" data-addon="state" /> + estado (R$ 97/mês)</label>
+              <label class="check"><input type="checkbox" data-addon="cnpj" /> + 100 CNPJs (R$ 147/mês)</label>
+              <label class="check"><input type="checkbox" data-addon="dossier" /> dossiê avulso (R$ 49)</label>
+            </div>
+            <button class="btn btn-emerald btn-sm" id="mock-checkout" style="margin-top:12px" type="button">Simular assinatura</button>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <div class="modal-backdrop" id="modal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-head">
+        <div><div class="tiny strong" id="modal-kicker" style="color:var(--emerald)">DOSSIÊ</div><h3 id="modal-title">—</h3></div>
+        <button class="modal-close" id="modal-close" type="button" aria-label="Fechar">×</button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="assets/dashboard.js"></script>
+</body>
+</html>
