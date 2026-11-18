@@ -1461,7 +1461,7 @@ export default function LandingPage() {
                 onClick={() => setSelectedPlan(featuredPlan.code)}
                 aria-pressed={selectedPlan === featuredPlan.code}
                 data-plan={featuredPlan.code}
-                className={`group flex h-full flex-col rounded-3xl border p-8 text-left transition-all duration-200 ${
+                className={`group flex h-full flex-col rounded-3xl border p-8 text-left ${
                   selectedPlan === featuredPlan.code
                     ? "border-emerald-400/45 bg-[#0b1210]"
                     : "border-slate-800 bg-[#0a0f16] hover:border-slate-700"
@@ -1510,7 +1510,7 @@ export default function LandingPage() {
                       onClick={() => setSelectedPlan(plan.code)}
                       aria-pressed={selected}
                       data-plan={plan.code}
-                      className={`group flex h-full flex-col rounded-2xl border p-5 text-left transition-all duration-200 ${
+                      className={`group flex h-full flex-col rounded-2xl border p-5 text-left transition-[transform,box-shadow] duration-200 ${
                         selected
                           ? "border-emerald-400/40 bg-[#0b1210]"
                           : "border-slate-800 bg-[#080d14] hover:-translate-y-0.5 hover:border-slate-700 hover:bg-[#0a1018]"
