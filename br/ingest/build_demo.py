@@ -28,6 +28,14 @@ ASSETS = BR / "web" / "assets"
 DETAILS = BR / "data" / "license_details.json"
 CONDITIONS = BR / "data" / "conditions.json"
 TODAY = date(2026, 11, 18)
+CPF_IN_NAME = re.compile(r"\s*-?\s*CPF\s*:?\s*[\d.\-/]{11,}", re.I)
+
+
+def clean_company(value: object) -> str:
+    """Remove CPF embutido no nome (LGPD); mantém o nome da empresa/pessoa."""
+    text = CPF_IN_NAME.sub("", str(value or ""))
+    return re.sub(r"\s{2,}", " ", text).strip(" -")
+
 
 UF_BY_CODE = {
     11: "RO", 12: "AC", 13: "AM", 14: "RR", 15: "PA", 16: "AP", 17: "TO",
@@ -184,7 +192,7 @@ def parse_ibama(limit: int, muni_index: dict) -> tuple[list[dict], dict]:
                         "source": "IBAMA",
                         "source_label": "Auto de infração federal",
                         "source_id": key,
-                        "company": (row.get("NOME_INFRATOR") or "").strip(),
+                        "company": clean_company(row.get("NOME_INFRATOR")),
                         "cnpj": cnpj,
                         "cnpj_root": cnpj[:8],
                         "uf": uf,
@@ -263,7 +271,7 @@ def parse_sislic(limit: int) -> tuple[list[dict], dict]:
                 "source": "IBAMA SISLIC",
                 "source_label": "Licença federal",
                 "source_id": (row.get("NUM_LICENCA") or "").strip(),
-                "company": company,
+                "company": clean_company(company),
                 "cnpj": None,
                 "cnpj_root": None,
                 "uf": None,
@@ -425,7 +433,7 @@ def parse_mg(limit: int, muni_index: dict, details_by_process: dict, conditions_
                 "source": "SEMAD-MG",
                 "source_label": "Licença estadual (MG)",
                 "source_id": (props.get("n_solicit") or props.get("n_processo") or "").strip(),
-                "company": (props.get("nome_pf_pj") or "").strip(),
+                "company": clean_company(props.get("nome_pf_pj")),
                 "cnpj": full,
                 "cnpj_root": root,
                 "uf": "MG",
@@ -485,11 +493,12 @@ def main() -> None:
             for process, detail in (payload.get("details") or {}).items()
         }
     conditions_by_process: dict[str, dict] = {}
+    conditions_payload: dict = {}
     if CONDITIONS.exists():
-        payload = json.loads(CONDITIONS.read_text(encoding="utf-8"))
+        conditions_payload = json.loads(CONDITIONS.read_text(encoding="utf-8"))
         conditions_by_process = {
             norm(process): detail
-            for process, detail in (payload.get("processes") or {}).items()
+            for process, detail in (conditions_payload.get("processes") or {}).items()
         }
     cnpj_cache_path = CACHE / "cnpj_cache.json"
     cnpj_cache = (
@@ -592,6 +601,34 @@ def main() -> None:
     conditions_total = sum(len(item.get("conditions") or []) for item in leads)
     companies_with_conditions = sum(1 for item in leads if item.get("conditions"))
 
+    freq_order = [
+        "semanal", "quinzenal", "mensal", "bimestral", "trimestral",
+        "quadrimestral", "semestral", "anual", "unica", "constante",
+        "diario", "durante_vigencia", "nao_classificada",
+    ]
+    cond_freq: dict[str, int] = {}
+    cond_companies: set[str] = set()
+    cond_conditions = 0
+    for process in (conditions_payload.get("processes") or {}).values():
+        digits = cnpj_digits(process.get("cnpj"))
+        cond_companies.add(f"cnpj:{digits}" if len(digits) == 14 else f"name:{norm(process.get('company'))}")
+        for condition in process.get("conditions") or []:
+            cond_conditions += 1
+            for frequency in condition.get("frequencies") or [condition.get("frequency_group") or "nao_classificada"]:
+                cond_freq[frequency] = cond_freq.get(frequency, 0) + 1
+    cond_summary = conditions_payload.get("summary") or {}
+    conditions_coverage = {
+        "checked": cond_summary.get("checked", 0),
+        "with_conditions": cond_summary.get("with_conditions", 0),
+        "conditions": cond_conditions,
+        "companies": len(cond_companies),
+        "without_documents": cond_summary.get("without_documents", 0),
+        "not_parsed": cond_summary.get("document_without_parsed_conditions", 0),
+        "not_available": cond_summary.get("process_not_available", 0),
+        "errors": cond_summary.get("errors", 0),
+        "by_frequency": {key: cond_freq[key] for key in freq_order if key in cond_freq},
+    }
+
     data = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "today": TODAY.isoformat(),
@@ -612,6 +649,7 @@ def main() -> None:
             "conditions": conditions_total,
             "companies_with_conditions": companies_with_conditions,
         },
+        "conditions_coverage": conditions_coverage,
         "coverage": {
             "federal": {
                 "autos_2026": ibama_stats.get("rows", 0),

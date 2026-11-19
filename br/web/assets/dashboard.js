@@ -315,7 +315,7 @@ const FREQUENCY_LABELS = {
   semanal: "Semanal", quinzenal: "Quinzenal", mensal: "Mensal",
   bimestral: "Bimestral", trimestral: "Trimestral", quadrimestral: "Quadrimestral",
   semestral: "Semestral", anual: "Anual", unica: "Única", constante: "Constante",
-  diario: "Diário", durante_vigencia: "Durante vigência", outra: "Outra",
+  diario: "Diário", durante_vigencia: "Durante vigência", outra: "Outra", nao_classificada: "Não classificada",
 };
 const CONDITION_STATUS_LABELS = {
   cumprida: "Cumprida",
@@ -596,6 +596,17 @@ function closeModal() {
 
 function renderCoverage() {
   const rows = Object.values(S.data.coverage.states || {}).sort((a, b) => (b.federal_autos || 0) - (a.federal_autos || 0));
+  const cc = S.data.conditions_coverage;
+  const target = $("#conditions-summary");
+  if (target) {
+    target.innerHTML = cc && cc.conditions ? `
+      <div class="notice notice-green">
+        <b>Universo MG — condicionantes extraídas:</b> ${INT.format(cc.with_conditions)} processos com condicionantes · ${INT.format(cc.conditions)} condicionantes · ${INT.format(cc.companies)} empresas.
+        <br/>Verificados ${INT.format(cc.checked)} processos: ${INT.format(cc.without_documents)} sem documento, ${INT.format(cc.not_parsed)} documento não parseável, ${INT.format(cc.not_available)} indisponíveis na API pública.
+        <br/>Periodicidade: ${Object.entries(cc.by_frequency).map(([key, value]) => `${INT.format(value)} ${frequencyLabel(key).toLowerCase()}`).join(" · ")}.
+        <br/><b>Semanal: ${INT.format(cc.by_frequency.semanal || 0)} · Quinzenal: ${INT.format(cc.by_frequency.quinzenal || 0)}.</b>
+      </div>` : "";
+  }
   $("#coverage-body").innerHTML = rows.map((row) => {
     const cov = coverageFor(row.uf);
     const stateSource = row.uf === "MG" ? "SEMAD-MG WFS" : PENDING_STATES[row.uf] ? PENDING_STATES[row.uf] : "—";

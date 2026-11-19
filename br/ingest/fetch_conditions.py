@@ -38,6 +38,12 @@ OUT = BR / "data" / "conditions.json"
 SLA = "https://ecosistemas.meioambiente.mg.gov.br/sla"
 DOCS_API = SLA + "/listarDocumentos/anexado/cidadao/{id}"
 DOWNLOAD = SLA + "/anexarDocumento/downloadPath"
+CPF_IN_NAME = re.compile(r"\s*-?\s*CPF\s*:?\s*[\d.\-/]{11,}", re.I)
+
+
+def clean_company(value: object) -> str:
+    text = CPF_IN_NAME.sub("", str(value or ""))
+    return re.sub(r"\s{2,}", " ", text).strip(" -")
 
 FREQ_TERMS = (
     ("SEMANAL", "semanal"),
@@ -139,6 +145,24 @@ def clean_responsible(raw: object) -> str:
     return "Equipe (nome não exibido)"
 
 
+def classify_condition(periodicity: object, description: object, deadline: object) -> tuple[list[str], str, list[str]]:
+    """Classifica pela periodicidade/prazo explícitos; o texto é só fallback.
+
+    Assim, uma condicionante semestral cujo texto menciona "relatórios mensais"
+    continua semestral. As menções no texto ficam em `description_frequencies`
+    para auditoria, mas não entram nas contagens oficiais.
+    """
+    primary = f"{periodicity or ''} {deadline or ''}".strip()
+    frequencies, group = classify_frequency(primary)
+    text_frequencies, _ = classify_frequency(description)
+    if not frequencies:
+        frequencies, group = text_frequencies, (
+            "composta" if len(text_frequencies) > 1 else text_frequencies[0] if text_frequencies else "nao_classificada"
+        )
+    mentions = [item for item in text_frequencies if item not in frequencies]
+    return frequencies, group, mentions
+
+
 def make_condition(
     *,
     item: object,
@@ -151,7 +175,7 @@ def make_condition(
     observation: object = "",
     source: str,
 ) -> dict:
-    frequencies, group = classify_frequency(f"{periodicity or ''} {description or ''} {deadline or ''}")
+    frequencies, group, mentions = classify_condition(periodicity, description, deadline)
     return {
         "item": int(item) if str(item).isdigit() else item,
         "description": str(description or "").strip(),
@@ -160,6 +184,7 @@ def make_condition(
         "periodicity_raw": str(periodicity or deadline or "").strip(),
         "frequencies": frequencies,
         "frequency_group": group,
+        "description_frequencies": mentions,
         "responsible": clean_responsible(responsible),
         "status": classify_status(status),
         "status_raw": str(status or "").strip(),
@@ -405,6 +430,17 @@ def fetch_process(lead: dict) -> dict:
         timeout=60,
         headers={"User-Agent": "MagicLeadsBR/0.1", "Content-Type": "application/json"},
     )
+    if response.status_code == 404:
+        result = {
+            "process": process,
+            "id_solicitacao": id_solicitacao,
+            "company": clean_company(lead.get("company")),
+            "status": "process_not_available",
+            "checked_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cache_file.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
+        return result
     response.raise_for_status()
     documents = response.json().get("content") or []
     compliance_docs = [
@@ -464,7 +500,7 @@ def fetch_process(lead: dict) -> dict:
     result = {
         "process": process,
         "id_solicitacao": id_solicitacao,
-        "company": lead.get("company"),
+        "company": clean_company(lead.get("company")),
         "cnpj": lead.get("cnpj"),
         "status": status,
         "compliance_document": xlsx_doc.get("documento") if xlsx_doc else None,
@@ -490,6 +526,7 @@ def write_output(processes: dict, coverage: dict) -> dict:
         "with_compliance_xlsx": sum(1 for item in processes.values() if item.get("status") == "ok"),
         "without_documents": status_counts.get("no_conditions_document", 0),
         "document_without_parsed_conditions": status_counts.get("document_without_parsed_conditions", 0),
+        "process_not_available": status_counts.get("process_not_available", 0),
         "errors": status_counts.get("error", 0),
         "total_in_file": len(processes),
     }
@@ -522,24 +559,46 @@ def main() -> None:
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--all", action="store_true")
     parser.add_argument("--reclassify", action="store_true", help="Recalcula frequências no ficheiro existente, sem rede")
+    parser.add_argument("--retry-errors", action="store_true", help="Reprocessa apenas processos com status error")
     args = parser.parse_args()
 
     if args.reclassify:
         payload = json.loads(OUT.read_text(encoding="utf-8"))
         processes = payload.get("processes") or {}
         for process in processes.values():
+            process["company"] = clean_company(process.get("company"))
             for condition in process.get("conditions") or []:
-                frequencies, group = classify_frequency(
-                    f"{condition.get('periodicity_raw', '')} {condition.get('description', '')} {condition.get('deadline', '')}"
+                frequencies, group, mentions = classify_condition(
+                    condition.get("periodicity_raw", ""),
+                    condition.get("description", ""),
+                    condition.get("deadline", ""),
                 )
                 condition["frequencies"] = frequencies
                 condition["frequency_group"] = group
+                condition["description_frequencies"] = mentions
             process["summary"] = summarize(process.get("conditions") or [])
         summary = write_output(processes, payload.get("coverage") or {})
         print(f"[ok] reclassificado — {summary}")
         return
 
     leads = candidate_leads(args.source, None if args.all else args.limit, args.offset)
+    if args.retry_errors:
+        payload = json.loads(OUT.read_text(encoding="utf-8"))
+        errors = [
+            (sid, entry) for sid, entry in (payload.get("coverage") or {}).items()
+            if entry.get("status") == "error"
+        ]
+        leads = [
+            {
+                "process": entry.get("process") or "",
+                "id_solicitacao": int(sid),
+                "company": entry.get("company"),
+            }
+            for sid, entry in errors
+        ]
+        leads = leads[args.offset:]
+        if not args.all:
+            leads = leads[: args.limit]
     if args.process:
         leads = [lead for lead in leads if lead["process"] == args.process]
     previous: dict = {}

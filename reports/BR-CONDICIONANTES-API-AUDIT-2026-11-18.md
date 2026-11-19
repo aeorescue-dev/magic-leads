@@ -1,8 +1,8 @@
 # Condicionantes ambientais por empresa — auditoria e extrator (2026-11-18)
 
 **Âmbito:** SLA/Sisema (MG), APIs públicas, documentos de licenciamento e condicionantes por processo.
-**Amostra aleatória:** 348 processos de Minas Gerais (de 19.713), 111 com condicionantes extraídas, 497 condicionantes em 105 empresas.
-**Veredito:** **é tecnicamente possível extrair condicionantes individuais por empresa** através dos documentos públicos do SLA. A cobertura não é 100%: depende de o processo ter Parecer Técnico e/ou Relatório de Cumprimento de Condicionantes anexado. Na amostra aleatória, **31,9%** dos processos tinham condicionantes extraíveis.
+**Universo:** 19.672 processos de Minas Gerais verificados, **3.184 com condicionantes extraídas**, **13.692 condicionantes em 2.807 empresas**.
+**Veredito:** **é tecnicamente possível extrair condicionantes individuais por empresa** através dos documentos públicos do SLA. A cobertura é documental: 8.809 processos não têm documento de condicionantes publicado e 6.599 já não existem na API pública (404). Nos processos com documento acessível, **24,4%** tinham condicionantes extraíveis.
 
 ---
 
@@ -53,48 +53,54 @@ O Parecer Técnico traz o **Anexo I — Condicionantes** com `Item`, `Descriçã
 
 ---
 
-## 3. Amostra de 348 processos (MG)
+## 3. Carga completa de MG (19.672 processos)
 
-Amostra aleatória determinística sobre as 19.713 licenças do WFS (`random.Random(42)`), para evitar viés de região/data.
+Carga executada em lotes retomáveis sobre as 19.713 licenças do WFS, com cache por `idSolicitacao` e reprocessamento dos erros transitórios.
 
 | Métrica | Valor |
 |---|---:|
-| Processos analisados | **348** |
-| Com condicionantes extraídas | **111** (31,9%) |
-| Condicionantes extraídas | **497** |
-| Empresas distintas | **105** |
-| Fonte XLSX (status/histórico) | **1** processo (11 condicionantes) |
-| Fonte Parecer Técnico | **110** processos (486 condicionantes) |
-| Sem documento de condicionantes | **233** (67,0%) |
-| Documento sem condições parseáveis | **23** (6,6%) |
-| Erros de rede/parse | **0** |
+| Processos verificados | **19.672** |
+| Com condicionantes extraídas | **3.184** (16,2% do total) |
+| Condicionantes extraídas | **13.692** |
+| Empresas distintas | **2.807** |
+| Fonte XLSX (status/histórico) | **3** processos (93 condicionantes) |
+| Fonte Parecer Técnico | **3.181** processos (13.599 condicionantes) |
+| Sem documento de condicionantes | **8.809** (44,8%) |
+| Documento sem condições parseáveis | **1.027** (5,2%) |
+| Processo já não existe na API pública (404) | **6.599** (33,5%) |
+| Erros residuais de rede | **52** (0,3%) |
 
-### Distribuição por periodicidade (497 condicionantes; uma condição composta conta em mais de uma)
+**Cobertura efetiva:** entre os 13.020 processos com documento acessível, **24,4%** tinham condicionantes extraíveis.
+
+### Distribuição por periodicidade (13.692 condicionantes; uma condição composta conta em mais de uma)
 
 | Periodicidade | Ocorrências |
 |---|---:|
-| Durante vigência | **211** |
-| Única | **189** |
-| Anual | **86** |
-| Semestral | **34** |
-| Constante | **6** |
-| Trimestral | **3** |
-| Mensal | **3** |
-| Diário | **2** |
-| Não classificada | **36** (7,2%) |
+| Durante vigência | **6.368** |
+| Única | **4.615** |
+| Anual | **1.869** |
+| Não classificada | **1.346** (9,8%) |
+| Semestral | **347** |
+| Trimestral | **29** |
+| Mensal | **17** |
+| Diário | **12** |
+| Constante | **11** |
+| Bimestral | **4** |
+| **Semanal** | **0** |
+| **Quinzenal** | **0** |
 
-**Semanal e quinzenal:** **0 ocorrências** na amostra. O filtro já suporta as duas; a carga completa pode encontrar casos noutros processos.
+A classificação usa o campo oficial de periodicidade/prazo; menções no texto descritivo ficam separadas em `description_frequencies`. Há **3 menções semanais no texto** (manutenção semanal de tanque, limpeza semanal de separador água/óleo, comprovantes semanais de efluente), mas os prazos oficiais dessas condicionantes são, respetivamente, 30 dias, durante a vigência e anual. **Não há obrigação com periodicidade oficial semanal ou quinzenal na base de MG.**
 
 ### Distribuição por situação
 
 | Situação | Ocorrências |
 |---|---:|
-| Não informado (Parecer) | **486** |
+| Não informado (Parecer) | **13.681** |
 | Cumprida conforme periodicidade | **7** |
 | Cumprida | **3** |
 | Em atendimento | **1** |
 
-**Leitura:** o Parecer dá a obrigação e o prazo, mas não o estado de cumprimento. O XLSX dá o estado; por isso os dois são combinados.
+**Leitura:** o Parecer dá a obrigação e o prazo, mas não o estado de cumprimento. O XLSX dá o estado; por isso os dois são combinados. Apenas 3 processos tinham XLSX de cumprimento na base — é a lacuna de dados mais importante para o produto.
 
 ---
 
@@ -238,7 +244,7 @@ python aggregate_conditions.py               # agregado por empresa
 python build_demo.py                         # snapshot do dashboard
 ```
 
-**Projeção com base na amostra:** ~31,9% de 19.713 ≈ **6.300 processos** com condicionantes, ~**28.000 condicionantes** (média de 4,5 por processo).
+**Resultado da carga completa:** 19.672 processos verificados em ~6 horas (lotes de 1.000, 6 workers, ~1,1 processo/s) → **3.184 processos com condicionantes** e **13.692 condicionantes** (média de 4,3 por processo).
 
 ---
 
@@ -263,7 +269,7 @@ python build_demo.py                         # snapshot do dashboard
 4. Adicionar OCR para PDFs digitalizados só depois de medir a proporção (6,6% na amostra).
 5. Expandir o mesmo extrator para outros estados que publiquem documentos de licença; onde não houver, manter apenas o que o WFS/CSV oferece.
 
-**Conclusão:** sim, é possível entregar condicionantes individuais por empresa com dados públicos. A amostra de 348 processos produziu **497 condicionantes em 105 empresas**, com periodicidade classificada em 92,8% dos casos. O limite é documental, não técnico: processos sem Parecer/Relatório anexado não têm condicionantes extraíveis.
+**Conclusão:** sim, é possível entregar condicionantes individuais por empresa com dados públicos. A carga completa de MG produziu **13.692 condicionantes em 2.807 empresas**, com periodicidade classificada em 90,2% dos casos e **zero obrigações semanais ou quinzenais** oficiais. O limite é documental, não técnico: 8.809 processos não têm documento publicado e 6.599 já não existem na API pública.
 
 ---
 

@@ -9,7 +9,7 @@ Protótipo de validação para o mercado brasileiro de consultoria/engenharia am
 - **Landing:** `/`
 - **Dashboard:** `/dashboard.html`
 - **Código:** branch `feat/br-environmental-mvp` (worktree `garimpador-leads-br`)
-- **Dados:** snapshot de 18/11/2026 — 1.360 oportunidades, 650 autos IBAMA, 450 licenças MG, 260 licenças federais SISLIC. **Condicionantes:** 497 extraídas em 111 processos (amostra de 348); 112 visíveis no dashboard em 22 oportunidades.
+- **Dados:** snapshot de 18/11/2026 — 1.400 oportunidades, 650 autos IBAMA, 490 licenças MG (450 + 40 renovadas), 260 licenças federais SISLIC. **Condicionantes:** 13.692 extraídas em 3.184 processos (carga completa de MG); 530 visíveis no dashboard em 123 oportunidades.
 - **Cobertura:** federal em todo o Brasil + MG (WFS). PR tem fonte em PDF identificada; parser na fase 2.
 - **Billing:** simulado (mock). Sem cobrança real.
 ## Deploy Vercel
