@@ -2133,6 +2133,16 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Estado:** aguardar verificação manual; não criar campanha nem associar número até `identityStatus=VERIFIED`; campanhas de voz continuam pausadas.
 - **Documento:** `reports/10DLC-STATUS-2026-11-18.md`.
 
+### 10DLC — recurso negado e plano (2026-11-18)
+
+- **Recurso negado pelo TCR.** A Telnyx submeteu o recurso a **2026-11-13 02:40** sem alterar os dados do brand; em **2026-11-18 13:22** confirmou a recusa e disse estar a pedir o motivo ao TCR.
+- **Causa provável:** `entityType=PRIVATE_PROFIT` num EIN emitido a pessoa singular (Name Control **SOAR**). Um recurso com os mesmos dados tende a falhar de novo.
+- **Estado API (read-only):** `status=OK`, `identityStatus=UNVERIFIED`, `entityType=PRIVATE_PROFIT`, `mobilePhone` vazio, `businessContactEmailVerifiedDate` vazio, número `+19739137808` ativo no profile, 0 campanhas.
+- **Gate:** não reenviar o mesmo pedido nem criar brand duplicado antes de **2026-11-20 18:00 ET**. Pedido objetivo preparado para **2026-11-23** se não houver resposta.
+- **Artefactos:** `reports/10DLC-NEXT-REQUEST-2026-11-18.md` (email, checklist SP/OTP, árvore de decisão) e `scripts/send_10dlc_email.py` (dry-run por defeito; `--send` para entregar via Resend).
+- **Bloqueio SP:** falta um **mobile US/CA** para OTP (`mobilePhone` vazio) e o `CP575G.pdf` não está no workspace.
+- **Produção intocada:** nenhum brand, campanha, número ou variável alterado.
+
 ### Parecer — Collision & Accident Leads (2026-11-06)
 
 - **Documento completo:** `docs/COLLISION-LEADS-FEASIBILITY.md`.
