@@ -1679,15 +1679,29 @@ export interface OpportunityListResponse {
 export async function fetchOpportunityInsights(
   kind: string = "preventive",
   days: number = 7,
+  filters: {
+    city?: string;
+    category?: string;
+    severity?: string;
+    zips?: string;
+    deadline_within?: number;
+    with_fines?: boolean;
+  } = {},
 ): Promise<OpportunityInsights> {
+  const params = new URLSearchParams({ kind, days: String(days) });
+  if (filters.city && filters.city !== "all") params.set("city", filters.city);
+  if (filters.category && filters.category !== "all") params.set("category", filters.category);
+  if (filters.severity && filters.severity !== "all") params.set("severity", filters.severity);
+  if (filters.zips) params.set("zips", filters.zips);
+  if (filters.deadline_within != null) {
+    params.set("deadline_within", String(filters.deadline_within));
+  }
+  if (filters.with_fines) params.set("with_fines", "true");
   return handle<OpportunityInsights>(
-    await fetch(
-      `${API_URL}/api/opportunities/insights?kind=${encodeURIComponent(kind)}&days=${days}`,
-      {
-        credentials: "include",
-        headers: { ...authHeaders() },
-      }
-    )
+    await fetch(`${API_URL}/api/opportunities/insights?${params.toString()}`, {
+      credentials: "include",
+      headers: { ...authHeaders() },
+    })
   );
 }
 

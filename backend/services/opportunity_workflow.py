@@ -44,6 +44,81 @@ def _parse_dt(value: Optional[str]) -> Optional[datetime]:
     return parsed.astimezone(timezone.utc).replace(tzinfo=None)
 
 
+def _build_opportunity_filters(
+    *,
+    kind: Optional[str] = None,
+    status: Optional[str] = None,
+    city: Optional[str] = None,
+    category: Optional[str] = None,
+    zips: Optional[list[str]] = None,
+    days: Optional[int] = None,
+    deadline_within: Optional[int] = None,
+    with_fines: bool = False,
+    severity: Optional[str] = None,
+    search: Optional[str] = None,
+    include_kind: bool = True,
+) -> tuple[list[str], list]:
+    """Filtros partilhados por lista, contagens e insights.
+
+    `include_kind=False` serve para as contagens por `source_kind`: mantêm os
+    restantes filtros (cidade, categoria, severidade, prazo, multas), mas não
+    colapsam num único tipo.
+    """
+    clauses: list[str] = []
+    params: list = []
+    if include_kind and kind:
+        clauses.append("source_kind = ?")
+        params.append(kind)
+    if status:
+        clauses.append("status = ?")
+        params.append(status)
+    if city:
+        clauses.append("UPPER(TRIM(city)) = UPPER(TRIM(?))")
+        params.append(city)
+    if category:
+        clauses.append("category = ?")
+        params.append(category)
+    if severity:
+        clauses.append("severity = ?")
+        params.append(severity)
+    if zips:
+        cleaned = []
+        for value in zips[:200]:
+            code = str(value or "").strip()[:5]
+            if len(code) == 5 and code.isdigit():
+                cleaned.append(code)
+        if cleaned:
+            placeholders = ",".join("?" for _ in cleaned)
+            clauses.append(f"SUBSTR(TRIM(zip_code), 1, 5) IN ({placeholders})")
+            params.extend(cleaned)
+    if days:
+        clauses.append(
+            "date(COALESCE(received_at, created_at)) >= date('now', ?)"
+        )
+        params.append(f"-{int(days)} days")
+    if deadline_within is not None:
+        clauses.append("compliance_deadline IS NOT NULL")
+        clauses.append("date(compliance_deadline) <= date('now', ?)")
+        params.append(f"+{int(deadline_within)} days")
+    if with_fines:
+        clauses.append(
+            "(COALESCE(fine_balance, 0) > 0 OR "
+            "(COALESCE(fine_imposed, 0) - COALESCE(fine_paid, 0)) > 0)"
+        )
+    term = str(search or "").strip().lower()
+    if term:
+        like = f"%{term}%"
+        clauses.append(
+            "(LOWER(address) LIKE ? OR LOWER(city) LIKE ? OR "
+            "LOWER(COALESCE(zip_code, '')) LIKE ? OR "
+            "LOWER(COALESCE(category, '')) LIKE ? OR "
+            "LOWER(COALESCE(description, '')) LIKE ? OR "
+            "LOWER(COALESCE(owner_name, '')) LIKE ?)"
+        )
+        params.extend([like] * 6)
+    return clauses, params
+
+
 def make_property_key(
     *,
     bbl: Optional[str] = None,
@@ -316,66 +391,25 @@ class OpportunityWorkflowService:
         days: Optional[int] = None,
         deadline_within: Optional[int] = None,
         with_fines: bool = False,
+        severity: Optional[str] = None,
         search: Optional[str] = None,
         viewer_id: Optional[int] = None,
     ) -> dict:
         """Lista oportunidades com janela/paginação e filtros no servidor."""
         limit = max(1, min(int(limit or 50), 300))
         offset = max(0, int(offset or 0))
-        clauses = []
-        params: list = []
-        if kind:
-            clauses.append("source_kind = ?")
-            params.append(kind)
-        if status:
-            clauses.append("status = ?")
-            params.append(status)
-        if city:
-            clauses.append("UPPER(TRIM(city)) = UPPER(TRIM(?))")
-            params.append(city)
-        if category:
-            clauses.append("category = ?")
-            params.append(category)
-        if zips:
-            # Filtro por bairro: o cliente envia os ZIPs que compõem o bairro.
-            cleaned = []
-            for value in zips[:200]:
-                code = str(value or "").strip()[:5]
-                if len(code) == 5 and code.isdigit():
-                    cleaned.append(code)
-            if cleaned:
-                placeholders = ",".join("?" for _ in cleaned)
-                clauses.append(
-                    f"SUBSTR(TRIM(zip_code), 1, 5) IN ({placeholders})"
-                )
-                params.extend(cleaned)
-        if days:
-            clauses.append(
-                "date(COALESCE(received_at, created_at)) >= date('now', ?)"
-            )
-            params.append(f"-{int(days)} days")
-        if deadline_within is not None:
-            clauses.append("compliance_deadline IS NOT NULL")
-            clauses.append(
-                "date(compliance_deadline) <= date('now', ?)"
-            )
-            params.append(f"+{int(deadline_within)} days")
-        if with_fines:
-            clauses.append(
-                "(COALESCE(fine_balance, 0) > 0 OR "
-                "(COALESCE(fine_imposed, 0) - COALESCE(fine_paid, 0)) > 0)"
-            )
-        term = str(search or "").strip().lower()
-        if term:
-            like = f"%{term}%"
-            clauses.append(
-                "(LOWER(address) LIKE ? OR LOWER(city) LIKE ? OR "
-                "LOWER(COALESCE(zip_code, '')) LIKE ? OR "
-                "LOWER(COALESCE(category, '')) LIKE ? OR "
-                "LOWER(COALESCE(description, '')) LIKE ? OR "
-                "LOWER(COALESCE(owner_name, '')) LIKE ?)"
-            )
-            params.extend([like] * 6)
+        clauses, params = _build_opportunity_filters(
+            kind=kind,
+            status=status,
+            city=city,
+            category=category,
+            zips=zips,
+            days=days,
+            deadline_within=deadline_within,
+            with_fines=with_fines,
+            severity=severity,
+            search=search,
+        )
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         conn = get_connection()
         try:
@@ -402,13 +436,18 @@ class OpportunityWorkflowService:
                     LIMIT ? OFFSET ?""",
                 (int(viewer_id or -1), *params, limit, offset),
             ).fetchall()
-            count_clauses = []
-            count_params: list = []
-            if days:
-                count_clauses.append(
-                    "date(COALESCE(received_at, created_at)) >= date('now', ?)"
-                )
-                count_params.append(f"-{int(days)} days")
+            count_clauses, count_params = _build_opportunity_filters(
+                kind=kind,
+                status=status,
+                city=city,
+                category=category,
+                zips=zips,
+                days=days,
+                deadline_within=deadline_within,
+                with_fines=with_fines,
+                severity=severity,
+                include_kind=False,
+            )
             count_where = (
                 f"WHERE {' AND '.join(count_clauses)}" if count_clauses else ""
             )
@@ -430,7 +469,6 @@ class OpportunityWorkflowService:
                 "offset": offset,
                 "limit": limit,
                 "has_more": offset + len(rows) < int(total or 0),
-                "insights": self.insights(kind=kind or "all", window_days=days),
             }
         finally:
             conn.close()
@@ -454,20 +492,31 @@ class OpportunityWorkflowService:
         kind: Optional[str] = "preventive",
         days: int = 10,
         window_days: Optional[int] = None,
+        *,
+        city: Optional[str] = None,
+        category: Optional[str] = None,
+        zips: Optional[list[str]] = None,
+        severity: Optional[str] = None,
+        deadline_within: Optional[int] = None,
+        with_fines: bool = False,
     ) -> dict:
-        """Agregados do painel lateral e dos KPI, sem expor dados sensíveis."""
+        """Agregados do painel lateral e dos KPI, sem expor dados sensíveis.
+
+        Aceita os mesmos filtros da lista (cidade, categoria, severidade, ZIPs,
+        prazo e multas) para os cartões não divergirem do feed.
+        """
         days = max(1, min(int(days or 10), 30))
         today = datetime.now(timezone.utc).date()
-        clause_parts = []
-        params: list = []
-        if kind and kind != "all":
-            clause_parts.append("source_kind = ?")
-            params.append(kind)
-        if window_days:
-            clause_parts.append(
-                "date(COALESCE(received_at, created_at)) >= date('now', ?)"
-            )
-            params.append(f"-{int(window_days)} days")
+        clause_parts, params = _build_opportunity_filters(
+            kind=None if kind == "all" else kind,
+            city=city,
+            category=category,
+            zips=zips,
+            days=window_days,
+            deadline_within=deadline_within,
+            with_fines=with_fines,
+            severity=severity,
+        )
         clause = f"WHERE {' AND '.join(clause_parts)}" if clause_parts else ""
         conn = get_connection()
         try:

@@ -154,3 +154,62 @@ def test_list_filters_by_neighborhood_zips():
         "02124",
         "02125",
     }
+
+
+def test_insights_respects_city_and_category():
+    _create(
+        record="i1",
+        address="1 Alpha St",
+        city="Boston",
+        category="Plumbing",
+        severity="high",
+    )
+    _create(
+        record="i2",
+        address="2 Beta Ave",
+        city="Boston",
+        category="Roof",
+        severity="critical",
+    )
+    _create(
+        record="i3",
+        address="3 Gamma Rd",
+        city="Dallas",
+        category="Plumbing",
+        severity="high",
+    )
+
+    boston = opportunity_workflow.insights(
+        kind="preventive", window_days=7, city="Boston"
+    )
+    plumbing = opportunity_workflow.insights(
+        kind="preventive", window_days=7, category="Plumbing"
+    )
+    critical = opportunity_workflow.insights(
+        kind="preventive", window_days=7, severity="critical"
+    )
+
+    assert boston["totals"]["count"] == 2
+    assert plumbing["totals"]["count"] == 2
+    assert critical["totals"]["count"] == 1
+
+
+def test_list_counts_respect_city_and_do_not_embed_insights():
+    _create(record="c1", address="1 Alpha St", city="Boston")
+    _create(record="c2", address="2 Beta Ave", city="Dallas")
+
+    result = opportunity_workflow.list(kind="preventive", city="Boston", days=7)
+
+    assert result["total"] == 1
+    assert result["counts"]["preventive"] == 1
+    assert "insights" not in result
+
+
+def test_list_filters_by_severity():
+    _create(record="s1", address="1 Alpha St", severity="critical")
+    _create(record="s2", address="2 Beta Ave", severity="high")
+
+    result = opportunity_workflow.list(kind="preventive", severity="critical")
+
+    assert result["total"] == 1
+    assert result["opportunities"][0]["severity"] == "critical"

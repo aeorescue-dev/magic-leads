@@ -254,6 +254,7 @@ function DashboardPageInner() {
   const { user, subscription, loading: authLoading, signOut, refreshSubscription } = useAuth();
   const isWeeklyPlan = Boolean(user?.plan?.startsWith("weekly_"));
   const isActiveWeekly = isWeeklyPlan && Boolean(subscription?.can_access);
+  const hasAccess = Boolean(subscription?.can_access);
   const isFreemium = !isActiveWeekly;
   const [usage, setUsage] = useState<Usage | null>(null);
   const [billingPlans, setBillingPlans] = useState<SubscriptionPlan[]>([]);
@@ -322,6 +323,7 @@ function DashboardPageInner() {
   const [withFines, setWithFines] = useState(false);
   const [feedLayer, setFeedLayer] = useState<"all" | "reactive" | "permit">("all");
   const [preventiveShown, setPreventiveShown] = useState(0);
+  const [preventiveLoaded, setPreventiveLoaded] = useState(false);
   // Data de referência estável para prazos calculados no render.
   const [renderNow] = useState(() => Date.now());
   const [selectedType, setSelectedType] = useState<string>("all");
@@ -850,13 +852,39 @@ function DashboardPageInner() {
   }, [publicMetricsData]);
 
   // Agregados da pré-inspeção: alimentam os KPI e o painel lateral do feed.
-  // Marco 1A: o endpoint exige acesso vigente; em freemium não disparamos o
-  // pedido para o interceptor 402 não saltar automaticamente para créditos.
+  // O gate é o acesso vigente (não o plano semanal): planos pro/enterprise
+  // também precisam dos cartões. Os filtros acompanham o feed para os números
+  // não divergirem da lista.
+  const insightsCity = selectedCity === "all" ? undefined : selectedCity;
+  const insightsCategory = selectedCategory === "all" ? undefined : selectedCategory;
+  const insightsSeverity = selectedSeverity === "all" ? undefined : selectedSeverity;
+  const insightsZips = (neighborhoodFilter?.zips ?? NO_ZIPS).join(",");
+  const insightsDeadline =
+    deadlineWindow === "all" ? (onlyDeadline ? 7 : undefined) : Number(deadlineWindow);
   const { mutate: mutatePreventiveInsights } = useSWRConfig();
   const { data: preventiveInsightsData } = useSWR(
-    isActiveWeekly ? "/api/opportunities/insights?kind=preventive" : null,
-    () => fetchOpportunityInsights("preventive"),
-    { refreshInterval: 60000, isPaused: swrPaused }
+    hasAccess
+      ? [
+          "opportunity-insights",
+          "preventive",
+          insightsCity ?? null,
+          insightsCategory ?? null,
+          insightsSeverity ?? null,
+          insightsZips,
+          insightsDeadline ?? null,
+          withFines,
+        ]
+      : null,
+    () =>
+      fetchOpportunityInsights("preventive", 7, {
+        city: insightsCity,
+        category: insightsCategory,
+        severity: insightsSeverity,
+        zips: insightsZips || undefined,
+        deadline_within: insightsDeadline,
+        with_fines: withFines,
+      }),
+    { refreshInterval: 60000, isPaused: swrPaused, keepPreviousData: true }
   );
   useEffect(() => {
     if (preventiveInsightsData) setPreventiveInsights(preventiveInsightsData);
@@ -1470,7 +1498,11 @@ function DashboardPageInner() {
       if (userId) refreshNotifications();
       refreshHistory();
       if (isOpportunity) {
-        mutatePreventiveInsights("/api/opportunities/insights?kind=preventive");
+        mutatePreventiveInsights(
+          (key) => Array.isArray(key) && key[0] === "opportunity-insights",
+          undefined,
+          { revalidate: true }
+        );
         requestOpportunitiesRefresh();
       }
     } catch (e: any) {
@@ -2072,7 +2104,7 @@ function DashboardPageInner() {
   const kpiHero = isPreventionTab
     ? {
         label: t("dashboard.kpi.active_opportunities"),
-        value: realTotalLeads,
+        value: preventiveLoaded ? preventiveShown : realTotalLeads,
         delta: t("dashboard.kpi.active_delta"),
         sub: `${dashboardSummary?.urgent ?? 0} ${t("dashboard.kpi.need_action")}`,
         series: leadSeries,
@@ -3356,7 +3388,10 @@ function DashboardPageInner() {
                 <PreventiveFeed
                   onOpenReveal={openOpportunityReveal}
                   filters={feedFilters}
-                  onCountChange={setPreventiveShown}
+                  onCountChange={(count) => {
+                    setPreventiveShown(count);
+                    setPreventiveLoaded(true);
+                  }}
                 />
               </div>
             </div>

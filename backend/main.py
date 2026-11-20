@@ -9885,6 +9885,7 @@ async def list_opportunities(
     days: Optional[int] = None,
     deadline_within: Optional[int] = None,
     with_fines: bool = False,
+    severity: Optional[str] = None,
     search: Optional[str] = None,
     user: dict = Depends(_get_current_user),
 ):
@@ -9911,6 +9912,7 @@ async def list_opportunities(
         days=window_days,
         deadline_within=deadline_within,
         with_fines=with_fines,
+        severity=severity,
         search=search,
         viewer_id=user["id"],
     )
@@ -9920,6 +9922,12 @@ async def list_opportunities(
 async def opportunity_insights(
     kind: str = "preventive",
     days: Optional[int] = None,
+    city: Optional[str] = None,
+    category: Optional[str] = None,
+    zips: Optional[str] = None,
+    severity: Optional[str] = None,
+    deadline_within: Optional[int] = None,
+    with_fines: bool = False,
     user: dict = Depends(_get_current_user),
 ):
     await _require_active_access(user)
@@ -9928,7 +9936,21 @@ async def opportunity_insights(
         if days is not None
         else int(getattr(settings, "PREVENTIVE_FEED_WINDOW_DAYS", 7) or 7)
     )
-    return opportunity_workflow.insights(kind=kind, window_days=window_days)
+    zip_list = [
+        part.strip()
+        for part in str(zips or "").split(",")
+        if part.strip()
+    ][:200]
+    return opportunity_workflow.insights(
+        kind=kind,
+        window_days=window_days,
+        city=city,
+        category=category,
+        zips=zip_list or None,
+        severity=severity,
+        deadline_within=deadline_within,
+        with_fines=with_fines,
+    )
 
 
 @app.get("/api/opportunities/territories")
