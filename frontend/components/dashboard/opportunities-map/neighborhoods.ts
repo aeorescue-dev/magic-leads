@@ -172,6 +172,7 @@ export function nycBorough(zip: string): string {
 function zoneName(city: string, zone: Zone): string {
   if (city === "NYC") return nycBorough(zone.zip);
   if (city === "Boston") return BOSTON_ZIP_LABELS[zone.zip] ?? zone.label ?? OTHER_AREAS;
+  if (city === "Chicago") return zone.label ?? `ZIP ${zone.zip}`;
   if (city === "Dallas") return DALLAS_ZIP_LABELS[zone.zip] ?? OTHER_AREAS;
   return zone.label ?? OTHER_AREAS;
 }

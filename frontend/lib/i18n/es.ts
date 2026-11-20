@@ -317,7 +317,7 @@ const ES: Dict = {
 
   // Dashboard
   "dashboard.nav.overview": "Resumen general",
-  "dashboard.nav.opportunities": "Oportunidades",
+  "dashboard.nav.opportunities": "Leads en el feed",
   "dashboard.nav.prevention": "Preinspección",
   "dashboard.nav.favorites": "Favoritos",
   "dashboard.nav.interests": "Mis intereses",
@@ -1553,6 +1553,9 @@ const ES: Dict = {
   "dashboard.oppmap.show": "Mostrar mapa",
   "dashboard.oppmap.hide": "Ocultar mapa",
   "dashboard.oppmap.hint": "Haga clic en un barrio para filtrar los leads de abajo.",
+  "dashboard.oppmap.scope": "Oportunidades preventivas · 30 días",
+  "dashboard.oppmap.unmapped": "oportunidades sin ubicación (ZIP)",
+  "dashboard.oppmap.unmapped_empty": "{n} oportunidades aún sin ubicación. El ZIP se está derivando.",
   "dashboard.oppmap.filtered_by": "Barrio: {name}",
   "dashboard.oppmap.clear": "Limpiar",
 

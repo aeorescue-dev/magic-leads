@@ -183,6 +183,7 @@ class OpportunityWorkflowService:
         city: str,
         state: str,
         zip_code: Optional[str] = None,
+        zip_source: Optional[str] = None,
         bbl: Optional[str] = None,
         bin_value: Optional[str] = None,
         source_type: Optional[str] = None,
@@ -219,14 +220,14 @@ class OpportunityWorkflowService:
             conn.execute(
                 """INSERT INTO opportunity_workflow
                    (property_key, source_kind, source_record_id, source_type,
-                    address, city, state, zip_code, bbl, bin, category,
+                    address, city, state, zip_code, zip_source, bbl, bin, category,
                     signal_type, severity, compliance_deadline, job_value,
                     value_source, fine_balance, fine_imposed, fine_paid,
                     hearing_date, hearing_status,
                     description, owner_name, owner_type, inspection_status,
                     received_at, tags_json, timeline_json, history_json,
                     property_json, source_payload)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(source_kind, source_record_id) DO UPDATE SET
                      property_key=excluded.property_key,
                      source_type=excluded.source_type,
@@ -234,6 +235,7 @@ class OpportunityWorkflowService:
                      city=excluded.city,
                      state=excluded.state,
                      zip_code=excluded.zip_code,
+                     zip_source=excluded.zip_source,
                      bbl=excluded.bbl,
                      bin=excluded.bin,
                      category=excluded.category,
@@ -260,7 +262,8 @@ class OpportunityWorkflowService:
                      updated_at=CURRENT_TIMESTAMP""",
                 (
                     property_key, source_kind, source_record_id, source_type,
-                    address, city, state, zip_code, bbl, bin_value, category,
+                    address, city, state, zip_code, zip_source, bbl, bin_value,
+                    category,
                     signal_type, severity, compliance_deadline, job_value,
                     value_source, fine_balance, fine_imposed, fine_paid,
                     hearing_date, hearing_status,
@@ -293,6 +296,8 @@ class OpportunityWorkflowService:
         "hearing_status": ("hearing_status", None),
         "description": ("description", None),
         "category": ("category", None),
+        "zip_code": ("zip_code", None),
+        "zip_source": ("zip_source", None),
         "owner_name": ("owner_name", None),
         "owner_type": ("owner_type", None),
         "inspection_status": ("inspection_status", None),
@@ -672,7 +677,6 @@ class OpportunityWorkflowService:
         clauses = [
             "source_kind = ?",
             "UPPER(TRIM(city)) = UPPER(TRIM(?))",
-            "LENGTH(TRIM(COALESCE(zip_code, ''))) >= 5",
             "date(COALESCE(received_at, created_at)) >= date('now', ?)",
         ]
         params: list = [kind, city, f"-{days} days"]
@@ -710,14 +714,43 @@ class OpportunityWorkflowService:
                     ORDER BY zip""",
                 tuple(params),
             ).fetchall()
+            centroid_rows = conn.execute(
+                """
+                SELECT SUBSTR(TRIM(zip_code), 1, 5) AS zip,
+                       AVG(lat) AS lat, AVG(lng) AS lng
+                FROM leads
+                WHERE UPPER(TRIM(city)) = UPPER(TRIM(?))
+                  AND LENGTH(TRIM(COALESCE(zip_code, ''))) >= 5
+                  AND lat IS NOT NULL AND lng IS NOT NULL
+                GROUP BY zip
+                """,
+                (city,),
+            ).fetchall()
         finally:
             conn.close()
+        centroids = {
+            str(row["zip"]): (float(row["lat"]), float(row["lng"]))
+            for row in centroid_rows
+            if row["zip"] and row["lat"] is not None and row["lng"] is not None
+        }
 
         zones: dict[str, dict] = {}
         niches: dict[str, int] = {}
+        unmapped = 0
+        total_count = 0
+        total_available = 0
+        total_critical = 0
+        total_fresh = 0
         for row in rows:
             zip_code = str(row["zip"] or "").strip()
+            count = int(row["n"] or 0)
+            total_count += count
+            total_available += int(row["available"] or 0)
+            total_critical += int(row["critical"] or 0)
+            total_fresh += int(row["fresh"] or 0)
+            niches[row["niche"]] = niches.get(row["niche"], 0) + count
             if len(zip_code) < 5:
+                unmapped += count
                 continue
             zone = zones.setdefault(
                 zip_code,
@@ -729,9 +762,15 @@ class OpportunityWorkflowService:
                     "fresh": 0,
                     "next_deadline": None,
                     "niches": [],
+                    "lat": round(centroids[zip_code][0], 5)
+                    if zip_code in centroids
+                    else None,
+                    "lng": round(centroids[zip_code][1], 5)
+                    if zip_code in centroids
+                    else None,
+                    "geo_source": "leads" if zip_code in centroids else "",
                 },
             )
-            count = int(row["n"] or 0)
             zone["total"] += count
             zone["available"] += int(row["available"] or 0)
             zone["critical"] += int(row["critical"] or 0)
@@ -742,7 +781,6 @@ class OpportunityWorkflowService:
             ):
                 zone["next_deadline"] = deadline
             zone["niches"].append({"key": row["niche"], "n": count})
-            niches[row["niche"]] = niches.get(row["niche"], 0) + count
 
         zone_list = sorted(
             zones.values(), key=lambda item: (-item["total"], item["zip"])
@@ -756,11 +794,12 @@ class OpportunityWorkflowService:
             "window_days": days,
             "generated_at": _now_iso(),
             "totals": {
-                "count": sum(int(zone["total"]) for zone in zone_list),
-                "available": sum(int(zone["available"]) for zone in zone_list),
-                "critical": sum(int(zone["critical"]) for zone in zone_list),
-                "fresh": sum(int(zone["fresh"]) for zone in zone_list),
+                "count": total_count,
+                "available": total_available,
+                "critical": total_critical,
+                "fresh": total_fresh,
                 "zones": len(zone_list),
+                "unmapped": unmapped,
             },
             "zones": zone_list,
             "niches": [

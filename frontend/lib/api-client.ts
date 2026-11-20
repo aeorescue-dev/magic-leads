@@ -362,6 +362,9 @@ export interface TerritoryZone {
   fresh: number;
   next_deadline: string | null;
   niches: Array<{ key: string; n: number }>;
+  lat?: number | null;
+  lng?: number | null;
+  geo_source?: string;
 }
 
 export interface TerritoryResponse {
@@ -375,6 +378,7 @@ export interface TerritoryResponse {
     critical: number;
     fresh: number;
     zones: number;
+    unmapped?: number;
   };
   zones: TerritoryZone[];
   niches: Array<{ key: string; n: number }>;

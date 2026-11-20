@@ -31,6 +31,7 @@ export function NeighborhoodList({
   onFreshOnlyChange,
   freshCount,
   city,
+  unmapped = 0,
 }: {
   rows: NeighborhoodRow[];
   total: number;
@@ -44,6 +45,7 @@ export function NeighborhoodList({
   onFreshOnlyChange: (value: boolean) => void;
   freshCount: number;
   city: string;
+  unmapped?: number;
 }) {
   const { t } = useI18n();
 
@@ -110,7 +112,12 @@ export function NeighborhoodList({
           <div>
             <MapPin className="mx-auto h-6 w-6 text-[var(--sd-faint)]" />
             <p className="mt-2 text-[12px] font-bold text-[var(--sd-text)]">
-              {t("dashboard.oppmap.empty").replace("{city}", city)}
+              {unmapped > 0
+                ? t("dashboard.oppmap.unmapped_empty").replace(
+                    "{n}",
+                    unmapped.toLocaleString("en-US")
+                  )
+                : t("dashboard.oppmap.empty").replace("{city}", city)}
             </p>
           </div>
         </div>

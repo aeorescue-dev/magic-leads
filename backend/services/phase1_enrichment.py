@@ -28,11 +28,47 @@ import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from typing import Iterable, Optional
 
+from .db import get_connection
 from .opportunity_workflow import make_property_key, opportunity_workflow
 from .privacy import scrub
+from .zip_lookup import resolve_chicago_zip
 
 _USER_AGENT = "MagicLeadsPhase1/1.0 (staging enrichment)"
 _TIMEOUT = 60
+
+CHI_VIOLATIONS_WATERMARK = "chi_violations_open"
+
+
+def _get_watermark(source: str) -> Optional[str]:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT watermark FROM phase1_watermarks WHERE source = ?", (source,)
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return None
+    value = str(row["watermark"] or "").strip()
+    return value or None
+
+
+def _set_watermark(source: str, value: str) -> None:
+    conn = get_connection()
+    try:
+        conn.execute(
+            """
+            INSERT INTO phase1_watermarks (source, watermark, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(source) DO UPDATE SET
+              watermark = excluded.watermark,
+              updated_at = excluded.updated_at
+            """,
+            (source, value, datetime.now(timezone.utc).isoformat()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 NYC = "data.cityofnewyork.us"
 CHI = "data.cityofchicago.org"
@@ -627,47 +663,168 @@ class Phase1EnrichmentService:
     def fetch_chicago_violations(self, limit: int = 20) -> list:
         if limit <= 0:
             return []
-        since = (self.today - timedelta(days=90)).isoformat()
+        budget = max(1, int(limit))
+        watermark = _get_watermark(CHI_VIOLATIONS_WATERMARK)
+        if not watermark:
+            watermark = (self.today - timedelta(days=90)).isoformat()
+        page_size = min(1000, budget)
+        grouped: dict = {}
+        offset = 0
+        max_seen = watermark
+        for _ in range(20):
+            rows = socrata(
+                "chi_violations",
+                {
+                    "$limit": min(page_size, max(1, budget - len(grouped))),
+                    "$offset": offset,
+                    "$order": "coalesce(violation_last_modified_date, violation_date) ASC",
+                    "$where": (
+                        "violation_status = 'OPEN' "
+                        "AND coalesce(violation_last_modified_date, violation_date) "
+                        f"> '{watermark}'"
+                    ),
+                },
+            )
+            if not rows:
+                break
+            for row in rows:
+                address = normalize_address(row.get("address"))
+                if not address:
+                    continue
+                zip_code, zip_source = resolve_chicago_zip(
+                    address=address,
+                    lat=row.get("latitude"),
+                    lng=row.get("longitude"),
+                )
+                key = make_property_key(address=address, city="Chicago", zip_code=None)
+                item = grouped.setdefault(
+                    key,
+                    {
+                        "property_key": key,
+                        "address": address,
+                        "city": "Chicago",
+                        "state": "IL",
+                        "zip_code": zip_code,
+                        "zip_source": zip_source,
+                        "signal_type": "legal_obligation",
+                        "severity": "critical"
+                        if str(row.get("inspection_status") or "").upper() == "FAILED"
+                        else "high",
+                        "category": map_category(
+                            row.get("violation_description"), row.get("violation_code")
+                        ),
+                        "description": _clean(row.get("violation_description")),
+                        "received_at": row.get("violation_date"),
+                        "history": [],
+                        "tags": ["inspection_possible"],
+                        "source_record_id": "phase1-chi-violation-"
+                        + hashlib.sha1(address.encode("utf-8")).hexdigest()[:16],
+                    },
+                )
+                if zip_code and not item.get("zip_code"):
+                    item["zip_code"] = zip_code
+                    item["zip_source"] = zip_source
+                item["history"].append(
+                    _history_entry(
+                        "violation",
+                        _clean(row.get("violation_description"), 140) or "Violation",
+                        to_iso_date(row.get("violation_date")),
+                        row.get("violation_status"),
+                        None,
+                        f"chi-violation-{row.get('id')}",
+                    )
+                )
+                seen = str(
+                    row.get("violation_last_modified_date")
+                    or row.get("violation_date")
+                    or ""
+                ).strip()
+                if seen and seen > max_seen:
+                    max_seen = seen
+            offset += len(rows)
+            if len(rows) < min(page_size, budget):
+                break
+            if len(grouped) >= budget:
+                break
+        if max_seen > watermark:
+            _set_watermark(CHI_VIOLATIONS_WATERMARK, max_seen)
+        return list(grouped.values())
+
+    def fetch_chicago_permits(self, limit: int = 0, days: int = 30) -> list:
+        """Alvarás de Chicago como oportunidades de obra autorizada."""
+        if limit <= 0:
+            return []
         rows = socrata(
-            "chi_violations",
-            {
-                "$limit": max(1, int(limit)),
-                "$order": "violation_date DESC",
-                "$where": f"violation_status = 'OPEN' AND violation_date >= '{since}T00:00:00'",
-            },
+            "chi_permits",
+            {"$limit": max(1, int(limit)), "$order": ":id DESC"},
         )
+        cutoff = (self.today - timedelta(days=max(1, int(days)))).isoformat()
         grouped: dict = {}
         for row in rows:
-            address = normalize_address(row.get("address"))
+            issued = to_iso_date(row.get("issue_date"))
+            if not issued or issued < cutoff:
+                continue
+            street = " ".join(
+                part
+                for part in (
+                    str(row.get("street_number") or "").strip(),
+                    str(row.get("street_direction") or "").strip(),
+                    str(row.get("street_name") or "").strip(),
+                )
+                if part
+            )
+            address = normalize_address(street)
             if not address:
                 continue
+            permit_type = _clean(row.get("permit_type"))
+            description = _clean(row.get("work_description")) or permit_type or "Approved work"
+            zip_code, zip_source = resolve_chicago_zip(
+                address=address,
+                lat=row.get("latitude"),
+                lng=row.get("longitude"),
+                contact_zip=row.get("contact_1_zipcode"),
+            )
             key = make_property_key(address=address, city="Chicago", zip_code=None)
-            item = grouped.setdefault(
-                key,
-                {
+            item = grouped.get(key)
+            if item is None:
+                item = {
                     "property_key": key,
                     "address": address,
                     "city": "Chicago",
                     "state": "IL",
-                    "zip_code": None,
-                    "signal_type": "legal_obligation",
-                    "severity": "critical" if str(row.get("inspection_status") or "").upper() == "FAILED" else "high",
-                    "category": map_category(row.get("violation_description"), row.get("violation_code")),
-                    "description": _clean(row.get("violation_description")),
-                    "received_at": row.get("violation_date"),
+                    "zip_code": zip_code,
+                    "zip_source": zip_source,
+                    "signal_type": "authorized_work",
+                    "severity": "medium",
+                    "category": match_category(description)
+                    or match_category(permit_type)
+                    or "Structure",
+                    "description": description,
+                    "received_at": issued,
+                    "job_value": to_float(row.get("reported_cost")),
+                    "value_source": "permit",
                     "history": [],
                     "tags": ["inspection_possible"],
-                    "source_record_id": "phase1-chi-violation-" + hashlib.sha1(address.encode("utf-8")).hexdigest()[:16],
-                },
-            )
+                    "source_record_id": "phase1-chi-permit-"
+                    + hashlib.sha1(
+                        str(row.get("id") or row.get("permit_") or address).encode("utf-8")
+                    ).hexdigest()[:16],
+                }
+                grouped[key] = item
+            elif zip_code and not item.get("zip_code"):
+                item["zip_code"] = zip_code
+                item["zip_source"] = zip_source
+            value = to_float(row.get("reported_cost"))
+            if value and (not item.get("job_value") or value > item["job_value"]):
+                item["job_value"] = value
             item["history"].append(
                 _history_entry(
-                    "violation",
-                    _clean(row.get("violation_description"), 140) or "Violation",
-                    to_iso_date(row.get("violation_date")),
-                    row.get("violation_status"),
-                    None,
-                    f"chi-violation-{row.get('id')}",
+                    "permit",
+                    description,
+                    issued,
+                    row.get("permit_status") or "Issued",
+                    value,
+                    f"chi-permit-{row.get('id')}",
                 )
             )
         return list(grouped.values())
@@ -1036,6 +1193,7 @@ class Phase1EnrichmentService:
         hpd_deadlines: int = 20,
         ecb: int = 40,
         chi_violations: int = 20,
+        chi_permits: int = 0,
         permit_rows: int = 400,
         bos_violations: int = 0,
         bos_311: int = 0,
@@ -1105,6 +1263,11 @@ class Phase1EnrichmentService:
             target["history"] = (target.get("history") or []) + (item.get("history") or [])
         for item in self.fetch_chicago_violations(chi_violations):
             merge(item)
+        if chi_permits > 0:
+            for item in self.fetch_chicago_permits(
+                chi_permits, days=permit_window_days
+            ):
+                merge(item)
         for item in self.fetch_boston_violations(bos_violations):
             merge(item)
         for item in self.fetch_boston_311(bos_311):
@@ -1326,6 +1489,9 @@ class Phase1EnrichmentService:
             fields["compliance_deadline"] = deadline
         if candidate.get("description"):
             fields["description"] = candidate["description"]
+        if candidate.get("zip_code") and not current.get("zip_code"):
+            fields["zip_code"] = candidate["zip_code"]
+            fields["zip_source"] = candidate.get("zip_source")
         if candidate.get("job_value"):
             fields["job_value"] = candidate["job_value"]
             fields["value_source"] = candidate.get("value_source")

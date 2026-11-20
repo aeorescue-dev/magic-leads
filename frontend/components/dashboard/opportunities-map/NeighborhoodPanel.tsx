@@ -94,9 +94,9 @@ export function NeighborhoodPanel({
         total: zone.total,
         fresh: zone.fresh,
         niches: zone.niches,
-        lat: geo?.lat ?? null,
-        lng: geo?.lng ?? null,
-        geo_source: geo ? "snapshot" : "",
+        lat: zone.lat ?? geo?.lat ?? null,
+        lng: zone.lng ?? geo?.lng ?? null,
+        geo_source: zone.geo_source ?? (geo ? "snapshot" : ""),
       };
     });
   }, [live, snapshot]);
@@ -104,10 +104,14 @@ export function NeighborhoodPanel({
   const meta = CITY_META[city];
   const mapAvailable = Boolean(meta);
 
-  const niches = useMemo(
-    () => (snapshot ? snapshot.niches.slice(0, 8) : []),
-    [snapshot]
-  );
+  const niches = useMemo(() => {
+    const source = live?.niches?.length
+      ? live.niches
+      : snapshot?.niches ?? [];
+    return source.slice(0, 8);
+  }, [live, snapshot]);
+
+  const unmapped = live?.totals?.unmapped ?? 0;
 
   const neighborhoods = useMemo(
     () => (mapAvailable ? buildNeighborhoods(city, zones, category) : []),
@@ -183,6 +187,9 @@ export function NeighborhoodPanel({
               {city === "all"
                 ? t("dashboard.oppmap.choose_city")
                 : `${nicheLabelText} · ${cityLabel}`}
+            </p>
+            <p className="truncate text-[10px] text-[var(--sd-faint)]">
+              {t("dashboard.oppmap.scope")}
             </p>
           </div>
         </div>
@@ -345,7 +352,9 @@ export function NeighborhoodPanel({
                   total={
                     freshOnly
                       ? freshTotal
-                      : rows.reduce((sum, row) => sum + row.item.count, 0)
+                      : rows.length === 0 && unmapped > 0
+                        ? live?.totals?.count ?? unmapped
+                        : rows.reduce((sum, row) => sum + row.item.count, 0)
                   }
                   activeName={activeName}
                   onSelect={(name) => {
@@ -363,10 +372,17 @@ export function NeighborhoodPanel({
                   onFreshOnlyChange={setFreshOnly}
                   freshCount={freshTotal}
                   city={cityLabel}
+                  unmapped={unmapped}
                 />
               </div>
             </div>
           )}
+
+          {unmapped > 0 ? (
+            <p className="mt-2 text-[10.5px] text-[var(--sd-muted)]">
+              {unmapped.toLocaleString("en-US")} {t("dashboard.oppmap.unmapped")}
+            </p>
+          ) : null}
 
           {mapAvailable ? (
             <p className="mt-2 flex items-center gap-1 text-[9px] text-[var(--sd-faint)]">

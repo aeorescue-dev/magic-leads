@@ -52,6 +52,14 @@ class Phase1Scheduler:
             dal_limit = max(
                 1, int(getattr(settings, "PHASE1_DALLAS_LIMIT", 300) or 300)
             )
+            chi_limit = max(
+                1, int(getattr(settings, "PHASE1_CHICAGO_VIOLATIONS", 1000) or 1000)
+            )
+            chi_permits = (
+                max(1, int(getattr(settings, "PHASE1_CHICAGO_PERMIT_ROWS", 300) or 300))
+                if include_permits
+                else 0
+            )
             bos_permits = (
                 max(1, int(getattr(settings, "PHASE1_BOSTON_PERMIT_ROWS", 300) or 300))
                 if include_permits
@@ -71,7 +79,8 @@ class Phase1Scheduler:
                     hpd_complaints=limit,
                     hpd_deadlines=limit,
                     ecb=ecb,
-                    chi_violations=limit,
+                    chi_violations=chi_limit,
+                    chi_permits=chi_permits,
                     permit_rows=permit_rows,
                     bos_violations=bos_limit,
                     bos_311=bos_limit,

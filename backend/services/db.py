@@ -512,6 +512,7 @@ CREATE TABLE IF NOT EXISTS opportunity_workflow (
   city TEXT,
   state TEXT,
   zip_code TEXT,
+  zip_source TEXT,
   bbl TEXT,
   bin TEXT,
   category TEXT,
@@ -1273,7 +1274,13 @@ CREATE TABLE IF NOT EXISTS city_enrichment_state (
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
--- Cursor/quota do backfill de proprietarios (leads com owner_name NULL).
+-- Watermark incremental por fonte da Fase 1 (ex.: violações abertas de Chicago).
+CREATE TABLE IF NOT EXISTS phase1_watermarks (
+  source TEXT PRIMARY KEY,
+  watermark TEXT,
+  updated_at TEXT NOT NULL
+);
+
 -- `last_id` desce a partir do max(id) e reinicia em 0 quando chega ao fim.
 CREATE TABLE IF NOT EXISTS owner_backfill_state (
   city TEXT PRIMARY KEY,
@@ -1788,6 +1795,7 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         "owner_type": "TEXT",
         "inspection_status": "TEXT",
         "received_at": "TEXT",
+        "zip_source": "TEXT",
         "tags_json": "TEXT",
         "timeline_json": "TEXT",
         "history_json": "TEXT",
