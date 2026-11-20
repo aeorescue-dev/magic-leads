@@ -38,7 +38,7 @@
 | Verificação | Resultado |
 |---|---|
 | `pytest tests/test_chicago_pipeline.py tests/test_opportunity_territories.py -q` | **14 passed** |
-| `pytest tests -q` (suite completa, execução isolada) | em curso no fecho deste relatório |
+| `pytest tests -q` (suite completa, execução isolada) | **1.735 passed, 1 skipped** (4m57s) |
 | `ruff check` nos ficheiros alterados | **All checks passed** |
 | `npx tsc --noEmit` | **sem erros** |
 | `npm run lint` | **0 erros** (122 warnings pré-existentes) |
@@ -91,7 +91,7 @@ tests/test_opportunity_territories.py
 
 ## 4. O que falta antes de publicar
 
-1. Fechar a suite completa sem execuções concorrentes (os 78 erros da primeira tentativa eram de `showcase_checkouts` por dois pytest a partilhar o mesmo SQLite temporário; a suite isolada está a correr).
+1. ~~Fechar a suite completa sem execuções concorrentes~~ — feita: **1.735 passed, 1 skipped**. (A primeira tentativa teve 78 erros de `showcase_checkouts` porque dois `pytest` partilhavam o mesmo SQLite temporário; a execução isolada passou.)
 2. Revisão do diff e aprovação do owner.
 3. Deploy backend (Railway) + frontend (Vercel) a partir de `master` — **não executado**.
 4. Depois do deploy: `python -m backend.scripts.backfill_chicago_zip --apply` e validar Chicago no mapa.
