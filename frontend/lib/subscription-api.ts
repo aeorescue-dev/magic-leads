@@ -68,6 +68,10 @@ export interface PhonePayload {
   type: "phone";
   trade_code: string;
   phone: string;
+  /** true apenas com parcela exacta + nome compatível + camada L2. */
+  verified?: boolean;
+  /** owner_verified | property_phone_unverified | entity_phone_unverified */
+  label?: string;
   owner_name: string;
   address: string;
   city: string;
@@ -85,6 +89,8 @@ export interface LetterResult {
 
 export interface PhoneResult {
   success: boolean;
+  /** ready = número entregue; in_progress = job aceite (cache fria). */
+  state?: "ready" | "in_progress" | "no_phone";
   duplicate?: boolean;
   reveal_id?: number;
   payload?: PhonePayload;
@@ -92,6 +98,8 @@ export interface PhoneResult {
   error?: string;
   message?: string;
   quota_preserved?: boolean;
+  verified?: boolean;
+  label?: string;
 }
 
 export class SubscriptionApiError extends Error {

@@ -61,6 +61,7 @@ function KpiCard({
   onClick,
   hero = false,
   dark = false,
+  noData = false,
 }: {
   label: string;
   value: number;
@@ -75,6 +76,8 @@ function KpiCard({
   onClick?: () => void;
   hero?: boolean;
   dark?: boolean;
+  /** Sem fonte de dados: mostra "—" em vez de um zero enganador. */
+  noData?: boolean;
 }) {
   const body = (
     <>
@@ -105,9 +108,15 @@ function KpiCard({
           }`}
           aria-live="polite"
         >
-          {prefix ? <span className="mr-0.5 text-[0.55em] font-bold align-top">{prefix}</span> : null}
-          {Number(value || 0).toLocaleString()}
-          {suffix ? <span className="ml-0.5 text-[0.55em] font-bold">{suffix}</span> : null}
+          {noData ? (
+            <span aria-label="sem dados">—</span>
+          ) : (
+            <>
+              {prefix ? <span className="mr-0.5 text-[0.55em] font-bold align-top">{prefix}</span> : null}
+              {Number(value || 0).toLocaleString()}
+              {suffix ? <span className="ml-0.5 text-[0.55em] font-bold">{suffix}</span> : null}
+            </>
+          )}
         </div>
         <div
           className={`mt-2 flex items-center gap-1.5 text-[10.5px] ${
@@ -189,6 +198,7 @@ export function KpiPulse({
     sub?: string;
     series?: number[];
     prefix?: string;
+    noData?: boolean;
     suffix?: string;
     icon: LucideIcon;
   };

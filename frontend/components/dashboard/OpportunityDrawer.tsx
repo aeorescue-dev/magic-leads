@@ -50,6 +50,9 @@ export function OpportunityDrawer({
       (Number(opportunity.fine_imposed) || 0) - (Number(opportunity.fine_paid) || 0),
   );
   const hasFine = fineBalance > 0;
+  const noFineData =
+    !hasFine &&
+    ["Dallas"].includes(String(opportunity.city || "").trim());
   const currentStep =
     hasFine
       ? 3
@@ -207,7 +210,11 @@ export function OpportunityDrawer({
               className="rounded-xl border bg-[var(--sd-accent-soft)] p-3"
               style={{ borderColor: "color-mix(in srgb, var(--sd-accent) 25%, transparent)" }}
             >
-              <p className="text-xs font-bold text-[var(--sd-accent)]">{t("dashboard.preinspection.no_fine")}</p>
+              <p className="text-xs font-bold text-[var(--sd-accent)]">
+                {noFineData
+                  ? t("dashboard.preinspection.no_fine_data")
+                  : t("dashboard.preinspection.no_fine")}
+              </p>
               <p className="mt-1 text-[11px] leading-relaxed text-[var(--sd-muted)]">
                 {t("dashboard.preinspection.risk")}
               </p>

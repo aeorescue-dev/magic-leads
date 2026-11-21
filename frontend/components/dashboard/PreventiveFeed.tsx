@@ -36,11 +36,18 @@ export interface FeedFilters {
 export function PreventiveFeed({
   onOpenReveal,
   filters,
+  kind = "preventive",
+  title,
   onCountChange,
+  onCountsChange,
 }: {
   onOpenReveal: (opportunity: Opportunity) => void;
   filters: FeedFilters;
+  /** all | preventive | reactive | permit — a mesma aba que o contador. */
+  kind?: string;
+  title?: string;
   onCountChange?: (count: number) => void;
+  onCountsChange?: (counts: OpportunityListResponse["counts"]) => void;
 }) {
   const { t } = useI18n();
   const [data, setData] = useState<OpportunityListResponse | null>(null);
@@ -66,7 +73,7 @@ export function PreventiveFeed({
 
   const buildParams = useCallback(
     (offset: number) => ({
-      kind: "preventive",
+      kind: kind === "all" ? undefined : kind,
       limit: PAGE_SIZE,
       offset,
       days: 7,
@@ -88,6 +95,7 @@ export function PreventiveFeed({
       filters.onlyDeadline,
       filters.withFines,
       debouncedSearch,
+      kind,
     ]
   );
 
@@ -167,6 +175,10 @@ export function PreventiveFeed({
     onCountChange?.(total);
   }, [total, onCountChange]);
 
+  useEffect(() => {
+    if (data?.counts) onCountsChange?.(data.counts);
+  }, [data?.counts, onCountsChange]);
+
   const rail = useMemo(() => {
     const severity = { critical: 0, high: 0, medium: 0, routine: 0 };
     const zipCounts = new Map<string, number>();
@@ -213,9 +225,15 @@ export function PreventiveFeed({
           <div>
             <h2 className="flex items-center gap-2 text-base font-bold">
               <ShieldCheck className="h-4 w-4 text-[var(--sd-accent)]" />
-              {t("dashboard.preinspection.title")}
+              {title ?? t("dashboard.preinspection.title")}
               <span className="rounded-full bg-[var(--sd-accent-soft)] px-2 py-0.5 text-[11px] font-semibold text-[var(--sd-accent)]">
-                {data?.counts.preventive ?? 0}
+                {kind === "all"
+                  ? data?.counts.all ?? 0
+                  : kind === "reactive"
+                    ? data?.counts.reactive ?? 0
+                    : kind === "permit"
+                      ? data?.counts.permit ?? 0
+                      : data?.counts.preventive ?? 0}
               </span>
             </h2>
             <p className="mt-1 text-xs text-[var(--sd-muted)]">

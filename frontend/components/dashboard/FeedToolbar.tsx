@@ -40,6 +40,7 @@ export function FeedToolbar({
   deadlineWindow,
   onDeadlineWindowChange,
   withFines,
+  finesAvailable = true,
   onToggleFines,
   search,
   onSearchChange,
@@ -69,6 +70,8 @@ export function FeedToolbar({
   deadlineWindow?: string;
   onDeadlineWindowChange?: (value: string) => void;
   withFines?: boolean;
+  /** false quando a cidade nao tem fonte de multa (ex.: Dallas). */
+  finesAvailable?: boolean;
   onToggleFines?: () => void;
   search: string;
   onSearchChange: (value: string) => void;
@@ -230,11 +233,15 @@ export function FeedToolbar({
             <button
               type="button"
               onClick={onToggleFines}
+              disabled={!finesAvailable}
               aria-pressed={withFines}
+              title={!finesAvailable ? t("dashboard.filter.no_fine_data") : undefined}
               className={`inline-flex h-8 shrink-0 items-center gap-2 rounded-lg border px-2.5 text-[11px] font-semibold transition ${
-                withFines
-                  ? "border-[var(--sd-urgent)] bg-[var(--sd-urgent-soft)] text-[var(--sd-urgent)]"
-                  : "border-[var(--sd-border)] text-[var(--sd-muted)] hover:text-[var(--sd-text)]"
+                !finesAvailable
+                  ? "cursor-not-allowed border-[var(--sd-border)] text-[var(--sd-faint)] opacity-50"
+                  : withFines
+                    ? "border-[var(--sd-urgent)] bg-[var(--sd-urgent-soft)] text-[var(--sd-urgent)]"
+                    : "border-[var(--sd-border)] text-[var(--sd-muted)] hover:text-[var(--sd-text)]"
               }`}
             >
               <span

@@ -20,11 +20,14 @@ export function CityPicker({
   options,
   onChange,
   allLabel = "Todas as cidades",
+  countsHint,
 }: {
   value: string;
   options: CityOption[];
   onChange: (value: string) => void;
   allLabel?: string;
+  /** Explica a que universo pertencem os contadores (ex.: leads 7d). */
+  countsHint?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -106,6 +109,11 @@ export function CityPicker({
           {filtered.length === 0 ? (
             <p className="px-2.5 py-6 text-center text-xs text-[var(--sd-muted)]">
               Sem cidades correspondentes.
+            </p>
+          ) : null}
+          {countsHint ? (
+            <p className="px-2.5 pb-1.5 pt-1 text-[9px] leading-snug text-[var(--sd-faint)]">
+              {countsHint}
             </p>
           ) : null}
         </div>

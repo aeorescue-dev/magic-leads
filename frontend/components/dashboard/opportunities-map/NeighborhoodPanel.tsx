@@ -37,6 +37,11 @@ export function NeighborhoodPanel({
   onCityChange,
   category,
   onCategoryChange,
+  kind = "preventive",
+  severity = "all",
+  deadlineWithin = null,
+  withFines = false,
+  search = "",
   activeName,
   onSelect,
 }: {
@@ -45,6 +50,11 @@ export function NeighborhoodPanel({
   onCityChange: (value: string) => void;
   category: string;
   onCategoryChange: (value: string) => void;
+  kind?: string;
+  severity?: string;
+  deadlineWithin?: number | null;
+  withFines?: boolean;
+  search?: string;
   activeName: string | null;
   onSelect: (name: string, zips: string[]) => void;
 }) {
@@ -66,14 +76,28 @@ export function NeighborhoodPanel({
   // offline: mantém o mapa útil se a API falhar, mas sem frescos.
   const { data: live } = useSWR(
     city !== "all"
-      ? ["territories", city, "preventive", 30, category]
+      ? [
+          "territories",
+          city,
+          kind,
+          7,
+          category,
+          severity,
+          deadlineWithin ?? "",
+          withFines,
+          search,
+        ]
       : null,
     () =>
       fetchOpportunityTerritories({
         city,
-        kind: "preventive",
-        days: 30,
+        kind,
+        days: 7,
         category,
+        severity,
+        deadline_within: deadlineWithin ?? undefined,
+        with_fines: withFines,
+        search,
       }),
     { revalidateOnFocus: false, keepPreviousData: true }
   );

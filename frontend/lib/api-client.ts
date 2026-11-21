@@ -160,6 +160,13 @@ export interface LeadsListResponse {
   per_page: number;
   leads: LeadResponse[];
   counts?: { all: number; letter: number; phone: number };
+  /** Contagens pelo mesmo WHERE do feed: base das abas por tipo. */
+  signal_counts?: {
+    all: number;
+    reactive: number;
+    preventive: number;
+    permit: number;
+  };
 }
 
 export interface LeadStats {
@@ -389,14 +396,26 @@ export async function fetchOpportunityTerritories(params: {
   kind?: string;
   days?: number;
   category?: string;
+  severity?: string;
+  deadline_within?: number;
+  with_fines?: boolean;
+  search?: string;
 }): Promise<TerritoryResponse> {
   const q = new URLSearchParams();
   q.set("city", params.city);
   q.set("kind", params.kind ?? "preventive");
-  q.set("days", String(params.days ?? 30));
+  q.set("days", String(params.days ?? 7));
   if (params.category && params.category !== "all") {
     q.set("category", params.category);
   }
+  if (params.severity && params.severity !== "all") {
+    q.set("severity", params.severity);
+  }
+  if (params.deadline_within != null) {
+    q.set("deadline_within", String(params.deadline_within));
+  }
+  if (params.with_fines) q.set("with_fines", "true");
+  if (params.search?.trim()) q.set("search", params.search.trim());
   return handle<TerritoryResponse>(
     await fetch(`${API_URL}/api/opportunities/territories?${q.toString()}`, {
       credentials: "include",
@@ -1566,10 +1585,15 @@ export async function fetchMyLeadsHistory(params: {
 // ------------------------------------------------------------------
 export interface PhoneRevealResult {
   success: boolean;
+  /** ready = entregue; in_progress = a confirmar; no_phone = sem prova. */
+  state?: "ready" | "in_progress" | "no_phone";
   phone?: string;
   phone_type?: string;
   carrier?: string;
   is_connected?: boolean;
+  /** Só true com parcela exacta + nome compatível + L2. */
+  phone_verified?: boolean;
+  phone_label?: string;
   error?: string;
   provider?: string;
   billed?: boolean;
@@ -1659,9 +1683,13 @@ export interface OpportunityInsights {
     awaiting_inspection: number;
     deadlines_7d: number;
     deadlines_3d: number;
+    /** Prazos já vencidos (incluídos em deadlines_7d/3d). */
+    overdue: number;
     value_at_risk: number;
     fines_at_risk: number;
     fines_count: number;
+    /** false quando a cidade nao tem fonte de multa (ex.: Dallas). */
+    fines_available: boolean;
   };
   by_severity: { critical: number; high: number; medium: number; routine: number };
   by_zip: Array<{ zip: string; count: number }>;

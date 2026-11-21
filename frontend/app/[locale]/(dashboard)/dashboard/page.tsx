@@ -321,9 +321,20 @@ function DashboardPageInner() {
   const [onlyDeadline, setOnlyDeadline] = useState(false);
   const [deadlineWindow, setDeadlineWindow] = useState<"all" | "3" | "7">("all");
   const [withFines, setWithFines] = useState(false);
-  const [feedLayer, setFeedLayer] = useState<"all" | "reactive" | "permit">("all");
+  const [feedLayer, setFeedLayer] = useState<
+    "all" | "reactive" | "preventive" | "permit"
+  >("all");
+  const [opportunityKind, setOpportunityKind] = useState<
+    "all" | "preventive" | "reactive" | "permit"
+  >("preventive");
   const [preventiveShown, setPreventiveShown] = useState(0);
   const [preventiveLoaded, setPreventiveLoaded] = useState(false);
+  const [opportunityCounts, setOpportunityCounts] = useState<{
+    all: number;
+    preventive: number;
+    reactive: number;
+    permit: number;
+  } | null>(null);
   // Data de referência estável para prazos calculados no render.
   const [renderNow] = useState(() => Date.now());
   const [selectedType, setSelectedType] = useState<string>("all");
@@ -866,7 +877,7 @@ function DashboardPageInner() {
     hasAccess
       ? [
           "opportunity-insights",
-          "preventive",
+          opportunityKind,
           insightsCity ?? null,
           insightsCategory ?? null,
           insightsSeverity ?? null,
@@ -876,7 +887,7 @@ function DashboardPageInner() {
         ]
       : null,
     () =>
-      fetchOpportunityInsights("preventive", 7, {
+      fetchOpportunityInsights(opportunityKind, 7, {
         city: insightsCity,
         category: insightsCategory,
         severity: insightsSeverity,
@@ -1114,7 +1125,40 @@ function DashboardPageInner() {
         crypto.randomUUID(),
       );
       if (result.usage) setUsage(result.usage);
-      if (result.success && result.payload?.phone) {
+      if (result.state === "in_progress") {
+        // Cache fria: o job foi aceite e corre fora do clique. Não inventamos
+        // um número nem mostramos selo; a UI diz a verdade e o worker preenche.
+        showToast(
+          result.message ||
+            "Estamos a confirmar o proprietário. O telefone aparece aqui quando estiver validado.",
+          "warning",
+        );
+        // O worker entrega fora do clique. Faz um poll curto e honesto: só
+        // atualiza quando o backend tiver um telefone validado.
+        void (async () => {
+          for (let attempt = 0; attempt < 6; attempt++) {
+            await new Promise((resolve) => setTimeout(resolve, 5000));
+            const fresh = await fetchLeadById(lead.id).catch(() => null);
+            if (fresh?.owner_phone) {
+              setLeads((prev) =>
+                prev.map((l) =>
+                  l.id === lead.id ? { ...l, owner_phone: fresh.owner_phone } : l
+                )
+              );
+              if (selectedLead?.id === lead.id) {
+                setSelectedLead((prev) =>
+                  prev ? { ...prev, owner_phone: fresh.owner_phone } : null
+                );
+              }
+              showToast(
+                t("dashboard.toast.phone_revealed") || "Telefone revelado com sucesso",
+                "success"
+              );
+              return;
+            }
+          }
+        })();
+      } else if (result.success && result.payload?.phone) {
         const phone = result.payload.phone;
         // Update lead in list with the revealed phone
         setLeads((prev) => prev.map((l) =>
@@ -1661,7 +1705,9 @@ function DashboardPageInner() {
       if (feedLayer === "permit") {
         if (lead.signal_type !== "authorized_work") return false;
       } else if (feedLayer === "reactive") {
-        if (lead.signal_type === "authorized_work") return false;
+        if (lead.signal_type !== "legal_obligation") return false;
+      } else if (feedLayer === "preventive") {
+        if (lead.signal_type !== "open_request") return false;
       }
 
       // Somente com prazo: janela de 7 dias.
@@ -1902,6 +1948,11 @@ function DashboardPageInner() {
     setWithFines(false);
     setSearchQuery("");
     setLeadZone(null);
+    // P1: limpar tambem os estados que ficavam presos (mapa/ZIPs/abas).
+    setNeighborhoodFilter(null);
+    setFeedLayer("all");
+    setReadiness("all");
+    setOpportunityKind("preventive");
   };
 
   const ownerOptions = [
@@ -2100,6 +2151,11 @@ function DashboardPageInner() {
   const finesAtRisk = preventiveInsights?.totals.fines_at_risk ?? 0;
   const finesCount = preventiveInsights?.totals.fines_count ?? 0;
   const finesInThousands = finesAtRisk >= 10000;
+  const finesAvailable = preventiveInsights?.totals.fines_available ?? true;
+
+  useEffect(() => {
+    if (!finesAvailable && withFines) setWithFines(false);
+  }, [finesAvailable, withFines]);
 
   const kpiHero = isPreventionTab
     ? {
@@ -2119,10 +2175,18 @@ function DashboardPageInner() {
         icon: Building2,
       };
 
+  const activeKindLabel =
+    opportunityKind === "all"
+      ? t("dashboard.feed.tab_all")
+      : opportunityKind === "reactive"
+        ? t("dashboard.feed.tab_reactive")
+        : opportunityKind === "permit"
+          ? t("dashboard.feed.tab_works")
+          : t("dashboard.feed.tab_preventive");
   const kpiSatellites = isPreventionTab
     ? [
         {
-          label: t("dashboard.kpi.preventive"),
+          label: activeKindLabel,
           value: preventiveInsights?.totals.count ?? 0,
           delta: `${preventiveInsights?.totals.awaiting_inspection ?? 0} ${t("dashboard.kpi.awaiting_inspection")}`,
           sub: t("dashboard.kpi.live_sample"),
@@ -2134,7 +2198,10 @@ function DashboardPageInner() {
         {
           label: t("dashboard.kpi.deadlines_7d"),
           value: preventiveInsights?.totals.deadlines_7d ?? 0,
-          delta: `${preventiveInsights?.totals.deadlines_3d ?? 0} ${t("dashboard.kpi.within_3d")}`,
+          delta:
+            (preventiveInsights?.totals.overdue ?? 0) > 0
+              ? `${preventiveInsights?.totals.overdue ?? 0} ${t("dashboard.kpi.overdue")}`
+              : `${preventiveInsights?.totals.deadlines_3d ?? 0} ${t("dashboard.kpi.within_3d")}`,
           sub: t("dashboard.kpi.deadline_window"),
           series: deadlineSeries,
           icon: Clock,
@@ -2144,9 +2211,12 @@ function DashboardPageInner() {
         {
           label: t("dashboard.kpi.fines_at_risk"),
           value: finesInThousands ? Math.round(finesAtRisk / 1000) : finesAtRisk,
-          prefix: "$",
-          suffix: finesInThousands ? "k" : "",
-          delta: `${finesCount} ${t("dashboard.kpi.fines_open_count")}`,
+          prefix: finesAvailable ? "$" : undefined,
+          suffix: finesAvailable && finesInThousands ? "k" : "",
+          noData: !finesAvailable,
+          delta: finesAvailable
+            ? `${finesCount} ${t("dashboard.kpi.fines_open_count")}`
+            : t("dashboard.kpi.no_fine_data"),
           sub: t("dashboard.kpi.fines_at_risk_sub"),
           series: finesSeries,
           icon: AlertTriangle,
@@ -2188,18 +2258,30 @@ function DashboardPageInner() {
         },
       ];
 
-  // Barra central de abas/filtros (protótipo) — partilhada pelos feeds.
-  const permitCount = leads.filter((lead) => lead.signal_type === "authorized_work").length;
-  const preventiveCount = preventiveInsights?.totals.count ?? 0;
+  // Barra central de abas/filtros — cada separador lê o MESMO conjunto que a
+  // lista que vai abrir. Antes misturava leads totais, a página atual de leads
+  // e oportunidades, pelo que "Todos/Reativos/Preventivos/Obras" nunca batiam.
+  // Um universo por ecrã: na Pré-inspeção os contadores vêm do feed de
+  // oportunidades; na lista de leads vêm do feed de leads. Nunca se misturam.
+  const tabCounts =
+    activeTab === "prevention"
+      ? opportunityCounts ?? {
+          all: preventiveInsights?.totals.count ?? 0,
+          preventive: preventiveInsights?.totals.count ?? 0,
+          reactive: 0,
+          permit: 0,
+        }
+      : feedData?.signal_counts ?? {
+          all: realTotalLeads,
+          reactive: 0,
+          preventive: 0,
+          permit: 0,
+        };
   const feedTabs = [
-    { key: "all", label: t("dashboard.feed.tab_all"), count: realTotalLeads },
-    {
-      key: "reactive",
-      label: t("dashboard.feed.tab_reactive"),
-      count: Math.max(0, realTotalLeads - permitCount),
-    },
-    { key: "preventive", label: t("dashboard.feed.tab_preventive"), count: preventiveCount },
-    { key: "permit", label: t("dashboard.feed.tab_works"), count: permitCount },
+    { key: "all", label: t("dashboard.feed.tab_all"), count: tabCounts.all },
+    { key: "reactive", label: t("dashboard.feed.tab_reactive"), count: tabCounts.reactive },
+    { key: "preventive", label: t("dashboard.feed.tab_preventive"), count: tabCounts.preventive },
+    { key: "permit", label: t("dashboard.feed.tab_works"), count: tabCounts.permit },
   ];
   const readinessCounts = feedData?.counts ?? {
     all: feedTotal,
@@ -2217,19 +2299,35 @@ function DashboardPageInner() {
   );
   const activeFeedTab =
     activeTab === "prevention"
-      ? "preventive"
-      : feedLayer === "reactive"
-        ? "reactive"
-        : feedLayer === "permit"
-          ? "permit"
-          : "all";
+      ? opportunityKind
+      : feedLayer;
   const handleFeedTab = (key: string) => {
-    if (key === "preventive") {
-      setActiveTab("prevention");
+    // Cada ecrã tem um universo único:
+    // - Pré-inspeção: as quatro abas filtram o feed de oportunidades;
+    // - Oportunidades: as quatro abas filtram o feed de leads.
+    // Assim o contador, a lista e o mapa do ecrã falam do mesmo conjunto.
+    if (activeTab === "prevention") {
+      setOpportunityKind(
+        key === "all"
+          ? "all"
+          : key === "reactive"
+            ? "reactive"
+            : key === "permit"
+              ? "permit"
+              : "preventive"
+      );
       return;
     }
     setActiveTab("opportunities");
-    setFeedLayer(key === "reactive" ? "reactive" : key === "permit" ? "permit" : "all");
+    setFeedLayer(
+      key === "reactive"
+        ? "reactive"
+        : key === "permit"
+          ? "permit"
+          : key === "preventive"
+            ? "preventive"
+            : "all"
+    );
   };
   const handleReadinessChange = (key: string) => {
     if (key !== "all" && key !== "letter" && key !== "phone") return;
@@ -2527,6 +2625,7 @@ function DashboardPageInner() {
               options={cityOptions}
               onChange={setSelectedCity}
               allLabel={t("dashboard.filter.all_cities") || "Todas"}
+              countsHint={t("dashboard.filter.city_counts_hint")}
             />
             <div className="hidden min-w-0 flex-1 items-center gap-2 rounded-xl border border-[var(--sd-border)] bg-[var(--sd-surface)] px-3 py-2 text-sm sm:flex">
               <Search className="h-4 w-4 shrink-0 text-[var(--sd-faint)]" />
@@ -2816,6 +2915,7 @@ function DashboardPageInner() {
                 setDeadlineWindow(value === "3" || value === "7" ? value : "all")
               }
               withFines={withFines}
+              finesAvailable={finesAvailable}
               onToggleFines={() => setWithFines((value) => !value)}
               search={searchQuery}
               onSearchChange={setSearchQuery}
@@ -3353,6 +3453,15 @@ function DashboardPageInner() {
                 onCityChange={setSelectedCity}
                 category={selectedCategory}
                 onCategoryChange={setSelectedCategory}
+                kind={opportunityKind}
+                severity={selectedSeverity}
+                deadlineWithin={
+                  deadlineWindow === "all"
+                    ? (onlyDeadline ? 7 : null)
+                    : Number(deadlineWindow)
+                }
+                withFines={withFines}
+                search={debouncedSearchQuery}
                 activeName={neighborhoodFilter?.name ?? null}
                 onSelect={(name, zips) => {
                   setNeighborhoodFilter({ name, zips });
@@ -3388,10 +3497,17 @@ function DashboardPageInner() {
                 <PreventiveFeed
                   onOpenReveal={openOpportunityReveal}
                   filters={feedFilters}
+                  kind={opportunityKind}
+                  title={
+                    opportunityKind === "preventive"
+                      ? t("dashboard.preinspection.title")
+                      : t("dashboard.nav.opportunities")
+                  }
                   onCountChange={(count) => {
                     setPreventiveShown(count);
                     setPreventiveLoaded(true);
                   }}
+                  onCountsChange={setOpportunityCounts}
                 />
               </div>
             </div>
