@@ -336,7 +336,7 @@ const PT: Dict = {
 
   // Dashboard
   "dashboard.nav.overview": "Visão geral",
-  "dashboard.nav.opportunities": "Leads no feed",
+  "dashboard.nav.opportunities": "Oportunidades",
   "dashboard.nav.prevention": "Pré-inspeção",
   "dashboard.nav.favorites": "Favoritos",
   "dashboard.nav.interests": "Meus interesses",

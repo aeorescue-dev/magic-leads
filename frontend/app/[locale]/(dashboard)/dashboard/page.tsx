@@ -1117,7 +1117,7 @@ function DashboardPageInner() {
     if (!lead.owner_name || lead.owner_phone) return;
     if (phoneRevealing?.loading) return;
 
-    if (!isActiveWeekly) {
+    if (!hasAccess) {
       setPlanOpen(true);
       return;
     }
@@ -1402,7 +1402,7 @@ function DashboardPageInner() {
 
   const handleQuickReserve = async (lead: LeadResponse) => {
     if (busyAction) return;
-    if (!isActiveWeekly) {
+    if (!hasAccess) {
       setPlanOpen(true);
       return;
     }
@@ -1477,7 +1477,7 @@ function DashboardPageInner() {
   }, [selectedLead, revealTarget, busyAction]);
   const confirmReveal = async () => {
     if (!revealTarget || busyAction || !revealConsent) return;
-    if (!isActiveWeekly) {
+    if (!hasAccess) {
       setRevealTarget(null);
       setPlanOpen(true);
       return;
@@ -2415,7 +2415,7 @@ function DashboardPageInner() {
     shouldShowAddressWarning,
     isFreeLead,
     isBlockedByQuota,
-    subscription: isActiveWeekly ? subscription : null,
+    subscription: hasAccess ? subscription : null,
     dailyStats: {
       used: usage?.letter_used ?? dailyStats?.used ?? 0,
       limit: usage?.letter_limit ?? dailyStats?.limit ?? 10,
@@ -2544,7 +2544,7 @@ function DashboardPageInner() {
                   Plano
                 </div>
                 <div className="truncate text-sm font-bold" style={{ color: "var(--text-primary)" }}>
-                  {billingPlans.find((p) => p.code === usage.plan)?.name || (isActiveWeekly ? usage.plan : "Conta gratuita")}
+                  {billingPlans.find((p) => p.code === usage.plan)?.name || (hasAccess ? usage.plan : "Conta gratuita")}
                 </div>
               </div>
               <button
@@ -2552,7 +2552,7 @@ function DashboardPageInner() {
                 onClick={() => setPlanOpen(true)}
                 className="rounded-lg bg-[var(--sd-accent)] px-2 py-1 text-[9px] font-black text-[var(--sd-accent-text)]"
               >
-                {isActiveWeekly ? "Gerir" : "Assinar"}
+                {hasAccess ? "Gerir" : "Assinar"}
               </button>
             </div>
             <div className="mt-1 text-[10px]" style={{ color: "var(--text-muted)" }}>
@@ -2585,7 +2585,7 @@ function DashboardPageInner() {
                 {user?.company_name || "Contratante Pro"}
               </div>
               <div className="text-[11px] text-emerald-400 font-medium capitalize">
-                {isActiveWeekly
+                {hasAccess
                   ? `Plano ${
                       billingPlans.find((p) => p.code === (usage?.plan || user?.plan))?.name ||
                       usage?.plan ||
@@ -2675,7 +2675,7 @@ function DashboardPageInner() {
             >
               <CreditCard className="h-4 w-4 text-emerald-500" />
               <span>
-                {isActiveWeekly
+                {hasAccess
                   ? `${billingPlans.find((p) => p.code === usage?.plan)?.name || usage?.plan} · ${usage?.phone_used ?? 0}/${usage?.phone_limit ?? 0}${
                       (usage?.addon_remaining ?? 0) > 0 ? ` +${usage?.addon_remaining}` : ""
                     }`
