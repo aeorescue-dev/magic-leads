@@ -155,4 +155,20 @@ Janela 7d, mesma API do smoke acima. **Todos os contadores bateram.**
    em "All". Verificado: apos Clear, cidade `All`, abas globais
    **1980 / 492 / 772 / 716** e o mapa mostra "Choose a city to see the map".
 
+---
+
+## 8. Acesso unificado e rotulo Oportunidades (2026-11-21)
+
+- **Regra unica `hasAccess`** (`can_access`): revelar telefone, reserva rapida e
+  confirmar revelacao deixaram de exigir plano `weekly_*`. A sidebar e o
+  contexto de subscription seguem a mesma regra. Contas ativas/cortesia (ex.:
+  `pro` ate 2099) nao veem "Conta gratuita" nem o modal de planos.
+- **Rotulo:** `dashboard.nav.opportunities` voltou a **Opportunities /
+  Oportunidades / Oportunidades**, mantendo o badge numerico.
+- **Verificado em producao** (`53bf2f2`, deployment `bi12y1c8s`):
+  sidebar **Opportunities 7.767**; plano **pro / Gerir**; topo **pro - 0/10**;
+  Opportunities com 50 botoes Reserve e **0 desativados**; Pre-inspecao com KPI e
+  FINES; **nenhum modal de planos** em ambas.
+
+
 
