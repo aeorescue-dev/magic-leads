@@ -255,7 +255,9 @@ function DashboardPageInner() {
   const isWeeklyPlan = Boolean(user?.plan?.startsWith("weekly_"));
   const isActiveWeekly = isWeeklyPlan && Boolean(subscription?.can_access);
   const hasAccess = Boolean(subscription?.can_access);
-  const isFreemium = !isActiveWeekly;
+  // Acesso ativo (inclui cortesias fora do plano semanal) nunca ve o banner
+  // de Free mode; o banner legacy fica restrito ao plano semanal.
+  const isFreemium = !hasAccess;
   const [usage, setUsage] = useState<Usage | null>(null);
   const [billingPlans, setBillingPlans] = useState<SubscriptionPlan[]>([]);
   const [planOpen, setPlanOpen] = useState(false);
@@ -526,9 +528,12 @@ function DashboardPageInner() {
     }
   }, [searchParams, loadBilling, refreshSubscription]);
 
-  // O mapa da aba Oportunidades precisa de uma praça concreta.
+  // O mapa precisa de uma praça concreta no arranque, mas o utilizador pode
+  // escolher "Todas as cidades" e o LIMPAR volta a esse estado.
+  const cityDefaulted = useRef(false);
   useEffect(() => {
-    if (!user?.id) return;
+    if (!user?.id || cityDefaulted.current) return;
+    cityDefaulted.current = true;
     if (selectedCity === "all") setSelectedCity("NYC");
   }, [user?.id, selectedCity]);
 
@@ -2808,8 +2813,8 @@ function DashboardPageInner() {
             </div>
           </div>
 
-          {/* SUBSCRIPTION BANNER + DAILY LIMIT BAR — legacy; freemium usa créditos */}
-          {!isFreemium && (
+          {/* SUBSCRIPTION BANNER + DAILY LIMIT BAR — legacy; so plano semanal */}
+          {isActiveWeekly && (
           <div className="rounded-2xl border border-emerald-500/30 bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-transparent p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <div className="h-10 w-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
