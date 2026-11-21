@@ -388,7 +388,7 @@ def test_create_call_adiciona_tts_url_ao_client_state(monkeypatch, tmp_path):
     monkeypatch.setattr(
         telnyx_voice.voice_audio_cache,
         "get_or_create",
-        lambda text: {
+        lambda text, pin=False: {
             "ok": True,
             "hash": "a" * 64,
             "url": "https://example.test/audio.mp3",
@@ -444,7 +444,7 @@ def test_create_call_shared_usa_hi_there(monkeypatch, tmp_path):
     telnyx_voice.voice_audio_cache.init()
     seen: dict = {}
 
-    def fake_cache(text):
+    def fake_cache(text, pin=False):
         seen["text"] = text
         return {
             "ok": True,

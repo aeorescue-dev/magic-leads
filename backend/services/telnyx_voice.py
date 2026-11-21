@@ -245,7 +245,8 @@ def create_call(
                 str(company.get("email") or ""),
             )
             cached = voice_audio_cache.get_or_create(
-                str(rendered.get("greeting") or "")
+                str(rendered.get("greeting") or ""),
+                pin=(voice_audio_cache.mode() == "shared"),
             )
             if cached.get("ok"):
                 tts_url = str(cached.get("url") or "")

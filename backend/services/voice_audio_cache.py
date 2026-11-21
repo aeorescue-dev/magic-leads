@@ -107,12 +107,21 @@ def init() -> None:
                   created_at TEXT NOT NULL,
                   last_used_at TEXT NOT NULL,
                   hits INTEGER NOT NULL DEFAULT 0,
-                  misses INTEGER NOT NULL DEFAULT 0
+                  misses INTEGER NOT NULL DEFAULT 0,
+                  pinned INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE INDEX IF NOT EXISTS idx_voice_tts_cache_used
                   ON voice_tts_cache (last_used_at);
                 """
             )
+            try:
+                # Bases antigas: acrescenta a coluna sem perder o cache.
+                conn.execute(
+                    "ALTER TABLE voice_tts_cache ADD COLUMN "
+                    "pinned INTEGER NOT NULL DEFAULT 0"
+                )
+            except Exception:  # noqa: BLE001 - coluna ja existe
+                pass
             conn.commit()
         finally:
             conn.close()
@@ -239,8 +248,11 @@ def _write_atomic(path: Path, data: bytes) -> None:
     os.replace(tmp, path)
 
 
-def get_or_create(text: str) -> dict:
-    """Devolve o áudio em cache ou sintetiza-o. Nunca levanta exceção."""
+def get_or_create(text: str, pin: bool = False) -> dict:
+    """Devolve o áudio em cache ou sintetiza-o. Nunca levanta exceção.
+
+    `pin=True` marca o MP3 como permanente: o cleanup por TTL não o remove.
+    """
     if not enabled():
         return {"ok": False, "reason": "disabled"}
     text = str(text or "").strip()
@@ -253,6 +265,8 @@ def get_or_create(text: str) -> dict:
         if path.exists() and path.stat().st_size > 0:
             size = path.stat().st_size
             _record(cache_hash, text, len(text), size, path, hit=True)
+            if pin:
+                _set_pinned(cache_hash, True)
             return {
                 "ok": True,
                 "hash": cache_hash,
@@ -261,6 +275,7 @@ def get_or_create(text: str) -> dict:
                 "chars": len(text),
                 "bytes": size,
                 "hit": True,
+                "pinned": bool(pin),
             }
         result = _synthesize(text)
         if not result.get("ok"):
@@ -268,6 +283,8 @@ def get_or_create(text: str) -> dict:
         audio = result["audio"]
         _write_atomic(path, audio)
         _record(cache_hash, text, len(text), len(audio), path, hit=False)
+        if pin:
+            _set_pinned(cache_hash, True)
         return {
             "ok": True,
             "hash": cache_hash,
@@ -276,9 +293,31 @@ def get_or_create(text: str) -> dict:
             "chars": len(text),
             "bytes": len(audio),
             "hit": False,
+            "pinned": bool(pin),
         }
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "reason": f"error:{type(exc).__name__}"}
+
+
+def _set_pinned(cache_hash: str, pinned: bool) -> None:
+    try:
+        conn = _conn()
+        try:
+            conn.execute(
+                "UPDATE voice_tts_cache SET pinned=? WHERE hash=?",
+                (1 if pinned else 0, cache_hash),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def pin(cache_hash: str, pinned: bool = True) -> dict:
+    init()
+    _set_pinned(str(cache_hash or ""), bool(pinned))
+    return {"ok": True, "hash": cache_hash, "pinned": bool(pinned)}
 
 
 def prewarm(texts: Iterable[str]) -> dict:
@@ -327,7 +366,8 @@ def cleanup(days: Optional[int] = None) -> dict:
         conn = _conn()
         try:
             rows = conn.execute(
-                "SELECT hash, path FROM voice_tts_cache WHERE last_used_at < ?",
+                "SELECT hash, path FROM voice_tts_cache "
+                "WHERE last_used_at < ? AND COALESCE(pinned,0)=0",
                 (cutoff,),
             ).fetchall()
             for row in rows:
