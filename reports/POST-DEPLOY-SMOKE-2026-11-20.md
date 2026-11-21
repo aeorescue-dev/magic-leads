@@ -141,11 +141,12 @@ Janela 7d, mesma API do smoke acima. **Todos os contadores bateram.**
 1. **`0` em vez de `—` em Dallas** (corrigido em `5633a68`): o `noData` existia
    no tipo do heroi mas nao era passado ao cartao, e os satelites nao o
    declaravam. Agora ambos recebem `noData`.
-2. **Conta ativa aparece como "Conta gratuita"/Free mode** (nao corrigido, decisao
-   de produto): `isWeeklyPlan = user.plan.startsWith("weekly_")`; esta conta e
-   `pro` com cortesia ate 2099, logo `isFreemium=true`. Os dados aparecem
-   normalmente, mas a sidebar e o banner assumem plano gratuito. Opcoes:
-   (a) colocar a conta de teste num plano `weekly_*`; ou (b) trocar
-   `isFreemium` para usar `!hasAccess`.
+2. **Conta ativa aparecia como "Conta gratuita"/Free mode** (corrigido em
+   `e1e0939`): `isFreemium` passou a ser `!hasAccess`; o banner legacy ficou
+   restrito ao plano semanal. Verificado em producao: banner ausente.
+3. **LIMPAR voltava a NYC** (corrigido em `e1e0939`): o default NYC passou a
+   aplicar-se uma unica vez (`useRef`), por isso LIMPAR e o seletor podem ficar
+   em "All". Verificado: apos Clear, cidade `All`, abas globais
+   **1980 / 492 / 772 / 716** e o mapa mostra "Choose a city to see the map".
 
 
