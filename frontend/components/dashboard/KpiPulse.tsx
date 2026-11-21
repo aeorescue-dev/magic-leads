@@ -13,6 +13,7 @@ export interface KpiSatellite {
   sub?: string;
   prefix?: string;
   suffix?: string;
+  noData?: boolean;
   onClick?: () => void;
   dark?: boolean;
 }
@@ -217,6 +218,7 @@ export function KpiPulse({
         sub={hero.sub}
         series={hero.series}
         prefix={hero.prefix}
+        noData={hero.noData}
         suffix={hero.suffix}
         icon={hero.icon}
         color="var(--sd-accent)"
@@ -232,6 +234,7 @@ export function KpiPulse({
           sub={item.sub}
           series={item.series}
           prefix={item.prefix}
+          noData={item.noData}
           suffix={item.suffix}
           icon={item.icon}
           color={toneColor[item.tone || "accent"]}
