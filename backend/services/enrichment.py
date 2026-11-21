@@ -64,6 +64,7 @@ CITY_DATASETS: Dict[str, Dict] = {
         # BBL (borough-block-lot) e o identificador canonico de imovel em NYC.
         # Quando presente, o casamento e exacto e nao depende de parsing de morada.
         "bbl_col": "bbl",
+        "parcel_key_col": "bbl",
     },
     "DALLAS": {
         "domain": "www.dallasopendata.com",
@@ -77,6 +78,10 @@ CITY_DATASETS: Dict[str, Dict] = {
         "mailing_zip_col": "ownerzip",
         "type": "socrata",
         "number_as_string": True,
+        # DCAD: `parcelid` e a chave canonica da parcela e `appraisalyr` diz a
+        # que ano fiscal pertence o registo (usado para bloquear dados velhos).
+        "parcel_key_col": "parcelid",
+        "record_year_col": "appraisalyr",
     },
     "BOSTON": {
         "domain": "data.boston.gov",
@@ -90,6 +95,9 @@ CITY_DATASETS: Dict[str, Dict] = {
         "mailing_zip_col": "OWNER_MAIL_ZIPCODE",
         "type": "ckan",
         "number_as_string": True,
+        "parcel_key_col": "PID",
+        # OWN_OCC=Y significa que o dono reside no imovel (nao absentee).
+        "owner_occupied_col": "OWN_OCC",
     },
     "CHICAGO": {
         "domain": "datacatalog.cookcountyil.gov",
@@ -103,12 +111,18 @@ CITY_DATASETS: Dict[str, Dict] = {
         "order_col": "year",
         "order_dir": "DESC",
         "year_col": "year",
+        # O `year_col` acima so' ordena. Para a politica de staleness o campo
+        # tem de ser lido e devolvido como `record_year`; sem esta chave a
+        # regra dos 5 anos nunca disparava em Chicago.
+        "record_year_col": "year",
         "zip_col": None,
         "mailing_addr_col": "mail_address_full",
         "mailing_city_col": "mail_address_city_name",
         "mailing_zip_col": "mail_address_zipcode_1",
         "type": "socrata",
         "number_as_string": True,
+        # Cook County expoe PIN e PIN10. O PIN10 e a chave estavel da parcela.
+        "parcel_key_col": "pin10",
     },
 }
 
@@ -297,7 +311,11 @@ class OwnerEnrichment:
 
         domain, dset = cfg["domain"], cfg["dataset"]
         select_cols = [cfg["owner_col"]]
-        for opt in ("address_col", "zip_col", "mailing_addr_col", "mailing_city_col", "mailing_zip_col"):
+        for opt in (
+            "address_col", "zip_col", "mailing_addr_col", "mailing_city_col",
+            "mailing_zip_col", "parcel_key_col", "record_year_col",
+            "owner_occupied_col",
+        ):
             if cfg.get(opt):
                 select_cols.append(cfg[opt])
         select_cols = list(dict.fromkeys(select_cols))
@@ -324,7 +342,7 @@ class OwnerEnrichment:
         if not isinstance(data, list) or not data:
             logger.warning(f"BBL {bbl} sem proprietario em {dset}")
             return None
-        result = self._build_result(data[0], cfg, f"BBL {bbl}")
+        result = self._build_result(data[0], cfg, f"BBL {bbl}", match_method="bbl")
         if (
             result
             and cfg.get("domain") == "data.cityofnewyork.us"
@@ -363,7 +381,11 @@ class OwnerEnrichment:
             select_cols.append(cfg["year_col"])
         if cfg.get("zip_col"):
             select_cols.append(cfg["zip_col"])
+        for opt in ("parcel_key_col", "record_year_col", "owner_occupied_col"):
+            if cfg.get(opt):
+                select_cols.append(cfg[opt])
 
+        select_cols = list(dict.fromkeys(select_cols))
         sel = ",".join(select_cols)
         base = f"https://{domain}/resource/{dset}.json"
         num_col = cfg.get("num_col")
@@ -455,7 +477,10 @@ class OwnerEnrichment:
                         for row in data:
                             row_num = str(row.get(num_col) or "").strip()
                             if row_num == num:
-                                return self._build_result(row, cfg, original_address)
+                                return self._build_result(
+                                    row, cfg, original_address,
+                                    match_method="exact_address",
+                                )
                         # O $where ja filtrou pelo numero: se nao ha casamento exato,
                         # a unica resposta segura e NAO ter proprietario.
                         logger.debug(f"Sem match exato para numero {num!r} em {cfg.get('dataset')}")
@@ -475,7 +500,9 @@ class OwnerEnrichment:
                                     best_year = year
                                     best = row
                         if best is not None:
-                            return self._build_result(best, cfg, original_address)
+                            return self._build_result(
+                                best, cfg, original_address, match_method="exact_address"
+                            )
                         # Fallback seguro: so aceitar uma linha cujo numero de
                         # imovel normalizado coincida com o pedido. Devolver
                         # data[0] sem verificacao atribui o proprietario do
@@ -484,7 +511,12 @@ class OwnerEnrichment:
                             row_addr = str(row.get(address_col) or "")
                             parsed = parse_address(row_addr)
                             if parsed and normalize_number(parsed[0]) == normalize_number(num):
-                                return self._build_result(row, cfg, original_address)
+                                # Numero exacto, mas a rua veio de um LIKE: o
+                                # casamento e bom, nao e' canonico.
+                                return self._build_result(
+                                    row, cfg, original_address,
+                                    match_method="number_only", match_score=0.75,
+                                )
                         logger.debug(
                             f"Sem match verificado para {original_address!r} em {cfg.get('dataset')}"
                         )
@@ -566,8 +598,12 @@ class OwnerEnrichment:
             # Condominios: preferir a linha sem unidade (dono do edificio).
             for row in exact:
                 if not parcel_has_unit(row.get(street_col)):
-                    return self._build_result(row, cfg, original_address)
-            return self._build_result(exact[0], cfg, original_address)
+                    return self._build_result(
+                        row, cfg, original_address, match_method="exact_address"
+                    )
+            return self._build_result(
+                exact[0], cfg, original_address, match_method="exact_address"
+            )
 
         # Intervalos ("980 970 AMERICAN LEGION HW", "81-83 CHARLES ST") e
         # números com letra não passam no filtro exacto ST_NUM. Casar por
@@ -582,7 +618,10 @@ class OwnerEnrichment:
                 if normalize_street(row_street) != street_norm:
                     continue
                 if _number_overlap(num, row.get("ST_NUM") or row_key[0]):
-                    return self._build_result(row, cfg, original_address)
+                    return self._build_result(
+                        row, cfg, original_address,
+                        match_method="range", match_score=0.9,
+                    )
 
         for row in records:
             full_addr = str(row.get(street_col) or "").upper()
@@ -597,26 +636,32 @@ class OwnerEnrichment:
                         or addr_num.startswith(num)
                         or num.startswith(addr_num)
                     ):
-                        return self._build_result(row, cfg, original_address)
+                        return self._build_result(
+                            row, cfg, original_address,
+                            match_method="street_substring", match_score=0.7,
+                        )
                 else:
-                    return self._build_result(row, cfg, original_address)
+                    return self._build_result(
+                        row, cfg, original_address,
+                        match_method="street_substring", match_score=0.7,
+                    )
 
         orig_norm = normalize_street(original_address.split(",")[0].strip().upper())
         for row in records:
             full_addr = str(row.get(street_col) or "").upper()
             row_norm = normalize_street(full_addr.split(",")[0].strip())
             if orig_norm == row_norm:
-                return self._build_result(row, cfg, original_address)
+                return self._build_result(
+                    row, cfg, original_address, match_method="exact_address"
+                )
 
-        # Sem correspondencia: so aceitar quando existe um unico candidato.
-        if len(records) == 1:
-            logger.warning(
-                "CKAN %s: a unica resposta para %r nao casou com a rua; "
-                "atribuido por unico candidato",
-                cfg["dataset"],
-                original_address,
-            )
-            return self._build_result(records[0], cfg, original_address)
+        # Sem correspondencia nao se aceita o "unico candidato". Essa regra
+        # atribuia o proprietario de outra rua quando o CKAN devolvia uma so
+        # linha (falso positivo real em Boston). A resposta segura e' None.
+        logger.debug(
+            "CKAN %s: nenhuma linha casou com %r (%d candidatos) — sem owner",
+            cfg["dataset"], original_address, len(records),
+        )
         return None
 
     async def _lookup_ckan(
@@ -637,8 +682,12 @@ class OwnerEnrichment:
             fields.append(cfg["street_col"])
         if cfg.get("zip_col"):
             fields.append(cfg["zip_col"])
+        for opt in ("parcel_key_col", "record_year_col", "owner_occupied_col"):
+            if cfg.get(opt):
+                fields.append(cfg[opt])
         # ST_NUM permite casar intervalos ("980 970 AMERICAN LEGION HW").
         fields.append("ST_NUM")
+        fields = list(dict.fromkeys(fields))
 
         street_search = street_norm.split()[0] if street_norm else ""
         if not street_search:
@@ -682,15 +731,53 @@ class OwnerEnrichment:
         )
         return None
 
-    def _build_result(self, row: Dict, cfg: Dict, original_address: str) -> Dict[str, Any]:
+    def _build_result(
+        self,
+        row: Dict,
+        cfg: Dict,
+        original_address: str,
+        match_method: str = "exact_address",
+        match_score: float = 1.0,
+    ) -> Dict[str, Any]:
+        """Empacota a linha do dataset com a proveniencia do casamento.
+
+        `match_method`/`match_score` nao existiam e sao o que permite a camada
+        de politica distinguir um BBL exacto de um casamento por numero. Sem
+        isto, "encontrei um dono" era binario e um casamento fraco seguia para
+        a consulta paga como se fosse exacto.
+        """
         owner = str(row.get(cfg["owner_col"]) or "").strip()
         if not owner or owner.upper().startswith("N/A"):
             return None
+
+        parcel_key = None
+        if cfg.get("parcel_key_col"):
+            parcel_key = str(row.get(cfg["parcel_key_col"]) or "").strip() or None
+
+        record_year = None
+        if cfg.get("record_year_col"):
+            raw_year = str(row.get(cfg["record_year_col"]) or "").strip()
+            if raw_year.replace(".", "", 1).isdigit():
+                try:
+                    record_year = int(float(raw_year))
+                except ValueError:
+                    record_year = None
+
+        owner_occupied = None
+        if cfg.get("owner_occupied_col"):
+            raw_occ = str(row.get(cfg["owner_occupied_col"]) or "").strip().upper()
+            if raw_occ:
+                owner_occupied = raw_occ in {"Y", "YES", "TRUE", "1", "OWNER"}
 
         result = {
             "owner_name": owner,
             "source_dataset": f"{cfg['domain']}/{cfg['dataset']}",
             "matched_address": original_address,
+            "parcel_key": parcel_key,
+            "record_year": record_year,
+            "owner_occupied": owner_occupied,
+            "match_method": match_method,
+            "match_score": float(match_score),
         }
 
         mailing_parts = []

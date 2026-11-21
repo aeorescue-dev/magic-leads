@@ -305,6 +305,8 @@ class OpportunityWorkflowService:
         "timeline": ("timeline_json", "json"),
         "history": ("history_json", "json"),
         "property": ("property_json", "json"),
+        # P1: auditoria do payload bruto da fonte (lista de {source, row}).
+        "source_payload": ("source_payload", "json"),
     }
 
     def update_enrichment(self, opportunity_id: int, **fields) -> Optional[dict]:
@@ -478,6 +480,10 @@ class OpportunityWorkflowService:
         finally:
             conn.close()
 
+    # Cidades com fonte de multa monetaria configurada/ingerida. Dallas ainda
+    # nao tem dataset com valor; a UI deve mostrar "—", nao "$0".
+    FINE_SOURCE_CITIES = frozenset({"NYC", "NEW YORK", "CHICAGO", "BOSTON"})
+
     # Severidade -> quatro buckets do painel (Crítica/Alta/Média/Rotina).
     _SEVERITY_BUCKETS = {
         "critical": "critical",
@@ -511,14 +517,22 @@ class OpportunityWorkflowService:
         prazo e multas) para os cartões não divergirem do feed.
         """
         days = max(1, min(int(days or 10), 30))
+        window_days = max(1, min(int(window_days or days), 365))
         today = datetime.now(timezone.utc).date()
+        # Mesma janela do feed (`date('now','-7 days')`): inclui hoje + 7.
+        window_start = today - timedelta(days=window_days)
+        # A janela de entrada (`received_at`) so' governa o que e' "novo"
+        # (contagem, serie, severidade e ZIP do feed). Prazos e multas sao
+        # riscos ABERTOS: nao podem desaparecer porque a ocorrencia entrou ha
+        # mais de 7 dias. Era esta a causa dos "2 prazos" de Dallas com 6.789
+        # vencidos.
         clause_parts, params = _build_opportunity_filters(
             kind=None if kind == "all" else kind,
             city=city,
             category=category,
             zips=zips,
-            days=window_days,
-            deadline_within=deadline_within,
+            days=None,
+            deadline_within=None,
             with_fines=with_fines,
             severity=severity,
         )
@@ -541,6 +555,8 @@ class OpportunityWorkflowService:
         awaiting = 0
         fines_at_risk = 0.0
         fines_count = 0
+        window_count = 0
+        overdue = 0
         deadline_counts = {
             (today + timedelta(days=offset)).isoformat(): 0 for offset in range(days)
         }
@@ -550,15 +566,10 @@ class OpportunityWorkflowService:
             (today - timedelta(days=offset)).isoformat(): 0
             for offset in range(days - 1, -1, -1)
         }
+        window_start_iso = window_start.isoformat()
 
         for row in rows:
             severity = str(row["severity"] or "").strip().lower()
-            buckets[self._SEVERITY_BUCKETS.get(severity, "routine")] += 1
-            if row["status"] == "available":
-                awaiting += 1
-            zip_code = str(row["zip_code"] or "").strip()[:5]
-            if len(zip_code) == 5:
-                zips[zip_code] = zips.get(zip_code, 0) + 1
 
             # Multa real: saldo em aberto; se a fonte só publica o valor
             # imposto, usa imposed - paid. Nunca deriva da obra.
@@ -582,6 +593,8 @@ class OpportunityWorkflowService:
                     target = None
                 if target is not None:
                     days_left = (target - today).days
+                    if days_left < 0:
+                        overdue += 1
                     deadlines.append(
                         {
                             "id": row["id"],
@@ -602,6 +615,7 @@ class OpportunityWorkflowService:
                         deadline_fines[key] += balance
 
             received = str(row["received_at"] or row["created_at"] or "")
+            day = None
             if received:
                 try:
                     day = datetime.fromisoformat(
@@ -609,22 +623,40 @@ class OpportunityWorkflowService:
                     ).date().isoformat()
                 except ValueError:
                     day = received[:10]
+            if day and day >= window_start_iso:
+                window_count += 1
+                buckets[self._SEVERITY_BUCKETS.get(severity, "routine")] += 1
+                if row["status"] == "available":
+                    awaiting += 1
+                zip_code = str(row["zip_code"] or "").strip()[:5]
+                if len(zip_code) == 5:
+                    zips[zip_code] = zips.get(zip_code, 0) + 1
                 if day in series_counts:
                     series_counts[day] += 1
 
         deadlines.sort(key=lambda item: (item["days_left"], item["deadline"]))
         value_at_risk = sum(item["job_value"] for item in deadlines if item["days_left"] <= 7)
+        visible_deadlines = deadlines
+        if deadline_within is not None:
+            visible_deadlines = [
+                item for item in deadlines if item["days_left"] <= deadline_within
+            ]
 
         return {
             "kind": kind or "all",
             "totals": {
-                "count": len(rows),
+                "count": window_count,
                 "awaiting_inspection": awaiting,
                 "deadlines_7d": sum(1 for item in deadlines if item["days_left"] <= 7),
                 "deadlines_3d": sum(1 for item in deadlines if item["days_left"] <= 3),
+                "overdue": overdue,
                 "value_at_risk": value_at_risk,
                 "fines_at_risk": round(fines_at_risk),
                 "fines_count": fines_count,
+                "fines_available": (
+                    not city
+                    or str(city).strip().upper() in self.FINE_SOURCE_CITIES
+                ),
             },
             "by_severity": buckets,
             "by_zip": [
@@ -635,7 +667,7 @@ class OpportunityWorkflowService:
             ],
             "deadlines": [
                 {**item, "days_left": max(0, item["days_left"])}
-                for item in deadlines[:5]
+                for item in visible_deadlines[:5]
             ],
             "series": [
                 {"date": day, "count": count} for day, count in series_counts.items()
@@ -658,6 +690,10 @@ class OpportunityWorkflowService:
         kind: str = "preventive",
         days: int = 30,
         category: Optional[str] = None,
+        severity: Optional[str] = None,
+        deadline_within: Optional[int] = None,
+        with_fines: bool = False,
+        search: Optional[str] = None,
         max_zones: int = 200,
     ) -> dict:
         """Agrega oportunidades por zona (ZIP) e nicho, em SQL.
@@ -675,14 +711,37 @@ class OpportunityWorkflowService:
         category = str(category or "").strip() or None
 
         clauses = [
-            "source_kind = ?",
             "UPPER(TRIM(city)) = UPPER(TRIM(?))",
             "date(COALESCE(received_at, created_at)) >= date('now', ?)",
         ]
-        params: list = [kind, city, f"-{days} days"]
+        params: list = [city, f"-{days} days"]
+        if kind != "all":
+            clauses.insert(0, "source_kind = ?")
+            params.insert(0, kind)
         if category:
             clauses.append("category = ?")
             params.append(category)
+        if severity:
+            clauses.append("LOWER(TRIM(COALESCE(severity, ''))) = ?")
+            params.append(str(severity).strip().lower())
+        if deadline_within is not None:
+            clauses.append("compliance_deadline IS NOT NULL")
+            clauses.append("date(compliance_deadline) <= date('now', ?)")
+            params.append(f"+{int(deadline_within)} days")
+        if with_fines:
+            clauses.append(
+                "(COALESCE(fine_balance, 0) > 0 OR "
+                "(COALESCE(fine_imposed, 0) - COALESCE(fine_paid, 0)) > 0)"
+            )
+        term = str(search or "").strip().lower()
+        if term:
+            like = f"%{term}%"
+            clauses.append(
+                "(LOWER(COALESCE(address, '')) LIKE ? OR "
+                "LOWER(COALESCE(category, '')) LIKE ? OR "
+                "LOWER(COALESCE(zip_code, '')) LIKE ?)"
+            )
+            params.extend([like] * 3)
         where = " AND ".join(clauses)
 
         critical_sql = (

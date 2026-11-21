@@ -18,7 +18,7 @@ from typing import Iterable, Optional
 from ..utils.logger import logger
 from . import timeutil
 from .db import db_service
-from .enrichment import owner_enrichment
+from .owner_resolution import resolve_owner
 
 CITIES = ("NYC", "CHICAGO", "DALLAS", "BOSTON")
 BATCH = 25
@@ -96,7 +96,7 @@ async def run_once(
                     continue
                 processed += 1
                 try:
-                    result = await owner_enrichment.enrich(
+                    record = await resolve_owner(
                         lead.get("address") or "",
                         lead.get("city") or city,
                         bbl=lead.get("bbl"),
@@ -106,15 +106,29 @@ async def run_once(
                         "[OWNER-BACKFILL] %s lead %s falhou: %s",
                         city, lead.get("id"), exc,
                     )
-                    result = None
-                owner = (result or {}).get("owner_name")
+                    record = None
+                owner = record.owner_name if record else None
                 if owner:
                     try:
                         await db_service.update_owner_details(
                             int(lead["id"]),
                             owner,
-                            (result or {}).get("mailing_address"),
+                            record.mailing_address if record else None,
                         )
+                        if record is not None and hasattr(
+                            db_service, "update_owner_resolution"
+                        ):
+                            try:
+                                await db_service.update_owner_resolution(
+                                    int(lead["id"]), record
+                                )
+                            except Exception as exc:  # noqa: BLE001
+                                # Proveniencia e' metadado: nunca impede o owner
+                                # de ser gravado (nem quebra o backfill).
+                                logger.debug(
+                                    "[OWNER-BACKFILL] proveniencia lead %s: %s",
+                                    lead["id"], exc,
+                                )
                         filled += 1
                     except Exception as exc:  # noqa: BLE001
                         logger.warning(

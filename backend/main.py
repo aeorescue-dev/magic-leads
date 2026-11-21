@@ -84,6 +84,7 @@ from .models.schemas import (
     ReleaseLeadRequest,
     ReserverLeadRequest,
     SendTestPushRequest,
+    SignalCounts,
     SourceType,
     UserCreate,
     UserLogin,
@@ -116,6 +117,8 @@ from .services import (
     notifier,
     outbound_templates,
     owner_backfill,
+    owner_resolution,
+    phone_jobs,
     plans,
     scrape_guard,
     security,
@@ -1088,6 +1091,22 @@ async def leads_today(
             owner_type=owner_type,
             search=search,
         )
+        signal_counts = await db_service.count_leads_by_signal(
+            city=city,
+            signal_type=signal_type,
+            category=category,
+            urgency=urgency,
+            include_closed=include_closed,
+            days=7,
+            user_id=user_id,
+            neighborhoods=neighborhood_list or None,
+            zips=zip_list or None,
+            no_geo=bool(no_geo),
+            deadline_only=bool(deadline_only),
+            layer=layer,
+            owner_type=owner_type,
+            search=search,
+        )
         await _annotate_visibility(leads, user)
 
         return LeadsListResponse(
@@ -1096,6 +1115,7 @@ async def leads_today(
             per_page=limit,
             leads=[_to_lead_response(lead) for lead in leads],
             counts=ReadinessCounts(**counts),
+            signal_counts=SignalCounts(**signal_counts),
         )
     except Exception as e:
         logger.error(f"Erro ao buscar demandas do dia: {e}", exc_info=True)
@@ -6734,6 +6754,14 @@ async def _lifespan(app):
     else:
         logger.info("[ENRICH-QUEUE] Desativada por ENRICH_QUEUE_ENABLED=0")
 
+    # Fila de telefone: o clique le cache/BD e enfileira; esta task e' a unica
+    # que chama a Searchbug. Sem ela, `in_progress` nunca resolveria.
+    if getattr(settings, "PHONE_JOB_WORKER_ENABLED", True):
+        _phone_jobs_task = asyncio.create_task(phone_jobs.worker_loop())
+        logger.info("Phone jobs worker ativo (cache-first; provider fora do clique)")
+    else:
+        logger.info("[PHONE_JOB] Desativado por PHONE_JOB_WORKER_ENABLED=0")
+
     # Recuperacao de checkout abandonado (Prioridade A). Fail-closed: sem
     # EMAIL_API_KEY/EMAIL_FROM nao envia nada; so' actua sobre utilizadores que
     # ja' iniciaram um pagamento e ainda nao pagaram.
@@ -9232,6 +9260,9 @@ async def reserve_lead(
     phone_consumed = False
     phone_authorized = False
     phone_quota_ref: dict | None = None
+    phone_state = "none"
+    phone_label = None
+    phone_verified = False
     letter_consumed = False
 
     # 2. COM CONSENTIMENTO => REVEAL (reserva 60min + conta 1/10 com idempotência)
@@ -9313,19 +9344,29 @@ async def reserve_lead(
         owner_phone = lead.get("owner_phone")
         mailing_address = lead.get("mailing_address")
 
-        needs_enrichment = not owner_name or not owner_phone or not mailing_address
+        # Tambem resolve quando falta a proveniencia: sem ela o telefone nunca
+        # pode ser marcado como verificado e o clique repetiria a consulta.
+        needs_enrichment = (
+            not owner_name
+            or not owner_phone
+            or not mailing_address
+            or not lead.get("owner_confidence")
+        )
         logger.info(f"[RESERVE] Enrichment check: needs_enrichment={needs_enrichment} owner_name={bool(owner_name)} owner_phone={bool(owner_phone)} mailing_address={bool(mailing_address)}")
 
+        owner_record = None
         if needs_enrichment:
             try:
-                # Enriquecimento de nome + mailing address (Socrata/CKAN)
-                logger.info(f"[RESERVE] Calling owner_enrichment.enrich for lead_id={lead_id}")
-                enrich_result = await owner_enrichment.enrich(
+                # Resolucao unica (4 adapters): devolve dono + prova do casamento
+                # (parcela, confianca, idade do registo), nao so um nome.
+                logger.info(f"[RESERVE] Resolving owner for lead_id={lead_id}")
+                owner_record = await owner_resolution.resolve_owner(
                     lead.get("address", ""),
                     lead.get("city", ""),
                     bbl=lead.get("bbl") if hasattr(lead, "get") else None,
                 )
-                logger.info(f"[RESERVE] owner_enrichment result: {enrich_result}")
+                enrich_result = owner_record.raw if owner_record else None
+                logger.info(f"[RESERVE] owner_resolution result: {enrich_result}")
                 if not enrich_result:
                     logger.warning(f"[RESERVE] owner_enrichment returned None/empty for lead_id={lead_id}")
                 if enrich_result:
@@ -9336,6 +9377,13 @@ async def reserve_lead(
                     if not mailing_address and enrich_result.get("mailing_address"):
                         mailing_address = enrich_result["mailing_address"]
                         await db_service.update_mailing_address(lead_id, mailing_address)
+                if owner_record is not None and (
+                    not owner_name
+                    or owner_resolution.names_equivalent(
+                        lead.get("owner_name"), owner_record.owner_name
+                    )
+                ):
+                    await db_service.update_owner_resolution(lead_id, owner_record)
 
                 # O telefone é tratado fora deste bloco, com a quota da Fase 3.
             except HTTPException:
@@ -9357,11 +9405,20 @@ async def reserve_lead(
                     lead_id,
                     f"reserve:{user_id}:{lead_id}:{key}",
                     trade_code=lead.get("issue_category"),
+                    owner=owner_record,
                 )
+                phone_state = phone_reveal.get("state") or "no_phone"
+                phone_label = phone_reveal.get("label")
+                phone_verified = bool(phone_reveal.get("verified"))
                 if phone_reveal.get("success") and phone_reveal.get("payload"):
                     owner_phone = phone_reveal["payload"].get("phone")
                     phone_authorized = True
                     phone_consumed = not bool(phone_reveal.get("duplicate"))
+                    phone_quota_ref = phone_reveal.get("quota") if phone_consumed else None
+                elif phone_state == "in_progress":
+                    # Job aceite: a unidade fica consumida e o worker devolve-a
+                    # se a consulta falhar em definitivo.
+                    phone_consumed = bool(phone_reveal.get("quota"))
                     phone_quota_ref = phone_reveal.get("quota") if phone_consumed else None
                 else:
                     logger.info(
@@ -9493,10 +9550,17 @@ async def reserve_lead(
             "stage_expires_at": _to_iso_utc(lead.get("stage_expires_at") or lead.get("reserved_until")),
             "server_now": utcnow().isoformat() + "Z",
             "message": (
-                "Dados revelados — reserva de 1 hora ativa"
-                if phone_consumed
-                else "Dados revelados sem custo — reserva de 1 hora ativa"
+                "Reserva de 1 hora ativa — proprietário em confirmação"
+                if phone_state == "in_progress"
+                else (
+                    "Dados revelados — reserva de 1 hora ativa"
+                    if phone_consumed
+                    else "Dados revelados sem custo — reserva de 1 hora ativa"
+                )
             ),
+            "phone_state": phone_state,
+            "phone_label": phone_label,
+            "phone_verified": bool(phone_verified and phone_authorized),
             "counted_again": result.get("counted_again", True),
             "used": usage_now.get("letter_used"),
             "limit": usage_now.get("letter_limit"),
@@ -9510,6 +9574,8 @@ async def reserve_lead(
             "owner": {
                 "name": lead.get("owner_name"),
                 "phone": lead.get("owner_phone") if phone_authorized else None,
+                "phone_verified": bool(phone_verified and phone_authorized),
+                "phone_label": phone_label if phone_authorized else None,
                 "email": lead.get("owner_email"),
                 "mailing_address": lead.get("mailing_address"),
                 "address": lead.get("address"),
@@ -9628,11 +9694,9 @@ async def reveal_phone_endpoint(
     endpoint simplesmente NAO EXISTIA — `fetch` devolvia 404 e o botao caia no
     toast de erro generico.
 
-    Reutiliza o mesmo caminho de dados do fluxo /reserve
-    (owner_enrichment.enrich -> searchbug_service.lookup_phone ->
-    update_owner_phone), com a mesma protecao de cota diaria: sem isso o
-    botao permitiria procuras pagas ilimitadas sem reserva nem debito de
-    creditos.
+    Reutiliza o mesmo caminho do fluxo /reserve: cache persistente primeiro e,
+    em cache fria, enfileira o job (`in_progress`). Nunca chama a Searchbug no
+    pedido HTTP.
 
     Contrato devolvido (frontend/lib/api-client.ts `PhoneRevealResult`):
     `success=false` sai com HTTP 200 + `error` — e o que o handler da UI
@@ -9651,81 +9715,76 @@ async def reveal_phone_endpoint(
         if pre_status == "already_reserved":
             return {"success": False, "error": "already_reserved"}
 
-        # Ja tem telefone: nada a procurar (evita chamada paga repetida).
+        # Ja tem telefone: entrega direta, sem consulta publica nem paga.
         if pre_lead.get("owner_phone"):
-            return {"success": True, "phone": pre_lead.get("owner_phone")}
-        if not pre_lead.get("owner_name"):
-            return {"success": False, "error": "owner_name_missing"}
-
-        # P0-C1B: reserva atomica da cota ANTES da chamada paga. Se a busca
-        # falhar, o `finally` devolve a unidade — "falha e' gratis".
-        reserved = await db_service.reserve_daily_quota(user_id)
-        if not reserved:
-            return {"success": False, "error": "daily_limit_reached"}
-
-        attempt = await db_service.reserve_phone_attempt(user_id)
-        if not attempt.get("ok"):
-            await db_service.refund_daily_quota(user_id)
             return {
-                "success": False,
-                "error": f"attempt_limit_{attempt.get('reason', 'unknown')}",
+                "success": True,
+                "state": "ready",
+                "phone": pre_lead.get("owner_phone"),
+                "phone_verified": bool(int(pre_lead.get("phone_verified") or 0)),
             }
 
-        phone = None
-        provider = None
-        owner_name = pre_lead.get("owner_name")
-        keep = False
-        try:
-            enrich_result = await owner_enrichment.enrich(
+        owner_record = None
+        if not pre_lead.get("owner_name") or not pre_lead.get("owner_confidence"):
+            owner_record = await owner_resolution.resolve_owner(
                 pre_lead.get("address", ""),
                 pre_lead.get("city", ""),
                 bbl=pre_lead.get("bbl") if hasattr(pre_lead, "get") else None,
             )
-            if enrich_result:
-                if not owner_name and enrich_result.get("owner_name"):
-                    owner_name = enrich_result["owner_name"]
-                    await db_service.update_owner(lead_id, owner_name)
-                    await _persist_managing_agent(lead_id, enrich_result)
-                if owner_name:
-                    phone_result = await searchbug_service.lookup_phone(
-                        pre_lead.get("address", ""),
-                        pre_lead.get("city", ""),
-                        pre_lead.get("state", ""),
-                        owner_name=owner_name,
-                        zip_code=pre_lead.get("zip_code") or pre_lead.get("zip"),
-                        owner_class=get_owner_class(owner_name),
-                        lead_id=lead_id,
+            if owner_record is None:
+                return {"success": False, "state": "no_phone", "error": "owner_name_missing"}
+            existing_owner = str(pre_lead.get("owner_name") or "").strip()
+            if existing_owner and not owner_resolution.names_equivalent(
+                existing_owner, owner_record.owner_name
+            ):
+                # O dataset devolveu outro titular: nao se cola a proveniencia
+                # nova a um nome antigo. O lead segue com confianca media.
+                owner_record = None
+            else:
+                if not existing_owner:
+                    await db_service.update_owner(lead_id, owner_record.owner_name)
+                await _persist_managing_agent(lead_id, owner_record.raw)
+                await db_service.update_owner_resolution(lead_id, owner_record)
+                if owner_record.mailing_address:
+                    await db_service.update_mailing_address(
+                        lead_id, owner_record.mailing_address
                     )
-                    if phone_result.success and phone_result.phone:
-                        phone = phone_result.phone
-                        provider = getattr(phone_result, "provider", None)
-                        await db_service.update_owner_phone(
-                            lead_id, phone, verified=phone_result.verified
-                        )
-                    else:
-                        # guarda_skipped:* = custo zero (o guard de custo
-                        # recusou); nao e o mesmo que provider sem resultados.
-                        logger.info(
-                            f"[PHONE][reveal-phone] lead {lead_id}: "
-                            f"{phone_result.error or 'provider sem resultado'}"
-                        )
-        except Exception as e:
-            logger.warning(f"reveal-phone: enriquecimento falhou lead {lead_id}: {e}")
-        finally:
-            if not phone:
-                refreshed = await db_service.get_lead_by_id(lead_id)
-                if refreshed:
-                    phone = dict(refreshed).get("owner_phone") or None
-            if phone:
-                keep = True
-            if not keep:
-                await db_service.refund_daily_quota(user_id)
 
-        if not phone:
-            return {"success": False, "error": "phone_not_found"}
+        idempotency = (
+            request.headers.get("Idempotency-Key")
+            or f"reveal:{user_id}:{lead_id}:{uuid.uuid4()}"
+        )
+        result = await subscription_reveals.reveal_phone(
+            user_id,
+            lead_id,
+            idempotency,
+            trade_code=pre_lead.get("issue_category"),
+            owner=owner_record,
+        )
 
-        await db_service.record_event(lead_id, "revealed")
-        return {"success": True, "phone": phone, "provider": provider or "searchbug"}
+        if result.get("state") == "in_progress":
+            return {
+                "success": True,
+                "state": "in_progress",
+                "phone": None,
+                "message": result.get("message"),
+            }
+        if result.get("success"):
+            await db_service.record_event(lead_id, "revealed")
+            payload = result.get("payload") or {}
+            return {
+                "success": True,
+                "state": "ready",
+                "phone": payload.get("phone"),
+                "phone_verified": bool(payload.get("verified")),
+                "phone_label": payload.get("label"),
+                "provider": result.get("provider") or "cache",
+            }
+        return {
+            "success": False,
+            "state": result.get("state") or "no_phone",
+            "error": result.get("error") or "phone_not_found",
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -9960,6 +10019,10 @@ async def opportunity_territories(
     kind: str = "preventive",
     days: int = 30,
     category: Optional[str] = None,
+    severity: Optional[str] = None,
+    deadline_within: Optional[int] = None,
+    with_fines: bool = False,
+    search: Optional[str] = None,
     user: dict = Depends(_get_current_user),
 ):
     """Agregado territorial (ZIP x nicho) para a vista de mapa/zonas.
@@ -9974,7 +10037,14 @@ async def opportunity_territories(
         raise HTTPException(status_code=400, detail="city_required")
     started = time.perf_counter()
     result = opportunity_workflow.territories(
-        city=city, kind=kind, days=days, category=category
+        city=city,
+        kind=kind,
+        days=days,
+        category=category,
+        severity=severity,
+        deadline_within=deadline_within,
+        with_fines=with_fines,
+        search=search,
     )
     elapsed_ms = (time.perf_counter() - started) * 1000
     response.headers["Server-Timing"] = f"db;dur={elapsed_ms:.1f}"

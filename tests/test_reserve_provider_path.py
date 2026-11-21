@@ -1,23 +1,22 @@
-"""Caminho do PROVIDER dentro do endpoint de reserva.
+"""Caminho PAGO do telefone: clique enfileira, worker entrega.
 
-Complementa `test_reserve_atomic_quota.py`, que usa um provider que responde
-sempre `NORESULTS`. Aqui o provider RESPONDE COM TELEFONE, que e o caminho que
-converte um lead entregue de graca num lead cobrado. Sem estes testes, a regra
-"so se cobra em sucesso total" podia passar em metade dos casos e a cobranca
-errada depois de um telefone aparecer nao era apanhada por ninguem.
-
-Cadeia real exercitada: lead sem telefone -> `searchbug_service.lookup_phone`
-devolve numero -> `update_owner_phone` persiste -> `reveal_lead` debita.
+Substitui a suite antiga que assumia chamada sincrona no `/reserve`. O que se
+guarda de proposito:
+  * a cota so' fica consumida quando ha telefone entregue ou job aceite;
+  * falha definitiva devolve a unidade;
+  * telefone ja existente nunca chama o provider;
+  * `verified` vem da prova (nome + camada), nao de "o provider respondeu".
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
-import backend.main as main_module
-import backend.services.subscription_reveals as reveals_module
+import backend.services.phone_jobs as phone_jobs
 from backend.config import settings
 from backend.main import _hash_token, app
 from backend.models.schemas import (
@@ -26,8 +25,10 @@ from backend.models.schemas import (
     SourceType,
     UrgencyLevel,
 )
-from backend.services import daily_quota
+from backend.services import daily_quota, phone_cache
 from backend.services.db import db_service
+from backend.services.enrichment import owner_enrichment
+from backend.services.searchbug import PhoneLookupResult
 from backend.utils.time import utcnow
 
 EMAIL = "pytest-provider-path@magicleads.app"
@@ -36,12 +37,13 @@ TOKEN = "pytest-provider-path-token"
 _EXT = {"n": 0}
 
 
-def _make_lead(owner_name=None, owner_phone=None, mailing_address=None) -> int:
+def _make_lead(owner_name=None, owner_phone=None, mailing_address=None) -> tuple[int, str]:
     _EXT["n"] += 1
+    address = f"{_EXT['n']} PROVIDER STREET"
     payload = EnrichedLead(
         external_id=f"pytest-provider-path-{_EXT['n']}",
         source_type=SourceType.SERVICE_311,
-        address=f"{_EXT['n']} PROVIDER STREET",
+        address=address,
         city="BROOKLYN",
         state="NY",
         zip_code="11201",
@@ -61,12 +63,10 @@ def _make_lead(owner_name=None, owner_phone=None, mailing_address=None) -> int:
     )
     row = db_service._service.insert_lead_new(payload)
     assert row is not None
-    return row["id"]
+    return int(row["id"]), address
 
 
 class _PhoneFound:
-    """Searchbug que ACERTA: e o caminho que deve passar a cobrar."""
-
     def __init__(self, phone="+17185550111"):
         self.phone = phone
         self.calls = []
@@ -75,37 +75,38 @@ class _PhoneFound:
         self.calls.append(
             {"address": address, "city": city, "state": state, "owner_name": owner_name}
         )
-
-        class R:
-            success = True
-            verified = True
-            name_match = 1.0
-
-        R.phone = self.phone
-        R.error = None
-        R.provider = "Searchbug"
-        return R()
+        return PhoneLookupResult(
+            success=True,
+            phone=self.phone,
+            provider="Searchbug",
+            verified=True,
+            name_match=1.0,
+            layer=kwargs.get("layer") or "L2",
+        )
 
 
 class _NoPhone:
+    def __init__(self):
+        self.calls = []
+
     async def lookup_phone(self, *args, **kwargs):
-        class R:
-            success = False
-            phone = None
-            error = "NORESULTS"
-            provider = "Searchbug"
-
-        return R()
+        self.calls.append(kwargs)
+        return PhoneLookupResult(
+            success=False, error="no_results", provider="Searchbug"
+        )
 
 
-class _ProviderExplodes:
+class _TransportError:
     async def lookup_phone(self, *args, **kwargs):
-        raise RuntimeError("Searchbug fora do ar (500)")
+        return PhoneLookupResult(
+            success=False,
+            error="transport_error:empty_or_non_json",
+            provider="Searchbug",
+        )
 
 
-class _NoName:
-    async def enrich(self, *args, **kwargs):
-        return None
+async def _no_enrich(*args, **kwargs):
+    return None
 
 
 @pytest.fixture(scope="module")
@@ -122,159 +123,198 @@ def user_and_client():
     return TestClient(app), {"Authorization": f"Bearer {TOKEN}"}, user_id
 
 
-def _used(user_id: int) -> int:
-    return int(db_service._service.get_daily_leads_used(user_id).get("used") or 0)
+def _reset_quota(user_id: int) -> None:
+    svc = db_service._service
+    today = utcnow().date().isoformat()
+    from backend.services.db import get_connection
+
+    conn = get_connection()
+    try:
+        conn.execute(
+            """INSERT OR REPLACE INTO user_daily_stats
+               (user_id, date, leads_used, leads_limit, reset_at)
+               VALUES (?, ?, 0, 10, ?)""",
+            (user_id, today, svc._utc_tomorrow_midnight().isoformat()),
+        )
+        conn.execute(
+            "UPDATE user_daily_usage SET phone_used=0, letter_used=0 WHERE user_id=?",
+            (user_id,),
+        )
+        conn.execute("DELETE FROM phone_attempts WHERE user_id=?", (user_id,))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _phone_used(user_id: int) -> int:
     return int(daily_quota.usage_payload(user_id)["phone_used"])
 
 
-def _letter_used(user_id: int) -> int:
-    return int(daily_quota.usage_payload(user_id)["letter_used"])
+def _drain_jobs(lead_id: int) -> list[dict]:
+    summaries = []
+    for job in phone_jobs.claim_due(limit=20, lead_id=lead_id):
+        summaries.append(asyncio.run(phone_jobs.process_one(job)))
+    return summaries
 
 
-@pytest.fixture
-def reset_quota():
-    """Devolve a cota a 0 antes de cada teste, e restaura no fim."""
-    from backend.services.db import get_connection
-
-    def _reset(user_id):
-        svc = db_service._service
-        today = utcnow().date().isoformat()
-        conn = get_connection()
-        try:
-            conn.execute(
-                """INSERT OR REPLACE INTO user_daily_stats
-                   (user_id, date, leads_used, leads_limit, reset_at)
-                   VALUES (?, ?, 0, 10, ?)""",
-                (user_id, today, svc._utc_tomorrow_midnight().isoformat()),
-            )
-            conn.execute(
-                "UPDATE user_daily_usage SET phone_used=0, letter_used=0 WHERE user_id=?",
-                (user_id,),
-            )
-            conn.commit()
-        finally:
-            conn.close()
-
-    yield _reset
+@pytest.fixture(autouse=True)
+def _isolate_provider(monkeypatch):
+    """Nenhum teste toca na rede: owner e provider sao sempre locais."""
+    _reset_quota(1)
+    monkeypatch.setattr(settings, "SEARCHBUG_MOCK", False, raising=False)
+    monkeypatch.setattr(settings, "PHONE_L3_UNNAMED_ENABLED", False, raising=False)
+    monkeypatch.setattr(owner_enrichment, "enrich", _no_enrich)
 
 
-# ---------------------------------------------------------------------------
-def test_provider_phone_turns_a_free_lead_into_a_paid_one(
-    user_and_client, reset_quota, monkeypatch
-):
-    """Nome sem telefone + provider ACERTA => sucesso total => debita.
-
-    Este e o unico caminho em que um lead que ia ser entregue de graca passa a
-    ser cobrado. A Regra A diz que a cobranca segue a qualidade FINAL dos dados,
-    nao a que o lead tinha quando o user clicou.
-    """
+def test_click_enqueues_without_calling_provider(user_and_client, monkeypatch):
     client, headers, user_id = user_and_client
-    reset_quota(user_id)
-
+    _reset_quota(user_id)
     provider = _PhoneFound()
-    monkeypatch.setattr(settings, "SEARCHBUG_MOCK", False, raising=False)
-    monkeypatch.setattr(reveals_module, "searchbug_service", provider)
-    monkeypatch.setattr(main_module, "owner_enrichment", _NoName())
+    monkeypatch.setattr(phone_jobs, "searchbug_service", provider)
 
-    lead_id = _make_lead(owner_name="MARIA SANTOS", owner_phone=None, mailing_address=None)
+    lead_id, address = _make_lead(owner_name="MARIA SANTOS")
 
     r = client.post(
         f"/api/leads/{lead_id}/reserve",
         headers=headers,
-        json={"minutes": 60, "consent": True, "idempotency": f"prov-paid-{lead_id}"},
+        json={"minutes": 60, "consent": True, "idempotency": f"async-{lead_id}"},
     )
     assert r.status_code == 200, r.text
     body = r.json()
 
-    assert provider.calls, "o provider nem foi consultado"
-    assert body["charged"] is True, "com telefone do provider devia cobrar"
-    assert body["incomplete_delivery"] is False
-    assert body["owner"]["phone"] == "+17185550111", body["owner"]
-    assert _phone_used(user_id) == 1, "telefone do provider não consumiu quota"
-    assert _letter_used(user_id) == 1, "reserva não consumiu carta/visita"
-
-
-def test_provider_noresults_keeps_the_lead_free(user_and_client, reset_quota, monkeypatch):
-    """Nome sem telefone + provider FALHA => entregue de graca, cota intacta."""
-    client, headers, user_id = user_and_client
-    reset_quota(user_id)
-
-    monkeypatch.setattr(settings, "SEARCHBUG_MOCK", False, raising=False)
-    monkeypatch.setattr(reveals_module, "searchbug_service", _NoPhone())
-    monkeypatch.setattr(main_module, "owner_enrichment", _NoName())
-
-    lead_id = _make_lead(owner_name="MARIA SANTOS", owner_phone=None, mailing_address=None)
-
-    r = client.post(
-        f"/api/leads/{lead_id}/reserve",
-        headers=headers,
-        json={"minutes": 60, "consent": True, "idempotency": f"prov-free-{lead_id}"},
-    )
-    assert r.status_code == 200, r.text
-    body = r.json()
-
-    assert body["charged"] is False, "provider falhou mas o lead foi cobrado"
-    assert body["incomplete_delivery"] is True
-    assert body["missing"], "devia dizer o que falta"
-    assert body["owner"]["name"] == "MARIA SANTOS", "o nome tem de ser entregue"
-    assert not body["owner"]["phone"], "nao ha telefone para entregar"
-    assert _phone_used(user_id) == 0, "lookup sem telefone devia devolver a unidade"
-    assert _letter_used(user_id) == 1, "a carta/visita foi entregue e deve contar"
-
-
-def test_provider_outage_does_not_break_delivery(user_and_client, reset_quota, monkeypatch):
-    """Provider levantado nao pode devolver 5xx nem perder o lead.
-
-    O Searchbug e um servico externo pago e instavel. Se a sua queda levasse o
-    utilizador a um 500, ele perderia a reserva que ja estava a tentar fazer.
-    """
-    client, headers, user_id = user_and_client
-    reset_quota(user_id)
-
-    monkeypatch.setattr(settings, "SEARCHBUG_MOCK", False, raising=False)
-    monkeypatch.setattr(reveals_module, "searchbug_service", _ProviderExplodes())
-    monkeypatch.setattr(main_module, "owner_enrichment", _NoName())
-
-    lead_id = _make_lead(owner_name="MARIA SANTOS", owner_phone=None, mailing_address=None)
-
-    r = client.post(
-        f"/api/leads/{lead_id}/reserve",
-        headers=headers,
-        json={"minutes": 60, "consent": True, "idempotency": f"prov-out-{lead_id}"},
-    )
-    assert r.status_code == 200, f"provider em queda devolveu {r.status_code}: {r.text}"
-    body = r.json()
-
-    assert body["charged"] is False
-    assert body["reserved"] is True, "o lead ficou por entregar"
-    assert _phone_used(user_id) == 0
-    assert _letter_used(user_id) == 1
-
-
-def test_provider_is_not_called_when_the_lead_already_has_a_phone(
-    user_and_client, reset_quota, monkeypatch
-):
-    """Sem telefone em falta nao ha motivo para pagar uma consulta."""
-    client, headers, user_id = user_and_client
-    reset_quota(user_id)
-
-    provider = _PhoneFound()
-    monkeypatch.setattr(settings, "SEARCHBUG_MOCK", False, raising=False)
-    monkeypatch.setattr(reveals_module, "searchbug_service", provider)
-    monkeypatch.setattr(main_module, "owner_enrichment", _NoName())
-
-    lead_id = _make_lead(owner_name="JOHN DOE", owner_phone="(718) 555-0700")
-
-    r = client.post(
-        f"/api/leads/{lead_id}/reserve",
-        headers=headers,
-        json={"minutes": 60, "consent": True, "idempotency": f"prov-nocall-{lead_id}"},
-    )
-    assert r.status_code == 200, r.text
-    assert provider.calls == [], "pagou uma consulta ao provider sem necessidade"
-    assert r.json()["charged"] is True
+    assert body["phone_state"] == "in_progress", body
+    assert body["owner"]["phone"] is None
+    assert body["charged"] is True, "o job aceite reserva a unidade"
+    assert provider.calls == [], "o clique NAO pode chamar a Searchbug"
     assert _phone_used(user_id) == 1
-    assert _letter_used(user_id) == 1
+
+    key = phone_cache.build_cache_key(lead_id, "MARIA SANTOS", address, "11201")
+    job = phone_jobs.get_by_cache_key(key)
+    assert job and job["status"] == "pending", job
+
+
+def test_worker_delivers_phone_and_marks_verified(user_and_client, monkeypatch):
+    client, headers, user_id = user_and_client
+    _reset_quota(user_id)
+    provider = _PhoneFound()
+    monkeypatch.setattr(phone_jobs, "searchbug_service", provider)
+
+    lead_id, address = _make_lead(owner_name="MARIA SANTOS")
+    # Proveniencia persistida (como se viesse de um BBL exacto).
+    db_service._service.update_owner_resolution(
+        lead_id,
+        SimpleNamespace(
+            parcel_key="4087860042",
+            owner_kind="person",
+            record_year=2025,
+            match_method="bbl",
+            confidence="high",
+            source_dataset="data.cityofnewyork.us/64uk-42ks",
+        ),
+    )
+    client.post(
+        f"/api/leads/{lead_id}/reserve",
+        headers=headers,
+        json={"minutes": 60, "consent": True, "idempotency": f"worker-{lead_id}"},
+    )
+
+    summaries = _drain_jobs(lead_id)
+    assert summaries and summaries[-1]["ok"] is True, summaries
+    assert len(provider.calls) == 1
+
+    lead = db_service._service.get_lead_by_id(lead_id)
+    assert lead["owner_phone"] == "+17185550111"
+    assert lead["phone_verified"] == 1, "nome 1.0 + L2 = verificado"
+
+    key = phone_cache.build_cache_key(lead_id, "MARIA SANTOS", address, "11201")
+    cached = phone_cache.get(key)
+    assert cached["phone"] == "+17185550111"
+    assert cached["verified"] == 1
+
+
+def test_no_results_refunds_phone_quota(user_and_client, monkeypatch):
+    client, headers, user_id = user_and_client
+    _reset_quota(user_id)
+    provider = _NoPhone()
+    monkeypatch.setattr(phone_jobs, "searchbug_service", provider)
+
+    lead_id, _ = _make_lead(owner_name="MARIA SANTOS")
+    r = client.post(
+        f"/api/leads/{lead_id}/reserve",
+        headers=headers,
+        json={"minutes": 60, "consent": True, "idempotency": f"none-{lead_id}"},
+    )
+    assert r.status_code == 200
+    assert _phone_used(user_id) == 1
+
+    _drain_jobs(lead_id)
+    assert _phone_used(user_id) == 0, "ausencia definitiva devolve a unidade"
+    assert db_service._service.get_lead_by_id(lead_id)["owner_phone"] is None
+
+
+def test_transport_error_retries_then_refunds(user_and_client, monkeypatch):
+    client, headers, user_id = user_and_client
+    _reset_quota(user_id)
+    monkeypatch.setattr(phone_jobs, "searchbug_service", _TransportError())
+    monkeypatch.setattr(phone_jobs, "MAX_ATTEMPTS", 1)
+
+    lead_id, _ = _make_lead(owner_name="MARIA SANTOS")
+    client.post(
+        f"/api/leads/{lead_id}/reserve",
+        headers=headers,
+        json={"minutes": 60, "consent": True, "idempotency": f"trans-{lead_id}"},
+    )
+    _drain_jobs(lead_id)
+    assert _phone_used(user_id) == 0
+
+
+def test_reveal_phone_endpoint_is_in_progress_then_ready(user_and_client, monkeypatch):
+    client, headers, user_id = user_and_client
+    _reset_quota(user_id)
+    monkeypatch.setattr(phone_jobs, "searchbug_service", _PhoneFound())
+
+    lead_id, _ = _make_lead(owner_name="MARIA SANTOS")
+    db_service._service.update_owner_resolution(
+        lead_id,
+        SimpleNamespace(
+            parcel_key="4087860042",
+            owner_kind="person",
+            record_year=2025,
+            match_method="bbl",
+            confidence="high",
+            source_dataset="data.cityofnewyork.us/64uk-42ks",
+        ),
+    )
+    first = client.post(f"/api/leads/{lead_id}/reveal-phone", headers=headers)
+    assert first.status_code == 200, first.text
+    assert first.json()["state"] == "in_progress"
+    assert first.json()["phone"] is None
+    assert _phone_used(user_id) == 1
+
+    _drain_jobs(lead_id)
+    second = client.post(f"/api/leads/{lead_id}/reveal-phone", headers=headers)
+    assert second.status_code == 200, second.text
+    body = second.json()
+    assert body["state"] == "ready"
+    assert body["phone"] == "+17185550111"
+    assert body["phone_verified"] is True
+
+
+def test_existing_phone_never_calls_provider(user_and_client, monkeypatch):
+    client, headers, user_id = user_and_client
+    _reset_quota(user_id)
+    provider = _PhoneFound()
+    monkeypatch.setattr(phone_jobs, "searchbug_service", provider)
+
+    lead_id, _ = _make_lead(owner_name="JOHN DOE", owner_phone="(718) 555-0700")
+    r = client.post(
+        f"/api/leads/{lead_id}/reserve",
+        headers=headers,
+        json={"minutes": 60, "consent": True, "idempotency": f"have-{lead_id}"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["phone_state"] == "ready", body
+    assert body["owner"]["phone"] == "(718) 555-0700"
+    assert provider.calls == []
+    assert _phone_used(user_id) == 1

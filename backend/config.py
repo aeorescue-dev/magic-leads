@@ -212,6 +212,26 @@ class Settings(BaseSettings):
     # 30/dia = 3x a cota de 10; uma rajada de 3/min trava scripts.
     PHONE_ATTEMPTS_PER_USER_DAY: int = 30
     PHONE_ATTEMPTS_PER_USER_MINUTE: int = 3
+    # Pede a Searchbug apenas registos COM telefone (`SUBTYPE=p`). Evita hits
+    # pagos que voltam sem numero. Desligar so para diagnostico.
+    SEARCHBUG_PHONE_ONLY: bool = True
+    # Politica de integridade do proprietario (4 cidades).
+    # Registo com mais de N anos nao autoriza consulta paga (Chicago e o caso
+    # real: o dataset tem `year`).
+    PHONE_STALE_YEARS: int = 5
+    PHONE_ALLOW_STALE: bool = False
+    # Entidades: `off` nao consulta; `address_only` entrega o telefone do
+    # imovel ROTULADO (exige PHONE_L3_UNNAMED_ENABLED=1); `officer` tenta o
+    # responsavel no registo estadual antes de cair para address_only.
+    PHONE_ENTITY_MODE: str = "address_only"
+    # Resolucao de responsaveis de LLC/trust (OpenCorporates). Fail-closed:
+    # sem chave/chave invalida devolve None e a politica cai para address_only.
+    SOS_OFFICERS_ENABLED: bool = False
+    OPENCORPORATES_API_KEY: str = ""
+    SOS_OFFICERS_TIMEOUT_SECONDS: float = 8.0
+    # Worker da fila de telefone (o clique nunca chama o provider).
+    PHONE_JOB_WORKER_ENABLED: bool = True
+    PHONE_JOB_POLL_SECONDS: float = 15.0
     # P1: frescura diaria HPD/DOB + consolidacao da reincidencia.
     FRESHNESS_ENABLED: bool = True
     FRESHNESS_INITIAL_DELAY_MIN: int = 30
@@ -272,6 +292,10 @@ class Settings(BaseSettings):
     PHASE1_DAILY_PERMIT_ROWS: int = 1500
     PHASE1_BOSTON_LIMIT: int = 200
     PHASE1_DALLAS_LIMIT: int = 300
+    # P1: novas fontes de pre-inspecao/multa.
+    PHASE1_CHICAGO_311: int = 300
+    PHASE1_CHICAGO_FINES: int = 500
+    PHASE1_BOSTON_CODE: int = 300
     PHASE1_BOSTON_PERMIT_ROWS: int = 300
     PHASE1_DALLAS_PERMIT_ROWS: int = 300
     PHASE1_PERMIT_WINDOW_DAYS: int = 30

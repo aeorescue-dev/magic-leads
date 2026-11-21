@@ -65,7 +65,12 @@ class _FakeResponse:
 
 @pytest.fixture(autouse=True)
 def _clean_calls():
-    """Zera telemetria e auditoria de custo antes de cada teste."""
+    """Zera telemetria e auditoria de custo antes de cada teste.
+
+    O buffer de metricas e global ao processo: sem o drenar primeiro, um evento
+    pendente de outro teste entrava no flush deste e quebrava `len(rows)==1`.
+    """
+    asyncio.run(searchbug_metrics.flush_once())
     conn = get_connection()
     try:
         conn.execute("DELETE FROM searchbug_calls")
@@ -74,6 +79,7 @@ def _clean_calls():
     finally:
         conn.close()
     yield
+    asyncio.run(searchbug_metrics.flush_once())
 
 
 def _rows() -> list[dict]:

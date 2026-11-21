@@ -11,10 +11,25 @@ from fastapi.testclient import TestClient
 
 from backend.config import settings
 from backend.main import _hash_token, app
-from backend.services import daily_quota, subscription_billing, subscription_reveals
+from backend.services import (
+    daily_quota,
+    phone_jobs,
+    phone_policy,
+    subscription_billing,
+    subscription_reveals,
+)
 from backend.services.db import DB_PATH, db_service  # noqa: F401
 from backend.services.searchbug import PhoneLookupResult
 from backend.services.security import hash_password
+
+
+async def _no_resolve(*args, **kwargs):
+    return None
+
+
+def _drain_phone_jobs(lead_id: int | None = None) -> None:
+    for job in phone_jobs.claim_due(limit=20, lead_id=lead_id):
+        asyncio.run(phone_jobs.process_one(job))
 
 
 def _conn():
@@ -135,14 +150,17 @@ def test_phone_mock_quota_addon_and_refund(monkeypatch) -> None:
     lead2 = _lead(ext2)
     lead3 = _lead(ext3)
     monkeypatch.setattr(settings, "SEARCHBUG_MOCK", True, raising=False)
+    monkeypatch.setattr(phone_policy, "resolve_owner", _no_resolve)
     try:
         first = asyncio.run(
             subscription_reveals.reveal_phone(uid, lead1, f"idem-{suffix}-1")
         )
         assert first["success"] is True
-        assert first["payload"]["phone"]
+        assert first["state"] == "in_progress"
         assert first["quota"]["bucket"] == "base"
         assert daily_quota.usage_payload(uid)["phone_remaining"] == 1
+        _drain_phone_jobs(lead1)
+        assert db_service._service.get_lead_by_id(lead1)["owner_phone"]
 
         duplicate = asyncio.run(
             subscription_reveals.reveal_phone(uid, lead1, f"idem-{suffix}-2")
@@ -154,6 +172,8 @@ def test_phone_mock_quota_addon_and_refund(monkeypatch) -> None:
             subscription_reveals.reveal_phone(uid, lead2, f"idem-{suffix}-3")
         )
         assert second["success"] is True
+        assert second["state"] == "in_progress"
+        _drain_phone_jobs(lead2)
         assert daily_quota.usage_payload(uid)["phone_remaining"] == 0
 
         with pytest.raises(daily_quota.QuotaError) as exhausted:
@@ -171,6 +191,7 @@ def test_phone_mock_quota_addon_and_refund(monkeypatch) -> None:
         )
         assert third["success"] is True
         assert third["quota"]["bucket"] == "addon"
+        _drain_phone_jobs(lead3)
         assert daily_quota.usage_payload(uid)["addon_remaining"] == 3
     finally:
         _cleanup(email, [ext1, ext2, ext3], [])
@@ -183,17 +204,19 @@ def test_phone_failure_preserves_quota(monkeypatch) -> None:
     uid = _user(email, "weekly_2")
     lead_id = _lead(ext)
     monkeypatch.setattr(settings, "SEARCHBUG_MOCK", False, raising=False)
+    monkeypatch.setattr(phone_policy, "resolve_owner", _no_resolve)
 
     async def _fail(*args, **kwargs):
         return PhoneLookupResult(success=False, error="no_results")
 
-    monkeypatch.setattr(subscription_reveals.searchbug_service, "lookup_phone", _fail)
+    monkeypatch.setattr(phone_jobs.searchbug_service, "lookup_phone", _fail)
     try:
         result = asyncio.run(
             subscription_reveals.reveal_phone(uid, lead_id, f"idem-{suffix}-fail")
         )
-        assert result["success"] is False
-        assert result["quota_preserved"] is True
+        assert result["success"] is True
+        assert result["state"] == "in_progress"
+        _drain_phone_jobs(lead_id)
         usage = daily_quota.usage_payload(uid)
         assert usage["phone_used"] == 0
         assert usage["phone_remaining"] == 2
@@ -259,6 +282,7 @@ def test_subscription_usage_letter_and_phone_endpoints(monkeypatch) -> None:
     email = f"quota-api-{suffix}@magicleads.app"
     ext = f"quota-api-{suffix}"
     monkeypatch.setattr(settings, "SEARCHBUG_MOCK", True, raising=False)
+    monkeypatch.setattr(phone_policy, "resolve_owner", _no_resolve)
     client = TestClient(app)
     headers, uid = _auth(email, "weekly_2")
     lead_id = _lead(ext)
@@ -281,7 +305,9 @@ def test_subscription_usage_letter_and_phone_endpoints(monkeypatch) -> None:
         )
         assert phone.status_code == 200, phone.text
         assert phone.json()["success"] is True
-        assert phone.json()["payload"]["phone"]
+        assert phone.json()["state"] == "in_progress"
+        _drain_phone_jobs(lead_id)
+        assert db_service._service.get_lead_by_id(lead_id)["owner_phone"]
 
         after = client.get("/api/subscription/usage", headers=headers).json()
         assert after["letter_used"] == 1

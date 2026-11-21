@@ -73,6 +73,15 @@ class Phase1Scheduler:
             permit_window = max(
                 1, int(getattr(settings, "PHASE1_PERMIT_WINDOW_DAYS", 30) or 30)
             )
+            chi_311 = max(
+                1, int(getattr(settings, "PHASE1_CHICAGO_311", 300) or 300)
+            )
+            chi_fines = max(
+                1, int(getattr(settings, "PHASE1_CHICAGO_FINES", 500) or 500)
+            )
+            bos_code = max(
+                1, int(getattr(settings, "PHASE1_BOSTON_CODE", 300) or 300)
+            )
             try:
                 stats = await asyncio.to_thread(
                     phase1_enrichment.ingest,
@@ -81,6 +90,9 @@ class Phase1Scheduler:
                     ecb=ecb,
                     chi_violations=chi_limit,
                     chi_permits=chi_permits,
+                    chi_311=chi_311,
+                    chi_fines=chi_fines,
+                    bos_code=bos_code,
                     permit_rows=permit_rows,
                     bos_violations=bos_limit,
                     bos_311=bos_limit,

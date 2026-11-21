@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import pytest
 
 from backend.services import owner_backfill
+from backend.services.owner_resolution.base import build_record
 
 NOW = datetime(2026, 11, 2, 12, 0, tzinfo=timezone.utc)
 
@@ -49,12 +50,20 @@ async def test_fills_owners_and_advances_cursor(monkeypatch, no_sleep):
     monkeypatch.setattr(owner_backfill, "db_service", fake)
     monkeypatch.setattr(owner_backfill, "per_city_day", lambda: 10)
 
-    async def fake_enrich(address, city, bbl=None):
+    async def fake_resolve(address, city, bbl=None):
         if address == "10 Main St":
-            return {"owner_name": "ANA COSTA", "mailing_address": "PO Box 1"}
+            return build_record(
+                address=address,
+                city=city,
+                raw={
+                    "owner_name": "ANA COSTA",
+                    "mailing_address": "PO Box 1",
+                    "match_method": "exact_address",
+                },
+            )
         return None
 
-    monkeypatch.setattr(owner_backfill.owner_enrichment, "enrich", fake_enrich)
+    monkeypatch.setattr(owner_backfill, "resolve_owner", fake_resolve)
 
     result = await owner_backfill.run_once(now=NOW, cities_override=["NYC"])
 
@@ -102,9 +111,13 @@ async def test_owner_api_failure_does_not_abort_batch(monkeypatch, no_sleep):
     async def flaky(address, city, bbl=None):
         if address == "1 A St":
             raise RuntimeError("socrata down")
-        return {"owner_name": "BETA LLC"}
+        return build_record(
+            address=address,
+            city=city,
+            raw={"owner_name": "BETA LLC", "match_method": "exact_address"},
+        )
 
-    monkeypatch.setattr(owner_backfill.owner_enrichment, "enrich", flaky)
+    monkeypatch.setattr(owner_backfill, "resolve_owner", flaky)
 
     result = await owner_backfill.run_once(now=NOW, cities_override=["NYC"])
 

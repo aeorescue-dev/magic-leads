@@ -1030,7 +1030,8 @@ CREATE TABLE IF NOT EXISTS searchbug_calls (
   owner_class TEXT,
   layer TEXT,
   name_match REAL,
-  transport_error INTEGER DEFAULT 0
+  transport_error INTEGER DEFAULT 0,
+  trigger TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_searchbug_calls_at ON searchbug_calls (called_at);
@@ -1038,6 +1039,58 @@ CREATE INDEX IF NOT EXISTS idx_searchbug_calls_outcome ON searchbug_calls (outco
 CREATE INDEX IF NOT EXISTS idx_searchbug_calls_billed ON searchbug_calls (billed, called_at);
 -- idx_searchbug_calls_lead e' criado em _migrate_schema (a coluna lead_id nao
 -- existe em bases antigas; criar o indice aqui abortaria o executescript).
+
+-- Cache persistente do telefone. O invariante do projecto (AGENTS #5/#11) diz
+-- que o clique le daqui e nunca chama a Searchbug; sem esta tabela o cache era
+-- um dicionario em memoria e cada restart voltava a pagar a mesma consulta.
+-- TTL: 90 d hit, 7 d miss, 1 h erro. A chave inclui o nome do dono e a morada,
+-- para que uma mudanca de titular nunca sirva o telefone do dono antigo.
+CREATE TABLE IF NOT EXISTS phone_lookups (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  cache_key TEXT NOT NULL UNIQUE,
+  lead_id INTEGER,
+  owner_name_key TEXT NOT NULL,
+  address_key TEXT NOT NULL,
+  zip_code TEXT,
+  state TEXT,
+  phone TEXT,
+  verified INTEGER DEFAULT 0,
+  label TEXT,
+  layer TEXT,
+  provider TEXT,
+  result_code TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  expires_at TEXT NOT NULL,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_phone_lookups_lead ON phone_lookups (lead_id);
+CREATE INDEX IF NOT EXISTS idx_phone_lookups_expires ON phone_lookups (expires_at);
+
+-- Fila persistente de consultas pagas. O clique enfileira e devolve
+-- `in_progress`; o worker chama o provider fora do pedido HTTP. A chave unica
+-- da single-flight: dois cliques simultaneos no mesmo imovel = um job.
+CREATE TABLE IF NOT EXISTS phone_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  cache_key TEXT NOT NULL UNIQUE,
+  lead_id INTEGER NOT NULL,
+  user_id INTEGER,
+  idempotency_key TEXT,
+  trigger TEXT NOT NULL DEFAULT 'user_click',
+  status TEXT NOT NULL DEFAULT 'pending',
+  attempts INTEGER DEFAULT 0,
+  next_attempt_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  quota_bucket TEXT,
+  quota_addon_id INTEGER,
+  lookup_address_kind TEXT,
+  last_error TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  claimed_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_phone_jobs_due ON phone_jobs (status, next_attempt_at);
+CREATE INDEX IF NOT EXISTS idx_phone_jobs_lead ON phone_jobs (lead_id);
 
 -- Fase 2: telemetria das entregas de push notification.
 --
@@ -1828,6 +1881,19 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE leads ADD COLUMN converted_at TEXT")
     if "phone_verified" not in cols:
         conn.execute("ALTER TABLE leads ADD COLUMN phone_verified INTEGER DEFAULT 0")
+    # Proveniencia da resolucao do proprietario. Sem isto, cada clique teria de
+    # repetir a consulta publica e o selo `verified` nao sobrevivia a um restart.
+    for name, ctype in {
+        "owner_parcel_key": "TEXT",
+        "owner_kind": "TEXT",
+        "owner_record_year": "INTEGER",
+        "owner_match_method": "TEXT",
+        "owner_confidence": "TEXT",
+        "owner_source_dataset": "TEXT",
+        "owner_resolved_at": "TEXT",
+    }.items():
+        if name not in cols:
+            conn.execute(f"ALTER TABLE leads ADD COLUMN {name} {ctype}")
     # P0-A: indice do feed (filtro por cidade/estado + ordenacao por data).
     try:
         conn.execute(
@@ -2546,6 +2612,8 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
             "name_match": "REAL",
             "transport_error": "INTEGER DEFAULT 0",
             "cost_usd": "REAL DEFAULT 0",
+            # AGENTS #10: toda a chamada paga tem de declarar o que a originou.
+            "trigger": "TEXT",
         }
         for name, ctype in sb_extra.items():
             if name not in sb_cols:
@@ -5784,7 +5852,11 @@ class DatabaseService:
         if layer == "permit":
             where.append("l.signal_type = 'authorized_work'")
         elif layer == "reactive":
-            where.append("l.signal_type <> 'authorized_work'")
+            # "Reativos" e' obrigacao legal, nao "tudo o que nao e' obra".
+            # A versao anterior incluia open_request e inflava a aba.
+            where.append("l.signal_type = 'legal_obligation'")
+        elif layer == "preventive":
+            where.append("l.signal_type = 'open_request'")
         if owner_type == "unknown":
             where.append("TRIM(COALESCE(l.owner_name, '')) = ''")
         elif owner_type == "institutional":
@@ -6012,6 +6084,42 @@ class DatabaseService:
         finally:
             conn.close()
 
+    def count_leads_by_signal(self, **filters) -> dict:
+        """Contagens por tipo de sinal no MESMO filtro base do feed.
+
+        Os separadores Todos/Reativos/Preventivos/Obras passam a ler daqui,
+        em vez de misturar `total_interested`, a pagina atual de leads e as
+        oportunidades. `signal_type` e' removido: o separador ativo nao pode
+        zerar os outros tres.
+        """
+        filters.pop("signal_type", None)
+        filters.pop("readiness", None)
+        where_sql, params = self._leads_feed_where(**filters)
+        conn = get_connection()
+        try:
+            rows = conn.execute(
+                f"""SELECT COALESCE(NULLIF(TRIM(l.signal_type), ''), '(null)') AS signal,
+                           COUNT(*) AS c
+                      FROM leads l
+                     WHERE {where_sql}
+                     GROUP BY signal""",
+                params,
+            ).fetchall()
+            counts = {"all": 0, "reactive": 0, "preventive": 0, "permit": 0}
+            for row in rows:
+                n = int(row["c"] or 0)
+                counts["all"] += n
+                signal = str(row["signal"] or "")
+                if signal == "legal_obligation":
+                    counts["reactive"] += n
+                elif signal == "authorized_work":
+                    counts["permit"] += n
+                elif signal == "open_request":
+                    counts["preventive"] += n
+            return counts
+        finally:
+            conn.close()
+
     def count_leads_by_readiness(self, **filters) -> dict:
         """Counts das três abas no MESMO filtro base (cidade/ofício/zona).
 
@@ -6235,6 +6343,30 @@ class DatabaseService:
             cur = conn.execute(
                 "UPDATE leads SET owner_email = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (owner_email, lead_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def update_owner_resolution(self, lead_id: int, record) -> bool:
+        """Grava a prova do casamento do proprietario (parcela, metodo, etc.)."""
+        conn = get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE leads SET owner_parcel_key = ?, owner_kind = ?, "
+                "owner_record_year = ?, owner_match_method = ?, owner_confidence = ?, "
+                "owner_source_dataset = ?, owner_resolved_at = CURRENT_TIMESTAMP, "
+                "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (
+                    getattr(record, "parcel_key", None),
+                    getattr(record, "owner_kind", None),
+                    getattr(record, "record_year", None),
+                    getattr(record, "match_method", None),
+                    getattr(record, "confidence", None),
+                    getattr(record, "source_dataset", None),
+                    int(lead_id),
+                ),
             )
             conn.commit()
             return cur.rowcount > 0
@@ -11773,6 +11905,36 @@ class DatabaseService:
         """Compatibilidade: reserva atomica de 1 unidade da cota diaria."""
         return self.reserve_daily_quota(user_id)
 
+    def phone_attempt_budget_ok(self, user_id: int) -> bool:
+        """Leitura pura do orcamento de tentativas (sem consumir).
+
+        O clique usa isto para recusar ANTES de consumir a cota. O worker
+        continua a reservar a tentativa de forma atomica; se a corrida perder,
+        devolve a unidade.
+        """
+        daily_limit = int(getattr(settings, "PHONE_ATTEMPTS_PER_USER_DAY", 30) or 30)
+        minute_limit = int(
+            getattr(settings, "PHONE_ATTEMPTS_PER_USER_MINUTE", 3) or 3
+        )
+        conn = get_connection()
+        try:
+            today = utcnow().date().isoformat()
+            daily = conn.execute(
+                "SELECT COUNT(*) AS c FROM phone_attempts "
+                "WHERE user_id = ? AND attempted_at >= ?",
+                (user_id, today),
+            ).fetchone()["c"]
+            if daily >= daily_limit:
+                return False
+            minute = conn.execute(
+                "SELECT COUNT(*) AS c FROM phone_attempts "
+                "WHERE user_id = ? AND datetime(attempted_at) >= datetime('now', '-60 seconds')",
+                (user_id,),
+            ).fetchone()["c"]
+            return minute < minute_limit
+        finally:
+            conn.close()
+
     def reserve_phone_attempt(self, user_id: int) -> dict:
         """Orcamento de tentativas pagas POR UTILIZADOR (anti-bot).
 
@@ -13429,6 +13591,11 @@ class AsyncDatabaseService:
             )
         )
 
+    async def count_leads_by_signal(self, **filters) -> dict:
+        return await anyio.to_thread.run_sync(
+            lambda: self._service.count_leads_by_signal(**filters)
+        )
+
     async def count_leads_by_readiness(self, **filters) -> dict:
         return await anyio.to_thread.run_sync(
             lambda: self._service.count_leads_by_readiness(**filters)
@@ -13606,6 +13773,11 @@ class AsyncDatabaseService:
 
     async def update_owner_email(self, lead_id: int, owner_email: Optional[str]) -> bool:
         return await anyio.to_thread.run_sync(self._service.update_owner_email, lead_id, owner_email)
+
+    async def update_owner_resolution(self, lead_id: int, record) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.update_owner_resolution, lead_id, record
+        )
 
     async def update_mailing_address(self, lead_id: int, mailing_address: Optional[str]) -> bool:
         return await anyio.to_thread.run_sync(self._service.update_mailing_address, lead_id, mailing_address)
@@ -14320,6 +14492,11 @@ class AsyncDatabaseService:
 
     async def refund_daily_quota(self, user_id: int) -> None:
         await anyio.to_thread.run_sync(self._service.refund_daily_quota, user_id)
+
+    async def phone_attempt_budget_ok(self, user_id: int) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._service.phone_attempt_budget_ok, user_id
+        )
 
     async def reserve_phone_attempt(self, user_id: int) -> dict:
         return await anyio.to_thread.run_sync(self._service.reserve_phone_attempt, user_id)

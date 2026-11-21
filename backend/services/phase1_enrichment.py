@@ -78,6 +78,8 @@ BOS = "data.boston.gov"
 BOSTON_VIOLATIONS_RESOURCE = "800a2663-1d6a-46e7-9356-bedb70f5332c"
 BOSTON_311_RESOURCE = "254adca6-64ab-4c5c-9fc0-a6da622be185"
 BOSTON_PERMITS_RESOURCE = "6ddcd912-32a0-43df-9908-63574f8c7e77"
+# Code Enforcement Violations: o unico dataset Boston com multa real (`value`).
+BOSTON_CODE_ENFORCEMENT_RESOURCE = "90ed3816-5e70-443c-803d-9a71f44470be"
 
 # Tipos de 311 de Dallas com ofício e imóvel privado identificáveis. Ficam
 # de fora o balde genérico "Code Concern - CCS" (20k+, sem descrição/ofício) e
@@ -104,6 +106,14 @@ DATASETS = {
     "nyc_permits": (NYC, "rbx6-tga4"),
     "chi_violations": (CHI, "22u3-xenr"),
     "chi_permits": (CHI, "ydr8-5enu"),
+    # 311 de Chicago: fonte de pre-inspecao (open_request), ja usada pelo
+    # pipeline principal e agora tambem pela camada de oportunidades.
+    "chi_311": (CHI, "v6vf-nfxy"),
+    # Multas reais de Chicago: Ordinance Violations (`imposed_fine`) e
+    # Vacant/Abandoned (`total_fines`/`current_amount_due`). O dataset
+    # `22u3-xenr` (Building Violations) nao tem valor monetario.
+    "chi_ordinance_fines": (CHI, "6br9-quuz"),
+    "chi_vacant_fines": (CHI, "kc9i-wq85"),
     "dal_311": (DAL, "d7e7-envw"),
     "dal_permits": (DAL, "e7gq-4sah"),
 }
@@ -248,6 +258,20 @@ def map_category(*parts: Optional[str]) -> str:
     return match_category(*parts) or "Structure"
 
 
+def source_kind_for_signal(signal: Optional[str]) -> tuple[str, str]:
+    """Classificação única: o tipo da oportunidade segue o sinal, não o pipeline.
+
+    `legal_obligation` é reativo (violação), `authorized_work` é obra (alvará)
+    e `open_request` é preventivo. Qualquer outro valor cai em preventivo.
+    """
+    value = str(signal or "").strip().lower()
+    if value == "legal_obligation":
+        return "reactive", "violation"
+    if value == "authorized_work":
+        return "permit", "permit"
+    return "preventive", "pre_inspection"
+
+
 def is_actionable(description: Optional[str], history: Optional[list] = None) -> bool:
     texts = [description] + [
         entry.get("label") for entry in (history or []) if isinstance(entry, dict)
@@ -386,6 +410,22 @@ def bbl_from_boro_block_lot(boro: Optional[str], block, lot) -> Optional[str]:
     return f"{code}{block_text.zfill(5)}{lot_text.zfill(4)}"[-10:]
 
 
+def source_payload(source: str, row: dict) -> dict:
+    """Payload bruto da fonte, para auditoria de campos ignorados.
+
+    Remove apenas as regioes calculadas do Socrata (`:@computed_region_*`),
+    que sao ruido e nao fazem parte do registo original.
+    """
+    return {
+        "source": source,
+        "row": {
+            key: value
+            for key, value in (row or {}).items()
+            if not str(key).startswith(":@")
+        },
+    }
+
+
 def _trim(text: Optional[str], limit: int = 220) -> Optional[str]:
     value = " ".join(str(text or "").split())
     if not value:
@@ -451,6 +491,9 @@ class Phase1EnrichmentService:
                     "source_record_id": f"phase1-hpd-complaint-{key}",
                 },
             )
+            item.setdefault("source_payload", []).append(
+                source_payload("hpd_complaints", row)
+            )
             item["history"].append(
                 _history_entry(
                     "complaint",
@@ -503,6 +546,9 @@ class Phase1EnrichmentService:
             )
             if deadline and (not item.get("compliance_deadline") or deadline < item["compliance_deadline"]):
                 item["compliance_deadline"] = deadline
+            item.setdefault("source_payload", []).append(
+                source_payload("hpd_violations", row)
+            )
             item["severity"] = max_severity(item.get("severity"), map_hpd_severity(row.get("class")))
             item["history"].append(
                 _history_entry(
@@ -567,6 +613,9 @@ class Phase1EnrichmentService:
             if hearing and (not item.get("hearing_date") or hearing < item["hearing_date"]):
                 item["hearing_date"] = hearing
             item["hearing_status"] = row.get("hearing_status") or item.get("hearing_status")
+            item.setdefault("source_payload", []).append(
+                source_payload("ecb", row)
+            )
             item["history"].append(
                 _history_entry(
                     "fine",
@@ -724,6 +773,9 @@ class Phase1EnrichmentService:
                 if zip_code and not item.get("zip_code"):
                     item["zip_code"] = zip_code
                     item["zip_source"] = zip_source
+                item.setdefault("source_payload", []).append(
+                    source_payload("chi_violations", row)
+                )
                 item["history"].append(
                     _history_entry(
                         "violation",
@@ -814,6 +866,9 @@ class Phase1EnrichmentService:
             elif zip_code and not item.get("zip_code"):
                 item["zip_code"] = zip_code
                 item["zip_source"] = zip_source
+            item.setdefault("source_payload", []).append(
+                source_payload("chi_permits", row)
+            )
             value = to_float(row.get("reported_cost"))
             if value and (not item.get("job_value") or value > item["job_value"]):
                 item["job_value"] = value
@@ -869,6 +924,286 @@ class Phase1EnrichmentService:
                 }
         return out
 
+    def fetch_chicago_311(self, limit: int = 0) -> list:
+        """311 aberto de Chicago (`v6vf-nfxy`) como pre-inspecao real."""
+        if limit <= 0:
+            return []
+        since = (self.today - timedelta(days=30)).isoformat()
+        rows = socrata(
+            "chi_311",
+            {
+                "$limit": max(1, int(limit)),
+                "$order": "created_date DESC",
+                "$where": (
+                    "status = 'Open' "
+                    f"AND created_date >= '{since}T00:00:00'"
+                ),
+            },
+        )
+        grouped: dict = {}
+        for row in rows:
+            address = normalize_address(row.get("street_address"))
+            if len(address) < 8:
+                continue
+            category = match_category(row.get("sr_type"))
+            if not category:
+                continue
+            zip_code = str(row.get("zip_code") or "").strip()[:5] or None
+            key = make_property_key(address=address, city="Chicago", zip_code=zip_code)
+            when = row.get("created_date")
+            item = grouped.get(key)
+            if item is None:
+                item = {
+                    "property_key": key,
+                    "address": address,
+                    "city": "Chicago",
+                    "state": "IL",
+                    "zip_code": zip_code,
+                    "zip_source": "311",
+                    "signal_type": "open_request",
+                    "severity": _severity_from_text(row.get("sr_type")),
+                    "category": category,
+                    "description": _clean(row.get("sr_type")) or "311 request",
+                    "received_at": when,
+                    "compliance_deadline": None,
+                    "history": [],
+                    "tags": ["inspection_possible"],
+                    "source_record_id": "phase1-chi-311-"
+                    + hashlib.sha1(
+                        f"{address}|{row.get('sr_number')}".encode("utf-8")
+                    ).hexdigest()[:16],
+                    "source_payload": [],
+                }
+                grouped[key] = item
+            item["source_payload"].append(source_payload("chi_311", row))
+            item["history"].append(
+                _history_entry(
+                    "complaint",
+                    _clean(row.get("sr_type"), 140) or "311",
+                    to_iso_date(when),
+                    row.get("status"),
+                    None,
+                    f"chi-311-{row.get('sr_number')}",
+                )
+            )
+        return list(grouped.values())
+
+    def fetch_chicago_fines(self, limit: int = 0) -> list:
+        """Multas reais de Chicago: Ordinance Violations + Vacant/Abandoned.
+
+        `hearing_date` e' uma audiencia, nao um prazo de correcao: fica no
+        campo `hearing_date` e `compliance_deadline` permanece None.
+        """
+        if limit <= 0:
+            return []
+        grouped: dict = {}
+        # P1.1: a mesma notificacao (`nov_number`/`violation_number`) pode
+        # aparecer em varias linhas (varios codigos) ou nos dois datasets.
+        # Conta-se uma vez por imovel; sem chave, mantem-se a linha unica.
+        seen_fine_keys: set[tuple[str, str]] = set()
+        ord_limit = max(1, int(limit) // 2)
+        vac_limit = max(1, int(limit) - ord_limit)
+
+        def merge_fine_item(
+            row: dict,
+            source: str,
+            address: str,
+            when,
+            fine_imposed,
+            fine_paid,
+            fine_balance,
+            hearing,
+            description,
+            category,
+            dedupe_key=None,
+        ):
+            if not address or len(address) < 8:
+                return
+            key = make_property_key(address=address, city="Chicago", zip_code=None)
+            normalized_key = str(dedupe_key or "").strip().upper()
+            if normalized_key:
+                token = (key, normalized_key)
+                if token in seen_fine_keys:
+                    return
+                seen_fine_keys.add(token)
+            item = grouped.get(key)
+            if item is None:
+                zip_code, zip_source = resolve_chicago_zip(
+                    address=address,
+                    lat=row.get("latitude"),
+                    lng=row.get("longitude"),
+                )
+                item = {
+                    "property_key": key,
+                    "address": address,
+                    "city": "Chicago",
+                    "state": "IL",
+                    "zip_code": zip_code,
+                    "zip_source": zip_source,
+                    "signal_type": "legal_obligation",
+                    "severity": "high",
+                    "category": category,
+                    "description": description,
+                    "received_at": when,
+                    "compliance_deadline": None,
+                    "hearing_date": hearing,
+                    "fine_imposed": 0.0,
+                    "fine_paid": 0.0,
+                    "fine_balance": 0.0,
+                    "history": [],
+                    "tags": ["fine_active", "inspection_possible"],
+                    "source_record_id": "phase1-chi-fines-"
+                    + hashlib.sha1(address.encode("utf-8")).hexdigest()[:16],
+                    "source_payload": [],
+                }
+                grouped[key] = item
+            item["fine_imposed"] += float(fine_imposed or 0)
+            item["fine_paid"] += float(fine_paid or 0)
+            item["fine_balance"] += max(0.0, float(fine_balance or 0))
+            if hearing and (
+                not item.get("hearing_date") or hearing < item["hearing_date"]
+            ):
+                item["hearing_date"] = hearing
+            item["source_payload"].append(source_payload(source, row))
+            item["history"].append(
+                _history_entry(
+                    "violation",
+                    _clean(description, 140) or "Fine",
+                    to_iso_date(when),
+                    "Open",
+                    fine_imposed,
+                    f"{source}-{row.get('id') or row.get('violation_number') or row.get('nov_number')}",
+                )
+            )
+
+        for row in socrata(
+            "chi_ordinance_fines",
+            {
+                "$limit": ord_limit,
+                "$order": "last_modified_date DESC",
+                "$where": "imposed_fine > 0",
+            },
+        ):
+            merge_fine_item(
+                row=row,
+                source="chi_ordinance_fines",
+                address=normalize_address(row.get("address")),
+                when=to_iso_date(row.get("violation_date")),
+                fine_imposed=to_float(row.get("imposed_fine")),
+                fine_paid=0.0,
+                fine_balance=to_float(row.get("imposed_fine")),
+                hearing=to_iso_date(row.get("hearing_date")),
+                description=_clean(row.get("violation_description")),
+                category=map_category(row.get("violation_description")),
+                dedupe_key=row.get("nov_number") or row.get("id"),
+            )
+
+        for row in socrata(
+            "chi_vacant_fines",
+            {
+                "$limit": vac_limit,
+                "$order": "last_hearing_date DESC",
+                "$where": "total_fines > 0 OR current_amount_due > 0",
+            },
+        ):
+            total = to_float(row.get("total_fines")) or 0.0
+            due = to_float(row.get("current_amount_due")) or 0.0
+            paid = to_float(row.get("total_paid")) or 0.0
+            if total <= 0 and due <= 0:
+                continue
+            merge_fine_item(
+                row=row,
+                source="chi_vacant_fines",
+                address=normalize_address(row.get("property_address")),
+                when=to_iso_date(row.get("issued_date") or row.get("last_hearing_date")),
+                fine_imposed=total,
+                fine_paid=paid,
+                fine_balance=max(0.0, due),
+                hearing=to_iso_date(row.get("last_hearing_date")),
+                description=_clean(row.get("violation_type")),
+                category=map_category(row.get("violation_type")),
+                dedupe_key=(
+                    row.get("violation_number")
+                    or row.get("docket_number")
+                    or row.get("id")
+                ),
+            )
+        return list(grouped.values())
+
+    def fetch_boston_code_enforcement(self, limit: int = 0) -> list:
+        """Code Enforcement Violations de Boston: `value` e' a multa real."""
+        if limit <= 0:
+            return []
+        rows = ckan_datastore(
+            BOSTON_CODE_ENFORCEMENT_RESOURCE,
+            {
+                "limit": max(1, int(limit)),
+                "sort": "status_dttm DESC",
+                "filters": json.dumps({"status": "Open"}),
+            },
+        )
+        grouped: dict = {}
+        seen_cases: set[tuple[str, str]] = set()
+        for row in rows:
+            address = normalize_address(
+                row.get("violation_stno"),
+                row.get("violation_street"),
+                row.get("violation_suffix"),
+            )
+            value = to_float(row.get("value"))
+            if len(address) < 8 or not value or value <= 0:
+                continue
+            zip_code = str(row.get("violation_zip") or "").strip()[:5] or None
+            key = make_property_key(address=address, city="Boston", zip_code=zip_code)
+            case_key = str(
+                row.get("case_no") or row.get("ticket_no") or ""
+            ).strip().upper()
+            if case_key:
+                token = (key, case_key)
+                if token in seen_cases:
+                    continue
+                seen_cases.add(token)
+            when = to_iso_date(row.get("status_dttm"))
+            item = grouped.get(key)
+            if item is None:
+                item = {
+                    "property_key": key,
+                    "address": address,
+                    "city": "Boston",
+                    "state": "MA",
+                    "zip_code": zip_code,
+                    "signal_type": "legal_obligation",
+                    "severity": _severity_from_text(row.get("description")),
+                    "category": map_category(row.get("description"), row.get("code")),
+                    "description": _clean(row.get("description")) or "Code enforcement",
+                    "received_at": when,
+                    "compliance_deadline": None,
+                    "hearing_date": None,
+                    "fine_imposed": 0.0,
+                    "fine_paid": 0.0,
+                    "fine_balance": 0.0,
+                    "history": [],
+                    "tags": ["fine_active", "inspection_possible"],
+                    "source_record_id": "phase1-bos-cev-"
+                    + hashlib.sha1(address.encode("utf-8")).hexdigest()[:16],
+                    "source_payload": [],
+                }
+                grouped[key] = item
+            item["fine_imposed"] += value
+            item["fine_balance"] += value
+            item["source_payload"].append(source_payload("bos_code_enforcement", row))
+            item["history"].append(
+                _history_entry(
+                    "violation",
+                    _clean(row.get("description"), 140) or "Code enforcement",
+                    when,
+                    row.get("status"),
+                    value,
+                    f"bos-cev-{row.get('case_no')}",
+                )
+            )
+        return list(grouped.values())
+
     # ------------------------------------------------------------- composição
     # ------------------------------------------------- Boston / Dallas
     def fetch_boston_violations(self, limit: int = 200) -> list:
@@ -916,6 +1251,9 @@ class Phase1EnrichmentService:
                     "source_record_id": "phase1-bos-violation-"
                     + hashlib.sha1(address.encode("utf-8")).hexdigest()[:16],
                 },
+            )
+            item.setdefault("source_payload", []).append(
+                source_payload("bos_violations", row)
             )
             item["history"].append(
                 _history_entry(
@@ -979,6 +1317,9 @@ class Phase1EnrichmentService:
                     + hashlib.sha1(address.encode("utf-8")).hexdigest()[:16],
                 },
             )
+            item.setdefault("source_payload", []).append(
+                source_payload("bos_311", row)
+            )
             item["history"].append(
                 _history_entry(
                     "complaint",
@@ -1036,6 +1377,9 @@ class Phase1EnrichmentService:
                     "source_record_id": "phase1-bos-permit-"
                     + hashlib.sha1(address.encode("utf-8")).hexdigest()[:16],
                 },
+            )
+            item.setdefault("source_payload", []).append(
+                source_payload("bos_permits", row)
             )
             if value and (not item.get("job_value") or value > item["job_value"]):
                 item["job_value"] = value
@@ -1115,6 +1459,9 @@ class Phase1EnrichmentService:
                     + hashlib.sha1(address.encode("utf-8")).hexdigest()[:16],
                 },
             )
+            item.setdefault("source_payload", []).append(
+                source_payload("dal_311", row)
+            )
             item["history"].append(
                 _history_entry(
                     "complaint",
@@ -1171,6 +1518,9 @@ class Phase1EnrichmentService:
                     + hashlib.sha1(address.encode("utf-8")).hexdigest()[:16],
                 },
             )
+            item.setdefault("source_payload", []).append(
+                source_payload("dal_permits", row)
+            )
             if value and (not item.get("job_value") or value > item["job_value"]):
                 item["job_value"] = value
                 item["value_source"] = "permit"
@@ -1194,9 +1544,12 @@ class Phase1EnrichmentService:
         ecb: int = 40,
         chi_violations: int = 20,
         chi_permits: int = 0,
+        chi_311: int = 0,
+        chi_fines: int = 0,
         permit_rows: int = 400,
         bos_violations: int = 0,
         bos_311: int = 0,
+        bos_code: int = 0,
         bos_permits: int = 0,
         dal_code: int = 0,
         dal_311: int = 0,
@@ -1218,6 +1571,18 @@ class Phase1EnrichmentService:
             for field, value in item.items():
                 if field in ("history", "tags"):
                     continue
+                if field == "source_payload":
+                    # Auditoria: guarda todas as linhas-fonte que alimentaram
+                    # este imovel, nao apenas a primeira.
+                    incoming = value if isinstance(value, list) else [value]
+                    existing = target.get("source_payload")
+                    if not existing:
+                        target["source_payload"] = incoming
+                    elif isinstance(existing, list):
+                        target["source_payload"] = existing + incoming
+                    else:
+                        target["source_payload"] = [existing] + incoming
+                    continue
                 if field == "compliance_deadline" and value:
                     current = target.get("compliance_deadline")
                     if not current or value < current:
@@ -1231,6 +1596,51 @@ class Phase1EnrichmentService:
             for tag in item.get("tags") or []:
                 if tag not in target["tags"]:
                     target["tags"].append(tag)
+
+        def merge_fine(item: dict) -> None:
+            """Soma multas no imovel, sem tocar em prazo/hearing."""
+            key = item["property_key"]
+            target = merged.get(key)
+            if target is None:
+                target = dict(item)
+                target.setdefault("history", [])
+                target.setdefault("tags", [])
+                merged[key] = target
+                return
+            for field in ("fine_balance", "fine_imposed", "fine_paid"):
+                target[field] = (target.get(field) or 0) + (item.get(field) or 0)
+            target["severity"] = max_severity(
+                target.get("severity"), item.get("severity")
+            )
+            if item.get("hearing_date") and (
+                not target.get("hearing_date")
+                or item["hearing_date"] < target["hearing_date"]
+            ):
+                target["hearing_date"] = item["hearing_date"]
+            if item.get("compliance_deadline") and (
+                not target.get("compliance_deadline")
+                or item["compliance_deadline"] < target["compliance_deadline"]
+            ):
+                target["compliance_deadline"] = item["compliance_deadline"]
+            incoming = item.get("source_payload") or []
+            if not isinstance(incoming, list):
+                incoming = [incoming]
+            existing = target.get("source_payload")
+            if not existing:
+                target["source_payload"] = incoming
+            elif isinstance(existing, list):
+                target["source_payload"] = existing + incoming
+            else:
+                target["source_payload"] = [existing] + incoming
+            target["history"] = (target.get("history") or []) + (
+                item.get("history") or []
+            )
+            for tag in item.get("tags") or []:
+                if tag not in target["tags"]:
+                    target["tags"].append(tag)
+            for field in ("description", "category", "zip_code"):
+                if not target.get(field) and item.get(field):
+                    target[field] = item[field]
 
         for item in self.fetch_hpd_complaints(hpd_complaints):
             merge(item)
@@ -1260,9 +1670,19 @@ class Phase1EnrichmentService:
             ):
                 target["hearing_date"] = item["hearing_date"]
             target["hearing_status"] = item.get("hearing_status") or target.get("hearing_status")
+            payloads = item.get("source_payload") or []
+            if payloads:
+                target.setdefault("source_payload", [])
+                target["source_payload"].extend(
+                    payloads if isinstance(payloads, list) else [payloads]
+                )
             target["history"] = (target.get("history") or []) + (item.get("history") or [])
         for item in self.fetch_chicago_violations(chi_violations):
             merge(item)
+        for item in self.fetch_chicago_311(chi_311):
+            merge(item)
+        for item in self.fetch_chicago_fines(chi_fines):
+            merge_fine(item)
         if chi_permits > 0:
             for item in self.fetch_chicago_permits(
                 chi_permits, days=permit_window_days
@@ -1272,6 +1692,8 @@ class Phase1EnrichmentService:
             merge(item)
         for item in self.fetch_boston_311(bos_311):
             merge(item)
+        for item in self.fetch_boston_code_enforcement(bos_code):
+            merge_fine(item)
         for item in self.fetch_dallas_code(dal_code):
             merge(item)
         for item in self.fetch_dallas_311(dal_311):
@@ -1330,8 +1752,12 @@ class Phase1EnrichmentService:
                 and not target.get("compliance_deadline")
             ):
                 continue
-            target["source_kind"] = "preventive"
-            target["source_type"] = "pre_inspection"
+            # A classificacao tem de seguir o sinal, nao o pipeline. Antes
+            # tudo era "preventive", pelo que as abas Reativos/Obras nao
+            # tinham dados e as multas/prazos de NYC ficavam no balde errado.
+            target["source_kind"], target["source_type"] = source_kind_for_signal(
+                target.get("signal_type")
+            )
             target["inspection_status"] = "possible"
             fine_balance = float(target.get("fine_balance") or 0)
             tags = list(target.get("tags") or [])
@@ -1517,6 +1943,9 @@ class Phase1EnrichmentService:
             merged_tags = list(dict.fromkeys((current.get("tags") or []) + candidate["tags"]))
             if merged_tags != (current.get("tags") or []):
                 fields["tags"] = merged_tags
+        if candidate.get("source_payload"):
+            # P1: guarda o payload bruto da fonte para auditoria futura.
+            fields["source_payload"] = candidate["source_payload"]
         return fields
 
     @staticmethod

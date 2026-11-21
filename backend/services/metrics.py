@@ -64,6 +64,8 @@ _SEARCHBUG_COLUMNS = (
     "lead_id", "owner_class", "layer", "name_match", "transport_error",
     # C2: custo real por chamada ($0,20 da fatura).
     "cost_usd",
+    # AGENTS #10: o que originou a chamada paga.
+    "trigger",
 )
 _PUSH_COLUMNS = ("outcome", "attempts", "latency_ms", "http_status", "user_id", "kind", "error", "notification_id")
 
@@ -74,7 +76,9 @@ _INT_COLUMNS = frozenset({
     "billed", "attempts", "latency_ms", "http_status", "user_id",
     "lead_id", "transport_error", "notification_id",
 })
-_STR_COLUMNS = frozenset({"outcome", "city", "kind", "owner_class", "layer"})
+_STR_COLUMNS = frozenset(
+    {"outcome", "city", "kind", "owner_class", "layer", "trigger"}
+)
 _MAX_ERROR_LEN = 300
 
 

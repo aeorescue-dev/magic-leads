@@ -49,6 +49,20 @@ import pytest  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
+def _reset_showcase_init():
+    """O showcase cacheia o schema por path.
+
+    Quando a BD de teste e' recriada entre testes, `init()` tem de voltar a
+    criar as tabelas; sem isto, um teste posterior recebia
+    `no such table: showcase_checkouts`.
+    """
+    from backend.services import showcase
+
+    showcase._INIT["path"] = None
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _voice_clock(monkeypatch):
     """Congela o relogio da voz num horario permitido (09:00-20:00 ET).
 

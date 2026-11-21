@@ -268,12 +268,20 @@ class ReadinessCounts(BaseModel):
     phone: int = 0
 
 
+class SignalCounts(BaseModel):
+    all: int
+    reactive: int
+    preventive: int
+    permit: int
+
+
 class LeadsListResponse(BaseModel):
     total: int
     page: int
     per_page: int
     leads: List[LeadResponse]
     counts: Optional[ReadinessCounts] = None
+    signal_counts: Optional[SignalCounts] = None
 
 
 class NoteCreate(BaseModel):

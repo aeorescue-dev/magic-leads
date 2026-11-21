@@ -159,7 +159,7 @@ def test_precheck_reveal_has_no_side_effects(user_and_client, no_external_data):
 def test_corporate_lead_without_phone_is_allowed(user_and_client, no_external_data):
     """Lead corporativo (nome + morada, sem telefone) => 200, reserva grátis (0 créditos)."""
     client, headers, user_id = user_and_client
-    lead_id = _make_lead(owner_name="JOHN DOE", owner_phone=None, mailing_address="123 CORP AVE")
+    lead_id = _make_lead(owner_name="ACME HOLDINGS LLC", owner_phone=None, mailing_address="123 CORP AVE")
 
     before_letter = _letter_used(user_id)
     before_phone = _phone_used(user_id)
@@ -173,7 +173,7 @@ def test_corporate_lead_without_phone_is_allowed(user_and_client, no_external_da
     assert r.status_code == 200, f"devolveu {r.status_code}: {r.text}"
     body = r.json()
     assert body["revealed"] is True, body
-    assert body["owner"]["name"] == "JOHN DOE", body
+    assert body["owner"]["name"] == "ACME HOLDINGS LLC", body
     assert body.get("corporate") is True, body
     assert body["used"] == before_letter + 1, body
     assert body["limit"] == 10
@@ -183,7 +183,7 @@ def test_corporate_lead_without_phone_is_allowed(user_and_client, no_external_da
     assert _phone_used(user_id) == before_phone, "lead corporativo não devia consumir telefone"
     lead = db_service._service.get_lead_by_id(lead_id)
     assert lead["lead_status"] == "reserved"
-    assert lead["owner_name"] == "JOHN DOE"
+    assert lead["owner_name"] == "ACME HOLDINGS LLC"
     assert lead["owner_phone"] is None
 
 

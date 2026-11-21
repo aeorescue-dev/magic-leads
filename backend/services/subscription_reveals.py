@@ -12,11 +12,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from ..config import settings
-from . import billing_time, daily_quota
+from . import billing_time, daily_quota, phone_jobs, phone_policy
 from .db import db_service, get_connection
-from .lead_rules import get_owner_class
-from .searchbug import searchbug_service
 
 LETTER_PRICE_CENTS = 0
 PHONE_PRICE_CENTS = 0
@@ -148,8 +145,15 @@ async def reveal_phone(
     lead_id: int,
     idempotency_key: str,
     trade_code: str | None = None,
+    owner=None,
 ) -> dict[str, Any]:
-    """Revela telefone com quota + Searchbug on-demand e estorno em falha."""
+    """Le o telefone da cache; em cache fria enfileira e devolve `in_progress`.
+
+    NUNCA chama a Searchbug dentro do pedido HTTP (AGENTS #5). A chamada paga
+    acontece no worker (`phone_jobs`), fora do clique. A cota e' consumida
+    apenas quando ha entrega ou quando o job e' aceite; se o job falhar em
+    definitivo, o worker devolve a unidade.
+    """
     if not str(idempotency_key or "").strip():
         raise daily_quota.QuotaError("idempotency_key_required", 422)
     conn = get_connection()
@@ -171,66 +175,37 @@ async def reveal_phone(
         if prior and prior.get("payload"):
             return {
                 "success": True,
+                "state": "ready",
                 "duplicate": True,
                 "payload": prior["payload"],
                 "usage": daily_quota.usage_payload(user_id),
             }
-        quota = daily_quota.consume_phone(user_id)
     finally:
         conn.close()
 
-    phone = str(lead.get("owner_phone") or "").strip()
-    provider = "cache"
-    attempt = None
-    try:
-        if not phone:
-            attempt = await db_service.reserve_phone_attempt(user_id)
-            if not attempt.get("ok"):
-                daily_quota.refund_phone(
-                    user_id, quota["bucket"], quota.get("addon_id")
-                )
-                return {
-                    "success": False,
-                    "error": "attempt_limit",
-                    "message": "Limite de consultas atingido. Tenta novamente mais tarde.",
-                    "quota_preserved": True,
-                    "usage": daily_quota.usage_payload(user_id),
-                }
-            if settings.SEARCHBUG_MOCK:
-                phone = _mock_phone(lead_id)
-                provider = "mock"
-            else:
-                result = await searchbug_service.lookup_phone(
-                    lead.get("address", ""),
-                    lead.get("city", ""),
-                    lead.get("state", ""),
-                    owner_name=lead.get("owner_name"),
-                    zip_code=lead.get("zip_code"),
-                    owner_class=get_owner_class(lead.get("owner_name")),
-                    lead_id=lead_id,
-                )
-                if not result.success or not result.phone:
-                    daily_quota.refund_phone(
-                        user_id, quota["bucket"], quota.get("addon_id")
-                    )
-                    return {
-                        "success": False,
-                        "error": "phone_not_found",
-                        "message": "Telefone indisponível para este imóvel — a sua cota diária foi preservada.",
-                        "quota_preserved": True,
-                        "usage": daily_quota.usage_payload(user_id),
-                    }
-                phone = result.phone
-                provider = getattr(result, "provider", "searchbug")
-            await db_service.update_owner_phone(
-                lead_id, phone, verified=(provider != "mock")
-            )
+    # O chamador ja' resolveu o dono (ou a proveniencia esta' no lead). Nao se
+    # repete a consulta publica dentro do clique.
+    decision = await phone_policy.decide(
+        lead, owner=owner, trigger="user_click", allow_resolve=False
+    )
+    usage = daily_quota.usage_payload(user_id)
+
+    # 1) Telefone disponivel (lead ou cache): entrega imediata.
+    if decision.state == phone_policy.STATE_READY and decision.phone:
+        quota = daily_quota.consume_phone(user_id)
+        phone = decision.phone
+        verified = bool(decision.verified)
+        label = decision.label
+        if not str(lead.get("owner_phone") or "").strip():
+            await db_service.update_owner_phone(lead_id, phone, verified=verified)
         payload = {
             "lead_id": int(lead_id),
             "type": "phone",
             "trade_code": trade_code or str(lead.get("issue_category") or ""),
             "phone": phone,
-            "owner_name": lead.get("owner_name"),
+            "verified": verified,
+            "label": label,
+            "owner_name": decision.owner_name or lead.get("owner_name"),
             "address": lead.get("address"),
             "city": lead.get("city"),
             "state": lead.get("state"),
@@ -258,16 +233,78 @@ async def reveal_phone(
             conn.close()
         return {
             "success": True,
+            "state": "ready",
             "duplicate": False,
             "reveal_id": reveal_id,
             "payload": payload,
-            "provider": provider,
+            "provider": "cache",
+            "verified": verified,
+            "label": label,
             "quota": quota,
             "usage": daily_quota.usage_payload(user_id),
         }
-    except daily_quota.QuotaError:
-        daily_quota.refund_phone(user_id, quota["bucket"], quota.get("addon_id"))
-        raise
-    except Exception:
-        daily_quota.refund_phone(user_id, quota["bucket"], quota.get("addon_id"))
-        raise
+
+    # 2) Cache fria mas politica autoriza: enfileira (single-flight).
+    if decision.state == phone_policy.STATE_IN_PROGRESS:
+        existing = phone_jobs.get_by_cache_key(decision.cache_key)
+        if existing and existing.get("status") in ("pending", "running"):
+            # Segundo clique enquanto o primeiro job corre: nao cobra outra vez.
+            return {
+                "success": True,
+                "state": "in_progress",
+                "error": "phone_in_progress",
+                "message": "Estamos a confirmar o proprietário. Avisamos quando estiver pronto.",
+                "payload": None,
+                "quota": None,
+                "usage": usage,
+            }
+
+        if not await db_service.phone_attempt_budget_ok(user_id):
+            return {
+                "success": False,
+                "state": "no_phone",
+                "error": "attempt_limit",
+                "message": "Limite de consultas atingido. Tenta novamente mais tarde.",
+                "quota_preserved": True,
+                "payload": None,
+                "quota": None,
+                "usage": usage,
+            }
+
+        quota = daily_quota.consume_phone(user_id)
+        try:
+            phone_jobs.enqueue(
+                cache_key=decision.cache_key,
+                lead_id=int(lead_id),
+                user_id=user_id,
+                idempotency_key=idempotency_key,
+                trigger="user_click",
+                decision=decision,
+                quota_ref=quota,
+            )
+        except Exception:
+            daily_quota.refund_phone(
+                user_id, quota["bucket"], quota.get("addon_id")
+            )
+            raise
+        return {
+            "success": True,
+            "state": "in_progress",
+            "error": "phone_in_progress",
+            "message": "Estamos a confirmar o proprietário. Avisamos quando estiver pronto.",
+            "payload": None,
+            "quota": quota,
+            "usage": daily_quota.usage_payload(user_id),
+        }
+
+    # 3) Sem dono confiavel / registo velho / entidade desligada: nao paga.
+    return {
+        "success": False,
+        "state": "no_phone",
+        "error": decision.reason,
+        "message": "Sem telefone confirmado para este imóvel — a sua cota diária foi preservada.",
+        "quota_preserved": True,
+        "payload": None,
+        "quota": None,
+        "usage": usage,
+    }

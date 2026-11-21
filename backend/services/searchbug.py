@@ -367,6 +367,20 @@ _TIMEOUT_MARKERS = (
     "connect timeout",
 )
 
+# Erros de credenciais/validacao da conta nao sao uma busca faturavel. A
+# Searchbug devolve-os como `Status=ERROR`, e o codigo antigo marcava-os como
+# `billed=1` (32 chamadas / $6,40 de "ghost charges" na telemetria).
+_AUTH_ERROR_MARKERS = (
+    "account number",
+    "password",
+    "api key",
+    "not valid",
+    "invalid account",
+    "unauthorized",
+    "access denied",
+    "authentication",
+)
+
 
 def classify_searchbug_outcome(success: bool, error: Optional[str] = None) -> str:
     """Normaliza o resultado de uma consulta Searchbug num outcome estavel."""
@@ -381,6 +395,12 @@ def classify_searchbug_outcome(success: bool, error: Optional[str] = None) -> st
         return "transport_error"
     if err.startswith("name_mismatch"):
         return "name_mismatch"
+    # "not configured" tem de vir antes dos marcadores de auth: a mensagem
+    # local contem "account number"/"api key" sem haver credenciais invalidas.
+    if "not configured" in err or "co_code" in err:
+        return "not_configured"
+    if any(marker in err for marker in _AUTH_ERROR_MARKERS):
+        return "auth_error"
     if "5-digit zip" in err or "enter 5-digit" in err:
         return "invalid_request"
     if err.startswith("http 429") or "rate limit" in err:
@@ -389,9 +409,12 @@ def classify_searchbug_outcome(success: bool, error: Optional[str] = None) -> st
         return "timeout"
     if err.startswith("http "):
         return "http_error"
-    if "not configured" in err or "co_code" in err:
-        return "not_configured"
-    if "noresults" in err or "no results" in err or "no phone found" in err:
+    if (
+        "noresults" in err
+        or "no results" in err
+        or "no_results" in err
+        or "no phone found" in err
+    ):
         return "no_results"
     if "unexpected response format" in err or "no data" in err:
         return "bad_response"
@@ -471,7 +494,8 @@ class PhoneLookupService:
     async def lookup_phone(self, address: str, city: str, state: str,
                            owner_name: str | None = None, zip_code: str | None = None,
                            owner_class: str | None = None,
-                           lead_id: int | None = None) -> "PhoneLookupResult":
+                           lead_id: int | None = None,
+                           trigger: str | None = None) -> "PhoneLookupResult":
         """Waterfall L2/L3 phone lookup via Searchbug api_nape.
 
         L2 (Name + Address): Para leads PRIVATE com owner_name verificado.
@@ -624,6 +648,7 @@ class PhoneLookupService:
                 address, city, state,
                 owner_name=clean_name, zip_code=zip_code,
                 lead_id=lead_id, owner_class=owner_class, layer="L2",
+                trigger=trigger,
             )
             result.layer = "L2"
             if result.success and result.phone:
@@ -646,20 +671,21 @@ class PhoneLookupService:
                 logger.info(f"[PHONE][L2->L3] L2 falhou ({outcome}), tentando L3 para {address!r}, {city}")
                 return await self._lookup_l3(
                     address, city, state, zip_code, cache_key,
-                    lead_id=lead_id, owner_class=owner_class,
+                    lead_id=lead_id, owner_class=owner_class, trigger=trigger,
                 )
             return result
 
         # L3: Address-only (sem nome, quando a flag permite)
         return await self._lookup_l3(
             address, city, state, zip_code, cache_key,
-            lead_id=lead_id, owner_class=owner_class,
+            lead_id=lead_id, owner_class=owner_class, trigger=trigger,
         )
 
     async def _lookup_l3(self, address: str, city: str, state: str,
                          zip_code: str | None, cache_key: str,
                          lead_id: int | None = None,
-                         owner_class: str | None = None) -> "PhoneLookupResult":
+                         owner_class: str | None = None,
+                         trigger: str | None = None) -> "PhoneLookupResult":
         """L3: Address-only lookup via api_nape (sem FNAME/LNAME).
 
         P0-C1: o resultado e' sempre `verified=False` (nao ha nome para
@@ -671,6 +697,7 @@ class PhoneLookupService:
             address, city, state,
             owner_name=None, zip_code=zip_code,
             lead_id=lead_id, owner_class=owner_class, layer="L3",
+            trigger=trigger,
         )
         result.layer = "L3"
         result.verified = False
@@ -811,7 +838,8 @@ class PhoneLookupService:
                                      use_api_contact: bool = False,
                                      lead_id: int | None = None,
                                      owner_class: str | None = None,
-                                     layer: str | None = None) -> "PhoneLookupResult":
+                                     layer: str | None = None,
+                                     trigger: str | None = None) -> "PhoneLookupResult":
         """Lookup via Searchbug People Search API (api_nape).
 
         Requer SEARCHBUG_ACCOUNT_CODE (CO_CODE) e SEARCHBUG_API_KEY (PASS).
@@ -853,6 +881,7 @@ class PhoneLookupService:
                     layer=layer,
                     name_match=result.name_match,
                     transport_error=1 if outcome == "transport_error" else 0,
+                    trigger=trigger,
                 )
             except Exception:  # pragma: no cover - telemetria nunca quebra o fluxo
                 logger.debug("Falha ao registar telemetria Searchbug", exc_info=True)
@@ -892,6 +921,10 @@ class PhoneLookupService:
             "CITY": city,
             "STATE": state,
         }
+        # `SUBTYPE=p` pede apenas registos COM telefone. Sem isto, um hit pago
+        # pode voltar sem numero e a unidade e' desperdicada.
+        if bool(getattr(settings, "SEARCHBUG_PHONE_ONLY", True)):
+            form_data["SUBTYPE"] = "p"
         if fname:
             form_data["FNAME"] = fname
         if lname:
@@ -968,6 +1001,22 @@ class PhoneLookupService:
             if status in ("ERROR", "NORESULTS"):
                 error = str(data.get("ERROR") or data.get("Error") or "No results")
                 err_lower = error.lower()
+                # Credenciais/conta invalidas: o provider recusou o pedido,
+                # nao fez uma busca. Nao e' faturavel.
+                if status == "ERROR" and any(
+                    marker in err_lower for marker in _AUTH_ERROR_MARKERS
+                ):
+                    return _record(
+                        PhoneLookupResult(
+                            success=False,
+                            error=f"auth_error:{error[:180]}",
+                            provider="Searchbug",
+                            raw=data,
+                            layer=layer,
+                        ),
+                        billed=False,
+                        http_status=200,
+                    )
                 # ZIP invalido e' erro de pedido, nao uma busca faturavel.
                 if "5-digit zip" in err_lower or "enter 5-digit" in err_lower:
                     return _record(
