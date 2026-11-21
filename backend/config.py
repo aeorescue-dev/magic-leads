@@ -361,8 +361,17 @@ class Settings(BaseSettings):
     #   EMAIL_API_KEY=<Resend API Key> e EMAIL_FROM="Magic Leads <noreply@seudominio.com>"
     # (Resend: resend.com, plano grátis 3.000 e-mails/mês; exige domínio verificado).
     # O SMTP continua como fallback caso a API não esteja configurada.
-    EMAIL_API_KEY: str = ""       # Resend API Key (HTTPS :443 — liberado no Railway)
+    EMAIL_API_KEY: str = ""       # Resend API Key (HTTPS :443 - liberado no Railway)
     EMAIL_FROM: str = ""          # "Nome <email@dominio-verificado.com>"
+    # Bonus de boas-vindas (contas free). Desligado por defeito.
+    FREE_UNLOCKS_ENABLED: bool = False
+    FREE_UNLOCKS_PHONE_TOTAL: int = 2
+    FREE_UNLOCKS_LETTER_TOTAL: int = 3
+    FREE_UNLOCKS_DAILY_CAP: int = 25
+    FREE_UNLOCKS_MONTHLY_BUDGET_USD: float = 75.0
+    FREE_UNLOCKS_PHONE_COST_CENTS: int = 20
+    TURNSTILE_SECRET_KEY: str = ""
+    EMAIL_VERIFY_SECRET: str = ""
     SMTP_HOST: str = "smtp.gmail.com"
     SMTP_PORT: int = 465          # 465 = SSL direto (SMTP_SSL) — Railway bloqueia egresso na 587
     SMTP_USER: str = ""           # helpmagicleads@gmail.com (Railway env)

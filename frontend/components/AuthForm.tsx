@@ -14,6 +14,10 @@ import { hasPasskeyHint, isPasskeySupported, loginWithPasskey, PasskeyError, pas
 
 const subscribeNoop = () => () => {};
 
+// Quando o bónus de boas-vindas está ativo, o registo vai direto à dashboard
+// (sem checkout obrigatório); o utilizador só vê os planos quando esgota.
+const FREE_UNLOCKS_UI = process.env.NEXT_PUBLIC_FREE_UNLOCKS === '1';
+
 interface FormErrors {
   email?: string;
   password?: string;
@@ -232,6 +236,14 @@ function AuthFormInner({
 
     try {
       const user = await signIn(email.trim(), password, isRegister ? companyName.trim() : undefined, lang);
+      if (isRegister && FREE_UNLOCKS_UI) {
+        // Bónus free: entra direto na dashboard para usar os desbloqueios.
+        setSuccess(true);
+        setTimeout(() => {
+          window.location.href = `/${lang}/dashboard`;
+        }, 600);
+        return;
+      }
       if (isRegister) {
         // Cadastro concluído: o acesso só é liberado após o pagamento.
         // Cria a sessão do Stripe Checkout e redireciona imediatamente.
@@ -281,9 +293,27 @@ function AuthFormInner({
         }, 800);
       }
     } catch (err: any) {
-      const msg = err?.response?.data?.detail || err?.message || t('dashboard.auth.error_generic') || 'Erro ao autenticar';
-      if (msg.includes('Email já cadastrado') || msg.includes('already registered')) {
+      const detail = err?.detail ?? err?.response?.data?.detail;
+      const code = detail && typeof detail === 'object' ? detail.code : null;
+      const msg =
+        typeof detail === 'string'
+          ? detail
+          : detail?.message ||
+            err?.message ||
+            t('dashboard.auth.error_generic') ||
+            'Erro ao autenticar';
+      if (code === 'email_exists') {
+        setErrors({
+          email:
+            msg ||
+            'Já existe conta com este email. Entra para continuar ou assinar.',
+        });
+        setIsRegister(false);
+      } else if (code === 'disposable_email' || code === 'captcha_failed') {
+        setErrors({ general: msg });
+      } else if (msg.includes('Email já cadastrado') || msg.includes('already registered')) {
         setErrors({ email: t('dashboard.auth.email_exists') || 'Email já cadastrado. Tente entrar.' });
+        setIsRegister(false);
       } else if (msg.includes('inválidos') || msg.includes('invalid')) {
         setErrors({ general: t('dashboard.auth.invalid_credentials') || 'Email ou senha inválidos' });
       } else {

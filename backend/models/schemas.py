@@ -325,6 +325,9 @@ class UserCreate(BaseModel):
     password: str
     company_name: str
     locale: Optional[str] = None
+    device_id: Optional[str] = None
+    turnstile_token: Optional[str] = None
+    phone: Optional[str] = None
 
 
 class UserLogin(BaseModel):

@@ -41,7 +41,7 @@ def _lead(ext, source, signal_type, signal_status, *, status="available", case_s
                 issue_description, lead_status)
                VALUES (?, ?, ?, ?, 'NY', 'Roof', ?, datetime('now','-2 days'),
                        ?, ?, 'roof leak', ?)""",
-            (ext, source, f"{abs(hash(ext)) % 9000 + 100} P1 STREET", CITY,
+            (ext, source, f"{ext} P1 STREET", CITY,
              case_status, signal_type, signal_status, status),
         )
         conn.commit()

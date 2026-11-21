@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 from ..config import settings
 from ..utils.logger import logger
-from . import billing_time, daily_quota, phone_cache, phone_policy
+from . import billing_time, daily_quota, free_unlocks, phone_cache, phone_policy
 from .db import db_service, get_connection
 from .lead_rules import get_owner_class
 from .searchbug import classify_searchbug_outcome, searchbug_service
@@ -232,6 +232,11 @@ def _refund_quota(job: dict[str, Any]) -> None:
     if not user_id or not bucket:
         return
     try:
+        if str(bucket) == "free_bonus":
+            free_unlocks.refund_phone(
+                int(user_id), job.get("lead_id")
+            )
+            return
         daily_quota.refund_phone(int(user_id), bucket, job.get("quota_addon_id"))
     except Exception as exc:  # noqa: BLE001
         logger.warning("[PHONE_JOB] refund falhou job=%s: %s", job.get("id"), exc)

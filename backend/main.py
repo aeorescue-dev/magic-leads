@@ -107,6 +107,7 @@ from .services import (
     daily_quota,
     enrichment_queue,
     enrichment_scheduler,
+    free_unlocks,
     freshness,
     freshness_policy,
     geo_lookup,
@@ -690,6 +691,16 @@ async def _require_active_access(user: dict) -> None:
                 "action": "REDIRECT_TO_CHECKOUT",
             },
         )
+
+
+async def _free_bonus_kind(user: dict, kind: str) -> bool:
+    """True se a conta free pode gastar um dos unlocks gratuitos deste tipo."""
+    if not free_unlocks.enabled():
+        return False
+    sub = await db_service.get_user_subscription_status(user["id"])
+    if sub.get("can_access", False):
+        return False
+    return free_unlocks.remaining(user["id"], kind) > 0
 
 
 async def _require_admin_user(
@@ -3808,6 +3819,27 @@ async def telnyx_assistant_tool(
 async def admin_showcase_build(_admin: dict = Depends(_require_admin_user)):
     """Recalcula inventário e páginas da vitrine a partir do leads.db."""
     return await anyio.to_thread.run_sync(showcase.build_pages)
+
+
+@app.get("/api/admin/free-unlocks")
+async def admin_free_unlocks(_admin: dict = Depends(_require_admin_user)):
+    return free_unlocks.status()
+
+
+@app.post("/api/admin/free-unlocks/pause")
+async def admin_free_unlocks_pause(
+    request: Request, _admin: dict = Depends(_require_admin_user)
+):
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    return free_unlocks.pause_all(str((body or {}).get("reason") or "manual"))
+
+
+@app.post("/api/admin/free-unlocks/resume")
+async def admin_free_unlocks_resume(_admin: dict = Depends(_require_admin_user)):
+    return free_unlocks.resume_all()
 
 
 @app.get("/api/admin/showcase/stats")
@@ -7627,6 +7659,38 @@ def _user_response(u: dict) -> UserResponse:
 @limiter.limit("3/minute")
 async def register_user(request: Request, payload: UserCreate, response: Response = None):
     try:
+        ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() or (
+            request.client.host if request.client else ""
+        )
+        ua = request.headers.get("user-agent") or ""
+        device = ""
+        if free_unlocks.enabled():
+            if free_unlocks.is_disposable(payload.email):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "disposable_email",
+                        "message": "Use um email permanente para receber o bónus.",
+                    },
+                )
+            if free_unlocks.canonical_in_use(payload.email):
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "email_exists",
+                        "next": "login",
+                        "message": "Já existe conta com este email. Entra para continuar ou assinar.",
+                    },
+                )
+            if not free_unlocks.verify_turnstile(payload.turnstile_token or "", ip):
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "code": "captcha_failed",
+                        "message": "Confirmação anti-bot falhou. Tenta novamente.",
+                    },
+                )
+            device = free_unlocks.device_key(payload.device_id or "", ua, ip)
         pwd_hash = security.hash_password(payload.password)
         user = await db_service.create_user(
             payload.email.lower(), pwd_hash, payload.company_name, plan="free",
@@ -7634,10 +7698,27 @@ async def register_user(request: Request, payload: UserCreate, response: Respons
             locale=payload.locale if payload.locale else "en",
         )
         if not user:
-            raise HTTPException(status_code=409, detail="Email já cadastrado")
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "email_exists",
+                    "next": "login",
+                    "message": "Já existe conta com este email. Entra para continuar ou assinar.",
+                },
+            )
         token = security.new_session_token()
         # Registra a sessão no banco (aplica limite de 2 sessões por usuário - FIFO)
         await db_service.create_user_session(user["id"], _hash_token(token), "Signup", None)
+
+        if free_unlocks.enabled():
+            free_unlocks.pending_signup(user["id"], payload.email, device)
+            verify_token = free_unlocks.email_token(user["id"], payload.email)
+            sent = free_unlocks.send_verify_email(payload.email, verify_token)
+            logger.info(
+                "[FREE-UNLOCKS] verificacao email=%s enviada=%s",
+                payload.email,
+                sent.get("ok"),
+            )
 
         # Define httpOnly cookie com o token
         if response:
@@ -7660,6 +7741,51 @@ async def register_user(request: Request, payload: UserCreate, response: Respons
     except Exception as e:
         logger.error(f"Erro no registro: {e}")
         raise HTTPException(status_code=500, detail="Erro no registro")
+
+
+@app.get("/api/auth/verify-email", response_class=HTMLResponse)
+async def verify_email(token: str = ""):
+    """Confirma o email e concede o bonus (flag). Link assinado, uso unico logico."""
+    data = free_unlocks.read_email_token(token)
+    if not data.get("ok"):
+        return HTMLResponse(
+            "<h1>Link inv&aacute;lido ou expirado</h1>"
+            "<p>Volta &agrave; dashboard e pede um novo email.</p>",
+            status_code=400,
+        )
+    user_id = int(data["user_id"])
+    free_unlocks.mark_email_verified(user_id)
+    result = free_unlocks.grant(user_id, data.get("email") or "")
+    if result.get("ok") and result.get("granted"):
+        message = (
+            "Email verificado! Tens 2 telefones e 3 cartas/visitas gr&aacute;tis."
+        )
+    elif result.get("ok"):
+        message = "Email verificado. O b&oacute;nus j&aacute; tinha sido atribu&iacute;do."
+    else:
+        message = (
+            "Email verificado. O b&oacute;nus n&atilde;o est&aacute; dispon&iacute;vel "
+            "(limite ou j&aacute; utilizado)."
+        )
+    return HTMLResponse(
+        f"<h1>Email confirmado</h1><p>{message}</p>"
+        '<p><a href="https://www.magicleads.app/en/dashboard">Ir para a dashboard</a></p>'
+    )
+
+
+@app.post("/api/auth/resend-verification")
+@limiter.limit("3/hour")
+async def resend_verification(
+    request: Request, user: dict = Depends(_get_current_user)
+):
+    if not free_unlocks.enabled():
+        raise HTTPException(status_code=404, detail="not_found")
+    full = await db_service.get_user_by_id(user["id"]) or {}
+    if full.get("email_verified_at"):
+        return {"ok": True, "already": True}
+    token = free_unlocks.email_token(user["id"], full.get("email") or "")
+    sent = free_unlocks.send_verify_email(full.get("email") or "", token)
+    return {"ok": bool(sent.get("ok")), "reason": sent.get("reason")}
 
 
 @app.post("/api/auth/login", response_model=AuthResponse)
@@ -8464,15 +8590,20 @@ async def subscription_usage(user: dict = Depends(_get_current_user)):
         "status": sub.get("status"),
         "can_access": bool(sub.get("can_access")),
         "plan_until": full.get("plan_until"),
+        "free_unlocks": free_unlocks.balance(user["id"]),
     }
 
 
 @app.post("/api/subscription/leads/{lead_id}/reveal-letter")
 async def subscription_reveal_letter(lead_id: int, user: dict = Depends(_get_current_user)):
-    """Carta/visita livre: 10/dia para assinantes ativos."""
-    await _require_active_access(user)
+    """Carta/visita livre: 10/dia para assinantes ativos (ou bónus free)."""
+    bonus = await _free_bonus_kind(user, "letter")
+    if not bonus:
+        await _require_active_access(user)
     try:
-        return await subscription_reveals.reveal_letter(user["id"], lead_id)
+        return await subscription_reveals.reveal_letter(
+            user["id"], lead_id, free_bonus=bonus
+        )
     except daily_quota.QuotaError as exc:
         raise HTTPException(
             status_code=exc.status_code,
@@ -8489,7 +8620,9 @@ async def subscription_reveal_phone(
     request: Request, lead_id: int, user: dict = Depends(_get_current_user)
 ):
     """Telefone on-demand: base -> add-on 24h -> Searchbug, com estorno em falha."""
-    await _require_active_access(user)
+    bonus = await _free_bonus_kind(user, "phone")
+    if not bonus:
+        await _require_active_access(user)
     try:
         body = await request.json()
     except Exception:
@@ -8498,7 +8631,7 @@ async def subscription_reveal_phone(
     trade_code = (body or {}).get("trade_code")
     try:
         return await subscription_reveals.reveal_phone(
-            user["id"], lead_id, idempotency_key, trade_code
+            user["id"], lead_id, idempotency_key, trade_code, free_bonus=bonus
         )
     except daily_quota.QuotaError as exc:
         detail = {
@@ -9725,7 +9858,10 @@ async def reveal_phone_endpoint(
     user_id = user["id"]
     try:
         # A5: 402 com action de renovação (igual a reservar/revelar).
-        await _require_active_access(user)
+        # Contas free com bónus disponível usam um dos 2 unlocks gratuitos.
+        bonus = await _free_bonus_kind(user, "phone")
+        if not bonus:
+            await _require_active_access(user)
 
         pre = await db_service.precheck_reveal(user_id, lead_id)
         pre_status = pre.get("status")
@@ -9780,6 +9916,7 @@ async def reveal_phone_endpoint(
             idempotency,
             trade_code=pre_lead.get("issue_category"),
             owner=owner_record,
+            free_bonus=bonus,
         )
 
         if result.get("state") == "in_progress":

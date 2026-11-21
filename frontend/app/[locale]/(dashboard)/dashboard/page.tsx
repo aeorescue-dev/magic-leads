@@ -259,6 +259,11 @@ function DashboardPageInner() {
   // de Free mode; o banner legacy fica restrito ao plano semanal.
   const isFreemium = !hasAccess;
   const [usage, setUsage] = useState<Usage | null>(null);
+  const freeUnlocks = usage?.free_unlocks;
+  const freePhoneLeft = freeUnlocks?.phone?.remaining ?? 0;
+  const freeLetterLeft = freeUnlocks?.letter?.remaining ?? 0;
+  const canFreePhone = !hasAccess && freePhoneLeft > 0;
+  const canFreeLetter = !hasAccess && freeLetterLeft > 0;
   const [billingPlans, setBillingPlans] = useState<SubscriptionPlan[]>([]);
   const [planOpen, setPlanOpen] = useState(false);
   const [addonOpen, setAddonOpen] = useState(false);
@@ -1117,7 +1122,7 @@ function DashboardPageInner() {
     if (!lead.owner_name || lead.owner_phone) return;
     if (phoneRevealing?.loading) return;
 
-    if (!hasAccess) {
+    if (!hasAccess && !canFreePhone) {
       setPlanOpen(true);
       return;
     }
@@ -1477,7 +1482,7 @@ function DashboardPageInner() {
   }, [selectedLead, revealTarget, busyAction]);
   const confirmReveal = async () => {
     if (!revealTarget || busyAction || !revealConsent) return;
-    if (!hasAccess) {
+    if (!hasAccess && !canFreePhone) {
       setRevealTarget(null);
       setPlanOpen(true);
       return;
@@ -2546,6 +2551,13 @@ function DashboardPageInner() {
                 <div className="truncate text-sm font-bold" style={{ color: "var(--text-primary)" }}>
                   {billingPlans.find((p) => p.code === usage.plan)?.name || (hasAccess ? usage.plan : "Conta gratuita")}
                 </div>
+                {!hasAccess && freeUnlocks?.enabled && (
+                  <div className="mt-0.5 text-[10px] font-semibold" style={{ color: "var(--sd-accent)" }}>
+                    {freeUnlocks.granted
+                      ? `${freePhoneLeft}/${freeUnlocks.phone.total} phones · ${freeLetterLeft}/${freeUnlocks.letter.total} letters free`
+                      : "Verify email: 2 phones + 3 letters free"}
+                  </div>
+                )}
               </div>
               <button
                 type="button"
@@ -2868,9 +2880,33 @@ function DashboardPageInner() {
             >
               <span>
                 <b>{lang === "en" ? "Free mode:" : "Modo gratuito:"}</b>{" "}
-                {lang === "en"
-                  ? "browse the map and masked signals. Subscribe to unlock letters/visits and the daily phone quota."
-                  : "navega o mapa e os sinais mascarados. Assina para desbloquear cartas/visitas e a cota diária de telefones."}
+                {freeUnlocks?.enabled ? (
+                  freeUnlocks.granted ? (
+                    lang === "en" ? (
+                      <>
+                        welcome bonus — <b>{freePhoneLeft}/{freeUnlocks.phone.total} phone</b> and{" "}
+                        <b>{freeLetterLeft}/{freeUnlocks.letter.total} letter/visit</b> unlocks left.
+                        After that, subscribe to continue.
+                      </>
+                    ) : (
+                      <>
+                        bónus de boas-vindas — <b>{freePhoneLeft}/{freeUnlocks.phone.total} telefones</b> e{" "}
+                        <b>{freeLetterLeft}/{freeUnlocks.letter.total} cartas/visitas</b> grátis. Depois
+                        disso, assina para continuar.
+                      </>
+                    )
+                  ) : (
+                    lang === "en" ? (
+                      <>verify your email to activate 2 phone + 3 letter free unlocks.</>
+                    ) : (
+                      <>verifica o teu email para ativar 2 telefones + 3 cartas/visitas grátis.</>
+                    )
+                  )
+                ) : lang === "en" ? (
+                  "browse the map and masked signals. Subscribe to unlock letters/visits and the daily phone quota."
+                ) : (
+                  "navega o mapa e os sinais mascarados. Assina para desbloquear cartas/visitas e a cota diária de telefones."
+                )}
               </span>
               <button
                 type="button"

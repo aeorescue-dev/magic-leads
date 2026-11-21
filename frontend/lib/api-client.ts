@@ -18,6 +18,22 @@ const API_URL = API_PROXY_MODE
 // ------------------------------------------------------------------
 export const AUTH_TOKEN_KEY = "garimpador.token";
 
+export function getDeviceId(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    let value = window.localStorage.getItem("ml.device_id") || "";
+    if (!value) {
+      value =
+        (crypto as any)?.randomUUID?.() ||
+        `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      window.localStorage.setItem("ml.device_id", value);
+    }
+    return value;
+  } catch {
+    return "";
+  }
+}
+
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
   return window.localStorage.getItem(AUTH_TOKEN_KEY);
@@ -233,9 +249,20 @@ async function handle<T>(res: Response): Promise<T> {
       handleSessionExpired(
         detail.error === "session_expired" ? "session_expired" : "fifo_evicted"
       );
-      throw new Error(toErrorMessage(detail));
+      const sessionError = new Error(toErrorMessage(detail)) as Error & {
+        detail?: any;
+        status?: number;
+      };
+      sessionError.detail = detail;
+      sessionError.status = res.status;
+      throw sessionError;
     }
-    const error = new Error(toErrorMessage(detail)) as Error & { responseBody?: any; status?: number };
+    const error = new Error(toErrorMessage(detail)) as Error & {
+      detail?: any;
+      responseBody?: any;
+      status?: number;
+    };
+    error.detail = detail;
     error.responseBody = responseBody;
     error.status = res.status;
     throw error;
@@ -894,12 +921,17 @@ export async function registerUser(data: {
   password: string;
   company_name: string;
   locale?: string;
+  device_id?: string;
+  turnstile_token?: string;
 }): Promise<AuthResponse> {
   const res = await fetch(`${API_URL}/api/auth/register`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
+    body: JSON.stringify({
+      ...data,
+      device_id: data.device_id || getDeviceId(),
+    }),
   });
   const out = await handle<AuthResponse>(res);
   setToken(out.token);

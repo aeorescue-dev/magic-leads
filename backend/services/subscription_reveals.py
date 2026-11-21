@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from . import billing_time, daily_quota, phone_jobs, phone_policy
+from . import billing_time, daily_quota, free_unlocks, phone_jobs, phone_policy
 from .db import db_service, get_connection
 
 LETTER_PRICE_CENTS = 0
@@ -21,6 +21,34 @@ PHONE_PRICE_CENTS = 0
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _consume_bonus_or_quota(user_id: int, kind: str, lead_id, free_bonus: bool):
+    """Consome o bonus gratuito (flag) ou a cota diaria do plano."""
+    if free_bonus:
+        consume = (
+            free_unlocks.consume_phone if kind == "phone" else free_unlocks.consume_letter
+        )
+        result = consume(user_id, lead_id)
+        if not result.get("ok"):
+            raise daily_quota.QuotaError("free_unlocks_exhausted", 402)
+        return {"bucket": "free_bonus", "addon_id": None, "free_bonus": True}
+    if kind == "phone":
+        return daily_quota.consume_phone(user_id)
+    return daily_quota.consume_letter(user_id)
+
+
+def _refund_bonus_or_quota(user_id: int, kind: str, lead_id, quota) -> None:
+    if quota and quota.get("bucket") == "free_bonus":
+        refund = (
+            free_unlocks.refund_phone if kind == "phone" else free_unlocks.refund_letter
+        )
+        refund(user_id, lead_id)
+        return
+    if kind == "phone":
+        daily_quota.refund_phone(user_id, quota["bucket"], quota.get("addon_id"))
+    else:
+        daily_quota.refund_letter(user_id)
 
 
 def _lead(conn, lead_id: int) -> dict[str, Any] | None:
@@ -75,8 +103,10 @@ def _insert_reveal(
     return int(cur.lastrowid)
 
 
-async def reveal_letter(user_id: int, lead_id: int) -> dict[str, Any]:
-    """Carta/visita livre, limitada a 10/dia. Idempotente por user/lead."""
+async def reveal_letter(
+    user_id: int, lead_id: int, free_bonus: bool = False
+) -> dict[str, Any]:
+    """Carta/visita livre, limitada a 10/dia (ou ao bonus free). Idempotente."""
     conn = get_connection()
     try:
         prior = _prior_reveal(conn, user_id, lead_id, "letter")
@@ -93,7 +123,7 @@ async def reveal_letter(user_id: int, lead_id: int) -> dict[str, Any]:
                 "payload": prior["payload"],
                 "usage": daily_quota.usage_payload(user_id),
             }
-        quota = daily_quota.consume_letter(user_id)
+        quota = _consume_bonus_or_quota(user_id, "letter", lead_id, free_bonus)
     finally:
         conn.close()
 
@@ -122,7 +152,7 @@ async def reveal_letter(user_id: int, lead_id: int) -> dict[str, Any]:
                 trade_code=str(lead.get("issue_category") or ""),
             )
         except Exception:
-            daily_quota.refund_letter(user_id)
+            _refund_bonus_or_quota(user_id, "letter", lead_id, quota)
             raise
     finally:
         conn.close()
@@ -132,6 +162,7 @@ async def reveal_letter(user_id: int, lead_id: int) -> dict[str, Any]:
         "payload": payload,
         "quota": quota,
         "usage": daily_quota.usage_payload(user_id),
+        "free_unlocks": free_unlocks.balance(user_id),
     }
 
 
@@ -146,6 +177,7 @@ async def reveal_phone(
     idempotency_key: str,
     trade_code: str | None = None,
     owner=None,
+    free_bonus: bool = False,
 ) -> dict[str, Any]:
     """Le o telefone da cache; em cache fria enfileira e devolve `in_progress`.
 
@@ -192,7 +224,7 @@ async def reveal_phone(
 
     # 1) Telefone disponivel (lead ou cache): entrega imediata.
     if decision.state == phone_policy.STATE_READY and decision.phone:
-        quota = daily_quota.consume_phone(user_id)
+        quota = _consume_bonus_or_quota(user_id, "phone", lead_id, free_bonus)
         phone = decision.phone
         verified = bool(decision.verified)
         label = decision.label
@@ -225,9 +257,7 @@ async def reveal_phone(
                     trade_code=trade_code or str(lead.get("issue_category") or ""),
                 )
             except Exception:
-                daily_quota.refund_phone(
-                    user_id, quota["bucket"], quota.get("addon_id")
-                )
+                _refund_bonus_or_quota(user_id, "phone", lead_id, quota)
                 raise
         finally:
             conn.close()
@@ -271,7 +301,7 @@ async def reveal_phone(
                 "usage": usage,
             }
 
-        quota = daily_quota.consume_phone(user_id)
+        quota = _consume_bonus_or_quota(user_id, "phone", lead_id, free_bonus)
         try:
             phone_jobs.enqueue(
                 cache_key=decision.cache_key,
@@ -283,10 +313,10 @@ async def reveal_phone(
                 quota_ref=quota,
             )
         except Exception:
-            daily_quota.refund_phone(
-                user_id, quota["bucket"], quota.get("addon_id")
-            )
+            _refund_bonus_or_quota(user_id, "phone", lead_id, quota)
             raise
+        if free_bonus:
+            free_unlocks.add_phone_cost(user_id, lead_id)
         return {
             "success": True,
             "state": "in_progress",

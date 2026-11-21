@@ -37,6 +37,13 @@ export interface Usage {
   status?: string;
   can_access?: boolean;
   plan_until?: string | null;
+  free_unlocks?: {
+    enabled: boolean;
+    granted: boolean;
+    status?: string | null;
+    phone: { total: number; used: number; remaining: number };
+    letter: { total: number; used: number; remaining: number };
+  };
 }
 
 export interface SubscriptionInfo {
