@@ -1,0 +1,103 @@
+{
+ "before_total": 10501,
+ "before": [
+  [
+   "Boston",
+   "permit",
+   590
+  ],
+  [
+   "Boston",
+   "preventive",
+   955
+  ],
+  [
+   "Chicago",
+   "reactive",
+   561
+  ],
+  [
+   "Dallas",
+   "permit",
+   898
+  ],
+  [
+   "Dallas",
+   "preventive",
+   6910
+  ],
+  [
+   "NYC",
+   "preventive",
+   437
+  ],
+  [
+   "NYC",
+   "reactive",
+   150
+  ]
+ ],
+ "stats": {
+  "status": "partial",
+  "stats": {
+   "candidates": 1137,
+   "created": 527,
+   "enriched": 610,
+   "skipped": 0,
+   "fines": 355,
+   "deadlines": 338,
+   "values": 0
+  },
+  "errors": {
+   "chi_violations": "TimeoutError: The read operation timed out"
+  }
+ },
+ "after_total": 11028,
+ "after": [
+  [
+   "Boston",
+   "permit",
+   590
+  ],
+  [
+   "Boston",
+   "preventive",
+   955
+  ],
+  [
+   "Boston",
+   "reactive",
+   242
+  ],
+  [
+   "Chicago",
+   "preventive",
+   76
+  ],
+  [
+   "Chicago",
+   "reactive",
+   766
+  ],
+  [
+   "Dallas",
+   "permit",
+   898
+  ],
+  [
+   "Dallas",
+   "preventive",
+   6910
+  ],
+  [
+   "NYC",
+   "preventive",
+   437
+  ],
+  [
+   "NYC",
+   "reactive",
+   154
+  ]
+ ]
+}

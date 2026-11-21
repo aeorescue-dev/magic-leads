@@ -41,7 +41,8 @@ Log: `reports/backfill-apply-2026-11-20.txt`.
 ## 3. Deploy
 
 - Backend Railway: deployment `828bbc58`, commit **`67f034e`**, SUCCESS,
-  `/health` = `{"status":"healthy"}`.
+  `/health` = `{"status":"healthy"}`. Correcao de resiliencia:
+  deployment `57bbe214`, commit **`271eb41`**, SUCCESS.
 - Frontend Vercel: deployment `ooh8n7xzg`, Production, aliases
   `www.magicleads.app` / `magicleads.app`. Bundle contem `no_fine_data`,
   `deadline_within` e "No fine source for this city".
@@ -58,42 +59,61 @@ projeto para nao gerar ruido.
 
 ---
 
-## 4. Smoke de producao (API real, codigo `67f034e`)
+## 4. Smoke de producao (API real, codigo `271eb41`)
 
 Janela 7d; chamadas `opportunity_workflow.list` + `insights` no contentor de
-producao (read-only).
+producao (read-only), **depois** da ingestao P1.
 
-| Cidade | Abas (all/prev/react/permit) | Prazos 7d | Multas em risco | `fines_available` |
+| Cidade | Abas (all / prev / react / permit) | Prazos 7d | Multas em risco | `fines_available` |
 |---|---|---|---:|---|
-| **NYC** | 469 / 319 / 150 / 0 | 52 (reactive) | $467.650 (98) | true |
-| **Chicago** | 96 / 0 / 96 / 0 | 0 | $0 (fontes novas ainda nao ingeridas) | true |
-| **Boston** | 548 / 336 / 0 / 212 | 393 (preventive) | $0 (idem) | true |
+| **NYC** | 473 / 319 / 154 / 0 | 56 (reactive) | reactive **$467.650** (98) | true |
+| **Chicago** | 172 / 76 / 96 / 0 | 0 | reactive **$621.394** | true |
+| **Boston** | 790 / 336 / 242 / 212 | 393 (preventive) | reactive **$18.565**; preventive $1.755; permit $575 | true |
 | **Dallas** | 545 / 41 / 0 / 504 | 6.855 (preventive, total) | $0 | **false** |
 
-- **Dallas** devolve `fines_available=false` — a UI mostra `-` / "sem dados de
-  multa" e desativa "Com multa". E o comportamento esperado.
-- **Chicago/Boston** ficam com `fines_available=true`; as multas novas
-  dependem da ingestao P1 (abaixo).
+- Chicago ganhou **76 preventivos** (311) e **205 multas** (reativos).
+- Boston ganhou **242 reativos** com multa.
+- Dallas devolve `fines_available=false`: a UI mostra `-` / "sem dados de multa"
+  e desativa "Com multa".
+- As multas aparecem em **Reativos/Todos**, nao em Preventivos.
 
 ---
 
-## 5. Incidente: ingestao P1 abortou por 503 transitorio
+## 5. Ingestao P1 em producao
+
+| Metrica | Valor |
+|---|---:|
+| Candidatos | 1.137 |
+| Criados | **527** |
+| Enriquecidos | **610** |
+| Com multa | 355 |
+| Com prazo | 338 |
+| Total de oportunidades | 10.501 -> **11.028** |
+| Fontes com erro | `chi_violations` (timeout; isolado) |
+
+O scheduler devolveu `partial` — comportamento novo e correto: a falha de uma
+fonte nao impede as restantes.
+
+---
+
+## 6. Incidente: ingestao P1 abortou por 503 transitorio
 
 O primeiro `run_operational` devolveu `status=error` com
 `The read operation timed out` e **nao escreveu nada** (10.501 antes e depois).
 Causa: uma fonte externa falhou (Socrata devolveu 503/timeout) e o
 `build_candidates` abortava **todas** as fontes.
 
-**Correcao:** cada fonte passou a ser isolada (`collect(...)`), com erros
-registados em `stats["source_errors"]`; o scheduler devolve `partial` em vez de
-`error` e as restantes fontes continuam a entrar. Teste novo:
-`test_one_failing_source_does_not_abort_the_run`.
+**Correcao (`271eb41`):** cada fonte passou a ser isolada (`collect(...)`), com
+erros registados em `stats["source_errors"]`; o scheduler devolve `partial` em
+vez de `error`. Teste novo:
+`test_one_failing_source_does_not_abort_the_run` (suite 1793 passed).
 
 ---
 
-## 6. Verificacao visual (pendente de sessao ativa)
+## 7. Verificacao visual (pendente de sessao ativa)
 
 O dashboard abre em **modo Free** com a conta demo (`demo@magicleads.app`,
-`plan_until=2025-12-31` expirado): KPIs a zero, sem feed. Para a conferencia
-na tela (abas, prazos/multas, `-`/sem dados, LIMPAR) e preciso um login com
-acesso ativo em producao.
+`plan_until=2025-12-31` expirado): KPIs a zero e feed vazio. A conferencia na
+tela (abas, prazos/multas, `-`/sem dados, LIMPAR) exige um login com acesso
+ativo em producao. O bundle servido ja contem as strings e parametros novos
+(`no_fine_data`, `deadline_within`, "No fine source for this city").

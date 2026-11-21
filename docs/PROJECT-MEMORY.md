@@ -2241,3 +2241,8 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Telefone:** base assincrona/cache-first, L3 off (`PHONE_L3_UNNAMED_ENABLED=False`),
   sem Fase B paga; `VOICE_FREEZE=1` mantido.
 - **Testes:** 1792 passed, 1 skipped; ruff/tsc limpos.
+- **Pos-deploy (2026-11-21):** ingestao P1 real -> 527 criados/610 enriquecidos
+  (total 11.028); Chicago 76 preventivos + 205 multas, Boston 242 reativos com
+  multa. Um 503 transitorio da Socrata abortou o 1.o run; corrigido em `271eb41`
+  (cada fonte isolada, scheduler devolve `partial`). Detalhe:
+  `reports/POST-DEPLOY-SMOKE-2026-11-20.md`.
