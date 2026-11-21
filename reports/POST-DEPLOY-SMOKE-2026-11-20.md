@@ -54,8 +54,14 @@ O push de `67f034e` disparou tambem um **preview** do projeto
 `magic-leads-br-staging`, que falhou porque o projeto espera a Root Directory
 `br/web` (nao existe no `master`). E um build de preview, nao a producao:
 `www.magicleads.app` nao foi afetado e a branch `feat/br-environmental-mvp`
-continua intacta. Se quiser, o preview pode ser desligado nas definicoes do
-projeto para nao gerar ruido.
+continua intacta.
+
+**Resolvido em `c8c2526`:** a Vercel valida a Root Directory antes do
+*Ignored Build Step*, por isso a pasta passou a existir no `master` com um
+placeholder (`br/web/.gitkeep`) e o step ficou
+`if [ -f index.html ]; then exit 1; else exit 0; fi`. Resultado: builds de
+`master` sao **CANCELED** (sem email de falha); a branch BR, que tem
+`index.html`, continua a construir o site estatico como antes.
 
 ---
 
