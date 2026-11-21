@@ -15,8 +15,10 @@ ou SMS real foi disparado (o envio fica bloqueado pelo freeze até autorização
 | Sub-use case | `CUSTOMER_CARE` |
 | Criada | 2026-11-21T21:14:19Z |
 | Custo | $4,50/trimestre (3 meses à cabeça); $1,50/mês depois |
-| Saldo antes | $12,99 |
-| Estado | **`submissionStatus=PENDING` · `campaignStatus=TCR_PENDING`** |
+| Saldo | $12,99 (cobrança ainda não debitada) |
+| Estado | **`submissionStatus=CREATED` · `campaignStatus=TCR_ACCEPTED`** |
+| TCR Campaign | `CPWT0EW` |
+| T-Mobile registado | `false` (provisioning por operadora em curso) |
 | failureReasons | null |
 
 Amostras submetidas:
@@ -31,8 +33,8 @@ Opt-in: tecla 1 durante a chamada (descrito no messageFlow). Keywords:
 
 **Número SMS `+1***7808`:** está no Messaging Profile
 `4001a1d1-8bd1-4cdc-a13b-e05580d2b932`, mas a atribuição à campanha foi
-**recusada** com o erro `10036` (campanha ainda pendente). Repetir após
-`APPROVED`:
+**recusada** com o erro `10036` (campanha ainda não `ACTIVE`). Repetir após
+aprovação:
 `POST /v2/10dlc/phone_number_campaigns {phoneNumber, campaignId}`.
 
 ---
@@ -58,7 +60,18 @@ Opt-in: tecla 1 durante a chamada (descrito no messageFlow). Keywords:
 - **Config**: `TELNYX_SMS_FROM_NUMBER`, `TELNYX_MESSAGING_PROFILE_ID`,
   `TELNYX_SMS_CAMPAIGN_ID`, `TELNYX_SMS_MAX_PER_DAY`.
 - **Testes**: `tests/test_telnyx_sms.py` (freeze, campanha pendente, envio,
-  STOP/START, tecla 1) — a suíte completa confirma no deploy.
+  STOP/START, tecla 1). Suíte completa: **1799 passed, 1 skipped**.
+
+### Deploy e configuração
+
+- Backend `f6828da` — Railway SUCCESS; `/health` healthy.
+- Variáveis: `TELNYX_SMS_FROM_NUMBER=+19739137808`,
+  `TELNYX_MESSAGING_PROFILE_ID=4001...`, `TELNYX_SMS_CAMPAIGN_ID=4b3001...`,
+  `TELNYX_SMS_MAX_PER_DAY=50`.
+- Messaging Profile: `webhook_url` =
+  `/api/sms/telnyx/webhook?secret=…` (configurado e verificado).
+- Webhook: sem segredo → **403**; com segredo → **200** (evento ignorado, sem
+  escrita).
 
 ---
 
