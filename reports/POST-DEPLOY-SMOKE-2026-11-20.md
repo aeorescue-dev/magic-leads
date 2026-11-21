@@ -110,10 +110,42 @@ vez de `error`. Teste novo:
 
 ---
 
-## 7. Verificacao visual (pendente de sessao ativa)
+## 7. Verificacao visual (sessao ativa, 2026-11-21)
 
-O dashboard abre em **modo Free** com a conta demo (`demo@magicleads.app`,
-`plan_until=2025-12-31` expirado): KPIs a zero e feed vazio. A conferencia na
-tela (abas, prazos/multas, `-`/sem dados, LIMPAR) exige um login com acesso
-ativo em producao. O bundle servido ja contem as strings e parametros novos
-(`no_fine_data`, `deadline_within`, "No fine source for this city").
+Conta usada: `pamelacj37@gmail.com` (plan pro, active, can_access=true).
+Janela 7d, mesma API do smoke acima. **Todos os contadores bateram.**
+
+| Cidade | Abas Todas/Reat/Prev/Obras | Cartao do separador | Prazos ≤7d | Multas |
+|---|---|---|---:|---|
+| **NYC** | 473 / 154 / 319 / 0 | Reativos 154 | 56 (26 vencidos) | **$468k** (98) |
+| | | Preventivos 319 | 0 | $11k (7) |
+| **Chicago** | 172 / 96 / 76 / 0 | Reativos 96 | 0 | **$621k** (86) |
+| | | Preventivos 76 | 0 | $0 (0) |
+| **Boston** | 790 / 242 / 336 / 212 | Preventivos 336 | 393 (334 vencidos) | $1.755 (7) |
+| | | Reativos 242 | 0 | **$19k** (242) |
+| | | Obras 212 | 0 | $575 (4) |
+| **Dallas** | 545 / 0 / 41 / 504 | Preventivos 41 | 6.855 (6.789 vencidos) | **— / no fine data** |
+| | | Obras 504 | 0 | **— / no fine data** |
+
+- **Dallas:** cartao FINES AT RISK mostra **`—`** com "no fine data"; toggle
+  **With fines disabled** (`title="No fine source for this city"`, opacity 0.5).
+  Nenhum `0` enganoso depois de `5633a68`.
+- **Chicago/Boston:** `$0` apenas no subconjunto Preventivos (fonte existe);
+  o valor real aparece em Reativos.
+- **LIMPAR:** com Chicago + Deadline only ativos, o CLEAR repoe Deadline=off,
+  aba=All, busca vazia e cidade no default (NYC); contagem volta ao global.
+- **Mapa:** "Opportunities · 7 days" e clusters por cidade; sem filtros presos.
+
+### Achados e correcoes nesta fase
+
+1. **`0` em vez de `—` em Dallas** (corrigido em `5633a68`): o `noData` existia
+   no tipo do heroi mas nao era passado ao cartao, e os satelites nao o
+   declaravam. Agora ambos recebem `noData`.
+2. **Conta ativa aparece como "Conta gratuita"/Free mode** (nao corrigido, decisao
+   de produto): `isWeeklyPlan = user.plan.startsWith("weekly_")`; esta conta e
+   `pro` com cortesia ate 2099, logo `isFreemium=true`. Os dados aparecem
+   normalmente, mas a sidebar e o banner assumem plano gratuito. Opcoes:
+   (a) colocar a conta de teste num plano `weekly_*`; ou (b) trocar
+   `isFreemium` para usar `!hasAccess`.
+
+
