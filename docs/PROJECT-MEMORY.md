@@ -2214,3 +2214,30 @@ Pendente: P0-A (paginação/watermark) → P0-B → UI/UX.
 - **Feed efetivo:** 107.106 -> 68.160. Zero `Unclassified` no feed; zero falsos positivos conhecidos (`rat`/`registration`, `shed`/`unleashed`, `leaning`/`cleaning`, `overgrown tree`, `cart maintenance`, `line locate`, `water lead test`).
 - **Voz:** intocada; campanhas #13-#24 continuam `paused`, 0 chamadas.
 - **Dívida/P2:** decidir política para graffiti->Paint, tree debris->Debris, water lead test->Unclassified; esconder categorias sem inventário por cidade; separar `inserted` bruto do KPI "novas oportunidades".
+
+---
+
+## 9. P0/P1 pre-inspecao + multas Chicago/Boston (2026-11-20/21)
+
+- **Dashboard:** `source_kind` deriva de `signal_type` (`legal_obligation`->reactive,
+  `authorized_work`->permit, `open_request`->preventive); janelas separadas
+  (`received_at` para novas, `compliance_deadline` para prazos, `fine_*` para multas);
+  abas por ecra; mapa 7d com severity/prazo/multas/busca.
+- **Fontes novas:** Chicago 311 `v6vf-nfxy` (open_request), Chicago multas `6br9-quuz`
+  (`imposed_fine`) e `kc9i-wq85` (`total_fines`/`current_amount_due`), Boston code
+  `90ed3816` (`value`). `hearing_date` nunca vira `compliance_deadline`.
+- **P1.1 dedupe:** uma multa por imovel e por `nov_number`/`violation_number`
+  (Chicago) e `case_no`/`ticket_no` (Boston). Chicago 205 imoveis,
+  **$832.700 imposto / $613.719,65 saldo**; Boston 253, **$20.895**.
+- **`source_payload`** (lista `{source,row}`) gravado nas novas oportunidades,
+  nunca exposto ao cliente (`_public` remove).
+- **UI:** Dallas mostra `-` / "sem dados de multa"; toggle "Com multa" desativado;
+  LIMPAR limpa `neighborhoodFilter`/`leadZone`/`feedLayer`/`readiness`/`opportunityKind`.
+- **Backfill producao:** backup `/data/leads.db.bak-20261121-042559.gz`
+  (sha256 `41482d9d...`, quick_check ok, 163.203 leads); `--apply` **2.199 linhas**
+  -> preventive 8.302 / reactive 711 / permit 1.488 (previstos 8.302/711/1.488).
+- **Incidente de disco:** `/data` estava a 100% (0 B). Removido o backup obsoleto de
+  2026-11-15 e feito `wal_checkpoint(TRUNCATE)`; backup atual comprimido ocupa 74 MB.
+- **Telefone:** base assincrona/cache-first, L3 off (`PHONE_L3_UNNAMED_ENABLED=False`),
+  sem Fase B paga; `VOICE_FREEZE=1` mantido.
+- **Testes:** 1792 passed, 1 skipped; ruff/tsc limpos.

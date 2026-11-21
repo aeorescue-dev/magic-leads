@@ -1,0 +1,13 @@
+﻿ANTES
+  open_request         preventive   pre_inspection   8302
+  authorized_work      preventive   pre_inspection   1488
+  legal_obligation     preventive   pre_inspection   711
+
+PLANEJADO
+  Chicago    legal_obligation     -> reactive     561
+  NYC        legal_obligation     -> reactive     150
+  Boston     authorized_work      -> permit       590
+  Dallas     authorized_work      -> permit       898
+  TOTAL 2199
+
+DRY-RUN: 2199 linha(s) seriam reclassificadas; use --apply.

@@ -1,0 +1,61 @@
+.\.venv\Scripts\python.exe : C:\Users\Fabio\Documents\Default 
+Project\garimpador-leads\.venv\Lib\site-packages\pytest_asyncio\plugin.py:300: PytestDeprecationWarning: The 
+configuration option "asyncio_default_fixture_loop_scope" is unset.
+No linha:1 caractere:65
++ ... dor-leads"; .\.venv\Scripts\python.exe -m pytest tests/ -q 2>&1 | Tee ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\Fabio\...cope" is unset.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+The event loop scope for asynchronous fixtures will default to the "fixture" caching scope. Future versions of 
+pytest-asyncio will default the loop scope for asynchronous fixtures to "function" scope. Set the default fixture loop 
+scope explicitly in order to avoid unexpected behavior in the future. Valid fixture loop scopes are: "function", 
+"class", "module", "package", "session"
+
+  warnings.warn(PytestDeprecationWarning(_DEFAULT_FIXTURE_LOOP_SCOPE_UNSET))
+........................................................................ [  4%]
+........................................................................ [  8%]
+........................................................................ [ 12%]
+........................................................................ [ 16%]
+........................................................................ [ 20%]
+........................................................................ [ 24%]
+........................................................................ [ 28%]
+....................................................................s... [ 32%]
+........................................................................ [ 36%]
+........................................................................ [ 40%]
+........................................................................ [ 44%]
+........................................................................ [ 48%]
+........................................................................ [ 52%]
+........................................................................ [ 56%]
+........................................................................ [ 60%]
+........................................................................ [ 64%]
+........................................................................ [ 68%]
+........................................................................ [ 72%]
+........................................................................ [ 76%]
+........................................................................ [ 80%]
+........................................................................ [ 84%]
+........................................................................ [ 88%]
+........................................................................ [ 92%]
+........................................................................ [ 96%]
+.................................................................        [100%]
+============================== warnings summary ===============================
+.venv\Lib\site-packages\starlette\testclient.py:29
+  C:\Users\Fabio\Documents\Default Project\garimpador-leads\.venv\Lib\site-packages\starlette\testclient.py:29: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    [], typing.ContextManager[anyio.abc.BlockingPortal]
+
+tests/test_phone_cache.py: 2 warnings
+tests/test_quota_phase3.py: 5 warnings
+tests/test_reserve_provider_path.py: 4 warnings
+tests/test_scraper_pipeline_regressions.py: 1 warning
+  C:\Users\Fabio\Documents\Default Project\garimpador-leads\backend\services\phone_cache.py:30: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    return datetime.utcnow()
+
+tests/test_phone_cache.py: 2 warnings
+tests/test_quota_phase3.py: 20 warnings
+tests/test_reserve_provider_path.py: 18 warnings
+tests/test_scraper_pipeline_regressions.py: 3 warnings
+  C:\Users\Fabio\Documents\Default Project\garimpador-leads\backend\services\phone_jobs.py:35: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    return datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1792 passed, 1 skipped, 56 warnings in 360.22s (0:06:00)

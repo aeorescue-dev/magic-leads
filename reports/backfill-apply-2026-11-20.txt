@@ -1,0 +1,24 @@
+Backfill source_kind - APPLY em producao (2026-11-21 UTC)
+DB: /data/leads.db (servico magic-leads, environment production)
+Backup previo: /data/leads.db.bak-20261121-042559.gz
+  sha256 41482d9da2541e80ec37a9f8b23d3d91fe92332722bc05c3f1c99e18eaae9fea
+  quick_check ok | 163.203 leads | 10.501 oportunidades
+
+ANTES
+  open_request         preventive   pre_inspection   8302
+  authorized_work      preventive   pre_inspection   1488
+  legal_obligation     preventive   pre_inspection   711
+
+PLANEJADO
+  Chicago    legal_obligation     -> reactive     561
+  NYC        legal_obligation     -> reactive     150
+  Boston     authorized_work      -> permit       590
+  Dallas     authorized_work      -> permit       898
+  TOTAL 2199
+
+DEPOIS
+  open_request         preventive   pre_inspection   8302
+  authorized_work      permit       permit           1488
+  legal_obligation     reactive     violation        711
+
+APLICADO: 2199 linha(s) reclassificadas.
