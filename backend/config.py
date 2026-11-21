@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     TELNYX_API_KEY: str = ""
     TELNYX_CONNECTION_ID: str = ""
     TELNYX_FROM_NUMBER: str = ""
+    # SMS 10DLC: numero dedicado (nunca o DID de voz), perfil e campanha.
+    TELNYX_SMS_FROM_NUMBER: str = ""
+    TELNYX_MESSAGING_PROFILE_ID: str = ""
+    TELNYX_SMS_CAMPAIGN_ID: str = ""
+    TELNYX_SMS_MAX_PER_DAY: int = 50
     TELNYX_WEBHOOK_SECRET: str = ""
     TELNYX_WEBHOOK_URL: str = ""
     # Chave publica Ed25519 da Telnyx (base64). Se definida, o webhook passa a

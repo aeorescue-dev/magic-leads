@@ -20,7 +20,7 @@ from . import b2b_voice, showcase
 
 DISCLOSURE = "Hi {{company | Contractor}}, this is an automated assistant from Magic Leads."
 
-TEMPLATE_VERSION = "2026-11-06.1"
+TEMPLATE_VERSION = "2026-11-21.1"
 
 # Guardrails do voice: nunca prometer uma vitrine com contagem fraca/zero
 # nem usar inventário antigo. O valor pode ser afinado por ambiente.
@@ -35,7 +35,8 @@ DEFAULT_TEMPLATE = (
     "give you the owner's direct name, verified address, and job details 5 "
     "to 7 days before anyone else in your area. You just call, visit, or "
     "send a letter, and close the deal before your competitors do. Go to "
-    "magicleads.app right now. To opt out, press 2."
+    "magicleads.app right now. Press 1 to receive this link by text, or press "
+    "2 to opt out."
 )
 
 TRADES = (
@@ -67,15 +68,17 @@ TOOL_GUIDANCE = (
     "## Operational rules\n"
     "You are on a live outbound phone call. Follow the approved script above "
     "exactly; do not add claims, prices, or promises that are not in it.\n"
-    "- The script asks the caller to visit MagicLeads.app and to press 2 to be "
-    "removed from the list.\n"
+    "- The script asks the caller to visit MagicLeads.app, offers press 1 to "
+    "receive the same link by text, and press 2 to be removed from the list.\n"
+    "- Pressing 1 sends one SMS with the link to the caller's number. The "
+    "backend handles it; do not call any tool for DTMF input.\n"
     "- Pressing 2 is an opt-out. The backend handles the suppression and the "
     "confirmation; do not call any tool for DTMF input.\n"
     "- Call remove_from_list only when the caller verbally asks to be removed "
     "or to stop calling (for example: \"remove me\", \"stop calling\", \"do "
     "not call\", \"take me off your list\").\n"
-    "- Do not ask for an email address. Do not promise email or SMS delivery. "
-    "The only conversion path is the website.\n"
+    "- Do not ask for an email address. The SMS is only the link the caller "
+    "requested; do not promise anything else by text or email.\n"
     "- If the caller asks for the website, repeat \"MagicLeads dot app\".\n"
     "- If the caller says no or is not interested, end the call politely. Do "
     "not pressure them.\n"

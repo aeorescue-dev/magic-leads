@@ -126,6 +126,7 @@ from .services import (
     subscription_billing,
     subscription_reveals,
     system_health,
+    telnyx_sms,
     telnyx_voice,
     voice_audio_cache,
     voice_scripts,
@@ -3730,6 +3731,25 @@ async def telnyx_webhook(request: Request, secret: str = ""):
     except Exception:  # noqa: BLE001
         raise HTTPException(status_code=400, detail="json inválido")
     return await anyio.to_thread.run_sync(telnyx_voice.handle_webhook, payload)
+
+
+@app.post("/api/sms/telnyx/webhook")
+async def telnyx_sms_webhook(request: Request, secret: str = ""):
+    """Webhook de mensagens Telnyx: inbound (STOP/HELP) e estado de envio."""
+    header_secret = request.headers.get("x-webhook-secret") or ""
+    raw_body = await request.body()
+    if not telnyx_voice.webhook_authorized(
+        secret or header_secret,
+        signature=request.headers.get("telnyx-signature-ed25519") or "",
+        timestamp=request.headers.get("telnyx-timestamp") or "",
+        raw_body=raw_body,
+    ):
+        raise HTTPException(status_code=403, detail="invalid_webhook_signature")
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="json inválido")
+    return await anyio.to_thread.run_sync(telnyx_sms.handle_inbound, payload)
 
 
 @app.get("/api/voice/fallback.mp3")

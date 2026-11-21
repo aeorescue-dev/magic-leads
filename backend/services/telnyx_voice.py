@@ -649,7 +649,7 @@ def _start_static_script_for_call(
         "maximum_digits": 1,
         "maximum_tries": 1,
         "timeout_millis": timeout_ms,
-        "valid_digits": "2",
+        "valid_digits": "12",
         "client_state": _encode_state(client_state),
     }
     if audio_ready:
@@ -662,7 +662,7 @@ def _start_static_script_for_call(
                 "maximum_digits": 1,
                 "maximum_tries": 1,
                 "timeout_millis": timeout_ms,
-                "valid_digits": "2",
+                "valid_digits": "12",
                 "client_state": _encode_state(client_state),
             },
         )
@@ -978,36 +978,55 @@ def handle_webhook(payload: dict) -> dict:
                 "confirmation": speak,
             }
         if digit == "1":
-            # A V3 nao oferece tecla 1. Se o caller pressionar por habito,
-            # repetimos o unico caminho de conversao (website) sem email.
             current = b2b_voice.get_voice_call(voice_call_id) or {}
             call_control_id = str(
                 body.get("call_control_id")
                 or current.get("provider_call_id")
                 or ""
             )
-            b2b_voice.update_voice_call(voice_call_id, intent="website_reminder")
+            phone = str(current.get("phone") or "")
+            try:
+                from . import telnyx_sms
+
+                sms = telnyx_sms.send_sms(
+                    phone, telnyx_sms.SMS_TEXT, trigger="dtmf_1"
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[TELNYX] SMS tecla 1 falhou: %s", exc)
+                sms = {"ok": False, "reason": "exception"}
             stop = stop_assistant_for_fallback(call_control_id)
+            if sms.get("ok"):
+                b2b_voice.update_voice_call(voice_call_id, intent="sms_link")
+                text = "We've texted the link to this number. Goodbye."
+            else:
+                b2b_voice.update_voice_call(voice_call_id, intent="sms_unavailable")
+                text = (
+                    "We couldn't send the text right now. Visit MagicLeads dot "
+                    "app to see this week's active opportunities."
+                )
             speak = _call_action(
                 call_control_id,
                 "speak",
                 {
-                    "payload": (
-                        "Visit MagicLeads dot app to see this week's active "
-                        "opportunities."
-                    ),
+                    "payload": text,
                     "voice": "female",
                     "language": "en-US",
                 },
             )
-            if not speak.get("ok"):
+            if str(current.get("campaign_id") or "") == "test_call":
+                # Teste: deixa ouvir a confirmacao sem desligar a linha.
+                pass
+            elif speak.get("ok"):
+                _schedule_hangup(call_control_id, 5)
+            else:
                 hangup_call(call_control_id)
             return {
                 "ok": True,
-                "action": "website_reminder",
+                "action": "sms_link" if sms.get("ok") else "sms_unavailable",
                 "voice_call_id": voice_call_id,
                 "digit": digit,
                 "stop": stop,
+                "sms": sms,
                 "confirmation": speak,
             }
         return {

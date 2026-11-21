@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from backend.services import b2b_voice as voice
-from backend.services import showcase, telnyx_voice, voice_scripts
+from backend.services import showcase, telnyx_sms, telnyx_voice, voice_scripts
 from backend.services.db import get_connection
 
 NOW = datetime(2026, 11, 2, 16, 0, tzinfo=timezone.utc)
@@ -118,7 +118,8 @@ def test_create_call_dry_run_sem_chaves():
     assert call["provider"] == "telnyx"
 
 
-def test_webhook_dtmf_1_regete_website_sem_email():
+def test_webhook_dtmf_1_faz_fallback_quando_sms_indisponivel(monkeypatch):
+    monkeypatch.setattr(telnyx_voice, "_schedule_hangup", lambda *a, **k: None)
     company = _seed_company()
     _seed_showcase()
     created = telnyx_voice.create_call(company, campaign_id="pilot")
@@ -150,11 +151,47 @@ def test_webhook_dtmf_1_regete_website_sem_email():
     finally:
         telnyx_voice._call_action = original
     assert result["ok"] is True
-    assert result["action"] == "website_reminder"
+    assert result["action"] == "sms_unavailable"
     assert [action for action, _ in actions] == ["ai_assistant_stop", "speak"]
     call = voice.get_voice_call(call_id)
-    assert call["intent"] == "website_reminder"
+    assert call["intent"] == "sms_unavailable"
     assert call["showcase_link_id"] is None
+
+
+def test_webhook_dtmf_1_envia_sms(monkeypatch):
+    company = _seed_company()
+    _seed_showcase()
+    created = telnyx_voice.create_call(company, campaign_id="pilot")
+    call_id = created["voice_call_id"]
+    state = base64.b64encode(
+        json.dumps({"voice_call_id": call_id, "company_id": company["id"]}).encode()
+    ).decode()
+    sent = {}
+    monkeypatch.setattr(
+        telnyx_sms,
+        "send_sms",
+        lambda phone, body, trigger="manual", **kwargs: sent.update(
+            {"phone": phone, "trigger": trigger}
+        )
+        or {"ok": True, "id": "sms-1"},
+    )
+    monkeypatch.setattr(telnyx_voice, "_call_action", lambda *a, **k: {"ok": True})
+    result = telnyx_voice.handle_webhook(
+        {
+            "data": {
+                "event_type": "call.dtmf.received",
+                "payload": {
+                    "client_state": state,
+                    "dtmf_digit": "1",
+                    "call_control_id": "v3:test-dtmf1-ok",
+                },
+            }
+        }
+    )
+    assert result["action"] == "sms_link"
+    assert sent["trigger"] == "dtmf_1"
+    assert result["sms"]["id"] == "sms-1"
+    assert voice.get_voice_call(call_id)["intent"] == "sms_link"
 
 
 def test_webhook_secret_fail_closed_e_valida():
@@ -278,7 +315,7 @@ def test_static_mode_usa_gather_using_audio_quando_cache_pronto(monkeypatch, tmp
     assert [action for action, _ in actions] == ["gather_using_audio"]
     payload = actions[0][1]
     assert payload["audio_url"].endswith(f"/api/voice/tts/{cache_hash}.mp3")
-    assert payload["valid_digits"] == "2"
+    assert payload["valid_digits"] == "12"
     assert payload["maximum_tries"] == 1
     assert voice.get_voice_call(call_id)["status"] == "in_call"
 
@@ -463,7 +500,7 @@ def test_static_mode_usa_gather_using_speak_sem_ai(monkeypatch):
     assert [action for action, _ in actions] == ["gather_using_speak"]
     payload = actions[0][1]
     assert "magicleads.app" in payload["payload"]
-    assert payload["valid_digits"] == "2"
+    assert payload["valid_digits"] == "12"
     assert payload["maximum_tries"] == 1
     assert voice.get_voice_call(call_id)["status"] == "in_call"
 
