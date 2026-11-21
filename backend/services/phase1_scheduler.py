@@ -107,7 +107,15 @@ class Phase1Scheduler:
                     "diária" if include_permits else "operacional",
                     stats,
                 )
-                result = {"status": "ok", "stats": stats}
+                result = (
+                    {
+                        "status": "partial",
+                        "stats": stats,
+                        "errors": stats.get("source_errors") or {},
+                    }
+                    if stats.get("source_errors")
+                    else {"status": "ok", "stats": stats}
+                )
             except Exception as exc:  # nunca deixar o loop morrer
                 logger.error("[PHASE1] falha na ingestão: %s", exc, exc_info=True)
                 result = {"status": "error", "error": str(exc)}

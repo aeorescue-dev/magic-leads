@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import urllib.parse
 import urllib.request
@@ -32,6 +33,8 @@ from .db import get_connection
 from .opportunity_workflow import make_property_key, opportunity_workflow
 from .privacy import scrub
 from .zip_lookup import resolve_chicago_zip
+
+logger = logging.getLogger(__name__)
 
 _USER_AGENT = "MagicLeadsPhase1/1.0 (staging enrichment)"
 _TIMEOUT = 60
@@ -1558,6 +1561,18 @@ class Phase1EnrichmentService:
     ) -> list:
         """Constrói a lista final por imóvel, já com multas, prazos e valores."""
         merged: dict = {}
+        # P1: uma fonte externa a falhar (503/timeout) nao pode abortar o run
+        # inteiro e deixar as restantes fontes sem ingestao.
+        errors: dict = {}
+        self._last_source_errors = errors
+
+        def collect(label: str, loader, merger) -> None:
+            try:
+                for item in loader():
+                    merger(item)
+            except Exception as exc:  # fonte externa: nunca derrubar o run
+                errors[label] = f"{type(exc).__name__}: {exc}"[:200]
+                logger.warning("phase1: fonte %s falhou: %s", label, exc)
 
         def merge(item: dict) -> None:
             key = item["property_key"]
@@ -1642,11 +1657,13 @@ class Phase1EnrichmentService:
                 if not target.get(field) and item.get(field):
                     target[field] = item[field]
 
-        for item in self.fetch_hpd_complaints(hpd_complaints):
-            merge(item)
-        for item in self.fetch_hpd_deadlines(hpd_deadlines):
-            merge(item)
-        for item in self.fetch_ecb(ecb):
+        collect(
+            "hpd_complaints",
+            lambda: self.fetch_hpd_complaints(hpd_complaints),
+            merge,
+        )
+        collect("hpd_deadlines", lambda: self.fetch_hpd_deadlines(hpd_deadlines), merge)
+        def merge_ecb(item: dict) -> None:
             target = next(
                 (
                     candidate
@@ -1677,45 +1694,65 @@ class Phase1EnrichmentService:
                     payloads if isinstance(payloads, list) else [payloads]
                 )
             target["history"] = (target.get("history") or []) + (item.get("history") or [])
-        for item in self.fetch_chicago_violations(chi_violations):
-            merge(item)
-        for item in self.fetch_chicago_311(chi_311):
-            merge(item)
-        for item in self.fetch_chicago_fines(chi_fines):
-            merge_fine(item)
+
+        collect("ecb", lambda: self.fetch_ecb(ecb), merge_ecb)
+        collect(
+            "chi_violations",
+            lambda: self.fetch_chicago_violations(chi_violations),
+            merge,
+        )
+        collect("chi_311", lambda: self.fetch_chicago_311(chi_311), merge)
+        collect("chi_fines", lambda: self.fetch_chicago_fines(chi_fines), merge_fine)
         if chi_permits > 0:
-            for item in self.fetch_chicago_permits(
-                chi_permits, days=permit_window_days
-            ):
-                merge(item)
-        for item in self.fetch_boston_violations(bos_violations):
-            merge(item)
-        for item in self.fetch_boston_311(bos_311):
-            merge(item)
-        for item in self.fetch_boston_code_enforcement(bos_code):
-            merge_fine(item)
-        for item in self.fetch_dallas_code(dal_code):
-            merge(item)
-        for item in self.fetch_dallas_311(dal_311):
-            merge(item)
+            collect(
+                "chi_permits",
+                lambda: self.fetch_chicago_permits(
+                    chi_permits, days=permit_window_days
+                ),
+                merge,
+            )
+        collect(
+            "bos_violations",
+            lambda: self.fetch_boston_violations(bos_violations),
+            merge,
+        )
+        collect("bos_311", lambda: self.fetch_boston_311(bos_311), merge)
+        collect(
+            "bos_code",
+            lambda: self.fetch_boston_code_enforcement(bos_code),
+            merge_fine,
+        )
+        collect("dal_code", lambda: self.fetch_dallas_code(dal_code), merge)
+        collect("dal_311", lambda: self.fetch_dallas_311(dal_311), merge)
         if bos_permits > 0:
-            for item in self.fetch_boston_permits(
-                bos_permits, days=permit_window_days
-            ):
-                merge(item)
+            collect(
+                "bos_permits",
+                lambda: self.fetch_boston_permits(
+                    bos_permits, days=permit_window_days
+                ),
+                merge,
+            )
         if dal_permits > 0:
-            for item in self.fetch_dallas_permits(
-                dal_permits, days=permit_window_days
-            ):
-                merge(item)
+            collect(
+                "dal_permits",
+                lambda: self.fetch_dallas_permits(
+                    dal_permits, days=permit_window_days
+                ),
+                merge,
+            )
 
         # Valores de obra: alvarás NYC casados por BIN; Chicago por morada.
         if permit_rows > 0:
-            nyc_values = self.fetch_nyc_permit_values(
-                (item.get("bin") for item in merged.values() if item.get("city") == "NYC"),
-                limit=max(permit_rows // 2, 20),
-            )
-            chi_values = self.fetch_chicago_permit_values(limit=permit_rows)
+            try:
+                nyc_values = self.fetch_nyc_permit_values(
+                    (item.get("bin") for item in merged.values() if item.get("city") == "NYC"),
+                    limit=max(permit_rows // 2, 20),
+                )
+                chi_values = self.fetch_chicago_permit_values(limit=permit_rows)
+            except Exception as exc:
+                errors["permit_values"] = f"{type(exc).__name__}: {exc}"[:200]
+                logger.warning("phase1: valores de obra falharam: %s", exc)
+                nyc_values, chi_values = {}, {}
             for key, target in merged.items():
                 permit = (
                     nyc_values.get(str(target.get("bin") or ""))
@@ -1730,7 +1767,12 @@ class Phase1EnrichmentService:
                 target["history"] = (target.get("history") or []) + [permit["history"]]
 
         # Ficha do imóvel (PLUTO) só para quem tem BBL.
-        profiles = self.fetch_pluto(item.get("bbl") for item in merged.values())
+        try:
+            profiles = self.fetch_pluto(item.get("bbl") for item in merged.values())
+        except Exception as exc:
+            errors["pluto"] = f"{type(exc).__name__}: {exc}"[:200]
+            logger.warning("phase1: PLUTO falhou: %s", exc)
+            profiles = {}
         for key, target in merged.items():
             profile = profiles.get(key)
             if profile:
@@ -1868,6 +1910,7 @@ class Phase1EnrichmentService:
             conn.close()
 
     def ingest(self, candidates: Optional[list] = None, **kwargs) -> dict:
+        self._last_source_errors = {}
         candidates = candidates if candidates is not None else self.build_candidates(**kwargs)
         existing = self._existing()
         stats = {
@@ -1878,6 +1921,7 @@ class Phase1EnrichmentService:
             "fines": 0,
             "deadlines": 0,
             "values": 0,
+            "source_errors": dict(getattr(self, "_last_source_errors", {}) or {}),
             "ids": [],
         }
         for candidate in candidates:

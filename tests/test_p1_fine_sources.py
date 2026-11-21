@@ -220,6 +220,43 @@ def test_territories_applies_severity_fines_and_deadline_filters():
     assert result["totals"]["count"] == 1
 
 
+def test_one_failing_source_does_not_abort_the_run(monkeypatch):
+    service = pe.phase1_enrichment
+
+    def boom(limit=0):
+        raise RuntimeError("503 Service Unavailable")
+
+    item = {
+        "property_key": "resilience-test",
+        "address": "123 N MAIN ST",
+        "city": "Chicago",
+        "state": "IL",
+        "zip_code": "60601",
+        "signal_type": "open_request",
+        "severity": "medium",
+        "category": "Rodent",
+        "description": "Rodent",
+        "compliance_deadline": None,
+        "history": [],
+        "tags": [],
+    }
+    monkeypatch.setattr(service, "fetch_chicago_311", boom)
+    monkeypatch.setattr(service, "fetch_chicago_violations", lambda limit=0: [item])
+    monkeypatch.setattr(service, "fetch_pluto", lambda bbls: {})
+
+    out = service.build_candidates(
+        hpd_complaints=0,
+        hpd_deadlines=0,
+        ecb=0,
+        chi_violations=10,
+        chi_311=10,
+        chi_fines=0,
+        permit_rows=0,
+    )
+    assert [c["address"] for c in out] == ["123 N MAIN ST"]
+    assert "503" in service._last_source_errors["chi_311"]
+
+
 def test_source_payload_is_persisted_in_db():
     conn = get_connection()
     try:
