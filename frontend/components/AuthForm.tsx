@@ -18,6 +18,51 @@ const subscribeNoop = () => () => {};
 // (sem checkout obrigatório); o utilizador só vê os planos quando esgota.
 const FREE_UNLOCKS_UI = process.env.NEXT_PUBLIC_FREE_UNLOCKS === '1';
 
+function TurnstileWidget({ onToken }: { onToken: (token: string) => void }) {
+  const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || '';
+  const holder = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!siteKey || !holder.current) return;
+    let cancelled = false;
+    const render = () => {
+      const w = window as any;
+      if (cancelled || !w.turnstile || !holder.current) return;
+      holder.current.innerHTML = '';
+      w.turnstile.render(holder.current, {
+        sitekey: siteKey,
+        callback: (token: string) => onToken(token),
+        'expired-callback': () => onToken(''),
+        'error-callback': () => onToken(''),
+      });
+    };
+    const w = window as any;
+    if (w.turnstile) {
+      render();
+      return;
+    }
+    const existing = document.querySelector('script[data-turnstile]');
+    if (existing) {
+      existing.addEventListener('load', render);
+      return () => existing.removeEventListener('load', render);
+    }
+    const script = document.createElement('script');
+    script.src =
+      'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+    script.async = true;
+    script.defer = true;
+    script.setAttribute('data-turnstile', '1');
+    script.addEventListener('load', render);
+    document.head.appendChild(script);
+    return () => {
+      cancelled = true;
+    };
+  }, [siteKey, onToken]);
+
+  if (!siteKey) return null;
+  return <div ref={holder} className="flex justify-center py-1" />;
+}
+
 interface FormErrors {
   email?: string;
   password?: string;
@@ -150,6 +195,7 @@ function AuthFormInner({
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [passkeyBusy, setPasskeyBusy] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState('');
   const [passkeyError, setPasskeyError] = useState<string | null>(null);
   const [passkeyDetail, setPasskeyDetail] = useState<string | null>(null);
   // Só depois da hidratação: no servidor não há window/PublicKeyCredential.
@@ -230,12 +276,20 @@ function AuthFormInner({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validate()) return;
+    if (
+      isRegister &&
+      process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY &&
+      !turnstileToken
+    ) {
+      setErrors({ general: 'Confirma que não és um robô (Turnstile).' });
+      return;
+    }
 
     setSubmitting(true);
     setErrors({});
 
     try {
-      const user = await signIn(email.trim(), password, isRegister ? companyName.trim() : undefined, lang);
+      const user = await signIn(email.trim(), password, isRegister ? companyName.trim() : undefined, lang, isRegister ? turnstileToken : undefined);
       if (isRegister && FREE_UNLOCKS_UI) {
         // Bónus free: entra direto na dashboard para usar os desbloqueios.
         setSuccess(true);
@@ -513,6 +567,10 @@ function AuthFormInner({
             />
             {errors.company_name && <p className="mt-1 text-xs text-red-400 ml-1">{errors.company_name}</p>}
           </div>
+        )}
+
+        {isRegister && (
+          <TurnstileWidget onToken={setTurnstileToken} />
         )}
 
         <button

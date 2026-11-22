@@ -57,6 +57,7 @@ export interface AuthContextValue {
     password: string,
     companyName?: string,
     locale?: string,
+    turnstileToken?: string,
   ) => Promise<AuthUser>;
   signOut: () => Promise<void>;
   updateUser: (user: AuthUser) => void;
@@ -132,6 +133,7 @@ export function useAuthState(): AuthContextValue {
       password: string,
       companyName?: string,
       locale?: string,
+      turnstileToken?: string,
     ) => {
       const withSubscription = async (u: AuthUser) => {
         setUser(u);
@@ -145,6 +147,7 @@ export function useAuthState(): AuthContextValue {
           password,
           company_name: companyName,
           ...(locale ? { locale } : {}),
+          ...(turnstileToken ? { turnstile_token: turnstileToken } : {}),
         });
         return withSubscription(out.user);
       }
